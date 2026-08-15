@@ -114,6 +114,9 @@ Observed result:
 - the per-actor local rate limit returned `429` plus `Retry-After`, while a different actor retained an independent allowance;
 - every API response used `Cache-Control: no-store`;
 - successful, empty, denied, and failed context requests made zero OpenAI/Anthropic requests and wrote zero provider-usage events;
+- every successful context response committed a durable metadata-only read event before returning content; the event retained trusted actor/team/org scope, policy, pack ID, repository/branch, clearance, provisional flag, and aggregate counts without query, title, content, source locator/hash, or selected record IDs;
+- an injected read-audit failure returned the same sanitized `503` storage envelope and no context pack, provider request, or usage event;
+- opening a schema-version-1 context repository migrated it in place to version 2 while preserving governed records and mutation history;
 - the context route rejected bodies above `64 KiB` before parsing and rejected
   Unicode line separators before they could forge metadata logs;
 - authentication, rate-limit, and oversized-body tests require explicit
@@ -122,10 +125,10 @@ Observed result:
   and other item metadata are counted rather than only the prose body;
 - storage tests proved an existing database file is tightened to mode `0600`
   before schema initialization and invalid codec output cannot mutate a record;
-- the rebuilt source distribution contains the REST contract, context repository, and hashed provenance source; the rebuilt wheel imported its context service policy and rate limiter under Python 3.14;
-- the complete source suite passed 69 tests locally, with only the opt-in official Claude Code executable test skipped.
+- the rebuilt source distribution contains the REST contract, context repository, and hashed provenance source; a clean Python 3.14 environment installed the rebuilt wheel with no broken requirements, loaded Hormuz from `site-packages`, initialized schema version 2, and emitted mutation/read audit events;
+- the complete source suite passed 72 tests locally, with only the opt-in official Claude Code executable test skipped.
 
-This verifies the additive REST contract and single-process policy enforcement. It is not evidence of distributed rate-limit consistency, durable context read-audit, MCP compatibility, automatic Codex/Claude injection, or accepted hosted tenancy.
+This verifies the additive REST contract, single-process policy enforcement, and local fail-closed durable read audit. It is not evidence of distributed rate-limit consistency, enterprise reader RBAC, MCP compatibility, automatic Codex/Claude injection, or accepted hosted tenancy.
 
 ## Reproduce locally
 

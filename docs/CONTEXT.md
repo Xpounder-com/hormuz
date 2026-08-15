@@ -71,7 +71,7 @@ Unknown fields, malformed timestamps, bad hashes, and content/hash mismatches fa
 
 For compatibility with the earlier JSONL format, an omitted owner becomes the importing actor, an omitted source item key becomes the record ID, an omitted effective time becomes the verification time, and an omitted source hash becomes the imported record-content hash. Production connectors should always provide the actual immutable source-artifact hash and stable item key.
 
-The tuple `(organization, source URI, source revision, source item key)` is idempotent. Reusing it for different data fails closed. Changing content through the repository update API requires a new source identity or revision, and every update/delete uses an expected storage version for optimistic concurrency. Metadata-only mutation events retain the actor, action, record/version references, policy version, classification, visibility, and repository ID without title, content, source URI, or source hashes.
+The tuple `(organization, source URI, source revision, source item key)` is idempotent. Reusing it for different data fails closed. Changing content through the repository update API requires a new source identity or revision, and every update/delete uses an expected storage version for optimistic concurrency. Metadata-only mutation events retain the actor, action, record/version references, policy version, classification, visibility, and repository ID without title, content, source URI, or source hashes. Successful repository-backed pack reads record a separate metadata-only event containing the trusted organization/team/actor scope, pack ID, policy version, repository/branch, clearance, provisional flag, and aggregate record/token counts. It excludes query text, titles, content, source locators and hashes, and selected record IDs.
 
 ## Inspect and export
 
@@ -93,7 +93,7 @@ python3 -m hormuz --config hormuz.json context-export \
   --output hormuz-context-export.jsonl
 ```
 
-Export the organization-scoped, metadata-only mutation ledger separately:
+Export the organization-scoped, metadata-only mutation and pack-read ledger separately:
 
 ```bash
 python3 -m hormuz --config hormuz.json context-audit-export \
@@ -102,7 +102,7 @@ python3 -m hormuz --config hormuz.json context-audit-export \
   --output hormuz-context-audit.jsonl
 ```
 
-The configured actor determines the organization boundary. As with the other local mutation commands, access to the local configuration is the current operator authorization boundary—not proof of enterprise reader RBAC.
+The configured actor determines the organization boundary. As with the other local commands, access to the local configuration is the current operator authorization boundary—not proof of enterprise reader RBAC.
 
 Delete requires the exact record ID and current version:
 
@@ -132,7 +132,7 @@ python3 -m hormuz --config hormuz.json context-pack \
   --policy-version engineering-v1
 ```
 
-`--records examples/context-records.jsonl` remains available as a no-persistence compatibility and migration check. The command writes a content-bearing JSON object to stdout; treat it as company data.
+Before a repository-backed pack is printed, Hormuz commits its metadata-only read event. An audit failure fails the command closed, so content is not printed. `--records examples/context-records.jsonl` remains available as an explicit no-persistence compatibility and migration check and therefore does not write an access event. Either path writes a content-bearing JSON object to stdout; treat it as company data.
 
 ## Selection contract
 

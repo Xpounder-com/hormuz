@@ -13,10 +13,16 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, Protocol
 
-from .context import CLASSIFICATIONS, ContextError, ContextPrincipal, ContextRecord
+from .context import (
+    CLASSIFICATIONS,
+    ContextError,
+    ContextPack,
+    ContextPrincipal,
+    ContextRecord,
+)
 
 
-CONTEXT_STORE_SCHEMA_VERSION = 1
+CONTEXT_STORE_SCHEMA_VERSION = 2
 MAX_CONTEXT_CONTENT_BYTES = 25 * 1024 * 1024
 _CLASSIFICATION_RANK = {name: index for index, name in enumerate(CLASSIFICATIONS)}
 _LEGACY_EFFECTIVE_AT = datetime(1970, 1, 1, tzinfo=timezone.utc)
@@ -138,11 +144,12 @@ class SQLiteContextRepository:
             schema_version = int(connection.execute("PRAGMA user_version").fetchone()[0])
             if schema_version > CONTEXT_STORE_SCHEMA_VERSION:
                 raise ContextStoreError("context_store_schema_newer_than_binary")
-            if schema_version not in {0, CONTEXT_STORE_SCHEMA_VERSION}:
+            if schema_version not in {0, 1, CONTEXT_STORE_SCHEMA_VERSION}:
                 raise ContextStoreError("context_store_schema_migration_required")
             connection.execute("PRAGMA journal_mode = WAL")
             connection.executescript(
-                """
+                f"""
+                BEGIN IMMEDIATE;
                 CREATE TABLE IF NOT EXISTS context_records (
                     organization_id TEXT NOT NULL,
                     id TEXT NOT NULL,
@@ -208,9 +215,35 @@ class SQLiteContextRepository:
                     ON context_mutation_events (organization_id, occurred_at, id);
                 CREATE INDEX IF NOT EXISTS idx_context_mutation_actor_time
                     ON context_mutation_events (organization_id, actor_id, occurred_at);
+
+                CREATE TABLE IF NOT EXISTS context_access_events (
+                    id TEXT PRIMARY KEY,
+                    occurred_at TEXT NOT NULL,
+                    organization_id TEXT NOT NULL,
+                    team_id TEXT NOT NULL,
+                    actor_id TEXT NOT NULL,
+                    action TEXT NOT NULL CHECK (action IN ('pack')),
+                    pack_id TEXT NOT NULL,
+                    policy_version TEXT NOT NULL,
+                    repository_id TEXT,
+                    branch TEXT,
+                    clearance TEXT NOT NULL CHECK (
+                        clearance IN ('public', 'internal', 'confidential', 'restricted')
+                    ),
+                    include_provisional INTEGER NOT NULL CHECK (include_provisional IN (0, 1)),
+                    selected_records INTEGER NOT NULL CHECK (selected_records >= 0),
+                    eligible_records INTEGER NOT NULL CHECK (eligible_records >= 0),
+                    matched_records INTEGER NOT NULL CHECK (matched_records >= 0),
+                    estimated_tokens INTEGER NOT NULL CHECK (estimated_tokens >= 0)
+                );
+                CREATE INDEX IF NOT EXISTS idx_context_access_org_time
+                    ON context_access_events (organization_id, occurred_at, id);
+                CREATE INDEX IF NOT EXISTS idx_context_access_actor_time
+                    ON context_access_events (organization_id, actor_id, occurred_at);
+                PRAGMA user_version = {CONTEXT_STORE_SCHEMA_VERSION};
+                COMMIT;
                 """
             )
-            connection.execute(f"PRAGMA user_version = {CONTEXT_STORE_SCHEMA_VERSION}")
 
     def ingest(
         self,
@@ -525,6 +558,67 @@ class SQLiteContextRepository:
             )
         ]
 
+    def record_pack_read(
+        self,
+        pack: ContextPack,
+        *,
+        occurred_at: datetime | None = None,
+    ) -> str:
+        """Durably record metadata for a successful pack read before content leaves Hormuz."""
+        if not isinstance(pack, ContextPack):
+            raise ContextStoreError("context_pack_required")
+        principal = pack.request.principal
+        if not pack.pack_id.strip() or not pack.request.policy_version.strip():
+            raise ContextStoreError("context_access_audit_invalid")
+        counts = (
+            len(pack.items),
+            pack.eligible_records,
+            pack.matched_records,
+            pack.estimated_tokens,
+        )
+        if any(
+            isinstance(value, bool) or not isinstance(value, int) or value < 0
+            for value in counts
+        ):
+            raise ContextStoreError("context_access_audit_invalid")
+        selected_records, eligible_records, matched_records, _estimated_tokens = counts
+        if selected_records > matched_records or matched_records > eligible_records:
+            raise ContextStoreError("context_access_audit_invalid")
+        event_id = str(uuid.uuid4())
+        now = _utc(occurred_at or datetime.now(timezone.utc))
+        try:
+            with self._lock, self._connection() as connection:
+                connection.execute(
+                    """
+                    INSERT INTO context_access_events (
+                        id, occurred_at, organization_id, team_id, actor_id, action,
+                        pack_id, policy_version, repository_id, branch, clearance,
+                        include_provisional, selected_records, eligible_records,
+                        matched_records, estimated_tokens
+                    ) VALUES (?, ?, ?, ?, ?, 'pack', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        event_id,
+                        _isoformat(now),
+                        principal.organization_id,
+                        principal.team_id,
+                        principal.actor_id,
+                        pack.pack_id,
+                        pack.request.policy_version,
+                        principal.repository_id,
+                        principal.branch,
+                        principal.clearance,
+                        int(pack.request.include_provisional),
+                        len(pack.items),
+                        pack.eligible_records,
+                        pack.matched_records,
+                        pack.estimated_tokens,
+                    ),
+                )
+        except sqlite3.Error as error:
+            raise ContextStoreError("context_access_audit_failed") from error
+        return event_id
+
     def audit_events(
         self,
         *,
@@ -537,7 +631,7 @@ class SQLiteContextRepository:
             clauses.append("occurred_at >= ?")
             parameters.append(_isoformat(_utc(since)))
         with self._lock, self._connection() as connection:
-            rows = connection.execute(
+            mutation_rows = connection.execute(
                 f"""
                 SELECT
                     id, occurred_at, organization_id, actor_id, action,
@@ -549,14 +643,38 @@ class SQLiteContextRepository:
                 """,
                 parameters,
             ).fetchall()
-        return [
+            access_rows = connection.execute(
+                f"""
+                SELECT
+                    id, occurred_at, organization_id, team_id, actor_id, action,
+                    pack_id, policy_version, repository_id, branch, clearance,
+                    include_provisional, selected_records, eligible_records,
+                    matched_records, estimated_tokens
+                FROM context_access_events
+                WHERE {' AND '.join(clauses)}
+                ORDER BY occurred_at, id
+                """,
+                parameters,
+            ).fetchall()
+        events = [
             {
                 "schema_version": 1,
                 "event_type": "context.mutation",
                 **dict(row),
             }
-            for row in rows
+            for row in mutation_rows
         ]
+        events.extend(
+            {
+                "schema_version": 1,
+                "event_type": "context.read",
+                **dict(row),
+                "include_provisional": bool(row["include_provisional"]),
+            }
+            for row in access_rows
+        )
+        events.sort(key=lambda event: (str(event["occurred_at"]), str(event["id"])))
+        return events
 
     def _fetch_row(
         self,

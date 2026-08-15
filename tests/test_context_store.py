@@ -12,7 +12,12 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from threading import Barrier
 
-from hormuz.context import ContextPrincipal, ContextRecord
+from hormuz.context import (
+    ContextPackRequest,
+    ContextPrincipal,
+    ContextRecord,
+    build_context_pack,
+)
 from hormuz.context_store import (
     ContextConflict,
     ContextStoreError,
@@ -134,6 +139,131 @@ class ContextStoreTests(unittest.TestCase):
             self.assertNotIn("SECRET-CONTENT", serialized)
             self.assertNotIn("SECRET-TITLE", serialized)
             self.assertNotIn("private/adr-7", serialized)
+
+    def test_pack_read_audit_is_metadata_only_and_combines_with_mutations(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = SQLiteContextRepository(Path(temporary) / "context.sqlite3")
+            original = record(
+                "read-audit",
+                title="SECRET-TITLE",
+                content="SECRET-CONTENT retry with jitter.",
+                source_uri="https://example.test/private/source",
+                source_sha256="d" * 64,
+                repository_id="acme/api",
+                branch="main",
+            )
+            repository.ingest(
+                original,
+                actor_id="alice",
+                policy_version="mutation-v1",
+                occurred_at=NOW - timedelta(minutes=1),
+            )
+            principal = ContextPrincipal(
+                organization_id="xpounder",
+                team_id="engineering",
+                actor_id="alice",
+                clearance="internal",
+                repository_id="acme/api",
+                branch="main",
+            )
+            pack = build_context_pack(
+                [original],
+                ContextPackRequest(
+                    query="SECRET-QUERY retry",
+                    principal=principal,
+                    token_budget=1_000,
+                    policy_version="read-v1",
+                    include_provisional=False,
+                    as_of=NOW,
+                ),
+            )
+
+            event_id = repository.record_pack_read(pack, occurred_at=NOW)
+            events = repository.audit_events(organization_id="xpounder")
+
+            self.assertEqual([event["event_type"] for event in events], [
+                "context.mutation",
+                "context.read",
+            ])
+            access = events[1]
+            self.assertEqual(access["id"], event_id)
+            self.assertEqual(access["action"], "pack")
+            self.assertEqual(access["pack_id"], pack.pack_id)
+            self.assertEqual(access["team_id"], "engineering")
+            self.assertEqual(access["repository_id"], "acme/api")
+            self.assertEqual(access["branch"], "main")
+            self.assertEqual(access["selected_records"], 1)
+            self.assertEqual(access["estimated_tokens"], pack.estimated_tokens)
+            self.assertIs(access["include_provisional"], False)
+            serialized = json.dumps(access)
+            for secret in (
+                "SECRET-QUERY",
+                "SECRET-TITLE",
+                "SECRET-CONTENT",
+                "private/source",
+                original.record_id,
+                original.source_sha256,
+            ):
+                self.assertNotIn(secret, serialized)
+
+    def test_schema_v1_is_migrated_in_place_without_losing_records_or_audit(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "context.sqlite3"
+            repository = SQLiteContextRepository(path)
+            original = record("migration")
+            repository.ingest(
+                original,
+                actor_id="alice",
+                policy_version="mutation-v1",
+                occurred_at=NOW - timedelta(minutes=1),
+            )
+            # Schema v2 only adds context_access_events, so removing that table
+            # recreates the complete v1 layout produced by the prior binary.
+            connection = sqlite3.connect(path)
+            try:
+                connection.execute("DROP TABLE context_access_events")
+                connection.execute("PRAGMA user_version = 1")
+                connection.commit()
+            finally:
+                connection.close()
+
+            migrated = SQLiteContextRepository(path)
+
+            connection = sqlite3.connect(path)
+            try:
+                schema_version = connection.execute("PRAGMA user_version").fetchone()[0]
+                access_table = connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'context_access_events'"
+                ).fetchone()
+            finally:
+                connection.close()
+            self.assertEqual(schema_version, 2)
+            self.assertIsNotNone(access_table)
+            stored = migrated.list_authorized(
+                ContextPrincipal("xpounder", "engineering", "alice"),
+                as_of=NOW,
+            )
+            self.assertEqual([item.record.record_id for item in stored], ["migration"])
+            self.assertEqual(
+                [event["event_type"] for event in migrated.audit_events(organization_id="xpounder")],
+                ["context.mutation"],
+            )
+
+            pack = build_context_pack(
+                [original],
+                ContextPackRequest(
+                    query="engineering guidance",
+                    principal=ContextPrincipal("xpounder", "engineering", "alice"),
+                    token_budget=1_000,
+                    policy_version="read-v2",
+                    as_of=NOW,
+                ),
+            )
+            migrated.record_pack_read(pack, occurred_at=NOW)
+            self.assertEqual(
+                [event["event_type"] for event in migrated.audit_events(organization_id="xpounder")],
+                ["context.mutation", "context.read"],
+            )
 
     def test_source_identity_and_record_id_conflicts_fail_closed(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

@@ -142,9 +142,10 @@ The request path is:
 3. validate and apply server-owned policy caps;
 4. filter organization, visibility, classification, repository, branch, verification, and freshness in SQLite before content decode;
 5. repeat authorization checks, rank deterministically, and enforce the token/item budget;
-6. return the explicit manifest with `no-store`.
+6. durably commit a metadata-only pack-read event;
+7. return the explicit manifest with `no-store`.
 
-The endpoint does not call OpenAI or Anthropic, consume a provider credential, mutate the usage ledger, inject content into Codex or Claude Code, or enable the proposed cache. A metadata log records actor/team/org, repository/branch, pack ID, item count, and estimated tokens; it does not record the query or context content. Durable read-audit events and reader-specific RBAC remain open work.
+The endpoint does not call OpenAI or Anthropic, consume a provider credential, mutate the usage ledger, inject content into Codex or Claude Code, or enable the proposed cache. Every successful response first commits a durable metadata-only read event containing actor/team/org, repository/branch, clearance, policy version, pack ID, provisional flag, and aggregate record/token counts. It does not contain the query, context content, titles, source locators or hashes, or selected record IDs. If that audit write fails, Hormuz returns the sanitized `503` envelope and no pack. Reader-specific enterprise RBAC remains open work.
 
 ## Example
 

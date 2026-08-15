@@ -14,7 +14,7 @@ The private alpha currently has:
 - generic OIDC JWT discovery/JWKS verification with explicit issuer-subject identity mapping;
 - metadata-only audit export;
 - a separate local persistent governed-context repository plus deterministic authorization-first context packs;
-- authenticated authorization-first context-pack REST retrieval with server-owned caps and no provider side effects;
+- authenticated authorization-first context-pack REST retrieval with server-owned caps, fail-closed durable metadata-only read audit, and no provider side effects;
 - local and GitHub package/client verification.
 
 The foundation is not an enterprise release. The local context database is single-node and plaintext, not an accepted hosted persistence design. Browser SSO/session custody, shared tenancy, SCIM, automatic lifecycle/invalidation, context injection, structured DLP, cache policy, invoice reconciliation, HA deployment, KMS, and independent security review remain open gates.

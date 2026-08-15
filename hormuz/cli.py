@@ -166,7 +166,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     context_audit = subparsers.add_parser(
         "context-audit-export",
-        help="Export metadata-only governed-context mutation events as JSONL",
+        help="Export metadata-only governed-context mutation and read events as JSONL",
     )
     context_audit.add_argument("--actor", required=True, help="Configured actor ID defining organization scope")
     context_audit.add_argument("--since", help="UTC ISO-8601 lower bound (default: start of current month)")
@@ -643,10 +643,12 @@ def _context_pack(config: GatewayConfig, args: argparse.Namespace) -> int:
             repository_id=args.repository,
             branch=args.branch,
         )
+        repository: SQLiteContextRepository | None = None
         if args.records:
             records = _load_context_records(Path(args.records))
         else:
-            stored = SQLiteContextRepository(config.context_database_path).list_authorized(
+            repository = SQLiteContextRepository(config.context_database_path)
+            stored = repository.list_authorized(
                 principal,
                 as_of=as_of,
                 include_provisional=args.include_provisional,
@@ -664,8 +666,13 @@ def _context_pack(config: GatewayConfig, args: argparse.Namespace) -> int:
                 as_of=as_of,
             ),
         )
+        if repository is not None:
+            repository.record_pack_read(pack)
     except OSError as error:
         print(f"context error: cannot read {args.records}: {error}", file=sys.stderr)
+        return 2
+    except (ContextError, ContextStoreError) as error:
+        print(f"context pack failed: {error}", file=sys.stderr)
         return 2
     print(json.dumps(pack.to_dict(), indent=2, ensure_ascii=False))
     return 0

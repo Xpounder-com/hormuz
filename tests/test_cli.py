@@ -484,11 +484,21 @@ class ClientConfigTests(unittest.TestCase):
             self.assertEqual(os.stat(context_audit_path).st_mode & 0o777, 0o600)
             audit_text = context_audit_path.read_text(encoding="utf-8")
             audit_events = [json.loads(line) for line in audit_text.splitlines()]
-            self.assertEqual(len(audit_events), 2)
+            self.assertEqual(len(audit_events), 3)
+            self.assertEqual(
+                [event["event_type"] for event in audit_events],
+                ["context.mutation", "context.mutation", "context.read"],
+            )
+            access_event = audit_events[-1]
+            self.assertEqual(access_event["action"], "pack")
+            self.assertEqual(access_event["actor_id"], "alice")
+            self.assertEqual(access_event["repository_id"], "acme/api")
+            self.assertEqual(access_event["selected_records"], 1)
             self.assertEqual({event["organization_id"] for event in audit_events}, {"xpounder"})
             self.assertNotIn("Use one retry", audit_text)
             self.assertNotIn("Retry policy", audit_text)
             self.assertNotIn("example.test/adr", audit_text)
+            self.assertNotIn("retry jitter", audit_text)
 
             delete_args = build_parser().parse_args(
                 [

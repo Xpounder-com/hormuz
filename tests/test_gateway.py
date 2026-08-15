@@ -515,6 +515,25 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertNotIn("storage", pack["items"][0])
         self.assertEqual(len(FakeProviderHandler.requests), provider_before)
         self.assertEqual(self.gateway.store.monthly_totals(actor_id="alice").requests, 0)
+        access_events = [
+            event
+            for event in self.gateway.context_repository.audit_events(
+                organization_id=identity.organization_id
+            )
+            if event["event_type"] == "context.read"
+        ]
+        self.assertEqual(len(access_events), 1)
+        access = access_events[0]
+        self.assertEqual(access["actor_id"], "alice")
+        self.assertEqual(access["team_id"], identity.team_id)
+        self.assertEqual(access["pack_id"], pack["pack_id"])
+        self.assertEqual(access["selected_records"], 1)
+        self.assertEqual(access["estimated_tokens"], pack["estimated_tokens"])
+        serialized_access = json.dumps(access)
+        self.assertNotIn("retry jitter", serialized_access)
+        self.assertNotIn("bounded retry", serialized_access)
+        self.assertNotIn("example.test", serialized_access)
+        self.assertNotIn("team-retry", serialized_access)
 
         bob_status, _, bob_response = self._post(
             "/v1/context/packs",
@@ -641,6 +660,29 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertEqual(payload["error"]["code"], "context_store_unavailable")
         self.assertNotIn("SECRET-INTERNAL-STORAGE-DETAIL", response.decode("utf-8"))
         self.assertNotIn("SECRET-INTERNAL-STORAGE-DETAIL", "\n".join(logs.output))
+
+    def test_context_pack_api_returns_nothing_when_read_audit_cannot_commit(self) -> None:
+        provider_before = len(FakeProviderHandler.requests)
+        with self.assertLogs("hormuz", level="ERROR") as logs:
+            with mock.patch.object(
+                self.gateway.context_repository,
+                "record_pack_read",
+                side_effect=ContextStoreError("SECRET-AUDIT-FAILURE"),
+            ):
+                status, _, response = self._post(
+                    "/v1/context/packs",
+                    {"query": "retry", "token_budget": 100},
+                )
+
+        self.assertEqual(status, 503)
+        payload = json.loads(response)
+        self.assertEqual(payload["error"]["code"], "context_store_unavailable")
+        self.assertNotIn("pack_id", payload)
+        self.assertNotIn("items", payload)
+        self.assertNotIn("SECRET-AUDIT-FAILURE", response.decode("utf-8"))
+        self.assertNotIn("SECRET-AUDIT-FAILURE", "\n".join(logs.output))
+        self.assertEqual(len(FakeProviderHandler.requests), provider_before)
+        self.assertEqual(self.gateway.store.monthly_totals(actor_id="alice").requests, 0)
 
     def test_secret_is_redacted_before_provider_and_audited(self) -> None:
         secret = "sk-" + "proj-" + ("A" * 24)

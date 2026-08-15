@@ -332,6 +332,9 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 include_provisional=include_provisional,
             )
             pack = build_context_pack((item.record for item in stored), request)
+            # No content leaves this boundary unless the metadata-only read event
+            # has committed successfully.
+            self.server.context_repository.record_pack_read(pack, occurred_at=as_of)
         except ContextError as error:
             self._send_error(
                 "context_invalid_request",
