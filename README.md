@@ -89,6 +89,8 @@ The suite uses local fake OpenAI and Anthropic endpoints and does not need real 
 HORMUZ_RUN_CLAUDE_CLIENT_TEST=1 python3 -m unittest -v
 ```
 
+The GitHub publication gate also tests Python 3.11 through 3.14, builds and installs the distribution wheel, verifies pinned official Codex and Claude Code releases, and runs a non-blocking weekly canary against their latest releases. See [docs/VERIFICATION.md](docs/VERIFICATION.md) for the exact boundary.
+
 ## Roadmap boundary
 
 The current milestone is the enforcement, accounting, deterministic secret-egress, and metadata-audit kernel. Before an enterprise release, Hormuz still needs structured PII/semantic DLP, durable identity and tenancy, TLS and deployment hardening, signed or externally immutable audit retention, invoice reconciliation, broader provider conformance coverage, and the governed reusable-context subsystem.

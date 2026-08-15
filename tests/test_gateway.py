@@ -567,8 +567,9 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertEqual(upstream["headers"]["authorization"], f"Bearer {OPENAI_KEY}")
 
     @unittest.skipUnless(
-        os.environ.get("HORMUZ_RUN_CLAUDE_CLIENT_TEST") == "1" and shutil.which("npx"),
-        "Set HORMUZ_RUN_CLAUDE_CLIENT_TEST=1 to run the downloaded Claude Code client",
+        os.environ.get("HORMUZ_RUN_CLAUDE_CLIENT_TEST") == "1"
+        and (shutil.which("claude") or shutil.which("npx")),
+        "Set HORMUZ_RUN_CLAUDE_CLIENT_TEST=1 and install Claude Code or npx",
     )
     def test_official_claude_code_routes_through_gateway(self) -> None:
         before = len(FakeProviderHandler.requests)
@@ -579,10 +580,8 @@ class GatewayIntegrationTests(unittest.TestCase):
         environment.pop("ANTHROPIC_AUTH_TOKEN", None)
         environment["DISABLE_AUTOUPDATER"] = "1"
         environment["CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT"] = "1"
-        command = [
-            "npx",
-            "-y",
-            "@anthropic-ai/claude-code",
+        claude = shutil.which("claude")
+        command = ([claude] if claude else ["npx", "-y", "@anthropic-ai/claude-code"]) + [
             "-p",
             "--bare",
             "--debug",

@@ -68,3 +68,17 @@ hormuz --config hormuz.json status --json
 ```
 
 Never add real provider or employee credentials to this record.
+
+## Automated publication gate
+
+GitHub Actions runs three independent gates without provider credentials:
+
+- the complete unit and loopback gateway suite on Python 3.11, 3.12, 3.13, and 3.14;
+- source-distribution and wheel builds followed by installation of the wheel in a clean virtual environment;
+- installed-client routing through local fake providers using pinned official Codex and Claude Code package versions.
+
+The workflow grants only read access to repository contents, disables persisted checkout credentials, pins every GitHub Action to a reviewed commit SHA, and retains build artifacts for seven days. Dependabot is configured to propose updates to action and Python build dependencies; a client-version bump remains an intentional compatibility change because it can alter the provider protocol.
+
+A separate weekly canary installs the latest published Codex and Claude Code packages in an ephemeral runner and exercises only the two fake-provider compatibility tests. It has no provider credentials, does not block ordinary pull requests, and is intended to surface upstream protocol drift before an employee upgrade does.
+
+The publication candidate was also checked locally on August 15, 2026 with Codex `0.147.0` and Claude Code `2.1.233`, the then-current npm releases. Both routed successfully through Hormuz, and the complete 29-test suite passed with those executables selected first on `PATH`.

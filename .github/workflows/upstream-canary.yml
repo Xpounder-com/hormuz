@@ -1,0 +1,49 @@
+name: Upstream client canary
+
+on:
+  schedule:
+    - cron: "17 13 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: upstream-client-canary
+  cancel-in-progress: true
+
+jobs:
+  latest-clients:
+    name: Latest Codex and Claude Code
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+      - name: Install current official clients
+        run: |
+          npm install --prefix "$RUNNER_TEMP/hormuz-clients" --no-package-lock --no-save \
+            "@openai/codex@latest" \
+            "@anthropic-ai/claude-code@latest"
+          echo "$RUNNER_TEMP/hormuz-clients/node_modules/.bin" >> "$GITHUB_PATH"
+      - name: Record client versions
+        run: |
+          codex --version
+          claude --version
+      - name: Detect upstream protocol drift
+        env:
+          HORMUZ_RUN_CLAUDE_CLIENT_TEST: "1"
+        run: |
+          python -m unittest -v \
+            tests.test_gateway.GatewayIntegrationTests.test_installed_codex_routes_through_gateway \
+            tests.test_gateway.GatewayIntegrationTests.test_official_claude_code_routes_through_gateway
