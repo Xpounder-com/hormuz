@@ -22,6 +22,16 @@ class ListenConfig:
 class UpstreamConfig:
     base_url: str
     api_key_env: str
+    allow_response_storage: bool = False
+    allow_background: bool = False
+
+
+@dataclass(frozen=True)
+class SecretControls:
+    mode: str = "redact"
+    builtins: bool = True
+    custom_secret_envs: tuple[str, ...] = ()
+    custom_secret_values: tuple[tuple[str, str], ...] = field(default=(), repr=False)
 
 
 @dataclass(frozen=True)
@@ -111,6 +121,7 @@ class GatewayConfig:
     identities_by_token: dict[str, Identity]
     model_routes: dict[str, ModelRoute]
     organization_policy: Policy
+    secret_controls: SecretControls = field(default_factory=SecretControls)
     team_policies: dict[str, Policy] = field(default_factory=dict)
     actor_policies: dict[str, Policy] = field(default_factory=dict)
     max_request_bytes: int = 25 * 1024 * 1024
@@ -149,6 +160,14 @@ class GatewayConfig:
             upstreams[protocol] = UpstreamConfig(
                 base_url=base_url,
                 api_key_env=_string(item.get("api_key_env"), f"upstreams.{protocol}.api_key_env"),
+                allow_response_storage=_boolean(
+                    item.get("allow_response_storage", False),
+                    f"upstreams.{protocol}.allow_response_storage",
+                ),
+                allow_background=_boolean(
+                    item.get("allow_background", False),
+                    f"upstreams.{protocol}.allow_background",
+                ),
             )
 
         identities_raw = raw.get("identities")
@@ -162,6 +181,8 @@ class GatewayConfig:
             token = env.get(token_env, "")
             if not token:
                 raise ConfigError(f"Required identity token environment variable is not set: {token_env}")
+            if len(token) < 16:
+                raise ConfigError(f"Identity token from {token_env} must be at least 16 characters")
             if token in identities_by_token:
                 raise ConfigError(f"Identity tokens must be unique; duplicate value from {token_env}")
             identity = Identity(
@@ -196,6 +217,8 @@ class GatewayConfig:
                 output_cost_per_million=_number(item.get("output_cost_per_million", 0), f"model_routes.{alias}.output_cost_per_million"),
             )
 
+        egress_raw = _object(raw.get("egress_controls", {}), "egress_controls")
+        secret_controls = _secret_controls(egress_raw.get("secrets", {}), env)
         policies_raw = _object(raw.get("policies"), "policies")
         organization_policy = _policy(policies_raw.get("organization"), "policies.organization")
         team_policies = {
@@ -215,6 +238,7 @@ class GatewayConfig:
             identities_by_token=identities_by_token,
             model_routes=model_routes,
             organization_policy=organization_policy,
+            secret_controls=secret_controls,
             team_policies=team_policies,
             actor_policies=actor_policies,
             max_request_bytes=_integer(raw.get("max_request_bytes", 25 * 1024 * 1024), "max_request_bytes", minimum=1024),
@@ -265,6 +289,32 @@ def _policy(value: Any, path: str) -> Policy:
     )
 
 
+def _secret_controls(value: Any, env: dict[str, str]) -> SecretControls:
+    item = _object(value, "egress_controls.secrets")
+    mode = _string(item.get("mode", "redact"), "egress_controls.secrets.mode")
+    if mode not in {"off", "redact", "deny"}:
+        raise ConfigError("egress_controls.secrets.mode must be off, redact, or deny")
+    builtins = _boolean(item.get("builtins", True), "egress_controls.secrets.builtins")
+    secret_envs = _string_tuple(
+        item.get("custom_secret_envs", []),
+        "egress_controls.secrets.custom_secret_envs",
+    )
+    secret_values: list[tuple[str, str]] = []
+    for env_name in secret_envs:
+        secret_value = env.get(env_name, "")
+        if not secret_value:
+            raise ConfigError(f"Required custom secret environment variable is not set: {env_name}")
+        if len(secret_value) < 8:
+            raise ConfigError(f"Custom secret from {env_name} must be at least 8 characters")
+        secret_values.append((f"custom:{env_name}", secret_value))
+    return SecretControls(
+        mode=mode,
+        builtins=builtins,
+        custom_secret_envs=secret_envs,
+        custom_secret_values=tuple(secret_values),
+    )
+
+
 def _object(value: Any, path: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ConfigError(f"{path} must be an object")
@@ -275,6 +325,12 @@ def _string(value: Any, path: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ConfigError(f"{path} must be a non-empty string")
     return value.strip()
+
+
+def _boolean(value: Any, path: str) -> bool:
+    if not isinstance(value, bool):
+        raise ConfigError(f"{path} must be a boolean")
+    return value
 
 
 def _optional_string(value: Any, path: str) -> str | None:

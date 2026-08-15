@@ -99,6 +99,7 @@ def _doctor(config: GatewayConfig) -> int:
     print(f"listener: http://{config.listen.host}:{config.listen.port}")
     print(f"identities: {len(config.identities_by_token)}")
     print(f"model routes: {len(config.model_routes)}")
+    print(f"secret egress control: {config.secret_controls.mode}")
     print(f"usage database: {config.database_path}")
     missing = _missing_upstream_credentials(config)
     if missing:
@@ -118,11 +119,12 @@ def _status(config: GatewayConfig, *, as_json: bool) -> int:
     if not rows:
         print("No Hormuz requests recorded this month.")
         return 0
-    print("ACTOR\tTEAM\tCLIENT\tPROTOCOL\tREQUESTS\tTOKENS\tCOST_USD\tDENIED")
+    print("ACTOR\tTEAM\tCLIENT\tPROTOCOL\tREQUESTS\tTOKENS\tCOST_USD\tDENIED\tREDACTIONS")
     for row in rows:
         print(
             f"{row['actor_name']}\t{row['team_name']}\t{row['client']}\t{row['protocol']}\t"
-            f"{row['requests']}\t{row['tokens']}\t{row['cost_microusd'] / 1_000_000:.6f}\t{row['denied']}"
+            f"{row['requests']}\t{row['tokens']}\t{row['cost_microusd'] / 1_000_000:.6f}\t"
+            f"{row['denied']}\t{row['redactions']}"
         )
     return 0
 

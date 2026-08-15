@@ -14,6 +14,7 @@ from urllib.parse import urlsplit
 
 from .config import GatewayConfig, Identity, ModelRoute, UpstreamConfig
 from .policy import PolicyDecision, PolicyEngine
+from .redaction import RedactionError, SecretRedactor
 from .store import UsageStore
 from .usage import ResponseUsageParser
 
@@ -29,6 +30,16 @@ class GatewayServer(ThreadingHTTPServer):
         self.config = config
         self.store = UsageStore(config.database_path)
         self.policy_engine = PolicyEngine(config, self.store)
+        protected_values = [
+            ("hormuz_identity_token", identity.token)
+            for identity in config.identities_by_token.values()
+        ]
+        protected_values.extend(
+            ("provider_credential", value)
+            for upstream in config.upstreams.values()
+            if len(value := os.environ.get(upstream.api_key_env, "")) >= 8
+        )
+        self.secret_redactor = SecretRedactor(config.secret_controls, tuple(protected_values))
         super().__init__((config.listen.host, config.listen.port), GatewayRequestHandler)
 
 
@@ -65,6 +76,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             return
         if path == "/v1/gateway/usage":
             totals = self.server.store.monthly_totals(actor_id=identity.actor_id)
+            secret_totals = self.server.store.monthly_secret_totals(actor_id=identity.actor_id)
             self._send_json(
                 HTTPStatus.OK,
                 {
@@ -77,6 +89,10 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                     "cache_write_tokens": totals.cache_write_tokens,
                     "reasoning_tokens": totals.reasoning_tokens,
                     "cost_usd": totals.cost_usd,
+                    "redactions": totals.redaction_count,
+                    "secret_events": secret_totals.events,
+                    "secret_detections": secret_totals.detections,
+                    "secret_denied_requests": secret_totals.denied_requests,
                 },
             )
             return
@@ -168,12 +184,96 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             self._send_protocol_error(protocol, decision.reason, HTTPStatus.FORBIDDEN, code="hormuz_policy_denied")
             return
 
+        upstream = self.server.config.upstreams[protocol]
+        is_responses_create = protocol == "openai" and urlsplit(self.path).path == "/v1/responses"
+        if is_responses_create and request_body.get("background") is True and not upstream.allow_background:
+            if account_usage:
+                self.server.store.record(
+                    identity=identity,
+                    client=client,
+                    protocol=protocol,
+                    requested_model=decision.requested_model,
+                    resolved_alias=decision.resolved_alias,
+                    upstream_model=decision.route.upstream_model,
+                    policy_action="provider_policy_denied",
+                    status="denied",
+                )
+            LOGGER.info(
+                "provider_policy_denied actor=%s team=%s client=%s protocol=%s requested_model=%s reason=background_disabled",
+                identity.actor_id,
+                identity.team_id,
+                client,
+                protocol,
+                decision.requested_model,
+            )
+            self._send_protocol_error(
+                protocol,
+                "Organization policy does not allow OpenAI background response storage.",
+                HTTPStatus.FORBIDDEN,
+                code="hormuz_provider_policy_denied",
+            )
+            return
+        if is_responses_create and not upstream.allow_response_storage:
+            request_body["store"] = False
+
         request_body["model"] = decision.route.upstream_model
         if decision.max_output_tokens is not None:
             current_output = request_body.get(output_field)
             if current_output is None or current_output > decision.max_output_tokens:
                 request_body[output_field] = decision.max_output_tokens
-        body = json.dumps(request_body, separators=(",", ":")).encode("utf-8")
+        try:
+            redaction = self.server.secret_redactor.inspect(request_body)
+        except RedactionError as error:
+            self._send_protocol_error(protocol, str(error), HTTPStatus.BAD_REQUEST)
+            return
+
+        if redaction.count:
+            self.server.store.record_secret_event(
+                identity=identity,
+                client=client,
+                protocol=protocol,
+                requested_model=decision.requested_model,
+                action="denied" if self.server.config.secret_controls.mode == "deny" else "redacted",
+                detection_count=redaction.count,
+                rules=redaction.rules,
+            )
+
+        if redaction.count and self.server.config.secret_controls.mode == "deny":
+            if account_usage:
+                self.server.store.record(
+                    identity=identity,
+                    client=client,
+                    protocol=protocol,
+                    requested_model=decision.requested_model,
+                    resolved_alias=decision.resolved_alias,
+                    upstream_model=decision.route.upstream_model,
+                    policy_action="secret_denied",
+                    status="denied",
+                    redaction_count=redaction.count,
+                    redaction_rules=redaction.rules,
+                )
+            LOGGER.warning(
+                "secret_egress_denied actor=%s team=%s client=%s protocol=%s requested_model=%s detections=%d rules=%s",
+                identity.actor_id,
+                identity.team_id,
+                client,
+                protocol,
+                decision.requested_model,
+                redaction.count,
+                ",".join(redaction.rules),
+            )
+            self._send_protocol_error(
+                protocol,
+                "Request blocked because Hormuz detected protected secret material.",
+                HTTPStatus.FORBIDDEN,
+                code="hormuz_secret_detected",
+            )
+            return
+
+        policy_action = decision.action
+        if redaction.count:
+            policy_action = f"{policy_action}+redacted"
+        body = json.dumps(redaction.value, separators=(",", ":")).encode("utf-8")
         self._forward(
             identity=identity,
             protocol=protocol,
@@ -181,6 +281,9 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             decision=decision,
             body=body,
             account_usage=account_usage,
+            policy_action=policy_action,
+            redaction_count=redaction.count,
+            redaction_rules=redaction.rules,
         )
 
     def _forward(
@@ -192,6 +295,9 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         decision: PolicyDecision,
         body: bytes,
         account_usage: bool,
+        policy_action: str,
+        redaction_count: int,
+        redaction_rules: tuple[str, ...],
     ) -> None:
         route = decision.route
         assert route is not None
@@ -222,8 +328,10 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                     requested_model=decision.requested_model,
                     resolved_alias=decision.resolved_alias,
                     upstream_model=route.upstream_model,
-                    policy_action=decision.action,
+                    policy_action=policy_action,
                     status="failed",
+                    redaction_count=redaction_count,
+                    redaction_rules=redaction_rules,
                 )
             self._send_protocol_error(
                 protocol,
@@ -243,9 +351,11 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", content_type)
         self.send_header("Cache-Control", "no-store")
         self.send_header("Connection", "close")
-        self.send_header("X-Hormuz-Policy-Decision", decision.action)
+        self.send_header("X-Hormuz-Policy-Decision", policy_action)
         self.send_header("X-Hormuz-Requested-Model", decision.requested_model)
         self.send_header("X-Hormuz-Routed-Model", route.upstream_model)
+        if redaction_count:
+            self.send_header("X-Hormuz-Redactions", str(redaction_count))
         for name, value in response.headers.items():
             lowered = name.lower()
             if lowered in {"x-request-id", "request-id", "openai-processing-ms"} or lowered.startswith(
@@ -285,7 +395,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 requested_model=decision.requested_model,
                 resolved_alias=decision.resolved_alias,
                 upstream_model=route.upstream_model,
-                policy_action=decision.action,
+                policy_action=policy_action,
                 status="succeeded" if successful else "failed",
                 input_tokens=usage.input_tokens,
                 output_tokens=usage.output_tokens,
@@ -294,20 +404,23 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 reasoning_tokens=usage.reasoning_tokens,
                 cost_microusd=cost,
                 provider_request_id=provider_request_id,
+                redaction_count=redaction_count,
+                redaction_rules=redaction_rules,
             )
             LOGGER.info(
-                "request_complete actor=%s team=%s client=%s protocol=%s action=%s requested_model=%s routed_model=%s status=%s input_tokens=%d output_tokens=%d cost_microusd=%d",
+                "request_complete actor=%s team=%s client=%s protocol=%s action=%s requested_model=%s routed_model=%s status=%s input_tokens=%d output_tokens=%d cost_microusd=%d redactions=%d",
                 identity.actor_id,
                 identity.team_id,
                 client,
                 protocol,
-                decision.action,
+                policy_action,
                 decision.requested_model,
                 route.upstream_model,
                 "succeeded" if successful else "failed",
                 usage.input_tokens,
                 usage.output_tokens,
                 cost,
+                redaction_count,
             )
 
     def _authenticate(self) -> Identity | None:
@@ -341,7 +454,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         data = self.rfile.read(content_length)
         try:
             value = json.loads(data)
-        except (json.JSONDecodeError, UnicodeDecodeError):
+        except (json.JSONDecodeError, UnicodeDecodeError, RecursionError):
             self._send_error("invalid_json", "Request body must be valid JSON", HTTPStatus.BAD_REQUEST)
             return None
         if not isinstance(value, dict):

@@ -283,6 +283,7 @@ class GatewayIntegrationTests(unittest.TestCase):
         upstream = FakeProviderHandler.requests[-1]
         self.assertEqual(upstream["body"]["model"], "gpt-test-fast")
         self.assertEqual(upstream["body"]["max_output_tokens"], 100)
+        self.assertIs(upstream["body"]["store"], False)
         self.assertEqual(upstream["headers"]["authorization"], f"Bearer {OPENAI_KEY}")
         self.assertNotIn(GATEWAY_TOKEN, upstream["headers"].values())
 
@@ -292,6 +293,39 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertEqual(totals.cache_read_tokens, 20)
         self.assertEqual(totals.reasoning_tokens, 7)
         self.assertGreater(totals.cost_microusd, 0)
+
+    def test_openai_background_mode_is_denied_by_default(self) -> None:
+        before = len(FakeProviderHandler.requests)
+        status, _, response = self._post(
+            "/v1/responses",
+            {"model": "engineering-fast", "input": "hello", "background": True},
+        )
+
+        self.assertEqual(status, 403)
+        self.assertEqual(len(FakeProviderHandler.requests), before)
+        self.assertEqual(json.loads(response)["error"]["code"], "hormuz_provider_policy_denied")
+        self.assertEqual(self.gateway.store.monthly_totals(actor_id="alice").denied_requests, 1)
+
+    def test_admin_can_explicitly_allow_openai_storage_and_background_mode(self) -> None:
+        config_value = self._config(self.provider.server_port, _free_port())
+        config_value["upstreams"]["openai"]["allow_response_storage"] = True
+        config_value["upstreams"]["openai"]["allow_background"] = True
+        self._restart_gateway(config_value)
+
+        status, _, _ = self._post(
+            "/v1/responses",
+            {
+                "model": "engineering-fast",
+                "input": "hello",
+                "background": True,
+                "store": True,
+            },
+        )
+
+        self.assertEqual(status, 200)
+        upstream = FakeProviderHandler.requests[-1]
+        self.assertIs(upstream["body"]["background"], True)
+        self.assertIs(upstream["body"]["store"], True)
 
     def test_anthropic_stream_is_relayed_and_usage_is_recorded(self) -> None:
         status, headers, response = self._post(
@@ -386,6 +420,91 @@ class GatewayIntegrationTests(unittest.TestCase):
             token="wrong-token",
         )
         self.assertEqual(status, 401)
+
+    def test_secret_is_redacted_before_provider_and_audited(self) -> None:
+        secret = "sk-" + "proj-" + ("A" * 24)
+        status, headers, _ = self._post(
+            "/v1/responses",
+            {
+                "model": "engineering-fast",
+                "input": f"Never forward this credential: {secret}",
+            },
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["x-hormuz-policy-decision"], "allowed+redacted")
+        self.assertEqual(headers["x-hormuz-redactions"], "1")
+        upstream = FakeProviderHandler.requests[-1]
+        serialized = json.dumps(upstream["body"])
+        self.assertNotIn(secret, serialized)
+        self.assertIn("[REDACTED:HORMUZ_SECRET]", serialized)
+        totals = self.gateway.store.monthly_totals(actor_id="alice")
+        self.assertEqual(totals.redaction_count, 1)
+        secret_totals = self.gateway.store.monthly_secret_totals(actor_id="alice")
+        self.assertEqual(secret_totals.events, 1)
+        self.assertEqual(secret_totals.detections, 1)
+        self.assertEqual(secret_totals.redacted_requests, 1)
+        summary = self.gateway.store.summary_rows()
+        self.assertEqual(summary[0]["redactions"], 1)
+
+    def test_gateway_identity_and_provider_credentials_are_always_exact_protected_values(self) -> None:
+        status, headers, _ = self._post(
+            "/v1/responses",
+            {
+                "model": "engineering-fast",
+                "input": f"identity={GATEWAY_TOKEN} provider={OPENAI_KEY}",
+            },
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["x-hormuz-redactions"], "2")
+        upstream = json.dumps(FakeProviderHandler.requests[-1]["body"])
+        self.assertNotIn(GATEWAY_TOKEN, upstream)
+        self.assertNotIn(OPENAI_KEY, upstream)
+        self.assertEqual(upstream.count("[REDACTED:HORMUZ_SECRET]"), 2)
+
+    def test_secret_deny_mode_blocks_provider_and_records_metadata(self) -> None:
+        config_value = self._config(self.provider.server_port, _free_port())
+        config_value["egress_controls"] = {
+            "secrets": {"mode": "deny", "builtins": True, "custom_secret_envs": []}
+        }
+        self._restart_gateway(config_value)
+        before = len(FakeProviderHandler.requests)
+        secret = "sk-ant-" + ("B" * 24)
+
+        status, _, response = self._post(
+            "/v1/responses",
+            {"model": "engineering-fast", "input": f"credential={secret}"},
+        )
+
+        self.assertEqual(status, 403)
+        self.assertEqual(len(FakeProviderHandler.requests), before)
+        self.assertEqual(json.loads(response)["error"]["code"], "hormuz_secret_detected")
+        totals = self.gateway.store.monthly_totals(actor_id="alice")
+        self.assertEqual(totals.denied_requests, 1)
+        self.assertEqual(totals.redaction_count, 1)
+        secret_totals = self.gateway.store.monthly_secret_totals(actor_id="alice")
+        self.assertEqual(secret_totals.denied_requests, 1)
+
+    def test_token_count_redaction_has_security_audit_without_usage_charge(self) -> None:
+        secret = "sk-" + "proj-" + ("E" * 24)
+        status, headers, _ = self._post(
+            "/v1/messages/count_tokens",
+            {
+                "model": "claude-sonnet-5",
+                "messages": [{"role": "user", "content": f"credential={secret}"}],
+            },
+            extra_headers={"Anthropic-Version": "2023-06-01"},
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["x-hormuz-redactions"], "1")
+        self.assertEqual(self.gateway.store.monthly_totals(actor_id="alice").requests, 0)
+        secret_totals = self.gateway.store.monthly_secret_totals(actor_id="alice")
+        self.assertEqual(secret_totals.events, 1)
+        self.assertEqual(secret_totals.detections, 1)
+        self.assertEqual(secret_totals.redacted_requests, 1)
+        self.assertNotIn(secret, json.dumps(FakeProviderHandler.requests[-1]["body"]))
 
     @unittest.skipUnless(shutil.which("codex"), "Codex CLI is not installed")
     def test_installed_codex_routes_through_gateway(self) -> None:
@@ -504,6 +623,14 @@ class GatewayIntegrationTests(unittest.TestCase):
         response_headers = {name.lower(): value for name, value in response.getheaders()}
         connection.close()
         return response.status, response_headers, data
+
+    def _restart_gateway(self, config_value: dict) -> None:
+        self.gateway.shutdown()
+        self.gateway.server_close()
+        self.config_path.write_text(json.dumps(config_value), encoding="utf-8")
+        self.config = GatewayConfig.load(self.config_path)
+        self.gateway = GatewayServer(self.config)
+        self.gateway_thread = serve_in_thread(self.gateway)
 
     def _config(self, provider_port: int, gateway_port: int) -> dict:
         return {

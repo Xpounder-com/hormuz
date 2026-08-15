@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 import threading
 import uuid
@@ -21,6 +22,7 @@ class MonthlyTotals:
     cache_write_tokens: int = 0
     reasoning_tokens: int = 0
     cost_microusd: int = 0
+    redaction_count: int = 0
 
     @property
     def total_tokens(self) -> int:
@@ -29,6 +31,14 @@ class MonthlyTotals:
     @property
     def cost_usd(self) -> float:
         return self.cost_microusd / 1_000_000
+
+
+@dataclass(frozen=True)
+class SecretTotals:
+    events: int = 0
+    detections: int = 0
+    redacted_requests: int = 0
+    denied_requests: int = 0
 
 
 class UsageStore:
@@ -77,7 +87,9 @@ class UsageStore:
                     cache_write_tokens INTEGER NOT NULL DEFAULT 0,
                     reasoning_tokens INTEGER NOT NULL DEFAULT 0,
                     cost_microusd INTEGER NOT NULL DEFAULT 0,
-                    provider_request_id TEXT
+                    provider_request_id TEXT,
+                    redaction_count INTEGER NOT NULL DEFAULT 0,
+                    redaction_rules TEXT NOT NULL DEFAULT '[]'
                 );
                 CREATE INDEX IF NOT EXISTS idx_gateway_usage_occurred_at
                     ON gateway_usage_events(occurred_at);
@@ -85,8 +97,40 @@ class UsageStore:
                     ON gateway_usage_events(actor_id, occurred_at);
                 CREATE INDEX IF NOT EXISTS idx_gateway_usage_team_month
                     ON gateway_usage_events(team_id, occurred_at);
+                CREATE TABLE IF NOT EXISTS gateway_secret_events (
+                    id TEXT PRIMARY KEY,
+                    occurred_at TEXT NOT NULL,
+                    actor_id TEXT NOT NULL,
+                    actor_name TEXT NOT NULL,
+                    team_id TEXT NOT NULL,
+                    team_name TEXT NOT NULL,
+                    client TEXT NOT NULL,
+                    protocol TEXT NOT NULL,
+                    requested_model TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    detection_count INTEGER NOT NULL,
+                    rules TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_gateway_secret_occurred_at
+                    ON gateway_secret_events(occurred_at);
+                CREATE INDEX IF NOT EXISTS idx_gateway_secret_actor_month
+                    ON gateway_secret_events(actor_id, occurred_at);
+                CREATE INDEX IF NOT EXISTS idx_gateway_secret_team_month
+                    ON gateway_secret_events(team_id, occurred_at);
                 """
             )
+            columns = {
+                row["name"]
+                for row in connection.execute("PRAGMA table_info(gateway_usage_events)").fetchall()
+            }
+            if "redaction_count" not in columns:
+                connection.execute(
+                    "ALTER TABLE gateway_usage_events ADD COLUMN redaction_count INTEGER NOT NULL DEFAULT 0"
+                )
+            if "redaction_rules" not in columns:
+                connection.execute(
+                    "ALTER TABLE gateway_usage_events ADD COLUMN redaction_rules TEXT NOT NULL DEFAULT '[]'"
+                )
 
     def record(
         self,
@@ -106,6 +150,8 @@ class UsageStore:
         reasoning_tokens: int = 0,
         cost_microusd: int = 0,
         provider_request_id: str | None = None,
+        redaction_count: int = 0,
+        redaction_rules: tuple[str, ...] = (),
     ) -> str:
         event_id = str(uuid.uuid4())
         with self._lock, self._connection() as connection:
@@ -115,8 +161,9 @@ class UsageStore:
                     id, occurred_at, actor_id, actor_name, team_id, team_name, client, protocol,
                     requested_model, resolved_alias, upstream_model, policy_action, status,
                     input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
-                    reasoning_tokens, cost_microusd, provider_request_id
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    reasoning_tokens, cost_microusd, provider_request_id, redaction_count,
+                    redaction_rules
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     event_id,
@@ -139,6 +186,47 @@ class UsageStore:
                     max(0, reasoning_tokens),
                     max(0, cost_microusd),
                     provider_request_id,
+                    max(0, redaction_count),
+                    json.dumps(sorted(set(redaction_rules)), separators=(",", ":")),
+                ),
+            )
+        return event_id
+
+    def record_secret_event(
+        self,
+        *,
+        identity: Identity,
+        client: str,
+        protocol: str,
+        requested_model: str,
+        action: str,
+        detection_count: int,
+        rules: tuple[str, ...],
+    ) -> str:
+        if action not in {"redacted", "denied"}:
+            raise ValueError("Secret event action must be redacted or denied")
+        event_id = str(uuid.uuid4())
+        with self._lock, self._connection() as connection:
+            connection.execute(
+                """
+                INSERT INTO gateway_secret_events (
+                    id, occurred_at, actor_id, actor_name, team_id, team_name,
+                    client, protocol, requested_model, action, detection_count, rules
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    event_id,
+                    datetime.now(timezone.utc).isoformat(),
+                    identity.actor_id,
+                    identity.actor_name,
+                    identity.team_id,
+                    identity.team_name,
+                    client,
+                    protocol,
+                    requested_model,
+                    action,
+                    max(0, detection_count),
+                    json.dumps(sorted(set(rules)), separators=(",", ":")),
                 ),
             )
         return event_id
@@ -162,7 +250,8 @@ class UsageStore:
                 COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens,
                 COALESCE(SUM(cache_write_tokens), 0) AS cache_write_tokens,
                 COALESCE(SUM(reasoning_tokens), 0) AS reasoning_tokens,
-                COALESCE(SUM(cost_microusd), 0) AS cost_microusd
+                COALESCE(SUM(cost_microusd), 0) AS cost_microusd,
+                COALESCE(SUM(redaction_count), 0) AS redaction_count
             FROM gateway_usage_events
             WHERE {' AND '.join(clauses)}
         """
@@ -179,7 +268,8 @@ class UsageStore:
                        COUNT(*) AS requests,
                        COALESCE(SUM(input_tokens + output_tokens), 0) AS tokens,
                        COALESCE(SUM(cost_microusd), 0) AS cost_microusd,
-                       SUM(CASE WHEN status = 'denied' THEN 1 ELSE 0 END) AS denied
+                       SUM(CASE WHEN status = 'denied' THEN 1 ELSE 0 END) AS denied,
+                       COALESCE(SUM(redaction_count), 0) AS redactions
                 FROM gateway_usage_events
                 WHERE occurred_at >= ?
                 GROUP BY actor_id, actor_name, team_id, team_name, client, protocol
@@ -188,3 +278,31 @@ class UsageStore:
                 (start,),
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def monthly_secret_totals(
+        self,
+        *,
+        actor_id: str | None = None,
+        team_id: str | None = None,
+    ) -> SecretTotals:
+        start = datetime.now(timezone.utc).replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat()
+        clauses = ["occurred_at >= ?"]
+        parameters: list[object] = [start]
+        if actor_id is not None:
+            clauses.append("actor_id = ?")
+            parameters.append(actor_id)
+        if team_id is not None:
+            clauses.append("team_id = ?")
+            parameters.append(team_id)
+        query = f"""
+            SELECT
+                COUNT(*) AS events,
+                COALESCE(SUM(detection_count), 0) AS detections,
+                COALESCE(SUM(CASE WHEN action = 'redacted' THEN 1 ELSE 0 END), 0) AS redacted_requests,
+                COALESCE(SUM(CASE WHEN action = 'denied' THEN 1 ELSE 0 END), 0) AS denied_requests
+            FROM gateway_secret_events
+            WHERE {' AND '.join(clauses)}
+        """
+        with self._lock, self._connection() as connection:
+            row = connection.execute(query, parameters).fetchone()
+        return SecretTotals(**dict(row))

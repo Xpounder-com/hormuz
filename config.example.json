@@ -9,7 +9,9 @@
   "upstreams": {
     "openai": {
       "base_url": "https://api.openai.com",
-      "api_key_env": "OPENAI_API_KEY"
+      "api_key_env": "OPENAI_API_KEY",
+      "allow_response_storage": false,
+      "allow_background": false
     },
     "anthropic": {
       "base_url": "https://api.anthropic.com",
@@ -66,6 +68,13 @@
       "cache_read_cost_per_million": 0.5,
       "cache_write_cost_per_million": 6.25,
       "output_cost_per_million": 25.0
+    }
+  },
+  "egress_controls": {
+    "secrets": {
+      "mode": "redact",
+      "builtins": true,
+      "custom_secret_envs": []
     }
   },
   "policies": {

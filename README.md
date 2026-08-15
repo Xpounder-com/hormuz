@@ -18,6 +18,8 @@ Hormuz is alpha software. The local prototype proves routing and policy behavior
 - Per-person attribution using unique Hormuz identity tokens.
 - Input, output, cache-read, cache-write, and reasoning-token accounting when providers report them.
 - Metadata-only SQLite usage ledger. Prompts and responses are relayed, not persisted.
+- Pre-provider secret redaction or denial with built-in detectors, custom environment-provided values, and metadata-only detection evidence.
+- OpenAI response storage and background mode disabled by default as enforceable provider privacy policy.
 - Configuration output for installed Codex and Claude Code clients.
 
 ## Quick start
@@ -62,7 +64,7 @@ python3 -m hormuz --config hormuz.json status
 python3 -m hormuz --config hormuz.json status --json
 ```
 
-See [docs/CLIENTS.md](docs/CLIENTS.md) for Codex and Claude Code setup, [docs/VERIFICATION.md](docs/VERIFICATION.md) for executable compatibility evidence, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the request path and current trust boundary.
+See [docs/CLIENTS.md](docs/CLIENTS.md) for Codex and Claude Code setup, [docs/SECRET_CONTROLS.md](docs/SECRET_CONTROLS.md) for the egress boundary and limitations, [docs/VERIFICATION.md](docs/VERIFICATION.md) for executable compatibility evidence, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the request path and current trust boundary.
 
 ## Test
 
@@ -78,4 +80,4 @@ HORMUZ_RUN_CLAUDE_CLIENT_TEST=1 python3 -m unittest -v
 
 ## Roadmap boundary
 
-The current milestone is the enforcement and accounting kernel. Before an enterprise release, Hormuz still needs secret/PII redaction, durable identity and tenancy, TLS and deployment hardening, immutable audit export, invoice reconciliation, provider conformance coverage, and the governed reusable-context subsystem.
+The current milestone is the enforcement, accounting, and deterministic secret-egress kernel. Before an enterprise release, Hormuz still needs structured PII/semantic DLP, durable identity and tenancy, TLS and deployment hardening, immutable audit export, invoice reconciliation, broader provider conformance coverage, and the governed reusable-context subsystem.
