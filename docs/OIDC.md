@@ -105,4 +105,4 @@ Authentication logs contain only a stable failure code. Hormuz does not log toke
 
 ## Current boundary
 
-The implemented path works with identity providers that issue JWT access tokens for a Hormuz audience. Hormuz does not yet include its own browser authorization-code/PKCE flow, refresh-token custody, opaque-token introspection, SCIM provisioning, or revocation endpoint. The material next decision is whether to build a Hormuz session broker—which maximizes provider compatibility and simplifies client setup—or require every customer IdP to mint JWT access tokens for the Hormuz resource.
+The implemented path works with identity providers that issue JWT access tokens for a Hormuz audience. Hormuz does not yet include its own browser authorization-code/PKCE flow, refresh-token custody, opaque-token introspection, SCIM provisioning, or revocation endpoint. [Proposed ADR 0001](decisions/0001-oidc-login-and-session-architecture.md) specifies the session-broker recommendation and its security boundary. It remains non-binding until the product owner explicitly approves issue #2.

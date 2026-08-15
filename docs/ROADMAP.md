@@ -22,9 +22,9 @@ The foundation is not an enterprise release. Browser SSO/session custody, shared
 
 These issues record product decisions and block dependent implementation. They must not be closed by implementation convenience.
 
-1. [#2 — Select the Hormuz OIDC login and session architecture](https://github.com/Xpounder-com/hormuz/issues/2)
-2. [#1 — Approve the enterprise tenancy, authorization, and persistence topology](https://github.com/Xpounder-com/hormuz/issues/1)
-3. [#3 — Define provider and Hormuz cache privacy tiers](https://github.com/Xpounder-com/hormuz/issues/3)
+1. [#2 — Select the Hormuz OIDC login and session architecture](https://github.com/Xpounder-com/hormuz/issues/2) — [Proposed ADR 0001](decisions/0001-oidc-login-and-session-architecture.md)
+2. [#1 — Approve the enterprise tenancy, authorization, and persistence topology](https://github.com/Xpounder-com/hormuz/issues/1) — [Proposed ADR 0002](decisions/0002-enterprise-tenancy-and-persistence.md)
+3. [#3 — Define provider and Hormuz cache privacy tiers](https://github.com/Xpounder-com/hormuz/issues/3) — [Proposed ADR 0003](decisions/0003-cache-privacy-tiers.md)
 
 ## v0.2 — Enterprise identity and tenancy
 
