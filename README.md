@@ -4,13 +4,15 @@ Hormuz is a CLI-first enterprise control plane that puts organization policy bet
 
 The first executable milestone enforces client, model, output-token, monthly-token, team-budget, and per-person budget rules. It records metadata-only usage in SQLite, estimates cost from configured rate cards, and keeps provider API keys on the Hormuz server rather than distributing them to employees.
 
+The included rate cards are examples current as of August 15, 2026. Treat them as versioned configuration: verify them against provider pricing before production use and reconcile estimated spend against provider invoices.
+
 Hormuz is alpha software. The local prototype proves routing and policy behavior; it is not yet a production-ready multi-tenant service.
 
 ## What works
 
 - OpenAI-compatible `POST /v1/responses` proxying, including streaming.
 - Anthropic-compatible `POST /v1/messages`, `/v1/messages/count_tokens`, and streaming.
-- Company aliases that map to provider-specific model IDs.
+- Provider model IDs by default, preserving native client model behavior; optional company aliases remain supported.
 - Organization, team, and person policy overlays that can only become more restrictive.
 - Model fallback, output-token caps, monthly token limits, and USD budget limits.
 - Per-person attribution using unique Hormuz identity tokens.
@@ -49,7 +51,7 @@ python3 -m hormuz --config hormuz.json policy-check \
   --actor alice \
   --client codex \
   --protocol openai \
-  --model engineering-deep \
+  --model gpt-5.5 \
   --max-output-tokens 50000
 ```
 
@@ -60,7 +62,7 @@ python3 -m hormuz --config hormuz.json status
 python3 -m hormuz --config hormuz.json status --json
 ```
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the request path and current trust boundary.
+See [docs/CLIENTS.md](docs/CLIENTS.md) for Codex and Claude Code setup, [docs/VERIFICATION.md](docs/VERIFICATION.md) for executable compatibility evidence, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the request path and current trust boundary.
 
 ## Test
 

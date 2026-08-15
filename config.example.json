@@ -27,41 +27,41 @@
     }
   ],
   "model_routes": {
-    "engineering-fast": {
+    "gpt-5.4-mini": {
       "protocol": "openai",
-      "upstream_model": "gpt-5.6-luna",
-      "input_cost_per_million": 1.0,
-      "cache_read_cost_per_million": 0.1,
-      "cache_write_cost_per_million": 1.25,
-      "output_cost_per_million": 6.0
+      "upstream_model": "gpt-5.4-mini",
+      "input_cost_per_million": 0.75,
+      "cache_read_cost_per_million": 0.075,
+      "cache_write_cost_per_million": 0.75,
+      "output_cost_per_million": 4.5
     },
-    "engineering-balanced": {
+    "gpt-5.4": {
       "protocol": "openai",
-      "upstream_model": "gpt-5.6-terra",
+      "upstream_model": "gpt-5.4",
       "input_cost_per_million": 2.5,
       "cache_read_cost_per_million": 0.25,
-      "cache_write_cost_per_million": 3.125,
+      "cache_write_cost_per_million": 2.5,
       "output_cost_per_million": 15.0
     },
-    "engineering-deep": {
+    "gpt-5.5": {
       "protocol": "openai",
-      "upstream_model": "gpt-5.6-sol",
+      "upstream_model": "gpt-5.5",
       "input_cost_per_million": 5.0,
       "cache_read_cost_per_million": 0.5,
-      "cache_write_cost_per_million": 6.25,
+      "cache_write_cost_per_million": 5.0,
       "output_cost_per_million": 30.0
     },
-    "claude-standard": {
+    "claude-sonnet-5": {
       "protocol": "anthropic",
       "upstream_model": "claude-sonnet-5",
-      "input_cost_per_million": 3.0,
-      "cache_read_cost_per_million": 0.3,
-      "cache_write_cost_per_million": 3.75,
-      "output_cost_per_million": 15.0
+      "input_cost_per_million": 2.0,
+      "cache_read_cost_per_million": 0.2,
+      "cache_write_cost_per_million": 2.5,
+      "output_cost_per_million": 10.0
     },
-    "claude-deep": {
+    "claude-opus-5": {
       "protocol": "anthropic",
-      "upstream_model": "claude-opus-4-8",
+      "upstream_model": "claude-opus-5",
       "input_cost_per_million": 5.0,
       "cache_read_cost_per_million": 0.5,
       "cache_write_cost_per_million": 6.25,
@@ -72,11 +72,11 @@
     "organization": {
       "allowed_clients": ["codex", "claude-code"],
       "allowed_models": [
-        "engineering-fast",
-        "engineering-balanced",
-        "engineering-deep",
-        "claude-standard",
-        "claude-deep"
+        "gpt-5.4-mini",
+        "gpt-5.4",
+        "gpt-5.5",
+        "claude-sonnet-5",
+        "claude-opus-5"
       ],
       "max_output_tokens": 32000,
       "monthly_budget_usd": 10000,
@@ -85,15 +85,15 @@
     "teams": {
       "engineering": {
         "allowed_models": [
-          "engineering-fast",
-          "engineering-balanced",
-          "engineering-deep",
-          "claude-standard",
-          "claude-deep"
+          "gpt-5.4-mini",
+          "gpt-5.4",
+          "gpt-5.5",
+          "claude-sonnet-5",
+          "claude-opus-5"
         ],
         "fallback_models": {
-          "openai": "engineering-fast",
-          "anthropic": "claude-standard"
+          "openai": "gpt-5.4-mini",
+          "anthropic": "claude-sonnet-5"
         },
         "max_output_tokens": 16000,
         "monthly_budget_usd": 5000

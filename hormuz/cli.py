@@ -161,8 +161,20 @@ def _client_config(config: GatewayConfig, client: str, url: str | None) -> int:
     base_url = (url or f"http://{config.listen.host}:{config.listen.port}").rstrip("/")
     identity = next(iter(config.identities_by_token.values()))
     if client == "codex":
+        policy = config.resolved_policy(identity)
+        allowed_models = set(policy.allowed_models) if policy.allowed_models is not None else None
+        default_model = next(
+            (
+                alias
+                for alias, route in config.model_routes.items()
+                if route.protocol == "openai" and (allowed_models is None or alias in allowed_models)
+            ),
+            None,
+        )
+        if default_model is None:
+            raise ConfigError(f"Identity {identity.actor_id} has no allowed OpenAI model for Codex")
         print(
-            f'''# Put this in the user-level ~/.codex/config.toml\nmodel = "engineering-fast"\nmodel_provider = "hormuz"\n\n[model_providers.hormuz]\nname = "Hormuz"\nbase_url = "{base_url}/v1"\nenv_key = "{identity.token_env}"\nwire_api = "responses"'''
+            f'''# Put this in the user-level ~/.codex/config.toml\nmodel = "{default_model}"\nmodel_provider = "hormuz"\n\n[model_providers.hormuz]\nname = "Hormuz"\nbase_url = "{base_url}/v1"\nenv_key = "{identity.token_env}"\nwire_api = "responses"'''
         )
     else:
         print(f'export ANTHROPIC_BASE_URL="{base_url}"')
