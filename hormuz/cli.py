@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import logging
 import os
 import signal
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 from .config import ConfigError, GatewayConfig
@@ -50,6 +52,12 @@ def build_parser() -> argparse.ArgumentParser:
     connect = subparsers.add_parser("client-config", help="Print client configuration for this gateway")
     connect.add_argument("client", choices=["codex", "claude"])
     connect.add_argument("--url", help="Externally reachable gateway URL; defaults to configured listener")
+
+    audit = subparsers.add_parser("audit-export", help="Export metadata-only usage and security events as JSONL")
+    audit.add_argument("--kind", choices=["all", "usage", "security"], default="all")
+    audit.add_argument("--since", help="UTC ISO-8601 lower bound (default: start of current month)")
+    audit.add_argument("--output", default="-", help="Output path or - for stdout (default: -)")
+    audit.add_argument("--force", action="store_true", help="Allow replacing an existing output file")
     return parser
 
 
@@ -71,6 +79,8 @@ def main(argv: list[str] | None = None) -> int:
             return _policy_check(config, args)
         if args.command == "client-config":
             return _client_config(config, args.client, args.url)
+        if args.command == "audit-export":
+            return _audit_export(config, args)
     except ConfigError as error:
         print(f"configuration error: {error}", file=sys.stderr)
         return 2
@@ -268,6 +278,69 @@ def _client_config(config: GatewayConfig, client: str, url: str | None) -> int:
         print(f'export ANTHROPIC_AUTH_TOKEN="${{{identity.token_env}}}"')
         print("claude")
     return 0
+
+
+def _audit_export(config: GatewayConfig, args: argparse.Namespace) -> int:
+    try:
+        since = _audit_since(args.since)
+    except ValueError as error:
+        print(f"invalid --since: {error}", file=sys.stderr)
+        return 2
+    events = UsageStore(config.database_path).audit_events(since=since, kind=args.kind)
+    stream = sys.stdout
+    should_close = False
+    output_path: Path | None = None
+    if args.output != "-":
+        output_path = Path(args.output).expanduser().absolute()
+        flags = (
+            os.O_WRONLY
+            | os.O_CREAT
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+            | (os.O_TRUNC if args.force else os.O_EXCL)
+        )
+        try:
+            descriptor = os.open(output_path, flags, 0o600)
+        except FileExistsError:
+            print(f"audit export already exists: {output_path} (use --force to replace it)", file=sys.stderr)
+            return 2
+        except OSError as error:
+            print(f"cannot open audit export {output_path}: {error}", file=sys.stderr)
+            return 2
+        if hasattr(os, "fchmod"):
+            os.fchmod(descriptor, 0o600)
+        else:  # pragma: no cover - Windows permission semantics
+            os.chmod(output_path, 0o600)
+        stream = os.fdopen(descriptor, "w", encoding="utf-8")
+        should_close = True
+
+    digest = hashlib.sha256()
+    try:
+        for event in events:
+            line = json.dumps(event, sort_keys=True, separators=(",", ":")) + "\n"
+            stream.write(line)
+            digest.update(line.encode("utf-8"))
+        stream.flush()
+        if should_close:
+            os.fsync(stream.fileno())
+    finally:
+        if should_close:
+            stream.close()
+    destination = str(output_path) if output_path is not None else "stdout"
+    print(
+        f"exported {len(events)} events to {destination}; sha256={digest.hexdigest()}",
+        file=sys.stderr,
+    )
+    return 0
+
+
+def _audit_since(value: str | None) -> str:
+    if value is None:
+        return datetime.now(timezone.utc).replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat()
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc).isoformat()
 
 
 def _missing_upstream_credentials(config: GatewayConfig) -> list[str]:

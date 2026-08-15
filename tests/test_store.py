@@ -81,6 +81,45 @@ class UsageStoreMigrationTests(unittest.TestCase):
             self.assertEqual(secret_totals.events, 1)
             self.assertEqual(secret_totals.detections, 2)
 
+            # The export contract is an allowlist: even a future content-bearing
+            # database column must not appear automatically in audit output.
+            connection = sqlite3.connect(path)
+            connection.execute("ALTER TABLE gateway_usage_events ADD COLUMN prompt TEXT")
+            connection.execute("UPDATE gateway_usage_events SET prompt = 'must-not-export'")
+            connection.execute("ALTER TABLE gateway_secret_events ADD COLUMN matched_value TEXT")
+            connection.execute("UPDATE gateway_secret_events SET matched_value = 'must-not-export'")
+            connection.commit()
+            connection.close()
+
+            audit = store.audit_events(since="2000-01-01T00:00:00+00:00")
+            self.assertEqual([event["event_type"] for event in audit], ["usage", "security.secret"])
+            self.assertEqual(audit[0]["redaction_rules"], ["openai_api_key"])
+            self.assertEqual(audit[1]["rules"], ["openai_api_key"])
+            self.assertNotIn("prompt", audit[0])
+            self.assertNotIn("response", audit[0])
+            self.assertNotIn("matched_value", audit[1])
+            self.assertNotIn("must-not-export", repr(audit))
+            self.assertEqual(
+                [event["event_type"] for event in store.audit_events(
+                    since="2000-01-01T00:00:00+00:00",
+                    kind="usage",
+                )],
+                ["usage"],
+            )
+            self.assertEqual(
+                [event["event_type"] for event in store.audit_events(
+                    since="2000-01-01T00:00:00+00:00",
+                    kind="security",
+                )],
+                ["security.secret"],
+            )
+            self.assertEqual(
+                store.audit_events(since="2999-01-01T00:00:00+00:00"),
+                [],
+            )
+            with self.assertRaises(ValueError):
+                store.audit_events(since="2000-01-01T00:00:00+00:00", kind="unsupported")
+
     def test_usage_reports_group_and_filter_without_content_fields(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             store = UsageStore(Path(temporary) / "usage.sqlite3")

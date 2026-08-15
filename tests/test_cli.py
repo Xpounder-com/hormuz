@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import argparse
 import io
+import os
+import tempfile
 import unittest
 from contextlib import redirect_stdout
+from contextlib import redirect_stderr
+from dataclasses import replace
 from pathlib import Path
 
-from hormuz.cli import _budget_for_scope, _client_config, build_parser
+from hormuz.cli import _audit_export, _audit_since, _budget_for_scope, _client_config, build_parser
 from hormuz.config import GatewayConfig
 
 
@@ -81,6 +86,49 @@ class ClientConfigTests(unittest.TestCase):
                 actor_filter="alice",
             )
         )
+
+    def test_audit_export_is_private_and_refuses_accidental_overwrite(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config = replace(self.config, database_path=root / "usage.sqlite3")
+            output_path = root / "audit.jsonl"
+            args = argparse.Namespace(
+                kind="all",
+                since="2026-08-01T00:00:00Z",
+                output=str(output_path),
+                force=False,
+            )
+            stderr = io.StringIO()
+            with redirect_stderr(stderr):
+                self.assertEqual(_audit_export(config, args), 0)
+            self.assertEqual(output_path.read_text(encoding="utf-8"), "")
+            self.assertEqual(os.stat(output_path).st_mode & 0o777, 0o600)
+            self.assertIn("sha256=", stderr.getvalue())
+
+            with redirect_stderr(io.StringIO()):
+                self.assertEqual(_audit_export(config, args), 2)
+            args.force = True
+            with redirect_stderr(io.StringIO()):
+                self.assertEqual(_audit_export(config, args), 0)
+
+            if hasattr(os, "O_NOFOLLOW"):
+                symlink_target = root / "must-not-change.jsonl"
+                symlink_target.write_text("preserve me", encoding="utf-8")
+                symlink_path = root / "audit-symlink.jsonl"
+                symlink_path.symlink_to(symlink_target)
+                args.output = str(symlink_path)
+                with redirect_stderr(io.StringIO()):
+                    self.assertEqual(_audit_export(config, args), 2)
+                self.assertEqual(symlink_target.read_text(encoding="utf-8"), "preserve me")
+
+    def test_audit_since_normalizes_to_utc(self) -> None:
+        self.assertEqual(_audit_since("2026-08-01"), "2026-08-01T00:00:00+00:00")
+        self.assertEqual(
+            _audit_since("2026-08-01T02:00:00+02:00"),
+            "2026-08-01T00:00:00+00:00",
+        )
+        with self.assertRaises(ValueError):
+            _audit_since("not-a-timestamp")
 
 
 if __name__ == "__main__":

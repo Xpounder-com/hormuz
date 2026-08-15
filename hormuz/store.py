@@ -536,3 +536,60 @@ class UsageStore:
         with self._lock, self._connection() as connection:
             row = connection.execute(query, parameters).fetchone()
         return SecretTotals(**dict(row))
+
+    def audit_events(self, *, since: str, kind: str = "all") -> list[dict[str, object]]:
+        if kind not in {"all", "usage", "security"}:
+            raise ValueError(f"Unsupported audit event kind: {kind}")
+        events: list[dict[str, object]] = []
+        with self._lock, self._connection() as connection:
+            connection.execute("BEGIN")
+            if kind in {"all", "usage"}:
+                rows = connection.execute(
+                    """
+                    SELECT
+                        id, occurred_at, actor_id, actor_name, team_id, team_name,
+                        client, protocol, requested_model, resolved_alias, upstream_model,
+                        policy_action, status, input_tokens, output_tokens,
+                        cache_read_tokens, cache_write_tokens, reasoning_tokens,
+                        cost_microusd, provider_request_id, redaction_count,
+                        redaction_rules
+                    FROM gateway_usage_events
+                    WHERE occurred_at >= ?
+                    ORDER BY occurred_at, id
+                    """,
+                    (since,),
+                ).fetchall()
+                for row in rows:
+                    event = dict(row)
+                    event["redaction_rules"] = json.loads(str(event["redaction_rules"]))
+                    events.append(
+                        {
+                            "schema_version": 1,
+                            "event_type": "usage",
+                            **event,
+                        }
+                    )
+            if kind in {"all", "security"}:
+                rows = connection.execute(
+                    """
+                    SELECT
+                        id, occurred_at, actor_id, actor_name, team_id, team_name,
+                        client, protocol, requested_model, action, detection_count, rules
+                    FROM gateway_secret_events
+                    WHERE occurred_at >= ?
+                    ORDER BY occurred_at, id
+                    """,
+                    (since,),
+                ).fetchall()
+                for row in rows:
+                    event = dict(row)
+                    event["rules"] = json.loads(str(event["rules"]))
+                    events.append(
+                        {
+                            "schema_version": 1,
+                            "event_type": "security.secret",
+                            **event,
+                        }
+                    )
+        events.sort(key=lambda event: (str(event["occurred_at"]), str(event["id"])))
+        return events

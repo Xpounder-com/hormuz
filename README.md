@@ -18,6 +18,7 @@ Hormuz is alpha software. The local prototype proves routing and policy behavior
 - Per-person attribution using unique Hormuz identity tokens.
 - Input, output, cache-read, cache-write, and reasoning-token accounting when providers report them.
 - Metadata-only SQLite usage ledger. Prompts and responses are relayed, not persisted.
+- Metadata-only JSONL audit export for usage and secret-egress evidence, with private file permissions and a SHA-256 checksum.
 - Pre-provider secret redaction or denial with built-in detectors, custom environment-provided values, and metadata-only detection evidence.
 - OpenAI response storage and background mode disabled by default as enforceable provider privacy policy.
 - Configuration output for installed Codex and Claude Code clients.
@@ -66,7 +67,15 @@ python3 -m hormuz --config hormuz.json status --group-by model --team engineerin
 python3 -m hormuz --config hormuz.json status --json
 ```
 
-See [docs/CLIENTS.md](docs/CLIENTS.md) for Codex and Claude Code setup, [docs/USAGE.md](docs/USAGE.md) for team/person/model cost and budget reporting, [docs/SECRET_CONTROLS.md](docs/SECRET_CONTROLS.md) for the egress boundary and limitations, [docs/VERIFICATION.md](docs/VERIFICATION.md) for executable compatibility evidence, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the request path and current trust boundary.
+Export metadata-only audit evidence for the current month:
+
+```bash
+python3 -m hormuz --config hormuz.json audit-export \
+  --kind all \
+  --output hormuz-audit.jsonl
+```
+
+See [docs/CLIENTS.md](docs/CLIENTS.md) for Codex and Claude Code setup, [docs/USAGE.md](docs/USAGE.md) for team/person/model cost and budget reporting, [docs/AUDIT.md](docs/AUDIT.md) for the export contract and limitations, [docs/SECRET_CONTROLS.md](docs/SECRET_CONTROLS.md) for the egress boundary, [docs/VERIFICATION.md](docs/VERIFICATION.md) for executable compatibility evidence, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the request path and current trust boundary.
 
 ## Test
 
@@ -82,4 +91,4 @@ HORMUZ_RUN_CLAUDE_CLIENT_TEST=1 python3 -m unittest -v
 
 ## Roadmap boundary
 
-The current milestone is the enforcement, accounting, and deterministic secret-egress kernel. Before an enterprise release, Hormuz still needs structured PII/semantic DLP, durable identity and tenancy, TLS and deployment hardening, immutable audit export, invoice reconciliation, broader provider conformance coverage, and the governed reusable-context subsystem.
+The current milestone is the enforcement, accounting, deterministic secret-egress, and metadata-audit kernel. Before an enterprise release, Hormuz still needs structured PII/semantic DLP, durable identity and tenancy, TLS and deployment hardening, signed or externally immutable audit retention, invoice reconciliation, broader provider conformance coverage, and the governed reusable-context subsystem.
