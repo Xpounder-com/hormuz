@@ -6,7 +6,7 @@ import threading
 import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from .config import Identity
@@ -39,6 +39,19 @@ class SecretTotals:
     detections: int = 0
     redacted_requests: int = 0
     denied_requests: int = 0
+
+
+@dataclass(frozen=True)
+class ReservationScope:
+    name: str
+    actor_id: str | None = None
+    team_id: str | None = None
+    token_limit: int | None = None
+    cost_limit_microusd: int | None = None
+
+
+class ReservationDenied(RuntimeError):
+    pass
 
 
 class UsageStore:
@@ -117,6 +130,21 @@ class UsageStore:
                     ON gateway_secret_events(actor_id, occurred_at);
                 CREATE INDEX IF NOT EXISTS idx_gateway_secret_team_month
                     ON gateway_secret_events(team_id, occurred_at);
+                CREATE TABLE IF NOT EXISTS gateway_budget_reservations (
+                    id TEXT PRIMARY KEY,
+                    created_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    actor_id TEXT NOT NULL,
+                    team_id TEXT NOT NULL,
+                    reserved_tokens INTEGER NOT NULL,
+                    reserved_cost_microusd INTEGER NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_gateway_reservation_expires_at
+                    ON gateway_budget_reservations(expires_at);
+                CREATE INDEX IF NOT EXISTS idx_gateway_reservation_actor
+                    ON gateway_budget_reservations(actor_id, expires_at);
+                CREATE INDEX IF NOT EXISTS idx_gateway_reservation_team
+                    ON gateway_budget_reservations(team_id, expires_at);
                 """
             )
             columns = {
@@ -231,6 +259,126 @@ class UsageStore:
             )
         return event_id
 
+    def reserve_budget(
+        self,
+        *,
+        identity: Identity,
+        scopes: tuple[ReservationScope, ...],
+        reserved_tokens: int,
+        reserved_cost_microusd: int,
+        ttl_seconds: int,
+    ) -> str | None:
+        constrained = tuple(
+            scope
+            for scope in scopes
+            if scope.token_limit is not None or scope.cost_limit_microusd is not None
+        )
+        if not constrained:
+            return None
+        now = datetime.now(timezone.utc)
+        now_value = now.isoformat()
+        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat()
+        reservation_id = str(uuid.uuid4())
+        with self._lock, self._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute(
+                "DELETE FROM gateway_budget_reservations WHERE expires_at <= ?",
+                (now_value,),
+            )
+            for scope in constrained:
+                usage_clauses = ["occurred_at >= ?"]
+                reservation_clauses = ["expires_at > ?"]
+                usage_parameters: list[object] = [month_start]
+                reservation_parameters: list[object] = [now_value]
+                if scope.actor_id is not None:
+                    usage_clauses.append("actor_id = ?")
+                    reservation_clauses.append("actor_id = ?")
+                    usage_parameters.append(scope.actor_id)
+                    reservation_parameters.append(scope.actor_id)
+                if scope.team_id is not None:
+                    usage_clauses.append("team_id = ?")
+                    reservation_clauses.append("team_id = ?")
+                    usage_parameters.append(scope.team_id)
+                    reservation_parameters.append(scope.team_id)
+                usage = connection.execute(
+                    f"""
+                    SELECT
+                        COALESCE(SUM(input_tokens + output_tokens), 0) AS tokens,
+                        COALESCE(SUM(cost_microusd), 0) AS cost_microusd
+                    FROM gateway_usage_events
+                    WHERE {' AND '.join(usage_clauses)}
+                    """,
+                    usage_parameters,
+                ).fetchone()
+                reserved = connection.execute(
+                    f"""
+                    SELECT
+                        COALESCE(SUM(reserved_tokens), 0) AS tokens,
+                        COALESCE(SUM(reserved_cost_microusd), 0) AS cost_microusd
+                    FROM gateway_budget_reservations
+                    WHERE {' AND '.join(reservation_clauses)}
+                    """,
+                    reservation_parameters,
+                ).fetchone()
+                projected_tokens = usage["tokens"] + reserved["tokens"] + max(0, reserved_tokens)
+                projected_cost = usage["cost_microusd"] + reserved["cost_microusd"] + max(
+                    0, reserved_cost_microusd
+                )
+                if scope.token_limit is not None and projected_tokens > scope.token_limit:
+                    raise ReservationDenied(
+                        f"The {scope.name} monthly token limit would be exceeded by this request."
+                    )
+                if scope.cost_limit_microusd is not None and projected_cost > scope.cost_limit_microusd:
+                    raise ReservationDenied(
+                        f"The {scope.name} monthly AI budget would be exceeded by this request."
+                    )
+            connection.execute(
+                """
+                INSERT INTO gateway_budget_reservations (
+                    id, created_at, expires_at, actor_id, team_id,
+                    reserved_tokens, reserved_cost_microusd
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    reservation_id,
+                    now_value,
+                    (now + timedelta(seconds=max(1, ttl_seconds))).isoformat(),
+                    identity.actor_id,
+                    identity.team_id,
+                    max(0, reserved_tokens),
+                    max(0, reserved_cost_microusd),
+                ),
+            )
+        return reservation_id
+
+    def release_budget_reservation(self, reservation_id: str | None) -> None:
+        if reservation_id is None:
+            return
+        with self._lock, self._connection() as connection:
+            connection.execute(
+                "DELETE FROM gateway_budget_reservations WHERE id = ?",
+                (reservation_id,),
+            )
+
+    def refresh_budget_reservation(self, reservation_id: str | None, *, ttl_seconds: int) -> None:
+        if reservation_id is None:
+            return
+        expires_at = (datetime.now(timezone.utc) + timedelta(seconds=max(1, ttl_seconds))).isoformat()
+        with self._lock, self._connection() as connection:
+            connection.execute(
+                "UPDATE gateway_budget_reservations SET expires_at = ? WHERE id = ?",
+                (expires_at, reservation_id),
+            )
+
+    def active_budget_reservations(self) -> int:
+        now = datetime.now(timezone.utc).isoformat()
+        with self._lock, self._connection() as connection:
+            row = connection.execute(
+                "SELECT COUNT(*) AS count FROM gateway_budget_reservations WHERE expires_at > ?",
+                (now,),
+            ).fetchone()
+        return int(row["count"])
+
     def monthly_totals(self, *, actor_id: str | None = None, team_id: str | None = None) -> MonthlyTotals:
         start = datetime.now(timezone.utc).replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat()
         clauses = ["occurred_at >= ?"]
@@ -277,6 +425,88 @@ class UsageStore:
                 """,
                 (start,),
             ).fetchall()
+        return [dict(row) for row in rows]
+
+    def report_rows(
+        self,
+        *,
+        group_by: str,
+        actor_id: str | None = None,
+        team_id: str | None = None,
+    ) -> list[dict[str, object]]:
+        dimensions: dict[str, tuple[list[str], list[str]]] = {
+            "organization": (
+                ["'organization' AS scope_id", "'Organization' AS scope_name"],
+                [],
+            ),
+            "team": (
+                ["team_id AS scope_id", "team_name AS scope_name"],
+                ["team_id", "team_name"],
+            ),
+            "person": (
+                [
+                    "actor_id AS scope_id",
+                    "actor_name AS scope_name",
+                    "team_id",
+                    "team_name",
+                ],
+                ["actor_id", "actor_name", "team_id", "team_name"],
+            ),
+            "model": (
+                [
+                    "COALESCE(upstream_model, resolved_alias, requested_model) AS scope_id",
+                    "COALESCE(upstream_model, resolved_alias, requested_model) AS scope_name",
+                    "protocol",
+                ],
+                ["COALESCE(upstream_model, resolved_alias, requested_model)", "protocol"],
+            ),
+            "client": (
+                ["client AS scope_id", "client AS scope_name", "client"],
+                ["client"],
+            ),
+            "provider": (
+                ["protocol AS scope_id", "protocol AS scope_name", "protocol"],
+                ["protocol"],
+            ),
+        }
+        try:
+            select_dimensions, group_dimensions = dimensions[group_by]
+        except KeyError as error:
+            raise ValueError(f"Unsupported usage report dimension: {group_by}") from error
+
+        start = datetime.now(timezone.utc).replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat()
+        clauses = ["occurred_at >= ?"]
+        parameters: list[object] = [start]
+        if actor_id is not None:
+            clauses.append("actor_id = ?")
+            parameters.append(actor_id)
+        if team_id is not None:
+            clauses.append("team_id = ?")
+            parameters.append(team_id)
+        grouping = f"GROUP BY {', '.join(group_dimensions)}" if group_dimensions else ""
+        query = f"""
+            SELECT
+                {', '.join(select_dimensions)},
+                COUNT(*) AS requests,
+                COALESCE(SUM(CASE WHEN status = 'succeeded' THEN 1 ELSE 0 END), 0) AS succeeded,
+                COALESCE(SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END), 0) AS failed,
+                COALESCE(SUM(CASE WHEN status = 'denied' THEN 1 ELSE 0 END), 0) AS denied,
+                COALESCE(SUM(input_tokens), 0) AS input_tokens,
+                COALESCE(SUM(output_tokens), 0) AS output_tokens,
+                COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens,
+                COALESCE(SUM(cache_write_tokens), 0) AS cache_write_tokens,
+                COALESCE(SUM(reasoning_tokens), 0) AS reasoning_tokens,
+                COALESCE(SUM(input_tokens + output_tokens), 0) AS total_tokens,
+                COALESCE(SUM(cost_microusd), 0) AS cost_microusd,
+                COUNT(DISTINCT actor_id) AS active_actors,
+                COALESCE(SUM(redaction_count), 0) AS redactions
+            FROM gateway_usage_events
+            WHERE {' AND '.join(clauses)}
+            {grouping}
+            ORDER BY cost_microusd DESC, total_tokens DESC, scope_name ASC
+        """
+        with self._lock, self._connection() as connection:
+            rows = connection.execute(query, parameters).fetchall()
         return [dict(row) for row in rows]
 
     def monthly_secret_totals(

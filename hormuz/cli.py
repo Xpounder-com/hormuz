@@ -29,8 +29,16 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers.add_parser("serve", help="Run the OpenAI Responses and Anthropic Messages gateway")
     subparsers.add_parser("doctor", help="Validate configuration and required credentials")
-    status = subparsers.add_parser("status", help="Print current-month usage by identity")
+    status = subparsers.add_parser("status", help="Print a current-month usage and cost report")
     status.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
+    status.add_argument(
+        "--group-by",
+        choices=["organization", "team", "person", "model", "client", "provider"],
+        default="person",
+        help="Report dimension (default: person)",
+    )
+    status.add_argument("--team", help="Limit the report to a configured team ID")
+    status.add_argument("--actor", help="Limit the report to a configured actor ID")
 
     policy = subparsers.add_parser("policy-check", help="Evaluate a request without sending it upstream")
     policy.add_argument("--actor", required=True, help="Configured actor ID")
@@ -58,7 +66,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "doctor":
             return _doctor(config)
         if args.command == "status":
-            return _status(config, as_json=args.json)
+            return _status(config, args)
         if args.command == "policy-check":
             return _policy_check(config, args)
         if args.command == "client-config":
@@ -111,22 +119,99 @@ def _doctor(config: GatewayConfig) -> int:
     return 0
 
 
-def _status(config: GatewayConfig, *, as_json: bool) -> int:
-    rows = UsageStore(config.database_path).summary_rows()
-    if as_json:
-        print(json.dumps(rows, indent=2))
+def _status(config: GatewayConfig, args: argparse.Namespace) -> int:
+    rows = UsageStore(config.database_path).report_rows(
+        group_by=args.group_by,
+        actor_id=args.actor,
+        team_id=args.team,
+    )
+    report = []
+    for row in rows:
+        cost_usd = row["cost_microusd"] / 1_000_000
+        budget_usd = _budget_for_scope(
+            config,
+            args.group_by,
+            row,
+            actor_filter=args.actor,
+            team_filter=args.team,
+        )
+        report.append(
+            {
+                **row,
+                "cost_usd": cost_usd,
+                "budget_usd": budget_usd,
+                "budget_remaining_usd": max(0.0, budget_usd - cost_usd) if budget_usd is not None else None,
+                "budget_used_percent": (cost_usd / budget_usd * 100) if budget_usd else None,
+            }
+        )
+    if args.json:
+        print(json.dumps(report, indent=2))
         return 0
-    if not rows:
+    if not report:
         print("No Hormuz requests recorded this month.")
         return 0
-    print("ACTOR\tTEAM\tCLIENT\tPROTOCOL\tREQUESTS\tTOKENS\tCOST_USD\tDENIED\tREDACTIONS")
-    for row in rows:
+    print(
+        "SCOPE_ID\tSCOPE_NAME\tTEAM\tPROVIDER\tCLIENT\tREQUESTS\tSUCCEEDED\tFAILED\tDENIED\t"
+        "INPUT\tOUTPUT\tCACHE_READ\tCACHE_WRITE\tREASONING\tTOTAL\tCOST_USD\tBUDGET_USD\t"
+        "REMAINING_USD\tBUDGET_USED_PCT\tACTORS\tREDACTIONS"
+    )
+    for row in report:
         print(
-            f"{row['actor_name']}\t{row['team_name']}\t{row['client']}\t{row['protocol']}\t"
-            f"{row['requests']}\t{row['tokens']}\t{row['cost_microusd'] / 1_000_000:.6f}\t"
-            f"{row['denied']}\t{row['redactions']}"
+            f"{row['scope_id']}\t{row['scope_name']}\t{row.get('team_name', '-')}\t"
+            f"{row.get('protocol', '-')}\t{row.get('client', '-')}\t{row['requests']}\t"
+            f"{row['succeeded']}\t{row['failed']}\t{row['denied']}\t{row['input_tokens']}\t"
+            f"{row['output_tokens']}\t{row['cache_read_tokens']}\t{row['cache_write_tokens']}\t"
+            f"{row['reasoning_tokens']}\t{row['total_tokens']}\t{row['cost_usd']:.6f}\t"
+            f"{_display_number(row['budget_usd'])}\t{_display_number(row['budget_remaining_usd'])}\t"
+            f"{_display_number(row['budget_used_percent'])}\t{row['active_actors']}\t{row['redactions']}"
         )
     return 0
+
+
+def _budget_for_scope(
+    config: GatewayConfig,
+    group_by: str,
+    row: dict[str, object],
+    *,
+    actor_filter: str | None = None,
+    team_filter: str | None = None,
+) -> float | None:
+    scope_id = str(row["scope_id"])
+    if group_by == "organization":
+        if actor_filter is not None or team_filter is not None:
+            return None
+        return config.organization_policy.monthly_budget_usd
+    if group_by == "team":
+        if actor_filter is not None:
+            return None
+        policy = config.team_policies.get(scope_id)
+        return policy.monthly_budget_usd if policy is not None else None
+    if group_by != "person":
+        return None
+
+    identity = next(
+        (item for item in config.identities_by_token.values() if item.actor_id == scope_id),
+        None,
+    )
+    if identity is None:
+        return None
+    caps = [
+        policy.per_actor_monthly_budget_usd
+        for policy in (
+            config.organization_policy,
+            config.team_policies.get(identity.team_id),
+            config.actor_policies.get(identity.actor_id),
+        )
+        if policy is not None and policy.per_actor_monthly_budget_usd is not None
+    ]
+    actor_policy = config.actor_policies.get(identity.actor_id)
+    if actor_policy is not None and actor_policy.monthly_budget_usd is not None:
+        caps.append(actor_policy.monthly_budget_usd)
+    return min(caps) if caps else None
+
+
+def _display_number(value: object) -> str:
+    return "-" if value is None else f"{float(value):.2f}"
 
 
 def _policy_check(config: GatewayConfig, args: argparse.Namespace) -> int:

@@ -413,6 +413,22 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertEqual(len(FakeProviderHandler.requests), before)
         self.assertIn("budget", json.loads(response)["error"]["message"].lower())
 
+    def test_request_is_denied_when_conservative_reservation_would_exceed_budget(self) -> None:
+        config_value = self._config(self.provider.server_port, _free_port())
+        config_value["policies"]["organization"]["monthly_budget_usd"] = 0.00001
+        self._restart_gateway(config_value)
+        before = len(FakeProviderHandler.requests)
+
+        status, _, response = self._post(
+            "/v1/responses",
+            {"model": "engineering-fast", "input": "hello"},
+        )
+
+        self.assertEqual(status, 403)
+        self.assertEqual(len(FakeProviderHandler.requests), before)
+        self.assertEqual(json.loads(response)["error"]["code"], "hormuz_budget_denied")
+        self.assertEqual(self.gateway.store.active_budget_reservations(), 0)
+
     def test_invalid_token_is_rejected(self) -> None:
         status, _, _ = self._post(
             "/v1/responses",

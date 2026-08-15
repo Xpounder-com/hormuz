@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .config import GatewayConfig, Identity, ModelRoute
-from .store import MonthlyTotals, UsageStore
+from .store import MonthlyTotals, ReservationScope, UsageStore
 
 
 @dataclass(frozen=True)
@@ -79,6 +79,57 @@ class PolicyEngine:
             max_output_tokens=output_cap,
         )
 
+    def reserve_budget(
+        self,
+        *,
+        identity: Identity,
+        reserved_tokens: int,
+        reserved_cost_microusd: int,
+        ttl_seconds: int,
+    ) -> str | None:
+        organization = self.config.organization_policy
+        team = self.config.team_policies.get(identity.team_id)
+        actor = self.config.actor_policies.get(identity.actor_id)
+        per_actor_cost_caps = [
+            policy.per_actor_monthly_budget_usd
+            for policy in (organization, team, actor)
+            if policy is not None and policy.per_actor_monthly_budget_usd is not None
+        ]
+        if actor is not None and actor.monthly_budget_usd is not None:
+            per_actor_cost_caps.append(actor.monthly_budget_usd)
+        actor_cost_limit = min(per_actor_cost_caps) if per_actor_cost_caps else None
+        scopes = [
+            ReservationScope(
+                name="organization",
+                token_limit=organization.monthly_token_limit,
+                cost_limit_microusd=_usd_to_microusd(organization.monthly_budget_usd),
+            )
+        ]
+        if team is not None:
+            scopes.append(
+                ReservationScope(
+                    name="team",
+                    team_id=identity.team_id,
+                    token_limit=team.monthly_token_limit,
+                    cost_limit_microusd=_usd_to_microusd(team.monthly_budget_usd),
+                )
+            )
+        scopes.append(
+            ReservationScope(
+                name="employee",
+                actor_id=identity.actor_id,
+                token_limit=actor.monthly_token_limit if actor is not None else None,
+                cost_limit_microusd=_usd_to_microusd(actor_cost_limit),
+            )
+        )
+        return self.store.reserve_budget(
+            identity=identity,
+            scopes=tuple(scopes),
+            reserved_tokens=reserved_tokens,
+            reserved_cost_microusd=reserved_cost_microusd,
+            ttl_seconds=ttl_seconds,
+        )
+
     def _check_limits(self, identity: Identity, requested_model: str) -> PolicyDecision | None:
         actor_totals = self.store.monthly_totals(actor_id=identity.actor_id)
         scopes: list[tuple[str, object, MonthlyTotals]] = [
@@ -114,3 +165,7 @@ class PolicyEngine:
             route=None,
             max_output_tokens=None,
         )
+
+
+def _usd_to_microusd(value: float | None) -> int | None:
+    return None if value is None else max(0, round(value * 1_000_000))

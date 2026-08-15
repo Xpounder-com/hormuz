@@ -61,10 +61,12 @@ Inspect current-month usage:
 
 ```bash
 python3 -m hormuz --config hormuz.json status
+python3 -m hormuz --config hormuz.json status --group-by team
+python3 -m hormuz --config hormuz.json status --group-by model --team engineering
 python3 -m hormuz --config hormuz.json status --json
 ```
 
-See [docs/CLIENTS.md](docs/CLIENTS.md) for Codex and Claude Code setup, [docs/SECRET_CONTROLS.md](docs/SECRET_CONTROLS.md) for the egress boundary and limitations, [docs/VERIFICATION.md](docs/VERIFICATION.md) for executable compatibility evidence, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the request path and current trust boundary.
+See [docs/CLIENTS.md](docs/CLIENTS.md) for Codex and Claude Code setup, [docs/USAGE.md](docs/USAGE.md) for team/person/model cost and budget reporting, [docs/SECRET_CONTROLS.md](docs/SECRET_CONTROLS.md) for the egress boundary and limitations, [docs/VERIFICATION.md](docs/VERIFICATION.md) for executable compatibility evidence, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the request path and current trust boundary.
 
 ## Test
 

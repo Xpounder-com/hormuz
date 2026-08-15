@@ -261,6 +261,19 @@ class GatewayConfig:
                     raise ConfigError(f"Policy references unknown fallback model alias: {alias}")
                 if route.protocol != protocol:
                     raise ConfigError(f"Policy fallback {alias} does not use protocol {protocol}")
+        limits_require_request_bound = any(
+            policy.monthly_token_limit is not None
+            or policy.monthly_budget_usd is not None
+            or policy.per_actor_monthly_budget_usd is not None
+            for policy in policies
+        )
+        if limits_require_request_bound:
+            for identity in self.identities_by_token.values():
+                if self.resolved_policy(identity).max_output_tokens is None:
+                    raise ConfigError(
+                        f"Identity {identity.actor_id} needs an effective max_output_tokens policy "
+                        "when monthly token or budget limits are configured"
+                    )
 
     def identity_for_token(self, token: str) -> Identity | None:
         return self.identities_by_token.get(token)

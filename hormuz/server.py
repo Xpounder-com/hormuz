@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import threading
+import time
 import urllib.error
 import urllib.request
 from http import HTTPStatus
@@ -15,7 +16,7 @@ from urllib.parse import urlsplit
 from .config import GatewayConfig, Identity, ModelRoute, UpstreamConfig
 from .policy import PolicyDecision, PolicyEngine
 from .redaction import RedactionError, SecretRedactor
-from .store import UsageStore
+from .store import ReservationDenied, UsageStore
 from .usage import ResponseUsageParser
 
 
@@ -274,17 +275,70 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         if redaction.count:
             policy_action = f"{policy_action}+redacted"
         body = json.dumps(redaction.value, separators=(",", ":")).encode("utf-8")
-        self._forward(
-            identity=identity,
-            protocol=protocol,
-            client=client,
-            decision=decision,
-            body=body,
-            account_usage=account_usage,
-            policy_action=policy_action,
-            redaction_count=redaction.count,
-            redaction_rules=redaction.rules,
-        )
+        reservation_id: str | None = None
+        if account_usage:
+            reserved_output_tokens = redaction.value.get(output_field, 0)
+            if not isinstance(reserved_output_tokens, int) or isinstance(reserved_output_tokens, bool):
+                reserved_output_tokens = 0
+            reserved_input_tokens = len(body)
+            reserved_cost_microusd = decision.route.estimate_cost_microusd(
+                input_tokens=reserved_input_tokens,
+                output_tokens=max(0, reserved_output_tokens),
+                cache_read_tokens=0,
+                cache_write_tokens=0,
+            )
+            try:
+                reservation_id = self.server.policy_engine.reserve_budget(
+                    identity=identity,
+                    reserved_tokens=reserved_input_tokens + max(0, reserved_output_tokens),
+                    reserved_cost_microusd=reserved_cost_microusd,
+                    ttl_seconds=self.server.config.upstream_timeout_seconds + 60,
+                )
+            except ReservationDenied as error:
+                self.server.store.record(
+                    identity=identity,
+                    client=client,
+                    protocol=protocol,
+                    requested_model=decision.requested_model,
+                    resolved_alias=decision.resolved_alias,
+                    upstream_model=decision.route.upstream_model,
+                    policy_action="budget_reservation_denied",
+                    status="denied",
+                    redaction_count=redaction.count,
+                    redaction_rules=redaction.rules,
+                )
+                LOGGER.info(
+                    "budget_reservation_denied actor=%s team=%s client=%s protocol=%s requested_model=%s reason=%s",
+                    identity.actor_id,
+                    identity.team_id,
+                    client,
+                    protocol,
+                    decision.requested_model,
+                    str(error),
+                )
+                self._send_protocol_error(
+                    protocol,
+                    str(error),
+                    HTTPStatus.FORBIDDEN,
+                    code="hormuz_budget_denied",
+                )
+                return
+        try:
+            self._forward(
+                identity=identity,
+                protocol=protocol,
+                client=client,
+                decision=decision,
+                body=body,
+                account_usage=account_usage,
+                policy_action=policy_action,
+                redaction_count=redaction.count,
+                redaction_rules=redaction.rules,
+                reservation_id=reservation_id,
+                reservation_ttl_seconds=self.server.config.upstream_timeout_seconds + 60,
+            )
+        finally:
+            self.server.store.release_budget_reservation(reservation_id)
 
     def _forward(
         self,
@@ -298,6 +352,8 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         policy_action: str,
         redaction_count: int,
         redaction_rules: tuple[str, ...],
+        reservation_id: str | None,
+        reservation_ttl_seconds: int,
     ) -> None:
         route = decision.route
         assert route is not None
@@ -366,16 +422,34 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         self.close_connection = True
 
         downstream_ok = True
+        refresh_at = time.monotonic() + max(1, reservation_ttl_seconds // 2)
         try:
             while True:
                 chunk = response.read(16 * 1024)
                 if not chunk:
                     break
+                if reservation_id is not None and time.monotonic() >= refresh_at:
+                    self.server.store.refresh_budget_reservation(
+                        reservation_id,
+                        ttl_seconds=reservation_ttl_seconds,
+                    )
+                    refresh_at = time.monotonic() + max(1, reservation_ttl_seconds // 2)
                 parser.feed(chunk)
                 self.wfile.write(chunk)
                 self.wfile.flush()
         except (BrokenPipeError, ConnectionResetError):
             downstream_ok = False
+        except (TimeoutError, OSError) as error:
+            downstream_ok = False
+            LOGGER.warning(
+                "upstream_stream_failed actor=%s team=%s client=%s protocol=%s requested_model=%s error=%s",
+                identity.actor_id,
+                identity.team_id,
+                client,
+                protocol,
+                decision.requested_model,
+                type(error).__name__,
+            )
         finally:
             response.close()
 

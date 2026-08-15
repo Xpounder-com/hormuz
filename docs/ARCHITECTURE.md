@@ -14,6 +14,7 @@ Hormuz HTTP transport
         +--> allow, deny, reroute, or cap the request
         +--> enforce provider storage policy
         +--> redact or deny detected secret material
+        +--> atomically reserve applicable token and spend budget
         +--> replace the employee token with the company provider key
         v
 OpenAI Responses API / Anthropic Messages API

@@ -68,6 +68,20 @@ class SecretRedactorTests(unittest.TestCase):
             self.assertEqual(config.secret_controls.custom_secret_envs, ("TEST_COMPANY_SECRET",))
             self.assertNotIn(secret, repr(config.secret_controls))
 
+    def test_budget_configuration_requires_an_effective_output_bound(self) -> None:
+        raw = json.loads((ROOT / "config.example.json").read_text(encoding="utf-8"))
+        raw["policies"]["organization"].pop("max_output_tokens")
+        raw["policies"]["teams"]["engineering"].pop("max_output_tokens")
+        with tempfile.TemporaryDirectory() as temporary:
+            config_path = Path(temporary) / "hormuz.json"
+            config_path.write_text(json.dumps(raw), encoding="utf-8")
+
+            with self.assertRaisesRegex(ConfigError, "max_output_tokens"):
+                GatewayConfig.load(
+                    config_path,
+                    environ={"HORMUZ_TOKEN": "employee-token-long"},
+                )
+
 
 if __name__ == "__main__":
     unittest.main()
