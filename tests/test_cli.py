@@ -5,7 +5,9 @@ import io
 import json
 import os
 import tempfile
+import tomllib
 import unittest
+from unittest import mock
 from contextlib import redirect_stdout
 from contextlib import redirect_stderr
 from dataclasses import replace
@@ -14,12 +16,13 @@ from pathlib import Path
 from hormuz.cli import (
     _audit_export,
     _audit_since,
+    _auth_token,
     _budget_for_scope,
     _client_config,
     _context_pack,
     build_parser,
 )
-from hormuz.config import GatewayConfig
+from hormuz.config import ConfigError, GatewayConfig, Identity, OIDCIssuerConfig
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -49,8 +52,79 @@ class ClientConfigTests(unittest.TestCase):
             result = _client_config(self.config, "claude", "https://hormuz.example")
 
         self.assertEqual(result, 0)
-        self.assertIn('ANTHROPIC_BASE_URL="https://hormuz.example"', output.getvalue())
+        self.assertIn("ANTHROPIC_BASE_URL=https://hormuz.example", output.getvalue())
         self.assertIn('ANTHROPIC_AUTH_TOKEN="${HORMUZ_TOKEN}"', output.getvalue())
+
+    def test_oidc_client_config_uses_credential_helpers_for_both_clients(self) -> None:
+        issuer = "https://identity.example.com"
+        identity = Identity(
+            token_env="",
+            token="",
+            actor_id="alice",
+            actor_name="Alice Example",
+            team_id="engineering",
+            team_name="Engineering",
+            allowed_clients=("codex", "claude-code"),
+            organization_id="xpounder",
+            clearance="confidential",
+            authentication_source=f"oidc:{issuer}",
+        )
+        config = replace(
+            self.config,
+            oidc_issuers={issuer: OIDCIssuerConfig(issuer=issuer, audiences=("hormuz-api",))},
+            identities_by_subject={(issuer, "subject-alice"): identity},
+        )
+
+        codex = io.StringIO()
+        with redirect_stdout(codex):
+            result = _client_config(
+                config,
+                "codex",
+                "https://hormuz.example",
+                actor_id="alice",
+                auth_mode="oidc",
+            )
+        self.assertEqual(result, 0)
+        self.assertIn("[model_providers.hormuz.auth]", codex.getvalue())
+        self.assertIn('command = "hormuz"', codex.getvalue())
+        self.assertIn('args = ["auth", "token", "--env", "HORMUZ_OIDC_ACCESS_TOKEN"]', codex.getvalue())
+        self.assertNotIn("env_key", codex.getvalue())
+        parsed_codex = tomllib.loads(codex.getvalue())
+        self.assertEqual(
+            parsed_codex["model_providers"]["hormuz"]["auth"]["command"],
+            "hormuz",
+        )
+
+        claude = io.StringIO()
+        with redirect_stdout(claude):
+            result = _client_config(
+                config,
+                "claude",
+                "https://hormuz.example",
+                actor_id="alice",
+                auth_mode="oidc",
+                credential_env="COMPANY_OIDC_TOKEN",
+            )
+        self.assertEqual(result, 0)
+        self.assertIn('"ANTHROPIC_BASE_URL": "https://hormuz.example"', claude.getvalue())
+        self.assertIn('"CLAUDE_CODE_API_KEY_HELPER_TTL_MS": "300000"', claude.getvalue())
+        self.assertIn("hormuz auth token --env COMPANY_OIDC_TOKEN", claude.getvalue())
+        self.assertNotIn("ANTHROPIC_AUTH_TOKEN", claude.getvalue())
+
+    def test_auth_token_prints_only_a_valid_environment_credential(self) -> None:
+        output = io.StringIO()
+        with mock.patch.dict(os.environ, {"COMPANY_TOKEN": "header.payload.signature"}):
+            with redirect_stdout(output):
+                self.assertEqual(_auth_token("COMPANY_TOKEN"), 0)
+        self.assertEqual(output.getvalue(), "header.payload.signature\n")
+
+        with mock.patch.dict(os.environ, {}, clear=True):
+            with redirect_stderr(io.StringIO()):
+                self.assertEqual(_auth_token("COMPANY_TOKEN"), 1)
+
+    def test_client_config_rejects_configuration_injection_urls(self) -> None:
+        with self.assertRaises(ConfigError):
+            _client_config(self.config, "codex", 'https://hormuz.example/"\nmodel="attacker"')
 
     def test_status_accepts_dimension_and_scope_filters(self) -> None:
         args = build_parser().parse_args(
@@ -147,7 +221,7 @@ class ClientConfigTests(unittest.TestCase):
                         "id": "engineering-standard",
                         "title": "Retry standard",
                         "content": "Use bounded retry policy with jitter.",
-                        "organization_id": "acme",
+                        "organization_id": "xpounder",
                         "visibility": "team",
                         "scope_id": "engineering",
                         "classification": "internal",
@@ -172,7 +246,7 @@ class ClientConfigTests(unittest.TestCase):
                     "--query",
                     "retry policy",
                     "--organization",
-                    "acme",
+                    "xpounder",
                     "--actor",
                     "alice",
                     "--repository",
@@ -205,7 +279,7 @@ class ClientConfigTests(unittest.TestCase):
                 "--query",
                 "retry",
                 "--organization",
-                "acme",
+                "xpounder",
                 "--actor",
                 "alice",
                 "--branch",
@@ -216,6 +290,28 @@ class ClientConfigTests(unittest.TestCase):
         )
         with redirect_stderr(io.StringIO()):
             self.assertEqual(_context_pack(self.config, args), 2)
+
+    def test_context_pack_cli_cannot_expand_identity_scope(self) -> None:
+        base = [
+            "context-pack",
+            "--records",
+            "unused.jsonl",
+            "--query",
+            "retry",
+            "--actor",
+            "alice",
+            "--token-budget",
+            "100",
+        ]
+        wrong_organization = build_parser().parse_args(
+            [*base, "--organization", "another-organization"]
+        )
+        over_clearance = build_parser().parse_args(
+            [*base, "--organization", "xpounder", "--clearance", "restricted"]
+        )
+        with redirect_stderr(io.StringIO()):
+            self.assertEqual(_context_pack(self.config, wrong_organization), 2)
+            self.assertEqual(_context_pack(self.config, over_clearance), 2)
 
 
 if __name__ == "__main__":

@@ -5,11 +5,11 @@ Hormuz sits on the provider request path while employees continue using Codex or
 ```text
 Codex / Claude Code
         |
-        | employee Hormuz identity token
+        | bootstrap token or OIDC JWT access token
         v
 Hormuz HTTP transport
         |
-        +--> authenticate identity and snapshot team metadata
+        +--> verify static/OIDC identity and resolve explicit actor/team metadata
         +--> resolve organization -> team -> person policy
         +--> allow, deny, reroute, or cap the request
         +--> enforce provider storage policy
@@ -28,6 +28,7 @@ SQLite usage ledger
 ## Code boundaries
 
 - `hormuz/server.py` owns HTTP compatibility, authentication, upstream forwarding, streaming, and protocol-shaped errors.
+- `hormuz/auth.py` verifies bootstrap or OIDC JWT credentials and resolves them to configured policy identities.
 - `hormuz/config.py` validates configuration and defines identity, route, rate-card, and policy data.
 - `hormuz/policy.py` evaluates access, fallback, caps, and budgets without transport concerns.
 - `hormuz/store.py` owns the SQLite schema and monthly aggregations.
@@ -43,3 +44,7 @@ Hormuz is trusted with plaintext requests and responses because it must inspect 
 ## Compatibility boundary
 
 Hormuz implements the provider endpoints required by Codex and Claude Code rather than inventing a new employee-facing client. Provider protocol changes are compatibility risks and require executable conformance tests.
+
+## Identity boundary
+
+OIDC authentication is currently a resource-server path for JWT access tokens. Discovery and JWKS metadata are cached, an unknown signing-key ID triggers one refresh, and authorization attributes come only from the configured `(issuer, subject)` mapping. Hormuz does not trust caller-provided group or team claims. Browser login, refresh-token custody, opaque-token introspection, SCIM, and active revocation remain separate enterprise milestones; see [OIDC.md](OIDC.md).

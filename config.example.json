@@ -18,6 +18,11 @@
       "api_key_env": "ANTHROPIC_API_KEY"
     }
   },
+  "authentication": {
+    "oidc": {
+      "issuers": []
+    }
+  },
   "identities": [
     {
       "token_env": "HORMUZ_TOKEN",
@@ -25,6 +30,8 @@
       "actor_name": "Alice Example",
       "team_id": "engineering",
       "team_name": "Engineering",
+      "organization_id": "xpounder",
+      "clearance": "confidential",
       "allowed_clients": ["codex", "claude-code"]
     }
   ],

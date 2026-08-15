@@ -19,7 +19,9 @@ classifiers = [
   "Topic :: Internet :: Proxy Servers",
   "Topic :: Security"
 ]
-dependencies = []
+dependencies = [
+  "PyJWT[crypto]>=2.13,<3"
+]
 
 [project.scripts]
 hormuz = "hormuz.cli:main"

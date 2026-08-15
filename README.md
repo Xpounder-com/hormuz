@@ -15,7 +15,7 @@ Hormuz is alpha software. The local prototype proves routing and policy behavior
 - Provider model IDs by default, preserving native client model behavior; optional company aliases remain supported.
 - Organization, team, and person policy overlays that can only become more restrictive.
 - Model fallback, output-token caps, monthly token limits, and USD budget limits.
-- Per-person attribution using unique Hormuz identity tokens.
+- Per-person attribution using unique bootstrap tokens or generic OIDC JWT access tokens mapped by issuer and subject.
 - Input, output, cache-read, cache-write, and reasoning-token accounting when providers report them.
 - Metadata-only SQLite usage ledger. Prompts and responses are relayed, not persisted.
 - Metadata-only JSONL audit export for usage and secret-egress evidence, with private file permissions and a SHA-256 checksum.
@@ -23,10 +23,11 @@ Hormuz is alpha software. The local prototype proves routing and policy behavior
 - OpenAI response storage and background mode disabled by default as enforceable provider privacy policy.
 - Configuration output for installed Codex and Claude Code clients.
 - Explicit, provider-neutral governed context packs with authorization, classification, verification, expiry, supersession, provenance, and deterministic token-budget enforcement.
+- Generic OIDC discovery/JWKS verification with strict issuer, audience, expiry, asymmetric-algorithm, subject-mapping, and signing-key-rotation enforcement.
 
 ## Quick start
 
-Hormuz uses only the Python standard library at runtime and requires Python 3.11 or newer.
+Hormuz requires Python 3.11 or newer. OIDC verification uses PyJWT and `cryptography`; signature verification is intentionally delegated to maintained security libraries rather than implemented in Hormuz.
 
 ```bash
 cp config.example.json hormuz.json
@@ -90,7 +91,7 @@ python3 -m hormuz --config hormuz.json context-pack \
   --policy-version engineering-v1
 ```
 
-See [docs/CLIENTS.md](docs/CLIENTS.md) for Codex and Claude Code setup, [docs/USAGE.md](docs/USAGE.md) for team/person/model cost and budget reporting, [docs/AUDIT.md](docs/AUDIT.md) for the export contract and limitations, [docs/SECRET_CONTROLS.md](docs/SECRET_CONTROLS.md) for the egress boundary, [docs/CONTEXT.md](docs/CONTEXT.md) for governed context-pack semantics, [docs/VERIFICATION.md](docs/VERIFICATION.md) for executable compatibility evidence, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the request path and current trust boundary.
+See [docs/CLIENTS.md](docs/CLIENTS.md) for Codex and Claude Code setup, [docs/OIDC.md](docs/OIDC.md) for generic enterprise identity, [docs/USAGE.md](docs/USAGE.md) for team/person/model cost and budget reporting, [docs/AUDIT.md](docs/AUDIT.md) for the export contract and limitations, [docs/SECRET_CONTROLS.md](docs/SECRET_CONTROLS.md) for the egress boundary, [docs/CONTEXT.md](docs/CONTEXT.md) for governed context-pack semantics, [docs/VERIFICATION.md](docs/VERIFICATION.md) for executable compatibility evidence, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the request path and current trust boundary.
 
 ## Test
 
@@ -108,4 +109,4 @@ The GitHub publication gate also tests Python 3.11 through 3.14, builds and inst
 
 ## Roadmap boundary
 
-The current milestone includes the enforcement, accounting, deterministic secret-egress, metadata-audit, and explicit context-pack kernels. Before an enterprise release, Hormuz still needs structured PII/semantic DLP, durable identity and tenancy, TLS and deployment hardening, signed or externally immutable audit retention, invoice reconciliation, broader provider conformance coverage, and a persistent context lifecycle with retrieval, approvals, invalidation, cache, and outcome writeback.
+The current milestone includes the enforcement, accounting, deterministic secret-egress, metadata-audit, explicit context-pack, and OIDC JWT-verification kernels. Before an enterprise release, Hormuz still needs an OIDC login/session or introspection strategy for opaque tokens, SCIM and revocation, structured PII/semantic DLP, durable tenancy, TLS and deployment hardening, signed or externally immutable audit retention, invoice reconciliation, broader provider conformance coverage, and a persistent context lifecycle with retrieval, approvals, invalidation, cache, and outcome writeback.

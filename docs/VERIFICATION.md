@@ -66,6 +66,22 @@ Observed result:
 - the sample CLI produced a single verified, source-linked 76-token context item and did not call a provider or write to the usage database;
 - the complete source suite passed 37 tests locally after the context change, with the optional Claude Code executable test skipped in that local run.
 
+### Generic OIDC JWT path
+
+A local standards-shaped issuer served an OIDC discovery document and rotating RSA JWKS to the actual Hormuz authentication and HTTP server path. No external identity provider, employee token, or provider credential was used.
+
+Observed result:
+
+- a valid RS256 JWT access token with the configured issuer, audience, expiry, key ID, and subject reached `/v1/gateway/whoami` and resolved to the explicit actor, team, organization, clearance, and client policy identity;
+- wrong-audience, expired, unmapped-subject, symmetric-algorithm, non-TLS remote-issuer, and inconsistent duplicate-actor configurations failed closed;
+- a new signing key was accepted after one JWKS refresh, while repeated attacker-controlled unknown key IDs were rate-limited from causing repeated metadata fetches;
+- the identity endpoint returned no JWT or OIDC subject;
+- context-pack CLI tests proved a caller cannot request an organization or clearance beyond the configured identity;
+- generated OIDC configurations use Codex command-backed bearer authentication and Claude Code `apiKeyHelper`, while invalid configuration-injection URLs are rejected;
+- the complete local source suite passed 48 tests, with only the opt-in official Claude Code executable test skipped in that run.
+
+This verifies Hormuz as a JWT resource server against a controlled issuer. It is not evidence of browser login, refresh-token custody, opaque-token introspection, SCIM, or a live third-party IdP; those remain explicitly outside this milestone.
+
 ## Reproduce locally
 
 The default suite uses only loopback fake providers:

@@ -5,11 +5,14 @@ import hashlib
 import json
 import logging
 import os
+import shlex
 import signal
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlparse
 
+from .auth import AuthenticationError, Authenticator
 from .config import ConfigError, GatewayConfig
 from .context import (
     CLASSIFICATIONS,
@@ -60,6 +63,22 @@ def build_parser() -> argparse.ArgumentParser:
     connect = subparsers.add_parser("client-config", help="Print client configuration for this gateway")
     connect.add_argument("client", choices=["codex", "claude"])
     connect.add_argument("--url", help="Externally reachable gateway URL; defaults to configured listener")
+    connect.add_argument("--actor", help="Configured actor ID; defaults to the first configured actor")
+    connect.add_argument(
+        "--auth-mode",
+        choices=["auto", "static", "oidc"],
+        default="auto",
+        help="Credential source to configure (default: static when available, otherwise OIDC)",
+    )
+    connect.add_argument(
+        "--credential-env",
+        help="Environment variable containing the credential (OIDC default: HORMUZ_OIDC_ACCESS_TOKEN)",
+    )
+
+    auth = subparsers.add_parser("auth", help="Credential helpers for AI clients")
+    auth_subparsers = auth.add_subparsers(dest="auth_command", required=True)
+    auth_token = auth_subparsers.add_parser("token", help="Print a credential from an environment variable")
+    auth_token.add_argument("--env", default="HORMUZ_OIDC_ACCESS_TOKEN", help="Credential environment variable")
 
     audit = subparsers.add_parser("audit-export", help="Export metadata-only usage and security events as JSONL")
     audit.add_argument("--kind", choices=["all", "usage", "security"], default="all")
@@ -105,6 +124,8 @@ def main(argv: list[str] | None = None) -> int:
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
+    if args.command == "auth" and args.auth_command == "token":
+        return _auth_token(args.env)
     try:
         config = GatewayConfig.load(args.config)
         if args.command == "serve":
@@ -116,7 +137,14 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "policy-check":
             return _policy_check(config, args)
         if args.command == "client-config":
-            return _client_config(config, args.client, args.url)
+            return _client_config(
+                config,
+                args.client,
+                args.url,
+                actor_id=args.actor,
+                auth_mode=args.auth_mode,
+                credential_env=args.credential_env,
+            )
         if args.command == "audit-export":
             return _audit_export(config, args)
         if args.command == "context-pack":
@@ -158,10 +186,20 @@ def _serve(config: GatewayConfig) -> int:
 def _doctor(config: GatewayConfig) -> int:
     print(f"configuration: {config.source_path}")
     print(f"listener: http://{config.listen.host}:{config.listen.port}")
-    print(f"identities: {len(config.identities_by_token)}")
+    print(f"actors: {len(config.identities_by_actor)}")
+    print(f"static identities: {len(config.identities_by_token)}")
+    print(f"OIDC issuers: {len(config.oidc_issuers)}")
+    print(f"OIDC subject mappings: {len(config.identities_by_subject)}")
     print(f"model routes: {len(config.model_routes)}")
     print(f"secret egress control: {config.secret_controls.mode}")
     print(f"usage database: {config.database_path}")
+    if config.oidc_issuers:
+        try:
+            metadata = Authenticator(config).validate_metadata()
+        except AuthenticationError as error:
+            print(f"OIDC metadata: unavailable ({error.code})")
+            return 1
+        print(f"OIDC signing keys: {sum(metadata.values())} usable across {len(metadata)} issuer(s)")
     missing = _missing_upstream_credentials(config)
     if missing:
         print("missing upstream credentials:")
@@ -242,10 +280,7 @@ def _budget_for_scope(
     if group_by != "person":
         return None
 
-    identity = next(
-        (item for item in config.identities_by_token.values() if item.actor_id == scope_id),
-        None,
-    )
+    identity = config.identities_by_actor.get(scope_id)
     if identity is None:
         return None
     caps = [
@@ -268,7 +303,7 @@ def _display_number(value: object) -> str:
 
 
 def _policy_check(config: GatewayConfig, args: argparse.Namespace) -> int:
-    identity = next((item for item in config.identities_by_token.values() if item.actor_id == args.actor), None)
+    identity = config.identities_by_actor.get(args.actor)
     if identity is None:
         print(f"unknown actor: {args.actor}", file=sys.stderr)
         return 2
@@ -297,11 +332,55 @@ def _policy_check(config: GatewayConfig, args: argparse.Namespace) -> int:
     return 0 if decision.allowed else 3
 
 
-def _client_config(config: GatewayConfig, client: str, url: str | None) -> int:
-    base_url = (url or f"http://{config.listen.host}:{config.listen.port}").rstrip("/")
-    identity = next(iter(config.identities_by_token.values()))
+def _client_config(
+    config: GatewayConfig,
+    client: str,
+    url: str | None,
+    *,
+    actor_id: str | None = None,
+    auth_mode: str = "auto",
+    credential_env: str | None = None,
+) -> int:
+    base_url = _client_base_url(url or f"http://{config.listen.host}:{config.listen.port}")
+    if actor_id is None:
+        identity = next(iter(config.identities_by_actor.values()))
+    else:
+        identity = config.identities_by_actor.get(actor_id)
+        if identity is None:
+            raise ConfigError(f"Unknown actor: {actor_id}")
+    static_identity = next(
+        (item for item in config.identities_by_token.values() if item.actor_id == identity.actor_id),
+        None,
+    )
+    oidc_identity = next(
+        (item for item in config.identities_by_subject.values() if item.actor_id == identity.actor_id),
+        None,
+    )
+    if auth_mode == "static":
+        if static_identity is None:
+            raise ConfigError(f"Actor {identity.actor_id} has no static identity")
+        selected_identity = static_identity
+        uses_oidc = False
+    elif auth_mode == "oidc":
+        if oidc_identity is None:
+            raise ConfigError(f"Actor {identity.actor_id} has no OIDC subject mapping")
+        selected_identity = oidc_identity
+        uses_oidc = True
+    elif static_identity is not None:
+        selected_identity = static_identity
+        uses_oidc = False
+    elif oidc_identity is not None:
+        selected_identity = oidc_identity
+        uses_oidc = True
+    else:  # pragma: no cover - configuration requires at least one source
+        raise ConfigError(f"Actor {identity.actor_id} has no authentication source")
+    env_name = credential_env or (
+        "HORMUZ_OIDC_ACCESS_TOKEN" if uses_oidc else selected_identity.token_env
+    )
+    if not env_name or not env_name.replace("_", "A").isalnum() or env_name[0].isdigit():
+        raise ConfigError("credential environment variable must contain only letters, digits, and underscores")
     if client == "codex":
-        policy = config.resolved_policy(identity)
+        policy = config.resolved_policy(selected_identity)
         allowed_models = set(policy.allowed_models) if policy.allowed_models is not None else None
         default_model = next(
             (
@@ -312,15 +391,79 @@ def _client_config(config: GatewayConfig, client: str, url: str | None) -> int:
             None,
         )
         if default_model is None:
-            raise ConfigError(f"Identity {identity.actor_id} has no allowed OpenAI model for Codex")
-        print(
-            f'''# Put this in the user-level ~/.codex/config.toml\nmodel = "{default_model}"\nmodel_provider = "hormuz"\n\n[model_providers.hormuz]\nname = "Hormuz"\nbase_url = "{base_url}/v1"\nenv_key = "{identity.token_env}"\nwire_api = "responses"'''
-        )
+            raise ConfigError(f"Identity {selected_identity.actor_id} has no allowed OpenAI model for Codex")
+        lines = [
+            "# Put this in the user-level ~/.codex/config.toml",
+            f"model = {json.dumps(default_model)}",
+            'model_provider = "hormuz"',
+            "",
+            "[model_providers.hormuz]",
+            'name = "Hormuz"',
+            f"base_url = {json.dumps(base_url + '/v1')}",
+            'wire_api = "responses"',
+        ]
+        if uses_oidc:
+            lines.extend(
+                [
+                    "",
+                    "[model_providers.hormuz.auth]",
+                    'command = "hormuz"',
+                    f'args = ["auth", "token", "--env", "{env_name}"]',
+                    "refresh_interval_ms = 300000",
+                ]
+            )
+        else:
+            lines.insert(-1, f'env_key = "{env_name}"')
+        print("\n".join(lines))
     else:
-        print(f'export ANTHROPIC_BASE_URL="{base_url}"')
-        print(f'export ANTHROPIC_AUTH_TOKEN="${{{identity.token_env}}}"')
+        if uses_oidc:
+            print("# Put this JSON in the managed or user Claude Code settings file:")
+            print(
+                json.dumps(
+                    {
+                        "apiKeyHelper": f"hormuz auth token --env {env_name}",
+                        "env": {
+                            "ANTHROPIC_BASE_URL": base_url,
+                            "CLAUDE_CODE_API_KEY_HELPER_TTL_MS": "300000",
+                        },
+                    },
+                    indent=2,
+                )
+            )
+            print(f'# Ensure {env_name} contains a current OIDC JWT access token.')
+        else:
+            print(f"export ANTHROPIC_BASE_URL={shlex.quote(base_url)}")
+            print(f'export ANTHROPIC_AUTH_TOKEN="${{{env_name}}}"')
         print("claude")
     return 0
+
+
+def _auth_token(env_name: str) -> int:
+    value = os.environ.get(env_name, "")
+    if not value:
+        print(f"credential environment variable is not set: {env_name}", file=sys.stderr)
+        return 1
+    if len(value.encode("utf-8")) > 64 * 1024 or "\n" in value or "\r" in value:
+        print(f"credential environment variable is invalid: {env_name}", file=sys.stderr)
+        return 1
+    print(value)
+    return 0
+
+
+def _client_base_url(value: str) -> str:
+    result = value.rstrip("/")
+    parsed = urlparse(result)
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.netloc
+        or parsed.username
+        or parsed.password
+        or parsed.query
+        or parsed.fragment
+        or any(character in result for character in ("\n", "\r", "\x00"))
+    ):
+        raise ConfigError("client gateway URL must be an HTTP(S) URL without credentials, query, or fragment")
+    return result
 
 
 def _audit_export(config: GatewayConfig, args: argparse.Namespace) -> int:
@@ -387,12 +530,15 @@ def _audit_since(value: str | None) -> str:
 
 
 def _context_pack(config: GatewayConfig, args: argparse.Namespace) -> int:
-    identity = next(
-        (item for item in config.identities_by_token.values() if item.actor_id == args.actor),
-        None,
-    )
+    identity = config.identities_by_actor.get(args.actor)
     if identity is None:
         print(f"unknown actor: {args.actor}", file=sys.stderr)
+        return 2
+    if args.organization != identity.organization_id:
+        print("context error: requested organization does not match the actor identity", file=sys.stderr)
+        return 2
+    if CLASSIFICATIONS.index(args.clearance) > CLASSIFICATIONS.index(identity.clearance):
+        print("context error: requested clearance exceeds the actor identity", file=sys.stderr)
         return 2
     if args.branch and not args.repository:
         print("context error: --branch requires --repository", file=sys.stderr)
@@ -405,7 +551,7 @@ def _context_pack(config: GatewayConfig, args: argparse.Namespace) -> int:
             ContextPackRequest(
                 query=args.query,
                 principal=ContextPrincipal(
-                    organization_id=args.organization,
+                    organization_id=identity.organization_id,
                     team_id=identity.team_id,
                     actor_id=identity.actor_id,
                     clearance=args.clearance,

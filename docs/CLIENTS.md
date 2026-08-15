@@ -1,6 +1,6 @@
 # Connect existing AI clients
 
-Hormuz sits between an employee's existing AI client and the provider API. The employee receives a unique Hormuz identity token; only the Hormuz service receives the organization's OpenAI or Anthropic credential.
+Hormuz sits between an employee's existing AI client and the provider API. The employee uses either a unique bootstrap identity token or a short-lived OIDC JWT access token; only the Hormuz service receives the organization's OpenAI or Anthropic credential.
 
 Use TLS and an organization-controlled hostname outside local development. The examples below use `https://hormuz.example.com` as that deployment URL.
 
@@ -33,7 +33,7 @@ export HORMUZ_TOKEN="employee-specific-hormuz-token"
 codex
 ```
 
-Codex supports custom model providers using a base URL and credential environment variable. Provider selection belongs in user-level configuration; current Codex builds ignore provider settings found only in project-local configuration. See the official [Codex configuration reference](https://developers.openai.com/codex/config-reference/).
+Codex supports custom model providers using a base URL and credential environment variable. Provider selection belongs in user-level configuration; current Codex builds ignore provider settings found only in project-local configuration. See the official [Codex configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference).
 
 Hormuz defaults to native OpenAI model IDs in its example configuration. This lets Codex retain its bundled model metadata while Hormuz decides whether that model is allowed, capped, denied, or replaced with the configured fallback. Optional company aliases work at the HTTP layer, but arbitrary aliases may cause Codex to use fallback client metadata.
 
@@ -57,11 +57,20 @@ export ANTHROPIC_AUTH_TOKEN="${HORMUZ_TOKEN}"
 claude --model claude-sonnet-5
 ```
 
-Anthropic documents `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN` as the static-token path for an LLM gateway; the auth token is sent in the `Authorization` header. See Anthropic's [Claude Code LLM gateway configuration](https://docs.anthropic.com/en/docs/claude-code/llm-gateway).
+Anthropic documents `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN` as the static-token path for an LLM gateway; the auth token is sent in the `Authorization` header. See Anthropic's [Claude Code authentication reference](https://code.claude.com/docs/en/authentication).
 
 Do not set the company's `ANTHROPIC_API_KEY` on employee machines. Hormuz replaces the employee credential with the provider credential only for the upstream request.
 
+## Generic OIDC credentials
+
+After configuring the issuer and explicit subject mapping described in [OIDC.md](OIDC.md), add `--actor` and `--auth-mode oidc` to either `client-config` command. The Codex output uses its command-backed bearer-token configuration. The Claude output uses `apiKeyHelper`. Both invoke:
+
+```bash
+hormuz auth token --env HORMUZ_OIDC_ACCESS_TOKEN
+```
+
+The helper does not load server configuration and does not mint tokens. It re-reads the credential supplied by the organization's OIDC tooling. The company must currently ensure that source contains a valid JWT access token for the Hormuz audience.
+
 ## Deployment boundary
 
-For a company rollout, endpoint management should install the client configuration and issue a unique, revocable Hormuz identity to each human or service account. Shared employee tokens make per-person attribution and revocation unreliable. A later enterprise milestone will replace static employee tokens with SSO-backed short-lived credentials; the provider keys remain server-side in either design.
-
+For a company rollout, endpoint management should install the client configuration and provision a unique identity for each human or service account. Shared employee tokens make per-person attribution and revocation unreliable. OIDC JWT verification is available now; native browser login, refresh-token custody, opaque-token handling, and SCIM remain later milestones. Provider keys remain server-side in every design.

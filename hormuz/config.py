@@ -37,12 +37,26 @@ class SecretControls:
 @dataclass(frozen=True)
 class Identity:
     token_env: str
-    token: str
+    token: str = field(repr=False)
     actor_id: str
     actor_name: str
     team_id: str
     team_name: str
     allowed_clients: tuple[str, ...] = ()
+    organization_id: str = "organization"
+    clearance: str = "internal"
+    authentication_source: str = "static"
+
+
+@dataclass(frozen=True)
+class OIDCIssuerConfig:
+    issuer: str
+    audiences: tuple[str, ...]
+    jwks_uri: str | None = None
+    algorithms: tuple[str, ...] = ("RS256",)
+    clock_skew_seconds: int = 60
+    discovery_cache_seconds: int = 3600
+    allow_insecure_http: bool = False
 
 
 @dataclass(frozen=True)
@@ -121,6 +135,8 @@ class GatewayConfig:
     identities_by_token: dict[str, Identity]
     model_routes: dict[str, ModelRoute]
     organization_policy: Policy
+    oidc_issuers: dict[str, OIDCIssuerConfig] = field(default_factory=dict)
+    identities_by_subject: dict[tuple[str, str], Identity] = field(default_factory=dict)
     secret_controls: SecretControls = field(default_factory=SecretControls)
     team_policies: dict[str, Policy] = field(default_factory=dict)
     actor_policies: dict[str, Policy] = field(default_factory=dict)
@@ -170,9 +186,9 @@ class GatewayConfig:
                 ),
             )
 
-        identities_raw = raw.get("identities")
-        if not isinstance(identities_raw, list) or not identities_raw:
-            raise ConfigError("identities must be a non-empty array")
+        identities_raw = raw.get("identities", [])
+        if not isinstance(identities_raw, list):
+            raise ConfigError("identities must be an array")
         identities_by_token: dict[str, Identity] = {}
         for index, value in enumerate(identities_raw):
             item = _object(value, f"identities[{index}]")
@@ -193,8 +209,112 @@ class GatewayConfig:
                 team_id=_string(item.get("team_id"), f"{prefix}.team_id"),
                 team_name=_string(item.get("team_name"), f"{prefix}.team_name"),
                 allowed_clients=_string_tuple(item.get("allowed_clients", []), f"{prefix}.allowed_clients"),
+                organization_id=_string(item.get("organization_id", "organization"), f"{prefix}.organization_id"),
+                clearance=_classification(item.get("clearance", "internal"), f"{prefix}.clearance"),
             )
             identities_by_token[token] = identity
+
+        authentication_raw = _object(raw.get("authentication", {}), "authentication")
+        oidc_raw = _object(authentication_raw.get("oidc", {}), "authentication.oidc")
+        oidc_issuers_raw = oidc_raw.get("issuers", [])
+        if not isinstance(oidc_issuers_raw, list):
+            raise ConfigError("authentication.oidc.issuers must be an array")
+        oidc_issuers: dict[str, OIDCIssuerConfig] = {}
+        identities_by_subject: dict[tuple[str, str], Identity] = {}
+        supported_algorithms = {
+            "RS256",
+            "RS384",
+            "RS512",
+            "PS256",
+            "PS384",
+            "PS512",
+            "ES256",
+            "ES384",
+            "ES512",
+        }
+        for issuer_index, value in enumerate(oidc_issuers_raw):
+            prefix = f"authentication.oidc.issuers[{issuer_index}]"
+            item = _object(value, prefix)
+            issuer = _url(item.get("issuer"), f"{prefix}.issuer")
+            if issuer in oidc_issuers:
+                raise ConfigError(f"OIDC issuer must be unique: {issuer}")
+            audiences = _string_tuple(item.get("audiences"), f"{prefix}.audiences")
+            if not audiences:
+                raise ConfigError(f"{prefix}.audiences must contain at least one audience")
+            algorithms = _string_tuple(item.get("algorithms", ["RS256"]), f"{prefix}.algorithms")
+            if not algorithms or any(algorithm not in supported_algorithms for algorithm in algorithms):
+                raise ConfigError(
+                    f"{prefix}.algorithms must contain only asymmetric JWT algorithms: "
+                    + ", ".join(sorted(supported_algorithms))
+                )
+            jwks_uri_value = item.get("jwks_uri")
+            jwks_uri = _url(jwks_uri_value, f"{prefix}.jwks_uri") if jwks_uri_value is not None else None
+            allow_insecure_http = _boolean(
+                item.get("allow_insecure_http", False),
+                f"{prefix}.allow_insecure_http",
+            )
+            _validate_oidc_transport(
+                issuer=issuer,
+                jwks_uri=jwks_uri,
+                allow_insecure_http=allow_insecure_http,
+                path=prefix,
+            )
+            issuer_config = OIDCIssuerConfig(
+                issuer=issuer,
+                audiences=audiences,
+                jwks_uri=jwks_uri,
+                algorithms=algorithms,
+                clock_skew_seconds=_integer(
+                    item.get("clock_skew_seconds", 60),
+                    f"{prefix}.clock_skew_seconds",
+                    minimum=0,
+                    maximum=300,
+                ),
+                discovery_cache_seconds=_integer(
+                    item.get("discovery_cache_seconds", 3600),
+                    f"{prefix}.discovery_cache_seconds",
+                    minimum=60,
+                    maximum=86400,
+                ),
+                allow_insecure_http=allow_insecure_http,
+            )
+            oidc_issuers[issuer] = issuer_config
+            subjects_raw = item.get("subjects", [])
+            if not isinstance(subjects_raw, list):
+                raise ConfigError(f"{prefix}.subjects must be an array")
+            if not subjects_raw:
+                raise ConfigError(f"{prefix}.subjects must contain at least one subject mapping")
+            for subject_index, subject_value in enumerate(subjects_raw):
+                subject_prefix = f"{prefix}.subjects[{subject_index}]"
+                subject_item = _object(subject_value, subject_prefix)
+                subject = _string(subject_item.get("subject"), f"{subject_prefix}.subject")
+                key = (issuer, subject)
+                if key in identities_by_subject:
+                    raise ConfigError(f"OIDC subject must be unique for issuer {issuer}: {subject}")
+                identities_by_subject[key] = Identity(
+                    token_env="",
+                    token="",
+                    actor_id=_string(subject_item.get("actor_id"), f"{subject_prefix}.actor_id"),
+                    actor_name=_string(subject_item.get("actor_name"), f"{subject_prefix}.actor_name"),
+                    team_id=_string(subject_item.get("team_id"), f"{subject_prefix}.team_id"),
+                    team_name=_string(subject_item.get("team_name"), f"{subject_prefix}.team_name"),
+                    allowed_clients=_string_tuple(
+                        subject_item.get("allowed_clients", []),
+                        f"{subject_prefix}.allowed_clients",
+                    ),
+                    organization_id=_string(
+                        subject_item.get("organization_id", "organization"),
+                        f"{subject_prefix}.organization_id",
+                    ),
+                    clearance=_classification(
+                        subject_item.get("clearance", "internal"),
+                        f"{subject_prefix}.clearance",
+                    ),
+                    authentication_source=f"oidc:{issuer}",
+                )
+        if not identities_by_token and not identities_by_subject:
+            raise ConfigError("At least one static identity or OIDC subject mapping is required")
+        _validate_identity_consistency((*identities_by_token.values(), *identities_by_subject.values()))
 
         routes_raw = _object(raw.get("model_routes"), "model_routes")
         if not routes_raw:
@@ -238,6 +358,8 @@ class GatewayConfig:
             identities_by_token=identities_by_token,
             model_routes=model_routes,
             organization_policy=organization_policy,
+            oidc_issuers=oidc_issuers,
+            identities_by_subject=identities_by_subject,
             secret_controls=secret_controls,
             team_policies=team_policies,
             actor_policies=actor_policies,
@@ -268,7 +390,7 @@ class GatewayConfig:
             for policy in policies
         )
         if limits_require_request_bound:
-            for identity in self.identities_by_token.values():
+            for identity in self.identities_by_actor.values():
                 if self.resolved_policy(identity).max_output_tokens is None:
                     raise ConfigError(
                         f"Identity {identity.actor_id} needs an effective max_output_tokens policy "
@@ -277,6 +399,16 @@ class GatewayConfig:
 
     def identity_for_token(self, token: str) -> Identity | None:
         return self.identities_by_token.get(token)
+
+    @property
+    def identities_by_actor(self) -> dict[str, Identity]:
+        result: dict[str, Identity] = {}
+        for identity in (*self.identities_by_token.values(), *self.identities_by_subject.values()):
+            result.setdefault(identity.actor_id, identity)
+        return result
+
+    def identity_for_subject(self, issuer: str, subject: str) -> Identity | None:
+        return self.identities_by_subject.get((issuer, subject))
 
     def resolved_policy(self, identity: Identity) -> Policy:
         return (
@@ -338,6 +470,68 @@ def _string(value: Any, path: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ConfigError(f"{path} must be a non-empty string")
     return value.strip()
+
+
+def _url(value: Any, path: str) -> str:
+    result = _string(value, path)
+    parsed = urlparse(result)
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.netloc
+        or parsed.query
+        or parsed.fragment
+        or parsed.username
+        or parsed.password
+    ):
+        raise ConfigError(f"{path} must be an HTTP(S) URL without a query or fragment")
+    return result
+
+
+def _classification(value: Any, path: str) -> str:
+    result = _string(value, path)
+    if result not in {"public", "internal", "confidential", "restricted"}:
+        raise ConfigError(f"{path} must be public, internal, confidential, or restricted")
+    return result
+
+
+def _validate_oidc_transport(
+    *,
+    issuer: str,
+    jwks_uri: str | None,
+    allow_insecure_http: bool,
+    path: str,
+) -> None:
+    urls = [issuer, *(value for value in (jwks_uri,) if value is not None)]
+    insecure = [value for value in urls if urlparse(value).scheme != "https"]
+    if not insecure:
+        return
+    if not allow_insecure_http:
+        raise ConfigError(f"{path} requires HTTPS; allow_insecure_http is only for loopback development")
+    for value in insecure:
+        hostname = urlparse(value).hostname
+        if hostname not in {"127.0.0.1", "::1", "localhost"}:
+            raise ConfigError(f"{path}.allow_insecure_http permits only loopback HTTP URLs")
+
+
+def _validate_identity_consistency(identities: tuple[Identity, ...]) -> None:
+    by_actor: dict[str, Identity] = {}
+    for identity in identities:
+        existing = by_actor.get(identity.actor_id)
+        if existing is None:
+            by_actor[identity.actor_id] = identity
+            continue
+        fields = (
+            "actor_name",
+            "team_id",
+            "team_name",
+            "allowed_clients",
+            "organization_id",
+            "clearance",
+        )
+        if any(getattr(existing, name) != getattr(identity, name) for name in fields):
+            raise ConfigError(
+                f"Identity metadata for actor {identity.actor_id} must match across authentication sources"
+            )
 
 
 def _boolean(value: Any, path: str) -> bool:

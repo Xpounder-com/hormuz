@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hmac
 import json
 import logging
 import os
@@ -13,6 +12,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.parse import urlsplit
 
+from .auth import AuthenticationError, Authenticator
 from .config import GatewayConfig, Identity, ModelRoute, UpstreamConfig
 from .policy import PolicyDecision, PolicyEngine
 from .redaction import RedactionError, SecretRedactor
@@ -29,11 +29,13 @@ class GatewayServer(ThreadingHTTPServer):
 
     def __init__(self, config: GatewayConfig):
         self.config = config
+        self.authenticator = Authenticator(config)
         self.store = UsageStore(config.database_path)
         self.policy_engine = PolicyEngine(config, self.store)
         protected_values = [
             ("hormuz_identity_token", identity.token)
             for identity in config.identities_by_token.values()
+            if identity.token
         ]
         protected_values.extend(
             ("provider_credential", value)
@@ -71,7 +73,9 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                     "actor_name": identity.actor_name,
                     "team_id": identity.team_id,
                     "team_name": identity.team_name,
+                    "organization_id": identity.organization_id,
                     "allowed_clients": list(identity.allowed_clients),
+                    "authentication_source": identity.authentication_source,
                 },
             )
             return
@@ -506,10 +510,11 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         if api_key:
             candidates.append(api_key)
         for candidate in candidates:
-            for configured_token, identity in self.server.config.identities_by_token.items():
-                if hmac.compare_digest(candidate, configured_token):
-                    return identity
-        self._send_error("unauthorized", "Missing or invalid Hormuz identity token", HTTPStatus.UNAUTHORIZED)
+            try:
+                return self.server.authenticator.authenticate(candidate)
+            except AuthenticationError as error:
+                LOGGER.info("authentication_denied reason=%s", error.code)
+        self._send_error("unauthorized", "Missing or invalid Hormuz identity credential", HTTPStatus.UNAUTHORIZED)
         return None
 
     def _read_json_body(self) -> dict[str, Any] | None:
