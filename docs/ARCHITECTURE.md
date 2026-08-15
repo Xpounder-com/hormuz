@@ -33,11 +33,12 @@ SQLite usage ledger
 - `hormuz/store.py` owns the SQLite schema and monthly aggregations.
 - `hormuz/usage.py` parses provider usage metadata without storing response content.
 - `hormuz/redaction.py` transforms provider-bound JSON values using configured secret controls.
+- `hormuz/context.py` authorizes, filters, ranks, budgets, and fingerprints explicit provider-neutral context packs without transport or persistence concerns.
 - `hormuz/cli.py` exposes serving, diagnostics, policy checks, client configuration, and usage reporting.
 
 ## Trust boundary
 
-Hormuz is trusted with plaintext requests and responses because it must inspect and relay them. The current store is deliberately metadata-only. Redaction runs after authentication and policy selection but before upstream serialization. Future reusable-context injection must run after authorization and before redaction so newly added context is inspected by the same egress controls.
+Hormuz is trusted with plaintext requests and responses because it must inspect and relay them. The usage store is deliberately metadata-only. Explicit context records are read from a caller-managed content file and are never written to that ledger. Redaction runs after authentication and policy selection but before upstream serialization. Future reusable-context injection must run after context authorization and before redaction so newly added context is inspected by the same egress controls.
 
 ## Compatibility boundary
 

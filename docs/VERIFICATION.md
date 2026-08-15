@@ -53,6 +53,19 @@ Observed result:
 
 This proves official Claude Code client/protocol compatibility without spending against or exposing a real Anthropic account. A live Anthropic provider call remains pending until `ANTHROPIC_API_KEY` is securely provisioned to the Hormuz service.
 
+### Governed context-pack path
+
+The explicit context-pack kernel was exercised from both the source checkout and a clean installation of `dist/hormuz-0.1.0-py3-none-any.whl`.
+
+Observed result:
+
+- authorization tests excluded wrong-organization, wrong-team, wrong-actor, wrong-repository, wrong-branch, over-clearance, provisional, future, and expired records before ranking;
+- active authorized supersession replaced stale records while an expired superseder correctly left the prior record eligible;
+- record ordering did not change the pack identity, while content, classification, policy version, and budget changes did;
+- an oversized high-scoring record was skipped and a smaller matching record was selected without exceeding the budget;
+- the sample CLI produced a single verified, source-linked 76-token context item and did not call a provider or write to the usage database;
+- the complete source suite passed 37 tests locally after the context change, with the optional Claude Code executable test skipped in that local run.
+
 ## Reproduce locally
 
 The default suite uses only loopback fake providers:
@@ -73,7 +86,7 @@ Never add real provider or employee credentials to this record.
 
 GitHub Actions runs three independent gates without provider credentials:
 
-- the complete unit and loopback gateway suite on Python 3.11, 3.12, 3.13, and 3.14;
+- the complete unit, context-governance, and loopback gateway suite on Python 3.11, 3.12, 3.13, and 3.14;
 - source-distribution and wheel builds followed by installation of the wheel in a clean virtual environment;
 - installed-client routing through local fake providers using pinned official Codex and Claude Code package versions.
 
