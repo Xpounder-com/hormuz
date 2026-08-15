@@ -4,6 +4,14 @@
     "port": 8787
   },
   "database": "./hormuz.sqlite3",
+  "context_database": "./hormuz-context.sqlite3",
+  "context_service": {
+    "policy_version": "engineering-context-v1",
+    "max_token_budget": 32768,
+    "max_items": 20,
+    "requests_per_minute": 60,
+    "allow_provisional": false
+  },
   "max_request_bytes": 26214400,
   "upstream_timeout_seconds": 600,
   "upstreams": {

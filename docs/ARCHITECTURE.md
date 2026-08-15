@@ -25,6 +25,25 @@ OpenAI Responses API / Anthropic Messages API
 SQLite usage ledger
 ```
 
+Governed context has explicit CLI and authenticated HTTP paths:
+
+```text
+content-bearing JSONL
+        |
+        | identity-scope validation and idempotent import
+        v
+local SQLite context repository (separate from usage)
+        |
+        | SQL authorization/freshness filter before content decode
+        v
+deterministic lexical context pack
+        |
+        +--> CLI stdout or POST /v1/context/packs response
+        +--> no provider call or automatic prompt injection
+```
+
+The HTTP path authenticates first, derives organization/team/actor from the static or OIDC identity, enforces server-owned pack/rate limits, and filters authorized metadata in SQLite before decoding content. Callers cannot supply identity, policy version, or historical evaluation time.
+
 ## Code boundaries
 
 - `hormuz/server.py` owns HTTP compatibility, authentication, upstream forwarding, streaming, and protocol-shaped errors.
@@ -35,11 +54,12 @@ SQLite usage ledger
 - `hormuz/usage.py` parses provider usage metadata without storing response content.
 - `hormuz/redaction.py` transforms provider-bound JSON values using configured secret controls.
 - `hormuz/context.py` authorizes, filters, ranks, budgets, and fingerprints explicit provider-neutral context packs without transport or persistence concerns.
-- `hormuz/cli.py` exposes serving, diagnostics, policy checks, client configuration, and usage reporting.
+- `hormuz/context_store.py` implements the local governed-record repository, optimistic concurrency, integrity checks, and metadata-only mutation audit behind a content-codec boundary.
+- `hormuz/cli.py` exposes serving, diagnostics, policy checks, client configuration, usage reporting, and explicit context lifecycle commands.
 
 ## Trust boundary
 
-Hormuz is trusted with plaintext requests and responses because it must inspect and relay them. The usage store is deliberately metadata-only. Explicit context records are read from a caller-managed content file and are never written to that ledger. Redaction runs after authentication and policy selection but before upstream serialization. Future reusable-context injection must run after context authorization and before redaction so newly added context is inspected by the same egress controls.
+Hormuz is trusted with plaintext requests and responses because it must inspect and relay them. The usage store is deliberately metadata-only. Governed content is held in a different SQLite database and never written to the usage ledger. The current local context codec is plainly labeled as unencrypted and is not an enterprise storage claim. Redaction runs after authentication and policy selection but before upstream serialization. Future reusable-context injection must run after context authorization and before redaction so newly added context is inspected by the same egress controls.
 
 ## Compatibility boundary
 

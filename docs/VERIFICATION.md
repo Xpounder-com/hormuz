@@ -82,6 +82,43 @@ Observed result:
 
 This verifies Hormuz as a JWT resource server against a controlled issuer. It is not evidence of browser login, refresh-token custody, opaque-token introspection, SCIM, or a live third-party IdP; those remain explicitly outside this milestone.
 
+### Persistent governed-context path
+
+The local repository and CLI lifecycle were exercised with the checked-in sample in an isolated temporary directory, not the developer's usage ledger.
+
+Observed result:
+
+- `context-import` created one verified decision at storage version 1 and a repeated import was idempotent;
+- `context-list` returned authorized provenance and lifecycle metadata without record content by default;
+- `context-pack` read the repository, authorized candidates before decoding, selected the expected 76-token record, and made no provider request;
+- `context-export` produced import-compatible content-bearing JSONL with mode `0600`, overwrite protection, and a SHA-256 checksum;
+- `context-audit-export` produced only organization-scoped mutation metadata, with mode `0600`, overwrite protection, and no title, content, or source locator;
+- the context database also had mode `0600` and was a separate schema/file from the metadata-only usage ledger;
+- the checked-in sample's source SHA-256 matches the packaged `examples/sources/adr-0017.md` artifact rather than a placeholder hash;
+- repository tests proved wrong tenant/team/actor/classification/repository/branch, future, expired, and provisional records were rejected before decode; intentionally inconsistent classification metadata also failed before decode;
+- tests proved idempotency conflicts, full batch rollback on a late conflict, immutable source revisions, required verification evidence, content-integrity checks, supersession cycles/references, physical-delete controls, metadata-only mutation audit, and exactly one winner under concurrent optimistic updates;
+- the complete source suite passed 61 tests locally, with only the opt-in official Claude Code executable test skipped.
+
+This is evidence for a single-node local repository contract. It is not evidence of encryption at rest, hosted multi-tenant isolation, KMS/BYOK, backup/restore, retention/legal hold, writer RBAC, automatic invalidation, context injection, or caching. Those gates remain open, and proposed ADRs 0002 and 0003 remain unaccepted.
+
+### Authenticated Context Pack REST path
+
+The actual `GatewayServer` was exercised through `POST /v1/context/packs` with its loopback HTTP transport, static identity authentication, local governed-context repository, and fake provider servers running.
+
+Observed result:
+
+- organization, team, actor, and policy version came from authenticated server configuration rather than caller fields;
+- a verified team record was selected within repository, classification, item, and token caps, while actor-private context was absent for a different authenticated actor;
+- unknown identity fields, invalid lexical queries, invalid branch scope, control-character scope injection, over-budget, over-item-cap, over-clearance, and provisional requests failed with stable `400` or `403` codes before retrieval or provider work;
+- missing credentials returned `401`; an injected repository failure returned sanitized `503` output and logs without its internal error detail;
+- the per-actor local rate limit returned `429` plus `Retry-After`, while a different actor retained an independent allowance;
+- every API response used `Cache-Control: no-store`;
+- successful, empty, denied, and failed context requests made zero OpenAI/Anthropic requests and wrote zero provider-usage events;
+- the rebuilt source distribution contains the REST contract, context repository, and hashed provenance source; the rebuilt wheel imported its context service policy and rate limiter under Python 3.14;
+- the complete source suite passed 66 tests locally, with only the opt-in official Claude Code executable test skipped.
+
+This verifies the additive REST contract and single-process policy enforcement. It is not evidence of distributed rate-limit consistency, durable context read-audit, MCP compatibility, automatic Codex/Claude injection, or accepted hosted tenancy.
+
 ## Reproduce locally
 
 The default suite uses only loopback fake providers:

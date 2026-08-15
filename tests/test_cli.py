@@ -4,6 +4,7 @@ import argparse
 import io
 import json
 import os
+import sqlite3
 import tempfile
 import tomllib
 import unittest
@@ -11,6 +12,7 @@ from unittest import mock
 from contextlib import redirect_stdout
 from contextlib import redirect_stderr
 from dataclasses import replace
+from datetime import datetime, timezone
 from pathlib import Path
 
 from hormuz.cli import (
@@ -19,10 +21,17 @@ from hormuz.cli import (
     _auth_token,
     _budget_for_scope,
     _client_config,
+    _context_audit_export,
+    _context_audit_since,
+    _context_delete,
+    _context_export,
+    _context_import,
+    _context_list,
     _context_pack,
     build_parser,
 )
 from hormuz.config import ConfigError, GatewayConfig, Identity, OIDCIssuerConfig
+from hormuz.context import ContextError
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -135,6 +144,29 @@ class ClientConfigTests(unittest.TestCase):
         self.assertEqual(args.team, "engineering")
         self.assertEqual(args.actor, "alice")
         self.assertTrue(args.json)
+
+    def test_context_database_is_separate_and_cannot_alias_usage(self) -> None:
+        self.assertNotEqual(self.config.context_database_path, self.config.database_path)
+        self.assertEqual(self.config.context_service.policy_version, "engineering-context-v1")
+        self.assertEqual(self.config.context_service.max_token_budget, 32_768)
+        self.assertEqual(self.config.context_service.max_items, 20)
+        self.assertEqual(self.config.context_service.requests_per_minute, 60)
+        self.assertFalse(self.config.context_service.allow_provisional)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            raw = json.loads((ROOT / "config.example.json").read_text(encoding="utf-8"))
+            raw["database"] = "./shared.sqlite3"
+            raw["context_database"] = "./shared.sqlite3"
+            path = root / "hormuz.json"
+            path.write_text(json.dumps(raw), encoding="utf-8")
+            with self.assertRaisesRegex(ConfigError, "must be separate"):
+                GatewayConfig.load(path, environ={"HORMUZ_TOKEN": "test-identity-token"})
+
+            raw["context_database"] = "./context.sqlite3"
+            raw["context_service"]["unknown_policy"] = True
+            path.write_text(json.dumps(raw), encoding="utf-8")
+            with self.assertRaisesRegex(ConfigError, "Unknown context_service fields"):
+                GatewayConfig.load(path, environ={"HORMUZ_TOKEN": "test-identity-token"})
 
     def test_usage_report_budget_matches_policy_scope(self) -> None:
         self.assertEqual(
@@ -312,6 +344,212 @@ class ClientConfigTests(unittest.TestCase):
         with redirect_stderr(io.StringIO()):
             self.assertEqual(_context_pack(self.config, wrong_organization), 2)
             self.assertEqual(_context_pack(self.config, over_clearance), 2)
+
+    def test_persistent_context_cli_import_list_pack_export_and_delete(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config = replace(self.config, context_database_path=root / "context.sqlite3")
+            records_path = root / "records.jsonl"
+            old = {
+                "id": "retry-v1",
+                "kind": "decision",
+                "title": "Retry policy v1",
+                "content": "Use one retry.",
+                "owner_id": "alice",
+                "organization_id": "xpounder",
+                "visibility": "team",
+                "scope_id": "engineering",
+                "classification": "internal",
+                "source": {
+                    "uri": "https://example.test/adr/retries",
+                    "revision": "git:one",
+                    "item_key": "retry-v1",
+                },
+                "repository_id": "acme/api",
+                "verification": "verified",
+                "verification_evidence": ["ci:passed"],
+                "effective_at": "2026-08-10T12:00:00Z",
+                "verified_at": "2026-08-10T12:00:00Z",
+                "tags": ["retry"],
+            }
+            new = {
+                **old,
+                "id": "retry-v2",
+                "title": "Retry policy v2",
+                "content": "Use bounded retries with jitter.",
+                "source": {
+                    **old["source"],
+                    "revision": "git:two",
+                    "item_key": "retry-v2",
+                },
+                "supersedes_id": "retry-v1",
+            }
+            records_path.write_text(
+                json.dumps(new) + "\n" + json.dumps(old) + "\n",
+                encoding="utf-8",
+            )
+            import_args = build_parser().parse_args(
+                [
+                    "context-import",
+                    "--records",
+                    str(records_path),
+                    "--actor",
+                    "alice",
+                    "--policy-version",
+                    "policy-2",
+                ]
+            )
+            output = io.StringIO()
+            with redirect_stdout(output):
+                self.assertEqual(_context_import(config, import_args), 0)
+            self.assertEqual(json.loads(output.getvalue())["imported"], 2)
+            with redirect_stdout(output := io.StringIO()):
+                self.assertEqual(_context_import(config, import_args), 0)
+            self.assertEqual(json.loads(output.getvalue())["already_present"], 2)
+
+            list_args = build_parser().parse_args(
+                [
+                    "context-list",
+                    "--actor",
+                    "alice",
+                    "--repository",
+                    "acme/api",
+                    "--as-of",
+                    "2026-08-15T12:00:00Z",
+                ]
+            )
+            with redirect_stdout(output := io.StringIO()):
+                self.assertEqual(_context_list(config, list_args), 0)
+            listed = json.loads(output.getvalue())
+            self.assertEqual(listed["total"], 2)
+            self.assertNotIn("content", listed["records"][0])
+
+            pack_args = build_parser().parse_args(
+                [
+                    "context-pack",
+                    "--query",
+                    "retry jitter",
+                    "--organization",
+                    "xpounder",
+                    "--actor",
+                    "alice",
+                    "--repository",
+                    "acme/api",
+                    "--token-budget",
+                    "1000",
+                    "--as-of",
+                    "2026-08-15T12:00:00Z",
+                ]
+            )
+            with redirect_stdout(output := io.StringIO()):
+                self.assertEqual(_context_pack(config, pack_args), 0)
+            packed = json.loads(output.getvalue())
+            self.assertEqual([item["id"] for item in packed["items"]], ["retry-v2"])
+
+            export_path = root / "export.jsonl"
+            export_args = build_parser().parse_args(
+                [
+                    "context-export",
+                    "--actor",
+                    "alice",
+                    "--repository",
+                    "acme/api",
+                    "--as-of",
+                    "2026-08-15T12:00:00Z",
+                    "--output",
+                    str(export_path),
+                ]
+            )
+            with redirect_stderr(io.StringIO()):
+                self.assertEqual(_context_export(config, export_args), 0)
+            self.assertEqual(os.stat(export_path).st_mode & 0o777, 0o600)
+            exported = [json.loads(line) for line in export_path.read_text(encoding="utf-8").splitlines()]
+            self.assertEqual({item["id"] for item in exported}, {"retry-v1", "retry-v2"})
+            self.assertTrue(all("content" in item for item in exported))
+
+            context_audit_path = root / "context-audit.jsonl"
+            context_audit_args = build_parser().parse_args(
+                [
+                    "context-audit-export",
+                    "--actor",
+                    "alice",
+                    "--since",
+                    "2026-08-01T00:00:00Z",
+                    "--output",
+                    str(context_audit_path),
+                ]
+            )
+            with redirect_stderr(io.StringIO()):
+                self.assertEqual(_context_audit_export(config, context_audit_args), 0)
+            self.assertEqual(os.stat(context_audit_path).st_mode & 0o777, 0o600)
+            audit_text = context_audit_path.read_text(encoding="utf-8")
+            audit_events = [json.loads(line) for line in audit_text.splitlines()]
+            self.assertEqual(len(audit_events), 2)
+            self.assertEqual({event["organization_id"] for event in audit_events}, {"xpounder"})
+            self.assertNotIn("Use one retry", audit_text)
+            self.assertNotIn("Retry policy", audit_text)
+            self.assertNotIn("example.test/adr", audit_text)
+
+            delete_args = build_parser().parse_args(
+                [
+                    "context-delete",
+                    "--actor",
+                    "alice",
+                    "--record-id",
+                    "retry-v2",
+                    "--expected-version",
+                    "1",
+                ]
+            )
+            with redirect_stdout(io.StringIO()):
+                self.assertEqual(_context_delete(config, delete_args), 0)
+
+    def test_context_import_rejects_the_entire_batch_before_cross_scope_write(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config = replace(self.config, context_database_path=root / "context.sqlite3")
+            records_path = root / "records.jsonl"
+            base = {
+                "id": "allowed",
+                "title": "Allowed",
+                "content": "Allowed content",
+                "organization_id": "xpounder",
+                "visibility": "organization",
+                "scope_id": "xpounder",
+                "classification": "internal",
+                "source": {"uri": "https://example.test/one", "revision": "1"},
+            }
+            denied = {
+                **base,
+                "id": "denied",
+                "organization_id": "another-organization",
+                "scope_id": "another-organization",
+                "source": {"uri": "https://example.test/two", "revision": "1"},
+            }
+            records_path.write_text(
+                json.dumps(base) + "\n" + json.dumps(denied) + "\n",
+                encoding="utf-8",
+            )
+            args = build_parser().parse_args(
+                ["context-import", "--records", str(records_path), "--actor", "alice"]
+            )
+            with redirect_stderr(io.StringIO()):
+                self.assertEqual(_context_import(config, args), 2)
+            if config.context_database_path.exists():
+                connection = sqlite3.connect(config.context_database_path)
+                try:
+                    count = connection.execute("SELECT COUNT(*) FROM context_records").fetchone()[0]
+                finally:
+                    connection.close()
+                self.assertEqual(count, 0)
+
+    def test_context_audit_since_requires_timezone_and_normalizes_utc(self) -> None:
+        self.assertEqual(
+            _context_audit_since("2026-08-01T02:00:00+02:00"),
+            datetime(2026, 8, 1, tzinfo=timezone.utc),
+        )
+        with self.assertRaisesRegex(ContextError, "timezone"):
+            _context_audit_since("2026-08-01T00:00:00")
 
 
 if __name__ == "__main__":

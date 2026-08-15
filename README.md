@@ -22,7 +22,9 @@ Hormuz is alpha software. The local prototype proves routing and policy behavior
 - Pre-provider secret redaction or denial with built-in detectors, custom environment-provided values, and metadata-only detection evidence.
 - OpenAI response storage and background mode disabled by default as enforceable provider privacy policy.
 - Configuration output for installed Codex and Claude Code clients.
-- Explicit, provider-neutral governed context packs with authorization, classification, verification, expiry, supersession, provenance, and deterministic token-budget enforcement.
+- A separate local governed-context repository with atomic idempotent import, verification evidence, classification/scope authorization, optimistic concurrency, metadata-only mutation-audit export, private content export, and physical deletion controls.
+- Explicit, provider-neutral governed context packs retrieved authorization-first from that repository, with expiry, supersession, deterministic lexical ranking, and token-budget enforcement.
+- Authenticated `POST /v1/context/packs` retrieval with identity-derived scope, server-owned caps, per-actor rate limiting, stable errors, and no provider or usage-ledger side effects.
 - Generic OIDC discovery/JWKS verification with strict issuer, audience, expiry, asymmetric-algorithm, subject-mapping, and signing-key-rotation enforcement.
 
 ## Quick start
@@ -77,11 +79,20 @@ python3 -m hormuz --config hormuz.json audit-export \
   --output hormuz-audit.jsonl
 ```
 
-Build an explicit governed context pack without injecting or sending it to a provider:
+Import the sample into the separate local context repository, inspect metadata, and build a pack without injecting or sending it to a provider:
 
 ```bash
-python3 -m hormuz --config hormuz.json context-pack \
+python3 -m hormuz --config hormuz.json context-import \
   --records examples/context-records.jsonl \
+  --actor alice \
+  --policy-version engineering-v1
+python3 -m hormuz --config hormuz.json context-list \
+  --actor alice \
+  --repository Xpounder-com/hormuz
+python3 -m hormuz --config hormuz.json context-audit-export \
+  --actor alice \
+  --output hormuz-context-audit.jsonl
+python3 -m hormuz --config hormuz.json context-pack \
   --query "How should API retries work?" \
   --organization xpounder \
   --actor alice \
@@ -91,7 +102,7 @@ python3 -m hormuz --config hormuz.json context-pack \
   --policy-version engineering-v1
 ```
 
-See [docs/ROADMAP.md](docs/ROADMAP.md) for the evidence-gated enterprise program, [docs/decisions/README.md](docs/decisions/README.md) for proposed and accepted architecture decisions, [docs/CLIENTS.md](docs/CLIENTS.md) for Codex and Claude Code setup, [docs/OIDC.md](docs/OIDC.md) for generic enterprise identity, [docs/USAGE.md](docs/USAGE.md) for team/person/model cost and budget reporting, [docs/AUDIT.md](docs/AUDIT.md) for the export contract and limitations, [docs/SECRET_CONTROLS.md](docs/SECRET_CONTROLS.md) for the egress boundary, [docs/CONTEXT.md](docs/CONTEXT.md) for governed context-pack semantics, [docs/VERIFICATION.md](docs/VERIFICATION.md) for executable compatibility evidence, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the request path and current trust boundary.
+See [docs/ROADMAP.md](docs/ROADMAP.md) for the evidence-gated enterprise program, [docs/decisions/README.md](docs/decisions/README.md) for proposed and accepted architecture decisions, [docs/CLIENTS.md](docs/CLIENTS.md) for Codex and Claude Code setup, [docs/OIDC.md](docs/OIDC.md) for generic enterprise identity, [docs/USAGE.md](docs/USAGE.md) for team/person/model cost and budget reporting, [docs/AUDIT.md](docs/AUDIT.md) for the export contract and limitations, [docs/SECRET_CONTROLS.md](docs/SECRET_CONTROLS.md) for the egress boundary, [docs/CONTEXT.md](docs/CONTEXT.md) for governed record/pack semantics, [docs/CONTEXT_API.md](docs/CONTEXT_API.md) for authenticated retrieval, [docs/VERIFICATION.md](docs/VERIFICATION.md) for executable compatibility evidence, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the request path and current trust boundary.
 
 ## Test
 
@@ -109,4 +120,4 @@ The GitHub publication gate also tests Python 3.11 through 3.14, builds and inst
 
 ## Roadmap boundary
 
-The current milestone includes the enforcement, accounting, deterministic secret-egress, metadata-audit, explicit context-pack, and OIDC JWT-verification kernels. Before an enterprise release, Hormuz still needs an OIDC login/session or introspection strategy for opaque tokens, SCIM and revocation, structured PII/semantic DLP, durable tenancy, TLS and deployment hardening, signed or externally immutable audit retention, invoice reconciliation, broader provider conformance coverage, and a persistent context lifecycle with retrieval, approvals, invalidation, cache, and outcome writeback.
+The current milestone includes the enforcement, accounting, deterministic secret-egress, metadata-audit, local persistent context-record/context-pack, and OIDC JWT-verification kernels. The context database is deliberately single-node and plaintext; it is not the pending enterprise tenancy or KMS design. Before an enterprise release, Hormuz still needs an OIDC login/session or introspection strategy for opaque tokens, SCIM and revocation, structured PII/semantic DLP, durable multi-tenant persistence, TLS and deployment hardening, signed or externally immutable audit retention, invoice reconciliation, broader provider conformance coverage, and automatic context approvals, invalidation, cache, injection, and outcome writeback.

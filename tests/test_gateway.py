@@ -9,10 +9,14 @@ import subprocess
 import tempfile
 import threading
 import unittest
+from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from unittest import mock
 
 from hormuz.config import GatewayConfig, Policy
+from hormuz.context import ContextRecord
+from hormuz.context_store import ContextStoreError
 from hormuz.policy import PolicyEngine
 from hormuz.server import GatewayServer, serve_in_thread
 from hormuz.store import UsageStore
@@ -437,6 +441,185 @@ class GatewayIntegrationTests(unittest.TestCase):
         )
         self.assertEqual(status, 401)
 
+    def test_context_pack_api_uses_authenticated_scope_without_provider_or_usage_side_effects(self) -> None:
+        identity = self.config.identities_by_actor["alice"]
+        now = datetime.now(timezone.utc)
+        self.gateway.context_repository.ingest_many(
+            [
+                ContextRecord(
+                    record_id="team-retry",
+                    record_kind="decision",
+                    title="Retry standard",
+                    content="Use bounded retry with jitter for transient failures.",
+                    owner_id="alice",
+                    organization_id=identity.organization_id,
+                    visibility="team",
+                    scope_id=identity.team_id,
+                    classification="internal",
+                    source_uri="https://example.test/adr/retry",
+                    source_revision="git:one",
+                    source_sha256="a" * 64,
+                    source_item_key="team-retry",
+                    repository_id="acme/api",
+                    verification="verified",
+                    verification_evidence=("ci:passed",),
+                    effective_at=now - timedelta(days=1),
+                    verified_at=now - timedelta(days=1),
+                    tags=("retry",),
+                ),
+                ContextRecord(
+                    record_id="alice-private",
+                    record_kind="claim",
+                    title="Private deployment decision",
+                    content="private-decision belongs only to Alice.",
+                    owner_id="alice",
+                    organization_id=identity.organization_id,
+                    visibility="actor",
+                    scope_id="alice",
+                    classification="internal",
+                    source_uri="https://example.test/private/alice",
+                    source_revision="git:two",
+                    source_sha256="b" * 64,
+                    source_item_key="alice-private",
+                    verification="verified",
+                    verification_evidence=("owner:confirmed",),
+                    effective_at=now - timedelta(days=1),
+                    verified_at=now - timedelta(days=1),
+                ),
+            ],
+            actor_id="alice",
+            policy_version="test-context-v1",
+        )
+        provider_before = len(FakeProviderHandler.requests)
+
+        status, headers, response = self._post(
+            "/v1/context/packs",
+            {
+                "query": "retry jitter",
+                "token_budget": 500,
+                "repository_id": "acme/api",
+                "max_items": 2,
+                "clearance": "internal",
+            },
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["cache-control"], "no-store")
+        pack = json.loads(response)
+        self.assertEqual(pack["policy_version"], "test-context-v1")
+        self.assertEqual(pack["scope"]["organization_id"], identity.organization_id)
+        self.assertEqual(pack["scope"]["team_id"], identity.team_id)
+        self.assertEqual(pack["scope"]["actor_id"], "alice")
+        self.assertEqual([item["id"] for item in pack["items"]], ["team-retry"])
+        self.assertNotIn("storage", pack["items"][0])
+        self.assertEqual(len(FakeProviderHandler.requests), provider_before)
+        self.assertEqual(self.gateway.store.monthly_totals(actor_id="alice").requests, 0)
+
+        bob_status, _, bob_response = self._post(
+            "/v1/context/packs",
+            {"query": "private-decision", "token_budget": 500},
+            token=CLAUDE_ONLY_TOKEN,
+        )
+        self.assertEqual(bob_status, 200)
+        self.assertEqual(json.loads(bob_response)["items"], [])
+
+    def test_context_pack_api_auth_validation_and_policy_fail_closed(self) -> None:
+        provider_before = len(FakeProviderHandler.requests)
+        status, _, response = self._post(
+            "/v1/context/packs",
+            {"query": "retry", "token_budget": 100},
+            token="invalid-token",
+        )
+        self.assertEqual(status, 401)
+        self.assertEqual(json.loads(response)["error"]["code"], "unauthorized")
+
+        cases = [
+            (
+                {"query": "retry", "token_budget": 100, "organization_id": "attacker"},
+                400,
+                "context_invalid_request",
+            ),
+            (
+                {"query": "!!!", "token_budget": 100},
+                400,
+                "context_invalid_request",
+            ),
+            (
+                {"query": "retry", "token_budget": 100, "branch": "main"},
+                400,
+                "context_invalid_request",
+            ),
+            (
+                {
+                    "query": "retry",
+                    "token_budget": 100,
+                    "repository_id": "acme/api\nforged-log-line",
+                },
+                400,
+                "context_invalid_request",
+            ),
+            (
+                {"query": "retry", "token_budget": 501},
+                403,
+                "context_policy_denied",
+            ),
+            (
+                {"query": "retry", "token_budget": 100, "max_items": 4},
+                403,
+                "context_policy_denied",
+            ),
+            (
+                {"query": "retry", "token_budget": 100, "clearance": "confidential"},
+                403,
+                "context_policy_denied",
+            ),
+            (
+                {"query": "retry", "token_budget": 100, "include_provisional": True},
+                403,
+                "context_policy_denied",
+            ),
+        ]
+        for body, expected_status, expected_code in cases:
+            with self.subTest(body=body):
+                status, _, response = self._post("/v1/context/packs", body)
+                self.assertEqual(status, expected_status)
+                self.assertEqual(json.loads(response)["error"]["code"], expected_code)
+        self.assertEqual(len(FakeProviderHandler.requests), provider_before)
+        self.assertEqual(self.gateway.store.monthly_totals(actor_id="alice").requests, 0)
+
+    def test_context_pack_api_rate_limit_is_actor_scoped_and_returns_retry_after(self) -> None:
+        config_value = self._config(self.provider.server_port, _free_port())
+        config_value["context_service"]["requests_per_minute"] = 2
+        self._restart_gateway(config_value)
+        body = {"query": "retry", "token_budget": 100}
+
+        self.assertEqual(self._post("/v1/context/packs", body)[0], 200)
+        self.assertEqual(self._post("/v1/context/packs", body)[0], 200)
+        status, headers, response = self._post("/v1/context/packs", body)
+
+        self.assertEqual(status, 429)
+        self.assertGreaterEqual(int(headers["retry-after"]), 1)
+        self.assertEqual(json.loads(response)["error"]["code"], "context_rate_limited")
+        self.assertEqual(self._post("/v1/context/packs", body, token=CLAUDE_ONLY_TOKEN)[0], 200)
+
+    def test_context_pack_api_maps_store_failure_without_leaking_details(self) -> None:
+        with self.assertLogs("hormuz", level="ERROR") as logs:
+            with mock.patch.object(
+                self.gateway.context_repository,
+                "list_authorized",
+                side_effect=ContextStoreError("SECRET-INTERNAL-STORAGE-DETAIL"),
+            ):
+                status, _, response = self._post(
+                    "/v1/context/packs",
+                    {"query": "retry", "token_budget": 100},
+                )
+
+        self.assertEqual(status, 503)
+        payload = json.loads(response)
+        self.assertEqual(payload["error"]["code"], "context_store_unavailable")
+        self.assertNotIn("SECRET-INTERNAL-STORAGE-DETAIL", response.decode("utf-8"))
+        self.assertNotIn("SECRET-INTERNAL-STORAGE-DETAIL", "\n".join(logs.output))
+
     def test_secret_is_redacted_before_provider_and_audited(self) -> None:
         secret = "sk-" + "proj-" + ("A" * 24)
         status, headers, _ = self._post(
@@ -651,6 +834,14 @@ class GatewayIntegrationTests(unittest.TestCase):
         return {
             "listen": {"host": "127.0.0.1", "port": gateway_port},
             "database": "./usage.sqlite3",
+            "context_database": "./context.sqlite3",
+            "context_service": {
+                "policy_version": "test-context-v1",
+                "max_token_budget": 500,
+                "max_items": 3,
+                "requests_per_minute": 100,
+                "allow_provisional": False,
+            },
             "upstreams": {
                 "openai": {"base_url": f"http://127.0.0.1:{provider_port}", "api_key_env": "TEST_OPENAI_KEY"},
                 "anthropic": {

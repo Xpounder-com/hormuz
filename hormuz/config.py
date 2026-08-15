@@ -35,6 +35,15 @@ class SecretControls:
 
 
 @dataclass(frozen=True)
+class ContextServiceConfig:
+    policy_version: str = "local-v1"
+    max_token_budget: int = 32_768
+    max_items: int = 20
+    requests_per_minute: int = 60
+    allow_provisional: bool = False
+
+
+@dataclass(frozen=True)
 class Identity:
     token_env: str
     token: str = field(repr=False)
@@ -131,10 +140,12 @@ class GatewayConfig:
     source_path: Path
     listen: ListenConfig
     database_path: Path
+    context_database_path: Path
     upstreams: dict[str, UpstreamConfig]
     identities_by_token: dict[str, Identity]
     model_routes: dict[str, ModelRoute]
     organization_policy: Policy
+    context_service: ContextServiceConfig = field(default_factory=ContextServiceConfig)
     oidc_issuers: dict[str, OIDCIssuerConfig] = field(default_factory=dict)
     identities_by_subject: dict[tuple[str, str], Identity] = field(default_factory=dict)
     secret_controls: SecretControls = field(default_factory=SecretControls)
@@ -164,6 +175,16 @@ class GatewayConfig:
         database_path = Path(database_value).expanduser()
         if not database_path.is_absolute():
             database_path = (source_path.parent / database_path).resolve()
+
+        context_database_value = _string(
+            raw.get("context_database", "./hormuz-context.sqlite3"),
+            "context_database",
+        )
+        context_database_path = Path(context_database_value).expanduser()
+        if not context_database_path.is_absolute():
+            context_database_path = (source_path.parent / context_database_path).resolve()
+        if context_database_path == database_path:
+            raise ConfigError("context_database must be separate from the usage database")
 
         upstreams_raw = _object(raw.get("upstreams"), "upstreams")
         upstreams: dict[str, UpstreamConfig] = {}
@@ -339,6 +360,49 @@ class GatewayConfig:
 
         egress_raw = _object(raw.get("egress_controls", {}), "egress_controls")
         secret_controls = _secret_controls(egress_raw.get("secrets", {}), env)
+        context_service_raw = _object(raw.get("context_service", {}), "context_service")
+        unknown_context_service = sorted(
+            set(context_service_raw)
+            - {
+                "policy_version",
+                "max_token_budget",
+                "max_items",
+                "requests_per_minute",
+                "allow_provisional",
+            }
+        )
+        if unknown_context_service:
+            raise ConfigError(
+                "Unknown context_service fields: " + ", ".join(unknown_context_service)
+            )
+        context_service = ContextServiceConfig(
+            policy_version=_string(
+                context_service_raw.get("policy_version", "local-v1"),
+                "context_service.policy_version",
+            ),
+            max_token_budget=_integer(
+                context_service_raw.get("max_token_budget", 32_768),
+                "context_service.max_token_budget",
+                minimum=1,
+                maximum=1_000_000,
+            ),
+            max_items=_integer(
+                context_service_raw.get("max_items", 20),
+                "context_service.max_items",
+                minimum=1,
+                maximum=100,
+            ),
+            requests_per_minute=_integer(
+                context_service_raw.get("requests_per_minute", 60),
+                "context_service.requests_per_minute",
+                minimum=1,
+                maximum=10_000,
+            ),
+            allow_provisional=_boolean(
+                context_service_raw.get("allow_provisional", False),
+                "context_service.allow_provisional",
+            ),
+        )
         policies_raw = _object(raw.get("policies"), "policies")
         organization_policy = _policy(policies_raw.get("organization"), "policies.organization")
         team_policies = {
@@ -354,10 +418,12 @@ class GatewayConfig:
             source_path=source_path,
             listen=ListenConfig(host=host, port=port),
             database_path=database_path,
+            context_database_path=context_database_path,
             upstreams=upstreams,
             identities_by_token=identities_by_token,
             model_routes=model_routes,
             organization_policy=organization_policy,
+            context_service=context_service,
             oidc_issuers=oidc_issuers,
             identities_by_subject=identities_by_subject,
             secret_controls=secret_controls,

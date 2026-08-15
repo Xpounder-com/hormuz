@@ -13,7 +13,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from .auth import AuthenticationError, Authenticator
-from .config import ConfigError, GatewayConfig
+from .config import ConfigError, GatewayConfig, Identity
 from .context import (
     CLASSIFICATIONS,
     ContextError,
@@ -22,6 +22,7 @@ from .context import (
     ContextRecord,
     build_context_pack,
 )
+from .context_store import ContextStoreError, SQLiteContextRepository, StoredContextRecord
 from .policy import PolicyEngine
 from .server import GatewayServer
 from .store import UsageStore
@@ -88,9 +89,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     context = subparsers.add_parser(
         "context-pack",
-        help="Build an explicit governed context pack from JSONL records",
+        help="Build an explicit governed context pack from the repository or JSONL",
     )
-    context.add_argument("--records", required=True, help="Path to content-bearing context JSONL")
+    context.add_argument(
+        "--records",
+        help="Compatibility path to content-bearing context JSONL; defaults to the repository",
+    )
     context.add_argument("--query", required=True, help="Task or question used for lexical retrieval")
     context.add_argument("--organization", required=True, help="Organization scope ID")
     context.add_argument("--actor", required=True, help="Configured actor ID")
@@ -115,7 +119,78 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Include provisional records; verified-only is the default",
     )
+
+    context_import = subparsers.add_parser(
+        "context-import",
+        help="Idempotently import governed context records from JSONL",
+    )
+    context_import.add_argument("--records", required=True, help="Path to content-bearing context JSONL")
+    context_import.add_argument("--actor", required=True, help="Configured actor ID for scope and audit")
+    context_import.add_argument(
+        "--policy-version",
+        default="local-v1",
+        help="Policy version recorded in metadata-only mutation audit events",
+    )
+
+    context_list = subparsers.add_parser(
+        "context-list",
+        help="List governed context authorized for a configured actor",
+    )
+    _add_context_read_arguments(context_list)
+    context_list.add_argument(
+        "--include-content",
+        action="store_true",
+        help="Include content; metadata-only is the default",
+    )
+
+    context_export = subparsers.add_parser(
+        "context-export",
+        help="Export authorized content-bearing context as private JSONL",
+    )
+    _add_context_read_arguments(context_export)
+    context_export.add_argument("--output", required=True, help="Output path or - for explicit stdout")
+    context_export.add_argument("--force", action="store_true", help="Allow replacing an existing output file")
+
+    context_delete = subparsers.add_parser(
+        "context-delete",
+        help="Delete one governed context record using optimistic concurrency",
+    )
+    context_delete.add_argument("--actor", required=True, help="Configured actor ID for scope and audit")
+    context_delete.add_argument("--record-id", required=True, help="Context record ID")
+    context_delete.add_argument("--expected-version", required=True, type=int, help="Current storage version")
+    context_delete.add_argument(
+        "--policy-version",
+        default="local-v1",
+        help="Policy version recorded in metadata-only mutation audit events",
+    )
+
+    context_audit = subparsers.add_parser(
+        "context-audit-export",
+        help="Export metadata-only governed-context mutation events as JSONL",
+    )
+    context_audit.add_argument("--actor", required=True, help="Configured actor ID defining organization scope")
+    context_audit.add_argument("--since", help="UTC ISO-8601 lower bound (default: start of current month)")
+    context_audit.add_argument("--output", default="-", help="Output path or - for stdout (default: -)")
+    context_audit.add_argument("--force", action="store_true", help="Allow replacing an existing output file")
     return parser
+
+
+def _add_context_read_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--actor", required=True, help="Configured actor ID")
+    parser.add_argument("--repository", help="Repository scope ID")
+    parser.add_argument("--branch", help="Branch scope; requires --repository")
+    parser.add_argument(
+        "--clearance",
+        choices=CLASSIFICATIONS,
+        default="internal",
+        help="Maximum permitted classification (default: internal)",
+    )
+    parser.add_argument("--as-of", help="UTC ISO-8601 evaluation time (default: now)")
+    parser.add_argument(
+        "--include-provisional",
+        action="store_true",
+        help="Include provisional records; verified-only is the default",
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -149,11 +224,24 @@ def main(argv: list[str] | None = None) -> int:
             return _audit_export(config, args)
         if args.command == "context-pack":
             return _context_pack(config, args)
+        if args.command == "context-import":
+            return _context_import(config, args)
+        if args.command == "context-list":
+            return _context_list(config, args)
+        if args.command == "context-export":
+            return _context_export(config, args)
+        if args.command == "context-delete":
+            return _context_delete(config, args)
+        if args.command == "context-audit-export":
+            return _context_audit_export(config, args)
     except ConfigError as error:
         print(f"configuration error: {error}", file=sys.stderr)
         return 2
     except ContextError as error:
         print(f"context error: {error}", file=sys.stderr)
+        return 2
+    except ContextStoreError as error:
+        print(f"context store error: {error}", file=sys.stderr)
         return 2
     except KeyboardInterrupt:
         return 130
@@ -169,8 +257,9 @@ def _serve(config: GatewayConfig) -> int:
         )
     server = GatewayServer(config)
     print(f"Hormuz listening on http://{config.listen.host}:{config.listen.port}")
-    print("Protocols: POST /v1/responses and POST /v1/messages")
+    print("Protocols: POST /v1/responses, POST /v1/messages, and POST /v1/context/packs")
     print(f"Usage database: {config.database_path}")
+    print(f"Context database: {config.context_database_path}")
 
     def stop(_signum, _frame):
         server.shutdown()
@@ -193,6 +282,7 @@ def _doctor(config: GatewayConfig) -> int:
     print(f"model routes: {len(config.model_routes)}")
     print(f"secret egress control: {config.secret_controls.mode}")
     print(f"usage database: {config.database_path}")
+    print(f"context database: {config.context_database_path}")
     if config.oidc_issuers:
         try:
             metadata = Authenticator(config).validate_metadata()
@@ -545,19 +635,28 @@ def _context_pack(config: GatewayConfig, args: argparse.Namespace) -> int:
         return 2
     try:
         as_of = _context_as_of(args.as_of)
-        records = _load_context_records(Path(args.records))
+        principal = ContextPrincipal(
+            organization_id=identity.organization_id,
+            team_id=identity.team_id,
+            actor_id=identity.actor_id,
+            clearance=args.clearance,
+            repository_id=args.repository,
+            branch=args.branch,
+        )
+        if args.records:
+            records = _load_context_records(Path(args.records))
+        else:
+            stored = SQLiteContextRepository(config.context_database_path).list_authorized(
+                principal,
+                as_of=as_of,
+                include_provisional=args.include_provisional,
+            )
+            records = [item.record for item in stored]
         pack = build_context_pack(
             records,
             ContextPackRequest(
                 query=args.query,
-                principal=ContextPrincipal(
-                    organization_id=identity.organization_id,
-                    team_id=identity.team_id,
-                    actor_id=identity.actor_id,
-                    clearance=args.clearance,
-                    repository_id=args.repository,
-                    branch=args.branch,
-                ),
+                principal=principal,
                 token_budget=args.token_budget,
                 max_items=args.max_items,
                 policy_version=args.policy_version,
@@ -570,6 +669,289 @@ def _context_pack(config: GatewayConfig, args: argparse.Namespace) -> int:
         return 2
     print(json.dumps(pack.to_dict(), indent=2, ensure_ascii=False))
     return 0
+
+
+def _context_import(config: GatewayConfig, args: argparse.Namespace) -> int:
+    identity = config.identities_by_actor.get(args.actor)
+    if identity is None:
+        print(f"unknown actor: {args.actor}", file=sys.stderr)
+        return 2
+    try:
+        records = _order_context_records(_load_context_records(Path(args.records)))
+        for record in records:
+            _require_mutation_scope(record, identity)
+        repository = SQLiteContextRepository(config.context_database_path)
+        results = repository.ingest_many(
+            records,
+            actor_id=identity.actor_id,
+            policy_version=args.policy_version,
+        )
+        created = sum(result.created for result in results)
+        existing = len(results) - created
+        versions = {
+            result.stored.record.record_id: result.stored.version
+            for result in results
+        }
+    except OSError as error:
+        print(f"context error: cannot read {args.records}: {error}", file=sys.stderr)
+        return 2
+    except (ContextError, ContextStoreError) as error:
+        print(f"context import failed: {error}", file=sys.stderr)
+        return 2
+    print(
+        json.dumps(
+            {
+                "imported": created,
+                "already_present": existing,
+                "records": len(records),
+                "versions": versions,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
+def _context_list(config: GatewayConfig, args: argparse.Namespace) -> int:
+    try:
+        principal = _context_principal(config, args)
+        records = SQLiteContextRepository(config.context_database_path).list_authorized(
+            principal,
+            as_of=_context_as_of(args.as_of),
+            include_provisional=args.include_provisional,
+        )
+    except (ContextError, ContextStoreError) as error:
+        print(f"context list failed: {error}", file=sys.stderr)
+        return 2
+    values = [_stored_context_dict(item, include_content=args.include_content) for item in records]
+    print(json.dumps({"records": values, "total": len(values)}, indent=2, ensure_ascii=False))
+    return 0
+
+
+def _context_export(config: GatewayConfig, args: argparse.Namespace) -> int:
+    try:
+        principal = _context_principal(config, args)
+        records = SQLiteContextRepository(config.context_database_path).list_authorized(
+            principal,
+            as_of=_context_as_of(args.as_of),
+            include_provisional=args.include_provisional,
+        )
+        values = [item.record.to_dict() for item in records]
+    except (ContextError, ContextStoreError) as error:
+        print(f"context export failed: {error}", file=sys.stderr)
+        return 2
+    result = _write_private_jsonl(
+        values,
+        output=args.output,
+        force=args.force,
+        label="context export",
+    )
+    if result is None:
+        return 2
+    count, digest, destination = result
+    print(
+        f"exported {count} context records to {destination}; sha256={digest}",
+        file=sys.stderr,
+    )
+    return 0
+
+
+def _context_delete(config: GatewayConfig, args: argparse.Namespace) -> int:
+    identity = config.identities_by_actor.get(args.actor)
+    if identity is None:
+        print(f"unknown actor: {args.actor}", file=sys.stderr)
+        return 2
+    try:
+        SQLiteContextRepository(config.context_database_path).delete(
+            organization_id=identity.organization_id,
+            record_id=args.record_id,
+            expected_version=args.expected_version,
+            actor_id=identity.actor_id,
+            policy_version=args.policy_version,
+        )
+    except (ContextError, ContextStoreError) as error:
+        print(f"context delete failed: {error}", file=sys.stderr)
+        return 2
+    print(
+        json.dumps(
+            {
+                "deleted": args.record_id,
+                "organization_id": identity.organization_id,
+                "prior_version": args.expected_version,
+            },
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
+def _context_audit_export(config: GatewayConfig, args: argparse.Namespace) -> int:
+    identity = config.identities_by_actor.get(args.actor)
+    if identity is None:
+        print(f"unknown actor: {args.actor}", file=sys.stderr)
+        return 2
+    try:
+        since = _context_audit_since(args.since)
+        values = SQLiteContextRepository(config.context_database_path).audit_events(
+            organization_id=identity.organization_id,
+            since=since,
+        )
+    except (ContextError, ContextStoreError) as error:
+        print(f"context audit export failed: {error}", file=sys.stderr)
+        return 2
+    result = _write_private_jsonl(
+        values,
+        output=args.output,
+        force=args.force,
+        label="context audit export",
+    )
+    if result is None:
+        return 2
+    count, digest, destination = result
+    print(
+        f"exported {count} context audit events to {destination}; sha256={digest}",
+        file=sys.stderr,
+    )
+    return 0
+
+
+def _context_audit_since(value: str | None) -> datetime:
+    if value is None:
+        return datetime.now(timezone.utc).replace(
+            day=1,
+            hour=0,
+            minute=0,
+            second=0,
+            microsecond=0,
+        )
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as error:
+        raise ContextError("--since must be a valid ISO-8601 timestamp") from error
+    if parsed.tzinfo is None:
+        raise ContextError("--since must include a timezone")
+    return parsed.astimezone(timezone.utc)
+
+
+def _context_principal(config: GatewayConfig, args: argparse.Namespace) -> ContextPrincipal:
+    identity = config.identities_by_actor.get(args.actor)
+    if identity is None:
+        raise ContextError(f"unknown actor: {args.actor}")
+    if CLASSIFICATIONS.index(args.clearance) > CLASSIFICATIONS.index(identity.clearance):
+        raise ContextError("requested clearance exceeds the actor identity")
+    if args.branch and not args.repository:
+        raise ContextError("--branch requires --repository")
+    return ContextPrincipal(
+        organization_id=identity.organization_id,
+        team_id=identity.team_id,
+        actor_id=identity.actor_id,
+        clearance=args.clearance,
+        repository_id=args.repository,
+        branch=args.branch,
+    )
+
+
+def _require_mutation_scope(record: ContextRecord, identity: Identity) -> None:
+    if record.organization_id != identity.organization_id:
+        raise ContextError(
+            f"record {record.record_id} organization does not match the actor identity"
+        )
+    expected_scope = {
+        "organization": identity.organization_id,
+        "team": identity.team_id,
+        "actor": identity.actor_id,
+    }[record.visibility]
+    if record.scope_id != expected_scope:
+        raise ContextError(f"record {record.record_id} scope exceeds the actor identity")
+    if CLASSIFICATIONS.index(record.classification) > CLASSIFICATIONS.index(identity.clearance):
+        raise ContextError(f"record {record.record_id} classification exceeds the actor identity")
+
+
+def _order_context_records(records: list[ContextRecord]) -> list[ContextRecord]:
+    by_id: dict[str, ContextRecord] = {}
+    for record in records:
+        if record.record_id in by_id:
+            raise ContextError(f"duplicate context record id: {record.record_id}")
+        by_id[record.record_id] = record
+    ordered: list[ContextRecord] = []
+    active: set[str] = set()
+    complete: set[str] = set()
+
+    def visit(record: ContextRecord) -> None:
+        if record.record_id in complete:
+            return
+        if record.record_id in active:
+            raise ContextError(f"context supersession cycle includes: {record.record_id}")
+        active.add(record.record_id)
+        if record.supersedes_id in by_id:
+            visit(by_id[record.supersedes_id])
+        active.remove(record.record_id)
+        complete.add(record.record_id)
+        ordered.append(record)
+
+    for record in records:
+        visit(record)
+    return ordered
+
+
+def _stored_context_dict(
+    stored: StoredContextRecord,
+    *,
+    include_content: bool,
+) -> dict[str, object]:
+    value = stored.to_dict()
+    if not include_content:
+        value.pop("content", None)
+    return value
+
+
+def _write_private_jsonl(
+    values: list[dict[str, object]],
+    *,
+    output: str,
+    force: bool,
+    label: str,
+) -> tuple[int, str, str] | None:
+    stream = sys.stdout
+    should_close = False
+    output_path: Path | None = None
+    if output != "-":
+        output_path = Path(output).expanduser().absolute()
+        flags = (
+            os.O_WRONLY
+            | os.O_CREAT
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+            | (os.O_TRUNC if force else os.O_EXCL)
+        )
+        try:
+            descriptor = os.open(output_path, flags, 0o600)
+        except FileExistsError:
+            print(f"{label} already exists: {output_path} (use --force to replace it)", file=sys.stderr)
+            return None
+        except OSError as error:
+            print(f"cannot open {label} {output_path}: {error}", file=sys.stderr)
+            return None
+        if hasattr(os, "fchmod"):
+            os.fchmod(descriptor, 0o600)
+        else:  # pragma: no cover - Windows permission semantics
+            os.chmod(output_path, 0o600)
+        stream = os.fdopen(descriptor, "w", encoding="utf-8")
+        should_close = True
+    digest = hashlib.sha256()
+    try:
+        for value in values:
+            line = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False) + "\n"
+            stream.write(line)
+            digest.update(line.encode("utf-8"))
+        stream.flush()
+        if should_close:
+            os.fsync(stream.fileno())
+    finally:
+        if should_close:
+            stream.close()
+    return len(values), digest.hexdigest(), str(output_path) if output_path is not None else "stdout"
 
 
 def _load_context_records(path: Path) -> list[ContextRecord]:

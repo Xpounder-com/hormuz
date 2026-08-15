@@ -13,8 +13,10 @@ CONTEXT_PACK_SCHEMA = "hormuz.context-pack.v1"
 CLASSIFICATIONS = ("public", "internal", "confidential", "restricted")
 VISIBILITIES = ("organization", "team", "actor")
 VERIFICATION_STATES = ("provisional", "verified")
+RECORD_KINDS = ("claim", "decision")
 _CLASSIFICATION_RANK = {name: index for index, name in enumerate(CLASSIFICATIONS)}
 _TERM_PATTERN = re.compile(r"[^\W_]+", re.UNICODE)
+_SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
 
 
 class ContextError(ValueError):
@@ -26,18 +28,25 @@ class ContextRecord:
     record_id: str
     title: str
     content: str = field(repr=False)
+    record_kind: str = "claim"
+    owner_id: str = ""
     organization_id: str = ""
     visibility: str = "organization"
     scope_id: str = ""
     classification: str = "internal"
     source_uri: str = ""
     source_revision: str = ""
+    source_sha256: str = ""
+    source_item_key: str = ""
     repository_id: str | None = None
     branch: str | None = None
     verification: str = "provisional"
+    verification_evidence: tuple[str, ...] = ()
+    effective_at: datetime | None = None
     verified_at: datetime | None = None
     expires_at: datetime | None = None
     supersedes_id: str | None = None
+    invalidation_rules: tuple[str, ...] = ()
     tags: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
@@ -52,8 +61,17 @@ class ContextRecord:
         ):
             if not isinstance(value, str) or not value.strip():
                 raise ContextError(f"context record {name} must be a non-empty string")
+        for name, value in (
+            ("owner_id", self.owner_id),
+            ("source_sha256", self.source_sha256),
+            ("source_item_key", self.source_item_key),
+        ):
+            if not isinstance(value, str):
+                raise ContextError(f"context record {name} must be a string")
         if self.visibility not in VISIBILITIES:
             raise ContextError(f"context record visibility must be one of: {', '.join(VISIBILITIES)}")
+        if self.record_kind not in RECORD_KINDS:
+            raise ContextError(f"context record kind must be one of: {', '.join(RECORD_KINDS)}")
         if self.classification not in CLASSIFICATIONS:
             raise ContextError(
                 f"context record classification must be one of: {', '.join(CLASSIFICATIONS)}"
@@ -66,7 +84,11 @@ class ContextRecord:
             raise ContextError("verified context records require verified_at")
         if self.verification == "provisional" and self.verified_at is not None:
             raise ContextError("provisional context records cannot set verified_at")
-        for name, value in (("verified_at", self.verified_at), ("expires_at", self.expires_at)):
+        for name, value in (
+            ("effective_at", self.effective_at),
+            ("verified_at", self.verified_at),
+            ("expires_at", self.expires_at),
+        ):
             if value is not None and not isinstance(value, datetime):
                 raise ContextError(f"context record {name} must be a datetime")
             if value is not None and value.tzinfo is None:
@@ -90,10 +112,53 @@ class ContextRecord:
             and self.expires_at <= self.verified_at
         ):
             raise ContextError("context record expires_at must be after verified_at")
-        if not isinstance(self.tags, tuple):
-            raise ContextError("context record tags must be a tuple")
-        if any(not isinstance(tag, str) or not tag.strip() for tag in self.tags):
-            raise ContextError("context record tags must be non-empty strings")
+        if self.effective_at is not None and self.expires_at is not None and self.expires_at <= self.effective_at:
+            raise ContextError("context record expires_at must be after effective_at")
+        if self.source_sha256 and not _SHA256_PATTERN.fullmatch(self.source_sha256):
+            raise ContextError("context record source.sha256 must be 64 lowercase hexadecimal characters")
+        for name, values in (
+            ("verification_evidence", self.verification_evidence),
+            ("invalidation_rules", self.invalidation_rules),
+            ("tags", self.tags),
+        ):
+            if not isinstance(values, tuple):
+                raise ContextError(f"context record {name} must be a tuple")
+            if any(not isinstance(item, str) or not item.strip() for item in values):
+                raise ContextError(f"context record {name} must contain non-empty strings")
+
+    @property
+    def content_sha256(self) -> str:
+        return hashlib.sha256(self.content.encode("utf-8")).hexdigest()
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.record_id,
+            "kind": self.record_kind,
+            "title": self.title,
+            "content": self.content,
+            "owner_id": self.owner_id,
+            "organization_id": self.organization_id,
+            "visibility": self.visibility,
+            "scope_id": self.scope_id,
+            "classification": self.classification,
+            "source": {
+                "uri": self.source_uri,
+                "revision": self.source_revision,
+                "sha256": self.source_sha256,
+                "item_key": self.source_item_key,
+            },
+            "repository_id": self.repository_id,
+            "branch": self.branch,
+            "verification": self.verification,
+            "verification_evidence": list(self.verification_evidence),
+            "effective_at": _isoformat(self.effective_at),
+            "verified_at": _isoformat(self.verified_at),
+            "expires_at": _isoformat(self.expires_at),
+            "supersedes_id": self.supersedes_id,
+            "invalidation_rules": list(self.invalidation_rules),
+            "tags": list(self.tags),
+            "content_sha256": self.content_sha256,
+        }
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> "ContextRecord":
@@ -101,6 +166,8 @@ class ContextRecord:
             "id",
             "title",
             "content",
+            "kind",
+            "owner_id",
             "organization_id",
             "visibility",
             "scope_id",
@@ -109,10 +176,14 @@ class ContextRecord:
             "repository_id",
             "branch",
             "verification",
+            "verification_evidence",
+            "effective_at",
             "verified_at",
             "expires_at",
             "supersedes_id",
+            "invalidation_rules",
             "tags",
+            "content_sha256",
         }
         unknown = sorted(set(value) - allowed)
         if unknown:
@@ -120,30 +191,54 @@ class ContextRecord:
         source = value.get("source")
         if not isinstance(source, dict):
             raise ContextError("context record source must be an object")
-        unknown_source = sorted(set(source) - {"uri", "revision"})
+        unknown_source = sorted(set(source) - {"uri", "revision", "sha256", "item_key"})
         if unknown_source:
             raise ContextError(f"unknown context source fields: {', '.join(unknown_source)}")
         tags = value.get("tags", [])
         if not isinstance(tags, list):
             raise ContextError("context record tags must be an array")
-        return cls(
+        evidence = value.get("verification_evidence", [])
+        if not isinstance(evidence, list):
+            raise ContextError("context record verification_evidence must be an array")
+        invalidation_rules = value.get("invalidation_rules", [])
+        if not isinstance(invalidation_rules, list):
+            raise ContextError("context record invalidation_rules must be an array")
+        expected_content_sha256 = value.get("content_sha256")
+        if expected_content_sha256 is not None and (
+            not isinstance(expected_content_sha256, str)
+            or not _SHA256_PATTERN.fullmatch(expected_content_sha256)
+        ):
+            raise ContextError(
+                "context record content_sha256 must be 64 lowercase hexadecimal characters"
+            )
+        record = cls(
             record_id=_required_string(value, "id"),
             title=_required_string(value, "title"),
             content=_required_string(value, "content"),
+            record_kind=_optional_string(value, "kind", "claim"),
+            owner_id=_optional_empty_string(value, "owner_id"),
             organization_id=_required_string(value, "organization_id"),
             visibility=_optional_string(value, "visibility", "organization"),
             scope_id=_required_string(value, "scope_id"),
             classification=_optional_string(value, "classification", "internal"),
             source_uri=_required_string(source, "uri", prefix="source."),
             source_revision=_required_string(source, "revision", prefix="source."),
+            source_sha256=_optional_empty_string(source, "sha256"),
+            source_item_key=_optional_empty_string(source, "item_key"),
             repository_id=_nullable_string(value, "repository_id"),
             branch=_nullable_string(value, "branch"),
             verification=_optional_string(value, "verification", "provisional"),
+            verification_evidence=tuple(evidence),
+            effective_at=_nullable_datetime(value, "effective_at"),
             verified_at=_nullable_datetime(value, "verified_at"),
             expires_at=_nullable_datetime(value, "expires_at"),
             supersedes_id=_nullable_string(value, "supersedes_id"),
+            invalidation_rules=tuple(invalidation_rules),
             tags=tuple(tags),
         )
+        if expected_content_sha256 is not None and record.content_sha256 != expected_content_sha256:
+            raise ContextError("context record content_sha256 does not match content")
+        return record
 
 
 @dataclass(frozen=True)
@@ -225,20 +320,28 @@ class ContextPackItem:
             "id": record.record_id,
             "title": record.title,
             "content": record.content,
+            "kind": record.record_kind,
+            "owner_id": record.owner_id,
             "classification": record.classification,
             "visibility": record.visibility,
             "scope_id": record.scope_id,
             "repository_id": record.repository_id,
             "branch": record.branch,
             "verification": record.verification,
+            "verification_evidence": list(record.verification_evidence),
+            "effective_at": _isoformat(record.effective_at),
             "verified_at": _isoformat(record.verified_at),
             "expires_at": _isoformat(record.expires_at),
             "supersedes_id": record.supersedes_id,
+            "invalidation_rules": list(record.invalidation_rules),
             "tags": list(record.tags),
             "source": {
                 "uri": record.source_uri,
                 "revision": record.source_revision,
+                "sha256": record.source_sha256,
+                "item_key": record.source_item_key,
             },
+            "content_sha256": record.content_sha256,
             "relevance_score": self.relevance_score,
             "estimated_tokens": self.estimated_tokens,
         }
@@ -371,6 +474,8 @@ def _is_authorized(record: ContextRecord, request: ContextPackRequest) -> bool:
     if record.verification != "verified" and not request.include_provisional:
         return False
     as_of = request.as_of.astimezone(timezone.utc)
+    if record.effective_at is not None and record.effective_at.astimezone(timezone.utc) > as_of:
+        return False
     if record.verified_at is not None and record.verified_at.astimezone(timezone.utc) > as_of:
         return False
     if record.expires_at is not None and record.expires_at.astimezone(timezone.utc) <= as_of:
@@ -436,20 +541,27 @@ def _pack_manifest(
             {
                 "id": item.record.record_id,
                 "title": item.record.title,
+                "kind": item.record.record_kind,
+                "owner_id": item.record.owner_id,
                 "organization_id": item.record.organization_id,
                 "visibility": item.record.visibility,
                 "scope_id": item.record.scope_id,
                 "classification": item.record.classification,
                 "source_uri": item.record.source_uri,
                 "source_revision": item.record.source_revision,
+                "source_sha256": item.record.source_sha256,
+                "source_item_key": item.record.source_item_key,
                 "repository_id": item.record.repository_id,
                 "branch": item.record.branch,
                 "verification": item.record.verification,
+                "verification_evidence": list(item.record.verification_evidence),
+                "effective_at": _isoformat(item.record.effective_at),
                 "verified_at": _isoformat(item.record.verified_at),
                 "expires_at": _isoformat(item.record.expires_at),
                 "supersedes_id": item.record.supersedes_id,
+                "invalidation_rules": list(item.record.invalidation_rules),
                 "tags": list(item.record.tags),
-                "content_sha256": hashlib.sha256(item.record.content.encode("utf-8")).hexdigest(),
+                "content_sha256": item.record.content_sha256,
                 "relevance_score": item.relevance_score,
                 "estimated_tokens": item.estimated_tokens,
             }
@@ -469,6 +581,13 @@ def _optional_string(value: dict[str, Any], name: str, default: str) -> str:
     item = value.get(name, default)
     if not isinstance(item, str) or not item.strip():
         raise ContextError(f"context record {name} must be a non-empty string")
+    return item
+
+
+def _optional_empty_string(value: dict[str, Any], name: str) -> str:
+    item = value.get(name, "")
+    if not isinstance(item, str):
+        raise ContextError(f"context record {name} must be a string")
     return item
 
 

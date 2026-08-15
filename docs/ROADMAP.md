@@ -13,10 +13,11 @@ The private alpha currently has:
 - pre-provider secret redaction/denial and default OpenAI storage restrictions;
 - generic OIDC JWT discovery/JWKS verification with explicit issuer-subject identity mapping;
 - metadata-only audit export;
-- deterministic authorization-first context packs from explicit records;
+- a separate local persistent governed-context repository plus deterministic authorization-first context packs;
+- authenticated authorization-first context-pack REST retrieval with server-owned caps and no provider side effects;
 - local and GitHub package/client verification.
 
-The foundation is not an enterprise release. Browser SSO/session custody, shared tenancy, SCIM, persistent governed memory, automatic lifecycle/invalidation, context injection, structured DLP, cache policy, invoice reconciliation, HA deployment, KMS, and independent security review remain open gates.
+The foundation is not an enterprise release. The local context database is single-node and plaintext, not an accepted hosted persistence design. Browser SSO/session custody, shared tenancy, SCIM, automatic lifecycle/invalidation, context injection, structured DLP, cache policy, invoice reconciliation, HA deployment, KMS, and independent security review remain open gates.
 
 ## Material decisions awaiting owner approval
 

@@ -7,6 +7,8 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from collections import defaultdict, deque
+from datetime import datetime, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
@@ -14,6 +16,14 @@ from urllib.parse import urlsplit
 
 from .auth import AuthenticationError, Authenticator
 from .config import GatewayConfig, Identity, ModelRoute, UpstreamConfig
+from .context import (
+    CLASSIFICATIONS,
+    ContextError,
+    ContextPackRequest,
+    ContextPrincipal,
+    build_context_pack,
+)
+from .context_store import ContextStoreError, SQLiteContextRepository
 from .policy import PolicyDecision, PolicyEngine
 from .redaction import RedactionError, SecretRedactor
 from .store import ReservationDenied, UsageStore
@@ -21,6 +31,28 @@ from .usage import ResponseUsageParser
 
 
 LOGGER = logging.getLogger("hormuz")
+
+
+class ContextRateLimiter:
+    """Single-process actor limiter; distributed enforcement remains a deployment concern."""
+
+    def __init__(self, requests_per_minute: int):
+        self.requests_per_minute = requests_per_minute
+        self._requests: dict[tuple[str, str], deque[float]] = defaultdict(deque)
+        self._lock = threading.Lock()
+
+    def check(self, *, organization_id: str, actor_id: str) -> int | None:
+        now = time.monotonic()
+        cutoff = now - 60
+        key = (organization_id, actor_id)
+        with self._lock:
+            requests = self._requests[key]
+            while requests and requests[0] <= cutoff:
+                requests.popleft()
+            if len(requests) >= self.requests_per_minute:
+                return max(1, int(60 - (now - requests[0])) + 1)
+            requests.append(now)
+            return None
 
 
 class GatewayServer(ThreadingHTTPServer):
@@ -31,6 +63,10 @@ class GatewayServer(ThreadingHTTPServer):
         self.config = config
         self.authenticator = Authenticator(config)
         self.store = UsageStore(config.database_path)
+        self.context_repository = SQLiteContextRepository(config.context_database_path)
+        self.context_rate_limiter = ContextRateLimiter(
+            config.context_service.requests_per_minute
+        )
         self.policy_engine = PolicyEngine(config, self.store)
         protected_values = [
             ("hormuz_identity_token", identity.token)
@@ -58,7 +94,11 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 {
                     "status": "ok",
                     "service": "hormuz",
-                    "protocols": ["openai-responses", "anthropic-messages"],
+                    "protocols": [
+                        "openai-responses",
+                        "anthropic-messages",
+                        "hormuz-context-packs",
+                    ],
                 },
             )
             return
@@ -105,6 +145,24 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         path = urlsplit(self.path).path
+        if path == "/v1/context/packs":
+            identity = self._authenticate()
+            if identity is None:
+                return
+            retry_after = self.server.context_rate_limiter.check(
+                organization_id=identity.organization_id,
+                actor_id=identity.actor_id,
+            )
+            if retry_after is not None:
+                self._send_error(
+                    "context_rate_limited",
+                    "Context pack request limit exceeded",
+                    HTTPStatus.TOO_MANY_REQUESTS,
+                    headers={"Retry-After": str(retry_after)},
+                )
+                return
+            self._create_context_pack(identity)
+            return
         routes = {
             "/v1/responses": ("openai", "codex", True),
             "/v1/responses/compact": ("openai", "codex", True),
@@ -127,6 +185,178 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             client=default_client,
             account_usage=account_usage,
         )
+
+    def _create_context_pack(self, identity: Identity) -> None:
+        request_body = self._read_json_body()
+        if request_body is None:
+            return
+        allowed_fields = {
+            "query",
+            "token_budget",
+            "max_items",
+            "repository_id",
+            "branch",
+            "clearance",
+            "include_provisional",
+        }
+        unknown_fields = sorted(set(request_body) - allowed_fields)
+        if unknown_fields:
+            self._send_error(
+                "context_invalid_request",
+                "Unknown request fields: " + ", ".join(unknown_fields),
+                HTTPStatus.BAD_REQUEST,
+            )
+            return
+        query = request_body.get("query")
+        if not isinstance(query, str) or not query.strip():
+            self._send_error(
+                "context_invalid_request",
+                "Request field query must be a non-empty string",
+                HTTPStatus.BAD_REQUEST,
+            )
+            return
+        token_budget = request_body.get("token_budget")
+        if isinstance(token_budget, bool) or not isinstance(token_budget, int) or token_budget <= 0:
+            self._send_error(
+                "context_invalid_request",
+                "Request field token_budget must be a positive integer",
+                HTTPStatus.BAD_REQUEST,
+            )
+            return
+        service_policy = self.server.config.context_service
+        if token_budget > service_policy.max_token_budget:
+            self._send_error(
+                "context_policy_denied",
+                "Requested token budget exceeds organization context policy",
+                HTTPStatus.FORBIDDEN,
+            )
+            return
+        max_items = request_body.get("max_items", service_policy.max_items)
+        if isinstance(max_items, bool) or not isinstance(max_items, int) or max_items <= 0:
+            self._send_error(
+                "context_invalid_request",
+                "Request field max_items must be a positive integer",
+                HTTPStatus.BAD_REQUEST,
+            )
+            return
+        if max_items > service_policy.max_items:
+            self._send_error(
+                "context_policy_denied",
+                "Requested item limit exceeds organization context policy",
+                HTTPStatus.FORBIDDEN,
+            )
+            return
+        repository_id = request_body.get("repository_id")
+        if repository_id is not None and not _valid_context_scope(repository_id):
+            self._send_error(
+                "context_invalid_request",
+                "Request field repository_id must be null or a safe non-empty string up to 512 characters",
+                HTTPStatus.BAD_REQUEST,
+            )
+            return
+        branch = request_body.get("branch")
+        if branch is not None and not _valid_context_scope(branch):
+            self._send_error(
+                "context_invalid_request",
+                "Request field branch must be null or a safe non-empty string up to 512 characters",
+                HTTPStatus.BAD_REQUEST,
+            )
+            return
+        if branch is not None and repository_id is None:
+            self._send_error(
+                "context_invalid_request",
+                "Request field branch requires repository_id",
+                HTTPStatus.BAD_REQUEST,
+            )
+            return
+        clearance = request_body.get("clearance", identity.clearance)
+        if not isinstance(clearance, str) or clearance not in CLASSIFICATIONS:
+            self._send_error(
+                "context_invalid_request",
+                "Request field clearance must be a supported classification",
+                HTTPStatus.BAD_REQUEST,
+            )
+            return
+        if CLASSIFICATIONS.index(clearance) > CLASSIFICATIONS.index(identity.clearance):
+            self._send_error(
+                "context_policy_denied",
+                "Requested clearance exceeds the authenticated identity",
+                HTTPStatus.FORBIDDEN,
+            )
+            return
+        include_provisional = request_body.get("include_provisional", False)
+        if not isinstance(include_provisional, bool):
+            self._send_error(
+                "context_invalid_request",
+                "Request field include_provisional must be a boolean",
+                HTTPStatus.BAD_REQUEST,
+            )
+            return
+        if include_provisional and not service_policy.allow_provisional:
+            self._send_error(
+                "context_policy_denied",
+                "Organization context policy does not allow provisional records",
+                HTTPStatus.FORBIDDEN,
+            )
+            return
+
+        as_of = datetime.now(timezone.utc)
+        try:
+            principal = ContextPrincipal(
+                organization_id=identity.organization_id,
+                team_id=identity.team_id,
+                actor_id=identity.actor_id,
+                clearance=clearance,
+                repository_id=repository_id.strip() if repository_id is not None else None,
+                branch=branch.strip() if branch is not None else None,
+            )
+            request = ContextPackRequest(
+                query=query.strip(),
+                principal=principal,
+                token_budget=token_budget,
+                policy_version=service_policy.policy_version,
+                max_items=max_items,
+                include_provisional=include_provisional,
+                as_of=as_of,
+            )
+            stored = self.server.context_repository.list_authorized(
+                principal,
+                as_of=as_of,
+                include_provisional=include_provisional,
+            )
+            pack = build_context_pack((item.record for item in stored), request)
+        except ContextError as error:
+            self._send_error(
+                "context_invalid_request",
+                str(error),
+                HTTPStatus.BAD_REQUEST,
+            )
+            return
+        except ContextStoreError:
+            LOGGER.error(
+                "context_store_failed actor=%s team=%s organization=%s",
+                identity.actor_id,
+                identity.team_id,
+                identity.organization_id,
+            )
+            self._send_error(
+                "context_store_unavailable",
+                "Governed context is temporarily unavailable",
+                HTTPStatus.SERVICE_UNAVAILABLE,
+            )
+            return
+        LOGGER.info(
+            "context_pack_created actor=%s team=%s organization=%s repository=%s branch=%s pack_id=%s selected=%d estimated_tokens=%d",
+            identity.actor_id,
+            identity.team_id,
+            identity.organization_id,
+            principal.repository_id or "-",
+            principal.branch or "-",
+            pack.pack_id,
+            len(pack.items),
+            pack.estimated_tokens,
+        )
+        self._send_json(HTTPStatus.OK, pack.to_dict())
 
     def do_OPTIONS(self) -> None:  # noqa: N802
         self.send_response(HTTPStatus.NO_CONTENT)
@@ -584,15 +814,34 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             payload = {"error": {"message": message, "type": "policy_error" if status == 403 else code, "code": code}}
         self._send_json(status, payload)
 
-    def _send_error(self, code: str, message: str, status: HTTPStatus) -> None:
-        self._send_json(status, {"error": {"code": code, "message": message}})
+    def _send_error(
+        self,
+        code: str,
+        message: str,
+        status: HTTPStatus,
+        *,
+        headers: dict[str, str] | None = None,
+    ) -> None:
+        self._send_json(
+            status,
+            {"error": {"code": code, "message": message}},
+            headers=headers,
+        )
 
-    def _send_json(self, status: HTTPStatus, value: Any) -> None:
+    def _send_json(
+        self,
+        status: HTTPStatus,
+        value: Any,
+        *,
+        headers: dict[str, str] | None = None,
+    ) -> None:
         body = json.dumps(value, separators=(",", ":")).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        for name, header_value in (headers or {}).items():
+            self.send_header(name, header_value)
         self.end_headers()
         self.wfile.write(body)
 
@@ -604,3 +853,12 @@ def serve_in_thread(server: GatewayServer) -> threading.Thread:
     thread = threading.Thread(target=server.serve_forever, name="hormuz", daemon=True)
     thread.start()
     return thread
+
+
+def _valid_context_scope(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and bool(value.strip())
+        and len(value) <= 512
+        and all(ord(character) >= 32 and ord(character) != 127 for character in value)
+    )
