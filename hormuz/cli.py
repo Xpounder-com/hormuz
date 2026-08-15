@@ -23,6 +23,13 @@ from .context import (
     build_context_pack,
 )
 from .context_store import ContextStoreError, SQLiteContextRepository, StoredContextRecord
+from .context_benchmark import (
+    ContextBenchmarkError,
+    DEFAULT_CORPUS_PATH,
+    DEFAULT_REFERENCES_PATH,
+    run_benchmark,
+    write_benchmark_result,
+)
 from .mcp import (
     MCPConfigurationError,
     run_mcp_server,
@@ -213,6 +220,40 @@ def build_parser() -> argparse.ArgumentParser:
     context_audit.add_argument("--since", help="UTC ISO-8601 lower bound (default: start of current month)")
     context_audit.add_argument("--output", default="-", help="Output path or - for stdout (default: -)")
     context_audit.add_argument("--force", action="store_true", help="Allow replacing an existing output file")
+
+    benchmark = subparsers.add_parser(
+        "context-benchmark",
+        help="Measure governed retrieval quality, safety, compression, and latency",
+    )
+    benchmark.add_argument(
+        "--corpus",
+        default=str(DEFAULT_CORPUS_PATH),
+        help="Frozen benchmark corpus JSON (default: bundled corpus)",
+    )
+    benchmark.add_argument(
+        "--references",
+        default=str(DEFAULT_REFERENCES_PATH),
+        help="Separated hidden-outcome JSON (default: bundled references)",
+    )
+    benchmark.add_argument(
+        "--profile",
+        choices=["report", "regression", "release"],
+        default="report",
+        help="Threshold profile; release exits 2 while enterprise gaps remain (default: report)",
+    )
+    benchmark.add_argument(
+        "--ci-subset",
+        action="store_true",
+        help="Run only the deterministic 12-task CI subset while validating the full corpus",
+    )
+    benchmark.add_argument(
+        "--iterations",
+        type=int,
+        default=1,
+        help="Repeated measurements per task and baseline, from 1 to 100 (default: 1)",
+    )
+    benchmark.add_argument("--output", default="-", help="Evidence JSON path or - for stdout (default: -)")
+    benchmark.add_argument("--force", action="store_true", help="Allow replacing an existing output file")
     return parser
 
 
@@ -242,6 +283,20 @@ def main(argv: list[str] | None = None) -> int:
     )
     if args.command == "auth" and args.auth_command == "token":
         return _auth_token(args.env)
+    if args.command == "context-benchmark":
+        try:
+            result, exit_code = run_benchmark(
+                args.corpus,
+                args.references,
+                profile=args.profile,
+                ci_subset=args.ci_subset,
+                iterations=args.iterations,
+            )
+            write_benchmark_result(result, args.output, force=args.force)
+            return exit_code
+        except ContextBenchmarkError as error:
+            print(f"context benchmark error: {error}", file=sys.stderr)
+            return 1
     if args.command in {"mcp", "mcp-config"}:
         try:
             if args.command == "mcp":

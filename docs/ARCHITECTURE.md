@@ -58,6 +58,7 @@ The HTTP path authenticates first, derives organization/team/actor from the stat
 - `hormuz/context.py` authorizes, filters, ranks, budgets, and fingerprints explicit provider-neutral context packs without transport or persistence concerns.
 - `hormuz/context_store.py` implements the local governed-record repository, optimistic concurrency, integrity checks, and metadata-only mutation/read audit behind a content-codec boundary.
 - `hormuz/mcp.py` implements the bounded dual-era MCP stdio protocol and an HTTPS client for the authenticated Context Pack API; it has no repository or provider access.
+- `hormuz/context_benchmark.py` evaluates the production context-pack kernel against frozen synthetic snapshots and separated outcomes; it has no provider, network, or context-repository dependency.
 - `hormuz/cli.py` exposes serving, diagnostics, policy checks, client configuration, usage reporting, and explicit context lifecycle commands.
 
 ## Trust boundary

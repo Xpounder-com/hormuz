@@ -16,6 +16,7 @@ The private alpha currently has:
 - a separate local persistent governed-context repository plus deterministic authorization-first context packs;
 - authenticated authorization-first context-pack REST retrieval with server-owned caps, fail-closed durable metadata-only read audit, and no provider side effects;
 - a dual-era read-only MCP adapter that connects Codex and Claude Code to that REST boundary without granting repository access or identity overrides;
+- a reproducible 60-task synthetic retrieval benchmark whose regression profile enforces current authorization, lifecycle, budget, determinism, leakage, and latency guarantees while its stricter release profile exposes dependency, malicious-context, and contradiction gaps;
 - local and GitHub package/client verification.
 
 The foundation is not an enterprise release. The local context database is single-node and plaintext, not an accepted hosted persistence design. Browser SSO/session custody, shared tenancy, SCIM, automatic lifecycle/invalidation, context injection, structured DLP, cache policy, invoice reconciliation, HA deployment, KMS, and independent security review remain open gates.

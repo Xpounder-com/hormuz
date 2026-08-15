@@ -26,6 +26,7 @@ Hormuz is alpha software. The local prototype proves routing and policy behavior
 - Explicit, provider-neutral governed context packs retrieved authorization-first from that repository, with expiry, supersession, deterministic lexical ranking, and token-budget enforcement.
 - Authenticated `POST /v1/context/packs` retrieval with identity-derived scope, server-owned caps, per-actor rate limiting, stable errors, and no provider or usage-ledger side effects.
 - A real `hormuz_get_context` MCP stdio tool for Codex and Claude Code that reuses the authenticated Context Pack API, supports current and next-generation MCP handshakes, and cannot override employee identity or organization policy.
+- A bundled 60-task synthetic context benchmark with no-memory, full-history, simple-lexical, and governed baselines; a green regression profile and a deliberately stricter release profile expose current lifecycle and untrusted-context gaps.
 - Generic OIDC discovery/JWKS verification with strict issuer, audience, expiry, asymmetric-algorithm, subject-mapping, and signing-key-rotation enforcement.
 
 ## Quick start
@@ -114,6 +115,18 @@ python3 -m hormuz --config hormuz.json context-audit-export \
 
 See [docs/ROADMAP.md](docs/ROADMAP.md) for the evidence-gated enterprise program, [docs/decisions/README.md](docs/decisions/README.md) for proposed and accepted architecture decisions, [docs/CLIENTS.md](docs/CLIENTS.md) for provider routing, [docs/MCP.md](docs/MCP.md) for governed context in Codex and Claude Code, [docs/OIDC.md](docs/OIDC.md) for generic enterprise identity, [docs/USAGE.md](docs/USAGE.md) for team/person/model cost and budget reporting, [docs/AUDIT.md](docs/AUDIT.md) for the export contract and limitations, [docs/SECRET_CONTROLS.md](docs/SECRET_CONTROLS.md) for the egress boundary, [docs/CONTEXT.md](docs/CONTEXT.md) for governed record/pack semantics, [docs/CONTEXT_API.md](docs/CONTEXT_API.md) for authenticated retrieval, [docs/VERIFICATION.md](docs/VERIFICATION.md) for executable compatibility evidence, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the request path and current trust boundary.
 
+Measure the bundled governed-context contract without a gateway configuration or provider credential:
+
+```bash
+python3 -m hormuz context-benchmark \
+  --profile regression \
+  --ci-subset \
+  --iterations 5 \
+  --output context-benchmark.json
+```
+
+See [docs/CONTEXT_BENCHMARK.md](docs/CONTEXT_BENCHMARK.md) for the corpus, formulas, evidence format, and the intentionally failing enterprise release profile.
+
 ## Test
 
 ```bash
@@ -126,7 +139,7 @@ The suite uses local fake OpenAI and Anthropic endpoints and does not need real 
 HORMUZ_RUN_CLAUDE_CLIENT_TEST=1 python3 -m unittest -v
 ```
 
-The GitHub publication gate also tests Python 3.11 through 3.14, builds and installs the distribution wheel, verifies pinned official Codex and Claude Code releases, and runs a non-blocking weekly canary against their latest releases. See [docs/VERIFICATION.md](docs/VERIFICATION.md) for the exact boundary.
+The GitHub publication gate also tests Python 3.11 through 3.14, validates the frozen benchmark and preserves CI evidence, builds and installs the distribution wheel, verifies pinned official Codex and Claude Code releases, and runs a non-blocking weekly canary against their latest releases. See [docs/VERIFICATION.md](docs/VERIFICATION.md) for the exact boundary.
 
 ## Roadmap boundary
 

@@ -28,3 +28,6 @@ hormuz = "hormuz.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["hormuz*"]
+
+[tool.setuptools.package-data]
+"hormuz.benchmark_data" = ["*.json"]

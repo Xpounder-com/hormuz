@@ -64,12 +64,45 @@ jobs:
           "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" context-audit-export --help
           "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" mcp --help
           "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" mcp-config --help
+          "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" context-benchmark --help
           "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" auth token --help
       - name: Preserve distribution evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: hormuz-distributions
           path: dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  context-benchmark:
+    name: Governed context benchmark
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Install Hormuz in editable mode
+        run: python -m pip install --editable .
+      - name: Verify frozen benchmark artifacts
+        run: python benchmarks/context/generate_corpus.py --check
+      - name: Run current-contract regression profile
+        run: |
+          hormuz context-benchmark \
+            --profile regression \
+            --ci-subset \
+            --iterations 5 \
+            --output "$RUNNER_TEMP/context-benchmark.json"
+      - name: Preserve benchmark evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hormuz-context-benchmark
+          path: ${{ runner.temp }}/context-benchmark.json
           if-no-files-found: error
           retention-days: 7
 

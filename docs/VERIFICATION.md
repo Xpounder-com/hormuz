@@ -149,6 +149,25 @@ Observed result:
 
 This is evidence for a real, model-controlled read-only context tool in both clients. It is not evidence of mandatory context injection, browser OIDC/session refresh or keychain custody, shared rate limiting, automatic context invalidation, or a production hosted topology. Those remain separate gates.
 
+### Governed context benchmark path
+
+The bundled version-1 synthetic corpus and separated reference outcomes were generated from the checked-in deterministic generator and then verified byte-for-byte with its `--check` mode.
+
+Observed result:
+
+- the corpus contains 60 frozen tasks: ten each for bug fixes, features, refactors, incidents, onboarding, and policy questions, plus a balanced 12-task CI subset;
+- authorization, expired-record, supersession, contradiction, changed-dependency, and malicious-context challenges each have ten primary task labels;
+- every task binds its records to a synthetic repository revision and memory-snapshot digest, and the references bind the complete corpus by canonical SHA-256;
+- the leakage review found zero exact normalized outcome or outcome-hash matches in task records;
+- the governed baseline selected all labeled relevant records with zero cross-scope authorization leaks, zero expired/superseded selections, zero budget violations, and zero determinism failures;
+- the regression profile passed on the 12-task CI subset with five iterations per task/baseline;
+- the full release profile exited 2 as designed: precision was `0.50`, recall was `1.00`, and useful-pack rate was `0.50`; dependency-stale, malicious, and contradiction records remain selectable because automatic invalidation/quarantine/resolution is not implemented;
+- full-history and ungoverned lexical baselines selected authorization or lifecycle hazards, demonstrating that the safety result is not a consequence of an inert corpus;
+- the complete local source suite passed 96 tests, with only the separately gated official Claude Code executable test skipped;
+- source and wheel distributions contain the generator, benchmark documentation, runner, and frozen artifacts; a clean Python 3.14 environment installed the wheel and passed the bundled 12-task regression profile outside the source checkout.
+
+These are synthetic retrieval-contract results, not claims about employee productivity, model answer quality, accepted patches, hosted latency, or customer-data performance. See [CONTEXT_BENCHMARK.md](CONTEXT_BENCHMARK.md) for formulas and limitations.
+
 ## Reproduce locally
 
 The default suite uses only loopback fake providers:
@@ -167,9 +186,10 @@ Never add real provider or employee credentials to this record.
 
 ## Automated publication gate
 
-GitHub Actions runs three independent gates without provider credentials:
+GitHub Actions runs four independent gates without provider credentials:
 
 - the complete unit, context-governance, and loopback gateway suite on Python 3.11, 3.12, 3.13, and 3.14;
+- deterministic corpus regeneration plus the 12-task governed-context regression profile, with machine-readable evidence retained as an artifact;
 - source-distribution and wheel builds followed by installation of the wheel in a clean virtual environment;
 - installed-client routing through local fake providers using pinned official Codex and Claude Code package versions.
 
