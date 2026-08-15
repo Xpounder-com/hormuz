@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hormuz"
+version = "0.1.0"
+description = "Enterprise AI policy, usage, and governed-context control plane."
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+  { name = "NeuralInt" }
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Topic :: Internet :: Proxy Servers",
+  "Topic :: Security"
+]
+dependencies = []
+
+[project.scripts]
+hormuz = "hormuz.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["hormuz*"]

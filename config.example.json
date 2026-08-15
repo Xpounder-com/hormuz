@@ -1,0 +1,104 @@
+{
+  "listen": {
+    "host": "127.0.0.1",
+    "port": 8787
+  },
+  "database": "./hormuz.sqlite3",
+  "max_request_bytes": 26214400,
+  "upstream_timeout_seconds": 600,
+  "upstreams": {
+    "openai": {
+      "base_url": "https://api.openai.com",
+      "api_key_env": "OPENAI_API_KEY"
+    },
+    "anthropic": {
+      "base_url": "https://api.anthropic.com",
+      "api_key_env": "ANTHROPIC_API_KEY"
+    }
+  },
+  "identities": [
+    {
+      "token_env": "HORMUZ_TOKEN",
+      "actor_id": "alice",
+      "actor_name": "Alice Example",
+      "team_id": "engineering",
+      "team_name": "Engineering",
+      "allowed_clients": ["codex", "claude-code"]
+    }
+  ],
+  "model_routes": {
+    "engineering-fast": {
+      "protocol": "openai",
+      "upstream_model": "gpt-5.6-luna",
+      "input_cost_per_million": 1.0,
+      "cache_read_cost_per_million": 0.1,
+      "cache_write_cost_per_million": 1.25,
+      "output_cost_per_million": 6.0
+    },
+    "engineering-balanced": {
+      "protocol": "openai",
+      "upstream_model": "gpt-5.6-terra",
+      "input_cost_per_million": 2.5,
+      "cache_read_cost_per_million": 0.25,
+      "cache_write_cost_per_million": 3.125,
+      "output_cost_per_million": 15.0
+    },
+    "engineering-deep": {
+      "protocol": "openai",
+      "upstream_model": "gpt-5.6-sol",
+      "input_cost_per_million": 5.0,
+      "cache_read_cost_per_million": 0.5,
+      "cache_write_cost_per_million": 6.25,
+      "output_cost_per_million": 30.0
+    },
+    "claude-standard": {
+      "protocol": "anthropic",
+      "upstream_model": "claude-sonnet-5",
+      "input_cost_per_million": 3.0,
+      "cache_read_cost_per_million": 0.3,
+      "cache_write_cost_per_million": 3.75,
+      "output_cost_per_million": 15.0
+    },
+    "claude-deep": {
+      "protocol": "anthropic",
+      "upstream_model": "claude-opus-4-8",
+      "input_cost_per_million": 5.0,
+      "cache_read_cost_per_million": 0.5,
+      "cache_write_cost_per_million": 6.25,
+      "output_cost_per_million": 25.0
+    }
+  },
+  "policies": {
+    "organization": {
+      "allowed_clients": ["codex", "claude-code"],
+      "allowed_models": [
+        "engineering-fast",
+        "engineering-balanced",
+        "engineering-deep",
+        "claude-standard",
+        "claude-deep"
+      ],
+      "max_output_tokens": 32000,
+      "monthly_budget_usd": 10000,
+      "per_actor_monthly_budget_usd": 500
+    },
+    "teams": {
+      "engineering": {
+        "allowed_models": [
+          "engineering-fast",
+          "engineering-balanced",
+          "engineering-deep",
+          "claude-standard",
+          "claude-deep"
+        ],
+        "fallback_models": {
+          "openai": "engineering-fast",
+          "anthropic": "claude-standard"
+        },
+        "max_output_tokens": 16000,
+        "monthly_budget_usd": 5000
+      }
+    },
+    "actors": {}
+  }
+}

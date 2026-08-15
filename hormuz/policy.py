@@ -1,0 +1,116 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+from .config import GatewayConfig, Identity, ModelRoute
+from .store import MonthlyTotals, UsageStore
+
+
+@dataclass(frozen=True)
+class PolicyDecision:
+    allowed: bool
+    action: str
+    reason: str
+    requested_model: str
+    resolved_alias: str | None
+    route: ModelRoute | None
+    max_output_tokens: int | None
+
+
+class PolicyEngine:
+    def __init__(self, config: GatewayConfig, store: UsageStore):
+        self.config = config
+        self.store = store
+
+    def evaluate(
+        self,
+        *,
+        identity: Identity,
+        client: str,
+        protocol: str,
+        requested_model: str,
+        requested_output_tokens: int | None,
+    ) -> PolicyDecision:
+        policy = self.config.resolved_policy(identity)
+
+        if identity.allowed_clients and client not in identity.allowed_clients:
+            return self._deny(requested_model, f"Identity is not authorized to use client {client}.")
+        if policy.allowed_clients is not None and client not in policy.allowed_clients:
+            return self._deny(requested_model, f"Policy does not allow client {client}.")
+
+        budget_decision = self._check_limits(identity, requested_model)
+        if budget_decision is not None:
+            return budget_decision
+
+        selected_alias = requested_model
+        action = "allowed"
+        reason = "Requested model is allowed by policy."
+        route = self.config.model_routes.get(selected_alias)
+        allowed_models = policy.allowed_models
+        route_is_usable = route is not None and route.protocol == protocol
+        model_is_allowed = allowed_models is None or selected_alias in allowed_models
+
+        if not route_is_usable or not model_is_allowed:
+            fallback = (policy.fallback_models or {}).get(protocol) or policy.fallback_model
+            fallback_route = self.config.model_routes.get(fallback) if fallback else None
+            fallback_allowed = allowed_models is None or fallback in allowed_models
+            if fallback_route is None or fallback_route.protocol != protocol or not fallback_allowed:
+                return self._deny(
+                    requested_model,
+                    f"Model {requested_model} is not allowed for {protocol}, and no compatible fallback is configured.",
+                )
+            selected_alias = fallback
+            route = fallback_route
+            action = "fallback"
+            reason = f"Model {requested_model} is not allowed; routed to {fallback}."
+
+        output_cap = policy.max_output_tokens
+        if output_cap is not None and requested_output_tokens is not None and requested_output_tokens > output_cap:
+            action = "capped" if action == "allowed" else f"{action}+capped"
+            reason = f"{reason} Output limit reduced from {requested_output_tokens} to {output_cap}."
+
+        return PolicyDecision(
+            allowed=True,
+            action=action,
+            reason=reason,
+            requested_model=requested_model,
+            resolved_alias=selected_alias,
+            route=route,
+            max_output_tokens=output_cap,
+        )
+
+    def _check_limits(self, identity: Identity, requested_model: str) -> PolicyDecision | None:
+        actor_totals = self.store.monthly_totals(actor_id=identity.actor_id)
+        scopes: list[tuple[str, object, MonthlyTotals]] = [
+            ("organization", self.config.organization_policy, self.store.monthly_totals()),
+        ]
+        team_policy = self.config.team_policies.get(identity.team_id)
+        if team_policy is not None:
+            scopes.append(("team", team_policy, self.store.monthly_totals(team_id=identity.team_id)))
+        actor_policy = self.config.actor_policies.get(identity.actor_id)
+        if actor_policy is not None:
+            scopes.append(("employee", actor_policy, actor_totals))
+
+        for scope_name, scope_policy, totals in scopes:
+            if scope_policy.monthly_token_limit is not None and totals.total_tokens >= scope_policy.monthly_token_limit:
+                return self._deny(requested_model, f"The {scope_name} monthly token limit has been reached.")
+            if scope_policy.monthly_budget_usd is not None and totals.cost_usd >= scope_policy.monthly_budget_usd:
+                return self._deny(requested_model, f"The {scope_name} monthly AI budget has been reached.")
+            if (
+                scope_policy.per_actor_monthly_budget_usd is not None
+                and actor_totals.cost_usd >= scope_policy.per_actor_monthly_budget_usd
+            ):
+                return self._deny(requested_model, "The employee monthly AI budget has been reached.")
+        return None
+
+    @staticmethod
+    def _deny(requested_model: str, reason: str) -> PolicyDecision:
+        return PolicyDecision(
+            allowed=False,
+            action="denied",
+            reason=reason,
+            requested_model=requested_model,
+            resolved_alias=None,
+            route=None,
+            max_output_tokens=None,
+        )

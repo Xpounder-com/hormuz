@@ -1,0 +1,107 @@
+from __future__ import annotations
+
+import codecs
+import json
+from dataclasses import dataclass
+from typing import Any
+
+
+@dataclass
+class Usage:
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
+    reasoning_tokens: int = 0
+
+
+class ResponseUsageParser:
+    """Extracts provider usage metadata without retaining response content."""
+
+    def __init__(self, protocol: str, *, is_event_stream: bool):
+        self.protocol = protocol
+        self.is_event_stream = is_event_stream
+        self.usage = Usage()
+        self._decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+        self._line_buffer = ""
+        self._json_buffer = bytearray()
+
+    def feed(self, data: bytes) -> None:
+        if self.is_event_stream:
+            self._line_buffer += self._decoder.decode(data)
+            while "\n" in self._line_buffer:
+                line, self._line_buffer = self._line_buffer.split("\n", 1)
+                self._parse_sse_line(line.rstrip("\r"))
+        elif len(self._json_buffer) < 10 * 1024 * 1024:
+            self._json_buffer.extend(data)
+
+    def finish(self) -> Usage:
+        if self.is_event_stream:
+            self._line_buffer += self._decoder.decode(b"", final=True)
+            if self._line_buffer:
+                self._parse_sse_line(self._line_buffer.rstrip("\r"))
+        elif self._json_buffer:
+            try:
+                self._parse_object(json.loads(self._json_buffer))
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                pass
+        return self.usage
+
+    def _parse_sse_line(self, line: str) -> None:
+        if not line.startswith("data:"):
+            return
+        payload = line[5:].strip()
+        if not payload or payload == "[DONE]":
+            return
+        try:
+            value = json.loads(payload)
+        except json.JSONDecodeError:
+            return
+        self._parse_object(value)
+
+    def _parse_object(self, value: Any) -> None:
+        if not isinstance(value, dict):
+            return
+        if self.protocol == "openai":
+            response = value.get("response") if value.get("type") == "response.completed" else value
+            if isinstance(response, dict):
+                self._apply_openai_usage(response.get("usage"))
+        elif self.protocol == "anthropic":
+            if value.get("type") == "message_start" and isinstance(value.get("message"), dict):
+                self._apply_anthropic_usage(value["message"].get("usage"))
+            else:
+                self._apply_anthropic_usage(value.get("usage"))
+
+    def _apply_openai_usage(self, value: Any) -> None:
+        if not isinstance(value, dict):
+            return
+        self.usage.input_tokens = _nonnegative_int(value.get("input_tokens"), self.usage.input_tokens)
+        self.usage.output_tokens = _nonnegative_int(value.get("output_tokens"), self.usage.output_tokens)
+        input_details = value.get("input_tokens_details")
+        if isinstance(input_details, dict):
+            self.usage.cache_read_tokens = _nonnegative_int(
+                input_details.get("cached_tokens"), self.usage.cache_read_tokens
+            )
+        output_details = value.get("output_tokens_details")
+        if isinstance(output_details, dict):
+            self.usage.reasoning_tokens = _nonnegative_int(
+                output_details.get("reasoning_tokens"), self.usage.reasoning_tokens
+            )
+
+    def _apply_anthropic_usage(self, value: Any) -> None:
+        if not isinstance(value, dict):
+            return
+        self.usage.input_tokens = _nonnegative_int(value.get("input_tokens"), self.usage.input_tokens)
+        self.usage.output_tokens = _nonnegative_int(value.get("output_tokens"), self.usage.output_tokens)
+        self.usage.cache_read_tokens = _nonnegative_int(
+            value.get("cache_read_input_tokens"), self.usage.cache_read_tokens
+        )
+        self.usage.cache_write_tokens = _nonnegative_int(
+            value.get("cache_creation_input_tokens"), self.usage.cache_write_tokens
+        )
+
+
+def _nonnegative_int(value: Any, fallback: int) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return fallback
+    return value
