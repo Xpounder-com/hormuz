@@ -66,7 +66,32 @@ class CountingCodec:
         return stored
 
 
+class ToggleCodec:
+    codec_id = "test-toggle-v1"
+
+    def __init__(self) -> None:
+        self.invalid_encode = False
+
+    def encode(self, plaintext: bytes) -> bytes:
+        if self.invalid_encode:
+            return "not-bytes"  # type: ignore[return-value]
+        return plaintext
+
+    def decode(self, stored: bytes) -> bytes:
+        return stored
+
+
 class ContextStoreTests(unittest.TestCase):
+    def test_existing_store_file_is_secured_before_schema_initialization(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "context.sqlite3"
+            path.touch(mode=0o644)
+            os.chmod(path, 0o644)
+
+            SQLiteContextRepository(path)
+
+            self.assertEqual(os.stat(path).st_mode & 0o777, 0o600)
+
     def test_checked_in_sample_source_hash_is_real_and_importable(self) -> None:
         value = json.loads(
             (ROOT / "examples/context-records.jsonl").read_text(encoding="utf-8")
@@ -192,6 +217,35 @@ class ContextStoreTests(unittest.TestCase):
             self.assertCountEqual(outcomes, ["updated", "conflict"])
             events = SQLiteContextRepository(path).audit_events(organization_id="xpounder")
             self.assertEqual([event["action"] for event in events], ["ingest", "update"])
+
+    def test_update_rejects_invalid_codec_output_without_mutating_record(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            codec = ToggleCodec()
+            repository = SQLiteContextRepository(
+                Path(temporary) / "context.sqlite3",
+                codec=codec,
+            )
+            repository.ingest(record("codec"), actor_id="alice", policy_version="p1")
+            codec.invalid_encode = True
+
+            with self.assertRaisesRegex(ContextStoreError, "context_content_codec_invalid"):
+                repository.update(
+                    record("codec", source_revision="git:new"),
+                    expected_version=1,
+                    actor_id="alice",
+                    policy_version="p2",
+                )
+
+            codec.invalid_encode = False
+            stored = repository.list_authorized(
+                ContextPrincipal("xpounder", "engineering", "alice"),
+                as_of=NOW,
+            )
+            self.assertEqual(stored[0].version, 1)
+            self.assertEqual(
+                [event["action"] for event in repository.audit_events(organization_id="xpounder")],
+                ["ingest"],
+            )
 
     def test_verified_records_require_evidence_and_source_revisions_are_immutable(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

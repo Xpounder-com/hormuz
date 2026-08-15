@@ -63,7 +63,7 @@ Observed result:
 - active authorized supersession replaced stale records while an expired superseder correctly left the prior record eligible;
 - record ordering did not change the pack identity, while content, classification, policy version, and budget changes did;
 - an oversized high-scoring record was skipped and a smaller matching record was selected without exceeding the budget;
-- the sample CLI produced a single verified, source-linked 76-token context item and did not call a provider or write to the usage database;
+- the sample CLI produced a single verified, source-linked context item and did not call a provider or write to the usage database;
 - the complete source suite passed 37 tests locally after the context change, with the optional Claude Code executable test skipped in that local run.
 
 ### Generic OIDC JWT path
@@ -90,7 +90,7 @@ Observed result:
 
 - `context-import` created one verified decision at storage version 1 and a repeated import was idempotent;
 - `context-list` returned authorized provenance and lifecycle metadata without record content by default;
-- `context-pack` read the repository, authorized candidates before decoding, selected the expected 76-token record, and made no provider request;
+- `context-pack` read the repository, authorized candidates before decoding, selected the expected record, and made no provider request;
 - `context-export` produced import-compatible content-bearing JSONL with mode `0600`, overwrite protection, and a SHA-256 checksum;
 - `context-audit-export` produced only organization-scoped mutation metadata, with mode `0600`, overwrite protection, and no title, content, or source locator;
 - the context database also had mode `0600` and was a separate schema/file from the metadata-only usage ledger;
@@ -114,8 +114,16 @@ Observed result:
 - the per-actor local rate limit returned `429` plus `Retry-After`, while a different actor retained an independent allowance;
 - every API response used `Cache-Control: no-store`;
 - successful, empty, denied, and failed context requests made zero OpenAI/Anthropic requests and wrote zero provider-usage events;
+- the context route rejected bodies above `64 KiB` before parsing and rejected
+  Unicode line separators before they could forge metadata logs;
+- authentication, rate-limit, and oversized-body tests require explicit
+  connection closure when a denied POST body can remain unread;
+- token-budget tests proved that emitted provenance, lifecycle, classification,
+  and other item metadata are counted rather than only the prose body;
+- storage tests proved an existing database file is tightened to mode `0600`
+  before schema initialization and invalid codec output cannot mutate a record;
 - the rebuilt source distribution contains the REST contract, context repository, and hashed provenance source; the rebuilt wheel imported its context service policy and rate limiter under Python 3.14;
-- the complete source suite passed 66 tests locally, with only the opt-in official Claude Code executable test skipped.
+- the complete source suite passed 69 tests locally, with only the opt-in official Claude Code executable test skipped.
 
 This verifies the additive REST contract and single-process policy enforcement. It is not evidence of distributed rate-limit consistency, durable context read-audit, MCP compatibility, automatic Codex/Claude injection, or accepted hosted tenancy.
 

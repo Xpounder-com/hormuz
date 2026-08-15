@@ -31,6 +31,7 @@ from .usage import ResponseUsageParser
 
 
 LOGGER = logging.getLogger("hormuz")
+MAX_CONTEXT_REQUEST_BYTES = 64 * 1024
 
 
 class ContextRateLimiter:
@@ -159,6 +160,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                     "Context pack request limit exceeded",
                     HTTPStatus.TOO_MANY_REQUESTS,
                     headers={"Retry-After": str(retry_after)},
+                    close_connection=True,
                 )
                 return
             self._create_context_pack(identity)
@@ -171,7 +173,12 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         }
         route = routes.get(path)
         if route is None:
-            self._send_error("not_found", "Route not found", HTTPStatus.NOT_FOUND)
+            self._send_error(
+                "not_found",
+                "Route not found",
+                HTTPStatus.NOT_FOUND,
+                close_connection=True,
+            )
             return
         identity = self._authenticate()
         if identity is None:
@@ -187,7 +194,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         )
 
     def _create_context_pack(self, identity: Identity) -> None:
-        request_body = self._read_json_body()
+        request_body = self._read_json_body(max_bytes=MAX_CONTEXT_REQUEST_BYTES)
         if request_body is None:
             return
         allowed_fields = {
@@ -744,21 +751,44 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 return self.server.authenticator.authenticate(candidate)
             except AuthenticationError as error:
                 LOGGER.info("authentication_denied reason=%s", error.code)
-        self._send_error("unauthorized", "Missing or invalid Hormuz identity credential", HTTPStatus.UNAUTHORIZED)
+        self._send_error(
+            "unauthorized",
+            "Missing or invalid Hormuz identity credential",
+            HTTPStatus.UNAUTHORIZED,
+            close_connection=True,
+        )
         return None
 
-    def _read_json_body(self) -> dict[str, Any] | None:
+    def _read_json_body(self, *, max_bytes: int | None = None) -> dict[str, Any] | None:
         content_length_value = self.headers.get("Content-Length")
         if content_length_value is None:
-            self._send_error("length_required", "Content-Length is required", HTTPStatus.LENGTH_REQUIRED)
+            self._send_error(
+                "length_required",
+                "Content-Length is required",
+                HTTPStatus.LENGTH_REQUIRED,
+                close_connection=True,
+            )
             return None
         try:
             content_length = int(content_length_value)
         except ValueError:
-            self._send_error("invalid_content_length", "Content-Length must be an integer", HTTPStatus.BAD_REQUEST)
+            self._send_error(
+                "invalid_content_length",
+                "Content-Length must be an integer",
+                HTTPStatus.BAD_REQUEST,
+                close_connection=True,
+            )
             return None
-        if content_length < 0 or content_length > self.server.config.max_request_bytes:
-            self._send_error("request_too_large", "Request body exceeds the configured limit", HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
+        request_limit = self.server.config.max_request_bytes
+        if max_bytes is not None:
+            request_limit = min(request_limit, max_bytes)
+        if content_length < 0 or content_length > request_limit:
+            self._send_error(
+                "request_too_large",
+                "Request body exceeds the allowed limit",
+                HTTPStatus.REQUEST_ENTITY_TOO_LARGE,
+                close_connection=True,
+            )
             return None
         data = self.rfile.read(content_length)
         try:
@@ -821,11 +851,16 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         status: HTTPStatus,
         *,
         headers: dict[str, str] | None = None,
+        close_connection: bool = False,
     ) -> None:
+        response_headers = dict(headers or {})
+        if close_connection:
+            self.close_connection = True
+            response_headers["Connection"] = "close"
         self._send_json(
             status,
             {"error": {"code": code, "message": message}},
-            headers=headers,
+            headers=response_headers,
         )
 
     def _send_json(
@@ -860,5 +895,5 @@ def _valid_context_scope(value: object) -> bool:
         isinstance(value, str)
         and bool(value.strip())
         and len(value) <= 512
-        and all(ord(character) >= 32 and ord(character) != 127 for character in value)
+        and all(character.isprintable() for character in value)
     )

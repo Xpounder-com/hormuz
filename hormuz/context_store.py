@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import sqlite3
+import stat
 import threading
 import uuid
 from contextlib import contextmanager
@@ -90,7 +91,29 @@ class SQLiteContextRepository:
         if self.path.exists() and self.path.is_symlink():
             raise ContextStoreError("context_store_symlink_refused")
         self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        self._prepare_storage_file()
         self._initialize()
+
+    def _prepare_storage_file(self) -> None:
+        flags = (
+            os.O_RDWR
+            | os.O_CREAT
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0)
+        )
+        try:
+            descriptor = os.open(self.path, flags, 0o600)
+        except OSError as error:
+            raise ContextStoreError("context_store_open_failed") from error
+        try:
+            if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+                raise ContextStoreError("context_store_regular_file_required")
+            if hasattr(os, "fchmod"):
+                os.fchmod(descriptor, 0o600)
+        finally:
+            os.close(descriptor)
+        if self.path.is_symlink():  # Defense for platforms without O_NOFOLLOW.
+            raise ContextStoreError("context_store_symlink_refused")
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.path, timeout=30)
@@ -217,11 +240,7 @@ class SQLiteContextRepository:
         prepared: list[tuple[ContextRecord, bytes]] = []
         for record in records:
             normalized = _normalize_for_storage(record, actor_id=actor_id)
-            encoded = self.codec.encode(normalized.content.encode("utf-8"))
-            if not isinstance(encoded, bytes):
-                raise ContextStoreError("context_content_codec_invalid")
-            if len(encoded) > MAX_CONTEXT_CONTENT_BYTES:
-                raise ContextStoreError("context_content_too_large")
+            encoded = _encode_content(self.codec, normalized.content)
             prepared.append((normalized, encoded))
         if not prepared:
             return []
@@ -317,9 +336,7 @@ class SQLiteContextRepository:
         _validate_mutation_identity(actor_id=actor_id, policy_version=policy_version)
         now = _utc(occurred_at or datetime.now(timezone.utc))
         normalized = _normalize_for_storage(record, actor_id=actor_id)
-        encoded = self.codec.encode(normalized.content.encode("utf-8"))
-        if len(encoded) > MAX_CONTEXT_CONTENT_BYTES:
-            raise ContextStoreError("context_content_too_large")
+        encoded = _encode_content(self.codec, normalized.content)
 
         with self._lock, self._connection() as connection:
             connection.execute("BEGIN IMMEDIATE")
@@ -602,11 +619,7 @@ class SQLiteContextRepository:
     def _row_to_stored(self, row: sqlite3.Row) -> StoredContextRecord:
         if str(row["content_encoding"]) != self.codec.codec_id:
             raise ContextStoreError("context_content_codec_unavailable")
-        try:
-            plaintext = self.codec.decode(bytes(row["content"]))
-            content = plaintext.decode("utf-8")
-        except (UnicodeDecodeError, ValueError) as error:
-            raise ContextStoreError("context_content_decode_failed") from error
+        content = _decode_content(self.codec, row["content"])
         actual_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
         if actual_hash != str(row["content_sha256"]):
             raise ContextStoreError("context_content_integrity_failed")
@@ -762,6 +775,33 @@ def _normalize_for_storage(record: ContextRecord, *, actor_id: str) -> ContextRe
     if normalized.verification == "verified" and not normalized.verification_evidence:
         raise ContextStoreError("context_verified_evidence_required")
     return normalized
+
+
+def _encode_content(codec: ContextContentCodec, content: str) -> bytes:
+    try:
+        encoded = codec.encode(content.encode("utf-8"))
+    except Exception as error:
+        raise ContextStoreError("context_content_encode_failed") from error
+    if not isinstance(encoded, bytes):
+        raise ContextStoreError("context_content_codec_invalid")
+    if len(encoded) > MAX_CONTEXT_CONTENT_BYTES:
+        raise ContextStoreError("context_content_too_large")
+    return encoded
+
+
+def _decode_content(codec: ContextContentCodec, stored: object) -> str:
+    if not isinstance(stored, (bytes, bytearray, memoryview)):
+        raise ContextStoreError("context_content_codec_invalid")
+    try:
+        plaintext = codec.decode(bytes(stored))
+    except Exception as error:
+        raise ContextStoreError("context_content_decode_failed") from error
+    if not isinstance(plaintext, bytes):
+        raise ContextStoreError("context_content_codec_invalid")
+    try:
+        return plaintext.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise ContextStoreError("context_content_decode_failed") from error
 
 
 def _validate_mutation_identity(*, actor_id: str, policy_version: str) -> None:

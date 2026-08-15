@@ -56,14 +56,22 @@ Full request:
 Contract:
 
 - `query` and `token_budget` are required. Query length, lexical content, integer types, and positive bounds are validated before retrieval.
+- The context route has a fixed `64 KiB` JSON-body ceiling in addition to the
+  global gateway request limit. It rejects oversized bodies before JSON parsing.
 - `max_items` may narrow but cannot exceed the configured organization cap.
-- `repository_id` and `branch` narrow scope. A branch requires a repository.
+- `repository_id` and `branch` narrow scope. A branch requires a repository;
+  non-printable Unicode and control characters are rejected before those values
+  can reach authorization or metadata logs.
 - `clearance` may narrow but cannot exceed the authenticated identity's configured clearance.
 - `include_provisional` defaults to `false` and is denied unless the organization explicitly enables it.
 - Unknown fields fail closed. In particular, callers cannot supply `organization_id`, `team_id`, `actor_id`, `policy_version`, or `as_of`.
 - Evaluation time is the server's current UTC time. The online endpoint cannot replay expired or not-yet-effective records by requesting a historical time.
 
-The existing `max_request_bytes` setting bounds the JSON body before parsing. Output is additionally bounded by the context token and item caps.
+The complete serialized form of every selected item—including content,
+provenance, lifecycle, and classification metadata—contributes to its
+deterministic token estimate. Selection is bounded by the context token and item
+caps; the response wrapper is outside that estimate, and the estimate is not a
+provider tokenizer guarantee.
 
 ## Response
 
@@ -116,11 +124,14 @@ Errors have a stable envelope:
 | `400` | `context_invalid_request` | Invalid type, value, scope combination, query, or unknown field. |
 | `401` | `unauthorized` | Missing or invalid Hormuz credential. |
 | `403` | `context_policy_denied` | Requested budget, item cap, clearance, or provisional access exceeds policy. |
-| `413` | `request_too_large` | JSON body exceeds `max_request_bytes`. |
+| `413` | `request_too_large` | JSON body exceeds the context route's `64 KiB` ceiling or the lower configured global limit. |
 | `429` | `context_rate_limited` | Per-actor local request limit exceeded; inspect `Retry-After`. |
 | `503` | `context_store_unavailable` | The governed-context repository failed closed. |
 
 Internal storage errors are logged without query or record content and are not returned to the caller.
+Authentication, rate-limit, unknown-route, and oversized-body rejections close
+the HTTP/1.1 connection when a request body may remain unread, preventing the
+body from being interpreted as a subsequent request.
 
 ## Security and side-effect boundary
 

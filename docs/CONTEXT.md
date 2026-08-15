@@ -146,7 +146,9 @@ Hormuz applies these stages in order:
 6. Exclude records not yet effective, verified in the future, or expired at `--as-of`.
 7. Apply active, authorized supersession chains.
 8. Rank remaining records lexically and deterministically.
-9. Select complete records within the estimated token budget and item cap.
+9. Estimate each complete emitted item, including content, provenance, lifecycle,
+   classification, and audit-facing metadata, then select whole items within the
+   token budget and item cap.
 
 Steps 1–6 execute in SQLite before stored content is decoded. The pack builder repeats those checks as a defense-in-depth boundary before ranking.
 
@@ -160,7 +162,9 @@ This is a durable local governance kernel, not the final enterprise context serv
 - the SQLite implementation is single-node and plaintext, with no accepted enterprise tenancy, KMS, backup, restore, legal-hold, or HA contract;
 - mutation commands trust the local configuration operator rather than a dedicated context-writer RBAC permission;
 - active authorized supersession means an expired successor can leave its prior record eligible; automatic invalidation and contradiction policy remain open lifecycle work;
-- the token estimate is deterministic but not a provider tokenizer guarantee;
+- the token estimate covers the complete serialized item contract and is
+  deterministic, but it excludes the response wrapper and is not a provider
+  tokenizer guarantee;
 - there is no automatic prompt injection, context-pack cache, approval workflow, connector, or outcome writeback;
 - if a pack is later injected, injection must happen before the existing secret-egress boundary so all added content is inspected.
 

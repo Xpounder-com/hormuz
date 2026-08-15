@@ -17,6 +17,7 @@ RECORD_KINDS = ("claim", "decision")
 _CLASSIFICATION_RANK = {name: index for index, name in enumerate(CLASSIFICATIONS)}
 _TERM_PATTERN = re.compile(r"[^\W_]+", re.UNICODE)
 _SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
+_TOKEN_ESTIMATE_INTEGER_SENTINEL = 9_999_999_999
 
 
 class ContextError(ValueError):
@@ -315,36 +316,48 @@ class ContextPackItem:
     estimated_tokens: int
 
     def to_dict(self) -> dict[str, Any]:
-        record = self.record
-        return {
-            "id": record.record_id,
-            "title": record.title,
-            "content": record.content,
-            "kind": record.record_kind,
-            "owner_id": record.owner_id,
-            "classification": record.classification,
-            "visibility": record.visibility,
-            "scope_id": record.scope_id,
-            "repository_id": record.repository_id,
-            "branch": record.branch,
-            "verification": record.verification,
-            "verification_evidence": list(record.verification_evidence),
-            "effective_at": _isoformat(record.effective_at),
-            "verified_at": _isoformat(record.verified_at),
-            "expires_at": _isoformat(record.expires_at),
-            "supersedes_id": record.supersedes_id,
-            "invalidation_rules": list(record.invalidation_rules),
-            "tags": list(record.tags),
-            "source": {
-                "uri": record.source_uri,
-                "revision": record.source_revision,
-                "sha256": record.source_sha256,
-                "item_key": record.source_item_key,
-            },
-            "content_sha256": record.content_sha256,
-            "relevance_score": self.relevance_score,
-            "estimated_tokens": self.estimated_tokens,
-        }
+        return _context_pack_item_dict(
+            self.record,
+            relevance_score=self.relevance_score,
+            estimated_tokens=self.estimated_tokens,
+        )
+
+
+def _context_pack_item_dict(
+    record: ContextRecord,
+    *,
+    relevance_score: int,
+    estimated_tokens: int,
+) -> dict[str, Any]:
+    return {
+        "id": record.record_id,
+        "title": record.title,
+        "content": record.content,
+        "kind": record.record_kind,
+        "owner_id": record.owner_id,
+        "classification": record.classification,
+        "visibility": record.visibility,
+        "scope_id": record.scope_id,
+        "repository_id": record.repository_id,
+        "branch": record.branch,
+        "verification": record.verification,
+        "verification_evidence": list(record.verification_evidence),
+        "effective_at": _isoformat(record.effective_at),
+        "verified_at": _isoformat(record.verified_at),
+        "expires_at": _isoformat(record.expires_at),
+        "supersedes_id": record.supersedes_id,
+        "invalidation_rules": list(record.invalidation_rules),
+        "tags": list(record.tags),
+        "source": {
+            "uri": record.source_uri,
+            "revision": record.source_revision,
+            "sha256": record.source_sha256,
+            "item_key": record.source_item_key,
+        },
+        "content_sha256": record.content_sha256,
+        "relevance_score": relevance_score,
+        "estimated_tokens": estimated_tokens,
+    }
 
 
 @dataclass(frozen=True)
@@ -446,10 +459,18 @@ def build_context_pack(
 
 
 def estimate_record_tokens(record: ContextRecord) -> int:
-    rendered = (
-        f"[context id={record.record_id} title={record.title} "
-        f"source={record.source_uri} revision={record.source_revision} "
-        f"classification={record.classification}]\n{record.content}\n"
+    # Budget the complete content-bearing item that the API emits, not only
+    # the prose body. The fixed-width sentinels make this an upper bound for
+    # the two computed integer fields without creating a circular estimate.
+    rendered = json.dumps(
+        _context_pack_item_dict(
+            record,
+            relevance_score=_TOKEN_ESTIMATE_INTEGER_SENTINEL,
+            estimated_tokens=_TOKEN_ESTIMATE_INTEGER_SENTINEL,
+        ),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
     )
     return max(1, math.ceil(len(rendered.encode("utf-8")) / 3))
 

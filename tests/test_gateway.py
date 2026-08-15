@@ -434,12 +434,13 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertEqual(self.gateway.store.active_budget_reservations(), 0)
 
     def test_invalid_token_is_rejected(self) -> None:
-        status, _, _ = self._post(
+        status, headers, _ = self._post(
             "/v1/responses",
             {"model": "engineering-fast", "input": "hello"},
             token="wrong-token",
         )
         self.assertEqual(status, 401)
+        self.assertEqual(headers["connection"], "close")
 
     def test_context_pack_api_uses_authenticated_scope_without_provider_or_usage_side_effects(self) -> None:
         identity = self.config.identities_by_actor["alice"]
@@ -559,6 +560,15 @@ class GatewayIntegrationTests(unittest.TestCase):
                 "context_invalid_request",
             ),
             (
+                {
+                    "query": "retry",
+                    "token_budget": 100,
+                    "repository_id": "acme/api\u2028forged-log-line",
+                },
+                400,
+                "context_invalid_request",
+            ),
+            (
                 {"query": "retry", "token_budget": 501},
                 403,
                 "context_policy_denied",
@@ -584,6 +594,17 @@ class GatewayIntegrationTests(unittest.TestCase):
                 status, _, response = self._post("/v1/context/packs", body)
                 self.assertEqual(status, expected_status)
                 self.assertEqual(json.loads(response)["error"]["code"], expected_code)
+        status, headers, response = self._post(
+            "/v1/context/packs",
+            {
+                "query": "retry",
+                "token_budget": 100,
+                "unknown": "x" * (64 * 1024),
+            },
+        )
+        self.assertEqual(status, 413)
+        self.assertEqual(headers["connection"], "close")
+        self.assertEqual(json.loads(response)["error"]["code"], "request_too_large")
         self.assertEqual(len(FakeProviderHandler.requests), provider_before)
         self.assertEqual(self.gateway.store.monthly_totals(actor_id="alice").requests, 0)
 
@@ -599,6 +620,7 @@ class GatewayIntegrationTests(unittest.TestCase):
 
         self.assertEqual(status, 429)
         self.assertGreaterEqual(int(headers["retry-after"]), 1)
+        self.assertEqual(headers["connection"], "close")
         self.assertEqual(json.loads(response)["error"]["code"], "context_rate_limited")
         self.assertEqual(self._post("/v1/context/packs", body, token=CLAUDE_ONLY_TOKEN)[0], 200)
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import unittest
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
@@ -160,6 +161,34 @@ class ContextPackTests(unittest.TestCase):
 
         self.assertEqual([item.record.record_id for item in pack.items], ["compact"])
         self.assertEqual(pack.estimated_tokens, budget)
+
+    def test_token_estimate_covers_complete_emitted_item_metadata(self) -> None:
+        metadata_heavy = replace(
+            record("metadata-heavy"),
+            verification_evidence=("review:" + "e" * 4_096,),
+            invalidation_rules=("dependency:" + "i" * 4_096,),
+            tags=("tag-" + "t" * 4_096,),
+        )
+        estimate = estimate_record_tokens(metadata_heavy)
+
+        pack = build_context_pack(
+            [metadata_heavy],
+            request(token_budget=estimate),
+        )
+
+        self.assertEqual([item.record.record_id for item in pack.items], ["metadata-heavy"])
+        item_bytes = json.dumps(
+            pack.items[0].to_dict(),
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode("utf-8")
+        self.assertGreaterEqual(estimate * 3, len(item_bytes))
+        excluded = build_context_pack(
+            [metadata_heavy],
+            request(token_budget=estimate - 1),
+        )
+        self.assertEqual(excluded.items, ())
 
     def test_invalid_records_and_supersession_cycles_fail_closed(self) -> None:
         with self.assertRaises(ContextError):
