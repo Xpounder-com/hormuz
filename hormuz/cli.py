@@ -23,6 +23,12 @@ from .context import (
     build_context_pack,
 )
 from .context_store import ContextStoreError, SQLiteContextRepository, StoredContextRecord
+from .mcp import (
+    MCPConfigurationError,
+    run_mcp_server,
+    validate_credential_env,
+    validate_gateway_url,
+)
 from .policy import PolicyEngine
 from .server import GatewayServer
 from .store import UsageStore
@@ -74,6 +80,41 @@ def build_parser() -> argparse.ArgumentParser:
     connect.add_argument(
         "--credential-env",
         help="Environment variable containing the credential (OIDC default: HORMUZ_OIDC_ACCESS_TOKEN)",
+    )
+
+    mcp = subparsers.add_parser(
+        "mcp",
+        help="Run the governed-context MCP stdio adapter for Codex and Claude Code",
+    )
+    mcp.add_argument("--url", required=True, help="Hormuz gateway base URL")
+    mcp.add_argument(
+        "--credential-env",
+        default="HORMUZ_TOKEN",
+        help="Environment variable containing the Hormuz credential (default: HORMUZ_TOKEN)",
+    )
+    mcp.add_argument(
+        "--timeout-seconds",
+        type=int,
+        default=30,
+        help="Context API timeout from 1 to 60 seconds (default: 30)",
+    )
+
+    mcp_config = subparsers.add_parser(
+        "mcp-config",
+        help="Print a secret-free Codex or Claude Code MCP configuration",
+    )
+    mcp_config.add_argument("client", choices=["codex", "claude"])
+    mcp_config.add_argument("--url", required=True, help="Hormuz gateway base URL")
+    mcp_config.add_argument(
+        "--credential-env",
+        default="HORMUZ_TOKEN",
+        help="Environment variable inherited by the MCP process (default: HORMUZ_TOKEN)",
+    )
+    mcp_config.add_argument(
+        "--timeout-seconds",
+        type=int,
+        default=30,
+        help="Context API timeout from 1 to 60 seconds (default: 30)",
     )
 
     auth = subparsers.add_parser("auth", help="Credential helpers for AI clients")
@@ -201,6 +242,23 @@ def main(argv: list[str] | None = None) -> int:
     )
     if args.command == "auth" and args.auth_command == "token":
         return _auth_token(args.env)
+    if args.command in {"mcp", "mcp-config"}:
+        try:
+            if args.command == "mcp":
+                return run_mcp_server(
+                    base_url=args.url,
+                    credential_env=args.credential_env,
+                    timeout_seconds=args.timeout_seconds,
+                )
+            return _mcp_config(
+                args.client,
+                args.url,
+                credential_env=args.credential_env,
+                timeout_seconds=args.timeout_seconds,
+            )
+        except MCPConfigurationError as error:
+            print(f"MCP configuration error: {error}", file=sys.stderr)
+            return 2
     try:
         config = GatewayConfig.load(args.config)
         if args.command == "serve":
@@ -537,6 +595,53 @@ def _auth_token(env_name: str) -> int:
         print(f"credential environment variable is invalid: {env_name}", file=sys.stderr)
         return 1
     print(value)
+    return 0
+
+
+def _mcp_config(
+    client: str,
+    url: str,
+    *,
+    credential_env: str = "HORMUZ_TOKEN",
+    timeout_seconds: int = 30,
+) -> int:
+    base_url = validate_gateway_url(url)
+    env_name = validate_credential_env(credential_env)
+    if isinstance(timeout_seconds, bool) or not isinstance(timeout_seconds, int) or not 1 <= timeout_seconds <= 60:
+        raise MCPConfigurationError("MCP timeout must be between 1 and 60 seconds")
+    args = [
+        "mcp",
+        "--url",
+        base_url,
+        "--credential-env",
+        env_name,
+        "--timeout-seconds",
+        str(timeout_seconds),
+    ]
+    if client == "codex":
+        print("[mcp_servers.hormuz]")
+        print('command = "hormuz"')
+        print("args = " + json.dumps(args))
+        print("env_vars = " + json.dumps([env_name]))
+        print("startup_timeout_sec = 10")
+        print(f"tool_timeout_sec = {timeout_seconds + 5}")
+        print("required = true")
+    else:
+        print(
+            json.dumps(
+                {
+                    "mcpServers": {
+                        "hormuz": {
+                            "type": "stdio",
+                            "command": "hormuz",
+                            "args": args,
+                            "env": {env_name: "${" + env_name + "}"},
+                        }
+                    }
+                },
+                indent=2,
+            )
+        )
     return 0
 
 

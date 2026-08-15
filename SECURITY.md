@@ -14,6 +14,7 @@ Hormuz is alpha software and has not received a third-party security review. Do 
 - Identity-token comparisons use constant-time comparison.
 - OIDC JWT access tokens require a configured issuer and audience, asymmetric signature verification, expiry, a key ID, and an explicit issuer-subject mapping. Discovery and JWKS use bounded responses and HTTPS outside loopback tests; unknown key IDs cannot trigger unlimited refreshes.
 - Request bodies have a configurable size limit and upstream calls have a configurable timeout.
+- The local MCP adapter has no direct context-store or provider access. It sends only the documented narrowing fields to the authenticated Context Pack API, refuses plaintext HTTP outside loopback, does not follow redirects, bounds messages and responses, and writes only protocol messages to stdout.
 
 ## Current limitations
 
@@ -23,6 +24,7 @@ Hormuz is alpha software and has not received a third-party security review. Do 
 - SQLite is a single-node development store.
 - Configuration contains rate cards and policy, but there is not yet a signed configuration or change-approval workflow.
 - Secret detection is best-effort and text-only. It does not inspect images, decode arbitrary encodings or archives, or infer semantically sensitive company information.
+- Governed context returned through MCP is explicitly marked as untrusted reference data. MCP makes it available to the model but does not itself prevent prompt injection; provider-bound tool results are inspected by the existing egress controls when the client sends the next model request through Hormuz.
 - Logs and provider behavior still require deployment-specific review.
 
 Terminate TLS and enforce network access controls in front of Hormuz for any shared test deployment. Use unique identities for every human or service account, never shared team credentials. Do not send an OIDC ID token where an API access token is required.

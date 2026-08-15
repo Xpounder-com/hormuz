@@ -158,4 +158,4 @@ curl --fail-with-body \
   http://127.0.0.1:8787/v1/context/packs
 ```
 
-The API is not yet an MCP tool and is not automatically called by Codex or Claude Code. Those are separate roadmap gates so automatic injection cannot bypass context authorization or secret-egress inspection.
+The same boundary is now exposed as the read-only `hormuz_get_context` MCP tool documented in [MCP.md](MCP.md). MCP retrieval remains explicit; automatic injection is a separate roadmap gate so it cannot bypass context authorization or secret-egress inspection.

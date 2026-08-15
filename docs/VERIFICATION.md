@@ -128,7 +128,26 @@ Observed result:
 - the rebuilt source distribution contains the REST contract, context repository, and hashed provenance source; a clean Python 3.14 environment installed the rebuilt wheel with no broken requirements, loaded Hormuz from `site-packages`, initialized schema version 2, and emitted mutation/read audit events;
 - the complete source suite passed 72 tests locally, with only the opt-in official Claude Code executable test skipped.
 
-This verifies the additive REST contract, single-process policy enforcement, and local fail-closed durable read audit. It is not evidence of distributed rate-limit consistency, enterprise reader RBAC, MCP compatibility, automatic Codex/Claude injection, or accepted hosted tenancy.
+This verifies the additive REST contract, single-process policy enforcement, and local fail-closed durable read audit. It is not evidence of distributed rate-limit consistency, enterprise reader RBAC, automatic Codex/Claude injection, or accepted hosted tenancy.
+
+### Codex and Claude Code MCP path
+
+The checked-in `hormuz mcp` stdio process was exercised as a protocol server, through the actual local Context Pack API, from a clean installed wheel, and as a required/strict MCP server loaded by the official employee clients.
+
+Observed result:
+
+- legacy MCP initialization, tool listing, structured and text tool results, unknown methods/tools, stable execution errors, and cancellation behavior passed executable protocol tests;
+- the `2026-07-28` discovery and per-request metadata contract returned complete discovery, list, and call results, rejected incomplete metadata, and returned the specified unsupported-version error;
+- non-standard JSON constants, messages above `128 KiB`, unsafe scope values, caller-supplied identity fields, invalid branch scoping, plaintext non-loopback URLs, URL credentials/query/fragment/whitespace, responses above `16 MiB`, redirects, and non-JSON responses fail closed;
+- a real MCP subprocess used an employee token from its inherited environment to call the actual authenticated `/v1/context/packs` route, selected only the expected repository/branch-scoped record, and returned no credential in stdout or stderr;
+- the end-to-end call committed exactly one durable metadata-only context-read event before returning the pack and made no provider request or usage-ledger entry;
+- the secret-free `mcp-config` outputs parse as Codex TOML and Claude Code JSON and do not require a local Hormuz server configuration or provider key;
+- installed Codex CLI `0.139.0` completed its fake-provider generation with Hormuz configured as a required MCP server;
+- official Claude Code `2.1.233` completed its fake-provider generation with `--strict-mcp-config`, and its debug trace confirmed that it loaded the Hormuz server;
+- the complete source suite passed 89 tests locally, with only the separately rerun official Claude Code test skipped in the default command; that opt-in test then passed;
+- the rebuilt source distribution includes `docs/MCP.md`, `hormuz/mcp.py`, and `tests/test_mcp.py`; a clean Python 3.14 environment installed the wheel, displayed both MCP commands, and completed initialize plus `tools/list` from the installed executable.
+
+This is evidence for a real, model-controlled read-only context tool in both clients. It is not evidence of mandatory context injection, browser OIDC/session refresh or keychain custody, shared rate limiting, automatic context invalidation, or a production hosted topology. Those remain separate gates.
 
 ## Reproduce locally
 

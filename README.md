@@ -25,6 +25,7 @@ Hormuz is alpha software. The local prototype proves routing and policy behavior
 - A separate local governed-context repository with atomic idempotent import, verification evidence, classification/scope authorization, optimistic concurrency, metadata-only mutation/read audit export, private content export, and physical deletion controls.
 - Explicit, provider-neutral governed context packs retrieved authorization-first from that repository, with expiry, supersession, deterministic lexical ranking, and token-budget enforcement.
 - Authenticated `POST /v1/context/packs` retrieval with identity-derived scope, server-owned caps, per-actor rate limiting, stable errors, and no provider or usage-ledger side effects.
+- A real `hormuz_get_context` MCP stdio tool for Codex and Claude Code that reuses the authenticated Context Pack API, supports current and next-generation MCP handshakes, and cannot override employee identity or organization policy.
 - Generic OIDC discovery/JWKS verification with strict issuer, audience, expiry, asymmetric-algorithm, subject-mapping, and signing-key-rotation enforcement.
 
 ## Quick start
@@ -48,6 +49,15 @@ python3 -m hormuz --config hormuz.json client-config claude
 ```
 
 Employees authenticate to Hormuz with their unique `HORMUZ_TOKEN`. Hormuz removes that credential and authenticates upstream with the company's provider key.
+
+Connect governed context to either existing client without placing a provider key on the employee machine:
+
+```bash
+python3 -m hormuz mcp-config codex --url http://127.0.0.1:8787
+python3 -m hormuz mcp-config claude --url http://127.0.0.1:8787
+```
+
+Install the generated Codex TOML or Claude Code `.mcp.json` entry, then verify it with `codex mcp get hormuz --json` or `claude mcp get hormuz`. See [docs/MCP.md](docs/MCP.md) for the complete, secret-free setup and the distinction between a callable governed tool and future mandatory context injection.
 
 ## Policies and usage
 
@@ -102,7 +112,7 @@ python3 -m hormuz --config hormuz.json context-audit-export \
   --output hormuz-context-audit.jsonl
 ```
 
-See [docs/ROADMAP.md](docs/ROADMAP.md) for the evidence-gated enterprise program, [docs/decisions/README.md](docs/decisions/README.md) for proposed and accepted architecture decisions, [docs/CLIENTS.md](docs/CLIENTS.md) for Codex and Claude Code setup, [docs/OIDC.md](docs/OIDC.md) for generic enterprise identity, [docs/USAGE.md](docs/USAGE.md) for team/person/model cost and budget reporting, [docs/AUDIT.md](docs/AUDIT.md) for the export contract and limitations, [docs/SECRET_CONTROLS.md](docs/SECRET_CONTROLS.md) for the egress boundary, [docs/CONTEXT.md](docs/CONTEXT.md) for governed record/pack semantics, [docs/CONTEXT_API.md](docs/CONTEXT_API.md) for authenticated retrieval, [docs/VERIFICATION.md](docs/VERIFICATION.md) for executable compatibility evidence, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the request path and current trust boundary.
+See [docs/ROADMAP.md](docs/ROADMAP.md) for the evidence-gated enterprise program, [docs/decisions/README.md](docs/decisions/README.md) for proposed and accepted architecture decisions, [docs/CLIENTS.md](docs/CLIENTS.md) for provider routing, [docs/MCP.md](docs/MCP.md) for governed context in Codex and Claude Code, [docs/OIDC.md](docs/OIDC.md) for generic enterprise identity, [docs/USAGE.md](docs/USAGE.md) for team/person/model cost and budget reporting, [docs/AUDIT.md](docs/AUDIT.md) for the export contract and limitations, [docs/SECRET_CONTROLS.md](docs/SECRET_CONTROLS.md) for the egress boundary, [docs/CONTEXT.md](docs/CONTEXT.md) for governed record/pack semantics, [docs/CONTEXT_API.md](docs/CONTEXT_API.md) for authenticated retrieval, [docs/VERIFICATION.md](docs/VERIFICATION.md) for executable compatibility evidence, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the request path and current trust boundary.
 
 ## Test
 
@@ -120,4 +130,4 @@ The GitHub publication gate also tests Python 3.11 through 3.14, builds and inst
 
 ## Roadmap boundary
 
-The current milestone includes the enforcement, accounting, deterministic secret-egress, metadata-audit, local persistent context-record/context-pack, and OIDC JWT-verification kernels. The context database is deliberately single-node and plaintext; it is not the pending enterprise tenancy or KMS design. Before an enterprise release, Hormuz still needs an OIDC login/session or introspection strategy for opaque tokens, SCIM and revocation, structured PII/semantic DLP, durable multi-tenant persistence, TLS and deployment hardening, signed or externally immutable audit retention, invoice reconciliation, broader provider conformance coverage, and automatic context approvals, invalidation, cache, injection, and outcome writeback.
+The current milestone includes the enforcement, accounting, deterministic secret-egress, metadata-audit, local persistent context-record/context-pack, MCP retrieval, and OIDC JWT-verification kernels. The context database is deliberately single-node and plaintext; it is not the pending enterprise tenancy or KMS design. Before an enterprise release, Hormuz still needs an OIDC login/session or introspection strategy for opaque tokens, SCIM and revocation, structured PII/semantic DLP, durable multi-tenant persistence, TLS and deployment hardening, signed or externally immutable audit retention, invoice reconciliation, broader provider conformance coverage, and automatic context approvals, invalidation, cache, mandatory injection, and outcome writeback.

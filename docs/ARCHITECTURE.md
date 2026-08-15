@@ -40,6 +40,7 @@ deterministic lexical context pack
         |
         +--> commit metadata-only pack-read audit
         +--> CLI stdout or POST /v1/context/packs response
+        +--> hormuz_get_context through local MCP stdio adapter
         +--> no provider call or automatic prompt injection
 ```
 
@@ -56,6 +57,7 @@ The HTTP path authenticates first, derives organization/team/actor from the stat
 - `hormuz/redaction.py` transforms provider-bound JSON values using configured secret controls.
 - `hormuz/context.py` authorizes, filters, ranks, budgets, and fingerprints explicit provider-neutral context packs without transport or persistence concerns.
 - `hormuz/context_store.py` implements the local governed-record repository, optimistic concurrency, integrity checks, and metadata-only mutation/read audit behind a content-codec boundary.
+- `hormuz/mcp.py` implements the bounded dual-era MCP stdio protocol and an HTTPS client for the authenticated Context Pack API; it has no repository or provider access.
 - `hormuz/cli.py` exposes serving, diagnostics, policy checks, client configuration, usage reporting, and explicit context lifecycle commands.
 
 ## Trust boundary
@@ -64,7 +66,7 @@ Hormuz is trusted with plaintext requests and responses because it must inspect 
 
 ## Compatibility boundary
 
-Hormuz implements the provider endpoints required by Codex and Claude Code rather than inventing a new employee-facing client. Provider protocol changes are compatibility risks and require executable conformance tests.
+Hormuz implements the provider endpoints and local MCP stdio integration required by Codex and Claude Code rather than inventing a new employee-facing client. Provider and MCP protocol changes are compatibility risks and require executable conformance tests.
 
 ## Identity boundary
 

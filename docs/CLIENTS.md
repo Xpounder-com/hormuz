@@ -2,6 +2,8 @@
 
 Hormuz sits between an employee's existing AI client and the provider API. The employee uses either a unique bootstrap identity token or a short-lived OIDC JWT access token; only the Hormuz service receives the organization's OpenAI or Anthropic credential.
 
+This page configures provider traffic through Hormuz. To add governed organizational context as a native tool in the same clients, also follow [MCP.md](MCP.md).
+
 Use TLS and an organization-controlled hostname outside local development. The examples below use `https://hormuz.example.com` as that deployment URL.
 
 ## Codex

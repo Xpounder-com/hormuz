@@ -6,6 +6,7 @@ import os
 import shutil
 import socket
 import subprocess
+import sys
 import tempfile
 import threading
 import unittest
@@ -543,6 +544,109 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertEqual(bob_status, 200)
         self.assertEqual(json.loads(bob_response)["items"], [])
 
+    def test_mcp_stdio_calls_the_actual_context_api_and_commits_read_audit(self) -> None:
+        identity = self.config.identities_by_actor["alice"]
+        now = datetime.now(timezone.utc)
+        self.gateway.context_repository.ingest_many(
+            [
+                ContextRecord(
+                    record_id="mcp-retry",
+                    record_kind="decision",
+                    title="MCP retry standard",
+                    content="Use bounded retry with jitter through the governed MCP path.",
+                    owner_id="alice",
+                    organization_id=identity.organization_id,
+                    visibility="team",
+                    scope_id=identity.team_id,
+                    classification="internal",
+                    source_uri="https://example.test/adr/mcp-retry",
+                    source_revision="git:mcp-one",
+                    source_sha256="c" * 64,
+                    source_item_key="mcp-retry",
+                    repository_id="Xpounder-com/hormuz",
+                    branch="main",
+                    verification="verified",
+                    verification_evidence=("ci:passed",),
+                    effective_at=now - timedelta(days=1),
+                    verified_at=now - timedelta(days=1),
+                    tags=("retry", "mcp"),
+                )
+            ],
+            actor_id="alice",
+            policy_version="test-context-v1",
+        )
+        provider_before = len(FakeProviderHandler.requests)
+        messages = "\n".join(
+            json.dumps(message)
+            for message in (
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {"protocolVersion": "2025-06-18"},
+                },
+                {
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "hormuz_get_context",
+                        "arguments": {
+                            "query": "retry jitter mcp",
+                            "token_budget": 500,
+                            "repository_id": "Xpounder-com/hormuz",
+                            "branch": "main",
+                        },
+                    },
+                },
+            )
+        ) + "\n"
+        environment = os.environ.copy()
+        environment["TEST_GATEWAY_TOKEN"] = GATEWAY_TOKEN
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "hormuz",
+                "mcp",
+                "--url",
+                f"http://127.0.0.1:{self.gateway.server_port}",
+                "--credential-env",
+                "TEST_GATEWAY_TOKEN",
+                "--timeout-seconds",
+                "5",
+            ],
+            cwd=self.root,
+            env=environment,
+            input=messages,
+            text=True,
+            capture_output=True,
+            timeout=10,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        responses = {value["id"]: value for value in map(json.loads, result.stdout.splitlines())}
+        tool_result = responses[2]["result"]
+        self.assertFalse(tool_result["isError"])
+        pack = tool_result["structuredContent"]
+        self.assertEqual([item["id"] for item in pack["items"]], ["mcp-retry"])
+        self.assertEqual(pack["scope"]["actor_id"], "alice")
+        self.assertNotIn(GATEWAY_TOKEN, result.stdout + result.stderr)
+        self.assertEqual(len(FakeProviderHandler.requests), provider_before)
+        self.assertEqual(self.gateway.store.monthly_totals(actor_id="alice").requests, 0)
+        access_events = [
+            event
+            for event in self.gateway.context_repository.audit_events(
+                organization_id=identity.organization_id
+            )
+            if event["event_type"] == "context.read"
+        ]
+        self.assertEqual(len(access_events), 1)
+        self.assertEqual(access_events[0]["pack_id"], pack["pack_id"])
+        self.assertNotIn("retry jitter mcp", json.dumps(access_events[0]))
+
     def test_context_pack_api_auth_validation_and_policy_fail_closed(self) -> None:
         provider_before = len(FakeProviderHandler.requests)
         status, _, response = self._post(
@@ -796,6 +900,27 @@ class GatewayIntegrationTests(unittest.TestCase):
             'model_providers.company_gateway.env_key="TEST_GATEWAY_TOKEN"',
             "-c",
             'model_providers.company_gateway.wire_api="responses"',
+            "-c",
+            f"mcp_servers.hormuz.command={json.dumps(sys.executable)}",
+            "-c",
+            "mcp_servers.hormuz.args="
+            + json.dumps(
+                [
+                    "-m",
+                    "hormuz",
+                    "mcp",
+                    "--url",
+                    f"http://127.0.0.1:{self.gateway.server_port}",
+                    "--credential-env",
+                    "TEST_GATEWAY_TOKEN",
+                    "--timeout-seconds",
+                    "5",
+                ]
+            ),
+            "-c",
+            'mcp_servers.hormuz.env_vars=["TEST_GATEWAY_TOKEN"]',
+            "-c",
+            "mcp_servers.hormuz.required=true",
             "Reply with exactly GATEWAY_OK and do not call tools.",
         ]
         result = subprocess.run(command, env=environment, text=True, capture_output=True, timeout=30)
@@ -824,10 +949,37 @@ class GatewayIntegrationTests(unittest.TestCase):
         environment = os.environ.copy()
         environment["ANTHROPIC_BASE_URL"] = f"http://127.0.0.1:{self.gateway.server_port}"
         environment["ANTHROPIC_API_KEY"] = GATEWAY_TOKEN
+        environment["TEST_GATEWAY_TOKEN"] = GATEWAY_TOKEN
         environment.pop("ANTHROPIC_AUTH_TOKEN", None)
         environment["DISABLE_AUTOUPDATER"] = "1"
         environment["CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT"] = "1"
         claude = shutil.which("claude")
+        mcp_config_path = self.root / "claude-mcp.json"
+        mcp_config_path.write_text(
+            json.dumps(
+                {
+                    "mcpServers": {
+                        "hormuz": {
+                            "type": "stdio",
+                            "command": sys.executable,
+                            "args": [
+                                "-m",
+                                "hormuz",
+                                "mcp",
+                                "--url",
+                                f"http://127.0.0.1:{self.gateway.server_port}",
+                                "--credential-env",
+                                "TEST_GATEWAY_TOKEN",
+                                "--timeout-seconds",
+                                "5",
+                            ],
+                            "env": {"TEST_GATEWAY_TOKEN": "${TEST_GATEWAY_TOKEN}"},
+                        }
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
         command = ([claude] if claude else ["npx", "-y", "@anthropic-ai/claude-code"]) + [
             "-p",
             "--bare",
@@ -836,6 +988,9 @@ class GatewayIntegrationTests(unittest.TestCase):
             "--debug-file",
             str(debug_path),
             "--no-session-persistence",
+            "--mcp-config",
+            str(mcp_config_path),
+            "--strict-mcp-config",
             "--tools",
             "",
             "--model",
@@ -860,6 +1015,8 @@ class GatewayIntegrationTests(unittest.TestCase):
             ),
         )
         self.assertIn("ok", result.stdout.lower())
+        debug_output = debug_path.read_text(encoding="utf-8") if debug_path.exists() else ""
+        self.assertIn("hormuz", debug_output.lower())
         self.assertGreater(len(FakeProviderHandler.requests), before)
         generation_requests = [
             request

@@ -62,6 +62,8 @@ jobs:
           "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" context-list --help
           "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" context-export --help
           "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" context-audit-export --help
+          "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" mcp --help
+          "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" mcp-config --help
           "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" auth token --help
       - name: Preserve distribution evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
