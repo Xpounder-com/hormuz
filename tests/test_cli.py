@@ -38,6 +38,7 @@ from hormuz.cli import (
     _policy_check,
     _status,
     build_parser,
+    main,
 )
 from hormuz.config import (
     ConfigError,
@@ -668,6 +669,139 @@ class ClientConfigTests(unittest.TestCase):
             path.write_text(json.dumps(raw), encoding="utf-8")
             with self.assertRaisesRegex(ConfigError, r"Unknown identities\[0\].capabilities"):
                 GatewayConfig.load(path, environ=environment)
+
+    def test_dlp_evaluate_cli_writes_only_aggregate_private_evidence(self) -> None:
+        marker = "CLI-EVALUATION-CONTENT-NEVER-RETAIN"
+        with tempfile.TemporaryDirectory() as temporary:
+            corpus = Path(temporary) / "corpus.jsonl"
+            output = Path(temporary) / "evaluation.json"
+            corpus.write_text(
+                "\n".join(
+                    (
+                        json.dumps(
+                            {
+                                "payload": {"input": f"employee@example.com {marker}"},
+                                "expected_match": True,
+                            }
+                        ),
+                        json.dumps(
+                            {
+                                "payload": {"input": "ordinary text"},
+                                "expected_match": False,
+                            }
+                        ),
+                    )
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            with mock.patch.dict(
+                os.environ,
+                {"HORMUZ_TOKEN": "test-identity-token"},
+            ):
+                exit_code = main(
+                    [
+                        "--config",
+                        str(ROOT / "config.example.json"),
+                        "dlp",
+                        "evaluate",
+                        "--rule-id",
+                        "email_address",
+                        "--corpus-id",
+                        "email-eval-v1",
+                        "--protocol",
+                        "openai",
+                        "--model",
+                        "gpt-5.4-mini",
+                        "--input",
+                        str(corpus),
+                        "--output",
+                        str(output),
+                    ]
+                )
+
+            report = json.loads(output.read_text(encoding="utf-8"))
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(report["confusion_matrix"]["true_positive"], 1)
+            self.assertEqual(report["confusion_matrix"]["true_negative"], 1)
+            self.assertFalse(report["privacy"]["payloads_retained"])
+            self.assertNotIn(marker, output.read_text(encoding="utf-8"))
+            self.assertEqual(os.stat(output).st_mode & 0o777, 0o600)
+
+    def test_dlp_evaluate_cli_does_not_reflect_invalid_corpus_content(self) -> None:
+        marker = "INVALID-CORPUS-CONTENT-NEVER-REFLECT"
+        with tempfile.TemporaryDirectory() as temporary:
+            corpus = Path(temporary) / "invalid.jsonl"
+            output = Path(temporary) / "evaluation.json"
+            corpus.write_text(
+                json.dumps(
+                    {
+                        "payload": {"input": marker},
+                        "expected_match": True,
+                        "unexpected": marker,
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            with mock.patch.dict(
+                os.environ,
+                {"HORMUZ_TOKEN": "test-identity-token"},
+            ), redirect_stderr(stderr := io.StringIO()):
+                exit_code = main(
+                    [
+                        "--config",
+                        str(ROOT / "config.example.json"),
+                        "dlp",
+                        "evaluate",
+                        "--rule-id",
+                        "email_address",
+                        "--corpus-id",
+                        "email-eval-v1",
+                        "--protocol",
+                        "openai",
+                        "--model",
+                        "gpt-5.4-mini",
+                        "--input",
+                        str(corpus),
+                        "--output",
+                        str(output),
+                    ]
+                )
+
+            self.assertEqual(exit_code, 1)
+            self.assertIn("must contain exactly payload and expected_match", stderr.getvalue())
+            self.assertNotIn(marker, stderr.getvalue())
+            self.assertFalse(output.exists())
+
+    def test_dlp_evaluate_cli_rejects_unconfigured_upstream_scope_before_input(self) -> None:
+        marker = "UNCONFIGURED-MODEL-NEVER-REFLECT"
+        with mock.patch.dict(
+            os.environ,
+            {"HORMUZ_TOKEN": "test-identity-token"},
+        ), redirect_stderr(stderr := io.StringIO()):
+            exit_code = main(
+                [
+                    "--config",
+                    str(ROOT / "config.example.json"),
+                    "dlp",
+                    "evaluate",
+                    "--rule-id",
+                    "email_address",
+                    "--corpus-id",
+                    "email-eval-v1",
+                    "--protocol",
+                    "openai",
+                    "--model",
+                    marker,
+                    "--input",
+                    "/path/that/must/not/be/read.jsonl",
+                ]
+            )
+
+        self.assertEqual(exit_code, 1)
+        self.assertIn("configured routed model not found for protocol", stderr.getvalue())
+        self.assertNotIn(marker, stderr.getvalue())
 
     def test_usage_report_budget_matches_policy_scope(self) -> None:
         self.assertEqual(

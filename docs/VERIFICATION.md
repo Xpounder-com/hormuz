@@ -596,6 +596,23 @@ The next accepted-ADR-0004 slice was exercised locally on August 16, 2026. No li
 
 This closes ASCII MIME-whitespace normalization for supported base64 forms, not arbitrary transfer decoding or issue #10. Non-ASCII whitespace, percent/hex and other encodings, unknown or obfuscated binary/container formats, archive-content inspection, provider file/URL fetching, source classification, application-specific repeated query decoding, semantic and organization-specific evaluation, cache invalidation, shared KMS/HA operations, externally immutable audit, and independent review remain open.
 
+### Content-free organization DLP detector evaluation
+
+The next accepted-ADR-0004 slice was exercised locally on August 16, 2026. No provider credential or live provider endpoint was used. The content-bearing inputs were synthetic or test-local and the emitted evidence was aggregate only.
+
+- red-first checks established that neither the `hormuz.dlp_evaluation` domain module nor `hormuz dlp evaluate` command existed before this slice;
+- the new offline command loads one enabled organization rule and one exact configured upstream protocol/model scope, then runs that detector through the same bounded provider-aware `SecretRedactor` kernel in detect mode. It does not call a provider or gateway, change policy, create an approval, or open the usage, security, context, or session stores;
+- strict UTF-8 JSONL validation rejects duplicate members, unknown case fields, non-standard constants, invalid labels, empty corpora, excessive detector nesting, more than 10,000 cases, and inputs over 25 MiB. Content-bearing payloads are hidden from object representations and bounded validation/detector errors;
+- schema `hormuz.dlp-evaluation.v1` records deterministic detector version `hormuz-deterministic-v1`, package/runtime versions, safe rule and scope metadata, an administrator-controlled corpus version, aggregate finding/case counts, confusion matrix, and derived metrics. It explicitly records that payloads, matched values, case IDs, and corpus hashes are absent and that policy promotion is manual;
+- direct and CLI tests proved one true positive, true negative, false positive, and false negative; null-safe metric calculation; encoded organization-dictionary detection; provider/model-scope rejection; no dictionary value or environment-name disclosure; content-free invalid-corpus and detector-failure errors; no partial evidence on failure; overwrite refusal; and private `0600` output;
+- the checked-in synthetic installation fixture produced one true positive and one true negative. That is format/package evidence only and is not represented as an organization-representative evaluation or evidence that the low-confidence email rule should move beyond detect-only;
+- all 277 source tests passed with installed-client gates enabled and no skips. Codex `0.139.0` and the cached official Claude Code `2.1.233` package each completed ordinary generation through Hormuz and provider-compatible loopback fakes;
+- the frozen 60-task release benchmark passed five iterations with precision `1.00`, recall `1.00`, useful-pack rate `1.00`, mean compression ratio `0.840593`, zero authorization, stale-lifecycle, dependency-stale, malicious, contradiction, token-budget, leakage, or determinism failures, and p95 in-process selection latency `0.154833 ms`. Corpus SHA-256 remained `9822d592868202c7c7539bcdac7d4a5894c01f9e6dba7a434846516b67b32c17`;
+- isolated source and wheel builds included the evaluator, documentation, tests, and synthetic fixture. A clean Python `3.14.0` environment installed the exact wheel outside the checkout, loaded `hormuz.dlp_evaluation` from `site-packages`, ran the packaged evaluator to a `0600` aggregate report, compiled the installed package, and passed the installed strict 60-task benchmark; and
+- source/test bytecode compilation, deterministic corpus verification, `git diff --check`, and high-confidence runtime-source, extracted-wheel, and tracked-environment-file credential scans passed.
+
+This completes the reusable content-free evaluation mechanism, not the customer-specific ADR gate or issue #10. An organization must still freeze and review a representative corpus, set acceptable false-positive/false-negative thresholds, approve any action change, and retain that decision through its security process. Source-path classification, semantic detection, unknown encodings/containers, archive-content inspection, application-specific repeated query decoding, multi-node approval operations, cache invalidation, shared KMS/HA, externally immutable audit, and independent security review remain open.
+
 ## Reproduce locally
 
 The default suite uses only loopback fake providers:

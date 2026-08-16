@@ -36,6 +36,12 @@ from .context_store import (
     StoredContextRecord,
 )
 from .dlp_client import DLPApprovalClient, DLPApprovalClientError
+from .dlp_evaluation import (
+    DLPEvaluationError,
+    evaluate_dlp_rule,
+    load_evaluation_corpus,
+    write_evaluation_result,
+)
 from .credential_store import CredentialStoreError, validate_profile
 from .context_benchmark import (
     ContextBenchmarkError,
@@ -319,8 +325,47 @@ def build_parser() -> argparse.ArgumentParser:
     lifecycle_revalidate.add_argument("--batch-size", type=int, help="Records in this batch")
     _add_remote_lifecycle_arguments(lifecycle_revalidate)
 
-    dlp = subparsers.add_parser("dlp", help="Review organization DLP exceptions")
+    dlp = subparsers.add_parser(
+        "dlp",
+        help="Evaluate organization DLP detectors and review exact exceptions",
+    )
     dlp_subparsers = dlp.add_subparsers(dest="dlp_command", required=True)
+    evaluation = dlp_subparsers.add_parser(
+        "evaluate",
+        help="Measure one configured detector on a labeled JSONL corpus",
+    )
+    evaluation.add_argument("--rule-id", required=True, help="Configured organization DLP rule")
+    evaluation.add_argument(
+        "--corpus-id",
+        required=True,
+        help="Administrator-controlled non-content corpus version identifier",
+    )
+    evaluation.add_argument(
+        "--protocol",
+        required=True,
+        choices=["openai", "anthropic"],
+        help="Provider protocol used for provider-aware detection",
+    )
+    evaluation.add_argument(
+        "--model",
+        required=True,
+        help="Exact routed upstream model used for rule-scope evaluation",
+    )
+    evaluation.add_argument(
+        "--input",
+        required=True,
+        help="Labeled content-bearing JSONL corpus; never copied into the report",
+    )
+    evaluation.add_argument(
+        "--output",
+        default="-",
+        help="Content-free aggregate evidence JSON path or - for stdout",
+    )
+    evaluation.add_argument(
+        "--force",
+        action="store_true",
+        help="Allow replacing an existing evidence file",
+    )
     approval = dlp_subparsers.add_parser("approval", help="Inspect or approve one DLP exception")
     approval_subparsers = approval.add_subparsers(
         dest="dlp_approval_command",
@@ -669,7 +714,7 @@ def main(argv: list[str] | None = None) -> int:
             profile=args.profile,
             allow_insecure_http=args.allow_insecure_http,
         )
-    if args.command == "dlp":
+    if args.command == "dlp" and args.dlp_command == "approval":
         return _dlp_approval_command(args)
     if args.command == "sessions":
         return _session_admin_command(args)
@@ -718,6 +763,8 @@ def main(argv: list[str] | None = None) -> int:
             return _status(config, args)
         if args.command == "billing":
             return _billing_command(config, args)
+        if args.command == "dlp" and args.dlp_command == "evaluate":
+            return _dlp_evaluate_command(config, args)
         if args.command == "policy-check":
             return _policy_check(config, args)
         if args.command == "client-config":
@@ -1345,6 +1392,47 @@ def _dlp_approval_command(args: argparse.Namespace) -> int:
         print(f"DLP approval failed: {error.code}", file=sys.stderr)
         return 1
     print(json.dumps(result, indent=2, sort_keys=True))
+    return 0
+
+
+def _dlp_evaluate_command(config: GatewayConfig, args: argparse.Namespace) -> int:
+    if not any(
+        route.protocol == args.protocol and route.upstream_model == args.model
+        for route in config.model_routes.values()
+    ):
+        print(
+            "DLP evaluation failed: configured routed model not found for protocol",
+            file=sys.stderr,
+        )
+        return 1
+    rule = next(
+        (
+            item
+            for item in config.dlp_controls.rules
+            if item.rule_id == args.rule_id
+        ),
+        None,
+    )
+    if rule is None:
+        print(
+            "DLP evaluation failed: configured rule not found",
+            file=sys.stderr,
+        )
+        return 1
+    try:
+        cases = load_evaluation_corpus(args.input)
+        result = evaluate_dlp_rule(
+            cases,
+            rule=rule,
+            policy_version=config.dlp_controls.policy_version,
+            corpus_id=args.corpus_id,
+            protocol=args.protocol,
+            model=args.model,
+        )
+        write_evaluation_result(result, args.output, force=args.force)
+    except DLPEvaluationError as error:
+        print(f"DLP evaluation failed: {error}", file=sys.stderr)
+        return 1
     return 0
 
 

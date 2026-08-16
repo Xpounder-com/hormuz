@@ -89,6 +89,7 @@ The HTTP path authenticates first, derives organization/team/actor from the stat
 - `hormuz/billing.py` validates complete OpenAI and Anthropic cost-report pages and normalizes exact provider amounts and supported billing dimensions without persistence or credentials.
 - `hormuz/usage.py` parses bounded provider usage and actual-model metadata through provider-specific allowlists without storing response content.
 - `hormuz/redaction.py` applies bounded credential, regulated-identifier, low-confidence PII, exact-dictionary, and provider-format-aware opaque-media rules to provider-bound JSON plus transport-supplied unredactable strings.
+- `hormuz/dlp_evaluation.py` measures one configured organization detector over a strict local labeled corpus and emits aggregate content-free evidence without provider, transport, or persistence behavior.
 - `hormuz/dlp_approval.py` computes domain-separated keyed fingerprints over canonical provider request material without persistence or transport concerns.
 - `hormuz/dlp_client.py` implements the bounded, authenticated approver CLI transport and refuses redirects or non-loopback plaintext HTTP.
 - `hormuz/context.py` authorizes, applies immutable lifecycle observations, quarantines high-confidence injection patterns, surfaces structured contradictions, ranks, budgets, and fingerprints explicit provider-neutral context packs without transport or persistence concerns.
@@ -99,7 +100,7 @@ The HTTP path authenticates first, derives organization/team/actor from the stat
 - `hormuz/context_store.py` implements the local governed-record, trusted-snapshot, immutable evidence, and resumable revalidation repository with optimistic concurrency, leases, integrity checks, and metadata-only mutation/read/lifecycle audit behind a content-codec boundary.
 - `hormuz/mcp.py` implements the bounded dual-era MCP stdio protocol and an HTTPS client for the authenticated Context Pack API; it has no repository or provider access.
 - `hormuz/context_benchmark.py` evaluates the production context-pack kernel against frozen synthetic snapshots and separated outcomes; it has no provider, network, or context-repository dependency.
-- `hormuz/cli.py` exposes serving, diagnostics, policy checks, client configuration, usage and billing reporting, local lifecycle operations, and config-independent remote connector commands.
+- `hormuz/cli.py` exposes serving, diagnostics, policy checks, client configuration, usage and billing reporting, offline DLP detector evaluation, local lifecycle operations, and config-independent remote connector commands.
 
 ## Trust boundary
 

@@ -1,0 +1,2 @@
+{"payload":{"input":"synthetic.user@example.com"},"expected_match":true}
+{"payload":{"input":"ordinary synthetic text"},"expected_match":false}

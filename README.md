@@ -22,6 +22,7 @@ Hormuz is alpha software. The local prototype proves routing and policy behavior
 - Metadata-only SQLite usage ledger. Prompts and responses are relayed, not persisted.
 - Metadata-only JSONL audit export for usage, secret-egress, and structured-DLP evidence, with private file permissions and a SHA-256 checksum.
 - Pre-provider JSON string value/key, provider URL-query, and allowlisted provider-header inspection for credentials, valid hyphenated US SSNs, Luhn-valid cards, low-confidence email syntax, and organization dictionaries, with provider/model-scoped detect, redact, deny, or approval-required actions. Keys, raw queries, and forwarded header values are never mutated: enforced redaction findings in any of them fail closed. Identity-derived team/person DLP overlays can narrow scope and only strengthen organization actions. Bounded UTF-8 base64/base64url strings and textual data URIs, including ASCII MIME whitespace inside the encoded payload, are decoded, recursively inspected, and safely re-encoded after value transformation. Recognized encoded compression/archive containers and OpenAI/Anthropic image/file content are denied by default when their bytes cannot be inspected; inspectable inline text documents continue through the ordinary redaction path. Optional approvals are metadata-only, non-self, exact-request-material/model bound, 15-minute, and atomically single-use.
+- Offline evaluation of one configured DLP detector against a strict organization-labeled JSONL corpus, producing only versioned aggregate confusion metrics and never retaining cases, samples, matches, or corpus hashes.
 - OpenAI response storage and background mode disabled by default as enforceable provider privacy policy.
 - Configuration output for installed Codex and Claude Code clients.
 - A separate local governed-context repository with atomic idempotent import, verification evidence, classification/scope authorization, optimistic concurrency, metadata-only mutation/read audit export, private content export, and physical deletion controls.
@@ -156,6 +157,20 @@ hormuz dlp approval approve apr_0123456789abcdef0123456789abcdef \
 
 No prompt or matched value is returned to the approver or stored in the approval ledger. Recognized opaque images and files are not approval-eligible: the secure default denies them because Hormuz cannot inspect their bytes. See [docs/SECRET_CONTROLS.md](docs/SECRET_CONTROLS.md) for media coverage, key generation, capability configuration, exact retry semantics, and failure behavior.
 
+Evaluate a configured detector offline before considering a lower-confidence policy promotion:
+
+```bash
+hormuz --config hormuz.json dlp evaluate \
+  --rule-id email_address \
+  --corpus-id security-email-2026-08-v1 \
+  --protocol openai \
+  --model gpt-5.5 \
+  --input /secure/evaluations/email-labeled.jsonl \
+  --output /secure/evidence/email-evaluation.json
+```
+
+The input corpus is sensitive and stays local. The private `0600` result contains only detector/policy versions, scope, aggregate case counts, a confusion matrix, and derived metrics; it does not automatically change policy. See [docs/DLP_EVALUATION.md](docs/DLP_EVALUATION.md) for the strict corpus contract and promotion boundary.
+
 Import the sample into the separate local context repository, inspect metadata, and build a pack without injecting or sending it to a provider:
 
 ```bash
@@ -225,7 +240,7 @@ hormuz lifecycle revalidate \
 
 This authenticates who submitted the normalized attestation; it does not yet verify a GitHub webhook or independently prove the external event. See [docs/CONTEXT_LIFECYCLE_API.md](docs/CONTEXT_LIFECYCLE_API.md) for the exact connector contract, status codes, retry behavior, and trust boundary.
 
-See [docs/ROADMAP.md](docs/ROADMAP.md) for the evidence-gated enterprise program, [docs/decisions/README.md](docs/decisions/README.md) for proposed and accepted architecture decisions, [docs/CLIENTS.md](docs/CLIENTS.md) for provider routing, [docs/MCP.md](docs/MCP.md) for explicit governed-context retrieval in Codex and Claude Code, [docs/CONTEXT_INJECTION.md](docs/CONTEXT_INJECTION.md) for automatic user-priority injection, [docs/OIDC.md](docs/OIDC.md) for generic enterprise identity, [docs/SESSION_ADMIN_API.md](docs/SESSION_ADMIN_API.md) for tenant-scoped session control, [docs/USAGE.md](docs/USAGE.md) for team/person/model cost and budget reporting, [docs/USAGE_ADMIN_API.md](docs/USAGE_ADMIN_API.md) for authenticated tenant usage administration, [docs/BILLING_RECONCILIATION.md](docs/BILLING_RECONCILIATION.md) for provider cost imports and aggregate reconciliation, [docs/AUDIT.md](docs/AUDIT.md) for the export contract and limitations, [docs/SECRET_CONTROLS.md](docs/SECRET_CONTROLS.md) for the egress boundary, [docs/DLP_APPROVAL_API.md](docs/DLP_APPROVAL_API.md) for the approver contract, [docs/CONTEXT.md](docs/CONTEXT.md) for governed record/pack semantics, [docs/CONTEXT_LIFECYCLE.md](docs/CONTEXT_LIFECYCLE.md) for evidence-driven promotion and revalidation, [docs/CONTEXT_API.md](docs/CONTEXT_API.md) for authenticated retrieval, [docs/CONTEXT_LIFECYCLE_API.md](docs/CONTEXT_LIFECYCLE_API.md) for authenticated lifecycle mutation, [docs/VERIFICATION.md](docs/VERIFICATION.md) for executable compatibility evidence, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the request path and current trust boundary.
+See [docs/ROADMAP.md](docs/ROADMAP.md) for the evidence-gated enterprise program, [docs/decisions/README.md](docs/decisions/README.md) for proposed and accepted architecture decisions, [docs/CLIENTS.md](docs/CLIENTS.md) for provider routing, [docs/MCP.md](docs/MCP.md) for explicit governed-context retrieval in Codex and Claude Code, [docs/CONTEXT_INJECTION.md](docs/CONTEXT_INJECTION.md) for automatic user-priority injection, [docs/OIDC.md](docs/OIDC.md) for generic enterprise identity, [docs/SESSION_ADMIN_API.md](docs/SESSION_ADMIN_API.md) for tenant-scoped session control, [docs/USAGE.md](docs/USAGE.md) for team/person/model cost and budget reporting, [docs/USAGE_ADMIN_API.md](docs/USAGE_ADMIN_API.md) for authenticated tenant usage administration, [docs/BILLING_RECONCILIATION.md](docs/BILLING_RECONCILIATION.md) for provider cost imports and aggregate reconciliation, [docs/AUDIT.md](docs/AUDIT.md) for the export contract and limitations, [docs/SECRET_CONTROLS.md](docs/SECRET_CONTROLS.md) for the egress boundary, [docs/DLP_EVALUATION.md](docs/DLP_EVALUATION.md) for organization-labeled detector measurement, [docs/DLP_APPROVAL_API.md](docs/DLP_APPROVAL_API.md) for the approver contract, [docs/CONTEXT.md](docs/CONTEXT.md) for governed record/pack semantics, [docs/CONTEXT_LIFECYCLE.md](docs/CONTEXT_LIFECYCLE.md) for evidence-driven promotion and revalidation, [docs/CONTEXT_API.md](docs/CONTEXT_API.md) for authenticated retrieval, [docs/CONTEXT_LIFECYCLE_API.md](docs/CONTEXT_LIFECYCLE_API.md) for authenticated lifecycle mutation, [docs/VERIFICATION.md](docs/VERIFICATION.md) for executable compatibility evidence, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the request path and current trust boundary.
 
 Measure the bundled governed-context contract without a gateway configuration or provider credential:
 

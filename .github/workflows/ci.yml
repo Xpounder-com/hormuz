@@ -78,10 +78,21 @@ jobs:
           "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" mcp-config --help
           "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" context-benchmark --help
           "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" auth token --help
+          "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" dlp evaluate --help
           "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" dlp approval show --help
           "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" dlp approval approve --help
           "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" login --help
           "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" logout --help
+          HORMUZ_TOKEN="ci-synthetic-identity-token-0001" \
+            "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" \
+            --config config.example.json \
+            dlp evaluate \
+            --rule-id email_address \
+            --corpus-id ci-package-email-v1 \
+            --protocol openai \
+            --model gpt-5.4-mini \
+            --input examples/dlp-evaluation-email.jsonl \
+            --output "$RUNNER_TEMP/dlp-evaluation-package.json"
       - name: Preserve distribution evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
