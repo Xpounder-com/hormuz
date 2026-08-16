@@ -35,11 +35,12 @@ These issues record product decisions and block dependent implementation. They m
 1. [#1 — Approve the enterprise tenancy, authorization, and persistence topology](https://github.com/Xpounder-com/hormuz/issues/1) — [Proposed ADR 0002](decisions/0002-enterprise-tenancy-and-persistence.md)
 2. [#3 — Define provider and Hormuz cache privacy tiers](https://github.com/Xpounder-com/hormuz/issues/3) — [Proposed ADR 0003](decisions/0003-cache-privacy-tiers.md)
 3. [#12 — Choose GitHub lifecycle event trust and collection](https://github.com/Xpounder-com/hormuz/issues/12) — [Proposed ADR 0005](decisions/0005-github-lifecycle-event-trust.md)
-4. [#5 — Choose automatic governed-context injection](https://github.com/Xpounder-com/hormuz/issues/5) — [Proposed ADR 0006](decisions/0006-automatic-context-injection.md)
 
 [ADR 0001](decisions/0001-oidc-login-and-session-architecture.md) was accepted by the product owner on 2026-08-15. Its implementation evidence is tracked under #13; acceptance of the decision does not close the remaining real-IdP, SCIM, shared-revocation, and HA gates.
 
 [ADR 0004](decisions/0004-structured-dlp-and-approval-boundary.md) was accepted by the product owner on 2026-08-15. The deterministic detector/action subset, monotonic team/person overlays, JSON string-key, one-pass provider-query, and allowlisted forwarded-header fail-closed enforcement, bounded supported encoded-text inspection, provider-format-aware opaque-media denial, and local replay-safe approval workflow now exist, but source classification, application-specific repeated query decoding, unsupported or compressed/archive decoding, semantic evaluation, multi-node approval operations, cache invalidation, and the full #10 release evidence remain open.
+
+[ADR 0006](decisions/0006-automatic-context-injection.md) was accepted by the product owner on 2026-08-16. It authorizes gateway-side, user-priority automatic context injection under #5 with injection disabled by default and verified-only as the production default; acceptance does not close the provider compatibility, policy, lineage, privacy, or end-to-end quality gates.
 
 ## v0.2 — Enterprise identity and tenancy
 

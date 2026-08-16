@@ -20,7 +20,7 @@ An agent, test result, or convenient implementation detail cannot move a decisio
 | [0003](0003-cache-privacy-tiers.md) | Proposed | Provider and Hormuz cache privacy tiers | [#3](https://github.com/Xpounder-com/hormuz/issues/3) |
 | [0004](0004-structured-dlp-and-approval-boundary.md) | Accepted | Structured DLP and approval boundary | [#10](https://github.com/Xpounder-com/hormuz/issues/10) |
 | [0005](0005-github-lifecycle-event-trust.md) | Proposed | GitHub lifecycle event trust and collection | [#12](https://github.com/Xpounder-com/hormuz/issues/12) |
-| [0006](0006-automatic-context-injection.md) | Proposed | Automatic governed-context injection | [#5](https://github.com/Xpounder-com/hormuz/issues/5) |
+| [0006](0006-automatic-context-injection.md) | Accepted | Automatic governed-context injection | [#5](https://github.com/Xpounder-com/hormuz/issues/5) |
 
 ## Acceptance record
 
@@ -32,3 +32,5 @@ When the owner decides, update the ADR with:
 - implementation issues unblocked by the decision.
 
 Do not rewrite the alternatives or rationale after acceptance. Supersede the ADR if the decision later changes.
+
+ADR 0006 was accepted by the product owner on 2026-08-16. The accepted decision authorizes gateway-side, user-priority injection under issue #5; it does not close the remaining implementation, compatibility, privacy, or enterprise-release gates.

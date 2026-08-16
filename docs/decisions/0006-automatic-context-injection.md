@@ -1,7 +1,8 @@
 # ADR 0006: Automatic governed-context injection
 
-- Status: **Proposed — owner approval required**
+- Status: **Accepted**
 - Date proposed: 2026-08-16
+- Date accepted: 2026-08-16
 - Decision owner: Product owner
 - Tracking issue: [#5](https://github.com/Xpounder-com/hormuz/issues/5)
 - Unblocks after acceptance: automatic Context Pack injection for Codex and Claude Code under [#5](https://github.com/Xpounder-com/hormuz/issues/5)
@@ -15,7 +16,7 @@ Choose where Hormuz should apply governed organizational context in employees' e
 3. **Client-side wrapper injection.** Add a Hormuz launcher or wrapper that retrieves and inserts context before starting each supported client.
 4. **Gateway-side high-priority injection.** Put governed records in OpenAI `instructions` and Anthropic `system` content.
 
-This ADR proposes option 1. It is not accepted and does not authorize runtime request mutation, new context policy fields, or repository-scope headers until the product owner approves it.
+The product owner accepted option 1 without changes on 2026-08-16. Acceptance authorizes bounded gateway-side user-priority injection work under issue #5; it does not close the issue or accept the separate cache, hosted-persistence, KMS, HA, or enterprise-release decisions.
 
 ## Context
 
@@ -187,4 +188,4 @@ Prompt text and caller-controlled paths are selectors at most. Treating either a
 
 ## Owner approval record
 
-Pending. Approval must identify option 1, 2, 3, or 4 and record any requested changes to default mode, verified-only behavior, repository selector/grant boundary, provider placement, optional/required failure semantics, or content-free usage lineage.
+Accepted option 1 without changes on 2026-08-16. The product owner approved the recommended direction in the Codex task, and the decision plus unchanged boundaries were recorded in [GitHub issue #5](https://github.com/Xpounder-com/hormuz/issues/5#issuecomment-5307621457). Automatic injection remains disabled by default in example and migrated configurations; verified-only remains the production default; repository selectors narrow administrator-authorized grants and never grant access; injected records remain untrusted user-priority reference data; and optional/required failures plus content-free lineage follow this ADR.
