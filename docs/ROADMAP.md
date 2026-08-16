@@ -52,7 +52,7 @@ Exit outcome: employees and workloads authenticate through a deployable company 
 - [#18 — Authorization-first Context Pack API and MCP tool](https://github.com/Xpounder-com/hormuz/issues/18)
 - [#12 — Automatic verification, promotion, decay, contradiction, and invalidation](https://github.com/Xpounder-com/hormuz/issues/12)
 - [#5 — Inject governed context into Codex and Claude without a new UI](https://github.com/Xpounder-com/hormuz/issues/5)
-- [#16 — Retrieval, freshness, and authorization benchmark](https://github.com/Xpounder-com/hormuz/issues/16)
+- [#16 — completed retrieval, freshness, and authorization benchmark](https://github.com/Xpounder-com/hormuz/issues/16)
 
 Exit outcome: Hormuz owns a persistent, source-linked and automatically maintained organizational-memory lifecycle and can inject the smallest authorized pack into supported clients with measurable retrieval quality and zero scope leaks.
 
