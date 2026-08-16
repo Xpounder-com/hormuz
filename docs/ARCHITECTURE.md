@@ -41,14 +41,15 @@ immutable organization/provider cost snapshot
         +--> expose unresolved variance without allocating it to employees or calling it bypass
 ```
 
-Governed context has explicit CLI and authenticated HTTP paths:
+Governed context has explicit local and authenticated connector paths:
 
 ```text
 content-bearing JSONL       trusted lifecycle envelope       evidence envelope
         |                             |                              |
-        | identity-scope validation   | promoter capability          | promoter capability
-        | idempotent provisional      | versioned observation        | hash raw reference
-        | import                      |                              | bind record subject
+        | local operator              | local CLI or authenticated   | local CLI or authenticated
+        | identity-scope validation   | remote connector             | remote connector
+        | idempotent provisional      | promoter capability          | promoter capability
+        | import                      | versioned observation        | hash raw reference
         +-----------------------------+------------------------------+
                                       v
 local SQLite context repository (separate from usage)
@@ -87,10 +88,12 @@ The HTTP path authenticates first, derives organization/team/actor from the stat
 - `hormuz/dlp_client.py` implements the bounded, authenticated approver CLI transport and refuses redirects or non-loopback plaintext HTTP.
 - `hormuz/context.py` authorizes, applies immutable lifecycle observations, quarantines high-confidence injection patterns, surfaces structured contradictions, ranks, budgets, and fingerprints explicit provider-neutral context packs without transport or persistence concerns.
 - `hormuz/context_lifecycle.py` defines strict evidence, promotion-policy, subject-fingerprint, conflict, negative-signal, and source/dependency transition rules without persistence or transport concerns.
+- `hormuz/context_api.py` defines the versioned lifecycle mutation request and metadata-only response contracts without authentication, persistence, or network behavior.
+- `hormuz/context_lifecycle_client.py` implements the bounded, authenticated remote connector transport, refuses redirects and non-loopback plaintext HTTP, and validates exact response shapes.
 - `hormuz/context_store.py` implements the local governed-record, trusted-snapshot, immutable evidence, and resumable revalidation repository with optimistic concurrency, leases, integrity checks, and metadata-only mutation/read/lifecycle audit behind a content-codec boundary.
 - `hormuz/mcp.py` implements the bounded dual-era MCP stdio protocol and an HTTPS client for the authenticated Context Pack API; it has no repository or provider access.
 - `hormuz/context_benchmark.py` evaluates the production context-pack kernel against frozen synthetic snapshots and separated outcomes; it has no provider, network, or context-repository dependency.
-- `hormuz/cli.py` exposes serving, diagnostics, policy checks, client configuration, usage and billing reporting, and explicit context lifecycle commands.
+- `hormuz/cli.py` exposes serving, diagnostics, policy checks, client configuration, usage and billing reporting, local lifecycle operations, and config-independent remote connector commands.
 
 ## Trust boundary
 
@@ -102,4 +105,4 @@ Hormuz implements the provider endpoints and local MCP stdio integration require
 
 ## Identity boundary
 
-OIDC supports both a workload resource-server path and a human authorization-code + PKCE session path. Discovery and JWKS metadata are cached, an unknown signing-key ID triggers one refresh, and authorization attributes come only from the configured `(issuer, subject)` mapping. Hormuz does not trust caller-provided group or team claims. The local session kernel binds every new session to its organization, actor, team, clearance, and client; a mapping change or capability-gated administrative action revokes it before provider work. The kernel remains single-node; real-IdP validation, SCIM, shared immediate revocation, KMS, and HA persistence remain enterprise milestones. See [OIDC.md](OIDC.md) and [SESSION_ADMIN_API.md](SESSION_ADMIN_API.md).
+OIDC supports both a workload resource-server path and a human authorization-code + PKCE session path. Discovery and JWKS metadata are cached, an unknown signing-key ID triggers one refresh, and authorization attributes come only from the configured `(issuer, subject)` mapping. Hormuz does not trust caller-provided group or team claims. Lifecycle connectors use this same resource-server path and additionally require server-configured `context_promoter`; the bearer token proves the mapped workload identity, not the truth of a claimed CI or source event. The local session kernel binds every new session to its organization, actor, team, clearance, and client; a mapping change or capability-gated administrative action revokes it before provider work. The kernel remains single-node; real-IdP validation, SCIM, shared immediate revocation, KMS, and HA persistence remain enterprise milestones. See [OIDC.md](OIDC.md), [CONTEXT_LIFECYCLE_API.md](CONTEXT_LIFECYCLE_API.md), and [SESSION_ADMIN_API.md](SESSION_ADMIN_API.md).

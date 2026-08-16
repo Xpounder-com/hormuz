@@ -34,6 +34,7 @@ from hormuz.cli import (
     _context_snapshot_import,
     _context_snapshot_show,
     _context_revalidate,
+    _lifecycle_remote_command,
     _policy_check,
     _status,
     build_parser,
@@ -230,6 +231,138 @@ class ClientConfigTests(unittest.TestCase):
         )
         self.assertIn('"HORMUZ_SESSION_GATEWAY": "https://hormuz.example"', claude.getvalue())
         self.assertNotIn("must-never-appear", codex.getvalue() + claude.getvalue())
+
+    def test_remote_lifecycle_cli_dispatches_all_connector_operations_without_local_config(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            evidence_path = root / "evidence.json"
+            evidence_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": "hormuz.context-evidence.v1",
+                        "organization_id": "xpounder",
+                        "record_id": "retry",
+                        "record_version": 1,
+                        "signal": "ci_passed",
+                        "evidence_ref": "ci:private:123",
+                        "observed_at": "2026-08-16T12:00:00Z",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            snapshot_path = root / "snapshot.json"
+            snapshot_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": "hormuz.context-lifecycle-envelope.v1",
+                        "organization_id": "xpounder",
+                        "repository_id": "acme/api",
+                        "branch": "main",
+                        "snapshot": {
+                            "schema_version": "hormuz.context-lifecycle-snapshot.v1",
+                            "repository_revision": "abc123",
+                            "artifacts": [],
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            commands = [
+                (
+                    [
+                        "lifecycle",
+                        "evidence",
+                        "--input",
+                        str(evidence_path),
+                        "--gateway",
+                        "https://hormuz.example",
+                    ],
+                    "record_evidence",
+                ),
+                (
+                    [
+                        "lifecycle",
+                        "snapshot",
+                        "--input",
+                        str(snapshot_path),
+                        "--expected-version",
+                        "4",
+                        "--gateway",
+                        "https://hormuz.example",
+                    ],
+                    "put_snapshot",
+                ),
+                (
+                    [
+                        "lifecycle",
+                        "revalidate",
+                        "--repository",
+                        "acme/api",
+                        "--branch",
+                        "main",
+                        "--batch-size",
+                        "25",
+                        "--gateway",
+                        "https://hormuz.example",
+                    ],
+                    "revalidate",
+                ),
+            ]
+            with mock.patch.dict(os.environ, {"HORMUZ_TOKEN": "connector-secret"}):
+                for argv, method_name in commands:
+                    with self.subTest(command=method_name):
+                        args = build_parser().parse_args(argv)
+                        with mock.patch("hormuz.cli.ContextLifecycleClient") as client_type:
+                            method = getattr(client_type.return_value, method_name)
+                            method.return_value = {
+                                "schema_version": "test-result.v1",
+                                "status": "ok",
+                            }
+                            with redirect_stdout(output := io.StringIO()):
+                                self.assertEqual(_lifecycle_remote_command(args), 0)
+                        client_type.assert_called_once_with(
+                            "https://hormuz.example",
+                            credential="connector-secret",
+                            allow_insecure_http=False,
+                            timeout_seconds=30,
+                        )
+                        self.assertEqual(json.loads(output.getvalue())["status"], "ok")
+                        if method_name == "put_snapshot":
+                            self.assertEqual(method.call_args.kwargs["expected_version"], 4)
+                        if method_name == "revalidate":
+                            self.assertEqual(
+                                method.call_args.kwargs,
+                                {
+                                    "repository_id": "acme/api",
+                                    "branch": "main",
+                                    "batch_size": 25,
+                                },
+                            )
+
+    def test_remote_lifecycle_cli_rejects_missing_credential_and_duplicate_input(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "evidence.json"
+            path.write_text(
+                '{"schema_version":"one","schema_version":"two"}',
+                encoding="utf-8",
+            )
+            args = build_parser().parse_args(
+                [
+                    "lifecycle",
+                    "evidence",
+                    "--input",
+                    str(path),
+                    "--gateway",
+                    "https://hormuz.example",
+                ]
+            )
+            with mock.patch.dict(os.environ, {}, clear=True), redirect_stderr(error := io.StringIO()):
+                self.assertEqual(_lifecycle_remote_command(args), 1)
+            self.assertIn("credential environment variable is not set", error.getvalue())
+            with mock.patch.dict(os.environ, {"HORMUZ_TOKEN": "connector-secret"}):
+                with redirect_stderr(error := io.StringIO()):
+                    self.assertEqual(_lifecycle_remote_command(args), 2)
+            self.assertIn("duplicate JSON object member", error.getvalue())
 
     def test_auth_token_prints_only_a_valid_environment_credential(self) -> None:
         output = io.StringIO()

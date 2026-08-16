@@ -413,6 +413,23 @@ Observed local result:
 
 This is a real single-node lifecycle kernel, not an enterprise scheduler or automatic connector system. GitHub, GitLab, CI, review, ADR, and incident connectors; signed attestations; probabilistic or time-based decay; PostgreSQL/multi-node leasing; hosted operations; and automatic client injection remain open. Issue #12 therefore remains open, and the hosted isolation decision remains proposed in ADR 0002 rather than implemented by this checkpoint.
 
+### Authenticated context lifecycle connector path
+
+The provider-neutral evidence, snapshot, and revalidation transport was exercised locally on August 16, 2026. This checkpoint adds no source-specific event collector and does not treat workload authentication as proof that an asserted external event occurred.
+
+- the gateway authenticated before reading lifecycle mutation bodies, required the explicit `context_promoter` capability, derived tenant scope from the identity, rejected cross-organization envelopes, and returned stable generic errors without reflecting attacker-controlled schema fields or storage exception text;
+- a signed JWT from the generic workload OIDC path reached the lifecycle connector only through its configured issuer, audience, subject mapping, organization, and promoter capability;
+- exact evidence retries returned the existing immutable event, exact snapshot retries preserved the existing version, stale record/snapshot versions returned `409`, oversized revalidation batches were denied by server policy, and ambiguous identical requests remained safe to retry;
+- a real HTTP client submitted a trusted snapshot and merge/CI evidence, ran one bounded server-side job, and promoted the expected provisional record to verified without any OpenAI/Anthropic call or usage-ledger event;
+- lifecycle mutation responses and metadata-only audit omitted raw evidence references and artifact identities. A high-confidence scan of the source and extracted wheel found no private-key, OpenAI, Anthropic, GitHub, AWS, or Google credential pattern;
+- the remote CLI required no local server configuration, refused redirects and non-loopback plaintext HTTP, validated strict JSON and exact metadata-only response shapes, bounded request/response sizes, and exposed stable exit behavior for local-input versus remote-policy failures;
+- the default source suite completed 224 tests: 223 passed and the explicitly opt-in Claude Code executable test skipped. The pinned official Codex `0.147.0` and Claude Code `2.1.233` compatibility tests then passed separately through local fake-provider endpoints;
+- the frozen 60-task release benchmark passed with precision `1.00`, recall `1.00`, useful-pack rate `1.00`, zero authorization, stale-lifecycle, dependency-stale, malicious, contradiction, budget, leakage, or determinism failures, and p95 in-process selection latency `0.173542 ms`;
+- isolated source and wheel builds succeeded. The source archive contained the connector API documentation, runtime modules, and tests; a clean Python 3.14 environment installed the exact wheel outside the checkout, loaded `hormuz.context_api` and `hormuz.context_lifecycle_client` from `site-packages`, displayed the three `hormuz lifecycle` commands, passed bytecode compilation, and passed the installed regression benchmark with zero safety failures;
+- source compilation, frozen-corpus regeneration, and `git diff --check` passed.
+
+This verifies a reusable authenticated connector boundary, not automatic GitHub/GitLab/CI collection, webhook signature validation, signed attestations, hosted scheduling, cross-node leases, or the truth of an external event. Issue #12 remains open for those source-specific and hosted lifecycle gates.
+
 ## Reproduce locally
 
 The default suite uses only loopback fake providers:

@@ -21,10 +21,11 @@ The private alpha currently has:
 - a dual-era read-only MCP adapter that connects Codex and Claude Code to that REST boundary without granting repository access or identity overrides;
 - trusted, versioned repository/dependency snapshots with immediate per-read source/dependency invalidation, bounded high-confidence prompt-injection quarantine, and explicit structured contradiction outcomes;
 - opt-in `context_promoter`-gated evidence import and policy-driven promotion/invalidation for merge, CI, review, ADR, incident, human, and validated-failure signals, with subject-bound evidence, false-invalidation recovery, and durable local record/evidence-set-bound revalidation jobs;
+- a config-independent, authenticated remote lifecycle CLI/API through which capability-gated workloads can submit normalized evidence, snapshots, and bounded revalidation work without provider calls or raw-reference audit retention;
 - a reproducible 60-task synthetic retrieval benchmark whose strict version-2 release profile passes current authorization, lifecycle, dependency, quarantine, contradiction, budget, determinism, leakage, and latency thresholds;
 - local and GitHub package/client verification.
 
-The foundation is not an enterprise release. The local usage/approval, context, and session databases are single-node, and the local context codec is plaintext; none is an accepted hosted persistence design. Real-IdP validation, shared tenancy and multi-node revocation, SCIM, lifecycle source connectors and hosted scheduling, remaining time/confidence decay policy, context injection, remaining structured-DLP coverage, cache policy, authenticated billing ingestion and final invoice reconciliation, HA deployment, KMS, and independent security review remain open gates.
+The foundation is not an enterprise release. The local usage/approval, context, and session databases are single-node, and the local context codec is plaintext; none is an accepted hosted persistence design. Real-IdP validation, shared tenancy and multi-node revocation, SCIM, source-specific lifecycle collectors and signed-event verification, hosted scheduling, remaining time/confidence decay policy, context injection, remaining structured-DLP coverage, cache policy, authenticated billing ingestion and final invoice reconciliation, HA deployment, KMS, and independent security review remain open gates.
 
 ## Material decisions awaiting owner approval
 

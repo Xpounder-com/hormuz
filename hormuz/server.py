@@ -25,7 +25,20 @@ from .context import (
     ContextPrincipal,
     build_context_pack,
 )
-from .context_store import ContextStoreError, SQLiteContextRepository
+from .context_api import (
+    ContextRevalidationBatchRequest,
+    ContextSnapshotWriteRequest,
+    context_evidence_result,
+    context_revalidation_result,
+    context_snapshot_result,
+)
+from .context_lifecycle import ContextEvidence, LifecyclePolicy
+from .context_store import (
+    ContextConflict,
+    ContextNotFound,
+    ContextStoreError,
+    SQLiteContextRepository,
+)
 from .dlp_approval import DLPApprovalError, payload_fingerprint
 from .policy import PolicyDecision, PolicyEngine
 from .redaction import RedactionError, SecretRedactor
@@ -41,6 +54,9 @@ from .usage import ResponseUsageParser
 
 LOGGER = logging.getLogger("hormuz")
 MAX_CONTEXT_REQUEST_BYTES = 64 * 1024
+MAX_CONTEXT_SNAPSHOT_REQUEST_BYTES = 8 * 1024 * 1024
+MAX_CONTEXT_EVIDENCE_REQUEST_BYTES = 64 * 1024
+MAX_CONTEXT_REVALIDATION_REQUEST_BYTES = 8 * 1024
 MAX_AUTH_REQUEST_BYTES = 8 * 1024
 MAX_DLP_APPROVAL_REQUEST_BYTES = 2 * 1024
 
@@ -286,6 +302,24 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 return
             self._create_context_pack(identity)
             return
+        if path == "/v1/context/evidence":
+            identity = self._authenticate()
+            if identity is None:
+                return
+            policy = self._context_promoter_policy(identity)
+            if policy is None or not self._check_context_rate_limit(identity):
+                return
+            self._create_context_evidence(identity, policy)
+            return
+        if path == "/v1/context/revalidation-batches":
+            identity = self._authenticate()
+            if identity is None:
+                return
+            policy = self._context_promoter_policy(identity)
+            if policy is None or not self._check_context_rate_limit(identity):
+                return
+            self._run_context_revalidation_batch(identity, policy)
+            return
         approval_request_id = _approval_decision_id_from_path(path)
         if approval_request_id is not None:
             identity = self._authenticate()
@@ -320,6 +354,24 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             client=default_client,
             account_usage=account_usage,
         )
+
+    def do_PUT(self) -> None:  # noqa: N802
+        path = urlsplit(self.path).path
+        if path != "/v1/context/lifecycle-snapshots":
+            self._send_error(
+                "not_found",
+                "Route not found",
+                HTTPStatus.NOT_FOUND,
+                close_connection=True,
+            )
+            return
+        identity = self._authenticate()
+        if identity is None:
+            return
+        policy = self._context_promoter_policy(identity)
+        if policy is None or not self._check_context_rate_limit(identity):
+            return
+        self._put_context_lifecycle_snapshot(identity, policy)
 
     def _create_login_enrollment(self) -> None:
         broker = self._require_session_broker()
@@ -1157,9 +1209,243 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         )
         self._send_json(HTTPStatus.OK, pack.to_dict())
 
+    def _create_context_evidence(
+        self,
+        identity: Identity,
+        policy: LifecyclePolicy,
+    ) -> None:
+        request_body = self._read_json_body(
+            max_bytes=MAX_CONTEXT_EVIDENCE_REQUEST_BYTES,
+            strict=True,
+        )
+        if request_body is None:
+            return
+        try:
+            evidence = ContextEvidence.from_dict(request_body)
+        except ValueError:
+            self._send_error(
+                "context_lifecycle_invalid_request",
+                "Context lifecycle request is invalid",
+                HTTPStatus.BAD_REQUEST,
+            )
+            return
+        if evidence.organization_id != identity.organization_id:
+            self._send_error(
+                "context_lifecycle_scope_denied",
+                "Context lifecycle organization exceeds the authenticated identity",
+                HTTPStatus.FORBIDDEN,
+            )
+            return
+        try:
+            result = self.server.context_repository.record_lifecycle_evidence(
+                evidence,
+                actor_id=identity.actor_id,
+                policy_version=policy.policy_version,
+            )
+        except ContextConflict:
+            self._send_error(
+                "context_lifecycle_conflict",
+                "Context lifecycle evidence conflicts with current governed state",
+                HTTPStatus.CONFLICT,
+            )
+            return
+        except ContextStoreError:
+            self._send_context_lifecycle_store_error(identity, "evidence")
+            return
+        LOGGER.info(
+            "context_evidence_recorded actor=%s organization=%s record=%s signal=%s created=%s",
+            identity.actor_id,
+            identity.organization_id,
+            evidence.record_id,
+            evidence.signal,
+            result.created,
+        )
+        self._send_json(
+            HTTPStatus.CREATED if result.created else HTTPStatus.OK,
+            context_evidence_result(result),
+        )
+
+    def _put_context_lifecycle_snapshot(
+        self,
+        identity: Identity,
+        policy: LifecyclePolicy,
+    ) -> None:
+        request_body = self._read_json_body(
+            max_bytes=MAX_CONTEXT_SNAPSHOT_REQUEST_BYTES,
+            strict=True,
+        )
+        if request_body is None:
+            return
+        try:
+            request = ContextSnapshotWriteRequest.from_dict(request_body)
+        except ContextError:
+            self._send_error(
+                "context_lifecycle_invalid_request",
+                "Context lifecycle request is invalid",
+                HTTPStatus.BAD_REQUEST,
+            )
+            return
+        if request.organization_id != identity.organization_id:
+            self._send_error(
+                "context_lifecycle_scope_denied",
+                "Context lifecycle organization exceeds the authenticated identity",
+                HTTPStatus.FORBIDDEN,
+            )
+            return
+        try:
+            stored = self.server.context_repository.observe_lifecycle_snapshot(
+                organization_id=identity.organization_id,
+                repository_id=request.repository_id,
+                branch=request.branch,
+                snapshot=request.snapshot,
+                expected_version=request.expected_version,
+                actor_id=identity.actor_id,
+                policy_version=policy.policy_version,
+            )
+        except ContextConflict:
+            self._send_error(
+                "context_lifecycle_conflict",
+                "Context lifecycle snapshot conflicts with the current version",
+                HTTPStatus.CONFLICT,
+            )
+            return
+        except ContextStoreError:
+            self._send_context_lifecycle_store_error(identity, "snapshot")
+            return
+        LOGGER.info(
+            "context_snapshot_recorded actor=%s organization=%s repository=%s branch=%s version=%d artifacts=%d",
+            identity.actor_id,
+            identity.organization_id,
+            request.repository_id,
+            request.branch,
+            stored.version,
+            len(stored.snapshot.artifacts),
+        )
+        self._send_json(HTTPStatus.OK, context_snapshot_result(stored))
+
+    def _run_context_revalidation_batch(
+        self,
+        identity: Identity,
+        policy: LifecyclePolicy,
+    ) -> None:
+        request_body = self._read_json_body(
+            max_bytes=MAX_CONTEXT_REVALIDATION_REQUEST_BYTES,
+            strict=True,
+        )
+        if request_body is None:
+            return
+        try:
+            request = ContextRevalidationBatchRequest.from_dict(request_body)
+        except ContextError:
+            self._send_error(
+                "context_lifecycle_invalid_request",
+                "Context lifecycle request is invalid",
+                HTTPStatus.BAD_REQUEST,
+            )
+            return
+        lifecycle = self.server.config.context_service.lifecycle
+        batch_size = request.batch_size or lifecycle.job_batch_size
+        if batch_size > lifecycle.job_batch_size:
+            self._send_error(
+                "context_lifecycle_policy_denied",
+                "Requested revalidation batch exceeds organization policy",
+                HTTPStatus.FORBIDDEN,
+            )
+            return
+        try:
+            job = self.server.context_repository.start_revalidation_job(
+                organization_id=identity.organization_id,
+                repository_id=request.repository_id,
+                branch=request.branch,
+                policy=policy,
+                actor_id=identity.actor_id,
+            )
+            result = self.server.context_repository.run_revalidation_batch(
+                job_id=job.job_id,
+                policy=policy,
+                actor_id=identity.actor_id,
+                batch_size=batch_size,
+                lease_seconds=lifecycle.lease_seconds,
+            )
+        except (ContextConflict, ContextNotFound):
+            self._send_error(
+                "context_lifecycle_conflict",
+                "Context revalidation cannot run against the current governed state",
+                HTTPStatus.CONFLICT,
+            )
+            return
+        except ContextStoreError:
+            self._send_context_lifecycle_store_error(identity, "revalidation")
+            return
+        LOGGER.info(
+            "context_revalidation_batch actor=%s organization=%s repository=%s branch=%s job=%s status=%s processed=%d total=%d",
+            identity.actor_id,
+            identity.organization_id,
+            request.repository_id,
+            request.branch,
+            result.job_id,
+            result.status,
+            result.processed_records,
+            result.total_records,
+        )
+        self._send_json(HTTPStatus.OK, context_revalidation_result(result))
+
+    def _context_promoter_policy(self, identity: Identity) -> LifecyclePolicy | None:
+        if "context_promoter" not in identity.capabilities:
+            self._send_error(
+                "context_promotion_forbidden",
+                "Context promoter capability is required",
+                HTTPStatus.FORBIDDEN,
+                close_connection=True,
+            )
+            return None
+        lifecycle = self.server.config.context_service.lifecycle
+        if not lifecycle.enabled or lifecycle.policy is None:
+            self._send_error(
+                "context_lifecycle_disabled",
+                "Context lifecycle automation is disabled",
+                HTTPStatus.FORBIDDEN,
+                close_connection=True,
+            )
+            return None
+        return lifecycle.policy
+
+    def _check_context_rate_limit(self, identity: Identity) -> bool:
+        retry_after = self.server.context_rate_limiter.check(
+            organization_id=identity.organization_id,
+            actor_id=identity.actor_id,
+        )
+        if retry_after is None:
+            return True
+        self._send_error(
+            "context_rate_limited",
+            "Context request limit exceeded",
+            HTTPStatus.TOO_MANY_REQUESTS,
+            headers={"Retry-After": str(retry_after)},
+            close_connection=True,
+        )
+        return False
+
+    def _send_context_lifecycle_store_error(
+        self,
+        identity: Identity,
+        operation: str,
+    ) -> None:
+        LOGGER.error(
+            "context_lifecycle_store_failed actor=%s organization=%s operation=%s",
+            identity.actor_id,
+            identity.organization_id,
+            operation,
+        )
+        self._send_error(
+            "context_store_unavailable",
+            "Governed context is temporarily unavailable",
+            HTTPStatus.SERVICE_UNAVAILABLE,
+        )
+
     def do_OPTIONS(self) -> None:  # noqa: N802
         self.send_response(HTTPStatus.NO_CONTENT)
-        self.send_header("Allow", "GET, POST, OPTIONS")
+        self.send_header("Allow", "GET, POST, PUT, OPTIONS")
         self.send_header("Content-Length", "0")
         self.end_headers()
 
@@ -1799,7 +2085,12 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         )
         return None
 
-    def _read_json_body(self, *, max_bytes: int | None = None) -> dict[str, Any] | None:
+    def _read_json_body(
+        self,
+        *,
+        max_bytes: int | None = None,
+        strict: bool = False,
+    ) -> dict[str, Any] | None:
         content_length_value = self.headers.get("Content-Length")
         if content_length_value is None:
             self._send_error(
@@ -1832,8 +2123,12 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             return None
         data = self.rfile.read(content_length)
         try:
-            value = json.loads(data)
-        except (json.JSONDecodeError, UnicodeDecodeError, RecursionError):
+            value = json.loads(
+                data,
+                parse_constant=_reject_json_constant if strict else None,
+                object_pairs_hook=_unique_json_object if strict else None,
+            )
+        except (json.JSONDecodeError, UnicodeDecodeError, RecursionError, ValueError):
             self._send_error("invalid_json", "Request body must be valid JSON", HTTPStatus.BAD_REQUEST)
             return None
         if not isinstance(value, dict):
@@ -1938,6 +2233,19 @@ def _valid_context_scope(value: object) -> bool:
         and len(value) <= 512
         and all(character.isprintable() for character in value)
     )
+
+
+def _reject_json_constant(_value: str) -> object:
+    raise ValueError("non-standard JSON numeric constant")
+
+
+def _unique_json_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    value: dict[str, object] = {}
+    for key, item in pairs:
+        if key in value:
+            raise ValueError("duplicate JSON object member")
+        value[key] = item
+    return value
 
 
 def _single_query_values(query: str) -> dict[str, str] | None:

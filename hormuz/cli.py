@@ -26,6 +26,10 @@ from .context import (
     build_context_pack,
 )
 from .context_lifecycle import ContextEvidence, LifecyclePolicy
+from .context_lifecycle_client import (
+    ContextLifecycleClient,
+    ContextLifecycleClientError,
+)
 from .context_store import (
     ContextStoreError,
     SQLiteContextRepository,
@@ -232,6 +236,48 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Allow loopback HTTP for local development only",
     )
+
+    lifecycle = subparsers.add_parser(
+        "lifecycle",
+        help="Submit governed lifecycle evidence from CI and trusted connectors",
+    )
+    lifecycle_subparsers = lifecycle.add_subparsers(
+        dest="lifecycle_command",
+        required=True,
+    )
+    lifecycle_evidence = lifecycle_subparsers.add_parser(
+        "evidence",
+        help="Submit one immutable evidence envelope",
+    )
+    lifecycle_evidence.add_argument(
+        "--input",
+        required=True,
+        help="hormuz.context-evidence.v1 JSON file",
+    )
+    _add_remote_lifecycle_arguments(lifecycle_evidence)
+    lifecycle_snapshot = lifecycle_subparsers.add_parser(
+        "snapshot",
+        help="Submit trusted repository and dependency state",
+    )
+    lifecycle_snapshot.add_argument(
+        "--input",
+        required=True,
+        help="hormuz.context-lifecycle-envelope.v1 JSON file",
+    )
+    lifecycle_snapshot.add_argument(
+        "--expected-version",
+        type=int,
+        help="Required current version when replacing a different snapshot",
+    )
+    _add_remote_lifecycle_arguments(lifecycle_snapshot)
+    lifecycle_revalidate = lifecycle_subparsers.add_parser(
+        "revalidate",
+        help="Run or resume one bounded server-side revalidation batch",
+    )
+    lifecycle_revalidate.add_argument("--repository", required=True, help="Repository scope ID")
+    lifecycle_revalidate.add_argument("--branch", required=True, help="Branch scope")
+    lifecycle_revalidate.add_argument("--batch-size", type=int, help="Records in this batch")
+    _add_remote_lifecycle_arguments(lifecycle_revalidate)
 
     dlp = subparsers.add_parser("dlp", help="Review organization DLP exceptions")
     dlp_subparsers = dlp.add_subparsers(dest="dlp_command", required=True)
@@ -545,6 +591,26 @@ def _add_context_read_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_remote_lifecycle_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--gateway", required=True, help="Hormuz gateway base URL")
+    parser.add_argument(
+        "--credential-env",
+        default="HORMUZ_TOKEN",
+        help="Workload or connector credential environment variable (default: HORMUZ_TOKEN)",
+    )
+    parser.add_argument(
+        "--timeout-seconds",
+        type=int,
+        default=30,
+        help="Gateway timeout from 1 to 300 seconds (default: 30)",
+    )
+    parser.add_argument(
+        "--allow-insecure-http",
+        action="store_true",
+        help="Allow loopback HTTP for local development only",
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     logging.basicConfig(
@@ -567,6 +633,8 @@ def main(argv: list[str] | None = None) -> int:
         return _dlp_approval_command(args)
     if args.command == "sessions":
         return _session_admin_command(args)
+    if args.command == "lifecycle":
+        return _lifecycle_remote_command(args)
     if args.command == "context-benchmark":
         try:
             result, exit_code = run_benchmark(
@@ -1253,6 +1321,82 @@ def _dlp_approval_command(args: argparse.Namespace) -> int:
         return 1
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
+
+
+def _lifecycle_remote_command(args: argparse.Namespace) -> int:
+    env_name = args.credential_env
+    if (
+        not env_name
+        or not env_name.replace("_", "A").isalnum()
+        or env_name[0].isdigit()
+    ):
+        print("credential environment variable name is invalid", file=sys.stderr)
+        return 2
+    credential = os.environ.get(env_name, "")
+    if not credential:
+        print(f"credential environment variable is not set: {env_name}", file=sys.stderr)
+        return 1
+    if not 1 <= args.timeout_seconds <= 300:
+        print("--timeout-seconds must be between 1 and 300", file=sys.stderr)
+        return 2
+    try:
+        client = ContextLifecycleClient(
+            args.gateway,
+            credential=credential,
+            allow_insecure_http=args.allow_insecure_http,
+            timeout_seconds=args.timeout_seconds,
+        )
+        if args.lifecycle_command == "evidence":
+            value = _load_remote_lifecycle_json(Path(args.input), max_bytes=64 * 1024)
+            result = client.record_evidence(value)
+        elif args.lifecycle_command == "snapshot":
+            value = _load_remote_lifecycle_json(
+                Path(args.input),
+                max_bytes=8 * 1024 * 1024,
+            )
+            result = client.put_snapshot(
+                value,
+                expected_version=args.expected_version,
+            )
+        elif args.lifecycle_command == "revalidate":
+            result = client.revalidate(
+                repository_id=args.repository,
+                branch=args.branch,
+                batch_size=args.batch_size,
+            )
+        else:
+            return 2
+    except (OSError, UnicodeDecodeError, ContextError) as error:
+        print(f"lifecycle input failed: {error}", file=sys.stderr)
+        return 2
+    except ContextLifecycleClientError as error:
+        local_input_codes = {
+            "invalid_context_evidence",
+            "invalid_context_snapshot",
+            "invalid_context_revalidation",
+            "context_request_too_large",
+            "invalid_timeout",
+        }
+        print(f"lifecycle request failed: {error.code}", file=sys.stderr)
+        return 2 if error.code in local_input_codes else 1
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0
+
+
+def _load_remote_lifecycle_json(path: Path, *, max_bytes: int) -> dict[str, object]:
+    if path.stat().st_size > max_bytes:
+        raise ContextError("lifecycle input exceeds the supported size")
+    try:
+        value = json.loads(
+            path.read_text(encoding="utf-8"),
+            parse_constant=_invalid_context_json_constant,
+            object_pairs_hook=_unique_context_json_object,
+        )
+    except json.JSONDecodeError as error:
+        raise ContextError("lifecycle input must be valid JSON") from error
+    if not isinstance(value, dict):
+        raise ContextError("lifecycle input must be a JSON object")
+    return value
 
 
 def _session_admin_command(args: argparse.Namespace) -> int:

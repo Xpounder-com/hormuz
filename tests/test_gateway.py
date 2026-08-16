@@ -19,6 +19,7 @@ from unittest import mock
 
 from hormuz.config import GatewayConfig, Policy
 from hormuz.context import ContextArtifact, ContextLifecycleSnapshot, ContextRecord
+from hormuz.context_lifecycle_client import ContextLifecycleClient
 from hormuz.context_store import ContextStoreError
 from hormuz.policy import PolicyEngine
 from hormuz.server import GatewayServer, serve_in_thread
@@ -778,6 +779,298 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertEqual(access["lifecycle_outcome"], "requires_resolution")
         self.assertEqual(access["excluded_records"], 4)
         self.assertEqual(access["contradiction_groups"], 1)
+
+    def test_remote_context_lifecycle_connector_is_idempotent_and_promotes_verified_memory(self) -> None:
+        config_value = self._config(self.provider.server_port, _free_port())
+        config_value["context_service"]["lifecycle"] = {
+            "enabled": True,
+            "policy_version": "test-lifecycle-v1",
+            "job_batch_size": 1,
+            "lease_seconds": 30,
+            "promotion_paths": [
+                {
+                    "id": "merged-and-green",
+                    "record_kinds": ["claim"],
+                    "required_signals": ["commit_merged", "ci_passed"],
+                }
+            ],
+        }
+        config_value["identities"][0]["capabilities"] = ["context_promoter"]
+        self._restart_gateway(config_value)
+        identity = self.config.identities_by_actor["alice"]
+        now = datetime.now(timezone.utc)
+        stored = self.gateway.context_repository.ingest(
+            ContextRecord(
+                record_id="remote-lifecycle-record",
+                record_kind="claim",
+                title="Retry policy",
+                content="Use bounded exponential retry with jitter.",
+                owner_id="alice",
+                organization_id=identity.organization_id,
+                visibility="team",
+                scope_id=identity.team_id,
+                classification="internal",
+                source_uri="repo://acme/api/docs/retry.md",
+                source_revision="git:abc123",
+                source_sha256="a" * 64,
+                source_item_key="retry-policy",
+                repository_id="acme/api",
+                branch="main",
+                verification="provisional",
+                effective_at=now,
+                invalidation_rules=("source_revision_changed",),
+                tags=("retry",),
+            ),
+            actor_id="alice",
+            policy_version="test-context-v1",
+            new_records_must_be_provisional=True,
+        ).stored
+        provider_before = len(FakeProviderHandler.requests)
+        client = ContextLifecycleClient(
+            f"http://127.0.0.1:{self.gateway.server_port}",
+            credential=GATEWAY_TOKEN,
+            allow_insecure_http=True,
+            timeout_seconds=5,
+        )
+        sensitive_artifact_uri = "repo://acme/api/private/customer-map.json"
+        snapshot_envelope = {
+            "schema_version": "hormuz.context-lifecycle-envelope.v1",
+            "organization_id": identity.organization_id,
+            "repository_id": "acme/api",
+            "branch": "main",
+            "snapshot": {
+                "schema_version": "hormuz.context-lifecycle-snapshot.v1",
+                "repository_revision": "abc123",
+                "artifacts": [
+                    {
+                        "uri": sensitive_artifact_uri,
+                        "revision": "git:abc123",
+                        "sha256": "b" * 64,
+                    }
+                ],
+            },
+        }
+
+        snapshot = client.put_snapshot(snapshot_envelope)
+        snapshot_retry = client.put_snapshot(snapshot_envelope)
+
+        self.assertEqual(snapshot["version"], 1)
+        self.assertEqual(snapshot_retry["version"], 1)
+        self.assertEqual(snapshot["artifact_count"], 1)
+        self.assertNotIn("artifacts", snapshot)
+        self.assertNotIn(sensitive_artifact_uri, json.dumps(snapshot))
+
+        sensitive_evidence_ref = "https://ci.example.test/private/runs/secret-customer-42"
+        base_evidence = {
+            "schema_version": "hormuz.context-evidence.v1",
+            "organization_id": identity.organization_id,
+            "record_id": stored.record.record_id,
+            "record_version": stored.version,
+            "evidence_ref": sensitive_evidence_ref,
+            "observed_at": now.isoformat(),
+        }
+        merged = client.record_evidence({**base_evidence, "signal": "commit_merged"})
+        merged_retry = client.record_evidence({**base_evidence, "signal": "commit_merged"})
+        passed = client.record_evidence({**base_evidence, "signal": "ci_passed"})
+
+        self.assertIs(merged["created"], True)
+        self.assertIs(merged_retry["created"], False)
+        self.assertIs(passed["created"], True)
+        self.assertNotIn("evidence_ref", merged)
+        self.assertNotIn("evidence_ref_sha256", merged)
+        self.assertNotIn(sensitive_evidence_ref, json.dumps(merged))
+
+        result = client.revalidate(repository_id="acme/api", branch="main", batch_size=1)
+
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["total_records"], 1)
+        self.assertEqual(result["processed_records"], 1)
+        self.assertEqual(result["promoted_records"], 1)
+        promoted = self.gateway.context_repository.get_record(
+            identity.organization_id,
+            stored.record.record_id,
+        )
+        self.assertEqual(promoted.version, 2)
+        self.assertEqual(promoted.record.verification, "verified")
+        self.assertEqual(len(FakeProviderHandler.requests), provider_before)
+        self.assertEqual(self.gateway.store.monthly_totals(actor_id="alice").requests, 0)
+        audit_json = json.dumps(
+            self.gateway.context_repository.audit_events(
+                organization_id=identity.organization_id
+            )
+        )
+        self.assertIn("context.lifecycle", audit_json)
+        self.assertIn("context.evidence", audit_json)
+        self.assertIn("context.revalidation", audit_json)
+        self.assertNotIn(sensitive_evidence_ref, audit_json)
+        self.assertNotIn(sensitive_artifact_uri, audit_json)
+
+    def test_remote_context_lifecycle_connector_enforces_scope_conflicts_and_safe_failures(self) -> None:
+        config_value = self._config(self.provider.server_port, _free_port())
+        config_value["context_service"]["lifecycle"] = {
+            "enabled": True,
+            "policy_version": "test-lifecycle-v1",
+            "job_batch_size": 1,
+            "lease_seconds": 30,
+            "promotion_paths": [
+                {
+                    "id": "green",
+                    "record_kinds": ["claim"],
+                    "required_signals": ["ci_passed"],
+                }
+            ],
+        }
+        config_value["identities"][0]["capabilities"] = ["context_promoter"]
+        self._restart_gateway(config_value)
+        identity = self.config.identities_by_actor["alice"]
+        now = datetime.now(timezone.utc)
+        stored = self.gateway.context_repository.ingest(
+            ContextRecord(
+                record_id="remote-negative-record",
+                record_kind="claim",
+                title="Negative transport checks",
+                content="Transport authorization is required.",
+                owner_id="alice",
+                organization_id=identity.organization_id,
+                visibility="team",
+                scope_id=identity.team_id,
+                classification="internal",
+                source_uri="repo://acme/api/negative.md",
+                source_revision="git:one",
+                source_item_key="negative",
+                repository_id="acme/api",
+                branch="main",
+                verification="provisional",
+                effective_at=now,
+            ),
+            actor_id="alice",
+            policy_version="test-context-v1",
+            new_records_must_be_provisional=True,
+        ).stored
+        evidence = {
+            "schema_version": "hormuz.context-evidence.v1",
+            "organization_id": identity.organization_id,
+            "record_id": stored.record.record_id,
+            "record_version": stored.version,
+            "signal": "ci_passed",
+            "evidence_ref": "https://ci.example.test/private/run-1",
+            "observed_at": now.isoformat(),
+        }
+
+        denied_status, denied_headers, denied_response = self._post(
+            "/v1/context/evidence",
+            evidence,
+            token=CLAUDE_ONLY_TOKEN,
+        )
+        self.assertEqual(denied_status, 403)
+        self.assertEqual(denied_headers["connection"], "close")
+        self.assertEqual(
+            json.loads(denied_response)["error"]["code"],
+            "context_promotion_forbidden",
+        )
+
+        cross_org = {**evidence, "organization_id": "other-organization"}
+        status, _, response = self._post("/v1/context/evidence", cross_org)
+        self.assertEqual(status, 403)
+        self.assertEqual(
+            json.loads(response)["error"]["code"],
+            "context_lifecycle_scope_denied",
+        )
+
+        sensitive_field_name = "SECRET-ATTACKER-CONTROLLED-FIELD"
+        status, _, response = self._post(
+            "/v1/context/evidence",
+            {**evidence, sensitive_field_name: True},
+        )
+        self.assertEqual(status, 400)
+        self.assertEqual(
+            json.loads(response)["error"]["code"],
+            "context_lifecycle_invalid_request",
+        )
+        self.assertNotIn(sensitive_field_name, response.decode("utf-8"))
+
+        duplicate = json.dumps(evidence)[:-1] + ',"signal":"ci_failed"}'
+        status, _, response = self._request_raw(
+            "POST",
+            "/v1/context/evidence",
+            duplicate.encode("utf-8"),
+        )
+        self.assertEqual(status, 400)
+        self.assertEqual(json.loads(response)["error"]["code"], "invalid_json")
+
+        status, _, response = self._post(
+            "/v1/context/evidence",
+            {**evidence, "record_version": stored.version + 1},
+        )
+        self.assertEqual(status, 409)
+        self.assertEqual(
+            json.loads(response)["error"]["code"],
+            "context_lifecycle_conflict",
+        )
+
+        snapshot = {
+            "schema_version": "hormuz.context-lifecycle-snapshot-write.v1",
+            "organization_id": identity.organization_id,
+            "repository_id": "acme/api",
+            "branch": "main",
+            "expected_version": None,
+            "snapshot": {
+                "schema_version": "hormuz.context-lifecycle-snapshot.v1",
+                "repository_revision": "one",
+                "artifacts": [],
+            },
+        }
+        self.assertEqual(self._put("/v1/context/lifecycle-snapshots", snapshot)[0], 200)
+        changed = {
+            **snapshot,
+            "snapshot": {**snapshot["snapshot"], "repository_revision": "two"},
+        }
+        status, _, response = self._put("/v1/context/lifecycle-snapshots", changed)
+        self.assertEqual(status, 409)
+        self.assertEqual(
+            json.loads(response)["error"]["code"],
+            "context_lifecycle_conflict",
+        )
+
+        status, _, response = self._post(
+            "/v1/context/revalidation-batches",
+            {
+                "schema_version": "hormuz.context-revalidation-batch-request.v1",
+                "repository_id": "acme/api",
+                "branch": "main",
+                "batch_size": 2,
+            },
+        )
+        self.assertEqual(status, 403)
+        self.assertEqual(
+            json.loads(response)["error"]["code"],
+            "context_lifecycle_policy_denied",
+        )
+
+        secret = "SECRET-INTERNAL-STORAGE-DETAIL"
+        with self.assertLogs("hormuz", level="ERROR") as logs:
+            with mock.patch.object(
+                self.gateway.context_repository,
+                "record_lifecycle_evidence",
+                side_effect=ContextStoreError(secret),
+            ):
+                status, _, response = self._post("/v1/context/evidence", evidence)
+        self.assertEqual(status, 503)
+        self.assertEqual(json.loads(response)["error"]["code"], "context_store_unavailable")
+        self.assertNotIn(secret, response.decode("utf-8"))
+        self.assertNotIn(secret, "\n".join(logs.output))
+        self.assertNotIn(evidence["evidence_ref"], "\n".join(logs.output))
+
+        disabled_config = self._config(self.provider.server_port, _free_port())
+        disabled_config["identities"][0]["capabilities"] = ["context_promoter"]
+        self._restart_gateway(disabled_config)
+        status, headers, response = self._post("/v1/context/evidence", evidence)
+        self.assertEqual(status, 403)
+        self.assertEqual(headers["connection"], "close")
+        self.assertEqual(
+            json.loads(response)["error"]["code"],
+            "context_lifecycle_disabled",
+        )
 
     def test_mcp_stdio_calls_the_actual_context_api_and_commits_read_audit(self) -> None:
         identity = self.config.identities_by_actor["alice"]
@@ -2097,6 +2390,38 @@ class GatewayIntegrationTests(unittest.TestCase):
         }
         headers.update(extra_headers or {})
         connection.request("POST", path, body=json.dumps(body), headers=headers)
+        response = connection.getresponse()
+        data = response.read()
+        response_headers = {name.lower(): value for name, value in response.getheaders()}
+        connection.close()
+        return response.status, response_headers, data
+
+    def _put(self, path: str, body: dict, *, token: str = GATEWAY_TOKEN):
+        return self._request_raw(
+            "PUT",
+            path,
+            json.dumps(body).encode("utf-8"),
+            token=token,
+        )
+
+    def _request_raw(
+        self,
+        method: str,
+        path: str,
+        body: bytes,
+        *,
+        token: str = GATEWAY_TOKEN,
+    ):
+        connection = http.client.HTTPConnection("127.0.0.1", self.gateway.server_port, timeout=5)
+        connection.request(
+            method,
+            path,
+            body=body,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            },
+        )
         response = connection.getresponse()
         data = response.read()
         response_headers = {name.lower(): value for name, value in response.getheaders()}

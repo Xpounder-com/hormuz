@@ -103,6 +103,8 @@ Snapshot creation is idempotent. Replacing a different snapshot requires `--expe
 
 When lifecycle automation is enabled, snapshot import requires the explicit `context_promoter` capability. The same capability governs immutable evidence import and resumable revalidation, while ordinary context reads remain available under their existing identity, classification, and repository scope. See [CONTEXT_LIFECYCLE.md](CONTEXT_LIFECYCLE.md) for configuration, evidence signals, promotion/invalidation rules, job recovery, and the legacy verified-record compatibility boundary.
 
+Trusted CI jobs and internal connectors can submit the same lifecycle state and evidence through the remote `hormuz lifecycle` CLI and authenticated gateway without local database access. The gateway authenticates and authorizes the connector before mutation, derives its organization server-side, and never calls a model provider for these operations. See [CONTEXT_LIFECYCLE_API.md](CONTEXT_LIFECYCLE_API.md).
+
 The CLI envelope is `hormuz.context-lifecycle-envelope.v1`, and its nested trusted state is `hormuz.context-lifecycle-snapshot.v1`. The HTTP Context Pack API never accepts a caller-supplied snapshot: it loads only the latest server-side snapshot for the authenticated organization and exact requested repository/branch.
 
 ## Inspect and export
@@ -205,7 +207,7 @@ This is a durable local governance kernel, not the final enterprise context serv
 - the token estimate covers the complete serialized item contract and is
   deterministic, but it excludes the response wrapper and is not a provider
   tokenizer guarantee;
-- there is no automatic context injection, context-pack cache, connector, or outcome writeback;
+- there is no automatic context injection, context-pack cache, source-specific event collector, or outcome writeback; the current connector API accepts already-validated normalized attestations;
 - if a pack is later injected, injection must happen before the existing secret-egress boundary so all added content is inspected.
 
 No context caching has been enabled. Cache privacy remains blocked on proposed ADR 0003, and the hosted persistence topology remains blocked on proposed ADR 0002.

@@ -230,6 +230,66 @@ class OIDCAuthenticationTests(unittest.TestCase):
         self.assertNotIn("token", value)
         self.assertNotIn("subject", value)
 
+    def test_workload_oidc_identity_reaches_lifecycle_connector_only_with_promoter_capability(self) -> None:
+        value = self._config_value()
+        value["context_database"] = "./context.sqlite3"
+        value["context_service"] = {
+            "lifecycle": {
+                "enabled": True,
+                "policy_version": "test-lifecycle-v1",
+                "promotion_paths": [
+                    {
+                        "id": "green",
+                        "record_kinds": ["claim"],
+                        "required_signals": ["ci_passed"],
+                    }
+                ],
+            }
+        }
+        subject = value["authentication"]["oidc"]["issuers"][0]["subjects"][0]  # type: ignore[index]
+        subject["capabilities"] = ["context_promoter"]
+        self.config_path.write_text(json.dumps(value), encoding="utf-8")
+        config = GatewayConfig.load(self.config_path)
+        gateway = GatewayServer(replace(config, listen=ListenConfig("127.0.0.1", 0)))
+        thread = serve_in_thread(gateway)
+        evidence = json.dumps(
+            {
+                "schema_version": "hormuz.context-evidence.v1",
+                "organization_id": "xpounder",
+                "record_id": "not-yet-imported",
+                "record_version": 1,
+                "signal": "ci_passed",
+                "evidence_ref": "ci:private:123",
+                "observed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            }
+        )
+        try:
+            connection = http.client.HTTPConnection(
+                "127.0.0.1",
+                gateway.server_address[1],
+                timeout=5,
+            )
+            connection.request(
+                "POST",
+                "/v1/context/evidence",
+                body=evidence,
+                headers={
+                    "Authorization": f"Bearer {self._token()}",
+                    "Content-Type": "application/json",
+                },
+            )
+            response = connection.getresponse()
+            payload = json.loads(response.read())
+            connection.close()
+        finally:
+            gateway.shutdown()
+            gateway.server_close()
+            thread.join(timeout=5)
+
+        self.assertEqual(response.status, 409)
+        self.assertEqual(payload["error"]["code"], "context_lifecycle_conflict")
+        self.assertEqual(self.issuer_server.request_count, 2)  # type: ignore[attr-defined]
+
     def test_configuration_rejects_symmetric_or_non_tls_remote_issuer(self) -> None:
         value = self._config_value()
         issuer = value["authentication"]["oidc"]["issuers"][0]  # type: ignore[index]

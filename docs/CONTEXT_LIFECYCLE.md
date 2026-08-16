@@ -1,6 +1,6 @@
 # Evidence-driven context lifecycle
 
-Hormuz can promote provisional organizational context only after configured evidence is present, and return verified context to provisional when newer negative evidence or trusted source state invalidates it. This is a local, CLI-driven implementation: it proves the lifecycle contract, durable recovery, and authorization split without claiming a hosted scheduler or source connector.
+Hormuz can promote provisional organizational context only after configured evidence is present, and return verified context to provisional when newer negative evidence or trusted source state invalidates it. The lifecycle repository and worker remain local, but trusted CI jobs and internal connectors can now reach them through a capability- and tenant-scoped remote API/CLI. This proves the lifecycle contract, durable recovery, authorization split, and provider-neutral connector transport without claiming a hosted scheduler or source-specific connector.
 
 ## Enable the automation boundary
 
@@ -71,6 +71,8 @@ hormuz --config hormuz.json context-revalidate \
 
 `context-revalidate` runs or resumes one batch. If the returned status is `pending`, run the same command again. `completed` means the frozen record and evidence sets for that job have been evaluated. `superseded` means the trusted snapshot, record set, or evidence set changed before the batch committed; start the command again to create a job bound to the new inputs.
 
+For a CI job or connector that cannot access the server's configuration or database, use `hormuz lifecycle snapshot`, `hormuz lifecycle evidence`, and `hormuz lifecycle revalidate` against the authenticated gateway. These commands support bootstrap, workload OIDC, and Hormuz session credentials already accepted by the gateway. See [CONTEXT_LIFECYCLE_API.md](CONTEXT_LIFECYCLE_API.md) for the exact schemas, status codes, OIDC boundary, and retry behavior.
+
 ## Evidence contract
 
 An input envelope uses `hormuz.context-evidence.v1`:
@@ -134,4 +136,4 @@ Lifecycle changes preserve record content, source, dependencies, supersession, c
 
 ## Current boundary
 
-This slice does not collect GitHub, GitLab, CI, ADR, incident, or review events automatically; a trusted operator or future connector must produce the evidence envelope and repository snapshot. It does not implement probabilistic confidence scoring, time-based decay, cross-node leases, PostgreSQL tenancy, signed attestations, a hosted scheduler, or automatic prompt injection. The existing assertion-level contradiction and pack-safety behavior remains separate from evidence-family conflicts. Issue #12 therefore remains open until connectors, remaining decay policy, hosted operations, and release evidence are complete.
+This slice does not collect GitHub, GitLab, CI, ADR, incident, or review events automatically; a trusted operator or source connector must validate its upstream protocol and produce the evidence envelope and repository snapshot. The authenticated remote boundary proves delivery and authorization, not the truth of the external event. It does not implement probabilistic confidence scoring, time-based decay, cross-node leases, PostgreSQL tenancy, signed attestations, a hosted scheduler, or automatic prompt injection. The existing assertion-level contradiction and pack-safety behavior remains separate from evidence-family conflicts. Issue #12 therefore remains open until source-specific verification, remaining decay policy, hosted operations, and release evidence are complete.
