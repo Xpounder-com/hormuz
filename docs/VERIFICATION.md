@@ -774,6 +774,20 @@ The provider-upstream configuration boundary was exercised locally on August 16,
 
 This closes the identified configured plaintext provider-egress path, not production network policy. DNS integrity, platform certificate trust, private endpoints, workload egress allowlists, proxy/service-mesh policy, TLS ingress, shared persistence, HA, disaster recovery, KMS, and independent review remain open gates.
 
+### Provider redirect refusal
+
+The provider-generation redirect boundary was exercised locally on August 16, 2026 through real Hormuz HTTP transport, its configured OpenAI and Anthropic credentials, and two provider-compatible loopback origins. No live provider credential or endpoint was used.
+
+- the red-first test proved that the standard provider transport followed a `302` to the second origin and treated its fixed fake response as a successful `200`;
+- Hormuz now uses one redirect-refusing provider transport for both OpenAI and Anthropic, keeping each server-held credential and provider-bound request at the configured origin;
+- OpenAI Responses and Anthropic Messages redirects each returned a provider-shaped fixed `502 gateway_upstream_redirect`, did not reflect `Location`, and produced zero requests at the redirect target;
+- each refused attempt created exactly one failed, `not_available` cost-basis usage event. The events retained identity, provider/model, policy, status, rate-card, DLP-count, and context-lineage metadata only; neither request/response content nor the redirect target entered routine telemetry;
+- ordinary OpenAI non-streaming, Anthropic streaming, and fixed content-free upstream-failure paths remained compatible in focused tests;
+- the complete 335-test source suite passed in `103.365` seconds. The environment-gated official Claude Code case was the sole local skip; and
+- source/test bytecode compilation and `git diff --check` passed.
+
+This closes automatic application-level provider redirect following, not production egress governance. DNS integrity, platform certificate trust, forward-proxy and service-mesh behavior, workload egress allowlists, TLS ingress, shared persistence, HA, KMS, disaster recovery, and independent security review remain open gates.
+
 ## Reproduce locally
 
 The default suite uses only loopback fake providers:

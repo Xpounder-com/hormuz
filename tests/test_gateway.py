@@ -48,6 +48,7 @@ class FakeProviderHandler(BaseHTTPRequestHandler):
     response_content_type: str = "application/json"
     response_request_id_override: str | None = None
     response_extra_headers: tuple[tuple[str, str], ...] = ()
+    redirect_url: str | None = None
     request_started: threading.Event | None = None
     release_response: threading.Event | None = None
 
@@ -67,6 +68,12 @@ class FakeProviderHandler(BaseHTTPRequestHandler):
             self.__class__.request_started.set()
         if self.__class__.release_response is not None:
             self.__class__.release_response.wait(timeout=5)
+        if self.__class__.redirect_url is not None:
+            self.send_response(302)
+            self.send_header("Location", self.__class__.redirect_url)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
 
         if request_path.endswith("/responses"):
             payload = {
@@ -266,6 +273,47 @@ class FakeProviderHandler(BaseHTTPRequestHandler):
         pass
 
 
+class RedirectSinkHandler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+    requests: list[dict[str, object]] = []
+
+    def do_GET(self) -> None:  # noqa: N802
+        self._capture_and_respond()
+
+    def do_POST(self) -> None:  # noqa: N802
+        length = int(self.headers.get("Content-Length", "0"))
+        if length:
+            self.rfile.read(length)
+        self._capture_and_respond()
+
+    def _capture_and_respond(self) -> None:
+        self.__class__.requests.append(
+            {
+                "method": self.command,
+                "path": self.path,
+                "headers": {name.lower(): value for name, value in self.headers.items()},
+            }
+        )
+        payload = json.dumps(
+            {
+                "id": "redirected_response",
+                "object": "response",
+                "status": "completed",
+                "model": "gpt-test-fast",
+                "output": [],
+                "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+            }
+        ).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def log_message(self, format: str, *args: object) -> None:
+        pass
+
+
 class ProviderQueryInspectionTests(unittest.TestCase):
     def test_query_is_form_decoded_then_percent_decoded_with_bounded_views(self) -> None:
         query = "owner=query%2Downer%40example.com+internal&feature=%2573%256B"
@@ -314,6 +362,7 @@ class GatewayIntegrationTests(unittest.TestCase):
         FakeProviderHandler.response_content_type = "application/json"
         FakeProviderHandler.response_request_id_override = None
         FakeProviderHandler.response_extra_headers = ()
+        FakeProviderHandler.redirect_url = None
         FakeProviderHandler.request_started = None
         FakeProviderHandler.release_response = None
         self.provider = ThreadingHTTPServer(("127.0.0.1", 0), FakeProviderHandler)
@@ -704,8 +753,9 @@ class GatewayIntegrationTests(unittest.TestCase):
         request_content = "PRIVATE-REQUEST-CONTENT"
         raw_query = "trace=PRIVATE-RAW-QUERY"
 
-        with mock.patch(
-            "hormuz.server.urllib.request.urlopen",
+        with mock.patch.object(
+            self.gateway.upstream_opener,
+            "open",
             side_effect=OSError(internal_detail),
         ), self.assertLogs("hormuz", level="DEBUG") as logs:
             status, _, response = self._post(
@@ -720,6 +770,53 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertNotIn(request_content, observable)
         self.assertNotIn(raw_query, observable)
         self.assertIn("route=/v1/responses", observable)
+
+    def test_provider_redirect_is_refused_without_forwarding_server_credential(self) -> None:
+        RedirectSinkHandler.requests = []
+        sink = ThreadingHTTPServer(("127.0.0.1", 0), RedirectSinkHandler)
+        sink_thread = threading.Thread(target=sink.serve_forever, daemon=True)
+        sink_thread.start()
+        FakeProviderHandler.redirect_url = (
+            f"http://127.0.0.1:{sink.server_port}/credential-target"
+        )
+        try:
+            cases = (
+                (
+                    "/v1/responses",
+                    {"model": "engineering-fast", "input": "ordinary request"},
+                ),
+                (
+                    "/v1/messages",
+                    {
+                        "model": "claude-sonnet-5",
+                        "messages": [{"role": "user", "content": "ordinary request"}],
+                        "max_tokens": 50,
+                    },
+                ),
+            )
+            for path, payload in cases:
+                with self.subTest(path=path):
+                    status, headers, response = self._post(path, payload)
+                    self.assertEqual(status, 502)
+                    self.assertEqual(
+                        json.loads(response)["error"]["type"],
+                        "gateway_upstream_redirect",
+                    )
+                    self.assertNotIn("location", headers)
+        finally:
+            sink.shutdown()
+            sink.server_close()
+
+        self.assertEqual(RedirectSinkHandler.requests, [])
+        events = self.gateway.store.audit_events(
+            since="2000-01-01T00:00:00+00:00",
+            kind="usage",
+        )
+        self.assertEqual(len(events), len(cases))
+        self.assertTrue(all(event["status"] == "failed" for event in events))
+        self.assertTrue(
+            all(event["cost_basis"] == "not_available" for event in events)
+        )
 
     def test_disallowed_client_is_rejected_before_provider_call(self) -> None:
         before = len(FakeProviderHandler.requests)

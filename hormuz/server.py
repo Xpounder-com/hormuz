@@ -238,6 +238,21 @@ class ContextRateLimiter:
             return None
 
 
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Keep provider credentials bound to the configured upstream origin."""
+
+    def redirect_request(
+        self,
+        request: urllib.request.Request,
+        file_pointer: object,
+        code: int,
+        message: str,
+        headers: object,
+        new_url: str,
+    ) -> None:
+        return None
+
+
 class GatewayServer(ThreadingHTTPServer):
     # Daemon request threads keep an idle HTTP/1.1 keep-alive socket from
     # blocking process termination. Parsed requests are drained explicitly.
@@ -272,6 +287,7 @@ class GatewayServer(ThreadingHTTPServer):
             config.context_service.requests_per_minute
         )
         self.login_rate_limiter = ContextRateLimiter(20)
+        self.upstream_opener = urllib.request.build_opener(_NoRedirectHandler)
         self.policy_engine = PolicyEngine(config, self.store)
         protected_values = [
             ("hormuz_identity_token", identity.token)
@@ -2721,7 +2737,10 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         request = urllib.request.Request(request_url, data=body, headers=headers, method="POST")
 
         try:
-            response = urllib.request.urlopen(request, timeout=self.server.config.upstream_timeout_seconds)
+            response = self.server.upstream_opener.open(
+                request,
+                timeout=self.server.config.upstream_timeout_seconds,
+            )
         except urllib.error.HTTPError as error:
             response = error
         except (urllib.error.URLError, TimeoutError, OSError):
@@ -2751,6 +2770,33 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             return
 
         status = getattr(response, "status", response.getcode())
+        if 300 <= status < 400:
+            response.close()
+            if account_usage:
+                self.server.store.record(
+                    identity=identity,
+                    client=client,
+                    protocol=protocol,
+                    requested_model=decision.requested_model,
+                    resolved_alias=decision.resolved_alias,
+                    upstream_model=route.upstream_model,
+                    policy_action=policy_action,
+                    status="failed",
+                    cost_basis="not_available",
+                    currency=route.currency,
+                    rate_card_version=route.rate_card_version,
+                    redaction_count=redaction_count,
+                    redaction_rules=redaction_rules,
+                    context_lineage=context_lineage,
+                )
+            LOGGER.warning("provider_redirect_refused protocol=%s", protocol)
+            self._send_protocol_error(
+                protocol,
+                "Upstream provider redirect was refused.",
+                HTTPStatus.BAD_GATEWAY,
+                code="gateway_upstream_redirect",
+            )
+            return
         raw_content_type = response.headers.get("Content-Type", "application/json")
         content_type = _safe_provider_content_type(raw_content_type)
         response_headers, dropped_response_headers = _safe_provider_response_headers(
