@@ -761,6 +761,19 @@ A focused failure-first review of the provider-response boundary was exercised l
 
 This closes the identified application-level provider-response metadata path, not production deployment issue #11. Reverse proxies, TLS termination, service meshes, provider-side content, shared persistence, HA, KMS, backup/restore, and independent security review remain separate gates.
 
+### Remote provider HTTPS enforcement
+
+The provider-upstream configuration boundary was exercised locally on August 16, 2026 without a live provider credential or remote provider request.
+
+- red-first configuration tests proved that both provider slots accepted non-loopback plaintext HTTP, embedded URL credentials, queries, and fragments before the change;
+- OpenAI and Anthropic base URLs now pass the same strict structural URL validator and require HTTPS whenever the hostname is not a literal loopback address or `localhost`;
+- deterministic development remains possible through IPv4, IPv6, and `localhost` loopback fakes, while remote hostnames and non-loopback addresses cannot receive a provider credential over HTTP;
+- focused OpenAI non-streaming and Anthropic streaming requests completed through the real gateway and loopback providers with the existing employee/provider credential separation intact;
+- the complete 334-test source suite passed in `102.465` seconds. The environment-gated official Claude Code case was the sole local skip; and
+- source/test bytecode compilation and `git diff --check` passed.
+
+This closes the identified configured plaintext provider-egress path, not production network policy. DNS integrity, platform certificate trust, private endpoints, workload egress allowlists, proxy/service-mesh policy, TLS ingress, shared persistence, HA, disaster recovery, KMS, and independent review remain open gates.
+
 ## Reproduce locally
 
 The default suite uses only loopback fake providers:

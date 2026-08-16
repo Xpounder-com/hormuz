@@ -177,6 +177,51 @@ class ClientConfigTests(unittest.TestCase):
                         environ={"HORMUZ_TOKEN": "test-identity-token"},
                     )
 
+    def test_provider_upstreams_require_https_outside_loopback(self) -> None:
+        invalid_urls = (
+            "http://api.openai.com/v1",
+            "http://192.0.2.10/v1",
+            "https://user:password@api.openai.com/v1",
+            "https://api.openai.com/v1?transport=unsafe",
+            "https://api.openai.com/v1#unsafe",
+        )
+        for protocol in ("openai", "anthropic"):
+            for invalid_url in invalid_urls:
+                with (
+                    self.subTest(protocol=protocol, invalid_url=invalid_url),
+                    tempfile.TemporaryDirectory() as temporary,
+                ):
+                    raw = json.loads((ROOT / "config.example.json").read_text(encoding="utf-8"))
+                    raw["upstreams"][protocol]["base_url"] = invalid_url
+                    path = Path(temporary) / "hormuz.json"
+                    path.write_text(json.dumps(raw), encoding="utf-8")
+                    with self.assertRaisesRegex(ConfigError, f"upstreams.{protocol}.base_url"):
+                        GatewayConfig.load(
+                            path,
+                            environ={"HORMUZ_TOKEN": "test-identity-token"},
+                        )
+
+        for protocol in ("openai", "anthropic"):
+            for loopback_url in (
+                "http://127.0.0.1:8000/v1",
+                "http://127.0.0.2:8000/v1",
+                "http://[::1]:8000/v1",
+                "http://localhost:8000/v1",
+            ):
+                with (
+                    self.subTest(protocol=protocol, loopback_url=loopback_url),
+                    tempfile.TemporaryDirectory() as temporary,
+                ):
+                    raw = json.loads((ROOT / "config.example.json").read_text(encoding="utf-8"))
+                    raw["upstreams"][protocol]["base_url"] = loopback_url
+                    path = Path(temporary) / "hormuz.json"
+                    path.write_text(json.dumps(raw), encoding="utf-8")
+                    config = GatewayConfig.load(
+                        path,
+                        environ={"HORMUZ_TOKEN": "test-identity-token"},
+                    )
+                    self.assertEqual(config.upstreams[protocol].base_url, loopback_url)
+
     def test_claude_configuration_uses_gateway_bearer_token(self) -> None:
         output = io.StringIO()
         with redirect_stdout(output):

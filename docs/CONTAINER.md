@@ -91,7 +91,7 @@ Set the stop timeout above the configured Hormuz shutdown grace. A non-zero cont
 
 ## Network and telemetry boundary
 
-For any shared deployment, keep Hormuz on a private network behind a separately hardened TLS terminator. Permit egress only to the configured OpenAI and Anthropic API hosts and explicitly configured OIDC discovery/JWKS hosts. The current server does not interpret forwarded headers as client identity, so a proxy must not invent an employee identity or expose the private listener directly.
+For any shared deployment, keep Hormuz on a private network behind a separately hardened TLS terminator. Permit egress only to the configured OpenAI and Anthropic API hosts and explicitly configured OIDC discovery/JWKS hosts. Hormuz refuses a non-loopback plaintext provider URL and rejects provider base URLs containing user credentials, a query, or a fragment, but this application check does not replace a workload egress firewall or private endpoint policy. The current server does not interpret forwarded headers as client identity, so a proxy must not invent an employee identity or expose the private listener directly.
 
 Disable body, raw URL, query, header, and process-dump collection in the load balancer, proxy, service mesh, container runtime, and log shipper. Hormuz's routine telemetry remains content-free inside the container, but provider-bound content is still inspected and relayed transiently, and the governed-context database intentionally contains reusable context. Mount, encrypt, retain, back up, and authorize that data accordingly.
 

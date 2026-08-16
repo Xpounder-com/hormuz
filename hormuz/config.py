@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import binascii
 import hashlib
+import ipaddress
 import json
 import os
 import re
@@ -327,10 +328,9 @@ class GatewayConfig:
         upstreams: dict[str, UpstreamConfig] = {}
         for protocol in ("openai", "anthropic"):
             item = _object(upstreams_raw.get(protocol), f"upstreams.{protocol}")
-            base_url = _string(item.get("base_url"), f"upstreams.{protocol}.base_url").rstrip("/")
-            parsed = urlparse(base_url)
-            if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-                raise ConfigError(f"upstreams.{protocol}.base_url must be an HTTP(S) URL")
+            upstream_path = f"upstreams.{protocol}.base_url"
+            base_url = _url(item.get("base_url"), upstream_path).rstrip("/")
+            _validate_upstream_transport(base_url, upstream_path)
             upstreams[protocol] = UpstreamConfig(
                 base_url=base_url,
                 api_key_env=_string(item.get("api_key_env"), f"upstreams.{protocol}.api_key_env"),
@@ -1647,6 +1647,26 @@ def _validate_oidc_transport(
         hostname = urlparse(value).hostname
         if hostname not in {"127.0.0.1", "::1", "localhost"}:
             raise ConfigError(f"{path}.allow_insecure_http permits only loopback HTTP URLs")
+
+
+def _validate_upstream_transport(value: str, path: str) -> None:
+    parsed = urlparse(value)
+    if parsed.scheme == "https":
+        return
+    hostname = parsed.hostname
+    if hostname is None or not _is_loopback_hostname(hostname):
+        raise ConfigError(
+            f"{path} requires HTTPS; HTTP is permitted only for loopback development"
+        )
+
+
+def _is_loopback_hostname(value: str) -> bool:
+    if value.casefold() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(value).is_loopback
+    except ValueError:
+        return False
 
 
 def _validate_identity_consistency(identities: tuple[Identity, ...]) -> None:
