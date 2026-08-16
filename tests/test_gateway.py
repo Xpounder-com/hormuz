@@ -12,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
 import urllib.parse
 from datetime import datetime, timedelta, timezone
@@ -44,6 +45,8 @@ class FakeProviderHandler(BaseHTTPRequestHandler):
     requests: list[dict[str, object]] = []
     lock = threading.Lock()
     actual_model_override: str | None = None
+    request_started: threading.Event | None = None
+    release_response: threading.Event | None = None
 
     def do_POST(self) -> None:  # noqa: N802
         request_path = self.path.partition("?")[0]
@@ -57,6 +60,10 @@ class FakeProviderHandler(BaseHTTPRequestHandler):
                     "body": body,
                 }
             )
+        if self.__class__.request_started is not None:
+            self.__class__.request_started.set()
+        if self.__class__.release_response is not None:
+            self.__class__.release_response.wait(timeout=5)
 
         if request_path.endswith("/responses"):
             payload = {
@@ -298,6 +305,8 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.root = Path(self.temporary.name)
         FakeProviderHandler.requests = []
         FakeProviderHandler.actual_model_override = None
+        FakeProviderHandler.request_started = None
+        FakeProviderHandler.release_response = None
         self.provider = ThreadingHTTPServer(("127.0.0.1", 0), FakeProviderHandler)
         self.provider_thread = threading.Thread(target=self.provider.serve_forever, daemon=True)
         self.provider_thread.start()
@@ -316,7 +325,8 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.gateway_thread = serve_in_thread(self.gateway)
 
     def tearDown(self) -> None:
-        self.gateway.shutdown()
+        if self.gateway_thread.is_alive():
+            self.gateway.shutdown()
         self.gateway.server_close()
         self.provider.shutdown()
         self.provider.server_close()
@@ -358,6 +368,148 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertEqual(event["rate_card_version"], "test-openai-v1")
         self.assertEqual(event["actual_model"], "gpt-test-fast")
         self.assertEqual(event["provider_usage"]["total_tokens"], 150)
+
+    def test_health_contract_and_drain_admission_are_content_free(self) -> None:
+        before_provider = len(FakeProviderHandler.requests)
+        before_usage = self.gateway.store.monthly_totals(actor_id="alice").requests
+
+        live_status, live_headers, live_body = self._get(
+            "/health/live?attacker=must-not-reflect",
+            include_authorization=False,
+        )
+        ready_status, ready_headers, ready_body = self._get(
+            "/health/ready",
+            include_authorization=False,
+        )
+        legacy_status, _, legacy_body = self._get(
+            "/health",
+            include_authorization=False,
+        )
+
+        self.assertEqual(live_status, 200)
+        self.assertEqual(ready_status, 200)
+        self.assertEqual(legacy_status, 200)
+        self.assertEqual(live_headers["cache-control"], "no-store")
+        self.assertEqual(ready_headers["cache-control"], "no-store")
+        self.assertEqual(
+            json.loads(live_body),
+            {"schema": "hormuz.health.v1", "status": "live", "service": "hormuz"},
+        )
+        self.assertEqual(
+            json.loads(ready_body),
+            {"schema": "hormuz.health.v1", "status": "ready", "service": "hormuz"},
+        )
+        self.assertEqual(json.loads(legacy_body)["status"], "ok")
+        self.assertNotIn("must-not-reflect", live_body.decode("utf-8"))
+
+        self.assertTrue(self.gateway.begin_draining())
+        self.assertFalse(self.gateway.begin_draining())
+        draining_status, draining_headers, draining_body = self._get(
+            "/health/ready",
+            include_authorization=False,
+        )
+        still_live_status, _, still_live_body = self._get(
+            "/health/live",
+            include_authorization=False,
+        )
+        rejected_status, rejected_headers, rejected_body = self._post(
+            "/v1/responses",
+            {"model": "engineering-fast", "input": "must-not-be-admitted"},
+        )
+
+        self.assertEqual(draining_status, 503)
+        self.assertEqual(draining_headers["retry-after"], "1")
+        self.assertEqual(json.loads(draining_body)["status"], "draining")
+        self.assertEqual(still_live_status, 200)
+        self.assertEqual(json.loads(still_live_body)["status"], "live")
+        self.assertEqual(rejected_status, 503)
+        self.assertEqual(rejected_headers["connection"], "close")
+        self.assertEqual(rejected_headers["retry-after"], "1")
+        self.assertEqual(
+            json.loads(rejected_body)["error"]["code"],
+            "gateway_draining",
+        )
+        self.assertNotIn("must-not-be-admitted", rejected_body.decode("utf-8"))
+        self.assertEqual(len(FakeProviderHandler.requests), before_provider)
+        self.assertEqual(
+            self.gateway.store.monthly_totals(actor_id="alice").requests,
+            before_usage,
+        )
+
+    def test_draining_allows_an_already_admitted_request_to_finish(self) -> None:
+        FakeProviderHandler.request_started = threading.Event()
+        FakeProviderHandler.release_response = threading.Event()
+        outcome: list[tuple[int, dict[str, str], bytes]] = []
+
+        worker = threading.Thread(
+            target=lambda: outcome.append(
+                self._post(
+                    "/v1/responses",
+                    {"model": "engineering-fast", "input": "already admitted"},
+                )
+            ),
+            name="in-flight-gateway-request",
+        )
+        worker.start()
+        self.assertTrue(FakeProviderHandler.request_started.wait(timeout=5))
+        self.assertEqual(self.gateway.active_requests, 1)
+        self.assertTrue(self.gateway.begin_draining())
+        self.assertEqual(self.gateway.wait_for_in_flight(0.01), 1)
+
+        rejected_status, _, _ = self._post(
+            "/v1/responses",
+            {"model": "engineering-fast", "input": "arrived after drain"},
+        )
+        self.assertEqual(rejected_status, 503)
+        self.assertTrue(worker.is_alive())
+
+        FakeProviderHandler.release_response.set()
+        worker.join(timeout=5)
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(self.gateway.wait_for_in_flight(1), 0)
+        self.assertEqual(outcome[0][0], 200)
+        self.assertEqual(len(FakeProviderHandler.requests), 1)
+
+    def test_idle_keep_alive_connection_does_not_block_shutdown(self) -> None:
+        connection = http.client.HTTPConnection(
+            "127.0.0.1",
+            self.gateway.server_port,
+            timeout=5,
+        )
+        try:
+            connection.request("GET", "/health/live")
+            response = connection.getresponse()
+            self.assertEqual(response.status, 200)
+            response.read()
+            self.assertEqual(self.gateway.active_requests, 0)
+
+            self.assertTrue(self.gateway.request_shutdown())
+            self.gateway_thread.join(timeout=2)
+            self.assertFalse(self.gateway_thread.is_alive())
+
+            started = time.monotonic()
+            self.gateway.server_close()
+            self.assertLess(time.monotonic() - started, 1)
+        finally:
+            connection.close()
+
+    def test_shutdown_request_is_idempotent_and_runs_off_caller_thread(self) -> None:
+        shutdown_called = threading.Event()
+        caller_thread = threading.current_thread()
+        shutdown_threads: list[threading.Thread] = []
+
+        def record_shutdown() -> None:
+            shutdown_threads.append(threading.current_thread())
+            shutdown_called.set()
+
+        with mock.patch.object(self.gateway, "shutdown", side_effect=record_shutdown):
+            self.assertTrue(self.gateway.request_shutdown())
+            self.assertFalse(self.gateway.request_shutdown())
+            self.assertTrue(shutdown_called.wait(timeout=5))
+
+        self.assertEqual(len(shutdown_threads), 1)
+        self.assertIsNot(shutdown_threads[0], caller_thread)
+        self.assertEqual(shutdown_threads[0].name, "hormuz-shutdown")
 
     def test_openai_background_mode_is_denied_by_default(self) -> None:
         before = len(FakeProviderHandler.requests)

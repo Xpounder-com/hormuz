@@ -697,6 +697,24 @@ The structural persistence backstop for the owner-approved content-free default 
 
 This manifest prevents silent column drift; it does not replace value validation, database access controls, encryption, retention/deletion, immutable export, or deployment-component logging policy. The hosted database topology and KMS boundary remain owner-pending enterprise decisions.
 
+### Process health and bounded graceful draining
+
+The process-level health and shutdown slice was exercised locally on August 16, 2026 through the real HTTP server, provider-compatible loopback fakes, signal callback, package artifacts, and a clean installed wheel. No live provider credential or endpoint was used.
+
+- unauthenticated `GET /health/live` and `GET /health/ready` returned exact `hormuz.health.v1` content-free responses with `Cache-Control: no-store`. The compatibility `/health` path retained its ready-state `status=ok` and feature metadata;
+- after readiness withdrawal, `/health/live` remained `200`, `/health/ready` and `/health` returned `503 draining` plus `Retry-After: 1`, and later implemented application work returned a fixed `503 gateway_draining` before authentication, request-body processing, policy, storage, or provider work;
+- request admission and drain transition are atomic. A provider request admitted before the transition completed successfully, while a later request was rejected and produced no provider or usage-ledger side effect;
+- the `SIGTERM` callback now starts `shutdown()` on one helper thread rather than the serving thread, repeated signals are idempotent, and the configured `listen.shutdown_grace_seconds` is bounded from 1 through 300 with a default of 30;
+- in-flight accounting waits only for parsed requests admitted before drain. A held provider request remained visible until completion, while an idle HTTP/1.1 keep-alive socket counted as zero and could not block listener shutdown or `server_close()`;
+- grace expiry returned a failed process exit and logged only the remaining request count. The health query marker, rejected prompt, provider credentials, and request content were absent from the fixed health/drain responses;
+- all 316 source tests passed with no skips. Installed Codex `0.139.0` and pinned official Claude Code `2.1.233` each completed their ordinary provider-compatible request through Hormuz;
+- the frozen 60-task release benchmark passed five iterations with precision `1.00`, recall `1.00`, useful-pack rate `1.00`, mean compression ratio `0.840593`, zero authorization, stale-lifecycle, dependency-stale, malicious, contradiction, token-budget, leakage, or determinism failures, and p95 in-process selection latency `0.168208 ms`. Corpus SHA-256 remained `9822d592868202c7c7539bcdac7d4a5894c01f9e6dba7a434846516b67b32c17`;
+- isolated source/wheel builds succeeded;
+- a clean Python `3.14.0` environment installed that exact wheel outside the source checkout, loaded `hormuz.server` from `site-packages`, compiled the installed package, displayed the 30-second grace through `doctor`, and passed the installed regression benchmark. The source archive contained the operations contract, config, implementation, and regression tests; and
+- source/test bytecode compilation, deterministic benchmark execution, local Markdown-link validation, `git diff --check`, and high-confidence runtime-source plus extracted-wheel scans for private-key, OpenAI, Anthropic, GitHub, AWS, Google, Slack, and Hormuz-session credential patterns passed.
+
+This verifies a shallow single-process liveness/readiness and graceful-drain foundation, not production deployment issue #11. Plain HTTP remains limited to loopback or a separately hardened private TLS boundary. Deep dependency policy, shared load-balancer coordination, container/reference deployment, multi-node persistence, HA/failover, backup/restore, RPO/RTO, deployment-component telemetry review, and independent security review remain open.
+
 ## Reproduce locally
 
 The default suite uses only loopback fake providers:

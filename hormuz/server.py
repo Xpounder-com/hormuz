@@ -92,6 +92,8 @@ _CONTEXT_SCOPE_HEADERS = (
 _CONTENT_FREE_HTTP_ROUTES = frozenset(
     {
         "/health",
+        "/health/live",
+        "/health/ready",
         "/v1/admin/session-events",
         "/v1/admin/session-revocations",
         "/v1/admin/sessions",
@@ -236,10 +238,18 @@ class ContextRateLimiter:
 
 
 class GatewayServer(ThreadingHTTPServer):
+    # Daemon request threads keep an idle HTTP/1.1 keep-alive socket from
+    # blocking process termination. Parsed requests are drained explicitly.
     daemon_threads = True
+    block_on_close = True
     allow_reuse_address = True
 
     def __init__(self, config: GatewayConfig):
+        self._draining = threading.Event()
+        self._request_condition = threading.Condition()
+        self._active_requests = 0
+        self._shutdown_lock = threading.Lock()
+        self._shutdown_started = False
         self.config = config
         self.authenticator = Authenticator(config)
         self.session_broker: SessionBroker | None = None
@@ -293,6 +303,69 @@ class GatewayServer(ThreadingHTTPServer):
         self._redactor_cache_lock = threading.Lock()
         super().__init__((config.listen.host, config.listen.port), GatewayRequestHandler)
 
+    @property
+    def is_draining(self) -> bool:
+        return self._draining.is_set()
+
+    def begin_draining(self) -> bool:
+        """Withdraw readiness and reject work not already admitted."""
+
+        with self._request_condition:
+            was_draining = self._draining.is_set()
+            self._draining.set()
+            return not was_draining
+
+    def admit_request(self) -> bool:
+        """Atomically admit a parsed request unless draining has begun."""
+
+        with self._request_condition:
+            if self._draining.is_set():
+                return False
+            self._active_requests += 1
+            return True
+
+    def request_finished(self) -> None:
+        """Release one admitted request and wake shutdown waiters."""
+
+        with self._request_condition:
+            if self._active_requests <= 0:
+                raise RuntimeError("request accounting underflow")
+            self._active_requests -= 1
+            if self._active_requests == 0:
+                self._request_condition.notify_all()
+
+    @property
+    def active_requests(self) -> int:
+        with self._request_condition:
+            return self._active_requests
+
+    def wait_for_in_flight(self, timeout_seconds: float) -> int:
+        """Wait a bounded interval and return the number still in flight."""
+
+        deadline = time.monotonic() + timeout_seconds
+        with self._request_condition:
+            while self._active_requests:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                self._request_condition.wait(remaining)
+            return self._active_requests
+
+    def request_shutdown(self) -> bool:
+        """Start shutdown off the serve thread; repeated signals are harmless."""
+
+        self.begin_draining()
+        with self._shutdown_lock:
+            if self._shutdown_started:
+                return False
+            self._shutdown_started = True
+            threading.Thread(
+                target=self.shutdown,
+                name="hormuz-shutdown",
+                daemon=True,
+            ).start()
+            return True
+
     def redactor_for(
         self,
         identity: Identity,
@@ -327,24 +400,62 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
     server: GatewayServer
     protocol_version = "HTTP/1.1"
 
+    def handle_one_request(self) -> None:
+        self._hormuz_request_admitted = False
+        try:
+            super().handle_one_request()
+        finally:
+            if self._hormuz_request_admitted:
+                self.server.request_finished()
+
+    def parse_request(self) -> bool:
+        parsed = super().parse_request()
+        if parsed:
+            self._hormuz_request_admitted = self.server.admit_request()
+        return parsed
+
     def do_GET(self) -> None:  # noqa: N802
         request_url = urlsplit(self.path)
         path = request_url.path
-        if path == "/health":
+        if path == "/health/live":
             self._send_json(
                 HTTPStatus.OK,
                 {
-                    "status": "ok",
+                    "schema": "hormuz.health.v1",
+                    "status": "live",
                     "service": "hormuz",
-                    "protocols": [
-                        "openai-responses",
-                        "anthropic-messages",
-                        "hormuz-context-packs",
-                    ],
-                    "human_login": self.server.session_broker is not None,
-                    "dlp_approval": self.server.config.dlp_controls.approval.enabled,
                 },
             )
+            return
+        if path in {"/health", "/health/ready"}:
+            ready = not self.server.is_draining
+            health_status = "ready" if ready else "draining"
+            if path == "/health" and ready:
+                health_status = "ok"
+            payload: dict[str, object] = {
+                "schema": "hormuz.health.v1",
+                "status": health_status,
+                "service": "hormuz",
+            }
+            if path == "/health":
+                payload.update(
+                    {
+                        "protocols": [
+                            "openai-responses",
+                            "anthropic-messages",
+                            "hormuz-context-packs",
+                        ],
+                        "human_login": self.server.session_broker is not None,
+                        "dlp_approval": self.server.config.dlp_controls.approval.enabled,
+                    }
+                )
+            self._send_json(
+                HTTPStatus.OK if ready else HTTPStatus.SERVICE_UNAVAILABLE,
+                payload,
+                headers={"Retry-After": "1"} if not ready else None,
+            )
+            return
+        if self._reject_if_draining():
             return
         if path == "/v1/auth/login":
             self._begin_browser_login(request_url.query)
@@ -640,6 +751,8 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         path = urlsplit(self.path).path
+        if self._reject_if_draining():
+            return
         if path == "/v1/auth/enrollments":
             self._create_login_enrollment()
             return
@@ -732,6 +845,8 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
 
     def do_PUT(self) -> None:  # noqa: N802
         path = urlsplit(self.path).path
+        if self._reject_if_draining():
+            return
         if path != "/v1/context/lifecycle-snapshots":
             self._send_error(
                 "not_found",
@@ -1819,6 +1934,8 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         )
 
     def do_OPTIONS(self) -> None:  # noqa: N802
+        if self._reject_if_draining():
+            return
         self.send_response(HTTPStatus.NO_CONTENT)
         self.send_header("Allow", "GET, POST, PUT, OPTIONS")
         self.send_header("Content-Length", "0")
@@ -2918,6 +3035,18 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             {"error": {"code": code, "message": message}},
             headers=response_headers,
         )
+
+    def _reject_if_draining(self) -> bool:
+        if self._hormuz_request_admitted:
+            return False
+        self._send_error(
+            "gateway_draining",
+            "Gateway is draining",
+            HTTPStatus.SERVICE_UNAVAILABLE,
+            headers={"Retry-After": "1"},
+            close_connection=True,
+        )
+        return True
 
     def _send_json(
         self,

@@ -26,6 +26,7 @@ The private alpha currently has:
 - a config-independent, authenticated remote lifecycle CLI/API through which capability-gated workloads can submit normalized evidence, snapshots, and bounded revalidation work without provider calls or raw-reference audit retention;
 - a reproducible 60-task synthetic retrieval benchmark whose strict version-2 release profile passes current authorization, lifecycle, dependency, quarantine, contradiction, budget, determinism, leakage, and latency thresholds;
 - local and GitHub package/client verification.
+- shallow versioned liveness/readiness probes and bounded `SIGTERM` request draining, with idle keep-alive and in-flight request regression coverage; TLS, deep dependency policy, supported deployment artifacts, HA, backup/restore, RPO/RTO, and the rest of #11 remain open.
 
 The foundation is not an enterprise release. The local usage/approval, context, and session databases are single-node, and the local context codec is plaintext; none is an accepted hosted persistence design. Real-IdP validation, shared tenancy and multi-node revocation, SCIM, source-specific lifecycle collectors and signed-event verification, hosted scheduling, remaining time/confidence decay policy, automatic trusted repository discovery, continuation binding and complete automatic-injection quality evidence, remaining structured-DLP coverage, cache policy, scheduled billing ingestion with secure hosted credential custody, final invoice reconciliation, HA deployment, KMS, and independent security review remain open gates.
 

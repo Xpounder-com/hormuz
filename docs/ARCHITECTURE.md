@@ -82,6 +82,7 @@ The HTTP path authenticates first, derives organization/team/actor from the stat
 ## Code boundaries
 
 - `hormuz/server.py` owns HTTP compatibility, authentication, upstream forwarding, streaming, and protocol-shaped errors.
+- The server also owns shallow content-free liveness/readiness, atomic request admission, and bounded drain accounting. `SIGTERM` orchestration and its configured grace deadline live in `hormuz/cli.py`; neither surface claims dependency-wide health or HA.
 - `hormuz/auth.py` verifies bootstrap, workload OIDC JWT, and login ID-token signatures against configured issuers.
 - `hormuz/session.py` owns authorization-code + PKCE protocol behavior and maps opaque sessions back to current configured identities.
 - `hormuz/session_store.py` owns a separate local session database, event-time identity bindings, keyed credential hashes, encrypted transient flow state, atomic rotation, replay detection, tenant-scoped administration, revocation, and metadata-only security events.

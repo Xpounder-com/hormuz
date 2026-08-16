@@ -874,19 +874,32 @@ def _serve(config: GatewayConfig) -> int:
         print(f"Session database: {config.session_broker.database_path}")
 
     def stop(_signum, _frame):
-        server.shutdown()
+        # BaseServer.shutdown() deadlocks when called from the same thread as
+        # serve_forever(). GatewayServer starts the shutdown call on a helper.
+        server.request_shutdown()
 
     signal.signal(signal.SIGTERM, stop)
+    remaining_requests = 0
     try:
         server.serve_forever()
     finally:
+        server.begin_draining()
+        remaining_requests = server.wait_for_in_flight(
+            config.listen.shutdown_grace_seconds
+        )
+        if remaining_requests:
+            logging.getLogger("hormuz").warning(
+                "shutdown_grace_expired in_flight=%d",
+                remaining_requests,
+            )
         server.server_close()
-    return 0
+    return 1 if remaining_requests else 0
 
 
 def _doctor(config: GatewayConfig) -> int:
     print(f"configuration: {config.source_path}")
     print(f"listener: http://{config.listen.host}:{config.listen.port}")
+    print(f"shutdown grace: {config.listen.shutdown_grace_seconds} seconds")
     print(f"actors: {len(config.identities_by_actor)}")
     print(f"static identities: {len(config.identities_by_token)}")
     print(f"OIDC issuers: {len(config.oidc_issuers)}")

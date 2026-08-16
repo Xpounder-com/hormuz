@@ -22,6 +22,7 @@ class ConfigError(ValueError):
 class ListenConfig:
     host: str = "127.0.0.1"
     port: int = 8787
+    shutdown_grace_seconds: int = 30
 
 
 @dataclass(frozen=True)
@@ -300,6 +301,12 @@ class GatewayConfig:
         listen_raw = _object(raw.get("listen", {}), "listen")
         host = _string(listen_raw.get("host", "127.0.0.1"), "listen.host")
         port = _integer(listen_raw.get("port", 8787), "listen.port", minimum=1, maximum=65535)
+        shutdown_grace_seconds = _integer(
+            listen_raw.get("shutdown_grace_seconds", 30),
+            "listen.shutdown_grace_seconds",
+            minimum=1,
+            maximum=300,
+        )
 
         database_value = _string(raw.get("database", "./hormuz.sqlite3"), "database")
         database_path = Path(database_value).expanduser()
@@ -616,7 +623,11 @@ class GatewayConfig:
 
         config = cls(
             source_path=source_path,
-            listen=ListenConfig(host=host, port=port),
+            listen=ListenConfig(
+                host=host,
+                port=port,
+                shutdown_grace_seconds=shutdown_grace_seconds,
+            ),
             database_path=database_path,
             context_database_path=context_database_path,
             upstreams=upstreams,

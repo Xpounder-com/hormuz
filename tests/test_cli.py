@@ -7,6 +7,7 @@ import io
 import json
 import os
 import sqlite3
+import signal
 import tempfile
 import tomllib
 import unittest
@@ -37,6 +38,7 @@ from hormuz.cli import (
     _lifecycle_remote_command,
     _policy_check,
     _status,
+    _serve,
     build_parser,
     main,
 )
@@ -85,6 +87,95 @@ class ClientConfigTests(unittest.TestCase):
         self.assertIn('model = "gpt-5.4-mini"', output.getvalue())
         self.assertIn('base_url = "https://hormuz.example/v1"', output.getvalue())
         self.assertIn('env_key = "HORMUZ_TOKEN"', output.getvalue())
+
+    def test_sigterm_uses_nonblocking_idempotent_shutdown_request(self) -> None:
+        callbacks: dict[int, object] = {}
+
+        class FakeServer:
+            request_shutdown_calls = 0
+            closed = False
+            draining = False
+
+            def request_shutdown(self) -> bool:
+                self.request_shutdown_calls += 1
+                return self.request_shutdown_calls == 1
+
+            def serve_forever(self) -> None:
+                callback = callbacks[signal.SIGTERM]
+                callback(signal.SIGTERM, None)  # type: ignore[operator]
+                callback(signal.SIGTERM, None)  # type: ignore[operator]
+
+            def begin_draining(self) -> bool:
+                was_draining = self.draining
+                self.draining = True
+                return not was_draining
+
+            def wait_for_in_flight(self, timeout_seconds: float) -> int:
+                self.wait_timeout = timeout_seconds
+                return 0
+
+            def server_close(self) -> None:
+                self.closed = True
+
+        server = FakeServer()
+
+        def capture_signal(number: int, callback: object) -> None:
+            callbacks[number] = callback
+
+        with (
+            mock.patch("hormuz.cli.GatewayServer", return_value=server),
+            mock.patch("hormuz.cli.signal.signal", side_effect=capture_signal),
+            redirect_stdout(io.StringIO()),
+            redirect_stderr(io.StringIO()),
+        ):
+            self.assertEqual(_serve(self.config), 0)
+
+        self.assertEqual(server.request_shutdown_calls, 2)
+        self.assertTrue(server.draining)
+        self.assertEqual(server.wait_timeout, 30)
+        self.assertTrue(server.closed)
+
+    def test_shutdown_grace_expiry_is_a_failed_exit(self) -> None:
+        server = mock.Mock()
+        server.wait_for_in_flight.return_value = 2
+
+        with (
+            mock.patch("hormuz.cli.GatewayServer", return_value=server),
+            mock.patch("hormuz.cli.signal.signal"),
+            redirect_stdout(io.StringIO()),
+            redirect_stderr(io.StringIO()),
+            self.assertLogs("hormuz", level="WARNING") as captured,
+        ):
+            self.assertEqual(_serve(self.config), 1)
+
+        server.begin_draining.assert_called_once_with()
+        server.wait_for_in_flight.assert_called_once_with(30)
+        server.server_close.assert_called_once_with()
+        self.assertIn("shutdown_grace_expired in_flight=2", captured.output[0])
+
+    def test_shutdown_grace_configuration_is_bounded(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "hormuz.json"
+            raw = json.loads((ROOT / "config.example.json").read_text(encoding="utf-8"))
+            raw["listen"]["shutdown_grace_seconds"] = 45
+            path.write_text(json.dumps(raw), encoding="utf-8")
+            config = GatewayConfig.load(
+                path,
+                environ={"HORMUZ_TOKEN": "test-identity-token"},
+            )
+            self.assertEqual(config.listen.shutdown_grace_seconds, 45)
+
+            for invalid in (0, 301):
+                raw["listen"]["shutdown_grace_seconds"] = invalid
+                path.write_text(json.dumps(raw), encoding="utf-8")
+                with self.subTest(invalid=invalid), self.assertRaisesRegex(
+                    ConfigError,
+                    "listen.shutdown_grace_seconds",
+                ):
+                    GatewayConfig.load(
+                        path,
+                        environ={"HORMUZ_TOKEN": "test-identity-token"},
+                    )
 
     def test_claude_configuration_uses_gateway_bearer_token(self) -> None:
         output = io.StringIO()
