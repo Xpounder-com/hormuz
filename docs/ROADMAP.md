@@ -35,6 +35,7 @@ These issues record product decisions and block dependent implementation. They m
 1. [#1 — Approve the enterprise tenancy, authorization, and persistence topology](https://github.com/Xpounder-com/hormuz/issues/1) — [Proposed ADR 0002](decisions/0002-enterprise-tenancy-and-persistence.md)
 2. [#3 — Define provider and Hormuz cache privacy tiers](https://github.com/Xpounder-com/hormuz/issues/3) — [Proposed ADR 0003](decisions/0003-cache-privacy-tiers.md)
 3. [#12 — Choose GitHub lifecycle event trust and collection](https://github.com/Xpounder-com/hormuz/issues/12) — [Proposed ADR 0005](decisions/0005-github-lifecycle-event-trust.md)
+4. [#5 — Choose automatic governed-context injection](https://github.com/Xpounder-com/hormuz/issues/5) — [Proposed ADR 0006](decisions/0006-automatic-context-injection.md)
 
 [ADR 0001](decisions/0001-oidc-login-and-session-architecture.md) was accepted by the product owner on 2026-08-15. Its implementation evidence is tracked under #13; acceptance of the decision does not close the remaining real-IdP, SCIM, shared-revocation, and HA gates.
 
