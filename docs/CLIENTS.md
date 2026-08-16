@@ -1,6 +1,6 @@
 # Connect existing AI clients
 
-Hormuz sits between an employee's existing AI client and the provider API. The employee uses either a unique bootstrap identity token or a short-lived OIDC JWT access token; only the Hormuz service receives the organization's OpenAI or Anthropic credential.
+Hormuz sits between an employee's existing AI client and the provider API. The employee uses a unique bootstrap credential, a workload OIDC JWT access token, or a short-lived Hormuz human session; only the Hormuz service receives the organization's OpenAI or Anthropic credential.
 
 This page configures provider traffic through Hormuz. To add governed organizational context as a native tool in the same clients, also follow [MCP.md](MCP.md).
 
@@ -73,6 +73,22 @@ hormuz auth token --env HORMUZ_OIDC_ACCESS_TOKEN
 
 The helper does not load server configuration and does not mint tokens. It re-reads the credential supplied by the organization's OIDC tooling. The company must currently ensure that source contains a valid JWT access token for the Hormuz audience.
 
+## Browser SSO and Hormuz sessions
+
+For human employees, prefer the accepted session-broker path in [OIDC.md](OIDC.md). Log in separately for each client-bound profile, then generate the native client configuration:
+
+```bash
+hormuz login --gateway https://hormuz.example.com --profile codex --client codex
+hormuz login --gateway https://hormuz.example.com --profile claude --client claude-code
+
+hormuz --config /etc/hormuz/hormuz.json client-config codex \
+  --url https://hormuz.example.com --actor alice --auth-mode session --profile codex
+hormuz --config /etc/hormuz/hormuz.json client-config claude \
+  --url https://hormuz.example.com --actor alice --auth-mode session --profile claude
+```
+
+The generated Codex auth command invokes `hormuz auth token --gateway ... --profile ...`. Claude Code's string-valued `apiKeyHelper` uses the shell-safe `--gateway-env HORMUZ_SESSION_GATEWAY` form, with the non-secret URL supplied in its managed `env` block. Both read the OS secure store and rotate the session when needed. Neither prints the refresh credential.
+
 ## Deployment boundary
 
-For a company rollout, endpoint management should install the client configuration and provision a unique identity for each human or service account. Shared employee tokens make per-person attribution and revocation unreliable. OIDC JWT verification is available now; native browser login, refresh-token custody, opaque-token handling, and SCIM remain later milestones. Provider keys remain server-side in every design.
+For a company rollout, endpoint management should install the client configuration and provision a unique identity for each human or service account. Shared employee tokens make per-person attribution and revocation unreliable. Browser login and opaque Hormuz session rotation are implemented; real-IdP validation, SCIM, admin revocation, and HA session persistence remain release gates. Provider keys remain server-side in every design.

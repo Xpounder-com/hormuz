@@ -3,6 +3,7 @@ from __future__ import annotations
 import http.client
 import json
 import os
+import shlex
 import shutil
 import socket
 import subprocess
@@ -897,7 +898,12 @@ class GatewayIntegrationTests(unittest.TestCase):
             "-c",
             f'model_providers.company_gateway.base_url="http://127.0.0.1:{self.gateway.server_port}/v1"',
             "-c",
-            'model_providers.company_gateway.env_key="TEST_GATEWAY_TOKEN"',
+            f"model_providers.company_gateway.auth.command={json.dumps(sys.executable)}",
+            "-c",
+            "model_providers.company_gateway.auth.args="
+            + json.dumps(["-c", f"print({GATEWAY_TOKEN!r})"]),
+            "-c",
+            "model_providers.company_gateway.auth.refresh_interval_ms=300000",
             "-c",
             'model_providers.company_gateway.wire_api="responses"',
             "-c",
@@ -947,13 +953,27 @@ class GatewayIntegrationTests(unittest.TestCase):
         before = len(FakeProviderHandler.requests)
         debug_path = self.root / "claude-debug.log"
         environment = os.environ.copy()
-        environment["ANTHROPIC_BASE_URL"] = f"http://127.0.0.1:{self.gateway.server_port}"
-        environment["ANTHROPIC_API_KEY"] = GATEWAY_TOKEN
         environment["TEST_GATEWAY_TOKEN"] = GATEWAY_TOKEN
+        environment.pop("ANTHROPIC_API_KEY", None)
         environment.pop("ANTHROPIC_AUTH_TOKEN", None)
         environment["DISABLE_AUTOUPDATER"] = "1"
         environment["CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT"] = "1"
         claude = shutil.which("claude")
+        settings_path = self.root / "claude-settings.json"
+        settings_path.write_text(
+            json.dumps(
+                {
+                    "apiKeyHelper": shlex.join(
+                        [sys.executable, "-c", f"print({GATEWAY_TOKEN!r})"]
+                    ),
+                    "env": {
+                        "ANTHROPIC_BASE_URL": f"http://127.0.0.1:{self.gateway.server_port}",
+                        "CLAUDE_CODE_API_KEY_HELPER_TTL_MS": "300000",
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
         mcp_config_path = self.root / "claude-mcp.json"
         mcp_config_path.write_text(
             json.dumps(
@@ -988,6 +1008,8 @@ class GatewayIntegrationTests(unittest.TestCase):
             "--debug-file",
             str(debug_path),
             "--no-session-persistence",
+            "--settings",
+            str(settings_path),
             "--mcp-config",
             str(mcp_config_path),
             "--strict-mcp-config",

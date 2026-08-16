@@ -23,6 +23,7 @@ from .context import (
     build_context_pack,
 )
 from .context_store import ContextStoreError, SQLiteContextRepository, StoredContextRecord
+from .credential_store import CredentialStoreError, validate_profile
 from .context_benchmark import (
     ContextBenchmarkError,
     DEFAULT_CORPUS_PATH,
@@ -38,6 +39,12 @@ from .mcp import (
 )
 from .policy import PolicyEngine
 from .server import GatewayServer
+from .session_client import (
+    SessionClientError,
+    access_token as session_access_token,
+    login as session_login,
+    logout as session_logout,
+)
 from .store import UsageStore
 
 
@@ -80,13 +87,52 @@ def build_parser() -> argparse.ArgumentParser:
     connect.add_argument("--actor", help="Configured actor ID; defaults to the first configured actor")
     connect.add_argument(
         "--auth-mode",
-        choices=["auto", "static", "oidc"],
+        choices=["auto", "static", "oidc", "session"],
         default="auto",
         help="Credential source to configure (default: static when available, otherwise OIDC)",
     )
     connect.add_argument(
         "--credential-env",
         help="Environment variable containing the credential (OIDC default: HORMUZ_OIDC_ACCESS_TOKEN)",
+    )
+    connect.add_argument(
+        "--profile",
+        help="Secure-store profile for session auth (default: codex or claude)",
+    )
+
+    login_parser = subparsers.add_parser(
+        "login",
+        help="Sign in through company OIDC and save a revocable session in the OS secure store",
+    )
+    login_parser.add_argument("--gateway", required=True, help="Hormuz gateway base URL")
+    login_parser.add_argument("--profile", default="default", help="Local secure-store profile")
+    login_parser.add_argument(
+        "--client",
+        choices=["codex", "claude-code"],
+        default="codex",
+        help="AI client bound to this session (default: codex)",
+    )
+    login_parser.add_argument("--issuer", help="OIDC issuer URL; required when multiple login issuers exist")
+    login_parser.add_argument("--no-open", action="store_true", help="Print the login URL instead of opening a browser")
+    login_parser.add_argument(
+        "--wait-seconds",
+        type=int,
+        default=300,
+        help="Time to wait for browser login, from 30 to 600 seconds (default: 300)",
+    )
+    login_parser.add_argument(
+        "--allow-insecure-http",
+        action="store_true",
+        help="Allow loopback HTTP for local development only",
+    )
+
+    logout_parser = subparsers.add_parser("logout", help="Revoke and remove a saved Hormuz session")
+    logout_parser.add_argument("--gateway", required=True, help="Hormuz gateway base URL")
+    logout_parser.add_argument("--profile", default="default", help="Local secure-store profile")
+    logout_parser.add_argument(
+        "--allow-insecure-http",
+        action="store_true",
+        help="Allow loopback HTTP for local development only",
     )
 
     mcp = subparsers.add_parser(
@@ -126,8 +172,19 @@ def build_parser() -> argparse.ArgumentParser:
 
     auth = subparsers.add_parser("auth", help="Credential helpers for AI clients")
     auth_subparsers = auth.add_subparsers(dest="auth_command", required=True)
-    auth_token = auth_subparsers.add_parser("token", help="Print a credential from an environment variable")
-    auth_token.add_argument("--env", default="HORMUZ_OIDC_ACCESS_TOKEN", help="Credential environment variable")
+    auth_token = auth_subparsers.add_parser("token", help="Print a current AI-client credential")
+    auth_token.add_argument("--env", help="Legacy workload credential environment variable")
+    auth_token.add_argument("--gateway", help="Hormuz gateway for a saved human session")
+    auth_token.add_argument(
+        "--gateway-env",
+        help="Environment variable containing the Hormuz gateway URL",
+    )
+    auth_token.add_argument("--profile", default="default", help="Local secure-store profile")
+    auth_token.add_argument(
+        "--allow-insecure-http",
+        action="store_true",
+        help="Allow loopback HTTP for local development only",
+    )
 
     audit = subparsers.add_parser("audit-export", help="Export metadata-only usage and security events as JSONL")
     audit.add_argument("--kind", choices=["all", "usage", "security"], default="all")
@@ -281,8 +338,18 @@ def main(argv: list[str] | None = None) -> int:
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
+    if args.command == "login":
+        return _session_login_command(args)
+    if args.command == "logout":
+        return _session_logout_command(args)
     if args.command == "auth" and args.auth_command == "token":
-        return _auth_token(args.env)
+        return _auth_token(
+            args.env,
+            gateway=args.gateway,
+            gateway_env=args.gateway_env,
+            profile=args.profile,
+            allow_insecure_http=args.allow_insecure_http,
+        )
     if args.command == "context-benchmark":
         try:
             result, exit_code = run_benchmark(
@@ -332,6 +399,7 @@ def main(argv: list[str] | None = None) -> int:
                 actor_id=args.actor,
                 auth_mode=args.auth_mode,
                 credential_env=args.credential_env,
+                profile=args.profile,
             )
         if args.command == "audit-export":
             return _audit_export(config, args)
@@ -373,6 +441,8 @@ def _serve(config: GatewayConfig) -> int:
     print("Protocols: POST /v1/responses, POST /v1/messages, and POST /v1/context/packs")
     print(f"Usage database: {config.database_path}")
     print(f"Context database: {config.context_database_path}")
+    if config.session_broker.enabled:
+        print(f"Session database: {config.session_broker.database_path}")
 
     def stop(_signum, _frame):
         server.shutdown()
@@ -392,6 +462,7 @@ def _doctor(config: GatewayConfig) -> int:
     print(f"static identities: {len(config.identities_by_token)}")
     print(f"OIDC issuers: {len(config.oidc_issuers)}")
     print(f"OIDC subject mappings: {len(config.identities_by_subject)}")
+    print(f"human session broker: {'enabled' if config.session_broker.enabled else 'disabled'}")
     print(f"model routes: {len(config.model_routes)}")
     print(f"secret egress control: {config.secret_controls.mode}")
     print(f"usage database: {config.database_path}")
@@ -543,6 +614,7 @@ def _client_config(
     actor_id: str | None = None,
     auth_mode: str = "auto",
     credential_env: str | None = None,
+    profile: str | None = None,
 ) -> int:
     base_url = _client_base_url(url or f"http://{config.listen.host}:{config.listen.port}")
     if actor_id is None:
@@ -559,6 +631,7 @@ def _client_config(
         (item for item in config.identities_by_subject.values() if item.actor_id == identity.actor_id),
         None,
     )
+    uses_session = False
     if auth_mode == "static":
         if static_identity is None:
             raise ConfigError(f"Actor {identity.actor_id} has no static identity")
@@ -569,6 +642,14 @@ def _client_config(
             raise ConfigError(f"Actor {identity.actor_id} has no OIDC subject mapping")
         selected_identity = oidc_identity
         uses_oidc = True
+    elif auth_mode == "session":
+        if not config.session_broker.enabled:
+            raise ConfigError("Human session broker is not enabled")
+        if oidc_identity is None:
+            raise ConfigError(f"Actor {identity.actor_id} has no OIDC subject mapping")
+        selected_identity = oidc_identity
+        uses_oidc = False
+        uses_session = True
     elif static_identity is not None:
         selected_identity = static_identity
         uses_oidc = False
@@ -577,11 +658,23 @@ def _client_config(
         uses_oidc = True
     else:  # pragma: no cover - configuration requires at least one source
         raise ConfigError(f"Actor {identity.actor_id} has no authentication source")
+    policy_client = "codex" if client == "codex" else "claude-code"
+    if selected_identity.allowed_clients and policy_client not in selected_identity.allowed_clients:
+        raise ConfigError(
+            f"Identity {selected_identity.actor_id} is not authorized to use {policy_client}"
+        )
     env_name = credential_env or (
         "HORMUZ_OIDC_ACCESS_TOKEN" if uses_oidc else selected_identity.token_env
     )
-    if not env_name or not env_name.replace("_", "A").isalnum() or env_name[0].isdigit():
+    if not uses_session and (
+        not env_name or not env_name.replace("_", "A").isalnum() or env_name[0].isdigit()
+    ):
         raise ConfigError("credential environment variable must contain only letters, digits, and underscores")
+    session_profile = profile or client
+    try:
+        validate_profile(session_profile)
+    except CredentialStoreError as error:
+        raise ConfigError("session profile must use only letters, digits, dots, dashes, and underscores") from error
     if client == "codex":
         policy = config.resolved_policy(selected_identity)
         allowed_models = set(policy.allowed_models) if policy.allowed_models is not None else None
@@ -605,7 +698,27 @@ def _client_config(
             f"base_url = {json.dumps(base_url + '/v1')}",
             'wire_api = "responses"',
         ]
-        if uses_oidc:
+        if uses_session:
+            helper_args = [
+                "auth",
+                "token",
+                "--gateway",
+                base_url,
+                "--profile",
+                session_profile,
+            ]
+            if base_url.startswith("http://"):
+                helper_args.append("--allow-insecure-http")
+            lines.extend(
+                [
+                    "",
+                    "[model_providers.hormuz.auth]",
+                    'command = "hormuz"',
+                    f"args = {json.dumps(helper_args)}",
+                    "refresh_interval_ms = 300000",
+                ]
+            )
+        elif uses_oidc:
             lines.extend(
                 [
                     "",
@@ -619,7 +732,28 @@ def _client_config(
             lines.insert(-1, f'env_key = "{env_name}"')
         print("\n".join(lines))
     else:
-        if uses_oidc:
+        if uses_session:
+            helper_parts = [
+                "hormuz", "auth", "token", "--gateway-env",
+                "HORMUZ_SESSION_GATEWAY", "--profile", session_profile,
+            ]
+            if base_url.startswith("http://"):
+                helper_parts.append("--allow-insecure-http")
+            print("# Put this JSON in the managed or user Claude Code settings file:")
+            print(
+                json.dumps(
+                    {
+                        "apiKeyHelper": " ".join(helper_parts),
+                        "env": {
+                            "ANTHROPIC_BASE_URL": base_url,
+                            "HORMUZ_SESSION_GATEWAY": base_url,
+                            "CLAUDE_CODE_API_KEY_HELPER_TTL_MS": "300000",
+                        },
+                    },
+                    indent=2,
+                )
+            )
+        elif uses_oidc:
             print("# Put this JSON in the managed or user Claude Code settings file:")
             print(
                 json.dumps(
@@ -641,15 +775,86 @@ def _client_config(
     return 0
 
 
-def _auth_token(env_name: str) -> int:
-    value = os.environ.get(env_name, "")
+def _auth_token(
+    env_name: str | None,
+    *,
+    gateway: str | None = None,
+    gateway_env: str | None = None,
+    profile: str = "default",
+    allow_insecure_http: bool = False,
+) -> int:
+    selected_sources = sum(value is not None for value in (gateway, gateway_env, env_name))
+    if selected_sources > 1:
+        print("choose only one of --gateway, --gateway-env, or --env", file=sys.stderr)
+        return 2
+    if gateway_env is not None:
+        if (
+            not gateway_env
+            or not gateway_env.replace("_", "A").isalnum()
+            or gateway_env[0].isdigit()
+        ):
+            print("gateway environment variable name is invalid", file=sys.stderr)
+            return 2
+        gateway = os.environ.get(gateway_env)
+        if not gateway:
+            print(f"gateway environment variable is not set: {gateway_env}", file=sys.stderr)
+            return 1
+    if gateway is not None:
+        try:
+            value = session_access_token(
+                gateway=gateway,
+                profile=profile,
+                allow_insecure_http=allow_insecure_http,
+            )
+        except (SessionClientError, CredentialStoreError) as error:
+            print(f"session credential unavailable: {error.code}", file=sys.stderr)
+            return 1
+        print(value)
+        return 0
+    selected_env = env_name or "HORMUZ_OIDC_ACCESS_TOKEN"
+    value = os.environ.get(selected_env, "")
     if not value:
-        print(f"credential environment variable is not set: {env_name}", file=sys.stderr)
+        print(f"credential environment variable is not set: {selected_env}", file=sys.stderr)
         return 1
     if len(value.encode("utf-8")) > 64 * 1024 or "\n" in value or "\r" in value:
-        print(f"credential environment variable is invalid: {env_name}", file=sys.stderr)
+        print(f"credential environment variable is invalid: {selected_env}", file=sys.stderr)
         return 1
     print(value)
+    return 0
+
+
+def _session_login_command(args: argparse.Namespace) -> int:
+    if not 30 <= args.wait_seconds <= 600:
+        print("--wait-seconds must be between 30 and 600", file=sys.stderr)
+        return 2
+    try:
+        access_expiry = session_login(
+            gateway=args.gateway,
+            profile=args.profile,
+            client=args.client,
+            issuer=args.issuer,
+            no_open=args.no_open,
+            allow_insecure_http=args.allow_insecure_http,
+            wait_seconds=args.wait_seconds,
+        )
+    except (SessionClientError, CredentialStoreError) as error:
+        print(f"login failed: {error.code}", file=sys.stderr)
+        return 1
+    print(f"Login saved securely for profile {args.profile}; access credential expires {access_expiry}")
+    return 0
+
+
+def _session_logout_command(args: argparse.Namespace) -> int:
+    try:
+        revoked = session_logout(
+            gateway=args.gateway,
+            profile=args.profile,
+            allow_insecure_http=args.allow_insecure_http,
+        )
+    except (SessionClientError, CredentialStoreError) as error:
+        print(f"logout failed: {error.code}", file=sys.stderr)
+        return 1
+    print("Session revoked and removed." if revoked else "No saved session for that profile.")
     return 0
 
 

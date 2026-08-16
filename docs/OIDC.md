@@ -1,10 +1,93 @@
 # Generic OIDC authentication
 
-Hormuz can authenticate a short-lived JWT access token from a standards-based OpenID Connect issuer and resolve it to the same organization, team, person, and policy principal used by static bootstrap credentials.
+Hormuz has two standards-based OpenID Connect paths. Human employees can use browser authorization-code + PKCE login and receive short-lived, opaque Hormuz credentials. CI and service workloads can continue to present a JWT access token minted for the Hormuz API audience. Both resolve the exact `(issuer, subject)` pair to the same organization, team, person, clearance, and policy principal.
 
-This is resource-server authentication. The employee's identity provider must issue a signed JWT access token whose audience represents the Hormuz API. An OIDC ID token is not an API access token and must not be supplied to Hormuz. Providers that issue only opaque access tokens require the future Hormuz login/session broker described under **Current boundary**.
+An OIDC ID token is accepted only inside Hormuz's server-side authorization-code callback and is never accepted as a gateway bearer credential. Provider access and refresh tokens are not retained.
 
-## Identity-provider registration
+## Human browser login and session broker
+
+Register Hormuz as a confidential web OIDC client with the identity provider:
+
+- authorization-code flow only;
+- exact redirect URI `https://hormuz.example.com/v1/auth/callback`;
+- `openid` scope, plus only claims genuinely needed for authentication;
+- asymmetric ID-token signing, normally `RS256`;
+- a server-held client secret; never install it on employee machines.
+- a login client ID distinct from every workload API audience, so an ID token can never satisfy the resource-server audience check.
+
+Generate a separate 32-byte session-store master key and place the base64url value and OIDC client secret in the Hormuz service environment. Keep the usage, context, and session databases separate.
+
+```json
+{
+  "authentication": {
+    "session_broker": {
+      "enabled": true,
+      "database": "./hormuz-sessions.sqlite3",
+      "public_base_url": "https://hormuz.example.com",
+      "master_key_env": "HORMUZ_SESSION_MASTER_KEY",
+      "access_ttl_seconds": 600,
+      "absolute_ttl_seconds": 43200,
+      "enrollment_ttl_seconds": 300
+    },
+    "oidc": {
+      "issuers": [
+        {
+          "issuer": "https://identity.example.com",
+          "audiences": ["api://hormuz"],
+          "algorithms": ["RS256"],
+          "login": {
+            "client_id": "hormuz-production",
+            "client_secret_env": "HORMUZ_OIDC_CLIENT_SECRET",
+            "scopes": ["openid"],
+            "token_endpoint_auth_method": "client_secret_basic"
+          },
+          "subjects": [
+            {
+              "subject": "00u-company-stable-subject",
+              "actor_id": "alice",
+              "actor_name": "Alice Example",
+              "team_id": "engineering",
+              "team_name": "Engineering",
+              "organization_id": "xpounder",
+              "clearance": "confidential",
+              "allowed_clients": ["codex", "claude-code"]
+            }
+          ]
+        }
+      ]
+    }
+  }
+}
+```
+
+The master key must decode to exactly 32 bytes. Human access lifetime is constrained to 5–15 minutes and defaults to 10 minutes. Absolute session lifetime cannot exceed 12 hours; organizations may shorten it. Loopback HTTP is available only behind explicit development flags and never permits a non-loopback host.
+
+An employee creates one client-bound profile for each AI client they use:
+
+```bash
+hormuz login --gateway https://hormuz.example.com --profile codex --client codex
+hormuz login --gateway https://hormuz.example.com --profile claude --client claude-code
+
+hormuz --config /etc/hormuz/hormuz.json client-config codex \
+  --url https://hormuz.example.com --actor alice \
+  --auth-mode session --profile codex
+
+hormuz --config /etc/hormuz/hormuz.json client-config claude \
+  --url https://hormuz.example.com --actor alice \
+  --auth-mode session --profile claude
+```
+
+`hormuz login` opens the one-time URL in the operating system's external browser. Use `--no-open` to print it for a headless terminal. The browser receives no Hormuz access or refresh credential. The terminal redeems its independent enrollment secret once and stores the session through the OS secure store. `hormuz auth token` is then invoked by Codex or Claude Code, reuses an unexpired access credential, or atomically rotates the access/refresh pair near expiry.
+
+Hormuz supports macOS Keychain, Windows Credential Manager, and Linux Secret Service/KWallet through an allowlisted `keyring` backend. Persistent login fails when none is available; it does not silently write a refresh credential to a dotfile. `hormuz logout --gateway ... --profile ...` revokes the server-side family before deleting the local entry.
+
+The session database contains keyed credential hashes, encrypted temporary PKCE verifier/nonce state, and session metadata. It does not contain raw Hormuz credentials or retained provider tokens. Reuse of any rotated refresh credential revokes the current family.
+
+## Workload JWT resource-server path
+
+For CI or service accounts, the identity provider must issue a signed JWT access token whose audience represents the Hormuz API. The OAuth client that obtains that access token is separate from the API audience. Never use an ID token as this bearer credential.
+
+## Workload identity-provider registration
 
 Create an OAuth/OIDC API or resource in the company's identity provider:
 
@@ -56,7 +139,7 @@ Subject mapping uses the pair `(issuer, sub)`, not an email address or a caller-
 
 Supported verification algorithms are `RS256`, `RS384`, `RS512`, `PS256`, `PS384`, `PS512`, `ES256`, `ES384`, and `ES512`. Symmetric JWT algorithms are rejected because an OIDC resource server must not share an HMAC signing secret with token issuers.
 
-## Client connection
+## Workload client connection
 
 Make a current JWT access token available through the environment selected by the company's identity tooling, then generate OIDC client configuration for the mapped actor:
 
@@ -105,4 +188,6 @@ Authentication logs contain only a stable failure code. Hormuz does not log toke
 
 ## Current boundary
 
-The implemented path works with identity providers that issue JWT access tokens for a Hormuz audience. Hormuz does not yet include its own browser authorization-code/PKCE flow, refresh-token custody, opaque-token introspection, SCIM provisioning, or revocation endpoint. [Proposed ADR 0001](decisions/0001-oidc-login-and-session-architecture.md) specifies the session-broker recommendation and its security boundary. It remains non-binding until the product owner explicitly approves issue #2.
+[Accepted ADR 0001](decisions/0001-oidc-login-and-session-architecture.md) governs the implemented login architecture. The repository includes protocol, persistence, HTTP, and CLI integration tests against a standards-shaped fake IdP. It has not yet been validated against the owner-selected real identity provider, and the local SQLite broker is not a claim of multi-node availability.
+
+SCIM provisioning/deprovisioning, tenant-admin revocation APIs, workload identity exchange, KMS-backed session storage, immutable security-event export, and distributed enrollment throttling remain enterprise gates. Until live configuration reload and SCIM exist, removing a subject mapping takes effect after a service reload/restart; the next request then invalidates that session. `hormuz logout` provides employee-initiated revocation.

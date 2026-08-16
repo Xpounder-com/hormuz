@@ -15,7 +15,7 @@ Hormuz is alpha software. The local prototype proves routing and policy behavior
 - Provider model IDs by default, preserving native client model behavior; optional company aliases remain supported.
 - Organization, team, and person policy overlays that can only become more restrictive.
 - Model fallback, output-token caps, monthly token limits, and USD budget limits.
-- Per-person attribution using unique bootstrap tokens or generic OIDC JWT access tokens mapped by issuer and subject.
+- Per-person attribution using unique bootstrap tokens, generic OIDC JWT access tokens, or revocable Hormuz human sessions mapped by issuer and subject.
 - Input, output, cache-read, cache-write, and reasoning-token accounting when providers report them.
 - Metadata-only SQLite usage ledger. Prompts and responses are relayed, not persisted.
 - Metadata-only JSONL audit export for usage and secret-egress evidence, with private file permissions and a SHA-256 checksum.
@@ -28,6 +28,7 @@ Hormuz is alpha software. The local prototype proves routing and policy behavior
 - A real `hormuz_get_context` MCP stdio tool for Codex and Claude Code that reuses the authenticated Context Pack API, supports current and next-generation MCP handshakes, and cannot override employee identity or organization policy.
 - A bundled 60-task synthetic context benchmark with no-memory, full-history, simple-lexical, and governed baselines; a green regression profile and a deliberately stricter release profile expose current lifecycle and untrusted-context gaps.
 - Generic OIDC discovery/JWKS verification with strict issuer, audience, expiry, asymmetric-algorithm, subject-mapping, and signing-key-rotation enforcement.
+- Generic OIDC authorization-code + PKCE browser login with opaque 10-minute Hormuz access credentials, atomic refresh rotation, replay-family revocation, and fail-closed OS secure-store custody.
 
 ## Quick start
 
@@ -50,6 +51,23 @@ python3 -m hormuz --config hormuz.json client-config claude
 ```
 
 Employees authenticate to Hormuz with their unique `HORMUZ_TOKEN`. Hormuz removes that credential and authenticates upstream with the company's provider key.
+
+For the approved employee SSO path, configure the session broker as described in [docs/OIDC.md](docs/OIDC.md), then log in without distributing either provider key:
+
+```bash
+hormuz login \
+  --gateway https://hormuz.example.com \
+  --profile codex \
+  --client codex
+
+hormuz --config /etc/hormuz/hormuz.json client-config codex \
+  --url https://hormuz.example.com \
+  --actor alice \
+  --auth-mode session \
+  --profile codex
+```
+
+The login page opens in the operating system's external browser. The CLI stores the revocable Hormuz session in macOS Keychain, Windows Credential Manager, or Linux Secret Service/KWallet through `keyring`; it refuses plaintext fallback.
 
 Connect governed context to either existing client without placing a provider key on the employee machine:
 
@@ -143,4 +161,4 @@ The GitHub publication gate also tests Python 3.11 through 3.14, validates the f
 
 ## Roadmap boundary
 
-The current milestone includes the enforcement, accounting, deterministic secret-egress, metadata-audit, local persistent context-record/context-pack, MCP retrieval, and OIDC JWT-verification kernels. The context database is deliberately single-node and plaintext; it is not the pending enterprise tenancy or KMS design. Before an enterprise release, Hormuz still needs an OIDC login/session or introspection strategy for opaque tokens, SCIM and revocation, structured PII/semantic DLP, durable multi-tenant persistence, TLS and deployment hardening, signed or externally immutable audit retention, invoice reconciliation, broader provider conformance coverage, and automatic context approvals, invalidation, cache, mandatory injection, and outcome writeback.
+The current milestone includes the enforcement, accounting, deterministic secret-egress, metadata-audit, local persistent context-record/context-pack, MCP retrieval, OIDC JWT verification, and a single-node OIDC login/session kernel. The context and session databases are deliberately local implementations; they are not the pending enterprise tenancy, HA, or KMS design. Before an enterprise release, Hormuz still needs one owner-selected real-IdP validation, SCIM-driven deprovisioning, admin revocation APIs, structured PII/semantic DLP, durable multi-tenant persistence, TLS and deployment hardening, signed or externally immutable audit retention, invoice reconciliation, broader provider conformance coverage, and automatic context approvals, invalidation, cache, mandatory injection, and outcome writeback.

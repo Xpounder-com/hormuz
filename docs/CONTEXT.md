@@ -26,7 +26,7 @@ python3 -m hormuz --config hormuz.json context-import \
   --policy-version engineering-v1
 ```
 
-Import validates the whole file against the selected configured identity before writing. Records are then ingested idempotently in supersession order inside one SQLite transaction; any late conflict rolls back every new record and mutation event in that batch. The local CLI treats control of the configuration file and machine as the operator authorization boundary; enterprise mutation RBAC and signed user sessions are not implemented yet.
+Import validates the whole file against the selected configured identity before writing. Records are then ingested idempotently in supersession order inside one SQLite transaction; any late conflict rolls back every new record and mutation event in that batch. The local mutation CLI treats control of the configuration file and machine as the operator authorization boundary; enterprise mutation RBAC is not implemented. Human sessions authenticate the read-only Context Pack HTTP route, not local mutation commands.
 
 Each non-empty JSONL line is one object:
 

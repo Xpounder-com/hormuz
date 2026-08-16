@@ -20,7 +20,11 @@ Hormuz is alpha software and has not received a third-party security review. Do 
 
 - The built-in server does not terminate TLS.
 - Static environment-provided identity tokens remain available for bootstrap and break-glass use.
-- The OIDC path verifies short-lived JWT access tokens but does not yet implement browser login, refresh-token custody, opaque-token introspection, active revocation, or SCIM provisioning.
+- The workload OIDC path verifies short-lived JWT access tokens. The human path implements authorization-code + PKCE browser login and issues opaque, rotating Hormuz credentials from a separate local session store.
+- Raw Hormuz access/refresh credentials are not stored server-side. The session database uses keyed hashes, encrypts transient PKCE state, rotates both credentials, and revokes a family on refresh replay.
+- The CLI permits persistent human login only through allowlisted macOS Keychain, Windows Credential Manager, or Linux Secret Service/KWallet backends. Plaintext keyrings fail closed.
+- Provider access/refresh tokens are not retained after the OIDC callback. ID tokens are never accepted as gateway bearer credentials.
+- Real-IdP validation, SCIM provisioning/deprovisioning, administrator revocation APIs, distributed throttling, KMS-backed custody, and HA session persistence remain release gates.
 - SQLite is a single-node development store.
 - Configuration contains rate cards and policy, but there is not yet a signed configuration or change-approval workflow.
 - Secret detection is best-effort and text-only. It does not inspect images, decode arbitrary encodings or archives, or infer semantically sensitive company information.

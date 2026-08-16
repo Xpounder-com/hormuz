@@ -12,6 +12,7 @@ The private alpha currently has:
 - organization/team/actor model policy, fallback, output caps, atomic token/spend reservations, and metadata-only reporting;
 - pre-provider secret redaction/denial and default OpenAI storage restrictions;
 - generic OIDC JWT discovery/JWKS verification with explicit issuer-subject identity mapping;
+- accepted generic OIDC authorization-code + PKCE login, opaque rotating human sessions, replay-family revocation, and fail-closed OS secure-store custody;
 - metadata-only audit export;
 - a separate local persistent governed-context repository plus deterministic authorization-first context packs;
 - authenticated authorization-first context-pack REST retrieval with server-owned caps, fail-closed durable metadata-only read audit, and no provider side effects;
@@ -19,21 +20,22 @@ The private alpha currently has:
 - a reproducible 60-task synthetic retrieval benchmark whose regression profile enforces current authorization, lifecycle, budget, determinism, leakage, and latency guarantees while its stricter release profile exposes dependency, malicious-context, and contradiction gaps;
 - local and GitHub package/client verification.
 
-The foundation is not an enterprise release. The local context database is single-node and plaintext, not an accepted hosted persistence design. Browser SSO/session custody, shared tenancy, SCIM, automatic lifecycle/invalidation, context injection, structured DLP, cache policy, invoice reconciliation, HA deployment, KMS, and independent security review remain open gates.
+The foundation is not an enterprise release. The local context database is single-node and plaintext, and the local session broker is also single-node; neither is an accepted hosted persistence design. Real-IdP validation, shared tenancy, SCIM, administrator revocation, automatic lifecycle/invalidation, context injection, structured DLP, cache policy, invoice reconciliation, HA deployment, KMS, and independent security review remain open gates.
 
 ## Material decisions awaiting owner approval
 
 These issues record product decisions and block dependent implementation. They must not be closed by implementation convenience.
 
-1. [#2 — Select the Hormuz OIDC login and session architecture](https://github.com/Xpounder-com/hormuz/issues/2) — [Proposed ADR 0001](decisions/0001-oidc-login-and-session-architecture.md)
-2. [#1 — Approve the enterprise tenancy, authorization, and persistence topology](https://github.com/Xpounder-com/hormuz/issues/1) — [Proposed ADR 0002](decisions/0002-enterprise-tenancy-and-persistence.md)
-3. [#3 — Define provider and Hormuz cache privacy tiers](https://github.com/Xpounder-com/hormuz/issues/3) — [Proposed ADR 0003](decisions/0003-cache-privacy-tiers.md)
+1. [#1 — Approve the enterprise tenancy, authorization, and persistence topology](https://github.com/Xpounder-com/hormuz/issues/1) — [Proposed ADR 0002](decisions/0002-enterprise-tenancy-and-persistence.md)
+2. [#3 — Define provider and Hormuz cache privacy tiers](https://github.com/Xpounder-com/hormuz/issues/3) — [Proposed ADR 0003](decisions/0003-cache-privacy-tiers.md)
+
+[ADR 0001](decisions/0001-oidc-login-and-session-architecture.md) was accepted by the product owner on 2026-08-15. Its implementation evidence is tracked under #13; acceptance of the decision does not close the remaining real-IdP, SCIM, administrator-revocation, and HA gates.
 
 ## v0.2 — Enterprise identity and tenancy
 
 [Milestone](https://github.com/Xpounder-com/hormuz/milestone/2)
 
-- [#2 — OIDC login and session architecture decision](https://github.com/Xpounder-com/hormuz/issues/2)
+- [#2 — accepted OIDC login and session architecture decision](https://github.com/Xpounder-com/hormuz/issues/2)
 - [#1 — Tenancy, authorization, and persistence decision](https://github.com/Xpounder-com/hormuz/issues/1)
 - [#13 — Browser SSO and rotating Hormuz sessions](https://github.com/Xpounder-com/hormuz/issues/13)
 - [#6 — Tenant-aware RBAC and PostgreSQL migrations](https://github.com/Xpounder-com/hormuz/issues/6)

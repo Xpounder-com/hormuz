@@ -30,7 +30,14 @@ from hormuz.cli import (
     _context_pack,
     build_parser,
 )
-from hormuz.config import ConfigError, GatewayConfig, Identity, OIDCIssuerConfig
+from hormuz.config import (
+    ConfigError,
+    GatewayConfig,
+    Identity,
+    OIDCLoginConfig,
+    OIDCIssuerConfig,
+    SessionBrokerConfig,
+)
 from hormuz.context import ContextError
 
 
@@ -120,6 +127,89 @@ class ClientConfigTests(unittest.TestCase):
         self.assertIn("hormuz auth token --env COMPANY_OIDC_TOKEN", claude.getvalue())
         self.assertNotIn("ANTHROPIC_AUTH_TOKEN", claude.getvalue())
 
+    def test_session_client_config_uses_secure_store_helper_for_both_clients(self) -> None:
+        issuer = "https://identity.example.com"
+        identity = Identity(
+            token_env="",
+            token="",
+            actor_id="alice",
+            actor_name="Alice Example",
+            team_id="engineering",
+            team_name="Engineering",
+            allowed_clients=("codex", "claude-code"),
+            organization_id="xpounder",
+            clearance="confidential",
+            authentication_source=f"oidc:{issuer}",
+        )
+        config = replace(
+            self.config,
+            oidc_issuers={
+                issuer: OIDCIssuerConfig(
+                    issuer=issuer,
+                    audiences=("hormuz-api",),
+                    login=OIDCLoginConfig(
+                        client_id="hormuz-login",
+                        client_secret_env="OIDC_SECRET",
+                        client_secret="must-never-appear-client-secret",
+                    ),
+                )
+            },
+            identities_by_subject={(issuer, "subject-alice"): identity},
+            session_broker=SessionBrokerConfig(
+                enabled=True,
+                database_path=Path("/tmp/hormuz-session-test.sqlite3"),
+                public_base_url="https://hormuz.example",
+                master_key_env="SESSION_KEY",
+                master_key=b"m" * 32,
+            ),
+        )
+
+        codex = io.StringIO()
+        with redirect_stdout(codex):
+            self.assertEqual(
+                _client_config(
+                    config,
+                    "codex",
+                    "https://hormuz.example",
+                    actor_id="alice",
+                    auth_mode="session",
+                    profile="engineering-codex",
+                ),
+                0,
+            )
+        parsed = tomllib.loads(codex.getvalue())
+        self.assertEqual(
+            parsed["model_providers"]["hormuz"]["auth"]["args"],
+            [
+                "auth",
+                "token",
+                "--gateway",
+                "https://hormuz.example",
+                "--profile",
+                "engineering-codex",
+            ],
+        )
+
+        claude = io.StringIO()
+        with redirect_stdout(claude):
+            self.assertEqual(
+                _client_config(
+                    config,
+                    "claude",
+                    "https://hormuz.example",
+                    actor_id="alice",
+                    auth_mode="session",
+                    profile="engineering-claude",
+                ),
+                0,
+            )
+        self.assertIn(
+            "hormuz auth token --gateway-env HORMUZ_SESSION_GATEWAY --profile engineering-claude",
+            claude.getvalue(),
+        )
+        self.assertIn('"HORMUZ_SESSION_GATEWAY": "https://hormuz.example"', claude.getvalue())
+        self.assertNotIn("must-never-appear", codex.getvalue() + claude.getvalue())
+
     def test_auth_token_prints_only_a_valid_environment_credential(self) -> None:
         output = io.StringIO()
         with mock.patch.dict(os.environ, {"COMPANY_TOKEN": "header.payload.signature"}):
@@ -130,6 +220,16 @@ class ClientConfigTests(unittest.TestCase):
         with mock.patch.dict(os.environ, {}, clear=True):
             with redirect_stderr(io.StringIO()):
                 self.assertEqual(_auth_token("COMPANY_TOKEN"), 1)
+
+        with mock.patch.dict(os.environ, {"HORMUZ_GATEWAY_URL": "https://hormuz.example"}):
+            with mock.patch("hormuz.cli.session_access_token", return_value="hox_a_" + "a" * 43):
+                output = io.StringIO()
+                with redirect_stdout(output):
+                    self.assertEqual(
+                        _auth_token(None, gateway_env="HORMUZ_GATEWAY_URL"),
+                        0,
+                    )
+                self.assertTrue(output.getvalue().startswith("hox_a_"))
 
     def test_client_config_rejects_configuration_injection_urls(self) -> None:
         with self.assertRaises(ConfigError):

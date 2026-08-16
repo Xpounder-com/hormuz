@@ -43,6 +43,17 @@ class SecretRedactorTests(unittest.TestCase):
         self.assertIs(result.value, value)
         self.assertEqual(result.count, 0)
 
+    def test_hormuz_human_session_credentials_are_builtin_secrets(self) -> None:
+        access = "hox_a_" + "a" * 43
+        refresh = "hox_r_" + "r" * 43
+        result = SecretRedactor(SecretControls()).inspect(
+            {"input": f"accidentally pasted {access} and {refresh}"}
+        )
+        self.assertEqual(result.count, 2)
+        self.assertEqual(result.rules, ("hormuz_session_credential",))
+        self.assertNotIn(access, result.value["input"])
+        self.assertNotIn(refresh, result.value["input"])
+
     def test_excessive_json_depth_is_rejected(self) -> None:
         value: dict = {"input": "safe"}
         for _ in range(MAX_JSON_DEPTH + 1):

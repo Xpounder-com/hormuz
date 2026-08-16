@@ -1,7 +1,8 @@
 # ADR 0001: OIDC login and Hormuz session architecture
 
-- Status: **Proposed — owner approval required**
+- Status: **Accepted**
 - Date proposed: 2026-08-15
+- Date accepted: 2026-08-15
 - Decision owner: Product owner
 - Tracking issue: [#2](https://github.com/Xpounder-com/hormuz/issues/2)
 - Unblocks after acceptance: [#13](https://github.com/Xpounder-com/hormuz/issues/13), part of [#7](https://github.com/Xpounder-com/hormuz/issues/7)
@@ -13,7 +14,7 @@ Choose how employees authenticate to Hormuz while continuing to use Codex and Cl
 1. **Hormuz session broker — recommended.** Hormuz performs generic OIDC browser login, maps the verified issuer and subject to a Hormuz principal, and issues its own short-lived, revocable, opaque client credentials.
 2. **Customer-minted JWT access tokens only.** Keep the implemented resource-server path and require every customer to mint and continuously refresh a JWT access token whose audience is Hormuz.
 
-This ADR proposes option 1. It is not accepted and does not authorize implementation until the product owner approves it.
+The product owner accepted option 1, including the proposed default lifetimes, on 2026-08-15.
 
 ## Context
 
@@ -98,7 +99,7 @@ This prevents reliable SSO cookie reuse and expands Hormuz's access to login cre
 
 This is easy to implement but weakens attribution, offboarding, and replay containment. Retain static keys only as explicit bootstrap or break-glass credentials.
 
-## Consequences if accepted
+## Consequences
 
 - Hormuz must operate a highly available, tenant-scoped session store and revocation path before calling identity enterprise-ready.
 - The CLI needs secure-store adapters for three desktop platforms and explicit headless behavior.
@@ -119,7 +120,9 @@ Acceptance of this ADR does not prove the implementation. Issue #13 closes only 
 
 ## Owner approval record
 
-Pending. To accept, the product owner must approve either:
+Accepted in the product-development conversation on 2026-08-15:
 
-- **A — Hormuz session broker (recommended), including the proposed default lifetimes**, or
-- **B — customer-minted JWT access tokens only**, with any requested constraints.
+- **A — Hormuz session broker, including 10-minute access credentials and a 12-hour absolute session.**
+- The existing direct audience-bound JWT path remains available for CI, service accounts, and customer-managed workload identity.
+
+The approval is being implemented and verified through [#13](https://github.com/Xpounder-com/hormuz/issues/13). Acceptance records the architecture; it does not claim that the implementation or real-IdP evidence is complete.

@@ -4,11 +4,11 @@ Hormuz exposes an authenticated REST boundary for retrieving the smallest author
 
 ```http
 POST /v1/context/packs
-Authorization: Bearer <Hormuz bootstrap or OIDC access token>
+Authorization: Bearer <Hormuz bootstrap, workload OIDC, or human-session access credential>
 Content-Type: application/json
 ```
 
-This is an additive `v1` endpoint. It uses the same static-token or OIDC JWT authentication boundary as the provider gateway, but it does not trust organization, team, actor, or policy-version values from the request.
+This is an additive `v1` endpoint. It uses the same static, OIDC JWT, or opaque human-session authentication boundary as the provider gateway, but it does not trust organization, team, actor, or policy-version values from the request.
 
 ## Organization policy
 
@@ -137,7 +137,7 @@ body from being interpreted as a subsequent request.
 
 The request path is:
 
-1. authenticate bootstrap/OIDC identity;
+1. authenticate bootstrap, workload OIDC, or opaque human-session identity;
 2. enforce actor rate limit;
 3. validate and apply server-owned policy caps;
 4. filter organization, visibility, classification, repository, branch, verification, and freshness in SQLite before content decode;

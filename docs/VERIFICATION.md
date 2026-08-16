@@ -147,7 +147,7 @@ Observed result:
 - the complete source suite passed 89 tests locally, with only the separately rerun official Claude Code test skipped in the default command; that opt-in test then passed;
 - the rebuilt source distribution includes `docs/MCP.md`, `hormuz/mcp.py`, and `tests/test_mcp.py`; a clean Python 3.14 environment installed the wheel, displayed both MCP commands, and completed initialize plus `tools/list` from the installed executable.
 
-This is evidence for a real, model-controlled read-only context tool in both clients. It is not evidence of mandatory context injection, browser OIDC/session refresh or keychain custody, shared rate limiting, automatic context invalidation, or a production hosted topology. Those remain separate gates.
+This is evidence for a real, model-controlled read-only context tool in both clients. It is not evidence of mandatory context injection, session-profile authentication inside the MCP adapter, shared rate limiting, automatic context invalidation, or a production hosted topology. Those remain separate gates.
 
 ### Governed context benchmark path
 
@@ -167,6 +167,25 @@ Observed result:
 - source and wheel distributions contain the generator, benchmark documentation, runner, and frozen artifacts; a clean Python 3.14 environment installed the wheel and passed the bundled 12-task regression profile outside the source checkout.
 
 These are synthetic retrieval-contract results, not claims about employee productivity, model answer quality, accepted patches, hosted latency, or customer-data performance. See [CONTEXT_BENCHMARK.md](CONTEXT_BENCHMARK.md) for formulas and limitations.
+
+### Browser OIDC and rotating human-session path
+
+The accepted [ADR 0001](decisions/0001-oidc-login-and-session-architecture.md) path was exercised through the actual HTTP gateway, a standards-shaped loopback OIDC issuer, the actual session persistence service, and the same CLI client functions used by Codex and Claude Code auth helpers.
+
+Observed result on August 15, 2026:
+
+- authorization-code login used an external-browser URL, exact server callback, state, nonce, and PKCE S256; the fake token endpoint verified the original code challenge and confidential-client authentication;
+- Hormuz verified the ID-token signature, issuer, client audience, expiry, nonce, and explicit subject mapping before authorizing enrollment;
+- the browser completion body contained no Hormuz credential, and redemption required the independent terminal-held secret exactly once;
+- opaque access and refresh credentials were independently random, client-bound, stored only as keyed hashes, and absent from the session database alongside the fake provider access token and OIDC client secret;
+- access refresh rotated both credentials atomically; replay of a consumed refresh credential and a concurrent duplicate refresh revoked the winning credential family and recorded metadata-only security events;
+- bad state/cookie, callback replay, wrong nonce, issuer mix-up, expired enrollment, token-endpoint outage, client mismatch, logout, and removed/invalid session credentials failed closed before provider work;
+- the CLI login, helper refresh, and logout path completed with an injected secure-store test backend, while a transient real macOS Keychain write/read/delete also passed and left no test entry behind;
+- `keyring` 25.7.0 was installed from the declared wheel dependency; unsupported, null, fail, plaintext, corrupt, and invalid-profile custody paths were rejected;
+- the complete local source suite passed 118 tests with one separately gated official Claude Code test skipped; that official Claude Code test then passed independently, while the installed Codex compatibility test passed in the default suite;
+- fresh source and wheel distributions contained the new protocol, persistence, CLI, documentation, and tests; a clean Python 3.14 environment installed the wheel, displayed `login`, `logout`, and `auth token`, and passed the bundled context regression profile.
+
+This verifies the local, single-node protocol kernel and real macOS secure-store adapter. It is not a real enterprise IdP result, Windows/Linux secure-store runner evidence, SCIM or administrator revocation, KMS-backed/HA session persistence, immutable security-audit export, or a hosted deployment claim. Issue #13 remains open until those applicable acceptance gates are satisfied.
 
 ## Reproduce locally
 

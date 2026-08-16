@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import os
 from dataclasses import dataclass, field
@@ -65,6 +67,30 @@ class OIDCIssuerConfig:
     algorithms: tuple[str, ...] = ("RS256",)
     clock_skew_seconds: int = 60
     discovery_cache_seconds: int = 3600
+    allow_insecure_http: bool = False
+    login: "OIDCLoginConfig | None" = None
+
+
+@dataclass(frozen=True)
+class OIDCLoginConfig:
+    client_id: str
+    client_secret_env: str
+    client_secret: str = field(repr=False)
+    scopes: tuple[str, ...] = ("openid",)
+    token_endpoint_auth_method: str = "client_secret_basic"
+
+
+@dataclass(frozen=True)
+class SessionBrokerConfig:
+    enabled: bool = False
+    database_path: Path | None = None
+    public_base_url: str | None = None
+    master_key_env: str | None = None
+    master_key: bytes = field(default=b"", repr=False)
+    master_key_source: str = field(default="", repr=False)
+    access_ttl_seconds: int = 600
+    absolute_ttl_seconds: int = 43_200
+    enrollment_ttl_seconds: int = 300
     allow_insecure_http: bool = False
 
 
@@ -146,6 +172,7 @@ class GatewayConfig:
     model_routes: dict[str, ModelRoute]
     organization_policy: Policy
     context_service: ContextServiceConfig = field(default_factory=ContextServiceConfig)
+    session_broker: SessionBrokerConfig = field(default_factory=SessionBrokerConfig)
     oidc_issuers: dict[str, OIDCIssuerConfig] = field(default_factory=dict)
     identities_by_subject: dict[tuple[str, str], Identity] = field(default_factory=dict)
     secret_controls: SecretControls = field(default_factory=SecretControls)
@@ -259,9 +286,17 @@ class GatewayConfig:
             issuer = _url(item.get("issuer"), f"{prefix}.issuer")
             if issuer in oidc_issuers:
                 raise ConfigError(f"OIDC issuer must be unique: {issuer}")
-            audiences = _string_tuple(item.get("audiences"), f"{prefix}.audiences")
-            if not audiences:
-                raise ConfigError(f"{prefix}.audiences must contain at least one audience")
+            login_config = _oidc_login_config(item.get("login"), env, prefix)
+            audiences = _string_tuple(item.get("audiences", []), f"{prefix}.audiences")
+            if not audiences and login_config is None:
+                raise ConfigError(
+                    f"{prefix} must configure at least one workload audience or a login client"
+                )
+            if login_config is not None and login_config.client_id in audiences:
+                raise ConfigError(
+                    f"{prefix}.audiences must not contain the OIDC login client_id; "
+                    "ID tokens and workload access tokens need distinct audiences"
+                )
             algorithms = _string_tuple(item.get("algorithms", ["RS256"]), f"{prefix}.algorithms")
             if not algorithms or any(algorithm not in supported_algorithms for algorithm in algorithms):
                 raise ConfigError(
@@ -298,6 +333,7 @@ class GatewayConfig:
                     maximum=86400,
                 ),
                 allow_insecure_http=allow_insecure_http,
+                login=login_config,
             )
             oidc_issuers[issuer] = issuer_config
             subjects_raw = item.get("subjects", [])
@@ -333,6 +369,21 @@ class GatewayConfig:
                     ),
                     authentication_source=f"oidc:{issuer}",
                 )
+        session_broker = _session_broker_config(
+            authentication_raw.get("session_broker", {}),
+            env,
+            source_path=source_path,
+        )
+        if session_broker.enabled and not any(
+            issuer.login is not None for issuer in oidc_issuers.values()
+        ):
+            raise ConfigError(
+                "authentication.session_broker requires at least one OIDC issuer with login configuration"
+            )
+        if session_broker.database_path in {database_path, context_database_path}:
+            raise ConfigError(
+                "authentication.session_broker.database must be separate from usage and context databases"
+            )
         if not identities_by_token and not identities_by_subject:
             raise ConfigError("At least one static identity or OIDC subject mapping is required")
         _validate_identity_consistency((*identities_by_token.values(), *identities_by_subject.values()))
@@ -424,6 +475,7 @@ class GatewayConfig:
             model_routes=model_routes,
             organization_policy=organization_policy,
             context_service=context_service,
+            session_broker=session_broker,
             oidc_issuers=oidc_issuers,
             identities_by_subject=identities_by_subject,
             secret_controls=secret_controls,
@@ -497,6 +549,141 @@ def _policy(value: Any, path: str) -> Policy:
         per_actor_monthly_budget_usd=_optional_number(
             item.get("per_actor_monthly_budget_usd"), f"{path}.per_actor_monthly_budget_usd"
         ),
+    )
+
+
+def _oidc_login_config(
+    value: Any,
+    env: dict[str, str],
+    issuer_path: str,
+) -> OIDCLoginConfig | None:
+    if value is None:
+        return None
+    path = f"{issuer_path}.login"
+    item = _object(value, path)
+    unknown = sorted(
+        set(item)
+        - {"client_id", "client_secret_env", "scopes", "token_endpoint_auth_method"}
+    )
+    if unknown:
+        raise ConfigError(f"Unknown {path} fields: " + ", ".join(unknown))
+    client_secret_env = _string(item.get("client_secret_env"), f"{path}.client_secret_env")
+    client_secret = env.get(client_secret_env, "")
+    if not client_secret:
+        raise ConfigError(
+            f"Required OIDC login client secret environment variable is not set: {client_secret_env}"
+        )
+    if len(client_secret) < 16:
+        raise ConfigError(f"OIDC login client secret from {client_secret_env} must be at least 16 characters")
+    scopes = _string_tuple(item.get("scopes", ["openid"]), f"{path}.scopes")
+    if "openid" not in scopes:
+        raise ConfigError(f"{path}.scopes must include openid")
+    auth_method = _string(
+        item.get("token_endpoint_auth_method", "client_secret_basic"),
+        f"{path}.token_endpoint_auth_method",
+    )
+    if auth_method not in {"client_secret_basic", "client_secret_post"}:
+        raise ConfigError(
+            f"{path}.token_endpoint_auth_method must be client_secret_basic or client_secret_post"
+        )
+    return OIDCLoginConfig(
+        client_id=_string(item.get("client_id"), f"{path}.client_id"),
+        client_secret_env=client_secret_env,
+        client_secret=client_secret,
+        scopes=scopes,
+        token_endpoint_auth_method=auth_method,
+    )
+
+
+def _session_broker_config(
+    value: Any,
+    env: dict[str, str],
+    *,
+    source_path: Path,
+) -> SessionBrokerConfig:
+    path = "authentication.session_broker"
+    item = _object(value, path)
+    unknown = sorted(
+        set(item)
+        - {
+            "enabled",
+            "database",
+            "public_base_url",
+            "master_key_env",
+            "access_ttl_seconds",
+            "absolute_ttl_seconds",
+            "enrollment_ttl_seconds",
+            "allow_insecure_http",
+        }
+    )
+    if unknown:
+        raise ConfigError(f"Unknown {path} fields: " + ", ".join(unknown))
+    enabled = _boolean(item.get("enabled", False), f"{path}.enabled")
+    if not enabled:
+        return SessionBrokerConfig()
+
+    database_value = _string(item.get("database"), f"{path}.database")
+    database_path = Path(database_value).expanduser()
+    if not database_path.is_absolute():
+        database_path = (source_path.parent / database_path).resolve()
+    public_base_url = _url(item.get("public_base_url"), f"{path}.public_base_url").rstrip("/")
+    if urlparse(public_base_url).path not in {"", "/"}:
+        raise ConfigError(f"{path}.public_base_url must not include a path")
+    allow_insecure_http = _boolean(
+        item.get("allow_insecure_http", False),
+        f"{path}.allow_insecure_http",
+    )
+    _validate_oidc_transport(
+        issuer=public_base_url,
+        jwks_uri=None,
+        allow_insecure_http=allow_insecure_http,
+        path=path,
+    )
+    master_key_env = _string(item.get("master_key_env"), f"{path}.master_key_env")
+    encoded_master_key = env.get(master_key_env, "")
+    if not encoded_master_key:
+        raise ConfigError(f"Required session broker master key environment variable is not set: {master_key_env}")
+    try:
+        padding = "=" * (-len(encoded_master_key) % 4)
+        master_key = base64.b64decode(
+            encoded_master_key + padding,
+            altchars=b"-_",
+            validate=True,
+        )
+    except (ValueError, binascii.Error) as error:
+        raise ConfigError(f"Session broker master key from {master_key_env} must be base64url") from error
+    if len(master_key) != 32:
+        raise ConfigError(f"Session broker master key from {master_key_env} must decode to exactly 32 bytes")
+
+    access_ttl = _integer(
+        item.get("access_ttl_seconds", 600),
+        f"{path}.access_ttl_seconds",
+        minimum=300,
+        maximum=900,
+    )
+    absolute_ttl = _integer(
+        item.get("absolute_ttl_seconds", 43_200),
+        f"{path}.absolute_ttl_seconds",
+        minimum=access_ttl,
+        maximum=43_200,
+    )
+    enrollment_ttl = _integer(
+        item.get("enrollment_ttl_seconds", 300),
+        f"{path}.enrollment_ttl_seconds",
+        minimum=60,
+        maximum=600,
+    )
+    return SessionBrokerConfig(
+        enabled=True,
+        database_path=database_path,
+        public_base_url=public_base_url,
+        master_key_env=master_key_env,
+        master_key=master_key,
+        master_key_source=encoded_master_key,
+        access_ttl_seconds=access_ttl,
+        absolute_ttl_seconds=absolute_ttl,
+        enrollment_ttl_seconds=enrollment_ttl,
+        allow_insecure_http=allow_insecure_http,
     )
 
 

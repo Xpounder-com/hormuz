@@ -155,6 +155,7 @@ retrieved content before the existing secret-egress inspection and preserve
 client protocol compatibility.
 
 The current credential is inherited from an environment variable. Browser
-OIDC login, short-lived session refresh, and OS-keychain custody remain blocked
-on the unaccepted sidecar/session architecture decision; this adapter does not
-silently decide that design.
+OIDC login, short-lived session refresh, and OS secure-store custody now exist
+for provider-gateway helpers. This MCP adapter still reads its credential from
+an inherited environment variable; it does not yet invoke a saved session profile.
+That additive adapter change remains separate from the provider-gateway session path.

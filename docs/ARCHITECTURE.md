@@ -5,11 +5,11 @@ Hormuz sits on the provider request path while employees continue using Codex or
 ```text
 Codex / Claude Code
         |
-        | bootstrap token or OIDC JWT access token
+        | bootstrap token, workload OIDC JWT, or opaque Hormuz access credential
         v
 Hormuz HTTP transport
         |
-        +--> verify static/OIDC identity and resolve explicit actor/team metadata
+        +--> verify static/OIDC/session identity and resolve explicit actor/team metadata
         +--> resolve organization -> team -> person policy
         +--> allow, deny, reroute, or cap the request
         +--> enforce provider storage policy
@@ -44,12 +44,15 @@ deterministic lexical context pack
         +--> no provider call or automatic prompt injection
 ```
 
-The HTTP path authenticates first, derives organization/team/actor from the static or OIDC identity, enforces server-owned pack/rate limits, and filters authorized metadata in SQLite before decoding content. Callers cannot supply identity, policy version, or historical evaluation time.
+The HTTP path authenticates first, derives organization/team/actor from the static credential, workload OIDC token, or mapped Hormuz human session, enforces server-owned pack/rate limits, and filters authorized metadata in SQLite before decoding content. Callers cannot supply identity, policy version, or historical evaluation time.
 
 ## Code boundaries
 
 - `hormuz/server.py` owns HTTP compatibility, authentication, upstream forwarding, streaming, and protocol-shaped errors.
-- `hormuz/auth.py` verifies bootstrap or OIDC JWT credentials and resolves them to configured policy identities.
+- `hormuz/auth.py` verifies bootstrap, workload OIDC JWT, and login ID-token signatures against configured issuers.
+- `hormuz/session.py` owns authorization-code + PKCE protocol behavior and maps opaque sessions back to current configured identities.
+- `hormuz/session_store.py` owns a separate local session database, keyed credential hashes, encrypted transient flow state, atomic rotation, replay detection, and revocation.
+- `hormuz/credential_store.py` and `hormuz/session_client.py` own fail-closed OS secure-store custody and the CLI login/refresh/logout path.
 - `hormuz/config.py` validates configuration and defines identity, route, rate-card, and policy data.
 - `hormuz/policy.py` evaluates access, fallback, caps, and budgets without transport concerns.
 - `hormuz/store.py` owns the SQLite schema and monthly aggregations.
@@ -71,4 +74,4 @@ Hormuz implements the provider endpoints and local MCP stdio integration require
 
 ## Identity boundary
 
-OIDC authentication is currently a resource-server path for JWT access tokens. Discovery and JWKS metadata are cached, an unknown signing-key ID triggers one refresh, and authorization attributes come only from the configured `(issuer, subject)` mapping. Hormuz does not trust caller-provided group or team claims. Browser login, refresh-token custody, opaque-token introspection, SCIM, and active revocation remain separate enterprise milestones; see [OIDC.md](OIDC.md).
+OIDC supports both a workload resource-server path and a human authorization-code + PKCE session path. Discovery and JWKS metadata are cached, an unknown signing-key ID triggers one refresh, and authorization attributes come only from the configured `(issuer, subject)` mapping. Hormuz does not trust caller-provided group or team claims. The local session kernel is single-node; real-IdP validation, SCIM, administrator revocation, and HA persistence remain enterprise milestones. See [OIDC.md](OIDC.md).

@@ -6,11 +6,13 @@ import os
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from collections import defaultdict, deque
 from datetime import datetime, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.cookies import SimpleCookie
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -26,12 +28,15 @@ from .context import (
 from .context_store import ContextStoreError, SQLiteContextRepository
 from .policy import PolicyDecision, PolicyEngine
 from .redaction import RedactionError, SecretRedactor
+from .session import SessionBroker, SessionBrokerError
+from .session_store import SQLiteSessionStore, SessionStoreError
 from .store import ReservationDenied, UsageStore
 from .usage import ResponseUsageParser
 
 
 LOGGER = logging.getLogger("hormuz")
 MAX_CONTEXT_REQUEST_BYTES = 64 * 1024
+MAX_AUTH_REQUEST_BYTES = 8 * 1024
 
 
 class ContextRateLimiter:
@@ -63,11 +68,25 @@ class GatewayServer(ThreadingHTTPServer):
     def __init__(self, config: GatewayConfig):
         self.config = config
         self.authenticator = Authenticator(config)
+        self.session_broker: SessionBroker | None = None
+        if config.session_broker.enabled:
+            session_config = config.session_broker
+            if session_config.database_path is None:
+                raise SessionStoreError("session_store_path_missing")
+            session_store = SQLiteSessionStore(
+                session_config.database_path,
+                master_key=session_config.master_key,
+                access_ttl_seconds=session_config.access_ttl_seconds,
+                absolute_ttl_seconds=session_config.absolute_ttl_seconds,
+                enrollment_ttl_seconds=session_config.enrollment_ttl_seconds,
+            )
+            self.session_broker = SessionBroker(config, self.authenticator, session_store)
         self.store = UsageStore(config.database_path)
         self.context_repository = SQLiteContextRepository(config.context_database_path)
         self.context_rate_limiter = ContextRateLimiter(
             config.context_service.requests_per_minute
         )
+        self.login_rate_limiter = ContextRateLimiter(20)
         self.policy_engine = PolicyEngine(config, self.store)
         protected_values = [
             ("hormuz_identity_token", identity.token)
@@ -79,6 +98,15 @@ class GatewayServer(ThreadingHTTPServer):
             for upstream in config.upstreams.values()
             if len(value := os.environ.get(upstream.api_key_env, "")) >= 8
         )
+        protected_values.extend(
+            ("oidc_client_secret", issuer.login.client_secret)
+            for issuer in config.oidc_issuers.values()
+            if issuer.login is not None
+        )
+        if len(config.session_broker.master_key_source) >= 8:
+            protected_values.append(
+                ("session_master_key", config.session_broker.master_key_source)
+            )
         self.secret_redactor = SecretRedactor(config.secret_controls, tuple(protected_values))
         super().__init__((config.listen.host, config.listen.port), GatewayRequestHandler)
 
@@ -88,7 +116,8 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
     def do_GET(self) -> None:  # noqa: N802
-        path = urlsplit(self.path).path
+        request_url = urlsplit(self.path)
+        path = request_url.path
         if path == "/health":
             self._send_json(
                 HTTPStatus.OK,
@@ -100,8 +129,15 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                         "anthropic-messages",
                         "hormuz-context-packs",
                     ],
+                    "human_login": self.server.session_broker is not None,
                 },
             )
+            return
+        if path == "/v1/auth/login":
+            self._begin_browser_login(request_url.query)
+            return
+        if path == "/v1/auth/callback":
+            self._complete_browser_login(request_url.query)
             return
         identity = self._authenticate()
         if identity is None:
@@ -146,6 +182,18 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         path = urlsplit(self.path).path
+        if path == "/v1/auth/enrollments":
+            self._create_login_enrollment()
+            return
+        if path.startswith("/v1/auth/enrollments/") and path.endswith("/redeem"):
+            self._redeem_login_enrollment(path)
+            return
+        if path == "/v1/auth/refresh":
+            self._refresh_human_session()
+            return
+        if path == "/v1/auth/logout":
+            self._logout_human_session()
+            return
         if path == "/v1/context/packs":
             identity = self._authenticate()
             if identity is None:
@@ -192,6 +240,296 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             client=default_client,
             account_usage=account_usage,
         )
+
+    def _create_login_enrollment(self) -> None:
+        broker = self._require_session_broker()
+        if broker is None:
+            return
+        retry_after = self.server.login_rate_limiter.check(
+            organization_id="anonymous",
+            actor_id=self.client_address[0],
+        )
+        if retry_after is not None:
+            self._send_error(
+                "login_rate_limited",
+                "Login request limit exceeded",
+                HTTPStatus.TOO_MANY_REQUESTS,
+                headers={"Retry-After": str(retry_after)},
+                close_connection=True,
+            )
+            return
+        request = self._read_json_body(max_bytes=MAX_AUTH_REQUEST_BYTES)
+        if request is None:
+            return
+        unknown = sorted(set(request) - {"issuer", "client", "enrollment_secret"})
+        if unknown:
+            self._send_error(
+                "invalid_enrollment_request",
+                "Unknown enrollment fields: " + ", ".join(unknown),
+                HTTPStatus.BAD_REQUEST,
+            )
+            return
+        issuer = request.get("issuer")
+        if issuer is not None and not isinstance(issuer, str):
+            self._send_error(
+                "invalid_enrollment_request",
+                "issuer must be a string when provided",
+                HTTPStatus.BAD_REQUEST,
+            )
+            return
+        client = request.get("client")
+        enrollment_secret = request.get("enrollment_secret")
+        if not isinstance(client, str) or not isinstance(enrollment_secret, str):
+            self._send_error(
+                "invalid_enrollment_request",
+                "client and enrollment_secret are required strings",
+                HTTPStatus.BAD_REQUEST,
+            )
+            return
+        try:
+            enrollment, login_url = broker.create_enrollment(
+                issuer_name=issuer,
+                client_name=client,
+                enrollment_secret=enrollment_secret,
+            )
+        except (SessionBrokerError, SessionStoreError) as error:
+            self._send_auth_failure(error.code)
+            return
+        self._send_json(
+            HTTPStatus.CREATED,
+            {
+                "enrollment_id": enrollment.enrollment_id,
+                "login_url": login_url,
+                "expires_at": enrollment.expires_at.isoformat(),
+            },
+        )
+
+    def _begin_browser_login(self, query: str) -> None:
+        broker = self._require_session_broker()
+        if broker is None:
+            return
+        values = _single_query_values(query)
+        enrollment_id = values.get("enrollment") if values is not None else None
+        if (
+            values is None
+            or set(values) != {"enrollment"}
+            or enrollment_id is None
+            or not _safe_identifier(enrollment_id)
+        ):
+            self._send_browser_result(
+                HTTPStatus.BAD_REQUEST,
+                "Hormuz login could not be started.",
+            )
+            return
+        try:
+            authorization_url, browser_cookie = broker.begin_authorization(enrollment_id)
+        except (SessionBrokerError, SessionStoreError):
+            self._send_browser_result(
+                HTTPStatus.BAD_REQUEST,
+                "This Hormuz login request is invalid or expired.",
+            )
+            return
+        cookie_name = self._login_cookie_name()
+        cookie = (
+            f"{cookie_name}={browser_cookie}; Path=/; Max-Age="
+            f"{self.server.config.session_broker.enrollment_ttl_seconds}; HttpOnly; SameSite=Lax"
+        )
+        if not self.server.config.session_broker.allow_insecure_http:
+            cookie += "; Secure"
+        self.send_response(HTTPStatus.FOUND)
+        self.send_header("Location", authorization_url)
+        self.send_header("Set-Cookie", cookie)
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def _complete_browser_login(self, query: str) -> None:
+        broker = self._require_session_broker(browser=True)
+        if broker is None:
+            return
+        values = _single_query_values(query)
+        state = values.get("state") if values is not None else None
+        code = values.get("code") if values is not None else None
+        provider_error = values.get("error") if values is not None else None
+        response_issuer = values.get("iss") if values is not None else None
+        browser_cookie = self._login_cookie()
+        if (
+            values is None
+            or not set(values).issubset({"state", "code", "error", "error_description", "iss"})
+            or state is None
+            or browser_cookie is None
+            or (code is None) == (provider_error is None)
+        ):
+            self._send_browser_result(
+                HTTPStatus.BAD_REQUEST,
+                "Hormuz could not verify this login response.",
+                clear_cookie=True,
+            )
+            return
+        try:
+            broker.complete_authorization(
+                state=state,
+                browser_cookie=browser_cookie,
+                code=code,
+                provider_error=provider_error,
+                response_issuer=response_issuer,
+            )
+        except (SessionBrokerError, SessionStoreError):
+            self._send_browser_result(
+                HTTPStatus.BAD_REQUEST,
+                "Hormuz could not complete this login. Return to the terminal and try again.",
+                clear_cookie=True,
+            )
+            return
+        self._send_browser_result(
+            HTTPStatus.OK,
+            "Login complete. You can close this window and return to the terminal.",
+            clear_cookie=True,
+        )
+
+    def _redeem_login_enrollment(self, path: str) -> None:
+        broker = self._require_session_broker()
+        if broker is None:
+            return
+        parts = path.split("/")
+        if len(parts) != 6 or not _safe_identifier(parts[4]):
+            self._send_error("not_found", "Route not found", HTTPStatus.NOT_FOUND)
+            return
+        request = self._read_json_body(max_bytes=MAX_AUTH_REQUEST_BYTES)
+        if request is None:
+            return
+        if set(request) != {"enrollment_secret"} or not isinstance(
+            request.get("enrollment_secret"), str
+        ):
+            self._send_error(
+                "invalid_redemption_request",
+                "enrollment_secret is required",
+                HTTPStatus.BAD_REQUEST,
+            )
+            return
+        try:
+            pair = broker.redeem(
+                enrollment_id=parts[4],
+                enrollment_secret=request["enrollment_secret"],
+            )
+        except (SessionBrokerError, SessionStoreError) as error:
+            status = (
+                HTTPStatus.CONFLICT
+                if error.code == "enrollment_not_redeemable"
+                else HTTPStatus.UNAUTHORIZED
+            )
+            self._send_error("login_not_ready", "Login is not ready or has expired", status)
+            return
+        self._send_json(HTTPStatus.OK, pair.to_dict())
+
+    def _refresh_human_session(self) -> None:
+        broker = self._require_session_broker()
+        if broker is None:
+            return
+        request = self._read_json_body(max_bytes=MAX_AUTH_REQUEST_BYTES)
+        if request is None:
+            return
+        if set(request) != {"refresh_token"} or not isinstance(request.get("refresh_token"), str):
+            self._send_error(
+                "invalid_refresh_request",
+                "refresh_token is required",
+                HTTPStatus.BAD_REQUEST,
+            )
+            return
+        try:
+            pair = broker.refresh(request["refresh_token"])
+        except (SessionBrokerError, SessionStoreError) as error:
+            LOGGER.info("session_refresh_denied reason=%s", error.code)
+            self._send_error(
+                "invalid_session",
+                "Session refresh was rejected",
+                HTTPStatus.UNAUTHORIZED,
+            )
+            return
+        self._send_json(HTTPStatus.OK, pair.to_dict())
+
+    def _logout_human_session(self) -> None:
+        broker = self._require_session_broker()
+        if broker is None:
+            return
+        request = self._read_json_body(max_bytes=MAX_AUTH_REQUEST_BYTES)
+        if request is None:
+            return
+        if set(request) != {"credential"} or not isinstance(request.get("credential"), str):
+            self._send_error(
+                "invalid_logout_request",
+                "credential is required",
+                HTTPStatus.BAD_REQUEST,
+            )
+            return
+        try:
+            broker.revoke(request["credential"])
+        except (SessionBrokerError, SessionStoreError):
+            pass
+        self._send_json(HTTPStatus.OK, {"revoked": True})
+
+    def _require_session_broker(self, *, browser: bool = False) -> SessionBroker | None:
+        broker = self.server.session_broker
+        if broker is not None:
+            return broker
+        if browser:
+            self._send_browser_result(HTTPStatus.NOT_FOUND, "Hormuz login is not enabled.")
+        else:
+            self._send_error("login_disabled", "Human login is not enabled", HTTPStatus.NOT_FOUND)
+        return None
+
+    def _send_auth_failure(self, code: str) -> None:
+        LOGGER.info("session_enrollment_denied reason=%s", code)
+        status = HTTPStatus.BAD_REQUEST
+        if code in {"oidc_metadata_unavailable", "session_store_unavailable"}:
+            status = HTTPStatus.SERVICE_UNAVAILABLE
+        self._send_error("login_unavailable", "Login could not be started", status)
+
+    def _login_cookie_name(self) -> str:
+        return (
+            "hormuz_login"
+            if self.server.config.session_broker.allow_insecure_http
+            else "__Host-hormuz_login"
+        )
+
+    def _login_cookie(self) -> str | None:
+        raw = self.headers.get("Cookie", "")
+        if len(raw) > 8192:
+            return None
+        cookie = SimpleCookie()
+        try:
+            cookie.load(raw)
+        except Exception:
+            return None
+        item = cookie.get(self._login_cookie_name())
+        return item.value if item is not None else None
+
+    def _send_browser_result(
+        self,
+        status: HTTPStatus,
+        message: str,
+        *,
+        clear_cookie: bool = False,
+    ) -> None:
+        body = (
+            "<!doctype html><meta charset=utf-8><title>Hormuz login</title>"
+            "<main><h1>Hormuz</h1><p>" + message + "</p></main>"
+        ).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Security-Policy", "default-src 'none'; style-src 'none'; frame-ancestors 'none'")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        if clear_cookie:
+            cookie = f"{self._login_cookie_name()}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax"
+            if not self.server.config.session_broker.allow_insecure_http:
+                cookie += "; Secure"
+            self.send_header("Set-Cookie", cookie)
+        self.end_headers()
+        self.wfile.write(body)
 
     def _create_context_pack(self, identity: Identity) -> None:
         request_body = self._read_json_body(max_bytes=MAX_CONTEXT_REQUEST_BYTES)
@@ -750,6 +1088,12 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         if api_key:
             candidates.append(api_key)
         for candidate in candidates:
+            if candidate.startswith("hox_a_") and self.server.session_broker is not None:
+                try:
+                    return self.server.session_broker.authenticate(candidate)
+                except AuthenticationError as error:
+                    LOGGER.info("authentication_denied reason=%s", error.code)
+                    continue
             try:
                 return self.server.authenticator.authenticate(candidate)
             except AuthenticationError as error:
@@ -899,4 +1243,36 @@ def _valid_context_scope(value: object) -> bool:
         and bool(value.strip())
         and len(value) <= 512
         and all(character.isprintable() for character in value)
+    )
+
+
+def _single_query_values(query: str) -> dict[str, str] | None:
+    if len(query.encode("utf-8")) > 8192:
+        return None
+    try:
+        parsed = urllib.parse.parse_qs(
+            query,
+            keep_blank_values=True,
+            strict_parsing=True,
+            max_num_fields=8,
+        )
+    except (ValueError, UnicodeError):
+        return None
+    if any(len(values) != 1 for values in parsed.values()):
+        return None
+    values = {name: items[0] for name, items in parsed.items()}
+    if any(
+        not value
+        or len(value.encode("utf-8")) > 4096
+        or any(character in value for character in ("\n", "\r", "\x00"))
+        for value in values.values()
+    ):
+        return None
+    return values
+
+
+def _safe_identifier(value: str) -> bool:
+    return (
+        20 <= len(value) <= 128
+        and all(character.isalnum() or character in {"-", "_"} for character in value)
     )

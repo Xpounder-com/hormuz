@@ -37,6 +37,7 @@ _BUILTIN_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("aws_access_key_id", re.compile(r"\b(?:AKIA|ASIA)[A-Z0-9]{16}\b")),
     ("google_api_key", re.compile(r"\bAIza[A-Za-z0-9_-]{35}\b")),
     ("slack_token", re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{20,}\b")),
+    ("hormuz_session_credential", re.compile(r"\bhox_[ar]_[A-Za-z0-9_-]{32,}\b")),
 )
 
 
