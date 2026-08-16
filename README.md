@@ -101,6 +101,15 @@ The same flags work with `client-config claude`. The effective context policy mu
 
 For process probes, use `GET /health/live` and `GET /health/ready`. On `SIGTERM`, readiness is withdrawn before new work is rejected and already-admitted requests receive the configured grace period. See [docs/OPERATIONS.md](docs/OPERATIONS.md) for the exact response, shutdown, and current deployment boundary.
 
+For a repeatable single-node container checkpoint, build the pinned non-root image and run its executable restricted-runtime smoke test:
+
+```bash
+docker build --pull=false --tag hormuz:local .
+python3 scripts/container_smoke.py --image hormuz:local
+```
+
+The reference command, data-volume contract, secret boundary, SBOM/vulnerability gate, and remaining production limitations are documented in [docs/CONTAINER.md](docs/CONTAINER.md).
+
 ## Policies and usage
 
 Evaluate a request without calling a model:

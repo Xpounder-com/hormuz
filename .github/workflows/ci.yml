@@ -172,3 +172,57 @@ jobs:
           python -m unittest -v \
             tests.test_gateway.GatewayIntegrationTests.test_installed_codex_routes_through_gateway \
             tests.test_gateway.GatewayIntegrationTests.test_official_claude_code_routes_through_gateway
+
+  container:
+    name: Restricted container, SBOM, and vulnerability gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      HORMUZ_IMAGE: hormuz:ci-${{ github.sha }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build pinned Hormuz image
+        run: |
+          docker build \
+            --pull=false \
+            --build-arg "HORMUZ_REVISION=$GITHUB_SHA" \
+            --tag "$HORMUZ_IMAGE" \
+            .
+      - name: Verify restricted runtime and graceful shutdown
+        run: python3 scripts/container_smoke.py --image "$HORMUZ_IMAGE"
+      - name: Generate CycloneDX software bill of materials
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: v0.74.0
+          scan-type: image
+          image-ref: ${{ env.HORMUZ_IMAGE }}
+          scanners: vuln
+          format: cyclonedx
+          output: ${{ runner.temp }}/hormuz.sbom.cdx.json
+          exit-code: "0"
+      - name: Record and enforce vulnerability result
+        run: |
+          trivy image \
+            --scanners vuln \
+            --severity HIGH,CRITICAL \
+            --exit-code 1 \
+            --format json \
+            --output "$RUNNER_TEMP/hormuz-vulnerability-report.json" \
+            "$HORMUZ_IMAGE"
+      - name: Record image metadata
+        if: always()
+        run: docker image inspect "$HORMUZ_IMAGE" > "$RUNNER_TEMP/hormuz-image-inspect.json"
+      - name: Preserve container security evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hormuz-container-security
+          path: |
+            ${{ runner.temp }}/hormuz.sbom.cdx.json
+            ${{ runner.temp }}/hormuz-vulnerability-report.json
+            ${{ runner.temp }}/hormuz-image-inspect.json
+          if-no-files-found: error
+          retention-days: 7

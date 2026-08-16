@@ -1,0 +1,12 @@
+**
+!Dockerfile
+!.dockerignore
+!deploy/
+!deploy/container/
+!deploy/container/requirements.lock
+!hormuz/
+!hormuz/**
+hormuz/**/__pycache__/
+hormuz/**/*.pyc
+hormuz/**/*.pyo
+hormuz/**/.DS_Store

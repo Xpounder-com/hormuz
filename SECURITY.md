@@ -23,6 +23,7 @@ Hormuz is alpha software and has not received a third-party security review. Do 
 ## Current limitations
 
 - The built-in server does not terminate TLS.
+- The reference container is pinned, non-root, restricted by its documented run command, smoke-tested, SBOM-producing, and gated on high/critical vulnerability findings in CI. It is not yet signed or published, and those controls do not make the single-node SQLite topology highly available.
 - Static environment-provided identity tokens remain available for bootstrap and break-glass use.
 - The workload OIDC path verifies short-lived JWT access tokens. The human path implements authorization-code + PKCE browser login and issues opaque, rotating Hormuz credentials from a separate local session store.
 - Raw Hormuz access/refresh credentials are not stored server-side. The session database uses keyed hashes, encrypts transient PKCE state, rotates both credentials, and revokes a family on refresh replay.
