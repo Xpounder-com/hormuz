@@ -15,6 +15,7 @@ class ContainerContractTests(unittest.TestCase):
         )
         self.assertIn("--require-hashes", dockerfile)
         self.assertIn("--only-binary=:all:", dockerfile)
+        self.assertIn("org.opencontainers.image.version", dockerfile)
 
         lock = (ROOT / "deploy/container/requirements.lock").read_text()
         self.assertIn("pyjwt==2.13.0", lock)

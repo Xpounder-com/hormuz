@@ -16,7 +16,7 @@ The root `Dockerfile`:
 
 CI builds the image, runs `scripts/container_smoke.py`, generates a CycloneDX SBOM, and fails on any Trivy high or critical OS or Python-package finding, including findings without a current fix. The scanner action commit and scanner release are explicitly pinned CI inputs. The SBOM, vulnerability JSON, and image inspection are retained as workflow artifacts for seven days.
 
-The image is not yet signed or published. Registry selection, identity-based pull authorization, retention, signing custody, and multi-architecture release promotion remain release work.
+Tag-driven private GHCR publication, multi-architecture promotion, GitHub OIDC keyless signing, exact-identity verification, and a signed SLSA provenance predicate are implemented as a release contract, but no image is claimed as published until an eligible tag run succeeds. See [RELEASES.md](RELEASES.md). Tag governance, identity-based pull authorization, retention, customer-registry/KMS custody, and an observed release remain release work.
 
 ## Build
 
@@ -97,4 +97,4 @@ Disable body, raw URL, query, header, and process-dump collection in the load ba
 
 ## Current boundary
 
-This reference process still uses SQLite and is single-node. Multiple replicas must not share the SQLite volume. PostgreSQL/shared-store topology, distributed budgets and throttles, HA sessions and approvals, backup/PITR, RPO/RTO, key rotation without restart, immutable external audit export, TLS reference configuration, upgrade/rollback proof, image signing, and registry publication remain open enterprise gates.
+This reference process still uses SQLite and is single-node. Multiple replicas must not share the SQLite volume. PostgreSQL/shared-store topology, distributed budgets and throttles, HA sessions and approvals, backup/PITR, RPO/RTO, key rotation without restart, immutable external audit export, TLS reference configuration, executed upgrade/rollback proof, tag/environment governance, and an observed signed registry release remain open enterprise gates.

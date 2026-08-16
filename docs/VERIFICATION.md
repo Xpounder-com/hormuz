@@ -715,6 +715,25 @@ The process-level health and shutdown slice was exercised locally on August 16, 
 
 This verifies a shallow single-process liveness/readiness and graceful-drain foundation, not production deployment issue #11. Plain HTTP remains limited to loopback or a separately hardened private TLS boundary. Deep dependency policy, shared load-balancer coordination, container/reference deployment, multi-node persistence, HA/failover, backup/restore, RPO/RTO, deployment-component telemetry review, and independent security review remain open.
 
+### Signed private-container release contract
+
+The tag, source, privilege, signing, provenance, package, evidence, and rollback contract was exercised locally on August 16, 2026 without creating a tag, registry package, signature, attestation, or GitHub release.
+
+- strict release inputs bind an annotated `vX.Y.Z` tag to the identical `pyproject.toml` version, full event ref/SHA, exact `Xpounder-com/hormuz` repository, and a commit reachable from `main`. Temporary real Git repositories proved acceptance of an annotated main-history tag and rejection of a lightweight or unmerged tag;
+- publication permissions are split across verification, package/signing, and GitHub-release jobs. All Actions are pinned to immutable commits, no `latest` tag exists, and version/revision aliases must resolve to the verified digest;
+- the live repository default was changed from write-capable Actions tokens to `read`, and workflow-token pull-request approval was disabled. Jobs that need additional authority must now request it explicitly;
+- public-good Sigstore metadata disclosure is fail-closed unless `HORMUZ_SIGSTORE_RELEASE_APPROVAL=sigstore-public-transparency-v1` records owner acceptance. No such approval or remote release was assumed by this checkpoint;
+- official action contracts were reviewed at their pinned commits. Digest-verified actionlint `v1.7.12` plus digest-verified ShellCheck `v0.11.0` reported zero workflow, expression, or embedded-shell errors;
+- all 329 source tests passed with the installed Codex path enabled; the environment-gated official Claude Code case was the sole local skip. The ordinary CI compatibility job continues to install and exercise both pinned clients, while a real tag workflow requires the Claude path inside its complete suite;
+- the frozen 60-task strict release benchmark passed five iterations, and deterministic corpus verification retained SHA-256 `9822d592868202c7c7539bcdac7d4a5894c01f9e6dba7a434846516b67b32c17`;
+- isolated source and wheel builds succeeded. A fresh Python 3.13 environment installed the wheel outside the checkout and displayed the installed CLI;
+- the version-labeled reference image passed the restricted non-root/read-only/capability-drop/health/authentication/persistence/credential-response/SIGTERM smoke contract;
+- an unpublished OCI archive built successfully for both `linux/amd64` and `linux/arm64`, with per-platform BuildKit attestation manifests;
+- digest-verified Trivy `v0.74.0` found zero high or critical OS/Python findings, including unfixed findings, and emitted a CycloneDX `1.7` SBOM with 43 components; and
+- source/test bytecode compilation and `git diff --check` passed.
+
+This proves the local and static automation contract, not a signed image or registry release. A real tag run must still prove Actions package permission, private repository linkage, OIDC certificate identity, public transparency behavior, remote digest aliases, Cosign signature and SLSA-attestation verification, and final release assets. Tag governance, protected release review, package retention/access, customer-registry/KMS options, TLS, shared persistence, HA, backup/restore, RPO/RTO, and independent security review remain open.
+
 ## Reproduce locally
 
 The default suite uses only loopback fake providers:
@@ -733,14 +752,15 @@ Never add real provider or employee credentials to this record.
 
 ## Automated publication gate
 
-GitHub Actions runs four independent gates without provider credentials:
+Ordinary GitHub CI runs five independent gate families without provider credentials:
 
 - the complete unit, context-governance, and loopback gateway suite on Python 3.11, 3.12, 3.13, and 3.14;
-- deterministic corpus regeneration plus the 12-task governed-context regression profile, with machine-readable evidence retained as an artifact;
+- deterministic corpus regeneration plus the 60-task governed-context release profile, with machine-readable evidence retained as an artifact;
 - source-distribution and wheel builds followed by installation of the wheel in a clean virtual environment;
-- installed-client routing through local fake providers using pinned official Codex and Claude Code package versions.
+- installed-client routing through local fake providers using pinned official Codex and Claude Code package versions; and
+- pinned-base/hash-locked container build, restricted-runtime smoke, CycloneDX SBOM, and a fail-on-any-high-or-critical vulnerability gate.
 
-The workflow grants only read access to repository contents, disables persisted checkout credentials, pins every GitHub Action to a reviewed commit SHA, and retains build artifacts for seven days. Dependabot is configured to propose updates to action and Python build dependencies; a client-version bump remains an intentional compatibility change because it can alter the provider protocol.
+Ordinary CI grants only read access to repository contents, disables persisted checkout credentials, pins every GitHub Action to a reviewed commit SHA, and retains build artifacts for seven days. The separate release workflow re-runs the applicable gates on an annotated version tag, splits source, package/signing, and GitHub-release permissions, and retains its verification and signed-release evidence longer. It remains blocked before publication until the owner-approved Sigstore transparency repository variable is present. Dependabot is configured to propose updates to action and Python build dependencies; a client-version bump remains an intentional compatibility change because it can alter the provider protocol.
 
 A separate weekly canary installs the latest published Codex and Claude Code packages in an ephemeral runner and exercises only the two fake-provider compatibility tests. It has no provider credentials, does not block ordinary pull requests, and is intended to surface upstream protocol drift before an employee upgrade does.
 

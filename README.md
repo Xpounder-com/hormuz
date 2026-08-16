@@ -108,7 +108,7 @@ docker build --pull=false --tag hormuz:local .
 python3 scripts/container_smoke.py --image hormuz:local
 ```
 
-The reference command, data-volume contract, secret boundary, SBOM/vulnerability gate, and remaining production limitations are documented in [docs/CONTAINER.md](docs/CONTAINER.md).
+The reference command, data-volume contract, secret boundary, SBOM/vulnerability gate, and remaining production limitations are documented in [docs/CONTAINER.md](docs/CONTAINER.md). Tag-driven private GHCR publication, exact-digest keyless signing, signed SLSA provenance, evidence assets, and digest-based rollback are specified in [docs/RELEASES.md](docs/RELEASES.md); the workflow is not evidence that an image has already been published.
 
 ## Policies and usage
 
@@ -299,7 +299,7 @@ The suite uses local fake OpenAI and Anthropic endpoints and does not need real 
 HORMUZ_RUN_CLAUDE_CLIENT_TEST=1 python3 -m unittest -v
 ```
 
-The GitHub publication gate also tests Python 3.11 through 3.14, validates the frozen benchmark and preserves CI evidence, builds and installs the distribution wheel, verifies pinned official Codex and Claude Code releases, and runs a non-blocking weekly canary against their latest releases. See [docs/VERIFICATION.md](docs/VERIFICATION.md) for the exact boundary.
+The GitHub publication gate also tests Python 3.11 through 3.14, validates the frozen benchmark and preserves CI evidence, builds and installs the distribution wheel, verifies pinned official Codex and Claude Code releases, and scans the restricted container. A separate tag-only workflow re-runs the release gates before it can publish, sign, attest, and verify a private image. The weekly latest-client canary remains non-blocking. See [docs/VERIFICATION.md](docs/VERIFICATION.md) for the exact boundary.
 
 ## Roadmap boundary
 

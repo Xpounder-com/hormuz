@@ -2,11 +2,13 @@ ARG PYTHON_IMAGE=python:3.14.6-alpine3.23@sha256:b165067c5afc37fa5608a3c05609cc3
 FROM ${PYTHON_IMAGE}
 
 ARG HORMUZ_REVISION=unknown
+ARG HORMUZ_VERSION=unknown
 
 LABEL org.opencontainers.image.title="Hormuz" \
       org.opencontainers.image.description="Enterprise AI policy, usage, and governed-context control plane" \
       org.opencontainers.image.source="https://github.com/Xpounder-com/hormuz" \
-      org.opencontainers.image.revision="${HORMUZ_REVISION}"
+      org.opencontainers.image.revision="${HORMUZ_REVISION}" \
+      org.opencontainers.image.version="${HORMUZ_VERSION}"
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
