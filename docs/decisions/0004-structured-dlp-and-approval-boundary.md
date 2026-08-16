@@ -107,4 +107,6 @@ This would create a concentrated sensitive-data store in the control plane. Reje
 
 Accepted in the product-development conversation on 2026-08-15. The owner explicitly approved the recommended architecture: high-confidence secret and regulated-identifier redaction by default, configurable organization policy, detect-only lower-confidence PII, short-lived non-self approvals, fail-closed enforced rules, and denial of uninspectable media under enforced DLP.
 
+GitHub acceptance record: [issue #10 comment](https://github.com/Xpounder-com/hormuz/issues/10#issuecomment-5305144582).
+
 Acceptance authorizes implementation under [#10](https://github.com/Xpounder-com/hormuz/issues/10). It does not claim that structured DLP or the approval workflow is already shipped.

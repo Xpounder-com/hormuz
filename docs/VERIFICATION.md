@@ -244,6 +244,7 @@ Observed local result:
 - the frozen 60-task release benchmark remained green with precision `1.00`, recall `1.00`, useful-pack rate `1.00`, zero safety failures, and p95 in-process selection latency `0.162125 ms`;
 - isolated source and wheel builds succeeded; the source distribution contained accepted DLP ADR 0004 and the new accounting tests, and a clean Python 3.14 environment installed the wheel and passed an installed-package model/rate/billable/estimate report smoke test;
 - a tracked-file scan found no private-key, OpenAI, Anthropic, or GitHub credential pattern, and the ignored `.env.local` was not read.
+- GitHub Actions run `31919702400` passed all seven publication jobs for implementation commit `db4269d`: Python 3.11–3.14, the full strict benchmark, source/wheel build and install, and pinned official Codex/Claude Code compatibility.
 
 This is the request-level accounting and immutable-estimate foundation for issue #8, not provider billing ingestion or invoice reconciliation. OpenAI and Anthropic cost reports are aggregate across provider dimensions and do not universally assign a final invoiced cost to one Hormuz request. Team/person values therefore remain estimates unless the customer isolates provider accounting boundaries; Hormuz does not label an inferred allocation as final.
 
