@@ -78,6 +78,10 @@ from .usage_reporting import REPORT_DIMENSIONS, enrich_usage_rows
 
 
 LOGGER = logging.getLogger("hormuz")
+_REQUEST_ADMITTED = "admitted"
+_REQUEST_DRAINING = "draining"
+_REQUEST_PROBE = "probe"
+_REQUEST_SATURATED = "saturated"
 MAX_CONTEXT_REQUEST_BYTES = 64 * 1024
 MAX_CONTEXT_SNAPSHOT_REQUEST_BYTES = 8 * 1024 * 1024
 MAX_CONTEXT_EVIDENCE_REQUEST_BYTES = 64 * 1024
@@ -333,14 +337,16 @@ class GatewayServer(ThreadingHTTPServer):
             self._draining.set()
             return not was_draining
 
-    def admit_request(self) -> bool:
-        """Atomically admit a parsed request unless draining has begun."""
+    def admit_request(self) -> str:
+        """Atomically classify a parsed request against drain and capacity state."""
 
         with self._request_condition:
             if self._draining.is_set():
-                return False
+                return _REQUEST_DRAINING
+            if self._active_requests >= self.config.listen.max_concurrent_requests:
+                return _REQUEST_SATURATED
             self._active_requests += 1
-            return True
+            return _REQUEST_ADMITTED
 
     def request_finished(self) -> None:
         """Release one admitted request and wake shutdown waiters."""
@@ -356,6 +362,11 @@ class GatewayServer(ThreadingHTTPServer):
     def active_requests(self) -> int:
         with self._request_condition:
             return self._active_requests
+
+    @property
+    def is_saturated(self) -> bool:
+        with self._request_condition:
+            return self._active_requests >= self.config.listen.max_concurrent_requests
 
     def wait_for_in_flight(self, timeout_seconds: float) -> int:
         """Wait a bounded interval and return the number still in flight."""
@@ -419,17 +430,21 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
     def handle_one_request(self) -> None:
-        self._hormuz_request_admitted = False
+        self._hormuz_request_admission = _REQUEST_DRAINING
         try:
             super().handle_one_request()
         finally:
-            if self._hormuz_request_admitted:
+            if self._hormuz_request_admission == _REQUEST_ADMITTED:
                 self.server.request_finished()
 
     def parse_request(self) -> bool:
         parsed = super().parse_request()
         if parsed:
-            self._hormuz_request_admitted = self.server.admit_request()
+            path = urlsplit(self.path).path
+            if path in {"/health", "/health/live", "/health/ready"}:
+                self._hormuz_request_admission = _REQUEST_PROBE
+            else:
+                self._hormuz_request_admission = self.server.admit_request()
         return parsed
 
     def do_GET(self) -> None:  # noqa: N802
@@ -446,8 +461,10 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             )
             return
         if path in {"/health", "/health/ready"}:
-            ready = not self.server.is_draining
-            health_status = "ready" if ready else "draining"
+            draining = self.server.is_draining
+            saturated = self.server.is_saturated
+            ready = not draining and not saturated
+            health_status = "ready" if ready else "draining" if draining else "busy"
             if path == "/health" and ready:
                 health_status = "ok"
             payload: dict[str, object] = {
@@ -473,7 +490,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 headers={"Retry-After": "1"} if not ready else None,
             )
             return
-        if self._reject_if_draining():
+        if self._reject_if_unavailable():
             return
         if path == "/v1/auth/login":
             self._begin_browser_login(request_url.query)
@@ -769,7 +786,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         path = urlsplit(self.path).path
-        if self._reject_if_draining():
+        if self._reject_if_unavailable():
             return
         if path == "/v1/auth/enrollments":
             self._create_login_enrollment()
@@ -863,7 +880,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
 
     def do_PUT(self) -> None:  # noqa: N802
         path = urlsplit(self.path).path
-        if self._reject_if_draining():
+        if self._reject_if_unavailable():
             return
         if path != "/v1/context/lifecycle-snapshots":
             self._send_error(
@@ -1952,7 +1969,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         )
 
     def do_OPTIONS(self) -> None:  # noqa: N802
-        if self._reject_if_draining():
+        if self._reject_if_unavailable():
             return
         self.send_response(HTTPStatus.NO_CONTENT)
         self.send_header("Allow", "GET, POST, PUT, OPTIONS")
@@ -2745,11 +2762,12 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             forwarded_headers,
         )
         request = urllib.request.Request(request_url, data=body, headers=headers, method="POST")
+        upstream_deadline = time.monotonic() + self.server.config.upstream_timeout_seconds
 
         try:
             response = self.server.upstream_opener.open(
                 request,
-                timeout=self.server.config.upstream_timeout_seconds,
+                timeout=max(0.001, upstream_deadline - time.monotonic()),
             )
         except urllib.error.HTTPError as error:
             response = error
@@ -2776,6 +2794,41 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 "Upstream provider is unavailable.",
                 HTTPStatus.BAD_GATEWAY,
                 code="gateway_upstream_error",
+            )
+            return
+
+        if time.monotonic() >= upstream_deadline:
+            response.close()
+            if account_usage:
+                self.server.store.record(
+                    identity=identity,
+                    client=client,
+                    protocol=protocol,
+                    requested_model=decision.requested_model,
+                    resolved_alias=decision.resolved_alias,
+                    upstream_model=route.upstream_model,
+                    policy_action=policy_action,
+                    status="failed",
+                    cost_basis="not_available",
+                    currency=route.currency,
+                    rate_card_version=route.rate_card_version,
+                    redaction_count=redaction_count,
+                    redaction_rules=redaction_rules,
+                    context_lineage=context_lineage,
+                )
+            LOGGER.warning(
+                "upstream_response_deadline_exceeded stage=headers actor=%s team=%s client=%s protocol=%s requested_model=%s",
+                identity.actor_id,
+                identity.team_id,
+                client,
+                protocol,
+                decision.requested_model,
+            )
+            self._send_protocol_error(
+                protocol,
+                "Upstream provider response deadline exceeded.",
+                HTTPStatus.GATEWAY_TIMEOUT,
+                code="gateway_upstream_timeout",
             )
             return
 
@@ -2852,9 +2905,18 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         refresh_at = time.monotonic() + max(1, reservation_ttl_seconds // 2)
         try:
             while True:
-                chunk = response.read(16 * 1024)
+                remaining = upstream_deadline - time.monotonic()
+                if remaining <= 0:
+                    raise _ProviderResponseDeadlineExceeded
+                chunk = _read_provider_response_chunk(
+                    response,
+                    maximum_bytes=16 * 1024,
+                    timeout_seconds=remaining,
+                )
                 if not chunk:
                     break
+                if time.monotonic() >= upstream_deadline:
+                    raise _ProviderResponseDeadlineExceeded
                 if reservation_id is not None and time.monotonic() >= refresh_at:
                     self.server.store.refresh_budget_reservation(
                         reservation_id,
@@ -2862,10 +2924,27 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                     )
                     refresh_at = time.monotonic() + max(1, reservation_ttl_seconds // 2)
                 parser.feed(chunk)
-                self.wfile.write(chunk)
-                self.wfile.flush()
+                remaining = upstream_deadline - time.monotonic()
+                if remaining <= 0:
+                    raise _ProviderResponseDeadlineExceeded
+                self.connection.settimeout(max(0.001, remaining))
+                try:
+                    self.wfile.write(chunk)
+                    self.wfile.flush()
+                except TimeoutError as error:
+                    raise _ProviderResponseDeadlineExceeded from error
         except (BrokenPipeError, ConnectionResetError):
             downstream_ok = False
+        except _ProviderResponseDeadlineExceeded:
+            downstream_ok = False
+            LOGGER.warning(
+                "upstream_response_deadline_exceeded stage=relay actor=%s team=%s client=%s protocol=%s requested_model=%s",
+                identity.actor_id,
+                identity.team_id,
+                client,
+                protocol,
+                decision.requested_model,
+            )
         except (TimeoutError, OSError) as error:
             downstream_ok = False
             LOGGER.warning(
@@ -3121,9 +3200,18 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             headers=response_headers,
         )
 
-    def _reject_if_draining(self) -> bool:
-        if self._hormuz_request_admitted:
+    def _reject_if_unavailable(self) -> bool:
+        if self._hormuz_request_admission == _REQUEST_ADMITTED:
             return False
+        if self._hormuz_request_admission == _REQUEST_SATURATED:
+            self._send_error(
+                "gateway_busy",
+                "Gateway request capacity is exhausted",
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                headers={"Retry-After": "1"},
+                close_connection=True,
+            )
+            return True
         self._send_error(
             "gateway_draining",
             "Gateway is draining",
@@ -3184,6 +3272,55 @@ def serve_in_thread(server: GatewayServer) -> threading.Thread:
     thread = threading.Thread(target=server.serve_forever, name="hormuz", daemon=True)
     thread.start()
     return thread
+
+
+class _ProviderResponseDeadlineExceeded(TimeoutError):
+    pass
+
+
+def _read_provider_response_chunk(
+    response: object,
+    *,
+    maximum_bytes: int,
+    timeout_seconds: float,
+) -> bytes:
+    if timeout_seconds <= 0:
+        raise _ProviderResponseDeadlineExceeded
+    _set_provider_response_timeout(response, timeout_seconds)
+    reader = getattr(response, "read1", None)
+    if not callable(reader):
+        reader = getattr(getattr(response, "fp", None), "read1", None)
+    if not callable(reader):
+        reader = getattr(response, "read")
+    try:
+        return reader(maximum_bytes)
+    except TimeoutError as error:
+        raise _ProviderResponseDeadlineExceeded from error
+
+
+def _set_provider_response_timeout(response: object, timeout_seconds: float) -> None:
+    """Tighten the active provider socket to the remaining wall-clock deadline."""
+
+    frontier = [response]
+    seen: set[int] = set()
+    for _ in range(6):
+        next_frontier: list[object] = []
+        for item in frontier:
+            marker = id(item)
+            if marker in seen:
+                continue
+            seen.add(marker)
+            setter = getattr(item, "settimeout", None)
+            if callable(setter):
+                setter(max(0.001, timeout_seconds))
+                return
+            for attribute in ("fp", "raw", "_sock"):
+                child = getattr(item, attribute, None)
+                if child is not None:
+                    next_frontier.append(child)
+        frontier = next_frontier
+        if not frontier:
+            return
 
 
 def _content_free_http_method(value: object) -> str:

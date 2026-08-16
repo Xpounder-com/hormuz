@@ -786,7 +786,24 @@ A focused failure-first review of the provider-response accounting parser was ex
 - the complete 343-test source suite passed in `105.927` seconds. The environment-gated official Claude Code case was the sole local skip; and
 - source/test bytecode compilation and `git diff --check` passed.
 
-This closes the identified per-request accounting-buffer and false-zero-estimate paths, not provider invoice completeness or process-wide resource governance. Concurrent-stream limits, total response duration, provider-side behavior, workload egress, final invoice/credit reconciliation, shared persistence, HA, KMS, disaster recovery, and independent security review remain open gates.
+This closes the identified per-request accounting-buffer and false-zero-estimate paths, not provider invoice completeness or complete process-wide resource governance. A later checkpoint added parsed-request capacity and a total provider-response relay deadline; pre-parse connection/header limits, provider-side behavior, workload egress, final invoice/credit reconciliation, shared persistence, HA, KMS, disaster recovery, and independent security review remain open gates.
+
+### Parsed-request capacity and total provider-response deadline
+
+A failure-first single-process resource review was exercised locally on August 16, 2026 through real Hormuz HTTP transport and continuously trickling OpenAI- and Anthropic-compatible loopback streams. No live provider credential or endpoint was used.
+
+- the pre-change configuration and admission path had no request-capacity ceiling: every syntactically parsed request was counted as active unless draining had begun. The pre-change provider timeout was a socket-inactivity timeout; a provider sending one byte every 10 milliseconds kept the response alive past the five-second test-client timeout;
+- `listen.max_concurrent_requests` now defaults to `128`, accepts only `1` through `10000`, and defaults safely for existing configuration files. One condition-protected check admits or rejects each parsed non-health request before authentication, body reading, policy, storage, or provider work;
+- saturation returns a fixed content-free `503 gateway_busy`, `Retry-After: 1`, and connection closure. Liveness remains `200`; health probes consume no application slot; readiness reports `503 busy` at capacity and recovers to `200 ready` after the admitted request releases its slot;
+- `upstream_timeout_seconds` now governs one wall-clock deadline from provider open through single-read response acquisition and downstream relay. Each provider read and downstream write is tightened to the remaining interval, preventing a continuous trickle from resetting the limit indefinitely;
+- deadline expiry before downstream headers returns a fixed provider-shaped `504 gateway_upstream_timeout`. Expiry after response start closes the partial provider-compatible response. Both paths release the budget reservation and admission slot and record an accounted failure; missing terminal usage remains explicitly `not_available` and unpriced. Logs and responses did not contain the adversarial prompt or invalid credential marker;
+- focused configuration, saturation, readiness, drain, deadline, installed-operator diagnostics, and ordinary OpenAI/Anthropic compatibility tests passed. An interim broader gateway, CLI, and authentication run passed 131 tests in `92.680` seconds with the existing environment-gated Claude case skipped; and
+- the final complete 348-test source suite passed in `111.488` seconds with that same single skip;
+- isolated source and wheel builds succeeded. The exact clean-install-tested wheel SHA-256 was `fb1f380372144fd642425994cfdcaad4a45d3eefa5bf40ac1ca9f2c5b1df3ed8`; the source archive is not self-hashed inside this embedded record because changing the record changes that archive;
+- a clean Python 3.12 environment outside the checkout imported `hormuz.server` from `site-packages`, displayed the effective `128`-request capacity and `600`-second response deadline through installed `doctor`, compiled the installed package, and passed the installed strict 60-task benchmark with precision, recall, and useful-pack rate `1.00`, zero safety failures, mean compression `0.840593`, and governed p95 selection latency `0.166791 ms`; and
+- deterministic corpus verification retained SHA-256 `9822d592868202c7c7539bcdac7d4a5894c01f9e6dba7a434846516b67b32c17`. Source/test bytecode compilation, `git diff --check`, and high-confidence tracked-source plus extracted-wheel credential scans passed.
+
+This closes parsed-application-request concurrency and provider-response relay duration for one Hormuz process, not production deployment issue #11. TCP connections and threads before parsing, a complete ingress-header deadline, operating-system DNS resolution, reverse-proxy/WAF slow-client controls, cross-replica capacity, TLS ingress, shared persistence, HA, backup/restore, RPO/RTO, KMS, and independent security review remain open.
 
 ### Remote provider HTTPS enforcement
 

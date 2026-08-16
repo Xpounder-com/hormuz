@@ -35,6 +35,7 @@ from hormuz.cli import (
     _context_snapshot_import,
     _context_snapshot_show,
     _context_revalidate,
+    _doctor,
     _lifecycle_remote_command,
     _policy_check,
     _status,
@@ -176,6 +177,56 @@ class ClientConfigTests(unittest.TestCase):
                         path,
                         environ={"HORMUZ_TOKEN": "test-identity-token"},
                     )
+
+    def test_concurrent_request_configuration_is_bounded(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "hormuz.json"
+            raw = json.loads((ROOT / "config.example.json").read_text(encoding="utf-8"))
+            raw["listen"].pop("max_concurrent_requests")
+            path.write_text(json.dumps(raw), encoding="utf-8")
+            defaulted = GatewayConfig.load(
+                path,
+                environ={"HORMUZ_TOKEN": "test-identity-token"},
+            )
+            self.assertEqual(defaulted.listen.max_concurrent_requests, 128)
+
+            raw["listen"]["max_concurrent_requests"] = 64
+            path.write_text(json.dumps(raw), encoding="utf-8")
+            config = GatewayConfig.load(
+                path,
+                environ={"HORMUZ_TOKEN": "test-identity-token"},
+            )
+            self.assertEqual(config.listen.max_concurrent_requests, 64)
+
+            for invalid in (0, 10_001):
+                raw["listen"]["max_concurrent_requests"] = invalid
+                path.write_text(json.dumps(raw), encoding="utf-8")
+                with self.subTest(invalid=invalid), self.assertRaisesRegex(
+                    ConfigError,
+                    "listen.max_concurrent_requests",
+                ):
+                    GatewayConfig.load(
+                        path,
+                        environ={"HORMUZ_TOKEN": "test-identity-token"},
+                    )
+
+    def test_doctor_reports_effective_request_resource_limits(self) -> None:
+        output = io.StringIO()
+        with (
+            mock.patch.dict(
+                os.environ,
+                {
+                    "OPENAI_API_KEY": "synthetic-openai-provider-key",
+                    "ANTHROPIC_API_KEY": "synthetic-anthropic-provider-key",
+                },
+            ),
+            redirect_stdout(output),
+        ):
+            result = _doctor(self.config)
+
+        self.assertEqual(result, 0)
+        self.assertIn("max concurrent requests: 128", output.getvalue())
+        self.assertIn("upstream response deadline: 600 seconds", output.getvalue())
 
     def test_provider_upstreams_require_https_outside_loopback(self) -> None:
         invalid_urls = (

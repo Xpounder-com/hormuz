@@ -15,6 +15,7 @@ import threading
 import time
 import unittest
 import urllib.parse
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -54,6 +55,8 @@ class FakeProviderHandler(BaseHTTPRequestHandler):
     redirect_url: str | None = None
     request_started: threading.Event | None = None
     release_response: threading.Event | None = None
+    response_chunk_size: int | None = None
+    response_chunk_delay_seconds: float = 0.0
 
     def do_POST(self) -> None:  # noqa: N802
         request_path = self.path.partition("?")[0]
@@ -180,7 +183,7 @@ class FakeProviderHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body_bytes)))
             self.send_header("request-id", "req_anthropic_test")
             self.end_headers()
-            self.wfile.write(body_bytes)
+            self._write_body(body_bytes)
             return
 
         if request_path.endswith("/messages/count_tokens"):
@@ -274,7 +277,20 @@ class FakeProviderHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body_bytes)))
         self.send_header("x-request-id", "req_codex_probe")
         self.end_headers()
-        self.wfile.write(body_bytes)
+        self._write_body(body_bytes)
+
+    def _write_body(self, body: bytes) -> None:
+        chunk_size = self.__class__.response_chunk_size
+        if chunk_size is None:
+            self.wfile.write(body)
+            return
+        for offset in range(0, len(body), chunk_size):
+            try:
+                self.wfile.write(body[offset : offset + chunk_size])
+                self.wfile.flush()
+            except OSError:
+                return
+            time.sleep(self.__class__.response_chunk_delay_seconds)
 
     def log_message(self, format: str, *args: object) -> None:
         pass
@@ -374,6 +390,8 @@ class GatewayIntegrationTests(unittest.TestCase):
         FakeProviderHandler.redirect_url = None
         FakeProviderHandler.request_started = None
         FakeProviderHandler.release_response = None
+        FakeProviderHandler.response_chunk_size = None
+        FakeProviderHandler.response_chunk_delay_seconds = 0.0
         self.provider = ThreadingHTTPServer(("127.0.0.1", 0), FakeProviderHandler)
         self.provider_thread = threading.Thread(target=self.provider.serve_forever, daemon=True)
         self.provider_thread.start()
@@ -658,6 +676,174 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertEqual(self.gateway.wait_for_in_flight(1), 0)
         self.assertEqual(outcome[0][0], 200)
         self.assertEqual(len(FakeProviderHandler.requests), 1)
+
+    def test_concurrency_limit_rejects_before_auth_body_policy_or_provider_work(self) -> None:
+        self.gateway.config = replace(
+            self.gateway.config,
+            listen=replace(self.gateway.config.listen, max_concurrent_requests=1),
+        )
+        FakeProviderHandler.request_started = threading.Event()
+        FakeProviderHandler.release_response = threading.Event()
+        first_outcome: list[tuple[int, dict[str, str], bytes]] = []
+        worker = threading.Thread(
+            target=lambda: first_outcome.append(
+                self._post(
+                    "/v1/responses",
+                    {"model": "engineering-fast", "input": "admitted request"},
+                )
+            ),
+            name="capacity-holder",
+        )
+        worker.start()
+        self.assertTrue(FakeProviderHandler.request_started.wait(timeout=5))
+        self.assertEqual(self.gateway.active_requests, 1)
+
+        live_status, _, live_body = self._get(
+            "/health/live",
+            include_authorization=False,
+        )
+        ready_status, _, ready_body = self._get(
+            "/health/ready",
+            include_authorization=False,
+        )
+        with self.assertLogs("hormuz", level="DEBUG") as captured:
+            busy_status, busy_headers, busy_body = self._post(
+                "/v1/responses",
+                {
+                    "model": "engineering-fast",
+                    "input": "BUSY-REQUEST-CONTENT-MUST-NOT-REFLECT",
+                },
+                token="invalid-token-content-must-not-reflect",
+            )
+
+        self.assertEqual(live_status, 200)
+        self.assertEqual(json.loads(live_body)["status"], "live")
+        self.assertEqual(ready_status, 503)
+        self.assertEqual(json.loads(ready_body)["status"], "busy")
+        self.assertEqual(busy_status, 503)
+        self.assertEqual(busy_headers["connection"], "close")
+        self.assertEqual(busy_headers["retry-after"], "1")
+        self.assertEqual(
+            json.loads(busy_body)["error"],
+            {
+                "code": "gateway_busy",
+                "message": "Gateway request capacity is exhausted",
+            },
+        )
+        evidence = "\n".join(captured.output) + busy_body.decode("utf-8")
+        self.assertNotIn("BUSY-REQUEST-CONTENT-MUST-NOT-REFLECT", evidence)
+        self.assertNotIn("invalid-token-content-must-not-reflect", evidence)
+        self.assertEqual(len(FakeProviderHandler.requests), 1)
+        self.assertEqual(self.gateway.store.monthly_totals(actor_id="alice").requests, 0)
+        self.assertEqual(self.gateway.active_requests, 1)
+
+        FakeProviderHandler.release_response.set()
+        worker.join(timeout=5)
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(first_outcome[0][0], 200)
+        self.assertEqual(self.gateway.active_requests, 0)
+        self.assertEqual(self.gateway.store.monthly_totals(actor_id="alice").requests, 1)
+        recovered_status, _, recovered_body = self._get(
+            "/health/ready",
+            include_authorization=False,
+        )
+        self.assertEqual(recovered_status, 200)
+        self.assertEqual(json.loads(recovered_body)["status"], "ready")
+
+    def test_total_upstream_deadline_stops_continuously_trickled_provider_streams(self) -> None:
+        self.gateway.config = replace(self.gateway.config, upstream_timeout_seconds=1)
+        FakeProviderHandler.response_stream_override = b"data: not-json\n\n" * 10_000
+        FakeProviderHandler.response_chunk_size = 1
+        FakeProviderHandler.response_chunk_delay_seconds = 0.01
+
+        cases = (
+            (
+                "/v1/responses",
+                {
+                    "model": "engineering-fast",
+                    "input": "OPENAI-DEADLINE-CONTENT-MUST-NOT-REFLECT",
+                    "stream": True,
+                },
+                "OPENAI-DEADLINE-CONTENT-MUST-NOT-REFLECT",
+            ),
+            (
+                "/v1/messages",
+                {
+                    "model": "claude-sonnet-5",
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": "ANTHROPIC-DEADLINE-CONTENT-MUST-NOT-REFLECT",
+                        }
+                    ],
+                    "stream": True,
+                },
+                "ANTHROPIC-DEADLINE-CONTENT-MUST-NOT-REFLECT",
+            ),
+        )
+        for path, request, marker in cases:
+            with self.subTest(path=path):
+                started = time.monotonic()
+                with self.assertLogs("hormuz", level="WARNING") as captured:
+                    status, headers, response = self._post(path, request)
+                elapsed = time.monotonic() - started
+
+                self.assertEqual(status, 200)
+                self.assertEqual(headers["content-type"], "text/event-stream")
+                self.assertLess(elapsed, 2.5)
+                self.assertLess(
+                    len(response),
+                    len(FakeProviderHandler.response_stream_override),
+                )
+                events = self.gateway.store.audit_events(
+                    since="2000-01-01T00:00:00+00:00",
+                    kind="usage",
+                )
+                self.assertEqual(events[-1]["status"], "failed")
+                self.assertEqual(events[-1]["cost_basis"], "not_available")
+                evidence = "\n".join(captured.output)
+                self.assertIn("upstream_response_deadline_exceeded", evidence)
+                self.assertNotIn(marker, evidence)
+        self.assertEqual(self.gateway.active_requests, 0)
+
+    def test_upstream_deadline_before_headers_returns_content_free_timeout(self) -> None:
+        self.gateway.config = replace(self.gateway.config, upstream_timeout_seconds=1)
+        delayed_response = mock.Mock()
+        delayed_response.close = mock.Mock()
+
+        def delayed_open(*_args: object, **_kwargs: object) -> object:
+            time.sleep(1.05)
+            return delayed_response
+
+        self.gateway.upstream_opener = mock.Mock()
+        self.gateway.upstream_opener.open.side_effect = delayed_open
+        before_provider = len(FakeProviderHandler.requests)
+        with self.assertLogs("hormuz", level="WARNING") as captured:
+            status, _, response = self._post(
+                "/v1/responses",
+                {
+                    "model": "engineering-fast",
+                    "input": "PRE-HEADER-DEADLINE-CONTENT-MUST-NOT-REFLECT",
+                },
+            )
+
+        self.assertEqual(status, 504)
+        self.assertEqual(
+            json.loads(response)["error"]["code"],
+            "gateway_upstream_timeout",
+        )
+        delayed_response.close.assert_called_once_with()
+        self.assertEqual(len(FakeProviderHandler.requests), before_provider)
+        events = self.gateway.store.audit_events(
+            since="2000-01-01T00:00:00+00:00",
+            kind="usage",
+        )
+        self.assertEqual(events[-1]["status"], "failed")
+        self.assertEqual(events[-1]["cost_basis"], "not_available")
+        evidence = "\n".join(captured.output) + response.decode("utf-8")
+        self.assertIn("upstream_response_deadline_exceeded stage=headers", evidence)
+        self.assertNotIn("PRE-HEADER-DEADLINE-CONTENT-MUST-NOT-REFLECT", evidence)
+        self.assertEqual(self.gateway.active_requests, 0)
 
     def test_idle_keep_alive_connection_does_not_block_shutdown(self) -> None:
         connection = http.client.HTTPConnection(

@@ -900,6 +900,8 @@ def _doctor(config: GatewayConfig) -> int:
     print(f"configuration: {config.source_path}")
     print(f"listener: http://{config.listen.host}:{config.listen.port}")
     print(f"shutdown grace: {config.listen.shutdown_grace_seconds} seconds")
+    print(f"max concurrent requests: {config.listen.max_concurrent_requests}")
+    print(f"upstream response deadline: {config.upstream_timeout_seconds} seconds")
     print(f"actors: {len(config.identities_by_actor)}")
     print(f"static identities: {len(config.identities_by_token)}")
     print(f"OIDC issuers: {len(config.oidc_issuers)}")

@@ -2,7 +2,8 @@
   "listen": {
     "host": "127.0.0.1",
     "port": 8787,
-    "shutdown_grace_seconds": 30
+    "shutdown_grace_seconds": 30,
+    "max_concurrent_requests": 128
   },
   "database": "./hormuz.sqlite3",
   "context_database": "./hormuz-context.sqlite3",
