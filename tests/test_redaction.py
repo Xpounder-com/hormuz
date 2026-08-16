@@ -149,6 +149,107 @@ class SecretRedactorTests(unittest.TestCase):
                 self.assertEqual(result.findings[0].action, action)
                 self.assertNotIn(key, repr(result.findings))
 
+    def test_unredactable_strings_fail_closed_without_mutating_forwarded_material(self) -> None:
+        secret = "sk-" + "proj-" + ("H" * 24)
+        encoded_secret = base64.b64encode(
+            f"credential={secret}".encode("utf-8")
+        ).decode("ascii")
+        ssn = "123-45-6789"
+        email = "header-owner@example.com"
+        protected = "PROJECT-HEADER"
+        cases = (
+            (
+                "builtin secret",
+                SecretRedactor(SecretControls(mode="redact")),
+                secret,
+                "openai_api_key",
+                "deny",
+            ),
+            (
+                "encoded builtin secret",
+                SecretRedactor(SecretControls(mode="redact")),
+                encoded_secret,
+                "openai_api_key",
+                "deny",
+            ),
+            (
+                "redact DLP",
+                SecretRedactor(
+                    SecretControls(mode="off"),
+                    dlp_controls=DLPControls(
+                        rules=(
+                            DLPRuleConfig(
+                                rule_id="us_ssn",
+                                category="regulated_identifier",
+                                confidence="high",
+                                action="redact",
+                            ),
+                        ),
+                    ),
+                ),
+                ssn,
+                "us_ssn",
+                "deny",
+            ),
+            (
+                "detect DLP",
+                SecretRedactor(
+                    SecretControls(mode="off"),
+                    dlp_controls=DLPControls(
+                        rules=(
+                            DLPRuleConfig(
+                                rule_id="email_address",
+                                category="personal_data",
+                                confidence="low",
+                                action="detect",
+                            ),
+                        ),
+                    ),
+                ),
+                email,
+                "email_address",
+                "detect",
+            ),
+            (
+                "approval DLP",
+                SecretRedactor(
+                    SecretControls(mode="off"),
+                    dlp_controls=DLPControls(
+                        rules=(
+                            DLPRuleConfig(
+                                rule_id="company.header",
+                                category="company_dictionary",
+                                confidence="high",
+                                action="require_approval",
+                                exact_values=(protected,),
+                            ),
+                        ),
+                    ),
+                ),
+                protected,
+                "company.header",
+                "require_approval",
+            ),
+        )
+
+        for name, redactor, forwarded, rule_id, action in cases:
+            with self.subTest(name=name):
+                value = {"input": "safe"}
+                result = redactor.inspect(
+                    value,
+                    protocol="openai",
+                    model="gpt-test",
+                    unredactable_strings=(forwarded,),
+                )
+
+                self.assertEqual(result.value, value)
+                self.assertEqual(result.count, 1)
+                self.assertEqual(result.redaction_count, 0)
+                self.assertEqual(result.rules, (rule_id,))
+                self.assertEqual(result.action, action)
+                self.assertEqual(result.findings[0].action, action)
+                self.assertNotIn(forwarded, repr(result.findings))
+
     def test_off_mode_returns_original_value(self) -> None:
         value = {"input": "sk-" + "proj-" + ("D" * 24)}
         result = SecretRedactor(SecretControls(mode="off")).inspect(value)

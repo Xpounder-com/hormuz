@@ -481,6 +481,23 @@ The recursive secret/DLP transformer, representative OpenAI and Anthropic JSON-k
 
 This closes the known ordinary JSON-key bypass under accepted ADR 0004, not issue #10 or the enterprise DLP release gate. Caller-controlled provider headers, source classification, whitespace-wrapped or other unsupported encodings, compression, archives, media decoding, semantic evaluation, shared approval/KMS/HA operations, future cache invalidation, customer-representative detector quality, and independent security review remain open.
 
+### Allowlisted provider-header DLP enforcement
+
+The provider-header extraction boundary, recursive secret/DLP transformer, approval binding, OpenAI Responses and Anthropic Messages paths, package artifacts, and installed wheel were exercised locally on August 16, 2026.
+
+- red-first gateway tests proved that all seven forwarded protocol/header slots could carry a fake credential to the fake providers with HTTP `200`, and that an approval-required company term in `OpenAI-Beta` bypassed the approval workflow entirely;
+- the gateway now extracts only the exact caller-controlled values it will forward: `Accept` and `User-Agent` for both protocols, `OpenAI-Beta` for OpenAI, and `Anthropic-Version` plus `Anthropic-Beta` for Anthropic. Server-owned `Content-Type` and provider authorization credentials remain outside the caller envelope;
+- the existing detector inspects those values, including supported encoded text, without mutating them. Detect-only values audit and forward unchanged, explicit deny blocks, approval-required uses the ordinary non-self workflow, and a credential or DLP finding configured for redaction denies the complete request because rewriting a feature/version header can change protocol semantics;
+- direct and encoded fake credentials plus a valid hyphenated SSN exercised every forwarded slot. All nine enforced requests returned provider-shaped `403` responses, made zero provider calls, recorded denied usage and metadata-only security evidence, and left matched values absent from responses, SQLite, and audit representations;
+- a detect-only email in `OpenAI-Beta` reached the fake OpenAI endpoint byte-for-byte with one detection and no redaction. An approval-required header term created no provider call, rejected changed header material with a different request ID, permitted one exact approved retry, then rejected replay; the protected value remained absent from durable evidence;
+- the complete source suite ran 243 tests: 242 passed and the separately gated official Claude Code executable test skipped. The CI-pinned Codex `0.147.0` and Claude Code `2.1.233` executables then passed their two real-client fake-provider tests independently;
+- the frozen 60-task release benchmark passed five iterations with precision `1.00`, recall `1.00`, useful-pack rate `1.00`, mean compression ratio `0.840593`, zero failed safety thresholds, and p95 in-process selection latency `0.154833 ms`; corpus SHA-256 remained `9822d592868202c7c7539bcdac7d4a5894c01f9e6dba7a434846516b67b32c17`;
+- isolated source and wheel builds succeeded. The wheel SHA-256 was `8f79653aad8fbb9c607a8156b2d8886994f94a21b95580cbd94a6316e81a9162`; the source archive SHA-256 was `9ae826049bc16ddf2bf24ae7b15dbd446f1e6fea1188dcdab62366c0f24e83be`, and the source archive contained the implementation, tests, and boundary documentation;
+- a clean Python 3.14 environment installed the exact wheel outside the checkout, loaded `hormuz.redaction` from `site-packages`, denied a fake credential supplied as unredactable provider material without mutating the request body, compiled the installed package, displayed CLI help, and passed the installed strict 60-task benchmark with zero failed thresholds;
+- source/test bytecode compilation, `git diff --check`, deterministic corpus verification, and high-confidence source and extracted-wheel scans for private-key, OpenAI, Anthropic, GitHub, AWS, and Google credential patterns passed.
+
+This closes the known allowlisted provider-header bypass under accepted ADR 0004, not issue #10 or the enterprise DLP release gate. Caller-controlled URL query parameters, source classification, whitespace-wrapped or other unsupported encodings, compression, archives, media decoding, semantic evaluation, shared approval/KMS/HA operations, future cache invalidation, customer-representative detector quality, and independent security review remain open.
+
 ## Reproduce locally
 
 The default suite uses only loopback fake providers:

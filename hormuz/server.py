@@ -1737,6 +1737,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             current_output = request_body.get(output_field)
             if current_output is None or current_output > decision.max_output_tokens:
                 request_body[output_field] = decision.max_output_tokens
+        forwarded_headers = self._forwarded_client_headers(protocol)
         try:
             redaction = self.server.redactor_for(
                 identity,
@@ -1746,6 +1747,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 request_body,
                 protocol=protocol,
                 model=decision.route.upstream_model,
+                unredactable_strings=tuple(forwarded_headers.values()),
             )
         except RedactionError as error:
             self._send_protocol_error(protocol, str(error), HTTPStatus.BAD_REQUEST)
@@ -1766,6 +1768,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                         {
                             "operation": urlsplit(self.path).path,
                             "payload": redaction.value,
+                            "provider_headers": forwarded_headers,
                         },
                         key=approval_config.fingerprint_key,
                     )
@@ -2057,6 +2060,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 client=client,
                 decision=decision,
                 body=body,
+                forwarded_headers=forwarded_headers,
                 account_usage=account_usage,
                 policy_action=policy_action,
                 redaction_count=redaction.redaction_count,
@@ -2077,6 +2081,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         client: str,
         decision: PolicyDecision,
         body: bytes,
+        forwarded_headers: dict[str, str],
         account_usage: bool,
         policy_action: str,
         redaction_count: int,
@@ -2115,7 +2120,11 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             )
             return
         request_url = self._upstream_url(upstream)
-        headers = self._upstream_headers(protocol, upstream_key)
+        headers = self._upstream_headers(
+            protocol,
+            upstream_key,
+            forwarded_headers,
+        )
         request = urllib.request.Request(request_url, data=body, headers=headers, method="POST")
 
         try:
@@ -2372,24 +2381,36 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         query = f"?{request_parts.query}" if request_parts.query else ""
         return f"{base}{request_path}{query}"
 
-    def _upstream_headers(self, protocol: str, upstream_key: str) -> dict[str, str]:
+    def _forwarded_client_headers(self, protocol: str) -> dict[str, str]:
         headers = {
-            "Content-Type": "application/json",
             "Accept": self.headers.get("Accept", "application/json"),
             "User-Agent": self.headers.get("User-Agent", "Hormuz/0.1.0"),
         }
         if protocol == "openai":
-            headers["Authorization"] = f"Bearer {upstream_key}"
-            for name in ("OpenAI-Beta",):
-                value = self.headers.get(name)
-                if value:
-                    headers[name] = value
+            beta = self.headers.get("OpenAI-Beta")
+            if beta:
+                headers["OpenAI-Beta"] = beta
         else:
-            headers["X-Api-Key"] = upstream_key
             headers["Anthropic-Version"] = self.headers.get("Anthropic-Version", "2023-06-01")
             beta = self.headers.get("Anthropic-Beta")
             if beta:
                 headers["Anthropic-Beta"] = beta
+        return headers
+
+    @staticmethod
+    def _upstream_headers(
+        protocol: str,
+        upstream_key: str,
+        forwarded_headers: dict[str, str],
+    ) -> dict[str, str]:
+        headers = {
+            "Content-Type": "application/json",
+            **forwarded_headers,
+        }
+        if protocol == "openai":
+            headers["Authorization"] = f"Bearer {upstream_key}"
+        else:
+            headers["X-Api-Key"] = upstream_key
         return headers
 
     def _send_protocol_error(

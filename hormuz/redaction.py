@@ -127,6 +127,7 @@ class SecretRedactor:
         *,
         protocol: str = "",
         model: str = "",
+        unredactable_strings: tuple[str, ...] = (),
     ) -> RedactionResult:
         if self.controls.mode == "off" and not self.dlp_controls.rules:
             return RedactionResult(
@@ -171,6 +172,17 @@ class SecretRedactor:
             model=model,
             opaque_object_ids=opaque_object_ids,
         )
+        for preserved in unredactable_strings:
+            _, preserved_findings, _ = self._transform_string(
+                preserved,
+                protocol=protocol,
+                model=model,
+                encoded_depth=0,
+            )
+            _merge_findings(
+                findings,
+                _fail_closed_unredactable_redactions(preserved_findings),
+            )
         assert isinstance(transformed, dict)
         result_findings = tuple(
             DLPFinding(
@@ -248,7 +260,7 @@ class SecretRedactor:
                     )
                     _merge_findings(
                         findings,
-                        _fail_closed_key_redactions(key_findings),
+                        _fail_closed_unredactable_redactions(key_findings),
                     )
                 transformed, item_findings, item_redactions = self._transform(
                     item,
@@ -644,7 +656,7 @@ def _merge_findings(
         target[key] = target.get(key, 0) + count
 
 
-def _fail_closed_key_redactions(
+def _fail_closed_unredactable_redactions(
     findings: dict[tuple[str, str, str, str, str], int],
 ) -> dict[tuple[str, str, str, str, str], int]:
     result: dict[tuple[str, str, str, str, str], int] = {}
