@@ -99,6 +99,8 @@ class ModelRoute:
     alias: str
     protocol: str
     upstream_model: str
+    rate_card_version: str = "unversioned"
+    currency: str = "USD"
     input_cost_per_million: float = 0
     cache_read_cost_per_million: float = 0
     cache_write_cost_per_million: float = 0
@@ -399,10 +401,30 @@ class GatewayConfig:
             protocol = _string(item.get("protocol"), f"model_routes.{alias}.protocol")
             if protocol not in upstreams:
                 raise ConfigError(f"model_routes.{alias}.protocol must be openai or anthropic")
+            rate_card_version = _string(
+                item.get("rate_card_version", "unversioned"),
+                f"model_routes.{alias}.rate_card_version",
+            )
+            if len(rate_card_version.encode("utf-8")) > 128 or any(
+                character in rate_card_version for character in ("\n", "\r", "\x00")
+            ):
+                raise ConfigError(
+                    f"model_routes.{alias}.rate_card_version must be a bounded single-line string"
+                )
+            currency = _string(
+                item.get("currency", "USD"),
+                f"model_routes.{alias}.currency",
+            ).upper()
+            if currency != "USD":
+                raise ConfigError(
+                    f"model_routes.{alias}.currency must be USD while costs use micro-USD storage"
+                )
             model_routes[alias] = ModelRoute(
                 alias=alias,
                 protocol=protocol,
                 upstream_model=_string(item.get("upstream_model"), f"model_routes.{alias}.upstream_model"),
+                rate_card_version=rate_card_version,
+                currency=currency,
                 input_cost_per_million=_number(item.get("input_cost_per_million", 0), f"model_routes.{alias}.input_cost_per_million"),
                 cache_read_cost_per_million=_number(item.get("cache_read_cost_per_million", 0), f"model_routes.{alias}.cache_read_cost_per_million"),
                 cache_write_cost_per_million=_number(item.get("cache_write_cost_per_million", 0), f"model_routes.{alias}.cache_write_cost_per_million"),

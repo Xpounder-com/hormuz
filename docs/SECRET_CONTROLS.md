@@ -68,7 +68,9 @@ This request-level policy does not itself enroll an organization in OpenAI Zero 
 
 This layer is deterministic secret detection, not a complete data-loss-prevention system. It does not currently inspect image contents, decode arbitrary base64 or archives, infer proprietary meaning, or reliably detect transformed and obfuscated values. A custom exact value protects only that exact textual representation.
 
-Use `deny` when forwarding a detected credential is unacceptable. Production deployments should combine Hormuz with least-privilege provider keys, short-lived employee identity, network controls, provider retention settings, code-host secret scanning, and a reviewed list of organization-specific values. Semantic classification and structured PII policies are later milestones and require measured false-positive/false-negative evaluation before enforcement.
+Use `deny` when forwarding a detected credential is unacceptable. Production deployments should combine Hormuz with least-privilege provider keys, short-lived employee identity, network controls, provider retention settings, code-host secret scanning, and a reviewed list of organization-specific values.
+
+Semantic classification and structured PII policies are later implementation milestones governed by [accepted ADR 0004](decisions/0004-structured-dlp-and-approval-boundary.md). High-confidence secrets and regulated identifiers redact by default; lower-confidence PII starts detect-only; enforced detectors fail closed; and any exception uses a short-lived, single-use, non-self approval. The architecture is accepted, but those structured detectors and approval workflows are not yet shipped and require measured false-positive/false-negative evaluation before enforcement.
 
 ## Verify
 

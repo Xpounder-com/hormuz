@@ -531,6 +531,7 @@ def _status(config: GatewayConfig, args: argparse.Namespace) -> int:
     report = []
     for row in rows:
         cost_usd = row["cost_microusd"] / 1_000_000
+        estimated_cost_usd = row["estimated_cost_microusd"] / 1_000_000
         budget_usd = _budget_for_scope(
             config,
             args.group_by,
@@ -542,6 +543,7 @@ def _status(config: GatewayConfig, args: argparse.Namespace) -> int:
             {
                 **row,
                 "cost_usd": cost_usd,
+                "estimated_cost_usd": estimated_cost_usd,
                 "budget_usd": budget_usd,
                 "budget_remaining_usd": max(0.0, budget_usd - cost_usd) if budget_usd is not None else None,
                 "budget_used_percent": (cost_usd / budget_usd * 100) if budget_usd else None,
@@ -556,7 +558,8 @@ def _status(config: GatewayConfig, args: argparse.Namespace) -> int:
     print(
         "SCOPE_ID\tSCOPE_NAME\tTEAM\tPROVIDER\tCLIENT\tREQUESTS\tSUCCEEDED\tFAILED\tDENIED\t"
         "INPUT\tOUTPUT\tCACHE_READ\tCACHE_WRITE\tREASONING\tTOTAL\tCOST_USD\tBUDGET_USD\t"
-        "REMAINING_USD\tBUDGET_USED_PCT\tACTORS\tREDACTIONS"
+        "REMAINING_USD\tBUDGET_USED_PCT\tACTORS\tREDACTIONS\tBILLABLE\tESTIMATED_COST_USD\t"
+        "UNPRICED\tCOST_BASES\tRATE_CARD_VERSIONS"
     )
     for row in report:
         print(
@@ -566,7 +569,9 @@ def _status(config: GatewayConfig, args: argparse.Namespace) -> int:
             f"{row['output_tokens']}\t{row['cache_read_tokens']}\t{row['cache_write_tokens']}\t"
             f"{row['reasoning_tokens']}\t{row['total_tokens']}\t{row['cost_usd']:.6f}\t"
             f"{_display_number(row['budget_usd'])}\t{_display_number(row['budget_remaining_usd'])}\t"
-            f"{_display_number(row['budget_used_percent'])}\t{row['active_actors']}\t{row['redactions']}"
+            f"{_display_number(row['budget_used_percent'])}\t{row['active_actors']}\t{row['redactions']}\t"
+            f"{row['billable_tokens']}\t{row['estimated_cost_usd']:.6f}\t{row['unpriced_requests']}\t"
+            f"{','.join(row['cost_bases'])}\t{','.join(row['rate_card_versions'])}"
         )
     return 0
 

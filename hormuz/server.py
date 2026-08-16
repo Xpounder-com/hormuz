@@ -766,6 +766,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                     upstream_model=None,
                     policy_action="denied",
                     status="denied",
+                    cost_basis="not_applicable",
                 )
             LOGGER.info(
                 "policy_denied actor=%s team=%s client=%s protocol=%s requested_model=%s reason=%s",
@@ -792,6 +793,9 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                     upstream_model=decision.route.upstream_model,
                     policy_action="provider_policy_denied",
                     status="denied",
+                    cost_basis="not_applicable",
+                    currency=decision.route.currency,
+                    rate_card_version=decision.route.rate_card_version,
                 )
             LOGGER.info(
                 "provider_policy_denied actor=%s team=%s client=%s protocol=%s requested_model=%s reason=background_disabled",
@@ -844,6 +848,9 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                     upstream_model=decision.route.upstream_model,
                     policy_action="secret_denied",
                     status="denied",
+                    cost_basis="not_applicable",
+                    currency=decision.route.currency,
+                    rate_card_version=decision.route.rate_card_version,
                     redaction_count=redaction.count,
                     redaction_rules=redaction.rules,
                 )
@@ -898,6 +905,9 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                     upstream_model=decision.route.upstream_model,
                     policy_action="budget_reservation_denied",
                     status="denied",
+                    cost_basis="not_applicable",
+                    currency=decision.route.currency,
+                    rate_card_version=decision.route.rate_card_version,
                     redaction_count=redaction.count,
                     redaction_rules=redaction.rules,
                 )
@@ -954,6 +964,22 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         upstream = self.server.config.upstreams[protocol]
         upstream_key = os.environ.get(upstream.api_key_env, "")
         if not upstream_key:
+            if account_usage:
+                self.server.store.record(
+                    identity=identity,
+                    client=client,
+                    protocol=protocol,
+                    requested_model=decision.requested_model,
+                    resolved_alias=decision.resolved_alias,
+                    upstream_model=route.upstream_model,
+                    policy_action=policy_action,
+                    status="failed",
+                    cost_basis="not_available",
+                    currency=route.currency,
+                    rate_card_version=route.rate_card_version,
+                    redaction_count=redaction_count,
+                    redaction_rules=redaction_rules,
+                )
             self._send_protocol_error(
                 protocol,
                 f"Gateway upstream credential is unavailable: {upstream.api_key_env}",
@@ -980,6 +1006,9 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                     upstream_model=route.upstream_model,
                     policy_action=policy_action,
                     status="failed",
+                    cost_basis="not_available",
+                    currency=route.currency,
+                    rate_card_version=route.rate_card_version,
                     redaction_count=redaction_count,
                     redaction_rules=redaction_rules,
                 )
@@ -1063,6 +1092,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 requested_model=decision.requested_model,
                 resolved_alias=decision.resolved_alias,
                 upstream_model=route.upstream_model,
+                actual_model=usage.actual_model,
                 policy_action=policy_action,
                 status="succeeded" if successful else "failed",
                 input_tokens=usage.input_tokens,
@@ -1070,7 +1100,12 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 cache_read_tokens=usage.cache_read_tokens,
                 cache_write_tokens=usage.cache_write_tokens,
                 reasoning_tokens=usage.reasoning_tokens,
+                billable_tokens=usage.billable_tokens,
                 cost_microusd=cost,
+                cost_basis="estimated",
+                currency=route.currency,
+                rate_card_version=route.rate_card_version,
+                provider_usage=usage.provider_usage,
                 provider_request_id=provider_request_id,
                 redaction_count=redaction_count,
                 redaction_rules=redaction_rules,

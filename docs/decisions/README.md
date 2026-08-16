@@ -18,6 +18,7 @@ An agent, test result, or convenient implementation detail cannot move a decisio
 | [0001](0001-oidc-login-and-session-architecture.md) | Accepted | OIDC login and Hormuz session architecture | [#2](https://github.com/Xpounder-com/hormuz/issues/2) |
 | [0002](0002-enterprise-tenancy-and-persistence.md) | Proposed | Enterprise tenancy, authorization, and persistence | [#1](https://github.com/Xpounder-com/hormuz/issues/1) |
 | [0003](0003-cache-privacy-tiers.md) | Proposed | Provider and Hormuz cache privacy tiers | [#3](https://github.com/Xpounder-com/hormuz/issues/3) |
+| [0004](0004-structured-dlp-and-approval-boundary.md) | Accepted | Structured DLP and approval boundary | [#10](https://github.com/Xpounder-com/hormuz/issues/10) |
 
 ## Acceptance record
 

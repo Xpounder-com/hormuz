@@ -31,6 +31,7 @@ from hormuz.cli import (
     _context_pack,
     _context_snapshot_import,
     _context_snapshot_show,
+    _status,
     build_parser,
 )
 from hormuz.config import (
@@ -42,6 +43,7 @@ from hormuz.config import (
     SessionBrokerConfig,
 )
 from hormuz.context import ContextError
+from hormuz.store import UsageStore
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -259,6 +261,63 @@ class ClientConfigTests(unittest.TestCase):
         self.assertEqual(args.actor, "alice")
         self.assertTrue(args.json)
 
+    def test_status_json_labels_versioned_estimates_and_unpriced_requests(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            config = replace(
+                self.config,
+                database_path=Path(temporary) / "usage.sqlite3",
+            )
+            store = UsageStore(config.database_path)
+            store.record(
+                identity=config.identities_by_actor["alice"],
+                client="codex",
+                protocol="openai",
+                requested_model="gpt-5.4-mini",
+                resolved_alias="gpt-5.4-mini",
+                upstream_model="gpt-5.4-mini",
+                actual_model="gpt-5.4-mini-2026-08-01",
+                policy_action="allowed",
+                status="succeeded",
+                input_tokens=100,
+                output_tokens=20,
+                billable_tokens=120,
+                cost_microusd=1_250,
+                cost_basis="estimated",
+                rate_card_version="rates-v1",
+            )
+            store.record(
+                identity=config.identities_by_actor["alice"],
+                client="codex",
+                protocol="openai",
+                requested_model="gpt-5.4-mini",
+                resolved_alias="gpt-5.4-mini",
+                upstream_model="gpt-5.4-mini",
+                policy_action="allowed",
+                status="failed",
+                cost_basis="not_available",
+                rate_card_version="rates-v1",
+            )
+            output = io.StringIO()
+            with redirect_stdout(output):
+                result = _status(
+                    config,
+                    argparse.Namespace(
+                        group_by="person",
+                        actor=None,
+                        team=None,
+                        json=True,
+                    ),
+                )
+
+            self.assertEqual(result, 0)
+            report = json.loads(output.getvalue())[0]
+            self.assertEqual(report["billable_tokens"], 120)
+            self.assertEqual(report["estimated_cost_microusd"], 1_250)
+            self.assertEqual(report["estimated_cost_usd"], 0.00125)
+            self.assertEqual(report["unpriced_requests"], 1)
+            self.assertEqual(report["cost_bases"], ["estimated", "not_available"])
+            self.assertEqual(report["rate_card_versions"], ["rates-v1"])
+
     def test_context_database_is_separate_and_cannot_alias_usage(self) -> None:
         self.assertNotEqual(self.config.context_database_path, self.config.database_path)
         self.assertEqual(self.config.context_service.policy_version, "engineering-context-v1")
@@ -280,6 +339,26 @@ class ClientConfigTests(unittest.TestCase):
             raw["context_service"]["unknown_policy"] = True
             path.write_text(json.dumps(raw), encoding="utf-8")
             with self.assertRaisesRegex(ConfigError, "Unknown context_service fields"):
+                GatewayConfig.load(path, environ={"HORMUZ_TOKEN": "test-identity-token"})
+
+    def test_model_routes_snapshot_a_bounded_usd_rate_card_version(self) -> None:
+        route = self.config.model_routes["gpt-5.4-mini"]
+        self.assertEqual(route.rate_card_version, "example-2026-08-15-v1")
+        self.assertEqual(route.currency, "USD")
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            raw = json.loads((ROOT / "config.example.json").read_text(encoding="utf-8"))
+            path = root / "hormuz.json"
+            raw["model_routes"]["gpt-5.4-mini"]["currency"] = "EUR"
+            path.write_text(json.dumps(raw), encoding="utf-8")
+            with self.assertRaisesRegex(ConfigError, "currency must be USD"):
+                GatewayConfig.load(path, environ={"HORMUZ_TOKEN": "test-identity-token"})
+
+            raw["model_routes"]["gpt-5.4-mini"]["currency"] = "USD"
+            raw["model_routes"]["gpt-5.4-mini"]["rate_card_version"] = "bad\nversion"
+            path.write_text(json.dumps(raw), encoding="utf-8")
+            with self.assertRaisesRegex(ConfigError, "bounded single-line"):
                 GatewayConfig.load(path, environ={"HORMUZ_TOKEN": "test-identity-token"})
 
     def test_usage_report_budget_matches_policy_scope(self) -> None:

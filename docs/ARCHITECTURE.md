@@ -57,7 +57,7 @@ The HTTP path authenticates first, derives organization/team/actor from the stat
 - `hormuz/config.py` validates configuration and defines identity, route, rate-card, and policy data.
 - `hormuz/policy.py` evaluates access, fallback, caps, and budgets without transport concerns.
 - `hormuz/store.py` owns the SQLite schema and monthly aggregations.
-- `hormuz/usage.py` parses provider usage metadata without storing response content.
+- `hormuz/usage.py` parses bounded provider usage and actual-model metadata through provider-specific allowlists without storing response content.
 - `hormuz/redaction.py` transforms provider-bound JSON values using configured secret controls.
 - `hormuz/context.py` authorizes, applies immutable lifecycle observations, quarantines high-confidence injection patterns, surfaces structured contradictions, ranks, budgets, and fingerprints explicit provider-neutral context packs without transport or persistence concerns.
 - `hormuz/context_store.py` implements the local governed-record and trusted-snapshot repository, optimistic concurrency, integrity checks, and metadata-only mutation/read/lifecycle audit behind a content-codec boundary.

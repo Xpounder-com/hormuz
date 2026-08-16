@@ -16,7 +16,8 @@ Hormuz is alpha software. The local prototype proves routing and policy behavior
 - Organization, team, and person policy overlays that can only become more restrictive.
 - Model fallback, output-token caps, monthly token limits, and USD budget limits.
 - Per-person attribution using unique bootstrap tokens, generic OIDC JWT access tokens, or revocable Hormuz human sessions mapped by issuer and subject.
-- Input, output, cache-read, cache-write, and reasoning-token accounting when providers report them.
+- Input, output, cache-read, cache-write, reasoning, and normalized billable-token accounting when providers report them.
+- Immutable USD rate-card version, cost-basis, and allowlisted provider-native usage snapshots for every accounted gateway outcome; invoice imports and reconciliation remain open.
 - Metadata-only SQLite usage ledger. Prompts and responses are relayed, not persisted.
 - Metadata-only JSONL audit export for usage and secret-egress evidence, with private file permissions and a SHA-256 checksum.
 - Pre-provider secret redaction or denial with built-in detectors, custom environment-provided values, and metadata-only detection evidence.
@@ -164,4 +165,4 @@ The GitHub publication gate also tests Python 3.11 through 3.14, validates the f
 
 ## Roadmap boundary
 
-The current milestone includes the enforcement, accounting, deterministic secret-egress, metadata-audit, local persistent context-record/context-pack, trusted lifecycle snapshot evaluation, MCP retrieval, OIDC JWT verification, and a single-node OIDC login/session kernel. The context and session databases are deliberately local implementations; they are not the pending enterprise tenancy, HA, or KMS design. Before an enterprise release, Hormuz still needs one owner-selected real-IdP validation, SCIM-driven deprovisioning, admin revocation APIs, structured PII/semantic DLP, durable multi-tenant persistence, TLS and deployment hardening, signed or externally immutable audit retention, invoice reconciliation, broader provider conformance coverage, automatic context verification/promotion/decay and resumable revalidation, cache, mandatory injection, and outcome writeback.
+The current milestone includes the enforcement, versioned estimate accounting, deterministic secret-egress, metadata-audit, local persistent context-record/context-pack, trusted lifecycle snapshot evaluation, MCP retrieval, OIDC JWT verification, and a single-node OIDC login/session kernel. The context and session databases are deliberately local implementations; they are not the pending enterprise tenancy, HA, or KMS design. Before an enterprise release, Hormuz still needs one owner-selected real-IdP validation, SCIM-driven deprovisioning, admin revocation APIs, implementation of the accepted structured PII/semantic DLP architecture, durable multi-tenant persistence, TLS and deployment hardening, signed or externally immutable audit retention, invoice reconciliation, broader provider conformance coverage, automatic context verification/promotion/decay and resumable revalidation, cache, mandatory injection, and outcome writeback.

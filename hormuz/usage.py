@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import codecs
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 
@@ -13,6 +13,42 @@ class Usage:
     cache_read_tokens: int = 0
     cache_write_tokens: int = 0
     reasoning_tokens: int = 0
+    billable_tokens: int = 0
+    actual_model: str | None = None
+    provider_usage: dict[str, Any] = field(default_factory=dict, repr=False)
+
+
+_OPENAI_USAGE_SPEC: dict[str, object] = {
+    "input_tokens": "integer",
+    "output_tokens": "integer",
+    "total_tokens": "integer",
+    "input_tokens_details": {
+        "cached_tokens": "integer",
+        "audio_tokens": "integer",
+    },
+    "output_tokens_details": {
+        "reasoning_tokens": "integer",
+        "audio_tokens": "integer",
+        "accepted_prediction_tokens": "integer",
+        "rejected_prediction_tokens": "integer",
+    },
+}
+_ANTHROPIC_USAGE_SPEC: dict[str, object] = {
+    "input_tokens": "integer",
+    "output_tokens": "integer",
+    "cache_read_input_tokens": "integer",
+    "cache_creation_input_tokens": "integer",
+    "cache_creation": {
+        "ephemeral_5m_input_tokens": "integer",
+        "ephemeral_1h_input_tokens": "integer",
+    },
+    "server_tool_use": {
+        "web_search_requests": "integer",
+        "web_fetch_requests": "integer",
+    },
+    "service_tier": "string",
+    "inference_geo": "string",
+}
 
 
 class ResponseUsageParser:
@@ -65,16 +101,30 @@ class ResponseUsageParser:
         if self.protocol == "openai":
             response = value.get("response") if value.get("type") == "response.completed" else value
             if isinstance(response, dict):
+                self.usage.actual_model = _bounded_string(
+                    response.get("model"),
+                    self.usage.actual_model,
+                )
                 self._apply_openai_usage(response.get("usage"))
         elif self.protocol == "anthropic":
             if value.get("type") == "message_start" and isinstance(value.get("message"), dict):
-                self._apply_anthropic_usage(value["message"].get("usage"))
+                message = value["message"]
+                self.usage.actual_model = _bounded_string(
+                    message.get("model"),
+                    self.usage.actual_model,
+                )
+                self._apply_anthropic_usage(message.get("usage"))
             else:
+                self.usage.actual_model = _bounded_string(
+                    value.get("model"),
+                    self.usage.actual_model,
+                )
                 self._apply_anthropic_usage(value.get("usage"))
 
     def _apply_openai_usage(self, value: Any) -> None:
         if not isinstance(value, dict):
             return
+        self._merge_provider_usage(sanitize_provider_usage("openai", value))
         self.usage.input_tokens = _nonnegative_int(value.get("input_tokens"), self.usage.input_tokens)
         self.usage.output_tokens = _nonnegative_int(value.get("output_tokens"), self.usage.output_tokens)
         input_details = value.get("input_tokens_details")
@@ -87,10 +137,15 @@ class ResponseUsageParser:
             self.usage.reasoning_tokens = _nonnegative_int(
                 output_details.get("reasoning_tokens"), self.usage.reasoning_tokens
             )
+        self.usage.billable_tokens = _bounded_sum(
+            self.usage.input_tokens,
+            self.usage.output_tokens,
+        )
 
     def _apply_anthropic_usage(self, value: Any) -> None:
         if not isinstance(value, dict):
             return
+        self._merge_provider_usage(sanitize_provider_usage("anthropic", value))
         self.usage.input_tokens = _nonnegative_int(value.get("input_tokens"), self.usage.input_tokens)
         self.usage.output_tokens = _nonnegative_int(value.get("output_tokens"), self.usage.output_tokens)
         self.usage.cache_read_tokens = _nonnegative_int(
@@ -99,9 +154,81 @@ class ResponseUsageParser:
         self.usage.cache_write_tokens = _nonnegative_int(
             value.get("cache_creation_input_tokens"), self.usage.cache_write_tokens
         )
+        self.usage.billable_tokens = _bounded_sum(
+            self.usage.input_tokens,
+            self.usage.output_tokens,
+            self.usage.cache_read_tokens,
+            self.usage.cache_write_tokens,
+        )
+
+    def _merge_provider_usage(self, value: dict[str, Any]) -> None:
+        for key, item in value.items():
+            existing = self.usage.provider_usage.get(key)
+            if isinstance(existing, dict) and isinstance(item, dict):
+                existing.update(item)
+            else:
+                self.usage.provider_usage[key] = item
+
+
+def sanitize_provider_usage(protocol: str, value: Any) -> dict[str, Any]:
+    """Return the documented metadata-only subset of a provider usage object."""
+    if not isinstance(value, dict):
+        return {}
+    spec = {
+        "openai": _OPENAI_USAGE_SPEC,
+        "anthropic": _ANTHROPIC_USAGE_SPEC,
+    }.get(protocol)
+    if spec is None:
+        return {}
+    return _sanitize_usage_object(value, spec)
+
+
+def _sanitize_usage_object(value: dict[str, Any], spec: dict[str, object]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, kind in spec.items():
+        item = value.get(key)
+        if kind == "integer":
+            if (
+                isinstance(item, int)
+                and not isinstance(item, bool)
+                and 0 <= item <= 2**63 - 1
+            ):
+                result[key] = item
+        elif kind == "string":
+            if (
+                isinstance(item, str)
+                and 0 < len(item.encode("utf-8")) <= 128
+                and all(character.isprintable() for character in item)
+            ):
+                result[key] = item
+        elif isinstance(kind, dict) and isinstance(item, dict):
+            nested = _sanitize_usage_object(item, kind)
+            if nested:
+                result[key] = nested
+    return result
 
 
 def _nonnegative_int(value: Any, fallback: int) -> int:
-    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or value < 0
+        or value > 2**63 - 1
+    ):
         return fallback
     return value
+
+
+def _bounded_string(value: Any, fallback: str | None) -> str | None:
+    if (
+        not isinstance(value, str)
+        or not value
+        or len(value.encode("utf-8")) > 256
+        or not all(character.isprintable() for character in value)
+    ):
+        return fallback
+    return value
+
+
+def _bounded_sum(*values: int) -> int:
+    return min(sum(values), 2**63 - 1)

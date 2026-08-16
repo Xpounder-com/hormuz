@@ -1,6 +1,6 @@
 # Usage, cost, and budget reporting
 
-Hormuz records one metadata-only usage event for each accounted generation attempt. The event snapshots the actor and team at request time, the client, provider protocol, requested and routed model, policy outcome, provider-reported token categories, configured-rate-card cost estimate, status, provider request ID, and secret-redaction count. Prompt and response bodies are not stored.
+Hormuz records one metadata-only usage event for each accounted generation attempt. The event snapshots the actor and team at request time, the client, provider protocol, requested, routed, and provider-returned actual model, policy outcome, provider-reported token categories, calculated billable-token units, configured-rate-card cost estimate and version, currency, status, provider request ID, and secret-redaction count. A strict provider-specific allowlist preserves native usage metadata needed for later reconciliation. Prompt and response bodies are not stored.
 
 ## CLI reports
 
@@ -37,15 +37,25 @@ hormuz --config hormuz.json status --group-by person --json
 ## Field semantics
 
 - `requests`, `succeeded`, `failed`, and `denied` describe gateway outcomes.
+- `requested_model`, `resolved_alias`, and `upstream_model` preserve policy/routing intent; `actual_model` is the bounded provider-returned model identifier when present. Model reports prefer the actual model and fall back through those routing fields when the provider omits it.
 - `input_tokens` and `output_tokens` come from the provider response.
 - `cache_read_tokens`, `cache_write_tokens`, and `reasoning_tokens` are shown separately when the provider exposes them. Some are subcategories of input or output, so Hormuz does not add them again to `total_tokens`.
 - `total_tokens` is input plus output tokens.
-- `cost_microusd` is the integer accounting value; `cost_usd` is its decimal representation.
+- `billable_tokens` is a normalized volume, not a price: OpenAI input plus output because cached tokens are an input subset; Anthropic uncached input plus cache-read input plus cache-write input plus output because those are separate categories.
+- `provider_usage` is the provider-native, metadata-only subset retained for reconciliation. Unknown fields, content, request bodies, and response bodies are discarded before persistence.
+- `cost_microusd` is the integer accounting value; `cost_usd` is its decimal representation. `estimated_cost_microusd` and `estimated_cost_usd` include only events whose cost basis is an estimate.
+- `cost_bases` identifies `estimated`, migrated `estimated_legacy`, `not_available`, or `not_applicable` events in the report row. `unpriced_requests` counts provider attempts for which a price was unavailable.
+- `currency` is currently fixed to USD because the persisted unit is micro-USD.
+- `rate_card_version` is snapshotted on every event. Reports return every `rate_card_versions` value represented in a group.
 - `active_actors` counts distinct attributed identities in the row.
 - `redactions` counts transformations attached to accounted generation events. The separate secret-event ledger also covers non-generation endpoints.
 - `budget_usd`, `budget_remaining_usd`, and `budget_used_percent` appear for organization, team, and person scopes when a corresponding cap is configured.
 
-Cost is an estimate based on the rate card attached to the routed model in the active Hormuz configuration. Provider prices, discounts, credits, cache rules, and invoice adjustments can change. Production reporting must version rate cards and reconcile estimates against provider invoices before calling spend final.
+Cost is an estimate based on the immutable version label and rates attached to the routed model when the event is written. A later configuration update does not rewrite historical events. The example label is illustrative; operators must issue a new version whenever any applicable model, cache, or output rate changes.
+
+Provider prices, discounts, credits, batches, tool fees, rounding, and invoice adjustments can differ from a request-time estimate. Hormuz therefore does not call these event costs final invoiced spend. OpenAI exposes organization costs in daily aggregate buckets grouped by dimensions such as project and line item through its [Costs API](https://platform.openai.com/docs/api-reference/usage/costs), while Anthropic exposes organization usage and cost reports through its [Usage & Cost Admin API](https://platform.claude.com/docs/en/manage-claude/usage-cost-api). Full imports, invoice reconciliation, coverage accounting, and variance reporting remain open work in issue #8.
+
+Those provider reports do not provide a universal per-Hormuz-request invoice cost. With a shared provider project, workspace, or key, a team/person chargeback can only be an explicitly labeled allocation. Exact provider-backed separation requires the organization to isolate provider projects, workspaces, or credentials at the desired accounting boundary. Hormuz will not silently label a proportional allocation as final cost.
 
 ## Concurrent budget enforcement
 

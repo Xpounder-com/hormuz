@@ -298,7 +298,16 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertEqual(totals.output_tokens, 30)
         self.assertEqual(totals.cache_read_tokens, 20)
         self.assertEqual(totals.reasoning_tokens, 7)
+        self.assertEqual(totals.billable_tokens, 150)
         self.assertGreater(totals.cost_microusd, 0)
+        event = self.gateway.store.audit_events(
+            since="2000-01-01T00:00:00+00:00",
+            kind="usage",
+        )[0]
+        self.assertEqual(event["cost_basis"], "estimated")
+        self.assertEqual(event["rate_card_version"], "test-openai-v1")
+        self.assertEqual(event["actual_model"], "gpt-test-fast")
+        self.assertEqual(event["provider_usage"]["total_tokens"], 150)
 
     def test_openai_background_mode_is_denied_by_default(self) -> None:
         before = len(FakeProviderHandler.requests)
@@ -358,6 +367,35 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertEqual(totals.output_tokens, 12)
         self.assertEqual(totals.cache_read_tokens, 20)
         self.assertEqual(totals.cache_write_tokens, 10)
+        self.assertEqual(totals.billable_tokens, 122)
+        event = self.gateway.store.audit_events(
+            since="2000-01-01T00:00:00+00:00",
+            kind="usage",
+        )[0]
+        self.assertEqual(event["cost_basis"], "estimated")
+        self.assertEqual(event["rate_card_version"], "test-anthropic-v1")
+        self.assertEqual(event["actual_model"], "claude-sonnet-5")
+        self.assertEqual(event["provider_usage"]["cache_read_input_tokens"], 20)
+
+    def test_missing_upstream_credential_is_recorded_as_unpriced_failure(self) -> None:
+        with mock.patch.dict(os.environ, {"TEST_OPENAI_KEY": ""}):
+            status, _, response = self._post(
+                "/v1/responses",
+                {"model": "engineering-fast", "input": "hello"},
+            )
+
+        self.assertEqual(status, 503)
+        self.assertEqual(
+            json.loads(response)["error"]["code"],
+            "gateway_upstream_not_configured",
+        )
+        event = self.gateway.store.audit_events(
+            since="2000-01-01T00:00:00+00:00",
+            kind="usage",
+        )[0]
+        self.assertEqual(event["status"], "failed")
+        self.assertEqual(event["cost_basis"], "not_available")
+        self.assertEqual(event["rate_card_version"], "test-openai-v1")
 
     def test_disallowed_client_is_rejected_before_provider_call(self) -> None:
         before = len(FakeProviderHandler.requests)
@@ -1289,6 +1327,7 @@ class GatewayIntegrationTests(unittest.TestCase):
                 "engineering-fast": {
                     "protocol": "openai",
                     "upstream_model": "gpt-test-fast",
+                    "rate_card_version": "test-openai-v1",
                     "input_cost_per_million": 1,
                     "cache_read_cost_per_million": 0.1,
                     "output_cost_per_million": 2,
@@ -1297,12 +1336,17 @@ class GatewayIntegrationTests(unittest.TestCase):
                 "claude-standard": {
                     "protocol": "anthropic",
                     "upstream_model": "claude-test",
+                    "rate_card_version": "test-anthropic-v1",
                     "input_cost_per_million": 3,
                     "cache_read_cost_per_million": 0.3,
                     "cache_write_cost_per_million": 3.75,
                     "output_cost_per_million": 15,
                 },
-                "claude-sonnet-5": {"protocol": "anthropic", "upstream_model": "claude-sonnet-5"},
+                "claude-sonnet-5": {
+                    "protocol": "anthropic",
+                    "upstream_model": "claude-sonnet-5",
+                    "rate_card_version": "test-anthropic-v1",
+                },
                 "claude-haiku-4-5": {"protocol": "anthropic", "upstream_model": "claude-test-haiku"},
                 "claude-haiku-4-5-20251001": {
                     "protocol": "anthropic",

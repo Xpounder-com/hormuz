@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from .config import Identity
+from .usage import sanitize_provider_usage
 
 
 @dataclass(frozen=True)
@@ -21,6 +22,7 @@ class MonthlyTotals:
     cache_read_tokens: int = 0
     cache_write_tokens: int = 0
     reasoning_tokens: int = 0
+    billable_tokens: int = 0
     cost_microusd: int = 0
     redaction_count: int = 0
 
@@ -92,6 +94,7 @@ class UsageStore:
                     requested_model TEXT NOT NULL,
                     resolved_alias TEXT,
                     upstream_model TEXT,
+                    actual_model TEXT,
                     policy_action TEXT NOT NULL,
                     status TEXT NOT NULL,
                     input_tokens INTEGER NOT NULL DEFAULT 0,
@@ -99,7 +102,12 @@ class UsageStore:
                     cache_read_tokens INTEGER NOT NULL DEFAULT 0,
                     cache_write_tokens INTEGER NOT NULL DEFAULT 0,
                     reasoning_tokens INTEGER NOT NULL DEFAULT 0,
+                    billable_tokens INTEGER NOT NULL DEFAULT 0,
                     cost_microusd INTEGER NOT NULL DEFAULT 0,
+                    cost_basis TEXT NOT NULL DEFAULT 'not_available',
+                    currency TEXT NOT NULL DEFAULT 'USD',
+                    rate_card_version TEXT NOT NULL DEFAULT 'unversioned',
+                    provider_usage_json TEXT NOT NULL DEFAULT '{}',
                     provider_request_id TEXT,
                     redaction_count INTEGER NOT NULL DEFAULT 0,
                     redaction_rules TEXT NOT NULL DEFAULT '[]'
@@ -159,6 +167,45 @@ class UsageStore:
                 connection.execute(
                     "ALTER TABLE gateway_usage_events ADD COLUMN redaction_rules TEXT NOT NULL DEFAULT '[]'"
                 )
+            if "actual_model" not in columns:
+                connection.execute(
+                    "ALTER TABLE gateway_usage_events ADD COLUMN actual_model TEXT"
+                )
+            if "billable_tokens" not in columns:
+                connection.execute(
+                    "ALTER TABLE gateway_usage_events ADD COLUMN billable_tokens INTEGER NOT NULL DEFAULT 0"
+                )
+                connection.execute(
+                    """
+                    UPDATE gateway_usage_events
+                    SET billable_tokens = input_tokens + output_tokens
+                        + CASE WHEN protocol = 'anthropic'
+                            THEN cache_read_tokens + cache_write_tokens ELSE 0 END
+                    """
+                )
+            if "cost_basis" not in columns:
+                connection.execute(
+                    "ALTER TABLE gateway_usage_events ADD COLUMN cost_basis TEXT NOT NULL DEFAULT 'not_available'"
+                )
+                connection.execute(
+                    """
+                    UPDATE gateway_usage_events
+                    SET cost_basis = CASE WHEN cost_microusd > 0
+                        THEN 'estimated_legacy' ELSE 'not_available' END
+                    """
+                )
+            if "currency" not in columns:
+                connection.execute(
+                    "ALTER TABLE gateway_usage_events ADD COLUMN currency TEXT NOT NULL DEFAULT 'USD'"
+                )
+            if "rate_card_version" not in columns:
+                connection.execute(
+                    "ALTER TABLE gateway_usage_events ADD COLUMN rate_card_version TEXT NOT NULL DEFAULT 'unversioned'"
+                )
+            if "provider_usage_json" not in columns:
+                connection.execute(
+                    "ALTER TABLE gateway_usage_events ADD COLUMN provider_usage_json TEXT NOT NULL DEFAULT '{}'"
+                )
 
     def record(
         self,
@@ -171,27 +218,74 @@ class UsageStore:
         upstream_model: str | None,
         policy_action: str,
         status: str,
+        actual_model: str | None = None,
         input_tokens: int = 0,
         output_tokens: int = 0,
         cache_read_tokens: int = 0,
         cache_write_tokens: int = 0,
         reasoning_tokens: int = 0,
+        billable_tokens: int | None = None,
         cost_microusd: int = 0,
+        cost_basis: str = "not_available",
+        currency: str = "USD",
+        rate_card_version: str = "unversioned",
+        provider_usage: dict[str, object] | None = None,
         provider_request_id: str | None = None,
         redaction_count: int = 0,
         redaction_rules: tuple[str, ...] = (),
     ) -> str:
+        if cost_basis not in {"estimated", "estimated_legacy", "not_available", "not_applicable"}:
+            raise ValueError("Unsupported usage cost basis")
+        if currency != "USD":
+            raise ValueError("Usage currency must be USD while costs use micro-USD storage")
+        if (
+            not isinstance(rate_card_version, str)
+            or not rate_card_version.strip()
+            or len(rate_card_version.encode("utf-8")) > 128
+            or any(character in rate_card_version for character in ("\n", "\r", "\x00"))
+        ):
+            raise ValueError("Usage rate-card version must be a bounded single-line string")
+        normalized_provider_usage = sanitize_provider_usage(protocol, provider_usage or {})
+        if provider_usage and not normalized_provider_usage:
+            raise ValueError("Usage provider metadata contains no supported fields")
+        if actual_model is not None and (
+            not isinstance(actual_model, str)
+            or not actual_model
+            or len(actual_model.encode("utf-8")) > 256
+            or not all(character.isprintable() for character in actual_model)
+        ):
+            raise ValueError("Usage actual model must be a bounded printable string")
+        normalized_input_tokens = _sqlite_nonnegative(input_tokens)
+        normalized_output_tokens = _sqlite_nonnegative(output_tokens)
+        normalized_cache_read_tokens = _sqlite_nonnegative(cache_read_tokens)
+        normalized_cache_write_tokens = _sqlite_nonnegative(cache_write_tokens)
+        normalized_reasoning_tokens = _sqlite_nonnegative(reasoning_tokens)
+        normalized_billable_tokens = (
+            _sqlite_nonnegative(billable_tokens)
+            if isinstance(billable_tokens, int) and not isinstance(billable_tokens, bool)
+            else _sqlite_nonnegative(
+                normalized_input_tokens
+                + normalized_output_tokens
+                + (
+                    normalized_cache_read_tokens + normalized_cache_write_tokens
+                    if protocol == "anthropic"
+                    else 0
+                )
+            )
+        )
         event_id = str(uuid.uuid4())
         with self._lock, self._connection() as connection:
             connection.execute(
                 """
                 INSERT INTO gateway_usage_events (
                     id, occurred_at, actor_id, actor_name, team_id, team_name, client, protocol,
-                    requested_model, resolved_alias, upstream_model, policy_action, status,
+                    requested_model, resolved_alias, upstream_model, actual_model,
+                    policy_action, status,
                     input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
-                    reasoning_tokens, cost_microusd, provider_request_id, redaction_count,
-                    redaction_rules
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    reasoning_tokens, billable_tokens, cost_microusd, cost_basis, currency,
+                    rate_card_version, provider_usage_json, provider_request_id,
+                    redaction_count, redaction_rules
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     event_id,
@@ -205,16 +299,22 @@ class UsageStore:
                     requested_model,
                     resolved_alias,
                     upstream_model,
+                    actual_model,
                     policy_action,
                     status,
-                    max(0, input_tokens),
-                    max(0, output_tokens),
-                    max(0, cache_read_tokens),
-                    max(0, cache_write_tokens),
-                    max(0, reasoning_tokens),
-                    max(0, cost_microusd),
+                    normalized_input_tokens,
+                    normalized_output_tokens,
+                    normalized_cache_read_tokens,
+                    normalized_cache_write_tokens,
+                    normalized_reasoning_tokens,
+                    normalized_billable_tokens,
+                    _sqlite_nonnegative(cost_microusd),
+                    cost_basis,
+                    currency,
+                    rate_card_version,
+                    json.dumps(normalized_provider_usage, sort_keys=True, separators=(",", ":")),
                     provider_request_id,
-                    max(0, redaction_count),
+                    _sqlite_nonnegative(redaction_count),
                     json.dumps(sorted(set(redaction_rules)), separators=(",", ":")),
                 ),
             )
@@ -398,6 +498,7 @@ class UsageStore:
                 COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens,
                 COALESCE(SUM(cache_write_tokens), 0) AS cache_write_tokens,
                 COALESCE(SUM(reasoning_tokens), 0) AS reasoning_tokens,
+                COALESCE(SUM(billable_tokens), 0) AS billable_tokens,
                 COALESCE(SUM(cost_microusd), 0) AS cost_microusd,
                 COALESCE(SUM(redaction_count), 0) AS redaction_count
             FROM gateway_usage_events
@@ -415,6 +516,7 @@ class UsageStore:
                 SELECT actor_id, actor_name, team_id, team_name, client, protocol,
                        COUNT(*) AS requests,
                        COALESCE(SUM(input_tokens + output_tokens), 0) AS tokens,
+                       COALESCE(SUM(billable_tokens), 0) AS billable_tokens,
                        COALESCE(SUM(cost_microusd), 0) AS cost_microusd,
                        SUM(CASE WHEN status = 'denied' THEN 1 ELSE 0 END) AS denied,
                        COALESCE(SUM(redaction_count), 0) AS redactions
@@ -454,11 +556,14 @@ class UsageStore:
             ),
             "model": (
                 [
-                    "COALESCE(upstream_model, resolved_alias, requested_model) AS scope_id",
-                    "COALESCE(upstream_model, resolved_alias, requested_model) AS scope_name",
+                    "COALESCE(actual_model, upstream_model, resolved_alias, requested_model) AS scope_id",
+                    "COALESCE(actual_model, upstream_model, resolved_alias, requested_model) AS scope_name",
                     "protocol",
                 ],
-                ["COALESCE(upstream_model, resolved_alias, requested_model)", "protocol"],
+                [
+                    "COALESCE(actual_model, upstream_model, resolved_alias, requested_model)",
+                    "protocol",
+                ],
             ),
             "client": (
                 ["client AS scope_id", "client AS scope_name", "client"],
@@ -497,7 +602,15 @@ class UsageStore:
                 COALESCE(SUM(cache_write_tokens), 0) AS cache_write_tokens,
                 COALESCE(SUM(reasoning_tokens), 0) AS reasoning_tokens,
                 COALESCE(SUM(input_tokens + output_tokens), 0) AS total_tokens,
+                COALESCE(SUM(billable_tokens), 0) AS billable_tokens,
                 COALESCE(SUM(cost_microusd), 0) AS cost_microusd,
+                COALESCE(SUM(CASE WHEN cost_basis LIKE 'estimated%' THEN cost_microusd ELSE 0 END), 0)
+                    AS estimated_cost_microusd,
+                COALESCE(SUM(CASE WHEN cost_basis = 'not_available' THEN 1 ELSE 0 END), 0)
+                    AS unpriced_requests,
+                GROUP_CONCAT(DISTINCT cost_basis) AS cost_bases_csv,
+                GROUP_CONCAT(DISTINCT currency) AS currencies_csv,
+                GROUP_CONCAT(DISTINCT rate_card_version) AS rate_card_versions_csv,
                 COUNT(DISTINCT actor_id) AS active_actors,
                 COALESCE(SUM(redaction_count), 0) AS redactions
             FROM gateway_usage_events
@@ -507,7 +620,14 @@ class UsageStore:
         """
         with self._lock, self._connection() as connection:
             rows = connection.execute(query, parameters).fetchall()
-        return [dict(row) for row in rows]
+        result: list[dict[str, object]] = []
+        for row in rows:
+            item = dict(row)
+            item["cost_bases"] = _sorted_csv(item.pop("cost_bases_csv"))
+            item["currencies"] = _sorted_csv(item.pop("currencies_csv"))
+            item["rate_card_versions"] = _sorted_csv(item.pop("rate_card_versions_csv"))
+            result.append(item)
+        return result
 
     def monthly_secret_totals(
         self,
@@ -549,10 +669,11 @@ class UsageStore:
                     SELECT
                         id, occurred_at, actor_id, actor_name, team_id, team_name,
                         client, protocol, requested_model, resolved_alias, upstream_model,
-                        policy_action, status, input_tokens, output_tokens,
+                        actual_model, policy_action, status, input_tokens, output_tokens,
                         cache_read_tokens, cache_write_tokens, reasoning_tokens,
-                        cost_microusd, provider_request_id, redaction_count,
-                        redaction_rules
+                        billable_tokens, cost_microusd, cost_basis, currency,
+                        rate_card_version, provider_usage_json, provider_request_id,
+                        redaction_count, redaction_rules
                     FROM gateway_usage_events
                     WHERE occurred_at >= ?
                     ORDER BY occurred_at, id
@@ -562,6 +683,7 @@ class UsageStore:
                 for row in rows:
                     event = dict(row)
                     event["redaction_rules"] = json.loads(str(event["redaction_rules"]))
+                    event["provider_usage"] = json.loads(str(event.pop("provider_usage_json")))
                     events.append(
                         {
                             "schema_version": 1,
@@ -593,3 +715,15 @@ class UsageStore:
                     )
         events.sort(key=lambda event: (str(event["occurred_at"]), str(event["id"])))
         return events
+
+
+def _sorted_csv(value: object) -> list[str]:
+    if not isinstance(value, str) or not value:
+        return []
+    return sorted(set(value.split(",")))
+
+
+def _sqlite_nonnegative(value: object) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        return 0
+    return min(max(value, 0), 2**63 - 1)

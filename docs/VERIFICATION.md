@@ -228,6 +228,25 @@ Observed local result:
 
 This closes the bounded model-facing pack-service contract, not record browsing, mandatory client injection, semantic/vector retrieval, distributed authorization, automatic lifecycle jobs, caching, or production tenancy. Context Pack v1 intentionally has no pagination because accumulating pages would bypass its pack budget; any future administrative discovery surface requires its own authorization-bound cursor contract.
 
+### Versioned provider-accounting foundation
+
+The provider-response parser, gateway outcomes, additive usage-ledger migration, audit export, CLI report, source distribution, and wheel were exercised on August 15, 2026.
+
+Observed local result:
+
+- OpenAI and Anthropic response fixtures retained normalized input, output, cache-read, cache-write, reasoning, and billable-token categories plus a strict allowlisted provider-native usage object without response content or unknown fields;
+- the provider-returned actual model was persisted separately from requested alias and routed model, and model reports preferred that actual model when available;
+- every accounted gateway outcome carried a cost basis, USD currency, and immutable rate-card version; successful provider results were labeled `estimated`, denials were `not_applicable`, and provider attempts without a credential were recorded as `not_available` rather than disappearing;
+- an additive legacy-database migration preserved existing events, derived conservative billable-token values, labeled nonzero historical estimates `estimated_legacy`, and assigned `unversioned` rather than inventing a rate-card identity;
+- report and audit tests proved billable tokens, estimate-only cost, unpriced request counts, cost bases, currencies, rate-card versions, actual model, and safe provider usage are visible while added prompt, response, matched-secret, and unknown provider fields remain excluded;
+- two otherwise identical events retained separate `rates-v1` and `rates-v2` cost snapshots, proving a current configuration change does not rewrite historical estimates;
+- the complete default source suite passed 139 tests with one separately gated official Claude Code executable test skipped; that official Claude Code test then passed independently, while the installed Codex path passed in the default suite;
+- the frozen 60-task release benchmark remained green with precision `1.00`, recall `1.00`, useful-pack rate `1.00`, zero safety failures, and p95 in-process selection latency `0.162125 ms`;
+- isolated source and wheel builds succeeded; the source distribution contained accepted DLP ADR 0004 and the new accounting tests, and a clean Python 3.14 environment installed the wheel and passed an installed-package model/rate/billable/estimate report smoke test;
+- a tracked-file scan found no private-key, OpenAI, Anthropic, or GitHub credential pattern, and the ignored `.env.local` was not read.
+
+This is the request-level accounting and immutable-estimate foundation for issue #8, not provider billing ingestion or invoice reconciliation. OpenAI and Anthropic cost reports are aggregate across provider dimensions and do not universally assign a final invoiced cost to one Hormuz request. Team/person values therefore remain estimates unless the customer isolates provider accounting boundaries; Hormuz does not label an inferred allocation as final.
+
 ## Reproduce locally
 
 The default suite uses only loopback fake providers:
