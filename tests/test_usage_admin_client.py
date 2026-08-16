@@ -29,6 +29,10 @@ def _row() -> dict[str, object]:
         "rate_card_versions": ["test-v1"],
         "active_actors": 1,
         "redactions": 0,
+        "context_injected_requests": 0,
+        "context_required_denials": 0,
+        "context_estimated_tokens": 0,
+        "context_packs_used": 0,
         "cost_usd": 0.001,
         "estimated_cost_usd": 0.001,
         "budget_usd": 10.0,
@@ -39,7 +43,7 @@ def _row() -> dict[str, object]:
 
 def _response() -> dict[str, object]:
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "organization_id": "xpounder",
         "group_by": "team",
         "filters": {"actor_id": None, "team_id": None},

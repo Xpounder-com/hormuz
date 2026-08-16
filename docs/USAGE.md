@@ -1,6 +1,6 @@
 # Usage, cost, and budget reporting
 
-Hormuz records one metadata-only usage event for each accounted generation attempt. The event snapshots the organization, actor, and team at request time, the client, provider protocol, requested, routed, and provider-returned actual model, policy outcome, provider-reported token categories, calculated billable-token units, configured-rate-card cost estimate and version, currency, status, provider request ID, and secret-redaction count. A strict provider-specific allowlist preserves native usage metadata needed for later reconciliation. Prompt and response bodies are not stored. Legacy rows created before the organization field existed remain unbound rather than being assigned a guessed tenant.
+Hormuz records one metadata-only usage event for each accounted generation attempt. The event snapshots the organization, actor, and team at request time, the client, provider protocol, requested, routed, and provider-returned actual model, policy outcome, provider-reported token categories, calculated billable-token units, configured-rate-card cost estimate and version, currency, status, provider request ID, and secret-redaction count. When automatic context policy is evaluated, the event also stores its mode, outcome, safe reason, pack/record lineage, version identifiers, estimated rendered tokens, assembly time, and authoritative fresh/already-present state. A strict provider-specific allowlist preserves native usage metadata needed for later reconciliation. Prompt, response, retrieval query, and rendered context bodies are not stored. Legacy rows created before the organization field existed remain unbound rather than being assigned a guessed tenant.
 
 ## CLI reports
 
@@ -62,6 +62,9 @@ This route requires the explicit `usage_viewer` capability, derives organization
 - `rate_card_version` is snapshotted on every event. Reports return every `rate_card_versions` value represented in a group.
 - `active_actors` counts distinct attributed identities in the row.
 - `redactions` counts transformations attached to accounted generation events. The separate secret-event ledger also covers non-generation endpoints.
+- `context_injected_requests` counts requests whose authorized block was present in the provider-bound body; `context_required_denials` counts required-mode requests denied by context policy.
+- `context_estimated_tokens` is Hormuz's deterministic estimate of rendered reference size, not a provider tokenizer result. `context_packs_used` counts distinct non-null pack IDs in the group.
+- Per-event context lineage includes `context_injection_mode`, `context_injection_outcome`, `context_injection_reason`, `context_pack_id`, `context_record_ids`, policy/retrieval/render versions, repository revision, assembly milliseconds, and reuse status. It deliberately excludes the query and record content.
 - `budget_usd`, `budget_remaining_usd`, and `budget_used_percent` appear for organization, team, and person scopes when a corresponding cap is configured.
 
 Cost is an estimate based on the immutable version label and rates attached to the routed model when the event is written. A later configuration update does not rewrite historical events. The example label is illustrative; operators must issue a new version whenever any applicable model, cache, or output rate changes.

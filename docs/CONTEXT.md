@@ -1,6 +1,6 @@
 # Governed context records and packs
 
-Hormuz has a local persistent repository for provider-neutral, governed context records. It is intentionally separate from both the gateway request path and the metadata-only usage database: importing or retrieving context does not inject it into an employee prompt, call an embedding model, or send content to OpenAI or Anthropic.
+Hormuz has a local persistent repository for provider-neutral, governed context records. It is intentionally separate from the metadata-only usage database. Importing, listing, exporting, or explicitly retrieving context never calls an embedding model or provider. When an administrator separately enables automatic context policy, supported generation requests can retrieve and inject a verified pack through the gateway path described in [CONTEXT_INJECTION.md](CONTEXT_INJECTION.md).
 
 The repository is a reversible local implementation behind a dedicated storage boundary. It proves the record lifecycle and authorization contract without selecting the pending enterprise PostgreSQL tenancy design.
 
@@ -207,7 +207,8 @@ This is a durable local governance kernel, not the final enterprise context serv
 - the token estimate covers the complete serialized item contract and is
   deterministic, but it excludes the response wrapper and is not a provider
   tokenizer guarantee;
-- there is no automatic context injection, context-pack cache, source-specific event collector, or outcome writeback; the current connector API accepts already-validated normalized attestations;
-- if a pack is later injected, injection must happen before the existing secret-egress boundary so all added content is inspected.
+- bounded disabled-by-default automatic injection exists for verified organization/team/actor records on OpenAI Responses and Anthropic Messages requests; repository selectors, continuation bindings, token-count/compaction injection, and complete issue #5 evidence remain open;
+- there is no context-pack cache, source-specific event collector, or outcome writeback; the current connector API accepts already-validated normalized attestations; and
+- injected packs run before the existing secret-egress boundary, so added content receives the same DLP action as employee request content.
 
 No context caching has been enabled. Cache privacy remains blocked on proposed ADR 0003, and the hosted persistence topology remains blocked on proposed ADR 0002.

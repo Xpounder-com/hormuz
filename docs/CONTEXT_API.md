@@ -184,4 +184,4 @@ curl --fail-with-body \
   http://127.0.0.1:8787/v1/context/packs
 ```
 
-The same boundary is now exposed as the read-only `hormuz_get_context` MCP tool documented in [MCP.md](MCP.md). MCP retrieval remains explicit; automatic injection is a separate roadmap gate so it cannot bypass context authorization or secret-egress inspection.
+The same boundary is exposed as the read-only `hormuz_get_context` MCP tool documented in [MCP.md](MCP.md). MCP retrieval remains explicit. A separate disabled-by-default automatic path reuses authorization-first pack assembly, commits the same content-free read audit, and injects before secret-egress inspection; see [CONTEXT_INJECTION.md](CONTEXT_INJECTION.md).

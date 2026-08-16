@@ -98,6 +98,35 @@ class ContextServiceConfig:
 
 
 @dataclass(frozen=True)
+class ContextInjectionPolicy:
+    mode: str | None = None
+    allowed_clients: tuple[str, ...] | None = None
+    allowed_models: tuple[str, ...] | None = None
+    token_budget: int | None = None
+    max_items: int | None = None
+
+    def overlaid(
+        self,
+        other: "ContextInjectionPolicy | None",
+    ) -> "ContextInjectionPolicy":
+        if other is None:
+            return self
+        return ContextInjectionPolicy(
+            mode=_context_injection_mode_overlay(self.mode, other.mode),
+            allowed_clients=_intersection(
+                self.allowed_clients,
+                other.allowed_clients,
+            ),
+            allowed_models=_intersection(
+                self.allowed_models,
+                other.allowed_models,
+            ),
+            token_budget=_minimum(self.token_budget, other.token_budget),
+            max_items=_minimum(self.max_items, other.max_items),
+        )
+
+
+@dataclass(frozen=True)
 class Identity:
     token_env: str
     token: str = field(repr=False)
@@ -193,6 +222,9 @@ class Policy:
     monthly_token_limit: int | None = None
     monthly_budget_usd: float | None = None
     per_actor_monthly_budget_usd: float | None = None
+    context_injection: ContextInjectionPolicy = field(
+        default_factory=ContextInjectionPolicy
+    )
 
     def overlaid(self, other: "Policy | None") -> "Policy":
         if other is None:
@@ -212,6 +244,9 @@ class Policy:
             per_actor_monthly_budget_usd=_minimum(
                 self.per_actor_monthly_budget_usd,
                 other.per_actor_monthly_budget_usd,
+            ),
+            context_injection=self.context_injection.overlaid(
+                other.context_injection
             ),
         )
 
@@ -554,7 +589,11 @@ class GatewayConfig:
             ),
         )
         policies_raw = _object(raw.get("policies"), "policies")
-        organization_policy = _policy(policies_raw.get("organization"), "policies.organization")
+        organization_policy = _policy(
+            policies_raw.get("organization"),
+            "policies.organization",
+            default_context_injection_mode="off",
+        )
         team_policies = {
             scope_id: _policy(value, f"policies.teams.{scope_id}")
             for scope_id, value in _object(policies_raw.get("teams", {}), "policies.teams").items()
@@ -603,6 +642,11 @@ class GatewayConfig:
                     raise ConfigError(f"Policy references unknown fallback model alias: {alias}")
                 if route.protocol != protocol:
                     raise ConfigError(f"Policy fallback {alias} does not use protocol {protocol}")
+            for alias in policy.context_injection.allowed_models or ():
+                if alias not in self.model_routes:
+                    raise ConfigError(
+                        f"Context injection policy references unknown model alias: {alias}"
+                    )
         limits_require_request_bound = any(
             policy.monthly_token_limit is not None
             or policy.monthly_budget_usd is not None
@@ -769,7 +813,12 @@ class GatewayConfig:
         )
 
 
-def _policy(value: Any, path: str) -> Policy:
+def _policy(
+    value: Any,
+    path: str,
+    *,
+    default_context_injection_mode: str | None = None,
+) -> Policy:
     item = _object(value, path)
     return Policy(
         allowed_clients=_optional_string_tuple(item.get("allowed_clients"), f"{path}.allowed_clients"),
@@ -782,6 +831,65 @@ def _policy(value: Any, path: str) -> Policy:
         per_actor_monthly_budget_usd=_optional_number(
             item.get("per_actor_monthly_budget_usd"), f"{path}.per_actor_monthly_budget_usd"
         ),
+        context_injection=_context_injection_policy(
+            item.get("context_injection", {}),
+            f"{path}.context_injection",
+            default_mode=default_context_injection_mode,
+        ),
+    )
+
+
+def _context_injection_policy(
+    value: Any,
+    path: str,
+    *,
+    default_mode: str | None = None,
+) -> ContextInjectionPolicy:
+    item = _object(value, path)
+    unknown = sorted(
+        set(item)
+        - {
+            "mode",
+            "allowed_clients",
+            "allowed_models",
+            "token_budget",
+            "max_items",
+        }
+    )
+    if unknown:
+        raise ConfigError(f"Unknown {path} fields: " + ", ".join(unknown))
+    mode_value = item.get("mode", default_mode)
+    mode = _optional_string(mode_value, f"{path}.mode")
+    if mode not in {None, "off", "optional", "required"}:
+        raise ConfigError(f"{path}.mode must be off, optional, or required")
+    token_budget = item.get("token_budget")
+    if token_budget is not None:
+        token_budget = _integer(
+            token_budget,
+            f"{path}.token_budget",
+            minimum=1,
+            maximum=1_000_000,
+        )
+    max_items = item.get("max_items")
+    if max_items is not None:
+        max_items = _integer(
+            max_items,
+            f"{path}.max_items",
+            minimum=1,
+            maximum=100,
+        )
+    return ContextInjectionPolicy(
+        mode=mode,
+        allowed_clients=_optional_string_tuple(
+            item.get("allowed_clients"),
+            f"{path}.allowed_clients",
+        ),
+        allowed_models=_optional_string_tuple(
+            item.get("allowed_models"),
+            f"{path}.allowed_models",
+        ),
+        token_budget=token_budget,
+        max_items=max_items,
     )
 
 
@@ -1573,3 +1681,20 @@ def _minimum(parent: int | float | None, child: int | float | None):
     if child is None:
         return parent
     return min(parent, child)
+
+
+def _context_injection_mode_overlay(
+    parent: str | None,
+    child: str | None,
+) -> str | None:
+    if child is None:
+        return parent
+    if parent is None:
+        return child
+    # A narrower scope cannot enable injection after a higher scope disabled
+    # it, or weaken a higher-scope required policy.
+    if parent == "off":
+        return "off"
+    if parent == "required":
+        return "required"
+    return child

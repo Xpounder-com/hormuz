@@ -479,6 +479,12 @@ class ClientConfigTests(unittest.TestCase):
         self.assertEqual(self.config.context_service.lifecycle.job_batch_size, 100)
         self.assertEqual(self.config.context_service.lifecycle.lease_seconds, 30)
         self.assertIsNotNone(self.config.context_service.lifecycle.policy)
+        self.assertEqual(
+            self.config.resolved_policy(
+                self.config.identities_by_actor["alice"]
+            ).context_injection.mode,
+            "off",
+        )
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             raw = json.loads((ROOT / "config.example.json").read_text(encoding="utf-8"))
@@ -494,6 +500,51 @@ class ClientConfigTests(unittest.TestCase):
             path.write_text(json.dumps(raw), encoding="utf-8")
             with self.assertRaisesRegex(ConfigError, "Unknown context_service fields"):
                 GatewayConfig.load(path, environ={"HORMUZ_TOKEN": "test-identity-token"})
+
+    def test_context_injection_policy_is_strict_and_monotonic(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            raw = json.loads((ROOT / "config.example.json").read_text(encoding="utf-8"))
+            raw["policies"]["organization"]["context_injection"] = {
+                "mode": "optional",
+                "allowed_clients": ["codex", "claude-code"],
+                "allowed_models": ["gpt-5.4-mini", "claude-sonnet-5"],
+                "token_budget": 1000,
+                "max_items": 5,
+            }
+            raw["policies"]["teams"]["engineering"]["context_injection"] = {
+                "mode": "required",
+                "allowed_clients": ["codex"],
+                "allowed_models": ["gpt-5.4-mini"],
+                "token_budget": 500,
+                "max_items": 3,
+            }
+            raw["policies"]["actors"]["alice"] = {
+                "context_injection": {"mode": "off", "token_budget": 750}
+            }
+            path = root / "hormuz.json"
+            path.write_text(json.dumps(raw), encoding="utf-8")
+
+            config = GatewayConfig.load(
+                path,
+                environ={"HORMUZ_TOKEN": "test-identity-token"},
+            )
+            effective = config.resolved_policy(
+                config.identities_by_actor["alice"]
+            ).context_injection
+            self.assertEqual(effective.mode, "required")
+            self.assertEqual(effective.allowed_clients, ("codex",))
+            self.assertEqual(effective.allowed_models, ("gpt-5.4-mini",))
+            self.assertEqual(effective.token_budget, 500)
+            self.assertEqual(effective.max_items, 3)
+
+            raw["policies"]["actors"]["alice"]["context_injection"]["unknown"] = True
+            path.write_text(json.dumps(raw), encoding="utf-8")
+            with self.assertRaisesRegex(ConfigError, "Unknown .*context_injection fields"):
+                GatewayConfig.load(
+                    path,
+                    environ={"HORMUZ_TOKEN": "test-identity-token"},
+                )
 
     def test_lifecycle_config_is_strict_and_requires_an_explicit_promoter(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

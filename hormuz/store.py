@@ -39,6 +39,22 @@ class MonthlyTotals:
 
 
 @dataclass(frozen=True)
+class ContextLineage:
+    mode: str = "off"
+    outcome: str = "not_evaluated"
+    reason: str = "policy_off"
+    pack_id: str | None = None
+    record_ids: tuple[str, ...] = ()
+    policy_version: str | None = None
+    retrieval_version: str | None = None
+    render_version: str | None = None
+    repository_revision: str | None = None
+    estimated_tokens: int = 0
+    assembly_milliseconds: int = 0
+    reuse_status: str = "not_applicable"
+
+
+@dataclass(frozen=True)
 class SecretTotals:
     events: int = 0
     detections: int = 0
@@ -228,7 +244,19 @@ class UsageStore:
                     provider_usage_json TEXT NOT NULL DEFAULT '{}',
                     provider_request_id TEXT,
                     redaction_count INTEGER NOT NULL DEFAULT 0,
-                    redaction_rules TEXT NOT NULL DEFAULT '[]'
+                    redaction_rules TEXT NOT NULL DEFAULT '[]',
+                    context_injection_mode TEXT NOT NULL DEFAULT 'off',
+                    context_injection_outcome TEXT NOT NULL DEFAULT 'not_evaluated',
+                    context_injection_reason TEXT NOT NULL DEFAULT 'policy_off',
+                    context_pack_id TEXT,
+                    context_record_ids_json TEXT NOT NULL DEFAULT '[]',
+                    context_policy_version TEXT,
+                    context_retrieval_version TEXT,
+                    context_render_version TEXT,
+                    context_repository_revision TEXT,
+                    context_estimated_tokens INTEGER NOT NULL DEFAULT 0,
+                    context_assembly_milliseconds INTEGER NOT NULL DEFAULT 0,
+                    context_reuse_status TEXT NOT NULL DEFAULT 'not_applicable'
                 );
                 CREATE INDEX IF NOT EXISTS idx_gateway_usage_occurred_at
                     ON gateway_usage_events(occurred_at);
@@ -456,6 +484,25 @@ class UsageStore:
                 connection.execute(
                     "ALTER TABLE gateway_usage_events ADD COLUMN provider_usage_json TEXT NOT NULL DEFAULT '{}'"
                 )
+            context_columns = {
+                "context_injection_mode": "TEXT NOT NULL DEFAULT 'off'",
+                "context_injection_outcome": "TEXT NOT NULL DEFAULT 'not_evaluated'",
+                "context_injection_reason": "TEXT NOT NULL DEFAULT 'policy_off'",
+                "context_pack_id": "TEXT",
+                "context_record_ids_json": "TEXT NOT NULL DEFAULT '[]'",
+                "context_policy_version": "TEXT",
+                "context_retrieval_version": "TEXT",
+                "context_render_version": "TEXT",
+                "context_repository_revision": "TEXT",
+                "context_estimated_tokens": "INTEGER NOT NULL DEFAULT 0",
+                "context_assembly_milliseconds": "INTEGER NOT NULL DEFAULT 0",
+                "context_reuse_status": "TEXT NOT NULL DEFAULT 'not_applicable'",
+            }
+            for name, declaration in context_columns.items():
+                if name not in columns:
+                    connection.execute(
+                        f"ALTER TABLE gateway_usage_events ADD COLUMN {name} {declaration}"
+                    )
             security_columns = {
                 row["name"]
                 for row in connection.execute("PRAGMA table_info(gateway_secret_events)").fetchall()
@@ -547,6 +594,7 @@ class UsageStore:
         provider_request_id: str | None = None,
         redaction_count: int = 0,
         redaction_rules: tuple[str, ...] = (),
+        context_lineage: ContextLineage | None = None,
     ) -> str:
         if cost_basis not in {"estimated", "estimated_legacy", "not_available", "not_applicable"}:
             raise ValueError("Unsupported usage cost basis")
@@ -587,6 +635,7 @@ class UsageStore:
                 )
             )
         )
+        lineage = _validated_context_lineage(context_lineage or ContextLineage())
         event_id = str(uuid.uuid4())
         with self._lock, self._connection() as connection:
             connection.execute(
@@ -599,8 +648,16 @@ class UsageStore:
                     input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
                     reasoning_tokens, billable_tokens, cost_microusd, cost_basis, currency,
                     rate_card_version, provider_usage_json, provider_request_id,
-                    redaction_count, redaction_rules
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    redaction_count, redaction_rules, context_injection_mode,
+                    context_injection_outcome, context_injection_reason, context_pack_id,
+                    context_record_ids_json, context_policy_version,
+                    context_retrieval_version, context_render_version,
+                    context_repository_revision, context_estimated_tokens,
+                    context_assembly_milliseconds, context_reuse_status
+                ) VALUES (
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                )
                 """,
                 (
                     event_id,
@@ -632,6 +689,18 @@ class UsageStore:
                     provider_request_id,
                     _sqlite_nonnegative(redaction_count),
                     json.dumps(sorted(set(redaction_rules)), separators=(",", ":")),
+                    lineage.mode,
+                    lineage.outcome,
+                    lineage.reason,
+                    lineage.pack_id,
+                    json.dumps(list(lineage.record_ids), separators=(",", ":")),
+                    lineage.policy_version,
+                    lineage.retrieval_version,
+                    lineage.render_version,
+                    lineage.repository_revision,
+                    lineage.estimated_tokens,
+                    lineage.assembly_milliseconds,
+                    lineage.reuse_status,
                 ),
             )
         return event_id
@@ -1534,7 +1603,11 @@ class UsageStore:
                        COALESCE(SUM(billable_tokens), 0) AS billable_tokens,
                        COALESCE(SUM(cost_microusd), 0) AS cost_microusd,
                        SUM(CASE WHEN status = 'denied' THEN 1 ELSE 0 END) AS denied,
-                       COALESCE(SUM(redaction_count), 0) AS redactions
+                       COALESCE(SUM(redaction_count), 0) AS redactions,
+                       COALESCE(SUM(CASE WHEN context_injection_outcome = 'injected'
+                           THEN 1 ELSE 0 END), 0) AS context_injected_requests,
+                       COALESCE(SUM(context_estimated_tokens), 0) AS context_estimated_tokens,
+                       COUNT(DISTINCT context_pack_id) AS context_packs_used
                 FROM gateway_usage_events
                 WHERE occurred_at >= ?
                 GROUP BY actor_id, actor_name, team_id, team_name, client, protocol
@@ -1655,7 +1728,14 @@ class UsageStore:
                 GROUP_CONCAT(DISTINCT currency) AS currencies_csv,
                 GROUP_CONCAT(DISTINCT rate_card_version) AS rate_card_versions_csv,
                 COUNT(DISTINCT actor_id) AS active_actors,
-                COALESCE(SUM(redaction_count), 0) AS redactions
+                COALESCE(SUM(redaction_count), 0) AS redactions,
+                COALESCE(SUM(CASE WHEN context_injection_outcome = 'injected'
+                    THEN 1 ELSE 0 END), 0) AS context_injected_requests,
+                COALESCE(SUM(CASE WHEN context_injection_mode = 'required'
+                    AND context_injection_outcome = 'denied'
+                    THEN 1 ELSE 0 END), 0) AS context_required_denials,
+                COALESCE(SUM(context_estimated_tokens), 0) AS context_estimated_tokens,
+                COUNT(DISTINCT context_pack_id) AS context_packs_used
             FROM gateway_usage_events
             WHERE {' AND '.join(clauses)}
             {grouping}
@@ -1817,7 +1897,13 @@ class UsageStore:
                         cache_read_tokens, cache_write_tokens, reasoning_tokens,
                         billable_tokens, cost_microusd, cost_basis, currency,
                         rate_card_version, provider_usage_json, provider_request_id,
-                        redaction_count, redaction_rules
+                        redaction_count, redaction_rules, context_injection_mode,
+                        context_injection_outcome, context_injection_reason,
+                        context_pack_id, context_record_ids_json,
+                        context_policy_version, context_retrieval_version,
+                        context_render_version, context_repository_revision,
+                        context_estimated_tokens, context_assembly_milliseconds,
+                        context_reuse_status
                     FROM gateway_usage_events
                     WHERE occurred_at >= ?
                     ORDER BY occurred_at, id
@@ -1828,9 +1914,12 @@ class UsageStore:
                     event = dict(row)
                     event["redaction_rules"] = json.loads(str(event["redaction_rules"]))
                     event["provider_usage"] = json.loads(str(event.pop("provider_usage_json")))
+                    event["context_record_ids"] = json.loads(
+                        str(event.pop("context_record_ids_json"))
+                    )
                     events.append(
                         {
-                            "schema_version": 1,
+                            "schema_version": 2,
                             "event_type": "usage",
                             **event,
                         }
@@ -1924,6 +2013,80 @@ def _sqlite_nonnegative(value: object) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
         return 0
     return min(max(value, 0), 2**63 - 1)
+
+
+def _validated_context_lineage(value: ContextLineage) -> ContextLineage:
+    if not isinstance(value, ContextLineage):
+        raise ValueError("Usage context lineage must be ContextLineage")
+    if value.mode not in {"off", "optional", "required"}:
+        raise ValueError("Usage context injection mode is invalid")
+    if value.outcome not in {
+        "not_evaluated",
+        "not_injected",
+        "injected",
+        "denied",
+    }:
+        raise ValueError("Usage context injection outcome is invalid")
+    if value.reuse_status not in {"not_applicable", "fresh", "already_present"}:
+        raise ValueError("Usage context reuse status is invalid")
+    _bounded_context_lineage_text(value.reason, "reason", maximum=64, required=True)
+    if value.pack_id is not None:
+        _bounded_context_lineage_text(value.pack_id, "pack ID", maximum=64, required=True)
+        if not value.pack_id.startswith("ctxpack_"):
+            raise ValueError("Usage context pack ID is invalid")
+    if len(value.record_ids) > 100 or len(set(value.record_ids)) != len(value.record_ids):
+        raise ValueError("Usage context record IDs must be unique and bounded")
+    for record_id in value.record_ids:
+        _bounded_context_lineage_text(
+            record_id,
+            "record ID",
+            maximum=512,
+            required=True,
+        )
+    for label, item, maximum in (
+        ("policy version", value.policy_version, 128),
+        ("retrieval version", value.retrieval_version, 128),
+        ("render version", value.render_version, 128),
+        ("repository revision", value.repository_revision, 512),
+    ):
+        if item is not None:
+            _bounded_context_lineage_text(item, label, maximum=maximum, required=True)
+    if value.outcome == "injected" and (
+        value.pack_id is None
+        or not value.record_ids
+        or value.policy_version is None
+        or value.retrieval_version is None
+        or value.render_version is None
+    ):
+        raise ValueError("Injected usage context lineage is incomplete")
+    if value.mode == "off" and (value.pack_id is not None or value.record_ids):
+        raise ValueError("Disabled usage context lineage cannot select a pack")
+    if (
+        isinstance(value.estimated_tokens, bool)
+        or not isinstance(value.estimated_tokens, int)
+        or not 0 <= value.estimated_tokens <= 2**63 - 1
+        or isinstance(value.assembly_milliseconds, bool)
+        or not isinstance(value.assembly_milliseconds, int)
+        or not 0 <= value.assembly_milliseconds <= 2**63 - 1
+    ):
+        raise ValueError("Usage context lineage counters must be non-negative integers")
+    return value
+
+
+def _bounded_context_lineage_text(
+    value: object,
+    label: str,
+    *,
+    maximum: int,
+    required: bool,
+) -> None:
+    if (
+        not isinstance(value, str)
+        or (required and not value)
+        or len(value.encode("utf-8")) > maximum
+        or any(character in value for character in ("\n", "\r", "\x00"))
+    ):
+        raise ValueError(f"Usage context {label} must be bounded single-line text")
 
 
 def _sanitize_dlp_findings(

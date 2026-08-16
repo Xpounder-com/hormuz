@@ -10,6 +10,7 @@ from pathlib import Path
 from hormuz.config import Identity
 from hormuz.dlp_approval import payload_fingerprint
 from hormuz.store import (
+    ContextLineage,
     DLPApprovalStoreError,
     ReservationDenied,
     ReservationScope,
@@ -18,6 +19,64 @@ from hormuz.store import (
 
 
 class UsageStoreMigrationTests(unittest.TestCase):
+    def test_usage_context_lineage_is_metadata_only_and_exported_explicitly(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            store = UsageStore(Path(temporary) / "usage.sqlite3")
+            identity = Identity(
+                token_env="ALICE_TOKEN",
+                token="alice-employee-token",
+                actor_id="alice",
+                actor_name="Alice",
+                team_id="engineering",
+                team_name="Engineering",
+                organization_id="org-a",
+            )
+            store.record(
+                identity=identity,
+                client="codex",
+                protocol="openai",
+                requested_model="gpt-fast",
+                resolved_alias="gpt-fast",
+                upstream_model="gpt-upstream",
+                policy_action="allowed+context-injected",
+                status="succeeded",
+                cost_basis="estimated",
+                context_lineage=ContextLineage(
+                    mode="optional",
+                    outcome="injected",
+                    reason="pack_injected",
+                    pack_id="ctxpack_0123456789abcdef01234567",
+                    record_ids=("record-a", "record-b"),
+                    policy_version="context-v1",
+                    retrieval_version="lexical-v1",
+                    render_version="user-reference-json-v1",
+                    repository_revision=None,
+                    estimated_tokens=123,
+                    assembly_milliseconds=4,
+                    reuse_status="fresh",
+                ),
+            )
+
+            event = store.audit_events(
+                since="2000-01-01T00:00:00+00:00",
+                kind="usage",
+            )[0]
+
+            self.assertEqual(event["schema_version"], 2)
+            self.assertEqual(event["context_injection_mode"], "optional")
+            self.assertEqual(event["context_injection_outcome"], "injected")
+            self.assertEqual(event["context_pack_id"], "ctxpack_0123456789abcdef01234567")
+            self.assertEqual(event["context_record_ids"], ["record-a", "record-b"])
+            self.assertEqual(event["context_estimated_tokens"], 123)
+            self.assertEqual(event["context_assembly_milliseconds"], 4)
+            self.assertNotIn("query", event)
+            self.assertNotIn("content", event)
+            report = store.report_rows(group_by="person")[0]
+            self.assertEqual(report["context_injected_requests"], 1)
+            self.assertEqual(report["context_required_denials"], 0)
+            self.assertEqual(report["context_estimated_tokens"], 123)
+            self.assertEqual(report["context_packs_used"], 1)
+
     def test_dlp_approval_is_metadata_only_non_self_exact_and_single_use(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             store = UsageStore(Path(temporary) / "usage.sqlite3")
@@ -453,6 +512,10 @@ class UsageStoreMigrationTests(unittest.TestCase):
                 audit[0]["provider_usage"],
                 {"input_tokens": 100, "output_tokens": 20},
             )
+            self.assertEqual(audit[0]["schema_version"], 2)
+            self.assertEqual(audit[0]["context_injection_mode"], "off")
+            self.assertEqual(audit[0]["context_injection_outcome"], "not_evaluated")
+            self.assertEqual(audit[0]["context_record_ids"], [])
             self.assertEqual(audit[1]["rules"], ["openai_api_key"])
             self.assertNotIn("prompt", audit[0])
             self.assertNotIn("response", audit[0])

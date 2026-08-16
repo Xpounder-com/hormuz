@@ -12,6 +12,7 @@ Hormuz HTTP transport
         +--> verify static/OIDC/session identity and resolve explicit actor/team metadata
         +--> resolve organization -> team -> person model, budget, and DLP policy
         +--> allow, deny, reroute, or cap the request
+        +--> when enabled, retrieve an authorized verified Context Pack and render it at user priority
         +--> classify provider content blocks; deny configured opaque images/files
         +--> inspect JSON, provider query, and allowlisted headers at the final DLP boundary
         +--> detect, redact, require approval, or deny without mutating keys/query/headers
@@ -66,7 +67,9 @@ deterministic lexical context pack
         +--> commit metadata-only pack-read audit
         +--> CLI stdout or POST /v1/context/packs response
         +--> hormuz_get_context through local MCP stdio adapter
-        +--> no provider call or automatic prompt injection
+        +--> disabled-by-default generation path
+                +--> provider-specific user-priority render
+                +--> complete mutated request enters DLP, budget, and provider path above
 ```
 
 The HTTP path authenticates first, derives organization/team/actor from the static credential, workload OIDC token, or mapped Hormuz human session, enforces server-owned pack/rate limits, and filters authorized metadata in SQLite before decoding content. Callers cannot supply identity, policy version, or historical evaluation time.
@@ -79,7 +82,7 @@ The HTTP path authenticates first, derives organization/team/actor from the stat
 - `hormuz/session_store.py` owns a separate local session database, event-time identity bindings, keyed credential hashes, encrypted transient flow state, atomic rotation, replay detection, tenant-scoped administration, revocation, and metadata-only security events.
 - `hormuz/credential_store.py` and `hormuz/session_client.py` own fail-closed OS secure-store custody and the CLI login/refresh/logout path.
 - `hormuz/session_admin_client.py` owns the authenticated, redirect-refusing session-administration CLI transport and validates the metadata-only session and security-event response contracts.
-- `hormuz/config.py` validates configuration, defines identity/route/rate-card policy data, and resolves monotonic organization/team/person DLP actions for the exact provider and routed model.
+- `hormuz/config.py` validates configuration, defines identity/route/rate-card policy data, and resolves monotonic organization/team/person model, DLP, budget, and context-injection policy.
 - `hormuz/policy.py` evaluates access, fallback, caps, and budgets without transport concerns.
 - The authenticated Claude Code catalog path resolves static organization/team/person model authorization through the policy engine and exposes only compatible policy aliases. It never contacts an upstream, reserves budget, or records usage; generation remains the authoritative budget and routing check.
 - `hormuz/store.py` owns the SQLite schema and monthly aggregations.
@@ -89,6 +92,7 @@ The HTTP path authenticates first, derives organization/team/actor from the stat
 - `hormuz/dlp_approval.py` computes domain-separated keyed fingerprints over canonical provider request material without persistence or transport concerns.
 - `hormuz/dlp_client.py` implements the bounded, authenticated approver CLI transport and refuses redirects or non-loopback plaintext HTTP.
 - `hormuz/context.py` authorizes, applies immutable lifecycle observations, quarantines high-confidence injection patterns, surfaces structured contradictions, ranks, budgets, and fingerprints explicit provider-neutral context packs without transport or persistence concerns.
+- `hormuz/context_injection.py` extracts bounded direct user text and deterministically renders authorized packs as provider-specific user-priority reference data without transport, persistence, or policy concerns.
 - `hormuz/context_lifecycle.py` defines strict evidence, promotion-policy, subject-fingerprint, conflict, negative-signal, and source/dependency transition rules without persistence or transport concerns.
 - `hormuz/context_api.py` defines the versioned lifecycle mutation request and metadata-only response contracts without authentication, persistence, or network behavior.
 - `hormuz/context_lifecycle_client.py` implements the bounded, authenticated remote connector transport, refuses redirects and non-loopback plaintext HTTP, and validates exact response shapes.
@@ -99,7 +103,7 @@ The HTTP path authenticates first, derives organization/team/actor from the stat
 
 ## Trust boundary
 
-Hormuz is trusted with plaintext requests and responses because it must inspect and relay them. The usage and DLP approval stores are deliberately metadata-only; the latter keeps only a keyed fingerprint and bounded binding metadata, never the payload. Provider billing imports add normalized financial metadata such as project/workspace IDs and line-item descriptions, but discard the raw provider response and never receive the administrator credential. Governed content is held in a different SQLite database and never written to the usage ledger. The current local context codec is plainly labeled as unencrypted and is not an enterprise storage claim. DLP runs after authentication and exact provider/model routing but before provider storage policy and upstream serialization. It inspects provider-bound JSON, one UTF-8 form-decoded view of the raw provider query, and the exact allowlisted caller headers that the transport will forward; JSON keys, the raw query, and header values are preserved, so would-be redaction in those locations fails closed. Team and actor overlays are selected only from the authenticated identity and can only strengthen an enabled organization rule; callers cannot request a weaker scope. Recognized opaque provider media is denied before egress unless the organization explicitly turns that rule off; Hormuz does not claim to inspect the underlying bytes. The off-mode exemption is limited to each recognized opaque object, so inspectable siblings remain governed by credential and DLP rules. Approval consumption is atomic, binds the operation/body/raw-query/forwarded-header map, and precedes egress, so mutation or concurrent replay cannot duplicate the exception. Future reusable-context injection must run after context authorization and before DLP so newly added context is inspected by the same egress controls.
+Hormuz is trusted with plaintext requests and responses because it must inspect and relay them. The usage and DLP approval stores are deliberately metadata-only; the latter keeps only a keyed fingerprint and bounded binding metadata, never the payload. Provider billing imports add normalized financial metadata such as project/workspace IDs and line-item descriptions, but discard the raw provider response and never receive the administrator credential. Governed content is held in a different SQLite database; usage lineage stores pack/record IDs and versions, never record content or the retrieval query. The current local context codec is plainly labeled as unencrypted and is not an enterprise storage claim. Automatic context lookup occurs only after authentication and model authorization; its metadata-only pack-read audit must commit before content can enter the provider-bound request. DLP then runs on the complete request, including injected context, before provider storage policy, budget reservation, and upstream serialization. It inspects provider-bound JSON, one UTF-8 form-decoded view of the raw provider query, and the exact allowlisted caller headers that the transport will forward; JSON keys, the raw query, and header values are preserved, so would-be redaction in those locations fails closed. Team and actor overlays are selected only from the authenticated identity and can only strengthen an enabled organization rule; callers cannot request a weaker scope. Recognized opaque provider media is denied before egress unless the organization explicitly turns that rule off; Hormuz does not claim to inspect the underlying bytes. The off-mode exemption is limited to each recognized opaque object, so inspectable siblings remain governed by credential and DLP rules. Approval consumption is atomic, binds the operation/body/raw-query/forwarded-header map, and precedes egress, so mutation or concurrent replay cannot duplicate the exception. DLP may transform rendered context; pack lineage identifies the selected governed sources rather than attesting to exact post-redaction provider bytes.
 
 ## Compatibility boundary
 

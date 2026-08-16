@@ -195,7 +195,10 @@
       ],
       "max_output_tokens": 32000,
       "monthly_budget_usd": 10000,
-      "per_actor_monthly_budget_usd": 500
+      "per_actor_monthly_budget_usd": 500,
+      "context_injection": {
+        "mode": "off"
+      }
     },
     "teams": {
       "engineering": {

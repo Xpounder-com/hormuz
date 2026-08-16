@@ -47,11 +47,11 @@ For a workload credential, replace `--profile` with `--credential-env HORMUZ_TOK
 - `limit` defaults to 50 and accepts 1–100;
 - `cursor` is the opaque value from the previous page.
 
-A successful response has schema version 1:
+A successful response has schema version 2. Version 2 adds the content-free automatic-context aggregates documented in [USAGE.md](USAGE.md):
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "organization_id": "xpounder",
   "group_by": "team",
   "filters": {"actor_id": null, "team_id": null},
@@ -70,7 +70,7 @@ A successful response has schema version 1:
 }
 ```
 
-The first request freezes an exclusive `window.end`; every cursor page reuses that window. Rows have the token, request-status, cost-basis, rate-card, model/provider/client, redaction, active-actor, and applicable budget fields documented in [USAGE.md](USAGE.md). Cursor state is never an authorization source: the gateway validates it and re-derives organization from the current credential on every page.
+The first request freezes an exclusive `window.end`; every cursor page reuses that window. Rows have the token, request-status, cost-basis, rate-card, model/provider/client, redaction, automatic-context, active-actor, and applicable budget fields documented in [USAGE.md](USAGE.md). Cursor state is never an authorization source: the gateway validates it and re-derives organization from the current credential on every page.
 
 Unknown, repeated, blank, over-limit, malformed, cursor/filter-mismatched, and unsupported fields return `400 invalid_usage_report_request`. A storage or mandatory audit-write failure returns `503 usage_admin_unavailable` without returning report rows.
 

@@ -23,10 +23,17 @@ from .auth import AuthenticationError, Authenticator
 from .config import GatewayConfig, Identity, ModelRoute, UpstreamConfig
 from .context import (
     CLASSIFICATIONS,
+    CONTEXT_RETRIEVAL_VERSION,
     ContextError,
     ContextPackRequest,
     ContextPrincipal,
     build_context_pack,
+)
+from .context_injection import (
+    CONTEXT_INJECTION_RENDER_VERSION,
+    ContextInjectionError,
+    extract_user_query,
+    inject_context_pack,
 )
 from .context_api import (
     ContextRevalidationBatchRequest,
@@ -51,7 +58,13 @@ from .session_store import (
     SQLiteSessionStore,
     SessionStoreError,
 )
-from .store import DLPApprovalStoreError, ReservationDenied, SecurityStoreError, UsageStore
+from .store import (
+    ContextLineage,
+    DLPApprovalStoreError,
+    ReservationDenied,
+    SecurityStoreError,
+    UsageStore,
+)
 from .usage import ResponseUsageParser
 from .usage_reporting import REPORT_DIMENSIONS, enrich_usage_rows
 
@@ -531,7 +544,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         self._send_json(
             HTTPStatus.OK,
             {
-                "schema_version": 1,
+                "schema_version": 2,
                 "organization_id": identity.organization_id,
                 "group_by": group_by,
                 "filters": {"actor_id": actor_id, "team_id": team_id},
@@ -1743,6 +1756,137 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", "0")
         self.end_headers()
 
+    def _prepare_automatic_context(
+        self,
+        *,
+        identity: Identity,
+        protocol: str,
+        client: str,
+        resolved_alias: str,
+        operation: str,
+        request_body: dict[str, Any],
+    ) -> tuple[dict[str, Any], ContextLineage]:
+        injection = self.server.config.resolved_policy(identity).context_injection
+        mode = injection.mode or "off"
+        if mode == "off":
+            return request_body, ContextLineage()
+        base = {
+            "mode": mode,
+            "policy_version": self.server.config.context_service.policy_version,
+        }
+        if injection.allowed_clients is not None and client not in injection.allowed_clients:
+            return request_body, ContextLineage(
+                **base,
+                outcome="not_injected",
+                reason="client_not_enabled",
+            )
+        if injection.allowed_models is not None and resolved_alias not in injection.allowed_models:
+            return request_body, ContextLineage(
+                **base,
+                outcome="not_injected",
+                reason="model_not_enabled",
+            )
+        if operation not in {"/v1/responses", "/v1/messages"}:
+            return request_body, ContextLineage(
+                **base,
+                outcome="not_injected",
+                reason="unsupported_operation",
+            )
+        query = extract_user_query(protocol, request_body)
+        if query is None:
+            return request_body, ContextLineage(
+                **base,
+                outcome="denied" if mode == "required" else "not_injected",
+                reason="no_eligible_query",
+            )
+
+        service = self.server.config.context_service
+        token_budget = min(
+            service.max_token_budget,
+            injection.token_budget or service.max_token_budget,
+        )
+        max_items = min(
+            service.max_items,
+            injection.max_items or service.max_items,
+        )
+        started = time.monotonic()
+        as_of = datetime.now(timezone.utc)
+        principal = ContextPrincipal(
+            organization_id=identity.organization_id,
+            team_id=identity.team_id,
+            actor_id=identity.actor_id,
+            clearance=identity.clearance,
+        )
+        pack_request = ContextPackRequest(
+            query=query,
+            principal=principal,
+            token_budget=token_budget,
+            policy_version=service.policy_version,
+            max_items=max_items,
+            include_provisional=False,
+            as_of=as_of,
+        )
+        stored = self.server.context_repository.list_access_authorized(principal)
+        pack = build_context_pack(
+            (item.record for item in stored),
+            pack_request,
+        )
+        # The same authorization-first read boundary applies to automatic
+        # injection: no selected content can leave Hormuz unless this audit
+        # commit succeeds.
+        self.server.context_repository.record_pack_read(pack, occurred_at=as_of)
+        elapsed = max(0, round((time.monotonic() - started) * 1000))
+        pack_lineage = {
+            **base,
+            "pack_id": pack.pack_id,
+            "record_ids": tuple(item.record.record_id for item in pack.items),
+            "retrieval_version": CONTEXT_RETRIEVAL_VERSION,
+            "repository_revision": pack.repository_revision,
+            "assembly_milliseconds": elapsed,
+        }
+        if not pack.items:
+            return request_body, ContextLineage(
+                **pack_lineage,
+                outcome="denied" if mode == "required" else "not_injected",
+                reason="empty_pack",
+                reuse_status="fresh",
+            )
+        try:
+            rendered = inject_context_pack(protocol, request_body, pack)
+        except ContextInjectionError as error:
+            return request_body, ContextLineage(
+                **pack_lineage,
+                outcome="denied" if mode == "required" else "not_injected",
+                reason=error.code,
+                reuse_status="fresh",
+            )
+        lineage = ContextLineage(
+            **pack_lineage,
+            outcome="injected",
+            reason=(
+                "authorized_pack_already_present"
+                if rendered.already_present
+                else "pack_injected"
+            ),
+            render_version=CONTEXT_INJECTION_RENDER_VERSION,
+            estimated_tokens=rendered.estimated_tokens,
+            reuse_status="already_present" if rendered.already_present else "fresh",
+        )
+        LOGGER.info(
+            "context_injection_ready actor=%s team=%s organization=%s client=%s protocol=%s pack_id=%s selected=%d outcome=%s estimated_tokens=%d assembly_ms=%d",
+            identity.actor_id,
+            identity.team_id,
+            identity.organization_id,
+            client,
+            protocol,
+            pack.pack_id,
+            len(pack.items),
+            pack.outcome,
+            rendered.estimated_tokens,
+            elapsed,
+        )
+        return rendered.body, lineage
+
     def _proxy_generation(
         self,
         *,
@@ -1804,6 +1948,88 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             current_output = request_body.get(output_field)
             if current_output is None or current_output > decision.max_output_tokens:
                 request_body[output_field] = decision.max_output_tokens
+        try:
+            request_body, context_lineage = self._prepare_automatic_context(
+                identity=identity,
+                protocol=protocol,
+                client=client,
+                resolved_alias=decision.resolved_alias or requested_model,
+                operation=urlsplit(self.path).path,
+                request_body=request_body,
+            )
+        except (ContextError, ContextStoreError, sqlite3.Error):
+            mode = (
+                self.server.config.resolved_policy(identity).context_injection.mode
+                or "off"
+            )
+            context_lineage = ContextLineage(
+                mode=mode,
+                outcome="denied",
+                reason="context_store_unavailable",
+                policy_version=self.server.config.context_service.policy_version,
+            )
+            if account_usage:
+                self.server.store.record(
+                    identity=identity,
+                    client=client,
+                    protocol=protocol,
+                    requested_model=decision.requested_model,
+                    resolved_alias=decision.resolved_alias,
+                    upstream_model=decision.route.upstream_model,
+                    policy_action="context_unavailable",
+                    status="denied",
+                    cost_basis="not_applicable",
+                    currency=decision.route.currency,
+                    rate_card_version=decision.route.rate_card_version,
+                    context_lineage=context_lineage,
+                )
+            LOGGER.error(
+                "context_injection_unavailable actor=%s team=%s organization=%s client=%s protocol=%s",
+                identity.actor_id,
+                identity.team_id,
+                identity.organization_id,
+                client,
+                protocol,
+            )
+            self._send_protocol_error(
+                protocol,
+                "Governed context is temporarily unavailable.",
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                code="hormuz_context_unavailable",
+            )
+            return
+        if context_lineage.outcome == "denied":
+            if account_usage:
+                self.server.store.record(
+                    identity=identity,
+                    client=client,
+                    protocol=protocol,
+                    requested_model=decision.requested_model,
+                    resolved_alias=decision.resolved_alias,
+                    upstream_model=decision.route.upstream_model,
+                    policy_action="context_required_denied",
+                    status="denied",
+                    cost_basis="not_applicable",
+                    currency=decision.route.currency,
+                    rate_card_version=decision.route.rate_card_version,
+                    context_lineage=context_lineage,
+                )
+            LOGGER.info(
+                "context_injection_denied actor=%s team=%s organization=%s client=%s protocol=%s reason=%s",
+                identity.actor_id,
+                identity.team_id,
+                identity.organization_id,
+                client,
+                protocol,
+                context_lineage.reason,
+            )
+            self._send_protocol_error(
+                protocol,
+                "Organization policy requires authorized governed context for this request.",
+                HTTPStatus.FORBIDDEN,
+                code="hormuz_context_required",
+            )
+            return
         forwarded_headers = self._forwarded_client_headers(protocol)
         forwarded_query = urlsplit(self.path).query
         try:
@@ -1958,6 +2184,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                     rate_card_version=decision.route.rate_card_version,
                     redaction_count=redaction.redaction_count,
                     redaction_rules=redaction_rules,
+                    context_lineage=context_lineage,
                 )
             LOGGER.warning(
                 "egress_denied actor=%s team=%s client=%s protocol=%s requested_model=%s routed_model=%s control=%s detections=%d rules=%s",
@@ -1999,6 +2226,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                     rate_card_version=decision.route.rate_card_version,
                     redaction_count=redaction.redaction_count,
                     redaction_rules=redaction_rules,
+                    context_lineage=context_lineage,
                 )
             LOGGER.warning(
                 "dlp_approval_required actor=%s team=%s client=%s protocol=%s requested_model=%s routed_model=%s policy_version=%s detections=%d rules=%s",
@@ -2052,6 +2280,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                     rate_card_version=decision.route.rate_card_version,
                     redaction_count=redaction.redaction_count,
                     redaction_rules=redaction_rules,
+                    context_lineage=context_lineage,
                 )
             LOGGER.info(
                 "provider_policy_denied actor=%s team=%s client=%s protocol=%s requested_model=%s reason=background_disabled",
@@ -2072,6 +2301,8 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             redaction.value["store"] = False
 
         policy_action = decision.action
+        if context_lineage.outcome == "injected":
+            policy_action = f"{policy_action}+context-injected"
         if redaction.redaction_count:
             policy_action = f"{policy_action}+redacted"
         if approval_authorized:
@@ -2111,6 +2342,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                     rate_card_version=decision.route.rate_card_version,
                     redaction_count=redaction.redaction_count,
                     redaction_rules=redaction_rules,
+                    context_lineage=context_lineage,
                 )
                 LOGGER.info(
                     "budget_reservation_denied actor=%s team=%s client=%s protocol=%s requested_model=%s reason=%s",
@@ -2145,6 +2377,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 reservation_id=reservation_id,
                 reservation_ttl_seconds=self.server.config.upstream_timeout_seconds + 60,
                 approval_request_id=(approval_request_id if approval_authorized else None),
+                context_lineage=context_lineage,
             )
         finally:
             self.server.store.release_budget_reservation(reservation_id)
@@ -2167,6 +2400,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         reservation_id: str | None,
         reservation_ttl_seconds: int,
         approval_request_id: str | None,
+        context_lineage: ContextLineage,
     ) -> None:
         route = decision.route
         assert route is not None
@@ -2188,6 +2422,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                     rate_card_version=route.rate_card_version,
                     redaction_count=redaction_count,
                     redaction_rules=redaction_rules,
+                    context_lineage=context_lineage,
                 )
             self._send_protocol_error(
                 protocol,
@@ -2224,6 +2459,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                     rate_card_version=route.rate_card_version,
                     redaction_count=redaction_count,
                     redaction_rules=redaction_rules,
+                    context_lineage=context_lineage,
                 )
             self._send_protocol_error(
                 protocol,
@@ -2246,6 +2482,8 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         self.send_header("X-Hormuz-Policy-Decision", policy_action)
         self.send_header("X-Hormuz-Requested-Model", decision.requested_model)
         self.send_header("X-Hormuz-Routed-Model", route.upstream_model)
+        if context_lineage.outcome == "injected" and context_lineage.pack_id is not None:
+            self.send_header("X-Hormuz-Context-Pack", context_lineage.pack_id)
         if redaction_count:
             self.send_header("X-Hormuz-Redactions", str(redaction_count))
         if dlp_detection_count:
@@ -2354,6 +2592,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 provider_request_id=provider_request_id,
                 redaction_count=redaction_count,
                 redaction_rules=redaction_rules,
+                context_lineage=context_lineage,
             )
             LOGGER.info(
                 "request_complete actor=%s team=%s client=%s protocol=%s action=%s requested_model=%s routed_model=%s status=%s input_tokens=%d output_tokens=%d cost_microusd=%d redactions=%d",

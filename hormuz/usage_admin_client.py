@@ -76,7 +76,7 @@ class UsageAdminClient:
             "rows",
             "next_cursor",
         }
-        if set(response) != required or response.get("schema_version") != 1:
+        if set(response) != required or response.get("schema_version") != 2:
             raise UsageAdminClientError("invalid_gateway_response")
         if response.get("group_by") != group_by:
             raise UsageAdminClientError("invalid_gateway_response")
@@ -205,6 +205,10 @@ def _valid_row(value: object, *, group_by: str) -> bool:
         "rate_card_versions",
         "active_actors",
         "redactions",
+        "context_injected_requests",
+        "context_required_denials",
+        "context_estimated_tokens",
+        "context_packs_used",
         "cost_usd",
         "estimated_cost_usd",
         "budget_usd",

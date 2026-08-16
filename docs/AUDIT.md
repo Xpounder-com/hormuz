@@ -40,15 +40,17 @@ python3 -m hormuz --config hormuz.json context-audit-export \
 
 Context event types are `context.mutation`, `context.read`, `context.lifecycle`, `context.evidence`, and `context.revalidation`. Evidence events include only the record ID/version, signal family, actor, and policy metadata; the submitted evidence reference and its fingerprint are omitted. Revalidation events expose job, batch status, scope, actor, and policy metadata. The ordinary mutation event records each verification flip, while the current job JSON reports bounded aggregate promotion, invalidation, unchanged, deferred, and processed counts. Neither surface includes record content, source locators, dependency identities, query text, or raw evidence references.
 
-## Schema version 1
+## Schema versions
 
 Every line is one JSON object containing:
 
-- `schema_version`: currently `1`.
+- `schema_version`: usage events are `2`; security and administrative events remain `1`.
 - `event_type`: `usage`, `security.secret`, `security.dlp`, `security.dlp.approval`, or `security.admin.usage_read`.
 - `id` and `occurred_at`: the event identifier and UTC occurrence time.
 - event-time organization, actor, team, client, protocol, requested/resolved/routed/actual model, policy, status, normalized token, cost-basis, currency, rate-card-version, provider-request, and redaction metadata when applicable. Pre-organization usage rows retain a null organization rather than receiving a guessed tenant.
 - `provider_usage`: a provider-specific allowlisted object containing only documented usage counters and bounded categorical metadata. Unknown fields and content-bearing provider data are removed before the event is written.
+
+Usage schema version 2 adds automatic-context lineage: injection mode, outcome and bounded reason; pack and selected record IDs; context policy, retrieval and render versions; repository revision; estimated rendered tokens; assembly time; and authoritative reuse status. It does not include the retrieval query, prompt, response, rendered pack, record content, title, source locator/hash, or provider credential.
 
 Array fields such as `redaction_rules`, `rules`, and DLP `findings` are emitted as JSON arrays. A finding is restricted to rule ID, category, confidence, action, and count. The `opaque_media` finding therefore records only the `unsupported_media` category and number of provider content blocks; URLs, file IDs, filenames, media types, encoded bytes, and surrounding content are excluded. DLP events also carry the exact routed upstream model and the effective policy version. For an identity with team/person overlays, that version is a deterministic digest of safe layer versions and rule metadata; it contains no dictionary values and binds later approval matching. Approval events record `requested`, `approved`, `consumed`, or post-egress `model_mismatch` transitions with the opaque request ID, event-time employee/team, separate decision actor, provider/model/policy, and rule IDs. They exclude the keyed payload fingerprint as well as all content.
 
