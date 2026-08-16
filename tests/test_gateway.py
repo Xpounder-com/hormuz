@@ -3075,19 +3075,19 @@ class GatewayIntegrationTests(unittest.TestCase):
             "claude-sonnet-5",
             "Reply with exactly ok and do not call tools.",
         ]
-        with mock.patch.object(
-            self.gateway.policy_engine,
-            "model_catalog",
-            wraps=self.gateway.policy_engine.model_catalog,
-        ) as model_catalog:
-            result = subprocess.run(
-                command,
-                cwd=self.root,
-                env=environment,
-                text=True,
-                capture_output=True,
-                timeout=45,
-            )
+        # Claude Code treats gateway catalog discovery as an optional model-picker
+        # prefetch. Its noninteractive print mode performs that prefetch on macOS
+        # but can skip it on Linux, so this official-client gate proves inference
+        # routing only. The exact authenticated discovery request and response are
+        # covered independently by the deterministic /v1/models contract tests.
+        result = subprocess.run(
+            command,
+            cwd=self.root,
+            env=environment,
+            text=True,
+            capture_output=True,
+            timeout=45,
+        )
         self.assertEqual(
             result.returncode,
             0,
@@ -3098,7 +3098,6 @@ class GatewayIntegrationTests(unittest.TestCase):
             ),
         )
         self.assertIn("ok", result.stdout.lower())
-        self.assertGreater(model_catalog.call_count, 0)
         debug_output = debug_path.read_text(encoding="utf-8") if debug_path.exists() else ""
         self.assertIn("hormuz", debug_output.lower())
         self.assertGreater(len(FakeProviderHandler.requests), before)
