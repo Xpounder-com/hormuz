@@ -210,6 +210,47 @@ class ClientConfigTests(unittest.TestCase):
                         environ={"HORMUZ_TOKEN": "test-identity-token"},
                     )
 
+    def test_connection_resource_configuration_is_bounded(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "hormuz.json"
+            raw = json.loads((ROOT / "config.example.json").read_text(encoding="utf-8"))
+            raw["listen"].pop("max_connections")
+            raw["listen"].pop("request_header_timeout_seconds")
+            path.write_text(json.dumps(raw), encoding="utf-8")
+            defaulted = GatewayConfig.load(
+                path,
+                environ={"HORMUZ_TOKEN": "test-identity-token"},
+            )
+            self.assertEqual(defaulted.listen.max_connections, 256)
+            self.assertEqual(defaulted.listen.request_header_timeout_seconds, 15)
+
+            raw["listen"]["max_connections"] = 64
+            raw["listen"]["request_header_timeout_seconds"] = 20
+            path.write_text(json.dumps(raw), encoding="utf-8")
+            config = GatewayConfig.load(
+                path,
+                environ={"HORMUZ_TOKEN": "test-identity-token"},
+            )
+            self.assertEqual(config.listen.max_connections, 64)
+            self.assertEqual(config.listen.request_header_timeout_seconds, 20)
+
+            for field, invalid_values in (
+                ("max_connections", (0, 10_001)),
+                ("request_header_timeout_seconds", (0, 121)),
+            ):
+                for invalid in invalid_values:
+                    raw["listen"][field] = invalid
+                    path.write_text(json.dumps(raw), encoding="utf-8")
+                    with self.subTest(field=field, invalid=invalid), self.assertRaisesRegex(
+                        ConfigError,
+                        f"listen.{field}",
+                    ):
+                        GatewayConfig.load(
+                            path,
+                            environ={"HORMUZ_TOKEN": "test-identity-token"},
+                        )
+                raw["listen"][field] = 64 if field == "max_connections" else 20
+
     def test_doctor_reports_effective_request_resource_limits(self) -> None:
         output = io.StringIO()
         with (
@@ -226,6 +267,8 @@ class ClientConfigTests(unittest.TestCase):
 
         self.assertEqual(result, 0)
         self.assertIn("max concurrent requests: 128", output.getvalue())
+        self.assertIn("max concurrent connections: 256", output.getvalue())
+        self.assertIn("request-header deadline: 15 seconds", output.getvalue())
         self.assertIn("upstream response deadline: 600 seconds", output.getvalue())
 
     def test_provider_upstreams_require_https_outside_loopback(self) -> None:

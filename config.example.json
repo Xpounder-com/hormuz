@@ -3,7 +3,9 @@
     "host": "127.0.0.1",
     "port": 8787,
     "shutdown_grace_seconds": 30,
-    "max_concurrent_requests": 128
+    "max_concurrent_requests": 128,
+    "max_connections": 256,
+    "request_header_timeout_seconds": 15
   },
   "database": "./hormuz.sqlite3",
   "context_database": "./hormuz-context.sqlite3",

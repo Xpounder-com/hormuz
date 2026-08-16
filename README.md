@@ -99,7 +99,7 @@ hormuz --config /etc/hormuz/hormuz.json client-config codex \
 
 The same flags work with `client-config claude`. The effective context policy must independently grant the repository; Hormuz consumes the generated scope headers and never forwards them to a model provider.
 
-For process probes, use `GET /health/live` and `GET /health/ready`. Readiness returns `503 busy` while parsed-request capacity is full and `503 draining` after shutdown begins. Health probes do not consume application capacity. See [docs/OPERATIONS.md](docs/OPERATIONS.md) for the exact limits, response, shutdown, and current deployment boundary.
+For process probes, use `GET /health/live` and `GET /health/ready`. Readiness returns `503 busy` while parsed-request capacity is full and `503 draining` after shutdown begins. Health probes do not consume application capacity, but they require one of the bounded accepted-connection slots. See [docs/OPERATIONS.md](docs/OPERATIONS.md) for the exact connection, header, request, provider-response, and shutdown limits plus the current deployment boundary.
 
 For a repeatable single-node container checkpoint, build the pinned non-root image and run its executable restricted-runtime smoke test:
 

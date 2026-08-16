@@ -750,6 +750,202 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertEqual(recovered_status, 200)
         self.assertEqual(json.loads(recovered_body)["status"], "ready")
 
+    def test_connection_limit_rejects_before_handler_thread_and_recovers(self) -> None:
+        self.gateway.config = replace(
+            self.gateway.config,
+            listen=replace(
+                self.gateway.config.listen,
+                max_connections=1,
+                request_header_timeout_seconds=5,
+            ),
+        )
+        before_provider = len(FakeProviderHandler.requests)
+        before_usage = self.gateway.store.monthly_totals(actor_id="alice").requests
+        holder = socket.create_connection(
+            ("127.0.0.1", self.gateway.server_port),
+            timeout=2,
+        )
+        rejected = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        rejected.settimeout(2)
+        try:
+            deadline = time.monotonic() + 2
+            while self.gateway.active_connections != 1 and time.monotonic() < deadline:
+                time.sleep(0.01)
+            self.assertEqual(self.gateway.active_connections, 1)
+
+            with self.assertLogs("hormuz", level="WARNING") as captured:
+                rejected.connect(("127.0.0.1", self.gateway.server_port))
+                rejected.sendall(
+                    b"GET /health/live HTTP/1.1\r\n"
+                    b"Host: capacity-marker-must-not-reflect\r\n\r\n"
+                )
+                try:
+                    response = rejected.recv(1)
+                    rejected_by_server = response == b""
+                except (ConnectionResetError, BrokenPipeError):
+                    rejected_by_server = True
+
+            self.assertTrue(rejected_by_server)
+            self.assertEqual(self.gateway.active_connections, 1)
+            evidence = "\n".join(captured.output)
+            self.assertIn("connection_capacity_exhausted limit=1", evidence)
+            self.assertNotIn("capacity-marker-must-not-reflect", evidence)
+            self.assertEqual(len(FakeProviderHandler.requests), before_provider)
+            self.assertEqual(
+                self.gateway.store.monthly_totals(actor_id="alice").requests,
+                before_usage,
+            )
+        finally:
+            rejected.close()
+            holder.close()
+
+        deadline = time.monotonic() + 2
+        while self.gateway.active_connections and time.monotonic() < deadline:
+            time.sleep(0.01)
+        self.assertEqual(self.gateway.active_connections, 0)
+        recovered_status, _, recovered_body = self._get(
+            "/health/ready",
+            include_authorization=False,
+        )
+        self.assertEqual(recovered_status, 200)
+        self.assertEqual(json.loads(recovered_body)["status"], "ready")
+
+    def test_connection_capacity_diagnostics_are_content_free_and_rate_limited(self) -> None:
+        with (
+            mock.patch("hormuz.server.time.monotonic", side_effect=(100.0, 101.0, 106.0)),
+            mock.patch("hormuz.server.LOGGER.warning") as warning,
+        ):
+            self.gateway._log_connection_capacity_exhausted()
+            self.gateway._log_connection_capacity_exhausted()
+            self.gateway._log_connection_capacity_exhausted()
+
+        self.assertEqual(warning.call_count, 2)
+        self.assertEqual(
+            warning.call_args_list[0].args,
+            (
+                "connection_capacity_exhausted limit=%d suppressed=%d",
+                256,
+                0,
+            ),
+        )
+        self.assertEqual(
+            warning.call_args_list[1].args,
+            (
+                "connection_capacity_exhausted limit=%d suppressed=%d",
+                256,
+                1,
+            ),
+        )
+
+    def test_total_header_deadline_stops_continuous_trickle_and_recovers(self) -> None:
+        self.gateway.config = replace(
+            self.gateway.config,
+            listen=replace(
+                self.gateway.config.listen,
+                max_connections=1,
+                request_header_timeout_seconds=1,
+            ),
+        )
+        before_provider = len(FakeProviderHandler.requests)
+        before_usage = self.gateway.store.monthly_totals(actor_id="alice").requests
+        connection = socket.create_connection(
+            ("127.0.0.1", self.gateway.server_port),
+            timeout=3,
+        )
+        connection.settimeout(3)
+        started = time.monotonic()
+        marker = "HEADER-DEADLINE-CONTENT-MUST-NOT-REFLECT"
+        try:
+            connection.sendall(
+                b"GET /health/live HTTP/1.1\r\n"
+                b"Host: localhost\r\n"
+                + f"X-Leak: {marker}".encode("ascii")
+            )
+            with self.assertLogs("hormuz", level="WARNING") as captured:
+                while time.monotonic() - started < 2.5:
+                    try:
+                        connection.sendall(b"x")
+                    except (BrokenPipeError, ConnectionResetError):
+                        break
+                    time.sleep(0.1)
+                try:
+                    closed = connection.recv(1) == b""
+                except ConnectionResetError:
+                    closed = True
+        finally:
+            connection.close()
+
+        elapsed = time.monotonic() - started
+        self.assertTrue(closed)
+        self.assertGreaterEqual(elapsed, 0.75)
+        self.assertLess(elapsed, 2.5)
+        evidence = "\n".join(captured.output)
+        self.assertIn("request_header_deadline_exceeded", evidence)
+        self.assertNotIn(marker, evidence)
+
+        deadline = time.monotonic() + 2
+        while self.gateway.active_connections and time.monotonic() < deadline:
+            time.sleep(0.01)
+        self.assertEqual(self.gateway.active_connections, 0)
+        self.assertEqual(len(FakeProviderHandler.requests), before_provider)
+        self.assertEqual(
+            self.gateway.store.monthly_totals(actor_id="alice").requests,
+            before_usage,
+        )
+        recovered_status, _, recovered_body = self._get(
+            "/health/ready",
+            include_authorization=False,
+        )
+        self.assertEqual(recovered_status, 200)
+        self.assertEqual(json.loads(recovered_body)["status"], "ready")
+
+    def test_header_deadline_rearms_while_keep_alive_waits_for_next_request(self) -> None:
+        self.gateway.config = replace(
+            self.gateway.config,
+            listen=replace(
+                self.gateway.config.listen,
+                max_connections=1,
+                request_header_timeout_seconds=1,
+            ),
+        )
+        connection = http.client.HTTPConnection(
+            "127.0.0.1",
+            self.gateway.server_port,
+            timeout=3,
+        )
+        try:
+            connection.request("GET", "/health/live")
+            response = connection.getresponse()
+            self.assertEqual(response.status, 200)
+            self.assertEqual(json.loads(response.read())["status"], "live")
+            self.assertEqual(self.gateway.active_connections, 1)
+            keep_alive_socket = connection.sock
+            self.assertIsNotNone(keep_alive_socket)
+
+            with self.assertLogs("hormuz", level="WARNING") as captured:
+                deadline = time.monotonic() + 2
+                while self.gateway.active_connections and time.monotonic() < deadline:
+                    time.sleep(0.01)
+            self.assertEqual(self.gateway.active_connections, 0)
+            self.assertIn(
+                "request_header_deadline_exceeded",
+                "\n".join(captured.output),
+            )
+            try:
+                closed = keep_alive_socket.recv(1) == b""
+            except ConnectionResetError:
+                closed = True
+            self.assertTrue(closed)
+        finally:
+            connection.close()
+
+        recovered_status, _, recovered_body = self._get(
+            "/health/ready",
+            include_authorization=False,
+        )
+        self.assertEqual(recovered_status, 200)
+        self.assertEqual(json.loads(recovered_body)["status"], "ready")
+
     def test_total_upstream_deadline_stops_continuously_trickled_provider_streams(self) -> None:
         self.gateway.config = replace(self.gateway.config, upstream_timeout_seconds=1)
         FakeProviderHandler.response_stream_override = b"data: not-json\n\n" * 10_000

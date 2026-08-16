@@ -5,6 +5,7 @@ import binascii
 import json
 import logging
 import os
+import socket
 import sqlite3
 import threading
 import time
@@ -90,6 +91,7 @@ MAX_AUTH_REQUEST_BYTES = 8 * 1024
 MAX_DLP_APPROVAL_REQUEST_BYTES = 2 * 1024
 MAX_PROVIDER_QUERY_DECODE_DEPTH = 3
 MAX_PROVIDER_REQUEST_HEADER_BYTES = 1024
+CONNECTION_CAPACITY_LOG_INTERVAL_SECONDS = 5.0
 _CONTEXT_SCOPE_HEADERS = (
     ("X-Hormuz-Repository", "repository_id"),
     ("X-Hormuz-Branch", "branch"),
@@ -269,6 +271,13 @@ class GatewayServer(ThreadingHTTPServer):
         self._draining = threading.Event()
         self._request_condition = threading.Condition()
         self._active_requests = 0
+        self._connection_condition = threading.Condition()
+        self._active_connections = 0
+        self._connections: set[socket.socket] = set()
+        self._header_deadlines: dict[socket.socket, float] = {}
+        self._header_watchdog_stopped = False
+        self._last_connection_capacity_log: float | None = None
+        self._suppressed_connection_capacity_logs = 0
         self._shutdown_lock = threading.Lock()
         self._shutdown_started = False
         self.config = config
@@ -324,6 +333,157 @@ class GatewayServer(ThreadingHTTPServer):
         self._redactor_cache: dict[tuple[str, str, str, str, str], SecretRedactor] = {}
         self._redactor_cache_lock = threading.Lock()
         super().__init__((config.listen.host, config.listen.port), GatewayRequestHandler)
+        self._header_watchdog = threading.Thread(
+            target=self._watch_header_deadlines,
+            name="hormuz-header-watchdog",
+            daemon=True,
+        )
+        self._header_watchdog.start()
+
+    def process_request(
+        self,
+        request: socket.socket,
+        client_address: tuple[str, int],
+    ) -> None:
+        """Bound accepted connections before ThreadingMixIn creates a worker."""
+
+        if not self._admit_connection(request):
+            self._log_connection_capacity_exhausted()
+            self.shutdown_request(request)
+            return
+        try:
+            super().process_request(request, client_address)
+        except BaseException:
+            self._connection_finished(request)
+            raise
+
+    def process_request_thread(
+        self,
+        request: socket.socket,
+        client_address: tuple[str, int],
+    ) -> None:
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self._connection_finished(request)
+
+    def server_close(self) -> None:
+        """Stop the deadline worker and wake any pre-parse connection workers."""
+
+        with self._connection_condition:
+            connections = tuple(self._connections)
+            self._header_watchdog_stopped = True
+            self._header_deadlines.clear()
+            self._connection_condition.notify_all()
+        for connection in connections:
+            try:
+                connection.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+        super().server_close()
+        self._header_watchdog.join(timeout=1)
+
+    def handle_error(
+        self,
+        request: socket.socket,
+        client_address: tuple[str, int],
+    ) -> None:
+        """Keep unexpected connection-worker failures content-free."""
+
+        LOGGER.error("connection_handler_failed")
+
+    def _admit_connection(self, request: socket.socket) -> bool:
+        with self._connection_condition:
+            if self._active_connections >= self.config.listen.max_connections:
+                return False
+            self._active_connections += 1
+            self._connections.add(request)
+            self._header_deadlines[request] = (
+                time.monotonic()
+                + self.config.listen.request_header_timeout_seconds
+            )
+            self._connection_condition.notify_all()
+            return True
+
+    def _connection_finished(self, request: socket.socket) -> None:
+        with self._connection_condition:
+            if request not in self._connections:
+                raise RuntimeError("connection accounting underflow")
+            self._connections.remove(request)
+            self._header_deadlines.pop(request, None)
+            self._active_connections -= 1
+            self._connection_condition.notify_all()
+
+    def _log_connection_capacity_exhausted(self) -> None:
+        """Rate-limit a content-free diagnostic on the overloaded accept path."""
+
+        now = time.monotonic()
+        with self._connection_condition:
+            last_log = self._last_connection_capacity_log
+            if (
+                last_log is not None
+                and now - last_log < CONNECTION_CAPACITY_LOG_INTERVAL_SECONDS
+            ):
+                self._suppressed_connection_capacity_logs += 1
+                return
+            suppressed = self._suppressed_connection_capacity_logs
+            self._suppressed_connection_capacity_logs = 0
+            self._last_connection_capacity_log = now
+        LOGGER.warning(
+            "connection_capacity_exhausted limit=%d suppressed=%d",
+            self.config.listen.max_connections,
+            suppressed,
+        )
+
+    def arm_request_header_deadline(self, request: socket.socket) -> None:
+        """Start an absolute deadline for the next keep-alive request header."""
+
+        with self._connection_condition:
+            if request in self._connections and request not in self._header_deadlines:
+                self._header_deadlines[request] = (
+                    time.monotonic()
+                    + self.config.listen.request_header_timeout_seconds
+                )
+                self._connection_condition.notify_all()
+
+    def request_header_finished(self, request: socket.socket) -> None:
+        with self._connection_condition:
+            if self._header_deadlines.pop(request, None) is not None:
+                self._connection_condition.notify_all()
+
+    def _watch_header_deadlines(self) -> None:
+        while True:
+            expired: tuple[socket.socket, ...]
+            with self._connection_condition:
+                while True:
+                    if self._header_watchdog_stopped:
+                        return
+                    if not self._header_deadlines:
+                        self._connection_condition.wait()
+                        continue
+                    now = time.monotonic()
+                    expired = tuple(
+                        connection
+                        for connection, deadline in self._header_deadlines.items()
+                        if deadline <= now
+                    )
+                    if expired:
+                        for connection in expired:
+                            self._header_deadlines.pop(connection, None)
+                        break
+                    next_deadline = min(self._header_deadlines.values())
+                    self._connection_condition.wait(next_deadline - now)
+            LOGGER.warning("request_header_deadline_exceeded count=%d", len(expired))
+            for connection in expired:
+                try:
+                    connection.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+
+    @property
+    def active_connections(self) -> int:
+        with self._connection_condition:
+            return self._active_connections
 
     @property
     def is_draining(self) -> bool:
@@ -431,14 +591,19 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
 
     def handle_one_request(self) -> None:
         self._hormuz_request_admission = _REQUEST_DRAINING
+        self.server.arm_request_header_deadline(self.connection)
         try:
             super().handle_one_request()
         finally:
+            self.server.request_header_finished(self.connection)
             if self._hormuz_request_admission == _REQUEST_ADMITTED:
                 self.server.request_finished()
 
     def parse_request(self) -> bool:
-        parsed = super().parse_request()
+        try:
+            parsed = super().parse_request()
+        finally:
+            self.server.request_header_finished(self.connection)
         if parsed:
             path = urlsplit(self.path).path
             if path in {"/health", "/health/live", "/health/ready"}:

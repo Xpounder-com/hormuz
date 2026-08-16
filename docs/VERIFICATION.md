@@ -805,6 +805,25 @@ A failure-first single-process resource review was exercised locally on August 1
 
 This closes parsed-application-request concurrency and provider-response relay duration for one Hormuz process, not production deployment issue #11. TCP connections and threads before parsing, a complete ingress-header deadline, operating-system DNS resolution, reverse-proxy/WAF slow-client controls, cross-replica capacity, TLS ingress, shared persistence, HA, backup/restore, RPO/RTO, KMS, and independent security review remain open.
 
+### Pre-parse connection capacity and total request-header deadline
+
+A failure-first transport-boundary review was exercised locally on August 16, 2026 through real TCP sockets against the Hormuz HTTP server. No live provider credential or endpoint was used.
+
+- source inspection confirmed that Python's `ThreadingHTTPServer` created a new worker before Hormuz's parsed-request admission check, while request-line and header reads had no application-owned deadline. Incomplete or continuously trickled headers could therefore retain unbounded workers;
+- `listen.max_connections` now defaults to `256`, accepts only `1` through `10000`, and defaults safely for existing configuration files. The accepted-connection slot is acquired before the standard library creates a handler thread and is released exactly once on ordinary completion, parse failure, disconnect, deadline, or worker error;
+- a connection arriving at the ceiling is hard-closed before handler creation because an incomplete request cannot safely receive a shaped HTTP response. The event is rate-limited and fixed to `connection_capacity_exhausted` with only the numeric configured ceiling and suppressed-event count; no client address, request bytes, credential, provider call, or usage row is retained;
+- `listen.request_header_timeout_seconds` now defaults to `15`, accepts only `1` through `120`, and is an absolute wall-clock deadline rather than socket inactivity. One server-wide watchdog covers accepted sockets and re-arms for each keep-alive request, so a client sending bytes every 100 milliseconds cannot extend the deadline indefinitely;
+- deadline expiry records one `request_header_deadline_exceeded` event containing only its batch count, shuts down the sockets, releases their connection workers and slots, and permits a later readiness probe. An adversarial header marker was absent from logs, responses, provider requests, and usage storage;
+- focused configuration, installed-operator diagnostics, capacity, continuous-trickle, keep-alive re-arm, recovery, health, drain, parsed-request concurrency, keep-alive shutdown, and shutdown-idempotence tests passed;
+- the complete 353-test source suite passed in `117.844` seconds. The environment-gated official Claude Code case was the sole local skip;
+- source/test bytecode compilation and `git diff --check` passed;
+- isolated source and wheel builds succeeded. The exact clean-install-tested wheel SHA-256 was `faa5044a2da02981c47c65a92cd3bff1b78c53fbb05f05a679cd80f55d74fda6`; the source archive is not self-hashed inside this embedded record because changing the record changes that archive;
+- a clean Python 3.12 environment outside the checkout imported `hormuz.server` from `site-packages`, displayed the effective `256`-connection ceiling, `15`-second request-header deadline, `128`-request capacity, and `600`-second provider-response deadline through installed `doctor`, and compiled the installed package;
+- the installed strict 60-task release benchmark passed with precision, recall, and useful-pack rate `1.00`, zero authorization, lifecycle, dependency, contradiction, malicious-context, determinism, or token-budget failures, mean compression `0.840593`, and governed p95 selection latency `0.158958 ms`; and
+- deterministic corpus verification retained SHA-256 `9822d592868202c7c7539bcdac7d4a5894c01f9e6dba7a434846516b67b32c17`. High-confidence tracked-source and extracted-wheel scans found no private-key, OpenAI, Anthropic, GitHub, AWS, Google, Slack, or Hormuz-session credential pattern. Remote CI evidence follows after publication.
+
+This closes unbounded accepted connection workers and complete request-header duration for one Hormuz process, not production deployment issue #11. A total ingress-body deadline, kernel accept-backlog policy, per-source limits, cross-replica coordination, reverse-proxy/WAF controls, TLS ingress, shared persistence, HA, backup/restore, RPO/RTO, KMS, and independent security review remain open.
+
 ### Remote provider HTTPS enforcement
 
 The provider-upstream configuration boundary was exercised locally on August 16, 2026 without a live provider credential or remote provider request.

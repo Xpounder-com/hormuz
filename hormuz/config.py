@@ -25,6 +25,8 @@ class ListenConfig:
     port: int = 8787
     shutdown_grace_seconds: int = 30
     max_concurrent_requests: int = 128
+    max_connections: int = 256
+    request_header_timeout_seconds: int = 15
 
 
 @dataclass(frozen=True)
@@ -314,6 +316,18 @@ class GatewayConfig:
             "listen.max_concurrent_requests",
             minimum=1,
             maximum=10_000,
+        )
+        max_connections = _integer(
+            listen_raw.get("max_connections", 256),
+            "listen.max_connections",
+            minimum=1,
+            maximum=10_000,
+        )
+        request_header_timeout_seconds = _integer(
+            listen_raw.get("request_header_timeout_seconds", 15),
+            "listen.request_header_timeout_seconds",
+            minimum=1,
+            maximum=120,
         )
 
         database_value = _string(raw.get("database", "./hormuz.sqlite3"), "database")
@@ -640,6 +654,8 @@ class GatewayConfig:
                 port=port,
                 shutdown_grace_seconds=shutdown_grace_seconds,
                 max_concurrent_requests=max_concurrent_requests,
+                max_connections=max_connections,
+                request_header_timeout_seconds=request_header_timeout_seconds,
             ),
             database_path=database_path,
             context_database_path=context_database_path,
