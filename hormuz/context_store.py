@@ -9,7 +9,7 @@ import threading
 import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterable, Protocol
 
@@ -22,9 +22,15 @@ from .context import (
     ContextPrincipal,
     ContextRecord,
 )
+from .context_lifecycle import (
+    ContextEvidence,
+    LifecyclePolicy,
+    evaluate_record_lifecycle,
+    lifecycle_subject_sha256,
+)
 
 
-CONTEXT_STORE_SCHEMA_VERSION = 3
+CONTEXT_STORE_SCHEMA_VERSION = 4
 MAX_CONTEXT_CONTENT_BYTES = 25 * 1024 * 1024
 _CLASSIFICATION_RANK = {name: index for index, name in enumerate(CLASSIFICATIONS)}
 _LEGACY_EFFECTIVE_AT = datetime(1970, 1, 1, tzinfo=timezone.utc)
@@ -87,6 +93,91 @@ class StoredContextRecord:
 class IngestResult:
     stored: StoredContextRecord
     created: bool
+
+
+@dataclass(frozen=True)
+class StoredLifecycleEvidence:
+    evidence: ContextEvidence
+    subject_sha256: str
+    actor_id: str
+    policy_version: str
+    created_at: datetime
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            **self.evidence.to_dict(),
+            "subject_sha256": self.subject_sha256,
+            "storage": {
+                "actor_id": self.actor_id,
+                "policy_version": self.policy_version,
+                "created_at": _isoformat(self.created_at),
+            },
+        }
+
+
+@dataclass(frozen=True)
+class LifecycleEvidenceResult:
+    stored: StoredLifecycleEvidence
+    created: bool
+
+
+@dataclass(frozen=True)
+class ContextRevalidationJob:
+    job_id: str
+    organization_id: str
+    repository_id: str
+    branch: str
+    snapshot_sha256: str
+    snapshot_version: int
+    policy_version: str
+    policy_sha256: str
+    record_set_sha256: str
+    evidence_set_sha256: str
+    status: str
+    cursor_record_id: str | None
+    total_records: int
+    processed_records: int
+    promoted_records: int
+    invalidated_records: int
+    unchanged_records: int
+    deferred_records: int
+    created_at: datetime
+    updated_at: datetime
+    created_by: str
+    last_actor_id: str
+    lease_owner: str | None
+    lease_expires_at: datetime | None
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "schema_version": "hormuz.context-revalidation-job.v1",
+            "job_id": self.job_id,
+            "organization_id": self.organization_id,
+            "repository_id": self.repository_id,
+            "branch": self.branch,
+            "snapshot_sha256": self.snapshot_sha256,
+            "snapshot_version": self.snapshot_version,
+            "policy_version": self.policy_version,
+            "policy_sha256": self.policy_sha256,
+            "record_set_sha256": self.record_set_sha256,
+            "evidence_set_sha256": self.evidence_set_sha256,
+            "status": self.status,
+            "cursor_record_id": self.cursor_record_id,
+            "total_records": self.total_records,
+            "processed_records": self.processed_records,
+            "promoted_records": self.promoted_records,
+            "invalidated_records": self.invalidated_records,
+            "unchanged_records": self.unchanged_records,
+            "deferred_records": self.deferred_records,
+            "created_at": _isoformat(self.created_at),
+            "updated_at": _isoformat(self.updated_at),
+            "created_by": self.created_by,
+            "last_actor_id": self.last_actor_id,
+            "lease": {
+                "owner": self.lease_owner,
+                "expires_at": _isoformat(self.lease_expires_at),
+            },
+        }
 
 
 @dataclass(frozen=True)
@@ -173,7 +264,7 @@ class SQLiteContextRepository:
             schema_version = int(connection.execute("PRAGMA user_version").fetchone()[0])
             if schema_version > CONTEXT_STORE_SCHEMA_VERSION:
                 raise ContextStoreError("context_store_schema_newer_than_binary")
-            if schema_version not in {0, 1, 2, CONTEXT_STORE_SCHEMA_VERSION}:
+            if schema_version not in {0, 1, 2, 3, CONTEXT_STORE_SCHEMA_VERSION}:
                 raise ContextStoreError("context_store_schema_migration_required")
             connection.execute("PRAGMA journal_mode = WAL")
             connection.executescript(
@@ -310,6 +401,103 @@ class SQLiteContextRepository:
                 );
                 CREATE INDEX IF NOT EXISTS idx_context_lifecycle_events_org_time
                     ON context_lifecycle_events (organization_id, occurred_at, id);
+
+                CREATE TABLE IF NOT EXISTS context_evidence_events (
+                    id TEXT PRIMARY KEY,
+                    organization_id TEXT NOT NULL,
+                    record_id TEXT NOT NULL,
+                    record_version INTEGER NOT NULL CHECK (record_version >= 1),
+                    subject_sha256 TEXT NOT NULL,
+                    signal TEXT NOT NULL,
+                    signal_family TEXT NOT NULL,
+                    evidence_ref_sha256 TEXT NOT NULL,
+                    observed_at TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    actor_id TEXT NOT NULL,
+                    policy_version TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_context_evidence_subject
+                    ON context_evidence_events (
+                        organization_id, record_id, subject_sha256, observed_at, id
+                    );
+                CREATE INDEX IF NOT EXISTS idx_context_evidence_org_time
+                    ON context_evidence_events (organization_id, created_at, id);
+
+                CREATE TABLE IF NOT EXISTS context_revalidation_jobs (
+                    id TEXT PRIMARY KEY,
+                    organization_id TEXT NOT NULL,
+                    repository_id TEXT NOT NULL,
+                    branch TEXT NOT NULL,
+                    snapshot_sha256 TEXT NOT NULL,
+                    snapshot_version INTEGER NOT NULL CHECK (snapshot_version >= 1),
+                    policy_version TEXT NOT NULL,
+                    policy_sha256 TEXT NOT NULL,
+                    record_set_sha256 TEXT NOT NULL,
+                    evidence_set_sha256 TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK (
+                        status IN ('pending', 'running', 'completed', 'superseded', 'failed')
+                    ),
+                    cursor_record_id TEXT,
+                    total_records INTEGER NOT NULL CHECK (total_records >= 0),
+                    processed_records INTEGER NOT NULL DEFAULT 0 CHECK (processed_records >= 0),
+                    promoted_records INTEGER NOT NULL DEFAULT 0 CHECK (promoted_records >= 0),
+                    invalidated_records INTEGER NOT NULL DEFAULT 0 CHECK (invalidated_records >= 0),
+                    unchanged_records INTEGER NOT NULL DEFAULT 0 CHECK (unchanged_records >= 0),
+                    deferred_records INTEGER NOT NULL DEFAULT 0 CHECK (deferred_records >= 0),
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    created_by TEXT NOT NULL,
+                    last_actor_id TEXT NOT NULL,
+                    lease_owner TEXT,
+                    lease_expires_at TEXT,
+                    UNIQUE (
+                        organization_id, repository_id, branch,
+                        snapshot_sha256, snapshot_version, policy_sha256,
+                        record_set_sha256, evidence_set_sha256
+                    )
+                );
+                CREATE INDEX IF NOT EXISTS idx_context_revalidation_scope
+                    ON context_revalidation_jobs (
+                        organization_id, repository_id, branch, created_at, id
+                    );
+
+                CREATE TABLE IF NOT EXISTS context_revalidation_changes (
+                    job_id TEXT NOT NULL,
+                    record_id TEXT NOT NULL,
+                    occurred_at TEXT NOT NULL,
+                    prior_verification TEXT NOT NULL CHECK (
+                        prior_verification IN ('provisional', 'verified')
+                    ),
+                    target_verification TEXT NOT NULL CHECK (
+                        target_verification IN ('provisional', 'verified')
+                    ),
+                    reason TEXT NOT NULL,
+                    evidence_count INTEGER NOT NULL CHECK (evidence_count >= 0),
+                    matched_path_id TEXT,
+                    prior_version INTEGER NOT NULL CHECK (prior_version >= 1),
+                    new_version INTEGER NOT NULL CHECK (new_version >= 1),
+                    PRIMARY KEY (job_id, record_id),
+                    FOREIGN KEY (job_id) REFERENCES context_revalidation_jobs(id)
+                );
+
+                CREATE TABLE IF NOT EXISTS context_revalidation_events (
+                    id TEXT PRIMARY KEY,
+                    occurred_at TEXT NOT NULL,
+                    organization_id TEXT NOT NULL,
+                    repository_id TEXT NOT NULL,
+                    branch TEXT NOT NULL,
+                    job_id TEXT NOT NULL,
+                    action TEXT NOT NULL CHECK (
+                        action IN ('job_start', 'batch_complete', 'job_superseded')
+                    ),
+                    status TEXT NOT NULL,
+                    batch_records INTEGER NOT NULL CHECK (batch_records >= 0),
+                    actor_id TEXT NOT NULL,
+                    policy_version TEXT NOT NULL,
+                    FOREIGN KEY (job_id) REFERENCES context_revalidation_jobs(id)
+                );
+                CREATE INDEX IF NOT EXISTS idx_context_revalidation_events_org_time
+                    ON context_revalidation_events (organization_id, occurred_at, id);
                 COMMIT;
                 """
             )
@@ -354,12 +542,14 @@ class SQLiteContextRepository:
         actor_id: str,
         policy_version: str,
         occurred_at: datetime | None = None,
+        new_records_must_be_provisional: bool = False,
     ) -> IngestResult:
         return self.ingest_many(
             [record],
             actor_id=actor_id,
             policy_version=policy_version,
             occurred_at=occurred_at,
+            new_records_must_be_provisional=new_records_must_be_provisional,
         )[0]
 
     def ingest_many(
@@ -369,9 +559,12 @@ class SQLiteContextRepository:
         actor_id: str,
         policy_version: str,
         occurred_at: datetime | None = None,
+        new_records_must_be_provisional: bool = False,
     ) -> list[IngestResult]:
         now = _utc(occurred_at or datetime.now(timezone.utc))
         _validate_mutation_identity(actor_id=actor_id, policy_version=policy_version)
+        if not isinstance(new_records_must_be_provisional, bool):
+            raise ContextStoreError("context_provisional_import_policy_invalid")
         prepared: list[tuple[ContextRecord, bytes]] = []
         for record in records:
             normalized = _normalize_for_storage(record, actor_id=actor_id)
@@ -390,6 +583,7 @@ class SQLiteContextRepository:
                     actor_id=actor_id,
                     policy_version=policy_version,
                     occurred_at=now,
+                    new_records_must_be_provisional=new_records_must_be_provisional,
                 )
                 for normalized, encoded in prepared
             ]
@@ -403,6 +597,7 @@ class SQLiteContextRepository:
         actor_id: str,
         policy_version: str,
         occurred_at: datetime,
+        new_records_must_be_provisional: bool,
     ) -> IngestResult:
         existing_source = self._fetch_source_identity(connection, record)
         if existing_source is not None:
@@ -420,6 +615,8 @@ class SQLiteContextRepository:
             if _record_fingerprint(stored.record) == _record_fingerprint(record):
                 return IngestResult(stored=stored, created=False)
             raise ContextConflict("context_record_id_conflict")
+        if new_records_must_be_provisional and record.verification != "provisional":
+            raise ContextConflict("context_lifecycle_new_record_must_be_provisional")
         self._require_superseded_record(connection, record)
         now_value = _isoformat(occurred_at)
         connection.execute(
@@ -777,6 +974,530 @@ class SQLiteContextRepository:
             ).fetchone()
         return None if row is None else self._row_to_lifecycle_snapshot(row)
 
+    def get_record(self, organization_id: str, record_id: str) -> StoredContextRecord:
+        _validate_scope_value(organization_id, "organization_id")
+        _validate_scope_value(record_id, "record_id")
+        with self._lock, self._connection() as connection:
+            row = self._fetch_row(
+                connection,
+                organization_id=organization_id,
+                record_id=record_id,
+            )
+        if row is None:
+            raise ContextNotFound("context_record_not_found")
+        return self._row_to_stored(row)
+
+    def record_lifecycle_evidence(
+        self,
+        evidence: ContextEvidence,
+        *,
+        actor_id: str,
+        policy_version: str,
+        occurred_at: datetime | None = None,
+    ) -> LifecycleEvidenceResult:
+        """Persist an immutable, subject-bound evidence fingerprint without its raw reference."""
+        if not isinstance(evidence, ContextEvidence):
+            raise ContextStoreError("context_lifecycle_evidence_required")
+        _validate_mutation_identity(actor_id=actor_id, policy_version=policy_version)
+        now = _utc(occurred_at or datetime.now(timezone.utc))
+        if evidence.observed_at.astimezone(timezone.utc) > now + timedelta(minutes=5):
+            raise ContextConflict("context_evidence_observed_at_in_future")
+        with self._lock, self._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            existing = connection.execute(
+                "SELECT * FROM context_evidence_events WHERE id = ?",
+                (evidence.evidence_id,),
+            ).fetchone()
+            if existing is not None:
+                stored = self._row_to_lifecycle_evidence(existing)
+                if stored.evidence != evidence:
+                    raise ContextConflict("context_evidence_id_conflict")
+                return LifecycleEvidenceResult(stored=stored, created=False)
+            row = self._fetch_row(
+                connection,
+                organization_id=evidence.organization_id,
+                record_id=evidence.record_id,
+            )
+            if row is None:
+                raise ContextConflict("context_evidence_record_not_found")
+            stored_record = self._row_to_stored(row)
+            if stored_record.version != evidence.record_version:
+                raise ContextConflict("context_evidence_record_version_conflict")
+            subject_sha256 = lifecycle_subject_sha256(stored_record.record)
+            connection.execute(
+                """
+                INSERT INTO context_evidence_events (
+                    id, organization_id, record_id, record_version, subject_sha256,
+                    signal, signal_family, evidence_ref_sha256, observed_at,
+                    created_at, actor_id, policy_version
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    evidence.evidence_id,
+                    evidence.organization_id,
+                    evidence.record_id,
+                    evidence.record_version,
+                    subject_sha256,
+                    evidence.signal,
+                    evidence.signal_family,
+                    evidence.evidence_ref_sha256,
+                    _isoformat(evidence.observed_at),
+                    _isoformat(now),
+                    actor_id,
+                    policy_version,
+                ),
+            )
+            stored_row = connection.execute(
+                "SELECT * FROM context_evidence_events WHERE id = ?",
+                (evidence.evidence_id,),
+            ).fetchone()
+            if stored_row is None:  # pragma: no cover - SQLite invariant
+                raise ContextStoreError("context_evidence_missing_after_write")
+            return LifecycleEvidenceResult(
+                stored=self._row_to_lifecycle_evidence(stored_row),
+                created=True,
+            )
+
+    def start_revalidation_job(
+        self,
+        *,
+        organization_id: str,
+        repository_id: str,
+        branch: str,
+        policy: LifecyclePolicy,
+        actor_id: str,
+        occurred_at: datetime | None = None,
+    ) -> ContextRevalidationJob:
+        for name, value in (
+            ("organization_id", organization_id),
+            ("repository_id", repository_id),
+            ("branch", branch),
+        ):
+            _validate_scope_value(value, name)
+        if not isinstance(policy, LifecyclePolicy):
+            raise ContextStoreError("context_lifecycle_policy_required")
+        _validate_mutation_identity(actor_id=actor_id, policy_version=policy.policy_version)
+        now = _utc(occurred_at or datetime.now(timezone.utc))
+        with self._lock, self._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            snapshot_row = connection.execute(
+                """
+                SELECT * FROM context_lifecycle_snapshots
+                WHERE organization_id = ? AND repository_id = ? AND branch = ?
+                """,
+                (organization_id, repository_id, branch),
+            ).fetchone()
+            if snapshot_row is None:
+                raise ContextNotFound("context_revalidation_snapshot_not_found")
+            stored_snapshot = self._row_to_lifecycle_snapshot(snapshot_row)
+            scope_rows = connection.execute(
+                """
+                SELECT * FROM context_records
+                WHERE organization_id = ? AND repository_id = ?
+                  AND (branch IS NULL OR branch = ?)
+                ORDER BY id
+                """,
+                (organization_id, repository_id, branch),
+            ).fetchall()
+            scoped_records = [self._row_to_stored(row) for row in scope_rows]
+            total_records = len(scoped_records)
+            record_set_sha256 = _lifecycle_record_set_sha256(scoped_records)
+            evidence_set_sha256 = self._lifecycle_evidence_set_sha256(
+                connection,
+                scoped_records,
+            )
+            canonical = json.dumps(
+                {
+                    "organization_id": organization_id,
+                    "repository_id": repository_id,
+                    "branch": branch,
+                    "snapshot_sha256": stored_snapshot.snapshot.snapshot_sha256,
+                    "snapshot_version": stored_snapshot.version,
+                    "policy_sha256": policy.policy_sha256,
+                    "record_set_sha256": record_set_sha256,
+                    "evidence_set_sha256": evidence_set_sha256,
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            job_id = "ctxjob_" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:24]
+            existing = connection.execute(
+                "SELECT * FROM context_revalidation_jobs WHERE id = ?",
+                (job_id,),
+            ).fetchone()
+            if existing is not None:
+                return self._row_to_revalidation_job(existing)
+            now_value = _isoformat(now)
+            connection.execute(
+                """
+                INSERT INTO context_revalidation_jobs (
+                    id, organization_id, repository_id, branch, snapshot_sha256,
+                    snapshot_version, policy_version, policy_sha256,
+                    record_set_sha256, evidence_set_sha256, status,
+                    cursor_record_id, total_records, processed_records,
+                    promoted_records, invalidated_records, unchanged_records,
+                    deferred_records, created_at, updated_at, created_by,
+                    last_actor_id, lease_owner, lease_expires_at
+                ) VALUES (
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', NULL, ?, 0, 0, 0, 0, 0,
+                    ?, ?, ?, ?, NULL, NULL
+                )
+                """,
+                (
+                    job_id,
+                    organization_id,
+                    repository_id,
+                    branch,
+                    stored_snapshot.snapshot.snapshot_sha256,
+                    stored_snapshot.version,
+                    policy.policy_version,
+                    policy.policy_sha256,
+                    record_set_sha256,
+                    evidence_set_sha256,
+                    total_records,
+                    now_value,
+                    now_value,
+                    actor_id,
+                    actor_id,
+                ),
+            )
+            self._insert_revalidation_event(
+                connection,
+                occurred_at=now,
+                organization_id=organization_id,
+                repository_id=repository_id,
+                branch=branch,
+                job_id=job_id,
+                action="job_start",
+                status="pending",
+                batch_records=0,
+                actor_id=actor_id,
+                policy_version=policy.policy_version,
+            )
+            row = connection.execute(
+                "SELECT * FROM context_revalidation_jobs WHERE id = ?",
+                (job_id,),
+            ).fetchone()
+            if row is None:  # pragma: no cover - SQLite invariant
+                raise ContextStoreError("context_revalidation_job_missing_after_write")
+            return self._row_to_revalidation_job(row)
+
+    def run_revalidation_batch(
+        self,
+        *,
+        job_id: str,
+        policy: LifecyclePolicy,
+        actor_id: str,
+        batch_size: int,
+        lease_seconds: int,
+        occurred_at: datetime | None = None,
+    ) -> ContextRevalidationJob:
+        _validate_scope_value(job_id, "job_id")
+        if not isinstance(policy, LifecyclePolicy):
+            raise ContextStoreError("context_lifecycle_policy_required")
+        _validate_mutation_identity(actor_id=actor_id, policy_version=policy.policy_version)
+        if (
+            isinstance(batch_size, bool)
+            or not isinstance(batch_size, int)
+            or not 1 <= batch_size <= 1_000
+        ):
+            raise ContextStoreError("context_revalidation_batch_size_invalid")
+        if (
+            isinstance(lease_seconds, bool)
+            or not isinstance(lease_seconds, int)
+            or not 1 <= lease_seconds <= 3_600
+        ):
+            raise ContextStoreError("context_revalidation_lease_seconds_invalid")
+        now = _utc(occurred_at or datetime.now(timezone.utc))
+        lease_owner = "ctxworker_" + uuid.uuid4().hex
+        lease_expires_at = now + timedelta(seconds=lease_seconds)
+
+        with self._lock, self._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT * FROM context_revalidation_jobs WHERE id = ?",
+                (job_id,),
+            ).fetchone()
+            if row is None:
+                raise ContextNotFound("context_revalidation_job_not_found")
+            job = self._row_to_revalidation_job(row)
+            self._require_revalidation_policy(job, policy)
+            if job.status in {"completed", "superseded", "failed"}:
+                return job
+            if (
+                job.status == "running"
+                and job.lease_expires_at is not None
+                and job.lease_expires_at > now
+            ):
+                raise ContextConflict("context_revalidation_lease_conflict")
+            current_snapshot = connection.execute(
+                """
+                SELECT * FROM context_lifecycle_snapshots
+                WHERE organization_id = ? AND repository_id = ? AND branch = ?
+                """,
+                (job.organization_id, job.repository_id, job.branch),
+            ).fetchone()
+            if (
+                current_snapshot is None
+                or str(current_snapshot["snapshot_sha256"]) != job.snapshot_sha256
+                or int(current_snapshot["version"]) != job.snapshot_version
+                or self._current_record_set_sha256(connection, job) != job.record_set_sha256
+                or self._current_evidence_set_sha256(connection, job)
+                != job.evidence_set_sha256
+            ):
+                return self._supersede_revalidation_job(
+                    connection,
+                    job=job,
+                    actor_id=actor_id,
+                    occurred_at=now,
+                )
+            cursor = connection.execute(
+                """
+                UPDATE context_revalidation_jobs
+                SET status = 'running', lease_owner = ?, lease_expires_at = ?,
+                    updated_at = ?, last_actor_id = ?
+                WHERE id = ? AND status IN ('pending', 'running')
+                """,
+                (
+                    lease_owner,
+                    _isoformat(lease_expires_at),
+                    _isoformat(now),
+                    actor_id,
+                    job_id,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise ContextConflict("context_revalidation_lease_conflict")
+
+        with self._lock, self._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT * FROM context_revalidation_jobs WHERE id = ?",
+                (job_id,),
+            ).fetchone()
+            if row is None:  # pragma: no cover - durable lease invariant
+                raise ContextNotFound("context_revalidation_job_not_found")
+            job = self._row_to_revalidation_job(row)
+            if job.status != "running" or job.lease_owner != lease_owner:
+                raise ContextConflict("context_revalidation_lease_lost")
+            self._require_revalidation_policy(job, policy)
+            current_snapshot_row = connection.execute(
+                """
+                SELECT * FROM context_lifecycle_snapshots
+                WHERE organization_id = ? AND repository_id = ? AND branch = ?
+                """,
+                (job.organization_id, job.repository_id, job.branch),
+            ).fetchone()
+            if (
+                current_snapshot_row is None
+                or str(current_snapshot_row["snapshot_sha256"]) != job.snapshot_sha256
+                or int(current_snapshot_row["version"]) != job.snapshot_version
+                or self._current_record_set_sha256(connection, job) != job.record_set_sha256
+                or self._current_evidence_set_sha256(connection, job)
+                != job.evidence_set_sha256
+            ):
+                return self._supersede_revalidation_job(
+                    connection,
+                    job=job,
+                    actor_id=actor_id,
+                    occurred_at=now,
+                )
+            snapshot = self._row_to_lifecycle_snapshot(current_snapshot_row).snapshot
+            record_parameters: list[object] = [
+                job.organization_id,
+                job.repository_id,
+                job.branch,
+            ]
+            cursor_clause = ""
+            if job.cursor_record_id is not None:
+                cursor_clause = " AND id > ?"
+                record_parameters.append(job.cursor_record_id)
+            record_parameters.append(batch_size)
+            record_rows = connection.execute(
+                """
+                SELECT * FROM context_records
+                WHERE organization_id = ? AND repository_id = ?
+                  AND (branch IS NULL OR branch = ?)
+                """
+                + cursor_clause
+                + " ORDER BY id LIMIT ?",
+                record_parameters,
+            ).fetchall()
+            stored_records = [self._row_to_stored(item) for item in record_rows]
+            evidence_by_record: dict[str, list[ContextEvidence]] = {
+                item.record.record_id: [] for item in stored_records
+            }
+            if stored_records:
+                placeholders = ", ".join("?" for _ in stored_records)
+                evidence_rows = connection.execute(
+                    f"""
+                    SELECT * FROM context_evidence_events
+                    WHERE organization_id = ? AND record_id IN ({placeholders})
+                    ORDER BY observed_at, id
+                    """,
+                    [job.organization_id, *(item.record.record_id for item in stored_records)],
+                ).fetchall()
+                subjects = {
+                    item.record.record_id: lifecycle_subject_sha256(item.record)
+                    for item in stored_records
+                }
+                for evidence_row in evidence_rows:
+                    record_id = str(evidence_row["record_id"])
+                    if str(evidence_row["subject_sha256"]) == subjects.get(record_id):
+                        evidence_by_record[record_id].append(
+                            self._row_to_lifecycle_evidence(evidence_row).evidence
+                        )
+
+            promoted = invalidated = unchanged = deferred = 0
+            for stored_record in stored_records:
+                decision = evaluate_record_lifecycle(
+                    stored_record.record,
+                    evidence_by_record[stored_record.record.record_id],
+                    snapshot,
+                    policy,
+                )
+                if decision.deferred:
+                    deferred += 1
+                    unchanged += 1
+                    continue
+                if decision.target_verification == stored_record.record.verification:
+                    unchanged += 1
+                    continue
+                target = replace(
+                    stored_record.record,
+                    verification=decision.target_verification,
+                    verification_evidence=decision.evidence_ids,
+                    verified_at=now if decision.target_verification == "verified" else None,
+                )
+                new_version = stored_record.version + 1
+                cursor = connection.execute(
+                    """
+                    UPDATE context_records
+                    SET verification = ?, verification_evidence_json = ?,
+                        verified_at = ?, version = ?, updated_at = ?
+                    WHERE organization_id = ? AND id = ? AND version = ?
+                    """,
+                    (
+                        target.verification,
+                        _json_tuple(target.verification_evidence),
+                        _isoformat(target.verified_at),
+                        new_version,
+                        _isoformat(now),
+                        target.organization_id,
+                        target.record_id,
+                        stored_record.version,
+                    ),
+                )
+                if cursor.rowcount != 1:
+                    raise ContextConflict("context_revalidation_record_version_conflict")
+                self._insert_audit(
+                    connection,
+                    occurred_at=now,
+                    actor_id=actor_id,
+                    action="update",
+                    prior_record_id=target.record_id,
+                    prior_version=stored_record.version,
+                    new_record_id=target.record_id,
+                    new_version=new_version,
+                    policy_version=policy.policy_version,
+                    record=target,
+                )
+                connection.execute(
+                    """
+                    INSERT INTO context_revalidation_changes (
+                        job_id, record_id, occurred_at, prior_verification,
+                        target_verification, reason, evidence_count,
+                        matched_path_id, prior_version, new_version
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        job_id,
+                        target.record_id,
+                        _isoformat(now),
+                        stored_record.record.verification,
+                        target.verification,
+                        decision.reason,
+                        len(decision.evidence_ids),
+                        decision.matched_path_id,
+                        stored_record.version,
+                        new_version,
+                    ),
+                )
+                if target.verification == "verified":
+                    promoted += 1
+                else:
+                    invalidated += 1
+
+            batch_records = len(stored_records)
+            processed_records = job.processed_records + batch_records
+            cursor_record_id = (
+                stored_records[-1].record.record_id if stored_records else job.cursor_record_id
+            )
+            has_more = False
+            if cursor_record_id is not None:
+                has_more = connection.execute(
+                    """
+                    SELECT 1 FROM context_records
+                    WHERE organization_id = ? AND repository_id = ?
+                      AND (branch IS NULL OR branch = ?) AND id > ? LIMIT 1
+                    """,
+                    (
+                        job.organization_id,
+                        job.repository_id,
+                        job.branch,
+                        cursor_record_id,
+                    ),
+                ).fetchone() is not None
+            status = "pending" if has_more else "completed"
+            job_cursor = connection.execute(
+                """
+                UPDATE context_revalidation_jobs SET
+                    status = ?, cursor_record_id = ?, processed_records = ?,
+                    promoted_records = promoted_records + ?,
+                    invalidated_records = invalidated_records + ?,
+                    unchanged_records = unchanged_records + ?,
+                    deferred_records = deferred_records + ?,
+                    updated_at = ?, last_actor_id = ?,
+                    lease_owner = NULL, lease_expires_at = NULL
+                WHERE id = ? AND lease_owner = ?
+                """,
+                (
+                    status,
+                    cursor_record_id,
+                    processed_records,
+                    promoted,
+                    invalidated,
+                    unchanged,
+                    deferred,
+                    _isoformat(now),
+                    actor_id,
+                    job_id,
+                    lease_owner,
+                ),
+            )
+            if job_cursor.rowcount != 1:
+                raise ContextConflict("context_revalidation_lease_lost")
+            self._insert_revalidation_event(
+                connection,
+                occurred_at=now,
+                organization_id=job.organization_id,
+                repository_id=job.repository_id,
+                branch=job.branch,
+                job_id=job_id,
+                action="batch_complete",
+                status=status,
+                batch_records=batch_records,
+                actor_id=actor_id,
+                policy_version=policy.policy_version,
+            )
+            updated = connection.execute(
+                "SELECT * FROM context_revalidation_jobs WHERE id = ?",
+                (job_id,),
+            ).fetchone()
+            if updated is None:  # pragma: no cover - SQLite invariant
+                raise ContextStoreError("context_revalidation_job_missing_after_batch")
+            return self._row_to_revalidation_job(updated)
+
     def list_authorized(
         self,
         principal: ContextPrincipal,
@@ -993,6 +1714,28 @@ class SQLiteContextRepository:
                 """,
                 parameters,
             ).fetchall()
+            evidence_rows = connection.execute(
+                f"""
+                SELECT
+                    id, created_at AS occurred_at, organization_id, record_id,
+                    record_version, signal, signal_family, actor_id, policy_version
+                FROM context_evidence_events
+                WHERE {' AND '.join(clauses)}
+                ORDER BY created_at, id
+                """,
+                parameters,
+            ).fetchall()
+            revalidation_rows = connection.execute(
+                f"""
+                SELECT
+                    id, occurred_at, organization_id, repository_id, branch,
+                    job_id, action, status, batch_records, actor_id, policy_version
+                FROM context_revalidation_events
+                WHERE {' AND '.join(clauses)}
+                ORDER BY occurred_at, id
+                """,
+                parameters,
+            ).fetchall()
         events = [
             {
                 "schema_version": 1,
@@ -1017,6 +1760,23 @@ class SQLiteContextRepository:
                 **dict(row),
             }
             for row in lifecycle_rows
+        )
+        events.extend(
+            {
+                "schema_version": 1,
+                "event_type": "context.evidence",
+                "action": "evidence_recorded",
+                **dict(row),
+            }
+            for row in evidence_rows
+        )
+        events.extend(
+            {
+                "schema_version": 1,
+                "event_type": "context.revalidation",
+                **dict(row),
+            }
+            for row in revalidation_rows
         )
         events.sort(key=lambda event: (str(event["occurred_at"]), str(event["id"])))
         return events
@@ -1078,6 +1838,254 @@ class SQLiteContextRepository:
                 record_id=current_id,
             )
             current_id = str(row["supersedes_id"]) if row is not None and row["supersedes_id"] else None
+
+    def _current_record_set_sha256(
+        self,
+        connection: sqlite3.Connection,
+        job: ContextRevalidationJob,
+    ) -> str:
+        rows = connection.execute(
+            """
+            SELECT * FROM context_records
+            WHERE organization_id = ? AND repository_id = ?
+              AND (branch IS NULL OR branch = ?)
+            ORDER BY id
+            """,
+            (job.organization_id, job.repository_id, job.branch),
+        ).fetchall()
+        return _lifecycle_record_set_sha256(
+            [self._row_to_stored(row) for row in rows]
+        )
+
+    def _current_evidence_set_sha256(
+        self,
+        connection: sqlite3.Connection,
+        job: ContextRevalidationJob,
+    ) -> str:
+        rows = connection.execute(
+            """
+            SELECT * FROM context_records
+            WHERE organization_id = ? AND repository_id = ?
+              AND (branch IS NULL OR branch = ?)
+            ORDER BY id
+            """,
+            (job.organization_id, job.repository_id, job.branch),
+        ).fetchall()
+        return self._lifecycle_evidence_set_sha256(
+            connection,
+            [self._row_to_stored(row) for row in rows],
+        )
+
+    def _lifecycle_evidence_set_sha256(
+        self,
+        connection: sqlite3.Connection,
+        records: list[StoredContextRecord],
+    ) -> str:
+        current_subjects = {
+            item.record.record_id: lifecycle_subject_sha256(item.record)
+            for item in records
+        }
+        entries: list[dict[str, str]] = []
+        if current_subjects:
+            organization_ids = {item.record.organization_id for item in records}
+            if len(organization_ids) != 1:
+                raise ContextStoreError("context_revalidation_record_scope_corrupt")
+            placeholders = ", ".join("?" for _ in current_subjects)
+            evidence_rows = connection.execute(
+                f"""
+                SELECT id, record_id, subject_sha256
+                FROM context_evidence_events
+                WHERE organization_id = ? AND record_id IN ({placeholders})
+                ORDER BY record_id, id
+                """,
+                [next(iter(organization_ids)), *current_subjects],
+            ).fetchall()
+            entries = [
+                {
+                    "record_id": str(row["record_id"]),
+                    "evidence_id": str(row["id"]),
+                    "subject_sha256": str(row["subject_sha256"]),
+                }
+                for row in evidence_rows
+                if str(row["subject_sha256"])
+                == current_subjects.get(str(row["record_id"]))
+            ]
+        canonical = json.dumps(entries, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    def _row_to_lifecycle_evidence(self, row: sqlite3.Row) -> StoredLifecycleEvidence:
+        try:
+            evidence = ContextEvidence(
+                organization_id=str(row["organization_id"]),
+                record_id=str(row["record_id"]),
+                record_version=int(row["record_version"]),
+                signal=str(row["signal"]),
+                evidence_ref_sha256=str(row["evidence_ref_sha256"]),
+                observed_at=_parse_required_datetime(row["observed_at"]),
+            )
+        except ValueError as error:
+            raise ContextStoreError("context_lifecycle_evidence_corrupt") from error
+        if evidence.evidence_id != str(row["id"]):
+            raise ContextStoreError("context_lifecycle_evidence_integrity_failed")
+        if evidence.signal_family != str(row["signal_family"]):
+            raise ContextStoreError("context_lifecycle_evidence_corrupt")
+        subject_sha256 = str(row["subject_sha256"])
+        if len(subject_sha256) != 64 or any(
+            character not in "0123456789abcdef" for character in subject_sha256
+        ):
+            raise ContextStoreError("context_lifecycle_evidence_corrupt")
+        return StoredLifecycleEvidence(
+            evidence=evidence,
+            subject_sha256=subject_sha256,
+            actor_id=str(row["actor_id"]),
+            policy_version=str(row["policy_version"]),
+            created_at=_parse_required_datetime(row["created_at"]),
+        )
+
+    def _row_to_revalidation_job(self, row: sqlite3.Row) -> ContextRevalidationJob:
+        status = str(row["status"])
+        if status not in {"pending", "running", "completed", "superseded", "failed"}:
+            raise ContextStoreError("context_revalidation_job_corrupt")
+        fingerprints = tuple(
+            str(row[name])
+            for name in (
+                "snapshot_sha256",
+                "policy_sha256",
+                "record_set_sha256",
+                "evidence_set_sha256",
+            )
+        )
+        if any(
+            len(value) != 64
+            or any(character not in "0123456789abcdef" for character in value)
+            for value in fingerprints
+        ):
+            raise ContextStoreError("context_revalidation_job_corrupt")
+        counts = tuple(
+            int(row[name])
+            for name in (
+                "total_records",
+                "processed_records",
+                "promoted_records",
+                "invalidated_records",
+                "unchanged_records",
+                "deferred_records",
+            )
+        )
+        if any(value < 0 for value in counts) or counts[1] > counts[0]:
+            raise ContextStoreError("context_revalidation_job_corrupt")
+        return ContextRevalidationJob(
+            job_id=str(row["id"]),
+            organization_id=str(row["organization_id"]),
+            repository_id=str(row["repository_id"]),
+            branch=str(row["branch"]),
+            snapshot_sha256=fingerprints[0],
+            snapshot_version=int(row["snapshot_version"]),
+            policy_version=str(row["policy_version"]),
+            policy_sha256=fingerprints[1],
+            record_set_sha256=fingerprints[2],
+            evidence_set_sha256=fingerprints[3],
+            status=status,
+            cursor_record_id=_nullable_row_string(row, "cursor_record_id"),
+            total_records=counts[0],
+            processed_records=counts[1],
+            promoted_records=counts[2],
+            invalidated_records=counts[3],
+            unchanged_records=counts[4],
+            deferred_records=counts[5],
+            created_at=_parse_required_datetime(row["created_at"]),
+            updated_at=_parse_required_datetime(row["updated_at"]),
+            created_by=str(row["created_by"]),
+            last_actor_id=str(row["last_actor_id"]),
+            lease_owner=_nullable_row_string(row, "lease_owner"),
+            lease_expires_at=_parse_nullable_datetime(row["lease_expires_at"]),
+        )
+
+    def _require_revalidation_policy(
+        self,
+        job: ContextRevalidationJob,
+        policy: LifecyclePolicy,
+    ) -> None:
+        if (
+            job.policy_version != policy.policy_version
+            or job.policy_sha256 != policy.policy_sha256
+        ):
+            raise ContextConflict("context_revalidation_policy_conflict")
+
+    def _supersede_revalidation_job(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        job: ContextRevalidationJob,
+        actor_id: str,
+        occurred_at: datetime,
+    ) -> ContextRevalidationJob:
+        connection.execute(
+            """
+            UPDATE context_revalidation_jobs
+            SET status = 'superseded', updated_at = ?, last_actor_id = ?,
+                lease_owner = NULL, lease_expires_at = NULL
+            WHERE id = ?
+            """,
+            (_isoformat(occurred_at), actor_id, job.job_id),
+        )
+        self._insert_revalidation_event(
+            connection,
+            occurred_at=occurred_at,
+            organization_id=job.organization_id,
+            repository_id=job.repository_id,
+            branch=job.branch,
+            job_id=job.job_id,
+            action="job_superseded",
+            status="superseded",
+            batch_records=0,
+            actor_id=actor_id,
+            policy_version=job.policy_version,
+        )
+        row = connection.execute(
+            "SELECT * FROM context_revalidation_jobs WHERE id = ?",
+            (job.job_id,),
+        ).fetchone()
+        if row is None:  # pragma: no cover - SQLite invariant
+            raise ContextStoreError("context_revalidation_job_missing_after_supersede")
+        return self._row_to_revalidation_job(row)
+
+    def _insert_revalidation_event(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        occurred_at: datetime,
+        organization_id: str,
+        repository_id: str,
+        branch: str,
+        job_id: str,
+        action: str,
+        status: str,
+        batch_records: int,
+        actor_id: str,
+        policy_version: str,
+    ) -> None:
+        connection.execute(
+            """
+            INSERT INTO context_revalidation_events (
+                id, occurred_at, organization_id, repository_id, branch,
+                job_id, action, status, batch_records, actor_id, policy_version
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                str(uuid.uuid4()),
+                _isoformat(occurred_at),
+                organization_id,
+                repository_id,
+                branch,
+                job_id,
+                action,
+                status,
+                batch_records,
+                actor_id,
+                policy_version,
+            ),
+        )
 
     def _row_to_lifecycle_snapshot(self, row: sqlite3.Row) -> StoredLifecycleSnapshot:
         try:
@@ -1312,6 +2320,17 @@ def _validate_mutation_identity(*, actor_id: str, policy_version: str) -> None:
         raise ContextStoreError("context_policy_version_required")
 
 
+def _validate_scope_value(value: object, name: str) -> str:
+    if (
+        not isinstance(value, str)
+        or not value.strip()
+        or len(value.encode("utf-8")) > 512
+        or any(character in value for character in ("\n", "\r", "\x00"))
+    ):
+        raise ContextStoreError(f"context_{name}_required")
+    return value
+
+
 def _record_values(
     record: ContextRecord,
     encoded_content: bytes,
@@ -1361,6 +2380,21 @@ def _update_values(
 
 def _record_fingerprint(record: ContextRecord) -> str:
     canonical = json.dumps(record.to_dict(), sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _lifecycle_record_set_sha256(records: Iterable[StoredContextRecord]) -> str:
+    canonical = json.dumps(
+        [
+            {
+                "record_id": item.record.record_id,
+                "subject_sha256": lifecycle_subject_sha256(item.record),
+            }
+            for item in records
+        ],
+        sort_keys=True,
+        separators=(",", ":"),
+    )
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 

@@ -1,0 +1,9 @@
+{
+  "schema_version": "hormuz.context-evidence.v1",
+  "organization_id": "xpounder",
+  "record_id": "retry-ci-observation",
+  "record_version": 1,
+  "signal": "ci_passed",
+  "evidence_ref": "github-actions:Xpounder-com/hormuz:run:example-green",
+  "observed_at": "2026-08-16T00:06:00Z"
+}

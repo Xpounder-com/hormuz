@@ -10,7 +10,46 @@
     "max_token_budget": 32768,
     "max_items": 20,
     "requests_per_minute": 60,
-    "allow_provisional": false
+    "allow_provisional": false,
+    "lifecycle": {
+      "enabled": false,
+      "policy_version": "engineering-lifecycle-v1",
+      "job_batch_size": 100,
+      "lease_seconds": 30,
+      "promotion_paths": [
+        {
+          "id": "merged-and-green",
+          "record_kinds": ["claim"],
+          "required_signals": ["commit_merged", "ci_passed"]
+        },
+        {
+          "id": "accepted-review",
+          "record_kinds": ["claim"],
+          "required_signals": ["review_accepted"]
+        },
+        {
+          "id": "approved-adr",
+          "record_kinds": ["decision"],
+          "required_signals": ["adr_approved"]
+        },
+        {
+          "id": "resolved-incident",
+          "record_kinds": ["claim"],
+          "required_signals": ["incident_resolved"]
+        },
+        {
+          "id": "human-confirmed",
+          "record_kinds": ["claim", "decision"],
+          "required_signals": ["human_confirmed"]
+        },
+        {
+          "id": "validated-failure",
+          "record_kinds": ["claim"],
+          "required_signals": ["failed_attempt_validated"],
+          "required_tags": ["negative_knowledge"]
+        }
+      ]
+    }
   },
   "max_request_bytes": 26214400,
   "upstream_timeout_seconds": 600,

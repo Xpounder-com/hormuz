@@ -392,6 +392,27 @@ Observed local result:
 
 This closes the single-node administrator-revocation and local event-inspection slice of issue #13, not the identity or enterprise-tenancy milestone. The event API is a queryable local evidence ledger, not a signed or externally immutable audit sink. Real owner-selected IdP validation, live configuration reload, SCIM/event-driven deprovisioning, shared multi-node revocation, PostgreSQL tenant isolation, KMS custody, retention/SIEM delivery, immutable session-event export, HA, backup/restore, and independent review remain open. Those shared persistence decisions still depend on proposed ADR 0002.
 
+### Evidence-driven governed-context lifecycle
+
+The opt-in evidence contract, promotion policy, invalidation evaluator, durable local job kernel, CLI operator path, schema migration, and metadata-only audit boundary were exercised on August 16, 2026.
+
+Observed local result:
+
+- new records imported while lifecycle automation is enabled were required to start provisional; exact idempotent retries of pre-existing verified records remained compatible, and legacy verified records without Hormuz-managed evidence were not silently demoted solely because managed evidence was absent;
+- immutable `hormuz.context-evidence.v1` events were tenant-, record-version-, and semantic-subject-bound. The raw external reference was hashed at import and was absent from the SQLite database and audit export; exact retries converged on one event and observation times more than five minutes in the future failed closed;
+- configured positive evidence paths promoted records, while reverted commits, failed CI, rejected reviews, superseded ADRs, reopened incidents, withdrawn human confirmation, and rejected failed-attempt evidence returned records to provisional. Same-time opposing signals surfaced an explicit conflict, and `negative_knowledge` required its dedicated validation path;
+- trusted source/dependency changes invalidated managed records, missing dependency observations deferred without destructive demotion, and returning to a matching snapshot recovered records only from still-current subject-bound evidence. Evidence for changed content was not reused;
+- each durable job was bound to tenant, repository, branch, exact snapshot hash/version, policy-content hash, semantic record-set hash, and current-subject evidence-set hash. New evidence after an unchanged completed run created a new job; snapshot, record, or evidence changes superseded stale work;
+- bounded SQLite leases allowed one active worker, expired leases resumed after a simulated crash, batches committed record mutations and cursor/counters atomically, and optimistic record versions prevented concurrent overwrite;
+- only an identity with the explicit organization-scoped `context_promoter` capability could import evidence, import managed snapshots, or run revalidation. Lifecycle automation remains disabled in the example configuration by default;
+- context schema versions 1, 2, and 3 migrated to schema version 4 without losing existing records or audit rows. The new evidence, job, change, and job-event tables were present after both source and clean-wheel initialization;
+- all 213 source tests passed with Codex `0.147.0` and Claude Code `2.1.233` selected first on `PATH`, including their real installed-client fake-provider compatibility paths;
+- the frozen 60-task release profile passed with precision `1.00`, recall `1.00`, useful-pack rate `1.00`, mean compression ratio `0.840593`, zero authorization, stale-lifecycle, dependency-stale, malicious, contradiction, budget, leakage, or determinism failures, and p95 in-process selection latency `0.1545 ms`. Corpus SHA-256 was `9822d592868202c7c7539bcdac7d4a5894c01f9e6dba7a434846516b67b32c17`; evidence artifact SHA-256 was `756940ef19e52eb2608cb9c5ef8628908cf90cc91e0015bc1b8a726931335b27`;
+- isolated source and wheel builds succeeded. The source archive contained the lifecycle implementation, documentation, examples, and tests; a fresh Python 3.14 environment installed the wheel outside the checkout, loaded `hormuz.context_lifecycle` from `site-packages`, displayed both lifecycle commands, created schema version 4 with the evidence-set-bound job column, and passed the installed 12-task regression profile;
+- source compilation and `git diff --check` passed. A high-confidence source and extracted-package scan found no private-key, OpenAI, Anthropic, GitHub, AWS, or Google credential pattern; the broader assignment scan returned only documented placeholders and an intentional test sentinel.
+
+This is a real single-node lifecycle kernel, not an enterprise scheduler or automatic connector system. GitHub, GitLab, CI, review, ADR, and incident connectors; signed attestations; probabilistic or time-based decay; PostgreSQL/multi-node leasing; hosted operations; and automatic client injection remain open. Issue #12 therefore remains open, and the hosted isolation decision remains proposed in ADR 0002 rather than implemented by this checkpoint.
+
 ## Reproduce locally
 
 The default suite uses only loopback fake providers:

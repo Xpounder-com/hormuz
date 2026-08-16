@@ -211,8 +211,8 @@ class ContextStoreTests(unittest.TestCase):
             ):
                 self.assertNotIn(secret, serialized)
 
-    def test_schema_v1_and_v2_are_migrated_without_losing_records_or_audit(self) -> None:
-        for old_version in (1, 2):
+    def test_schema_v1_v2_and_v3_are_migrated_without_losing_records_or_audit(self) -> None:
+        for old_version in (1, 2, 3):
             with self.subTest(old_version=old_version), tempfile.TemporaryDirectory() as temporary:
                 path = Path(temporary) / "context.sqlite3"
                 repository = SQLiteContextRepository(path)
@@ -225,14 +225,23 @@ class ContextStoreTests(unittest.TestCase):
                 )
                 connection = sqlite3.connect(path)
                 try:
-                    connection.execute("DROP TABLE context_lifecycle_events")
-                    connection.execute("DROP TABLE context_lifecycle_snapshots")
-                    connection.execute("ALTER TABLE context_records DROP COLUMN dependencies_json")
-                    connection.execute("ALTER TABLE context_records DROP COLUMN assertion_key")
-                    connection.execute("ALTER TABLE context_records DROP COLUMN assertion_value")
+                    connection.execute("DROP TABLE context_revalidation_changes")
+                    connection.execute("DROP TABLE context_revalidation_events")
+                    connection.execute("DROP TABLE context_revalidation_jobs")
+                    connection.execute("DROP TABLE context_evidence_events")
                     if old_version == 1:
+                        connection.execute("DROP TABLE context_lifecycle_events")
+                        connection.execute("DROP TABLE context_lifecycle_snapshots")
+                        connection.execute("ALTER TABLE context_records DROP COLUMN dependencies_json")
+                        connection.execute("ALTER TABLE context_records DROP COLUMN assertion_key")
+                        connection.execute("ALTER TABLE context_records DROP COLUMN assertion_value")
                         connection.execute("DROP TABLE context_access_events")
-                    else:
+                    elif old_version == 2:
+                        connection.execute("DROP TABLE context_lifecycle_events")
+                        connection.execute("DROP TABLE context_lifecycle_snapshots")
+                        connection.execute("ALTER TABLE context_records DROP COLUMN dependencies_json")
+                        connection.execute("ALTER TABLE context_records DROP COLUMN assertion_key")
+                        connection.execute("ALTER TABLE context_records DROP COLUMN assertion_value")
                         connection.execute(
                             "ALTER TABLE context_access_events DROP COLUMN lifecycle_outcome"
                         )
@@ -264,9 +273,13 @@ class ContextStoreTests(unittest.TestCase):
                         "SELECT name FROM sqlite_master WHERE type = 'table' "
                         "AND name = 'context_lifecycle_snapshots'"
                     ).fetchone()
+                    lifecycle_job_table = connection.execute(
+                        "SELECT name FROM sqlite_master WHERE type = 'table' "
+                        "AND name = 'context_revalidation_jobs'"
+                    ).fetchone()
                 finally:
                     connection.close()
-                self.assertEqual(schema_version, 3)
+                    self.assertEqual(schema_version, 4)
                 self.assertTrue(
                     {"dependencies_json", "assertion_key", "assertion_value"}
                     <= record_columns
@@ -276,6 +289,7 @@ class ContextStoreTests(unittest.TestCase):
                     <= access_columns
                 )
                 self.assertIsNotNone(lifecycle_table)
+                self.assertIsNotNone(lifecycle_job_table)
                 stored = migrated.list_authorized(
                     ContextPrincipal("xpounder", "engineering", "alice"),
                     as_of=NOW,

@@ -29,6 +29,17 @@ Hormuz writes the event count and the SHA-256 checksum of the exact JSONL bytes 
 shasum -a 256 hormuz-audit.jsonl
 ```
 
+Governed context uses a deliberately separate database and export command:
+
+```bash
+python3 -m hormuz --config hormuz.json context-audit-export \
+  --actor alice \
+  --since 2026-08-01T00:00:00Z \
+  --output hormuz-context-audit.jsonl
+```
+
+Context event types are `context.mutation`, `context.read`, `context.lifecycle`, `context.evidence`, and `context.revalidation`. Evidence events include only the record ID/version, signal family, actor, and policy metadata; the submitted evidence reference and its fingerprint are omitted. Revalidation events expose job, batch status, scope, actor, and policy metadata. The ordinary mutation event records each verification flip, while the current job JSON reports bounded aggregate promotion, invalidation, unchanged, deferred, and processed counts. Neither surface includes record content, source locators, dependency identities, query text, or raw evidence references.
+
 ## Schema version 1
 
 Every line is one JSON object containing:

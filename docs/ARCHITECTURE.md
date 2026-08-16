@@ -44,11 +44,17 @@ immutable organization/provider cost snapshot
 Governed context has explicit CLI and authenticated HTTP paths:
 
 ```text
-content-bearing JSONL       trusted lifecycle envelope
-        |
-        | identity-scope validation, idempotent import/snapshot observation
-        v
+content-bearing JSONL       trusted lifecycle envelope       evidence envelope
+        |                             |                              |
+        | identity-scope validation   | promoter capability          | promoter capability
+        | idempotent provisional      | versioned observation        | hash raw reference
+        | import                      |                              | bind record subject
+        +-----------------------------+------------------------------+
+                                      v
 local SQLite context repository (separate from usage)
+        |
+        +--> durable policy/snapshot/record-set/evidence-set-bound revalidation job
+        |       +--> bounded lease, cursor, counters, atomic verification mutation
         |
         | SQL authorization/freshness filter before content decode
         | trusted dependency/source evaluation, quarantine, contradiction grouping
@@ -80,7 +86,8 @@ The HTTP path authenticates first, derives organization/team/actor from the stat
 - `hormuz/dlp_approval.py` computes domain-separated keyed fingerprints over canonical provider operation/payload values without persistence or transport concerns.
 - `hormuz/dlp_client.py` implements the bounded, authenticated approver CLI transport and refuses redirects or non-loopback plaintext HTTP.
 - `hormuz/context.py` authorizes, applies immutable lifecycle observations, quarantines high-confidence injection patterns, surfaces structured contradictions, ranks, budgets, and fingerprints explicit provider-neutral context packs without transport or persistence concerns.
-- `hormuz/context_store.py` implements the local governed-record and trusted-snapshot repository, optimistic concurrency, integrity checks, and metadata-only mutation/read/lifecycle audit behind a content-codec boundary.
+- `hormuz/context_lifecycle.py` defines strict evidence, promotion-policy, subject-fingerprint, conflict, negative-signal, and source/dependency transition rules without persistence or transport concerns.
+- `hormuz/context_store.py` implements the local governed-record, trusted-snapshot, immutable evidence, and resumable revalidation repository with optimistic concurrency, leases, integrity checks, and metadata-only mutation/read/lifecycle audit behind a content-codec boundary.
 - `hormuz/mcp.py` implements the bounded dual-era MCP stdio protocol and an HTTPS client for the authenticated Context Pack API; it has no repository or provider access.
 - `hormuz/context_benchmark.py` evaluates the production context-pack kernel against frozen synthetic snapshots and separated outcomes; it has no provider, network, or context-repository dependency.
 - `hormuz/cli.py` exposes serving, diagnostics, policy checks, client configuration, usage and billing reporting, and explicit context lifecycle commands.

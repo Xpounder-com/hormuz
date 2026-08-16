@@ -26,12 +26,14 @@ from hormuz.cli import (
     _context_audit_export,
     _context_audit_since,
     _context_delete,
+    _context_evidence_import,
     _context_export,
     _context_import,
     _context_list,
     _context_pack,
     _context_snapshot_import,
     _context_snapshot_show,
+    _context_revalidate,
     _policy_check,
     _status,
     build_parser,
@@ -45,6 +47,7 @@ from hormuz.config import (
     SessionBrokerConfig,
 )
 from hormuz.context import ContextError
+from hormuz.context_store import SQLiteContextRepository
 from hormuz.store import UsageStore
 
 
@@ -327,6 +330,10 @@ class ClientConfigTests(unittest.TestCase):
         self.assertEqual(self.config.context_service.max_items, 20)
         self.assertEqual(self.config.context_service.requests_per_minute, 60)
         self.assertFalse(self.config.context_service.allow_provisional)
+        self.assertFalse(self.config.context_service.lifecycle.enabled)
+        self.assertEqual(self.config.context_service.lifecycle.job_batch_size, 100)
+        self.assertEqual(self.config.context_service.lifecycle.lease_seconds, 30)
+        self.assertIsNotNone(self.config.context_service.lifecycle.policy)
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             raw = json.loads((ROOT / "config.example.json").read_text(encoding="utf-8"))
@@ -342,6 +349,33 @@ class ClientConfigTests(unittest.TestCase):
             path.write_text(json.dumps(raw), encoding="utf-8")
             with self.assertRaisesRegex(ConfigError, "Unknown context_service fields"):
                 GatewayConfig.load(path, environ={"HORMUZ_TOKEN": "test-identity-token"})
+
+    def test_lifecycle_config_is_strict_and_requires_an_explicit_promoter(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            raw = json.loads((ROOT / "config.example.json").read_text(encoding="utf-8"))
+            path = root / "hormuz.json"
+
+            raw["context_service"]["lifecycle"]["unknown"] = True
+            path.write_text(json.dumps(raw), encoding="utf-8")
+            with self.assertRaisesRegex(ConfigError, "Unknown context_service.lifecycle fields"):
+                GatewayConfig.load(path, environ={"HORMUZ_TOKEN": "test-identity-token"})
+
+            raw["context_service"]["lifecycle"].pop("unknown")
+            raw["context_service"]["lifecycle"]["enabled"] = True
+            raw["identities"][0]["capabilities"] = []
+            path.write_text(json.dumps(raw), encoding="utf-8")
+            with self.assertRaisesRegex(ConfigError, "no context_promoter"):
+                GatewayConfig.load(path, environ={"HORMUZ_TOKEN": "test-identity-token"})
+
+            raw["context_service"]["lifecycle"]["enabled"] = False
+            raw["context_service"]["lifecycle"]["promotion_paths"] = []
+            path.write_text(json.dumps(raw), encoding="utf-8")
+            config = GatewayConfig.load(
+                path,
+                environ={"HORMUZ_TOKEN": "test-identity-token"},
+            )
+            self.assertFalse(config.context_service.lifecycle.enabled)
 
     def test_model_routes_snapshot_a_bounded_usd_rate_card_version(self) -> None:
         route = self.config.model_routes["gpt-5.4-mini"]
@@ -933,6 +967,191 @@ class ClientConfigTests(unittest.TestCase):
             with redirect_stdout(output := io.StringIO()):
                 self.assertEqual(_context_snapshot_import(config, snapshot_args), 0)
             self.assertEqual(json.loads(output.getvalue())["storage"]["version"], 2)
+
+    def test_lifecycle_cli_imports_evidence_and_revalidates_under_promoter_capability(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            base_identity = self.config.identities_by_actor["alice"]
+            promoter_identity = replace(
+                base_identity,
+                capabilities=("context_promoter",),
+            )
+            config = replace(
+                self.config,
+                context_database_path=root / "context.sqlite3",
+                context_service=replace(
+                    self.config.context_service,
+                    lifecycle=replace(
+                        self.config.context_service.lifecycle,
+                        enabled=True,
+                    ),
+                ),
+                identities_by_token={base_identity.token: promoter_identity},
+            )
+            records_path = root / "records.jsonl"
+            records_path.write_text(
+                json.dumps(
+                    {
+                        "id": "retry-observation",
+                        "kind": "claim",
+                        "title": "Retry observation",
+                        "content": "Bounded retries passed the repository test suite.",
+                        "organization_id": "xpounder",
+                        "visibility": "team",
+                        "scope_id": "engineering",
+                        "classification": "internal",
+                        "source": {
+                            "uri": "repo://acme/api/retry.py",
+                            "revision": "git:abc123",
+                            "item_key": "retry-observation",
+                        },
+                        "repository_id": "acme/api",
+                        "branch": "main",
+                        "verification": "provisional",
+                        "effective_at": "2026-08-15T12:00:00Z",
+                        "invalidation_rules": ["source_revision_changed"],
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            import_args = build_parser().parse_args(
+                ["context-import", "--records", str(records_path), "--actor", "alice"]
+            )
+            provisional_text = records_path.read_text(encoding="utf-8")
+            verified_payload = json.loads(provisional_text)
+            verified_payload["verification"] = "verified"
+            verified_payload["verification_evidence"] = ["manual:claim"]
+            verified_payload["verified_at"] = "2026-08-15T12:30:00Z"
+            records_path.write_text(json.dumps(verified_payload) + "\n", encoding="utf-8")
+            with redirect_stderr(io.StringIO()):
+                self.assertEqual(_context_import(config, import_args), 2)
+            records_path.write_text(provisional_text, encoding="utf-8")
+            with redirect_stdout(io.StringIO()):
+                self.assertEqual(_context_import(config, import_args), 0)
+
+            snapshot_path = root / "snapshot.json"
+            snapshot_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": "hormuz.context-lifecycle-envelope.v1",
+                        "organization_id": "xpounder",
+                        "repository_id": "acme/api",
+                        "branch": "main",
+                        "snapshot": {
+                            "schema_version": "hormuz.context-lifecycle-snapshot.v1",
+                            "repository_revision": "abc123",
+                            "artifacts": [],
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            snapshot_args = build_parser().parse_args(
+                [
+                    "context-snapshot-import",
+                    "--snapshot",
+                    str(snapshot_path),
+                    "--actor",
+                    "alice",
+                ]
+            )
+            with redirect_stdout(io.StringIO()):
+                self.assertEqual(_context_snapshot_import(config, snapshot_args), 0)
+
+            raw_reference = "github-actions:private-run:12345"
+            evidence_path = root / "evidence.json"
+            evidence_args = build_parser().parse_args(
+                [
+                    "context-evidence-import",
+                    "--evidence",
+                    str(evidence_path),
+                    "--actor",
+                    "alice",
+                ]
+            )
+            for signal in ("commit_merged", "ci_passed"):
+                evidence_path.write_text(
+                    json.dumps(
+                        {
+                            "schema_version": "hormuz.context-evidence.v1",
+                            "organization_id": "xpounder",
+                            "record_id": "retry-observation",
+                            "record_version": 1,
+                            "signal": signal,
+                            "evidence_ref": f"{raw_reference}:{signal}",
+                            "observed_at": "2026-08-15T13:00:00Z",
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                with redirect_stdout(output := io.StringIO()):
+                    self.assertEqual(_context_evidence_import(config, evidence_args), 0)
+                self.assertTrue(json.loads(output.getvalue())["created"])
+                if signal == "commit_merged":
+                    with redirect_stdout(output := io.StringIO()):
+                        self.assertEqual(_context_evidence_import(config, evidence_args), 0)
+                    self.assertFalse(json.loads(output.getvalue())["created"])
+            self.assertNotIn(raw_reference.encode(), config.context_database_path.read_bytes())
+
+            revalidate_args = build_parser().parse_args(
+                [
+                    "context-revalidate",
+                    "--actor",
+                    "alice",
+                    "--repository",
+                    "acme/api",
+                    "--branch",
+                    "main",
+                    "--batch-size",
+                    "1",
+                ]
+            )
+            with redirect_stdout(output := io.StringIO()):
+                self.assertEqual(_context_revalidate(config, revalidate_args), 0)
+            result = json.loads(output.getvalue())
+            self.assertEqual(result["status"], "completed")
+            self.assertEqual(result["promoted_records"], 1)
+            revalidate_args.batch_size = 0
+            with redirect_stderr(io.StringIO()):
+                self.assertEqual(_context_revalidate(config, revalidate_args), 2)
+            revalidate_args.batch_size = 1
+            with sqlite3.connect(config.context_database_path) as connection:
+                verification, version = connection.execute(
+                    "SELECT verification, version FROM context_records WHERE id = ?",
+                    ("retry-observation",),
+                ).fetchone()
+            self.assertEqual((verification, version), ("verified", 2))
+
+            evidence_path.write_text(
+                '{"schema_version":"hormuz.context-evidence.v1",'
+                '"organization_id":"xpounder","organization_id":"another",'
+                '"record_id":"retry-observation","record_version":2,'
+                '"signal":"ci_failed","evidence_ref":"duplicate",'
+                '"observed_at":"2026-08-15T14:00:00Z"}',
+                encoding="utf-8",
+            )
+            with redirect_stderr(io.StringIO()):
+                self.assertEqual(_context_evidence_import(config, evidence_args), 2)
+
+            identity = config.identities_by_actor["alice"]
+            denied_identity = replace(identity, capabilities=())
+            denied = replace(
+                config,
+                identities_by_token={identity.token: denied_identity},
+            )
+            with redirect_stderr(io.StringIO()):
+                self.assertEqual(_context_revalidate(denied, revalidate_args), 2)
+
+            events = SQLiteContextRepository(config.context_database_path).audit_events(
+                organization_id="xpounder",
+                since=datetime(2026, 8, 1, tzinfo=timezone.utc),
+            )
+            event_types = {event["event_type"] for event in events}
+            self.assertIn("context.evidence", event_types)
+            self.assertIn("context.revalidation", event_types)
+            serialized = json.dumps(events)
+            self.assertNotIn(raw_reference, serialized)
 
     def test_lifecycle_snapshot_import_rejects_cross_organization_scope_before_write(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

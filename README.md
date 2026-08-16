@@ -24,6 +24,7 @@ Hormuz is alpha software. The local prototype proves routing and policy behavior
 - OpenAI response storage and background mode disabled by default as enforceable provider privacy policy.
 - Configuration output for installed Codex and Claude Code clients.
 - A separate local governed-context repository with atomic idempotent import, verification evidence, classification/scope authorization, optimistic concurrency, metadata-only mutation/read audit export, private content export, and physical deletion controls.
+- Opt-in, capability-gated lifecycle automation that promotes provisional records through configured merge, CI, review, ADR, incident, human, or validated-failure evidence; invalidates them on newer negative evidence or changed trusted source state; and runs in resumable, lease-safe, tenant-scoped batches.
 - Explicit, provider-neutral governed context packs retrieved authorization-first from that repository, with versioned retrieval/render contracts, explicit authorized freshness/provisional exclusions, expiry, supersession, trusted dependency snapshots, prompt-injection quarantine, structured contradiction outcomes, deterministic lexical ranking, and token-budget enforcement.
 - Authenticated `POST /v1/context/packs` retrieval with identity-derived scope, server-owned caps, per-actor rate limiting, stable errors, and no provider or usage-ledger side effects.
 - A real `hormuz_get_context` MCP stdio tool for Codex and Claude Code that reuses the authenticated Context Pack API, supports current and next-generation MCP handshakes, and cannot override employee identity or organization policy.
@@ -167,7 +168,30 @@ python3 -m hormuz --config hormuz.json context-audit-export \
   --output hormuz-context-audit.jsonl
 ```
 
-See [docs/ROADMAP.md](docs/ROADMAP.md) for the evidence-gated enterprise program, [docs/decisions/README.md](docs/decisions/README.md) for proposed and accepted architecture decisions, [docs/CLIENTS.md](docs/CLIENTS.md) for provider routing, [docs/MCP.md](docs/MCP.md) for governed context in Codex and Claude Code, [docs/OIDC.md](docs/OIDC.md) for generic enterprise identity, [docs/SESSION_ADMIN_API.md](docs/SESSION_ADMIN_API.md) for tenant-scoped session control, [docs/USAGE.md](docs/USAGE.md) for team/person/model cost and budget reporting, [docs/BILLING_RECONCILIATION.md](docs/BILLING_RECONCILIATION.md) for provider cost imports and aggregate reconciliation, [docs/AUDIT.md](docs/AUDIT.md) for the export contract and limitations, [docs/SECRET_CONTROLS.md](docs/SECRET_CONTROLS.md) for the egress boundary, [docs/DLP_APPROVAL_API.md](docs/DLP_APPROVAL_API.md) for the approver contract, [docs/CONTEXT.md](docs/CONTEXT.md) for governed record/pack semantics, [docs/CONTEXT_API.md](docs/CONTEXT_API.md) for authenticated retrieval, [docs/VERIFICATION.md](docs/VERIFICATION.md) for executable compatibility evidence, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the request path and current trust boundary.
+To exercise automatic promotion, first enable `context_service.lifecycle` and grant a trusted identity `context_promoter`, then use the provisional lifecycle sample:
+
+```bash
+python3 -m hormuz --config hormuz.json context-import \
+  --records examples/context-lifecycle-records.jsonl \
+  --actor alice
+python3 -m hormuz --config hormuz.json context-snapshot-import \
+  --snapshot examples/context-lifecycle-snapshot.json \
+  --actor alice
+python3 -m hormuz --config hormuz.json context-evidence-import \
+  --evidence examples/context-evidence-commit-merged.json \
+  --actor alice
+python3 -m hormuz --config hormuz.json context-evidence-import \
+  --evidence examples/context-evidence-ci-passed.json \
+  --actor alice
+python3 -m hormuz --config hormuz.json context-revalidate \
+  --actor alice \
+  --repository Xpounder-com/hormuz \
+  --branch main
+```
+
+Lifecycle automation is disabled in the sample configuration until that capability and policy are reviewed. See [docs/CONTEXT_LIFECYCLE.md](docs/CONTEXT_LIFECYCLE.md) for the complete setup, evidence schema, invalidation/recovery behavior, and current connector boundary.
+
+See [docs/ROADMAP.md](docs/ROADMAP.md) for the evidence-gated enterprise program, [docs/decisions/README.md](docs/decisions/README.md) for proposed and accepted architecture decisions, [docs/CLIENTS.md](docs/CLIENTS.md) for provider routing, [docs/MCP.md](docs/MCP.md) for governed context in Codex and Claude Code, [docs/OIDC.md](docs/OIDC.md) for generic enterprise identity, [docs/SESSION_ADMIN_API.md](docs/SESSION_ADMIN_API.md) for tenant-scoped session control, [docs/USAGE.md](docs/USAGE.md) for team/person/model cost and budget reporting, [docs/BILLING_RECONCILIATION.md](docs/BILLING_RECONCILIATION.md) for provider cost imports and aggregate reconciliation, [docs/AUDIT.md](docs/AUDIT.md) for the export contract and limitations, [docs/SECRET_CONTROLS.md](docs/SECRET_CONTROLS.md) for the egress boundary, [docs/DLP_APPROVAL_API.md](docs/DLP_APPROVAL_API.md) for the approver contract, [docs/CONTEXT.md](docs/CONTEXT.md) for governed record/pack semantics, [docs/CONTEXT_LIFECYCLE.md](docs/CONTEXT_LIFECYCLE.md) for evidence-driven promotion and revalidation, [docs/CONTEXT_API.md](docs/CONTEXT_API.md) for authenticated retrieval, [docs/VERIFICATION.md](docs/VERIFICATION.md) for executable compatibility evidence, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the request path and current trust boundary.
 
 Measure the bundled governed-context contract without a gateway configuration or provider credential:
 
@@ -196,4 +220,4 @@ The GitHub publication gate also tests Python 3.11 through 3.14, validates the f
 
 ## Roadmap boundary
 
-The current milestone includes the enforcement, versioned estimate accounting, offline provider cost-report reconciliation, deterministic secret egress, a bounded structured-DLP detector/action subset, provider-format-aware opaque-media denial, replay-safe approval grants, metadata audit, local persistent context records/packs, trusted lifecycle snapshot evaluation, MCP retrieval, OIDC JWT verification, and a single-node OIDC login/session kernel with tenant-scoped administrator revocation. The usage, approval, context, and session databases are deliberately local implementations; they are not the pending enterprise tenancy, HA, or KMS design. Before an enterprise release, Hormuz still needs one owner-selected real-IdP validation, SCIM-driven deprovisioning, shared multi-node revocation, remaining accepted DLP architecture, durable multi-tenant persistence, TLS and deployment hardening, signed or externally immutable audit retention, authenticated provider polling and final invoice/credit reconciliation, broader provider conformance coverage, automatic context verification/promotion/decay and resumable revalidation, cache, mandatory injection, and outcome writeback.
+The current milestone includes the enforcement, versioned estimate accounting, offline provider cost-report reconciliation, deterministic secret egress, a bounded structured-DLP detector/action subset, provider-format-aware opaque-media denial, replay-safe approval grants, metadata audit, local persistent context records/packs, trusted lifecycle snapshot evaluation, opt-in evidence-driven promotion/invalidation with resumable local revalidation, MCP retrieval, OIDC JWT verification, and a single-node OIDC login/session kernel with tenant-scoped administrator revocation. The usage, approval, context, and session databases are deliberately local implementations; they are not the pending enterprise tenancy, HA, or KMS design. Before an enterprise release, Hormuz still needs one owner-selected real-IdP validation, SCIM-driven deprovisioning, shared multi-node revocation, remaining accepted DLP architecture, durable multi-tenant persistence, TLS and deployment hardening, signed or externally immutable audit retention, authenticated provider polling and final invoice/credit reconciliation, broader provider conformance coverage, lifecycle source connectors and remaining decay policy, cache, mandatory injection, and outcome writeback.

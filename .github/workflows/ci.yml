@@ -61,6 +61,8 @@ jobs:
           "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" context-import --help
           "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" context-snapshot-import --help
           "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" context-snapshot-show --help
+          "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" context-evidence-import --help
+          "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" context-revalidate --help
           "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" context-list --help
           "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" context-export --help
           "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" context-audit-export --help

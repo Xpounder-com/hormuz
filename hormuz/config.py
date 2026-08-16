@@ -11,6 +11,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+from .context_lifecycle import LifecyclePolicy
+
 
 class ConfigError(ValueError):
     pass
@@ -76,12 +78,23 @@ class DLPPolicyOverlay:
 
 
 @dataclass(frozen=True)
+class ContextLifecycleAutomationConfig:
+    enabled: bool = False
+    policy: LifecyclePolicy | None = None
+    job_batch_size: int = 100
+    lease_seconds: int = 30
+
+
+@dataclass(frozen=True)
 class ContextServiceConfig:
     policy_version: str = "local-v1"
     max_token_budget: int = 32_768
     max_items: int = 20
     requests_per_minute: int = 60
     allow_provisional: bool = False
+    lifecycle: ContextLifecycleAutomationConfig = field(
+        default_factory=ContextLifecycleAutomationConfig
+    )
 
 
 @dataclass(frozen=True)
@@ -502,6 +515,7 @@ class GatewayConfig:
                 "max_items",
                 "requests_per_minute",
                 "allow_provisional",
+                "lifecycle",
             }
         )
         if unknown_context_service:
@@ -534,6 +548,9 @@ class GatewayConfig:
             allow_provisional=_boolean(
                 context_service_raw.get("allow_provisional", False),
                 "context_service.allow_provisional",
+            ),
+            lifecycle=_context_lifecycle_automation_config(
+                context_service_raw.get("lifecycle", {})
             ),
         )
         policies_raw = _object(raw.get("policies"), "policies")
@@ -661,6 +678,21 @@ class GatewayConfig:
                 raise ConfigError(
                     "DLP approval is enabled but these organizations have no dlp_approver: "
                     + ", ".join(missing)
+                )
+        if self.context_service.lifecycle.enabled:
+            organization_ids = {
+                identity.organization_id for identity in self.identities_by_actor.values()
+            }
+            promoter_organizations = {
+                identity.organization_id
+                for identity in self.identities_by_actor.values()
+                if "context_promoter" in identity.capabilities
+            }
+            missing = sorted(organization_ids - promoter_organizations)
+            if missing:
+                raise ConfigError(
+                    "Context lifecycle automation is enabled but these organizations have no "
+                    "context_promoter: " + ", ".join(missing)
                 )
 
     def identity_for_token(self, token: str) -> Identity | None:
@@ -1304,9 +1336,64 @@ def _dlp_identifier(value: Any, path: str) -> str:
     return result
 
 
+def _context_lifecycle_automation_config(value: Any) -> ContextLifecycleAutomationConfig:
+    path = "context_service.lifecycle"
+    item = _object(value, path)
+    unknown = sorted(
+        set(item)
+        - {
+            "enabled",
+            "policy_version",
+            "promotion_paths",
+            "job_batch_size",
+            "lease_seconds",
+        }
+    )
+    if unknown:
+        raise ConfigError(f"Unknown {path} fields: " + ", ".join(unknown))
+    enabled = _boolean(item.get("enabled", False), f"{path}.enabled")
+    promotion_paths = item.get("promotion_paths", [])
+    if not isinstance(promotion_paths, list):
+        raise ConfigError(f"{path}.promotion_paths must be an array")
+    policy: LifecyclePolicy | None = None
+    if promotion_paths:
+        try:
+            policy = LifecyclePolicy.from_dict(
+                {
+                    "policy_version": _bounded_policy_version(
+                        item.get("policy_version", "engineering-lifecycle-v1"),
+                        f"{path}.policy_version",
+                    ),
+                    "promotion_paths": promotion_paths,
+                }
+            )
+        except ValueError as error:
+            raise ConfigError(f"Invalid {path}: {error}") from error
+    elif enabled:
+        raise ConfigError(
+            f"{path}.promotion_paths must contain at least one path when enabled"
+        )
+    return ContextLifecycleAutomationConfig(
+        enabled=enabled,
+        policy=policy,
+        job_batch_size=_integer(
+            item.get("job_batch_size", 100),
+            f"{path}.job_batch_size",
+            minimum=1,
+            maximum=1_000,
+        ),
+        lease_seconds=_integer(
+            item.get("lease_seconds", 30),
+            f"{path}.lease_seconds",
+            minimum=1,
+            maximum=3_600,
+        ),
+    )
+
+
 def _identity_capabilities(value: Any, path: str) -> tuple[str, ...]:
     capabilities = _string_tuple(value, path)
-    supported = {"dlp_approver", "session_admin"}
+    supported = {"context_promoter", "dlp_approver", "session_admin"}
     unknown = sorted(set(capabilities) - supported)
     if unknown:
         raise ConfigError(f"Unknown {path}: " + ", ".join(unknown))

@@ -25,6 +25,7 @@ from .context import (
     ContextRecord,
     build_context_pack,
 )
+from .context_lifecycle import ContextEvidence, LifecyclePolicy
 from .context_store import (
     ContextStoreError,
     SQLiteContextRepository,
@@ -417,6 +418,38 @@ def build_parser() -> argparse.ArgumentParser:
     snapshot_show.add_argument("--repository", required=True, help="Repository scope ID")
     snapshot_show.add_argument("--branch", required=True, help="Branch scope")
 
+    evidence_import = subparsers.add_parser(
+        "context-evidence-import",
+        help="Import one immutable lifecycle evidence fingerprint",
+    )
+    evidence_import.add_argument(
+        "--evidence",
+        required=True,
+        help="Context evidence envelope JSON",
+    )
+    evidence_import.add_argument(
+        "--actor",
+        required=True,
+        help="Configured actor with context_promoter capability",
+    )
+
+    revalidate = subparsers.add_parser(
+        "context-revalidate",
+        help="Run or resume one governed lifecycle revalidation batch",
+    )
+    revalidate.add_argument(
+        "--actor",
+        required=True,
+        help="Configured actor with context_promoter capability",
+    )
+    revalidate.add_argument("--repository", required=True, help="Repository scope ID")
+    revalidate.add_argument("--branch", required=True, help="Branch scope")
+    revalidate.add_argument(
+        "--batch-size",
+        type=int,
+        help="Records for this batch; cannot exceed the configured lifecycle maximum",
+    )
+
     context_list = subparsers.add_parser(
         "context-list",
         help="List governed context authorized for a configured actor",
@@ -597,6 +630,10 @@ def main(argv: list[str] | None = None) -> int:
             return _context_snapshot_import(config, args)
         if args.command == "context-snapshot-show":
             return _context_snapshot_show(config, args)
+        if args.command == "context-evidence-import":
+            return _context_evidence_import(config, args)
+        if args.command == "context-revalidate":
+            return _context_revalidate(config, args)
         if args.command == "context-list":
             return _context_list(config, args)
         if args.command == "context-export":
@@ -1532,6 +1569,7 @@ def _context_import(config: GatewayConfig, args: argparse.Namespace) -> int:
             records,
             actor_id=identity.actor_id,
             policy_version=args.policy_version,
+            new_records_must_be_provisional=config.context_service.lifecycle.enabled,
         )
         created = sum(result.created for result in results)
         existing = len(results) - created
@@ -1566,6 +1604,8 @@ def _context_snapshot_import(config: GatewayConfig, args: argparse.Namespace) ->
         print(f"unknown actor: {args.actor}", file=sys.stderr)
         return 2
     try:
+        if config.context_service.lifecycle.enabled:
+            identity, _policy = _context_promoter(config, args.actor)
         scope, snapshot = _load_context_lifecycle_envelope(Path(args.snapshot))
         _require_lifecycle_scope(
             scope,
@@ -1613,6 +1653,81 @@ def _context_snapshot_show(config: GatewayConfig, args: argparse.Namespace) -> i
         return 2
     print(json.dumps(stored.to_dict(), indent=2, sort_keys=True, ensure_ascii=False))
     return 0
+
+
+def _context_evidence_import(config: GatewayConfig, args: argparse.Namespace) -> int:
+    try:
+        identity, policy = _context_promoter(config, args.actor)
+        evidence = _load_context_evidence(Path(args.evidence))
+        if evidence.organization_id != identity.organization_id:
+            raise ContextError(
+                "context evidence organization does not match the actor identity"
+            )
+        result = SQLiteContextRepository(
+            config.context_database_path
+        ).record_lifecycle_evidence(
+            evidence,
+            actor_id=identity.actor_id,
+            policy_version=policy.policy_version,
+        )
+    except OSError as error:
+        print(f"context evidence import failed: {error}", file=sys.stderr)
+        return 2
+    except (ContextError, ContextStoreError, ValueError) as error:
+        print(f"context evidence import failed: {error}", file=sys.stderr)
+        return 2
+    payload = result.stored.to_dict()
+    payload["created"] = result.created
+    print(json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=False))
+    return 0
+
+
+def _context_revalidate(config: GatewayConfig, args: argparse.Namespace) -> int:
+    try:
+        identity, policy = _context_promoter(config, args.actor)
+        configured_batch_size = config.context_service.lifecycle.job_batch_size
+        batch_size = (
+            configured_batch_size if args.batch_size is None else args.batch_size
+        )
+        if batch_size > configured_batch_size:
+            raise ContextError(
+                "--batch-size cannot exceed context_service.lifecycle.job_batch_size"
+            )
+        repository = SQLiteContextRepository(config.context_database_path)
+        job = repository.start_revalidation_job(
+            organization_id=identity.organization_id,
+            repository_id=args.repository,
+            branch=args.branch,
+            policy=policy,
+            actor_id=identity.actor_id,
+        )
+        result = repository.run_revalidation_batch(
+            job_id=job.job_id,
+            policy=policy,
+            actor_id=identity.actor_id,
+            batch_size=batch_size,
+            lease_seconds=config.context_service.lifecycle.lease_seconds,
+        )
+    except (ContextError, ContextStoreError, ValueError) as error:
+        print(f"context revalidation failed: {error}", file=sys.stderr)
+        return 2
+    print(json.dumps(result.to_dict(), indent=2, sort_keys=True, ensure_ascii=False))
+    return 0
+
+
+def _context_promoter(
+    config: GatewayConfig,
+    actor_id: str,
+) -> tuple[Identity, LifecyclePolicy]:
+    identity = config.identities_by_actor.get(actor_id)
+    if identity is None:
+        raise ContextError(f"unknown actor: {actor_id}")
+    if "context_promoter" not in identity.capabilities:
+        raise ContextError("actor lacks context_promoter capability")
+    lifecycle = config.context_service.lifecycle
+    if not lifecycle.enabled or lifecycle.policy is None:
+        raise ContextError("context lifecycle automation is disabled")
+    return identity, lifecycle.policy
 
 
 def _context_list(config: GatewayConfig, args: argparse.Namespace) -> int:
@@ -1915,6 +2030,38 @@ def _load_context_lifecycle_envelope(
             raise ContextError(f"context lifecycle {name} must be a bounded non-empty string")
         scope[name] = item
     return scope, ContextLifecycleSnapshot.from_dict(value.get("snapshot"))
+
+
+def _load_context_evidence(path: Path) -> ContextEvidence:
+    if path.stat().st_size > 1024 * 1024:
+        raise ContextError("context evidence input cannot exceed 1 MiB")
+    try:
+        value = json.loads(
+            path.read_text(encoding="utf-8"),
+            parse_constant=_invalid_context_json_constant,
+            object_pairs_hook=_unique_context_json_object,
+        )
+    except (json.JSONDecodeError, UnicodeDecodeError) as error:
+        raise ContextError("context evidence input must be valid JSON") from error
+    try:
+        return ContextEvidence.from_dict(value)
+    except ValueError as error:
+        raise ContextError(str(error)) from error
+
+
+def _unique_context_json_object(
+    pairs: list[tuple[str, object]],
+) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ContextError("context evidence input contains a duplicate JSON object member")
+        result[key] = value
+    return result
+
+
+def _invalid_context_json_constant(_value: str) -> object:
+    raise ContextError("context evidence input contains a non-standard JSON numeric constant")
 
 
 def _require_lifecycle_scope(

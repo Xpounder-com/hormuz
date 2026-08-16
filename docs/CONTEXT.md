@@ -101,6 +101,8 @@ python3 -m hormuz --config hormuz.json context-snapshot-show \
 
 Snapshot creation is idempotent. Replacing a different snapshot requires `--expected-version`; concurrent writers using the same version produce exactly one winner. Snapshot audit events retain scope, actor, policy, version, hash, and artifact count, but not artifact URIs or revisions. The local snapshot row does retain those artifact identities because pack evaluation needs them; it does not contain source content.
 
+When lifecycle automation is enabled, snapshot import requires the explicit `context_promoter` capability. The same capability governs immutable evidence import and resumable revalidation, while ordinary context reads remain available under their existing identity, classification, and repository scope. See [CONTEXT_LIFECYCLE.md](CONTEXT_LIFECYCLE.md) for configuration, evidence signals, promotion/invalidation rules, job recovery, and the legacy verified-record compatibility boundary.
+
 The CLI envelope is `hormuz.context-lifecycle-envelope.v1`, and its nested trusted state is `hormuz.context-lifecycle-snapshot.v1`. The HTTP Context Pack API never accepts a caller-supplied snapshot: it loads only the latest server-side snapshot for the authenticated organization and exact requested repository/branch.
 
 ## Inspect and export
@@ -198,7 +200,7 @@ This is a durable local governance kernel, not the final enterprise context serv
 - the SQLite implementation is single-node and plaintext, with no accepted enterprise tenancy, KMS, backup, restore, legal-hold, or HA contract;
 - mutation commands trust the local configuration operator rather than a dedicated context-writer RBAC permission;
 - active authorized supersession means an expired successor can leave its prior record eligible;
-- snapshot evaluation is immediate and deterministic on every pack read, but source connectors, automatic verification/promotion/decay, resumable background revalidation, and approval workflows remain open lifecycle work;
+- snapshot evaluation is immediate and deterministic on every pack read; opt-in local evidence-driven promotion, invalidation, recovery, and resumable CLI revalidation are implemented, while source connectors, hosted scheduling, and remaining time/confidence decay policy remain open lifecycle work;
 - the prompt-injection quarantine uses narrow high-confidence text patterns. It lowers obvious risk but is not semantic prompt-injection prevention, and a safe record can still contain adversarial instructions that do not match those patterns;
 - the token estimate covers the complete serialized item contract and is
   deterministic, but it excludes the response wrapper and is not a provider
