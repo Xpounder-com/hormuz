@@ -263,6 +263,7 @@ Observed local result:
 - the complete default source suite passed 153 tests with only the separately gated official Claude Code executable test skipped; that official Claude Code test then passed independently, while the installed Codex path passed in the default suite;
 - the frozen 60-task context release profile remained green with precision `1.00`, recall `1.00`, useful-pack rate `1.00`, zero authorization/lifecycle/dependency/malicious/contradiction/budget/determinism failures, and p95 in-process selection latency `0.179375 ms`;
 - isolated source and wheel builds succeeded; the source distribution contained the DLP decision, implementation docs, and detector/gateway tests, and a clean Python 3.14 environment installed the wheel from outside the source tree and loaded `organization-dlp-v1` with all three built-in rules.
+- GitHub Actions push run `31920655595` and pull-request run `31920657597` both passed all seven publication jobs for implementation commit `695fff4`: Python 3.11–3.14, strict context benchmark, source/wheel build and install, and pinned official Codex/Claude Code compatibility.
 
 This is a bounded deterministic #10 implementation slice, not issue completion. Approval grants, replay-safe consumption, post-approval actual-model mismatch evidence, team/person DLP overlays, source classification, opaque-media denial, provider-header and JSON-key inspection, semantic detection, context-cache invalidation, and organization-representative detector evaluation remain open gates.
 
