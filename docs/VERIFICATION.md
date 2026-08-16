@@ -747,6 +747,19 @@ A focused failure-first security review of model routing metadata was exercised 
 
 This closes the identified model-metadata injection and request-thread failure path, not the independent security-review gate. Other provider-derived or deployment-generated metadata, reverse-proxy behavior, TLS, shared persistence, KMS, HA, backup/restore, and the broader enterprise review remain open.
 
+### Bounded provider-request metadata
+
+A focused failure-first review of caller-controlled provider-request metadata was exercised locally on August 16, 2026 through real Hormuz HTTP transport and provider-compatible OpenAI and Anthropic loopback fakes. No live provider credential or endpoint was used.
+
+- red-first cases proved that a folded `OpenAI-Beta`, folded `Anthropic-Version`, 1,025-byte `User-Agent`, and non-ASCII `Anthropic-Beta` each crossed Hormuz, reached the fake provider, and received HTTP `200` before the change;
+- the exact allowlist—`Accept` and `User-Agent` for both protocols, `OpenAI-Beta` for OpenAI, and `Anthropic-Version` plus `Anthropic-Beta` for Anthropic—now passes one gateway-owned limit of at most 1,024 bytes of visible ASCII plus horizontal tab;
+- folded, control-bearing, non-ASCII, or overlong values return a fixed provider-shaped `400 invalid_request` before DLP, policy accounting, provider work, or usage persistence. The adversarial marker was absent from downstream headers and bodies, with zero provider calls and zero usage events;
+- ordinary OpenAI non-streaming and Anthropic streaming requests remained compatible, and safe credential/DLP-bearing allowlisted headers still reached the existing fail-closed detector and metadata-only evidence path;
+- the complete 336-test source suite passed in `104.537` seconds. The environment-gated official Claude Code case was the sole local skip; and
+- source/test bytecode compilation and `git diff --check` passed.
+
+This closes the identified application-level provider-request metadata path, not every ingress component. A reverse proxy, load balancer, service mesh, or WAF must independently reject malformed request metadata before logging or forwarding it. TLS ingress, shared persistence, HA, KMS, backup/restore, and independent security review remain separate gates.
+
 ### Bounded provider-response metadata
 
 A focused failure-first review of the provider-response boundary was exercised locally on August 16, 2026 through real Hormuz HTTP transport and a provider-compatible loopback fake. No live provider credential or endpoint was used.

@@ -85,6 +85,7 @@ MAX_CONTEXT_REVALIDATION_REQUEST_BYTES = 8 * 1024
 MAX_AUTH_REQUEST_BYTES = 8 * 1024
 MAX_DLP_APPROVAL_REQUEST_BYTES = 2 * 1024
 MAX_PROVIDER_QUERY_DECODE_DEPTH = 3
+MAX_PROVIDER_REQUEST_HEADER_BYTES = 1024
 _CONTEXT_SCOPE_HEADERS = (
     ("X-Hormuz-Repository", "repository_id"),
     ("X-Hormuz-Branch", "branch"),
@@ -2324,7 +2325,16 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 code="hormuz_context_required",
             )
             return
-        forwarded_headers = self._forwarded_client_headers(protocol)
+        try:
+            forwarded_headers = self._forwarded_client_headers(protocol)
+        except ValueError:
+            self._send_protocol_error(
+                protocol,
+                "Provider request metadata is invalid.",
+                HTTPStatus.BAD_REQUEST,
+                code="invalid_request",
+            )
+            return
         forwarded_query = urlsplit(self.path).query
         try:
             query_strings = _provider_query_inspection_strings(forwarded_query)
@@ -3050,6 +3060,11 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             beta = self.headers.get("Anthropic-Beta")
             if beta:
                 headers["Anthropic-Beta"] = beta
+        if any(
+            not _safe_provider_request_header_value(value)
+            for value in headers.values()
+        ):
+            raise ValueError("unsafe provider request metadata")
         return headers
 
     @staticmethod
@@ -3196,6 +3211,15 @@ def _safe_provider_content_type(value: object) -> str:
         assert isinstance(value, str)
         return value
     return "application/json"
+
+
+def _safe_provider_request_header_value(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and value.isascii()
+        and len(value) <= MAX_PROVIDER_REQUEST_HEADER_BYTES
+        and all(character == "\t" or " " <= character <= "~" for character in value)
+    )
 
 
 def _safe_provider_response_headers(

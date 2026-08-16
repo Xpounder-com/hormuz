@@ -464,6 +464,63 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertIsNone(event["provider_request_id"])
         self.assertNotIn(marker, repr(event))
 
+    def test_provider_request_metadata_is_bounded_before_policy_and_egress(self) -> None:
+        marker = "provider-request-metadata-must-not-propagate"
+        before_provider = len(FakeProviderHandler.requests)
+        before_usage = self.gateway.store.monthly_totals(actor_id="alice").requests
+        cases = (
+            (
+                "/v1/responses",
+                {"model": "engineering-fast", "input": "ordinary request"},
+                {"OpenAI-Beta": f"safe\r\n X-Folded: {marker}"},
+            ),
+            (
+                "/v1/messages",
+                {
+                    "model": "claude-sonnet-5",
+                    "messages": [{"role": "user", "content": "ordinary request"}],
+                    "max_tokens": 50,
+                },
+                {"Anthropic-Version": f"safe\r\n X-Folded: {marker}"},
+            ),
+            (
+                "/v1/responses",
+                {"model": "engineering-fast", "input": "ordinary request"},
+                {"User-Agent": "u" * 1025},
+            ),
+            (
+                "/v1/messages",
+                {
+                    "model": "claude-sonnet-5",
+                    "messages": [{"role": "user", "content": "ordinary request"}],
+                    "max_tokens": 50,
+                },
+                {"Anthropic-Version": "2023-06-01", "Anthropic-Beta": "unsafe-\u00e9"},
+            ),
+        )
+
+        for path, payload, extra_headers in cases:
+            with self.subTest(path=path, headers=tuple(extra_headers)):
+                status, headers, response = self._post(
+                    path,
+                    payload,
+                    extra_headers=extra_headers,
+                )
+                self.assertEqual(status, 400)
+                error = json.loads(response)["error"]
+                self.assertEqual(
+                    error.get("code", error.get("type")),
+                    "invalid_request",
+                )
+                self.assertNotIn("x-folded", headers)
+                self.assertNotIn(marker.encode("ascii"), response)
+
+        self.assertEqual(len(FakeProviderHandler.requests), before_provider)
+        self.assertEqual(
+            self.gateway.store.monthly_totals(actor_id="alice").requests,
+            before_usage,
+        )
+
     def test_fallback_rejects_unsafe_model_metadata_before_policy_or_provider(self) -> None:
         before_provider = len(FakeProviderHandler.requests)
         before_usage = self.gateway.store.monthly_totals(actor_id="alice").requests
