@@ -1165,6 +1165,188 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertEqual(events[0]["redaction_count"], 1)
         self.assertNotIn(ssn, repr(events))
 
+    def test_opaque_media_is_denied_for_openai_and_anthropic_before_provider(self) -> None:
+        marker = "opaque-sensitive-bytes-never-persist"
+        encoded = base64.b64encode(marker.encode("utf-8")).decode("ascii")
+        before = len(FakeProviderHandler.requests)
+
+        openai_status, _, openai_response = self._post(
+            "/v1/responses",
+            {
+                "model": "engineering-fast",
+                "input": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "input_text", "text": "Inspect this file."},
+                            {
+                                "type": "input_file",
+                                "filename": "confidential.pdf",
+                                "file_data": encoded,
+                            },
+                        ],
+                    }
+                ],
+            },
+        )
+        anthropic_status, _, anthropic_response = self._post(
+            "/v1/messages",
+            {
+                "model": "claude-standard",
+                "max_tokens": 20,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "image",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": "image/png",
+                                    "data": encoded,
+                                },
+                            },
+                            {"type": "text", "text": "Inspect this image."},
+                        ],
+                    }
+                ],
+            },
+            extra_headers={"Anthropic-Version": "2023-06-01"},
+        )
+
+        self.assertEqual(openai_status, 403)
+        self.assertEqual(anthropic_status, 403)
+        self.assertEqual(len(FakeProviderHandler.requests), before)
+        self.assertEqual(json.loads(openai_response)["error"]["code"], "hormuz_dlp_denied")
+        self.assertEqual(json.loads(anthropic_response)["error"]["type"], "permission_error")
+        self.assertNotIn(marker.encode("utf-8"), openai_response)
+        self.assertNotIn(marker.encode("utf-8"), anthropic_response)
+
+        security = self.gateway.store.audit_events(
+            since="2000-01-01T00:00:00+00:00",
+            kind="security",
+        )
+        self.assertEqual(len(security), 2)
+        self.assertEqual({event["protocol"] for event in security}, {"openai", "anthropic"})
+        for event in security:
+            self.assertEqual(event["event_type"], "security.dlp")
+            self.assertEqual(event["action"], "denied")
+            self.assertEqual(event["detection_count"], 1)
+            self.assertEqual(event["rules"], ["opaque_media"])
+            self.assertEqual(event["findings"][0]["category"], "unsupported_media")
+        usage = self.gateway.store.audit_events(
+            since="2000-01-01T00:00:00+00:00",
+            kind="usage",
+        )
+        self.assertEqual(len(usage), 2)
+        self.assertTrue(all(event["policy_action"] == "dlp_denied" for event in usage))
+        self.assertNotIn(marker, repr(security))
+        self.assertNotIn(marker, repr(usage))
+        self.assertNotIn(marker.encode("utf-8"), self.config.database_path.read_bytes())
+        totals = self.gateway.store.monthly_secret_totals(actor_id="alice")
+        self.assertEqual(totals.dlp_detections, 2)
+        self.assertEqual(totals.denied_requests, 2)
+
+    def test_opaque_media_denial_on_token_count_has_no_usage_charge(self) -> None:
+        before = len(FakeProviderHandler.requests)
+
+        status, _, response = self._post(
+            "/v1/messages/count_tokens",
+            {
+                "model": "claude-sonnet-5",
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "document",
+                                "source": {
+                                    "type": "url",
+                                    "url": "https://example.invalid/confidential.pdf",
+                                },
+                            }
+                        ],
+                    }
+                ],
+            },
+            extra_headers={"Anthropic-Version": "2023-06-01"},
+        )
+
+        self.assertEqual(status, 403)
+        self.assertEqual(json.loads(response)["error"]["type"], "permission_error")
+        self.assertEqual(len(FakeProviderHandler.requests), before)
+        self.assertEqual(self.gateway.store.monthly_totals(actor_id="alice").requests, 0)
+        security = self.gateway.store.audit_events(
+            since="2000-01-01T00:00:00+00:00",
+            kind="security",
+        )
+        self.assertEqual(security[0]["rules"], ["opaque_media"])
+
+    def test_inline_anthropic_text_document_remains_inspectable(self) -> None:
+        ssn = "123-45-6789"
+
+        status, headers, _ = self._post(
+            "/v1/messages",
+            {
+                "model": "claude-standard",
+                "max_tokens": 20,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "document",
+                                "source": {
+                                    "type": "text",
+                                    "media_type": "text/plain",
+                                    "data": f"Tax identifier {ssn}",
+                                },
+                            },
+                            {"type": "text", "text": "Summarize this document."},
+                        ],
+                    }
+                ],
+            },
+            extra_headers={"Anthropic-Version": "2023-06-01"},
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["x-hormuz-redactions"], "1")
+        upstream = json.dumps(FakeProviderHandler.requests[-1]["body"])
+        self.assertNotIn(ssn, upstream)
+        self.assertIn("[REDACTED:HORMUZ_DLP]", upstream)
+
+    def test_organization_can_explicitly_disable_opaque_media_rule(self) -> None:
+        config_value = self._config(self.provider.server_port, _free_port())
+        config_value["egress_controls"] = {
+            "dlp": {"rules": {"opaque_media": {"action": "off"}}}
+        }
+        self._restart_gateway(config_value)
+
+        status, _, _ = self._post(
+            "/v1/responses",
+            {
+                "model": "engineering-fast",
+                "input": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "input_image",
+                                "image_url": "https://example.invalid/allowed-by-policy.png",
+                            }
+                        ],
+                    }
+                ],
+            },
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(
+            FakeProviderHandler.requests[-1]["body"]["input"][0]["content"][0]["type"],
+            "input_image",
+        )
+
     def test_company_dictionary_deny_blocks_before_egress_and_never_persists_value(self) -> None:
         protected = "PROJECT-ORBITAL"
         os.environ["TEST_COMPANY_TERMS"] = json.dumps([protected])

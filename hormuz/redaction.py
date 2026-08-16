@@ -85,6 +85,7 @@ _ACTION_PRECEDENCE = {
     "require_approval": 3,
     "deny": 4,
 }
+_OPAQUE_MEDIA_RULE_ID = "opaque_media"
 
 
 class SecretRedactor:
@@ -110,11 +111,43 @@ class SecretRedactor:
                 value=value,
                 policy_version=self.dlp_controls.policy_version,
             )
+        _validate_json_depth(value, depth=0)
+        opaque_media_count, opaque_object_ids = _opaque_media_scan(
+            value,
+            protocol=protocol,
+        )
+        if opaque_media_count:
+            opaque_rule = next(
+                (
+                    rule
+                    for rule in self.dlp_controls.rules
+                    if rule.rule_id == _OPAQUE_MEDIA_RULE_ID
+                    and rule.applies_to(protocol=protocol, model=model)
+                ),
+                None,
+            )
+            if opaque_rule is not None:
+                finding = DLPFinding(
+                    rule_id=opaque_rule.rule_id,
+                    category=opaque_rule.category,
+                    confidence=opaque_rule.confidence,
+                    action=opaque_rule.action,
+                    count=opaque_media_count,
+                )
+                return RedactionResult(
+                    value=value,
+                    count=opaque_media_count,
+                    rules=(opaque_rule.rule_id,),
+                    findings=(finding,),
+                    action=opaque_rule.action,
+                    policy_version=self.dlp_controls.policy_version,
+                )
         transformed, findings, redaction_count = self._transform(
             value,
             depth=0,
             protocol=protocol,
             model=model,
+            opaque_object_ids=opaque_object_ids,
         )
         assert isinstance(transformed, dict)
         result_findings = tuple(
@@ -150,9 +183,12 @@ class SecretRedactor:
         depth: int,
         protocol: str,
         model: str,
+        opaque_object_ids: frozenset[int],
     ) -> tuple[Any, dict[tuple[str, str, str, str, str], int], int]:
         if depth > MAX_JSON_DEPTH:
             raise RedactionError(f"Request JSON exceeds the maximum nesting depth of {MAX_JSON_DEPTH}")
+        if isinstance(value, dict) and id(value) in opaque_object_ids:
+            return value, {}, 0
         if isinstance(value, str):
             return self._transform_string(value, protocol=protocol, model=model)
         if isinstance(value, list):
@@ -165,6 +201,7 @@ class SecretRedactor:
                     depth=depth + 1,
                     protocol=protocol,
                     model=model,
+                    opaque_object_ids=opaque_object_ids,
                 )
                 transformed_items.append(transformed)
                 _merge_findings(findings, item_findings)
@@ -180,6 +217,7 @@ class SecretRedactor:
                     depth=depth + 1,
                     protocol=protocol,
                     model=model,
+                    opaque_object_ids=opaque_object_ids,
                 )
                 transformed_object[key] = transformed
                 _merge_findings(findings, item_findings)
@@ -291,6 +329,117 @@ def _replace_valid_cards(value: str) -> tuple[str, int]:
         return value, 0
     parts.append(value[cursor:])
     return "".join(parts), count
+
+
+def _validate_json_depth(value: Any, *, depth: int) -> None:
+    if depth > MAX_JSON_DEPTH:
+        raise RedactionError(f"Request JSON exceeds the maximum nesting depth of {MAX_JSON_DEPTH}")
+    if isinstance(value, list):
+        for item in value:
+            _validate_json_depth(item, depth=depth + 1)
+    elif isinstance(value, dict):
+        for item in value.values():
+            _validate_json_depth(item, depth=depth + 1)
+
+
+def _opaque_media_scan(
+    value: dict[str, Any],
+    *,
+    protocol: str,
+) -> tuple[int, frozenset[int]]:
+    opaque_object_ids: set[int] = set()
+    if protocol == "openai":
+        count = _openai_input_count(value.get("input"), opaque_object_ids)
+    elif protocol == "anthropic":
+        count = _anthropic_content_count(value.get("system"), opaque_object_ids)
+        messages = value.get("messages")
+        if isinstance(messages, list):
+            for message in messages:
+                if isinstance(message, dict):
+                    count += _anthropic_content_count(
+                        message.get("content"),
+                        opaque_object_ids,
+                    )
+    else:
+        count = 0
+    return count, frozenset(opaque_object_ids)
+
+
+def _openai_input_count(value: Any, opaque_object_ids: set[int]) -> int:
+    if isinstance(value, list):
+        return sum(
+            _openai_input_item_count(item, opaque_object_ids)
+            for item in value
+        )
+    return _openai_input_item_count(value, opaque_object_ids)
+
+
+def _openai_input_item_count(value: Any, opaque_object_ids: set[int]) -> int:
+    if not isinstance(value, dict):
+        return 0
+    item_type = value.get("type")
+    if item_type in {"input_image", "input_file", "computer_screenshot"}:
+        opaque_object_ids.add(id(value))
+        return 1
+    if item_type == "computer_call_output":
+        output = value.get("output")
+        if isinstance(output, dict) and output.get("type") == "computer_screenshot":
+            opaque_object_ids.add(id(output))
+            return 1
+        return 0
+    if item_type in {"function_call_output", "custom_tool_call_output"}:
+        return _openai_content_count(value.get("output"), opaque_object_ids)
+    if item_type == "message" or "role" in value:
+        return _openai_content_count(value.get("content"), opaque_object_ids)
+    return 0
+
+
+def _openai_content_count(value: Any, opaque_object_ids: set[int]) -> int:
+    if isinstance(value, list):
+        return sum(
+            _openai_input_item_count(item, opaque_object_ids)
+            for item in value
+        )
+    return _openai_input_item_count(value, opaque_object_ids)
+
+
+def _anthropic_content_count(value: Any, opaque_object_ids: set[int]) -> int:
+    if isinstance(value, list):
+        return sum(
+            _anthropic_block_count(item, opaque_object_ids)
+            for item in value
+        )
+    return _anthropic_block_count(value, opaque_object_ids)
+
+
+def _anthropic_block_count(value: Any, opaque_object_ids: set[int]) -> int:
+    if not isinstance(value, dict):
+        return 0
+    block_type = value.get("type")
+    if block_type == "image":
+        opaque_object_ids.add(id(value))
+        return 1
+    if block_type == "document":
+        source = value.get("source")
+        if not isinstance(source, dict):
+            opaque_object_ids.add(id(value))
+            return 1
+        source_type = source.get("type")
+        if source_type == "text":
+            return 0
+        if source_type == "content":
+            return _anthropic_content_count(
+                source.get("content"),
+                opaque_object_ids,
+            )
+        opaque_object_ids.add(id(value))
+        return 1
+    if block_type in {"file", "container_upload"}:
+        opaque_object_ids.add(id(value))
+        return 1
+    if block_type in {"tool_result", "search_result", "web_search_tool_result"}:
+        return _anthropic_content_count(value.get("content"), opaque_object_ids)
+    return 0
 
 
 def _valid_pan(value: str) -> bool:

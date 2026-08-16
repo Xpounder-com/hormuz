@@ -1,6 +1,6 @@
 # Secret and structured DLP egress controls
 
-Hormuz inspects JSON string values after identity and model policy evaluation and before the request is serialized to OpenAI or Anthropic. It never changes JSON keys. Prompt text, system instructions, tool outputs, and reusable context all pass through the same boundary when they are represented as JSON strings.
+Hormuz inspects JSON string values and recognized provider content blocks after identity and model policy evaluation and before the request is serialized to OpenAI or Anthropic. It never changes JSON keys. Prompt text, system instructions, tool outputs, and reusable context all pass through the same boundary when they are represented as JSON strings.
 
 ## Configuration
 
@@ -23,7 +23,8 @@ Egress controls are global because every provider-bound request must cross the s
       "rules": {
         "us_ssn": {"action": "redact", "providers": ["openai", "anthropic"]},
         "payment_card": {"action": "redact", "providers": ["openai", "anthropic"]},
-        "email_address": {"action": "detect", "providers": ["openai", "anthropic"]}
+        "email_address": {"action": "detect", "providers": ["openai", "anthropic"]},
+        "opaque_media": {"action": "deny", "providers": ["openai", "anthropic"]}
       },
       "dictionaries": [
         {
@@ -70,13 +71,24 @@ Built-in high-confidence detectors currently cover:
 
 Hormuz also treats every configured employee identity token and every available upstream provider credential as an exact protected value, regardless of its format.
 
-Structured DLP currently adds three deterministic built-ins:
+Structured DLP currently adds four deterministic built-ins:
 
 - `us_ssn` recognizes valid hyphenated US Social Security number structure and redacts by default.
 - `payment_card` recognizes 13-to-19-digit card candidates only after a Luhn check and redacts by default.
 - `email_address` recognizes conventional email-address syntax in detect-only mode. It is deliberately low-confidence telemetry, not a complete PII classifier.
+- `opaque_media` recognizes provider-defined image, file, document, and screenshot content positions whose bytes Hormuz cannot inspect. It denies by default and cannot be configured to redact or require approval because neither action produces inspected content.
 
 Each DLP rule can be limited to `openai`, `anthropic`, and exact routed upstream model IDs. `detect` forwards the original value, `redact` replaces it with `[REDACTED:HORMUZ_DLP]`, and `deny` returns `hormuz_dlp_denied` without a provider call. With approval disabled, `require_approval` continues to fail closed without creating a grant. With approval enabled, it creates a durable metadata-only request and returns `hormuz_dlp_approval_required` plus the opaque request ID in the message and `X-Hormuz-DLP-Approval-Request` header.
+
+## Opaque image and file boundary
+
+The OpenAI Responses contract accepts `input_image` values by URL, data URL, or file ID and `input_file` values by encoded data, URL, or file ID. Hormuz also recognizes those blocks when they are nested in provider-defined tool output, plus computer screenshot outputs. The Anthropic Messages contract accepts image blocks and document sources by base64, URL, or provider file reference. Hormuz recognizes those blocks in messages and nested tool/search-result content. See the official [OpenAI Responses request schema](https://developers.openai.com/api/reference/resources/responses/methods/create), [Anthropic vision guide](https://platform.claude.com/docs/en/build-with-claude/vision), and [Anthropic PDF guide](https://platform.claude.com/docs/en/build-with-claude/pdf-support).
+
+Hormuz does not fetch or decode those bytes yet. With the secure default, `opaque_media` produces one high-confidence `unsupported_media` finding per recognized block, commits metadata-only `security.dlp` evidence, and returns the ordinary provider-shaped `hormuz_dlp_denied` outcome before a provider call or usage charge. Filenames, URLs, file IDs, media data, prompts, and surrounding content are excluded from the event, log message, and error.
+
+Anthropic document sources whose type is `text` or `content` remain inspectable. Their nested JSON strings continue through secret and structured-DLP transformation, so a regulated identifier in an inline text document is redacted rather than causing a blanket media denial.
+
+The `opaque_media` action accepts only `deny` or `off`. `off` is an explicit organization risk acceptance that permits supported provider media to pass without byte inspection. Hormuz refuses `detect`, `redact`, or `require_approval` for this rule rather than implying that an opaque file was reviewed or safely transformed.
 
 ## Exact single-use approval
 
@@ -125,11 +137,11 @@ This request-level policy does not itself enroll an organization in OpenAI Zero 
 
 ## What this does not guarantee
 
-This is a bounded deterministic DLP subset, not a complete data-loss-prevention system. It inspects JSON values, not caller-controlled provider headers or JSON keys. It does not inspect image contents, decode arbitrary base64 or archives, classify source paths, infer proprietary meaning, or reliably detect transformed and obfuscated values. A custom exact value protects only that exact case-sensitive textual representation. The SSN detector intentionally supports only the high-confidence hyphenated form; the email detector has not passed an organization-specific false-positive/false-negative evaluation and therefore remains detect-only.
+This is a bounded deterministic DLP subset, not a complete data-loss-prevention system. It inspects JSON values and known provider media shapes, not caller-controlled provider headers or JSON keys. It denies recognized opaque media but does not inspect image/file contents, decode arbitrary base64 embedded in ordinary text, unpack archives, classify source paths, infer proprietary meaning, or reliably detect transformed and obfuscated values. A custom exact value protects only that exact case-sensitive textual representation. The SSN detector intentionally supports only the high-confidence hyphenated form; the email detector has not passed an organization-specific false-positive/false-negative evaluation and therefore remains detect-only.
 
 Use `deny` when forwarding a detected credential is unacceptable. Production deployments should combine Hormuz with least-privilege provider keys, short-lived employee identity, network controls, provider retention settings, code-host secret scanning, and a reviewed list of organization-specific values.
 
-The broader boundary remains governed by [accepted ADR 0004](decisions/0004-structured-dlp-and-approval-boundary.md). Source classification, opaque-media denial, semantic detection, team/person DLP tightening, detector-version evidence, multi-node approval persistence/notification, content-cache invalidation, and organization-specific evaluation are still open. Issue #10 remains open until those paths and the complete compatibility, failure, migration, and privacy gates pass.
+The broader boundary remains governed by [accepted ADR 0004](decisions/0004-structured-dlp-and-approval-boundary.md). Source classification, semantic detection, team/person DLP tightening, provider-header and JSON-key inspection, arbitrary encoded-text/archive decoding, detector-version evidence, multi-node approval persistence/notification, content-cache invalidation, and organization-specific evaluation are still open. Issue #10 remains open until those paths and the complete compatibility, failure, migration, and privacy gates pass.
 
 ## Verify
 
@@ -140,6 +152,9 @@ python3 -m unittest -v \
   tests.test_gateway.GatewayIntegrationTests.test_secret_is_redacted_before_provider_and_audited \
   tests.test_gateway.GatewayIntegrationTests.test_low_confidence_dlp_detection_forwards_unchanged_and_audits_metadata_only \
   tests.test_gateway.GatewayIntegrationTests.test_regulated_identifier_is_redacted_on_anthropic_path_before_provider \
+  tests.test_gateway.GatewayIntegrationTests.test_opaque_media_is_denied_for_openai_and_anthropic_before_provider \
+  tests.test_gateway.GatewayIntegrationTests.test_opaque_media_denial_on_token_count_has_no_usage_charge \
+  tests.test_gateway.GatewayIntegrationTests.test_inline_anthropic_text_document_remains_inspectable \
   tests.test_gateway.GatewayIntegrationTests.test_company_dictionary_deny_blocks_before_egress_and_never_persists_value \
   tests.test_gateway.GatewayIntegrationTests.test_approval_requirement_binds_to_exact_routed_model_and_fails_closed \
   tests.test_gateway.GatewayIntegrationTests.test_non_self_approval_allows_one_exact_retry_for_openai_and_anthropic \
@@ -147,4 +162,4 @@ python3 -m unittest -v \
   tests.test_store.UsageStoreMigrationTests.test_dlp_approval_expiry_and_concurrent_retry_fail_closed
 ```
 
-These tests prove credential and regulated-identifier transformation, detect-only forwarding, deny-before-egress, exact routed-model scoping, non-self authorization, CLI/API approval, exact single-use consumption, expiry, concurrent replay rejection, model-mismatch evidence, store-outage denial, and metadata-only evidence across the OpenAI and Anthropic compatibility paths.
+These tests prove credential and regulated-identifier transformation, detect-only forwarding, provider-format-aware opaque denial, inspectable text-document transformation, deny-before-egress, exact routed-model scoping, non-self authorization, CLI/API approval, exact single-use consumption, expiry, concurrent replay rejection, model-mismatch evidence, store-outage denial, and metadata-only evidence across the OpenAI and Anthropic compatibility paths.

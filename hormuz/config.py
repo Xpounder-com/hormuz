@@ -819,6 +819,7 @@ _DLP_BUILTINS = {
     "us_ssn": ("regulated_identifier", "high", "redact"),
     "payment_card": ("regulated_identifier", "high", "redact"),
     "email_address": ("pii", "low", "detect"),
+    "opaque_media": ("unsupported_media", "high", "deny"),
 }
 _DLP_RULE_ID = re.compile(r"[a-z][a-z0-9_.-]{0,63}\Z")
 
@@ -847,6 +848,10 @@ def _dlp_controls(value: Any, env: dict[str, str]) -> DLPControls:
             rule_path,
             default_action=default_action,
         )
+        if rule_id == "opaque_media" and action not in {"off", "deny"}:
+            raise ConfigError(
+                f"{rule_path}.action must be off or deny because Hormuz cannot safely transform opaque media"
+            )
         if action != "off":
             rules.append(
                 DLPRuleConfig(

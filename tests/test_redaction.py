@@ -164,6 +164,201 @@ class SecretRedactorTests(unittest.TestCase):
         self.assertEqual(result.value, value)
         self.assertEqual(result.findings[0].to_dict()["confidence"], "low")
 
+    def test_openai_opaque_media_is_denied_only_in_provider_content_positions(self) -> None:
+        controls = DLPControls(
+            policy_version="opaque-v1",
+            rules=(
+                DLPRuleConfig(
+                    rule_id="opaque_media",
+                    category="unsupported_media",
+                    confidence="high",
+                    action="deny",
+                    providers=("openai",),
+                ),
+            ),
+        )
+        redactor = SecretRedactor(SecretControls(mode="off"), dlp_controls=controls)
+
+        result = redactor.inspect(
+            {
+                "input": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "input_text", "text": "Inspect these."},
+                            {"type": "input_image", "image_url": "https://example.invalid/a.png"},
+                            {"type": "input_file", "file_id": "file_opaque"},
+                        ],
+                    },
+                    {
+                        "type": "function_call_output",
+                        "call_id": "call_1",
+                        "output": [{"type": "input_file", "file_data": "opaque-data"}],
+                    },
+                    {
+                        "type": "computer_call_output",
+                        "call_id": "call_2",
+                        "output": {
+                            "type": "computer_screenshot",
+                            "image_url": "data:image/png;base64,opaque",
+                        },
+                    },
+                ],
+                "metadata": {
+                    "type": "input_image",
+                    "image_url": "https://example.invalid/not-provider-content.png",
+                },
+            },
+            protocol="openai",
+            model="gpt-test",
+        )
+
+        self.assertEqual(result.action, "deny")
+        self.assertEqual(result.count, 4)
+        self.assertEqual(result.redaction_count, 0)
+        self.assertEqual(result.findings[0].rule_id, "opaque_media")
+        self.assertEqual(result.findings[0].category, "unsupported_media")
+
+    def test_opaque_media_does_not_bypass_json_depth_limit(self) -> None:
+        controls = DLPControls(
+            rules=(
+                DLPRuleConfig(
+                    rule_id="opaque_media",
+                    category="unsupported_media",
+                    confidence="high",
+                    action="deny",
+                    providers=("openai",),
+                ),
+            ),
+        )
+        nested: dict = {"value": "safe"}
+        for _ in range(MAX_JSON_DEPTH + 1):
+            nested = {"nested": nested}
+
+        with self.assertRaises(RedactionError):
+            SecretRedactor(
+                SecretControls(mode="off"),
+                dlp_controls=controls,
+            ).inspect(
+                {
+                    "input": [
+                        {
+                            "role": "user",
+                            "content": [{"type": "input_image", "file_id": "file_opaque"}],
+                        }
+                    ],
+                    "metadata": nested,
+                },
+                protocol="openai",
+                model="gpt-test",
+            )
+
+    def test_anthropic_opaque_media_denies_binary_sources_but_allows_inline_text(self) -> None:
+        controls = DLPControls(
+            rules=(
+                DLPRuleConfig(
+                    rule_id="opaque_media",
+                    category="unsupported_media",
+                    confidence="high",
+                    action="deny",
+                    providers=("anthropic",),
+                ),
+            ),
+        )
+        redactor = SecretRedactor(SecretControls(mode="off"), dlp_controls=controls)
+
+        result = redactor.inspect(
+            {
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "document",
+                                "source": {
+                                    "type": "text",
+                                    "media_type": "text/plain",
+                                    "data": "inspectable document text",
+                                },
+                            },
+                            {
+                                "type": "document",
+                                "source": {
+                                    "type": "content",
+                                    "content": [{"type": "text", "text": "inspectable block"}],
+                                },
+                            },
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": "tool_1",
+                                "content": [
+                                    {
+                                        "type": "image",
+                                        "source": {
+                                            "type": "base64",
+                                            "media_type": "image/png",
+                                            "data": "opaque-image",
+                                        },
+                                    }
+                                ],
+                            },
+                            {
+                                "type": "document",
+                                "source": {"type": "url", "url": "https://example.invalid/a.pdf"},
+                            },
+                            {
+                                "type": "document",
+                                "source": {"type": "file", "file_id": "file_opaque"},
+                            },
+                        ],
+                    }
+                ]
+            },
+            protocol="anthropic",
+            model="claude-test",
+        )
+
+        self.assertEqual(result.action, "deny")
+        self.assertEqual(result.count, 3)
+        self.assertEqual(result.redaction_count, 0)
+
+    def test_opaque_media_rule_is_provider_scoped_and_can_be_disabled(self) -> None:
+        controls = DLPControls(
+            rules=(
+                DLPRuleConfig(
+                    rule_id="opaque_media",
+                    category="unsupported_media",
+                    confidence="high",
+                    action="deny",
+                    providers=("anthropic",),
+                ),
+            ),
+        )
+        opaque_secret = "sk-" + "proj-" + ("Z" * 24)
+        value = {
+            "input": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "input_file",
+                            "file_data": opaque_secret,
+                            "filename": "opaque.bin",
+                        }
+                    ],
+                }
+            ]
+        }
+
+        result = SecretRedactor(
+            SecretControls(mode="redact"),
+            dlp_controls=controls,
+        ).inspect(value, protocol="openai", model="gpt-test")
+
+        self.assertEqual(result.action, "allow")
+        self.assertEqual(result.value, value)
+        self.assertIn(opaque_secret, result.value["input"][0]["content"][0]["file_data"])
+
     def test_strongest_scoped_action_wins_without_leaking_dictionary_value(self) -> None:
         protected = "PROJECT-ORBITAL"
         controls = DLPControls(
@@ -287,6 +482,19 @@ class SecretRedactorTests(unittest.TestCase):
                         "HORMUZ_TOKEN": "employee-token-long",
                         "COMPANY_TERMS": json.dumps(["safe-value"]),
                     },
+                )
+
+    def test_opaque_media_config_only_allows_off_or_deny(self) -> None:
+        raw = json.loads((ROOT / "config.example.json").read_text(encoding="utf-8"))
+        raw["egress_controls"]["dlp"]["rules"]["opaque_media"]["action"] = "redact"
+        with tempfile.TemporaryDirectory() as temporary:
+            config_path = Path(temporary) / "hormuz.json"
+            config_path.write_text(json.dumps(raw), encoding="utf-8")
+
+            with self.assertRaisesRegex(ConfigError, "must be off or deny"):
+                GatewayConfig.load(
+                    config_path,
+                    environ={"HORMUZ_TOKEN": "employee-token-long"},
                 )
 
     def test_budget_configuration_requires_an_effective_output_bound(self) -> None:

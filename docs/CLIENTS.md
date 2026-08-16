@@ -89,6 +89,12 @@ hormuz --config /etc/hormuz/hormuz.json client-config claude \
 
 The generated Codex auth command invokes `hormuz auth token --gateway ... --profile ...`. Claude Code's string-valued `apiKeyHelper` uses the shell-safe `--gateway-env HORMUZ_SESSION_GATEWAY` form, with the non-secret URL supplied in its managed `env` block. Both read the OS secure store and rotate the session when needed. Neither prints the refresh credential.
 
+## Image and file boundary
+
+Codex and Claude Code can represent provider image and file inputs, but Hormuz does not yet have a trusted byte decoder/classifier. The secure default therefore denies recognized OpenAI image/file/screenshot blocks and Anthropic image or non-text document/file blocks before provider egress. The employee keeps the same client configuration; the request receives the provider-shaped DLP denial. Inline Anthropic text documents remain inspectable and usable.
+
+An organization can set `egress_controls.dlp.rules.opaque_media.action` to `off`, but that is an explicit risk acceptance: the media then reaches the provider without Hormuz inspecting its bytes. See [SECRET_CONTROLS.md](SECRET_CONTROLS.md) for exact covered shapes and residual gaps.
+
 ## Deployment boundary
 
 For a company rollout, endpoint management should install the client configuration and provision a unique identity for each human or service account. Shared employee tokens make per-person attribution and revocation unreliable. Browser login and opaque Hormuz session rotation are implemented; real-IdP validation, SCIM, admin revocation, and HA session persistence remain release gates. Provider keys remain server-side in every design.

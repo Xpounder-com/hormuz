@@ -288,6 +288,26 @@ Observed local result:
 
 This is a verified single-node approval workflow, not completion of issue #10 or an enterprise release. It has no approver queue/notification connector, rejection reason workflow, signed or externally immutable audit sink, shared PostgreSQL tenancy, KMS/BYOK key custody, HA failover, or independent security review. The exact client retry can also fail to match if a client changes any outbound field between attempts; Hormuz deliberately creates a new blocked request rather than weakening the approved binding.
 
+### Provider-aware opaque-media boundary
+
+The built-in provider-content classifier, fail-closed policy, both gateway paths, metadata-only evidence boundary, package artifacts, and installed wheel were exercised on August 15, 2026. The recognized request shapes follow the published [OpenAI Responses request schema](https://developers.openai.com/api/reference/resources/responses/methods/create), [Anthropic vision contract](https://platform.claude.com/docs/en/build-with-claude/vision), and [Anthropic PDF contract](https://platform.claude.com/docs/en/build-with-claude/pdf-support).
+
+Observed local result:
+
+- OpenAI `input_image`, `input_file`, `computer_screenshot`, computer-output screenshots, and image/file blocks nested in supported tool-output content were classified only in provider-semantic input positions; arbitrary metadata with a matching `type` value was not classified;
+- Anthropic image, binary/URL/file document, direct file, container-upload, and supported nested tool/search-result content blocks were classified, while inline document `text` and `content` remained inspectable by the existing text DLP rules;
+- the built-in `opaque_media` rule denied recognized uninspectable media before provider egress and wrote one metadata-only `security.dlp` event plus a non-billable denied usage outcome; Anthropic token-count denial wrote no provider-usage event because no inference request occurred;
+- OpenAI and Anthropic denial tests made zero provider requests. The event and SQLite assertions retained only rule, category, confidence, action, count, event-time scope, and model/policy metadata; media data, URLs, file IDs, filenames, MIME values, and surrounding request content were absent;
+- configuration accepts only `deny` or the explicit risk-acceptance value `off` for `opaque_media`; unsupported detect, redact, or approval actions fail at startup because Hormuz cannot safely inspect, transform, or fingerprint the referenced bytes;
+- when the rule was explicitly off or provider-out-of-scope, the recognized media object passed through unchanged and was skipped by generic string scanning, avoiding both byte corruption and a false claim that embedded data had been inspected;
+- media classification runs before bounded regex and dictionary matching, while the global JSON nesting limit is still validated first;
+- all 169 source tests passed with both the installed Codex and official Claude Code compatibility paths enabled;
+- the frozen 60-task context release profile remained green with precision `1.00`, recall `1.00`, useful-pack rate `1.00`, mean compression ratio `0.840593`, zero safety failures, and p95 in-process selection latency `0.174333 ms`; corpus SHA-256 remained `9822d592868202c7c7539bcdac7d4a5894c01f9e6dba7a434846516b67b32c17`;
+- isolated source and wheel builds succeeded; the source distribution included the opaque-media implementation, documentation, configuration, and tests, and a clean Python 3.14 environment installed the final wheel from outside the source tree and returned `opaque_media`/`deny` for an OpenAI image block;
+- bytecode compilation and `git diff --check` passed.
+
+This closes the recognized provider-request media-shape gap, not issue #10 or the enterprise DLP program. Hormuz still does not fetch and inspect URLs or provider file IDs, decode arbitrary base64 hidden in ordinary text, inspect archives, classify provider headers/JSON keys/source repositories, run semantic detectors, apply team/person DLP overlays, or provide customer-representative detector evaluation, KMS/BYOK custody, HA persistence, an externally immutable audit sink, or an independent security review. Explicitly disabling the rule accepts that uninspected media can reach the provider.
+
 ## Reproduce locally
 
 The default suite uses only loopback fake providers:

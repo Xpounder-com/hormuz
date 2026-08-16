@@ -122,6 +122,10 @@
         "email_address": {
           "action": "detect",
           "providers": ["openai", "anthropic"]
+        },
+        "opaque_media": {
+          "action": "deny",
+          "providers": ["openai", "anthropic"]
         }
       },
       "dictionaries": []

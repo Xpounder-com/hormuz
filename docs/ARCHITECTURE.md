@@ -12,6 +12,7 @@ Hormuz HTTP transport
         +--> verify static/OIDC/session identity and resolve explicit actor/team metadata
         +--> resolve organization -> team -> person policy
         +--> allow, deny, reroute, or cap the request
+        +--> classify provider content blocks; deny configured opaque images/files
         +--> detect, redact, require approval, or deny at the final DLP boundary
         +--> create or atomically consume a scoped 15-minute single-use approval
         +--> enforce provider storage policy on the transformed payload
@@ -59,7 +60,7 @@ The HTTP path authenticates first, derives organization/team/actor from the stat
 - `hormuz/policy.py` evaluates access, fallback, caps, and budgets without transport concerns.
 - `hormuz/store.py` owns the SQLite schema and monthly aggregations.
 - `hormuz/usage.py` parses bounded provider usage and actual-model metadata through provider-specific allowlists without storing response content.
-- `hormuz/redaction.py` applies bounded credential, regulated-identifier, low-confidence PII, and exact-dictionary rules to provider-bound JSON values.
+- `hormuz/redaction.py` applies bounded credential, regulated-identifier, low-confidence PII, exact-dictionary, and provider-format-aware opaque-media rules to provider-bound JSON values.
 - `hormuz/dlp_approval.py` computes domain-separated keyed fingerprints over canonical provider operation/payload values without persistence or transport concerns.
 - `hormuz/dlp_client.py` implements the bounded, authenticated approver CLI transport and refuses redirects or non-loopback plaintext HTTP.
 - `hormuz/context.py` authorizes, applies immutable lifecycle observations, quarantines high-confidence injection patterns, surfaces structured contradictions, ranks, budgets, and fingerprints explicit provider-neutral context packs without transport or persistence concerns.
@@ -70,7 +71,7 @@ The HTTP path authenticates first, derives organization/team/actor from the stat
 
 ## Trust boundary
 
-Hormuz is trusted with plaintext requests and responses because it must inspect and relay them. The usage and DLP approval stores are deliberately metadata-only; the latter keeps only a keyed fingerprint and bounded binding metadata, never the payload. Governed content is held in a different SQLite database and never written to the usage ledger. The current local context codec is plainly labeled as unencrypted and is not an enterprise storage claim. DLP runs after authentication and exact provider/model routing but before provider storage policy and upstream serialization. Approval consumption is atomic and precedes egress, so concurrent replay cannot duplicate the exception. Future reusable-context injection must run after context authorization and before DLP so newly added context is inspected by the same egress controls.
+Hormuz is trusted with plaintext requests and responses because it must inspect and relay them. The usage and DLP approval stores are deliberately metadata-only; the latter keeps only a keyed fingerprint and bounded binding metadata, never the payload. Governed content is held in a different SQLite database and never written to the usage ledger. The current local context codec is plainly labeled as unencrypted and is not an enterprise storage claim. DLP runs after authentication and exact provider/model routing but before provider storage policy and upstream serialization. Recognized opaque provider media is denied before egress unless the organization explicitly turns that rule off; Hormuz does not claim to inspect the underlying bytes. Approval consumption is atomic and precedes egress, so concurrent replay cannot duplicate the exception. Future reusable-context injection must run after context authorization and before DLP so newly added context is inspected by the same egress controls.
 
 ## Compatibility boundary
 
