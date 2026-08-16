@@ -481,7 +481,7 @@ class GatewayIntegrationTests(unittest.TestCase):
             response = connection.getresponse()
             self.assertEqual(response.status, 200)
             response.read()
-            self.assertEqual(self.gateway.active_requests, 0)
+            self.assertEqual(self.gateway.wait_for_in_flight(1), 0)
 
             self.assertTrue(self.gateway.request_shutdown())
             self.gateway_thread.join(timeout=2)
