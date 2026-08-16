@@ -447,6 +447,24 @@ The tenant-scoped reporting API, CLI, read-audit boundary, and supporting usage-
 
 This closes a real single-node usage-administration slice without accepting proposed ADR 0002. SQLite is not evidence for shared hosted tenancy, PostgreSQL row security, HA, externally immutable audit, SCIM, SIEM delivery, final invoice coverage, or complete provider-account usage. Person-level tokens and estimated spend remain consumption metadata, not employee-performance evidence.
 
+### Bounded encoded-text DLP inspection
+
+The recursive secret/DLP transformer, supported encoding boundary, OpenAI Responses path, Anthropic Messages path, package artifacts, and installed wheel were exercised locally on August 16, 2026.
+
+- a red-first reproduction proved that a base64-encoded OpenAI-shaped credential previously produced zero detections and passed through unchanged; the new path decodes standard base64, URL-safe base64, and textual data URIs only when they form bounded, predominantly printable UTF-8;
+- inspection is capped at 1 MiB per decoded value and three nested encoding layers. Oversized supported text and a fourth layer fail closed with a content-free validation error before provider work, while benign encoded text remains byte-for-byte unchanged;
+- direct outer-value detection runs first, so an organization exact secret that is itself valid base64 remains protected as that exact secret rather than being misclassified as a container;
+- redaction applies the existing credential or structured-DLP replacement inside decoded text and then safely re-encodes only the changed value. Detect, deny, and approval-required findings keep the original encoded payload and follow their existing action semantics;
+- an OpenAI function-call output and an Anthropic tool-result text block each carried a distinct encoded fake provider credential through the full gateway. Both fake providers received only encoded replacement text, both gateway responses reported one redaction, and the two metadata-only security events retained protocol/rule/count data without either matched value;
+- the oversized gateway case returned the stable provider-shaped `400` error, made zero provider calls, created no billable usage event, and did not reflect the encoded content;
+- recognized provider image/file/document blocks remain outside this decoder and under the default-deny `opaque_media` boundary. Whitespace-wrapped base64, binary data, compression, archives, and other encodings remain explicitly unsupported;
+- the complete source suite ran 237 tests: 236 passed and the separately gated official Claude Code test skipped. The CI-pinned Codex `0.147.0` and Claude Code `2.1.233` executables then passed their two real-client fake-provider tests independently;
+- the frozen 60-task release benchmark passed with precision `1.00`, recall `1.00`, useful-pack rate `1.00`, zero failed thresholds, and p95 in-process selection latency `0.195 ms`; corpus SHA-256 remained `9822d592868202c7c7539bcdac7d4a5894c01f9e6dba7a434846516b67b32c17`;
+- source and wheel builds contained the encoded-text implementation and tests. A clean Python 3.14 environment installed the exact wheel outside the checkout, loaded Hormuz from `site-packages`, transformed an encoded fake credential, compiled the installed package, displayed the relevant CLI help, and passed the bundled strict benchmark with zero failed thresholds;
+- source/test bytecode compilation, deterministic corpus regeneration, `git diff --check`, and high-confidence source and extracted-wheel scans for private-key, OpenAI, Anthropic, GitHub, AWS, and Google credential patterns passed.
+
+This closes one encoded-text bypass under accepted ADR 0004, not issue #10 or the enterprise DLP release gate. It does not inspect arbitrary binaries or archives, classify source repositories or provider headers/JSON keys, provide semantic DLP, invalidate a future content cache, operate approval state across nodes, or establish customer-representative detector quality and independent security review.
+
 ## Reproduce locally
 
 The default suite uses only loopback fake providers:

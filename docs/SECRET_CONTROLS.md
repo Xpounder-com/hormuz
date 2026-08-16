@@ -100,6 +100,14 @@ Structured DLP currently adds four deterministic built-ins:
 - `email_address` recognizes conventional email-address syntax in detect-only mode. It is deliberately low-confidence telemetry, not a complete PII classifier.
 - `opaque_media` recognizes provider-defined image, file, document, and screenshot content positions whose bytes Hormuz cannot inspect. It denies by default and cannot be configured to redact or require approval because neither action produces inspected content.
 
+## Bounded encoded-text inspection
+
+Before treating an ordinary JSON string as opaque text, Hormuz recognizes standard base64, URL-safe base64, and base64 textual data URIs whose decoded bytes are predominantly printable UTF-8. It decodes at most 1 MiB per value and at most three nested encoding layers, applies the same credential and structured-DLP rules to the decoded text, and re-encodes the value only when a redaction changed it. Detect, deny, and approval-required outcomes retain the original encoded value in memory while following their ordinary forwarding or fail-closed behavior. A direct exact-secret or DLP match on the outer value takes precedence, preserving protection for secrets that are themselves base64-shaped.
+
+This path covers encoded content in inspectable prompts, system values, Codex function/custom-tool results, Claude tool/search results, inline text documents, and other JSON string values. Benign encoded UTF-8 remains byte-for-byte unchanged. Oversized supported encoded text or a fourth nested encoding layer fails closed before provider egress with a content-free validation error.
+
+The decoder does not treat provider image/file blocks as text. Those blocks remain governed by `opaque_media`. It also does not unwrap whitespace-formatted base64, percent/hex encodings, compression, archives, binary payloads, or provider file/URL references. These are explicit residual boundaries rather than claims of inspection.
+
 Each DLP rule can be limited to `openai`, `anthropic`, and exact routed upstream model IDs. `detect` forwards the original value, `redact` replaces it with `[REDACTED:HORMUZ_DLP]`, and `deny` returns `hormuz_dlp_denied` without a provider call. With approval disabled, `require_approval` continues to fail closed without creating a grant. With approval enabled, it creates a durable metadata-only request and returns `hormuz_dlp_approval_required` plus the opaque request ID in the message and `X-Hormuz-DLP-Approval-Request` header.
 
 ## Team and person tightening
@@ -169,11 +177,11 @@ This request-level policy does not itself enroll an organization in OpenAI Zero 
 
 ## What this does not guarantee
 
-This is a bounded deterministic DLP subset, not a complete data-loss-prevention system. It inspects JSON values and known provider media shapes, not caller-controlled provider headers or JSON keys. It denies recognized opaque media but does not inspect image/file contents, decode arbitrary base64 embedded in ordinary text, unpack archives, classify source paths, infer proprietary meaning, or reliably detect transformed and obfuscated values. A custom exact value protects only that exact case-sensitive textual representation. The SSN detector intentionally supports only the high-confidence hyphenated form; the email detector has not passed an organization-specific false-positive/false-negative evaluation and therefore remains detect-only.
+This is a bounded deterministic DLP subset, not a complete data-loss-prevention system. It inspects JSON values, the supported encoded-text forms above, and known provider media shapes, not caller-controlled provider headers or JSON keys. It denies recognized opaque media but does not inspect image/file contents, unwrap unsupported encodings or archives, classify source paths, infer proprietary meaning, or reliably detect transformed and obfuscated values. A custom exact value protects only that exact case-sensitive textual representation and its occurrence in supported decoded text. The SSN detector intentionally supports only the high-confidence hyphenated form; the email detector has not passed an organization-specific false-positive/false-negative evaluation and therefore remains detect-only.
 
 Use `deny` when forwarding a detected credential is unacceptable. Production deployments should combine Hormuz with least-privilege provider keys, short-lived employee identity, network controls, provider retention settings, code-host secret scanning, and a reviewed list of organization-specific values.
 
-The broader boundary remains governed by [accepted ADR 0004](decisions/0004-structured-dlp-and-approval-boundary.md). Source classification, semantic detection, provider-header and JSON-key inspection, arbitrary encoded-text/archive decoding, detector-version evidence, multi-node approval persistence/notification, content-cache invalidation, and organization-specific evaluation are still open. Issue #10 remains open until those paths and the complete compatibility, failure, migration, and privacy gates pass.
+The broader boundary remains governed by [accepted ADR 0004](decisions/0004-structured-dlp-and-approval-boundary.md). Source classification, semantic detection, provider-header and JSON-key inspection, unsupported encoding/archive decoding, detector-version evidence, multi-node approval persistence/notification, content-cache invalidation, and organization-specific evaluation are still open. Issue #10 remains open until those paths and the complete compatibility, failure, migration, and privacy gates pass.
 
 ## Verify
 
@@ -182,6 +190,7 @@ The integration tests assert both sides of the boundary:
 ```bash
 python3 -m unittest -v \
   tests.test_gateway.GatewayIntegrationTests.test_secret_is_redacted_before_provider_and_audited \
+  tests.test_gateway.GatewayIntegrationTests.test_base64_tool_payload_secrets_are_redacted_for_both_providers \
   tests.test_gateway.GatewayIntegrationTests.test_low_confidence_dlp_detection_forwards_unchanged_and_audits_metadata_only \
   tests.test_gateway.GatewayIntegrationTests.test_team_and_actor_dlp_overlays_apply_to_both_provider_paths \
   tests.test_gateway.GatewayIntegrationTests.test_regulated_identifier_is_redacted_on_anthropic_path_before_provider \

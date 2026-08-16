@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import binascii
 import re
 from dataclasses import dataclass
 from typing import Any
@@ -10,6 +12,8 @@ from .config import DLPControls, DLPRuleConfig, SecretControls
 REPLACEMENT = "[REDACTED:HORMUZ_SECRET]"
 DLP_REPLACEMENT = "[REDACTED:HORMUZ_DLP]"
 MAX_JSON_DEPTH = 100
+MAX_ENCODED_TEXT_BYTES = 1024 * 1024
+MAX_ENCODED_TEXT_DEPTH = 3
 
 
 class RedactionError(ValueError):
@@ -44,6 +48,24 @@ class RedactionResult:
     action: str = "allow"
     redaction_count: int = 0
     policy_version: str = "legacy-secret-v1"
+
+
+@dataclass(frozen=True)
+class _EncodedText:
+    decoded: str
+    prefix: str
+    urlsafe: bool
+    padded: bool
+
+    def render(self, value: str) -> str:
+        raw = value.encode("utf-8")
+        if self.urlsafe:
+            encoded = base64.urlsafe_b64encode(raw).decode("ascii")
+        else:
+            encoded = base64.b64encode(raw).decode("ascii")
+        if not self.padded:
+            encoded = encoded.rstrip("=")
+        return self.prefix + encoded
 
 
 _BUILTIN_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
@@ -190,7 +212,12 @@ class SecretRedactor:
         if isinstance(value, dict) and id(value) in opaque_object_ids:
             return value, {}, 0
         if isinstance(value, str):
-            return self._transform_string(value, protocol=protocol, model=model)
+            return self._transform_string(
+                value,
+                protocol=protocol,
+                model=model,
+                encoded_depth=0,
+            )
         if isinstance(value, list):
             transformed_items: list[Any] = []
             findings: dict[tuple[str, str, str, str, str], int] = {}
@@ -226,6 +253,43 @@ class SecretRedactor:
         return value, {}, 0
 
     def _transform_string(
+        self,
+        value: str,
+        *,
+        protocol: str,
+        model: str,
+        encoded_depth: int,
+    ) -> tuple[str, dict[tuple[str, str, str, str, str], int], int]:
+        plain_result = self._transform_plain_string(
+            value,
+            protocol=protocol,
+            model=model,
+        )
+        if plain_result[1]:
+            return plain_result
+
+        encoded = _decode_encoded_text(value)
+        if encoded is not None:
+            if encoded_depth >= MAX_ENCODED_TEXT_DEPTH:
+                raise RedactionError(
+                    "Encoded text exceeds the maximum nesting depth of "
+                    f"{MAX_ENCODED_TEXT_DEPTH}"
+                )
+            transformed, findings, redaction_count = self._transform_string(
+                encoded.decoded,
+                protocol=protocol,
+                model=model,
+                encoded_depth=encoded_depth + 1,
+            )
+            if redaction_count:
+                transformed = encoded.render(transformed)
+            else:
+                transformed = value
+            return transformed, findings, redaction_count
+
+        return plain_result
+
+    def _transform_plain_string(
         self,
         value: str,
         *,
@@ -285,6 +349,95 @@ class SecretRedactor:
                 transformed, applied = _redact_rule(rule, transformed)
                 redaction_count += applied
         return transformed, findings, redaction_count
+
+
+def _decode_encoded_text(value: str) -> _EncodedText | None:
+    prefix = ""
+    payload = value
+    data_uri = _text_data_uri(value)
+    if data_uri is not None:
+        prefix, payload = data_uri
+    elif not _looks_like_base64(payload):
+        return None
+
+    if len(payload) < 16 or len(payload) % 4 == 1:
+        return None
+    if len(payload) > ((MAX_ENCODED_TEXT_BYTES + 2) // 3) * 4:
+        raise RedactionError(
+            "Encoded text exceeds the maximum decoded size of "
+            f"{MAX_ENCODED_TEXT_BYTES} bytes"
+        )
+
+    urlsafe = "-" in payload or "_" in payload
+    padded = payload.endswith("=")
+    padding = "=" * (-len(payload) % 4)
+    try:
+        decoded_bytes = base64.b64decode(
+            (payload + padding).encode("ascii"),
+            altchars=b"-_" if urlsafe else None,
+            validate=True,
+        )
+    except (UnicodeEncodeError, binascii.Error, ValueError):
+        return None
+    if len(decoded_bytes) > MAX_ENCODED_TEXT_BYTES:
+        raise RedactionError(
+            "Encoded text exceeds the maximum decoded size of "
+            f"{MAX_ENCODED_TEXT_BYTES} bytes"
+        )
+    try:
+        decoded = decoded_bytes.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+    if not _is_textual(decoded):
+        return None
+    return _EncodedText(
+        decoded=decoded,
+        prefix=prefix,
+        urlsafe=urlsafe,
+        padded=padded,
+    )
+
+
+def _text_data_uri(value: str) -> tuple[str, str] | None:
+    if not value[:5].lower() == "data:":
+        return None
+    metadata, separator, payload = value[5:].partition(",")
+    if not separator:
+        return None
+    parts = metadata.split(";")
+    if not parts or parts[-1].lower() != "base64":
+        return None
+    media_type = parts[0].lower() or "text/plain"
+    if not _is_text_media_type(media_type):
+        return None
+    return value[: len(value) - len(payload)], payload
+
+
+def _is_text_media_type(media_type: str) -> bool:
+    return (
+        media_type.startswith("text/")
+        or media_type in {
+            "application/json",
+            "application/javascript",
+            "application/xml",
+            "application/x-ndjson",
+        }
+        or media_type.endswith("+json")
+        or media_type.endswith("+xml")
+    )
+
+
+def _looks_like_base64(value: str) -> bool:
+    if len(value) < 16 or any(character.isspace() for character in value):
+        return False
+    return re.fullmatch(r"[A-Za-z0-9+/_-]*={0,2}", value) is not None
+
+
+def _is_textual(value: str) -> bool:
+    if not value or "\x00" in value:
+        return False
+    printable = sum(character.isprintable() or character.isspace() for character in value)
+    return printable / len(value) >= 0.9
 
 
 def _rule_match_count(rule: DLPRuleConfig, value: str) -> int:

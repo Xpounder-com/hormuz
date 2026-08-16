@@ -15,6 +15,8 @@ from hormuz.config import (
 )
 from hormuz.redaction import (
     DLP_REPLACEMENT,
+    MAX_ENCODED_TEXT_BYTES,
+    MAX_ENCODED_TEXT_DEPTH,
     MAX_JSON_DEPTH,
     REPLACEMENT,
     RedactionError,
@@ -74,6 +76,123 @@ class SecretRedactorTests(unittest.TestCase):
 
         with self.assertRaises(RedactionError):
             SecretRedactor(SecretControls()).inspect(value)
+
+    def test_base64_encoded_secret_is_redacted_and_safely_reencoded(self) -> None:
+        secret = "sk-" + "proj-" + ("A" * 24)
+        encoded = base64.b64encode(f"credential={secret}".encode("utf-8")).decode("ascii")
+
+        result = SecretRedactor(SecretControls(mode="redact")).inspect(
+            {
+                "input": [
+                    {
+                        "type": "function_call_output",
+                        "output": encoded,
+                    }
+                ]
+            },
+            protocol="openai",
+            model="gpt-test",
+        )
+
+        transformed = result.value["input"][0]["output"]
+        decoded = base64.b64decode(transformed).decode("utf-8")
+        self.assertEqual(result.action, "redact")
+        self.assertEqual(result.count, 1)
+        self.assertEqual(result.redaction_count, 1)
+        self.assertEqual(result.rules, ("openai_api_key",))
+        self.assertNotIn(secret, decoded)
+        self.assertEqual(decoded, f"credential={REPLACEMENT}")
+
+    def test_base64_shaped_exact_secret_keeps_direct_match_precedence(self) -> None:
+        protected = base64.b64encode(b"test-company-secret").decode("ascii")
+        redactor = SecretRedactor(
+            SecretControls(
+                mode="redact",
+                custom_secret_values=(("custom:BASE64_SECRET", protected),),
+            )
+        )
+
+        result = redactor.inspect({"input": protected})
+
+        self.assertEqual(result.value["input"], REPLACEMENT)
+        self.assertEqual(result.count, 1)
+        self.assertEqual(result.rules, ("custom:BASE64_SECRET",))
+
+    def test_text_data_uri_dlp_is_redacted_without_changing_its_media_type(self) -> None:
+        ssn = "123-45-6789"
+        payload = base64.b64encode(f'{{"employee":"{ssn}"}}'.encode("utf-8")).decode("ascii")
+        prefix = "data:application/json;charset=utf-8;base64,"
+        controls = DLPControls(
+            policy_version="encoded-dlp-v1",
+            rules=(
+                DLPRuleConfig(
+                    rule_id="us_ssn",
+                    category="regulated_identifier",
+                    confidence="high",
+                    action="redact",
+                ),
+            ),
+        )
+
+        result = SecretRedactor(
+            SecretControls(mode="off"),
+            dlp_controls=controls,
+        ).inspect({"input": prefix + payload}, protocol="openai", model="gpt-test")
+
+        transformed = result.value["input"]
+        self.assertTrue(transformed.startswith(prefix))
+        decoded = base64.b64decode(transformed[len(prefix) :]).decode("utf-8")
+        self.assertNotIn(ssn, decoded)
+        self.assertIn(DLP_REPLACEMENT, decoded)
+        self.assertEqual(result.redaction_count, 1)
+        self.assertEqual(result.findings[0].rule_id, "us_ssn")
+
+    def test_encoded_dictionary_denial_preserves_payload_and_finding_privacy(self) -> None:
+        protected = "PROJECT-ORBITAL"
+        encoded = base64.urlsafe_b64encode(
+            f"codename={protected}".encode("utf-8")
+        ).decode("ascii").rstrip("=")
+        controls = DLPControls(
+            policy_version="encoded-company-v1",
+            rules=(
+                DLPRuleConfig(
+                    rule_id="company.codename",
+                    category="company_dictionary",
+                    confidence="high",
+                    action="deny",
+                    exact_values=(protected,),
+                ),
+            ),
+        )
+
+        result = SecretRedactor(
+            SecretControls(mode="off"),
+            dlp_controls=controls,
+        ).inspect({"input": encoded}, protocol="openai", model="gpt-test")
+
+        self.assertEqual(result.action, "deny")
+        self.assertEqual(result.value["input"], encoded)
+        self.assertEqual(result.count, 1)
+        self.assertEqual(result.redaction_count, 0)
+        self.assertNotIn(protected, repr(result.findings))
+
+    def test_nested_encoded_text_is_bounded_and_benign_text_is_unchanged(self) -> None:
+        benign = base64.b64encode(b"ordinary encoded tool output").decode("ascii")
+        benign_result = SecretRedactor(SecretControls()).inspect({"input": benign})
+        self.assertEqual(benign_result.value["input"], benign)
+        self.assertEqual(benign_result.count, 0)
+
+        too_deep = "sk-" + "proj-" + ("N" * 24)
+        for _ in range(MAX_ENCODED_TEXT_DEPTH + 1):
+            too_deep = base64.b64encode(too_deep.encode("utf-8")).decode("ascii")
+        with self.assertRaisesRegex(RedactionError, "maximum nesting depth"):
+            SecretRedactor(SecretControls()).inspect({"input": too_deep})
+
+        oversized = "A" * ((((MAX_ENCODED_TEXT_BYTES + 2) // 3) * 4) + 4)
+        with self.assertRaisesRegex(RedactionError, "maximum decoded size"):
+            SecretRedactor(SecretControls()).inspect(
+                {"input": "data:text/plain;base64," + oversized}
+            )
 
     def test_high_confidence_regulated_identifiers_are_redacted(self) -> None:
         controls = DLPControls(

@@ -22,6 +22,7 @@ from hormuz.context import ContextArtifact, ContextLifecycleSnapshot, ContextRec
 from hormuz.context_lifecycle_client import ContextLifecycleClient
 from hormuz.context_store import ContextStoreError
 from hormuz.policy import PolicyEngine
+from hormuz.redaction import MAX_ENCODED_TEXT_BYTES
 from hormuz.server import GatewayServer, serve_in_thread
 from hormuz.store import DLPApprovalStoreError, SecurityStoreError, UsageStore
 
@@ -1346,6 +1347,107 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertEqual(secret_totals.redacted_requests, 1)
         summary = self.gateway.store.summary_rows()
         self.assertEqual(summary[0]["redactions"], 1)
+
+    def test_base64_tool_payload_secrets_are_redacted_for_both_providers(self) -> None:
+        openai_secret = "sk-" + "proj-" + ("T" * 24)
+        anthropic_secret = "sk-ant-" + ("U" * 24)
+        openai_encoded = base64.b64encode(
+            f"tool credential={openai_secret}".encode("utf-8")
+        ).decode("ascii")
+        anthropic_encoded = base64.b64encode(
+            f"tool credential={anthropic_secret}".encode("utf-8")
+        ).decode("ascii")
+        before = len(FakeProviderHandler.requests)
+
+        openai_status, openai_headers, _ = self._post(
+            "/v1/responses",
+            {
+                "model": "engineering-fast",
+                "input": [
+                    {
+                        "type": "function_call_output",
+                        "call_id": "call_encoded_secret",
+                        "output": openai_encoded,
+                    }
+                ],
+            },
+        )
+        anthropic_status, anthropic_headers, _ = self._post(
+            "/v1/messages",
+            {
+                "model": "claude-standard",
+                "max_tokens": 20,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": "tool_encoded_secret",
+                                "content": [
+                                    {"type": "text", "text": anthropic_encoded}
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            },
+            extra_headers={"Anthropic-Version": "2023-06-01"},
+        )
+
+        self.assertEqual(openai_status, 200)
+        self.assertEqual(anthropic_status, 200)
+        self.assertEqual(openai_headers["x-hormuz-redactions"], "1")
+        self.assertEqual(anthropic_headers["x-hormuz-redactions"], "1")
+        self.assertEqual(len(FakeProviderHandler.requests), before + 2)
+        openai_forwarded = FakeProviderHandler.requests[-2]["body"]["input"][0]["output"]
+        anthropic_forwarded = (
+            FakeProviderHandler.requests[-1]["body"]["messages"][0]["content"][0]["content"][0]["text"]
+        )
+        openai_decoded = base64.b64decode(
+            openai_forwarded + ("=" * (-len(openai_forwarded) % 4))
+        ).decode("utf-8")
+        anthropic_decoded = base64.b64decode(
+            anthropic_forwarded + ("=" * (-len(anthropic_forwarded) % 4))
+        ).decode("utf-8")
+        self.assertNotIn(openai_secret, openai_decoded)
+        self.assertNotIn(anthropic_secret, anthropic_decoded)
+        self.assertIn("[REDACTED:HORMUZ_SECRET]", openai_decoded)
+        self.assertIn("[REDACTED:HORMUZ_SECRET]", anthropic_decoded)
+
+        events = self.gateway.store.audit_events(
+            since="2000-01-01T00:00:00+00:00",
+            kind="security",
+        )
+        self.assertEqual(len(events), 2)
+        self.assertEqual({event["protocol"] for event in events}, {"openai", "anthropic"})
+        self.assertTrue(all(event["event_type"] == "security.secret" for event in events))
+        self.assertTrue(all(event["detection_count"] == 1 for event in events))
+        self.assertNotIn(openai_secret, repr(events))
+        self.assertNotIn(anthropic_secret, repr(events))
+        self.assertNotIn(openai_secret.encode("utf-8"), self.config.database_path.read_bytes())
+        self.assertNotIn(anthropic_secret.encode("utf-8"), self.config.database_path.read_bytes())
+
+    def test_oversized_encoded_text_fails_closed_before_provider(self) -> None:
+        encoded_limit = ((MAX_ENCODED_TEXT_BYTES + 2) // 3) * 4
+        encoded = "A" * (encoded_limit + 4)
+        before = len(FakeProviderHandler.requests)
+
+        status, _, response = self._post(
+            "/v1/responses",
+            {
+                "model": "engineering-fast",
+                "input": "data:text/plain;base64," + encoded,
+            },
+        )
+
+        self.assertEqual(status, 400)
+        self.assertEqual(len(FakeProviderHandler.requests), before)
+        payload = json.loads(response)
+        self.assertEqual(payload["error"]["type"], "invalid_request")
+        self.assertIn("maximum decoded size", payload["error"]["message"])
+        self.assertNotIn(encoded[:128], response.decode("utf-8"))
+        self.assertEqual(self.gateway.store.monthly_totals(actor_id="alice").requests, 0)
 
     def test_gateway_identity_and_provider_credentials_are_always_exact_protected_values(self) -> None:
         status, headers, _ = self._post(
