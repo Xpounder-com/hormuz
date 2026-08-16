@@ -51,6 +51,7 @@ from .session_client import (
     login as session_login,
     logout as session_logout,
 )
+from .session_admin_client import SessionAdminClient, SessionAdminClientError
 from .store import UsageStore
 
 
@@ -214,6 +215,59 @@ def build_parser() -> argparse.ArgumentParser:
         credential.add_argument(
             "--credential-env",
             help="Approver credential environment variable (default: HORMUZ_TOKEN)",
+        )
+        credential.add_argument(
+            "--profile",
+            help="Saved human-session profile instead of an environment credential",
+        )
+        command.add_argument(
+            "--allow-insecure-http",
+            action="store_true",
+            help="Allow loopback HTTP for local development only",
+        )
+
+    sessions = subparsers.add_parser(
+        "sessions",
+        help="List and revoke human sessions as a tenant administrator",
+    )
+    session_subparsers = sessions.add_subparsers(dest="sessions_command", required=True)
+    session_list = session_subparsers.add_parser(
+        "list",
+        help="List active human sessions in the administrator's organization",
+    )
+    session_list.add_argument("--actor", help="Filter by exact actor ID")
+    session_list.add_argument("--team", help="Filter by exact team ID")
+    session_list.add_argument("--limit", type=int, default=50, help="Page size from 1 to 100")
+    session_list.add_argument("--cursor", help="Opaque cursor returned by the previous page")
+    session_revoke = session_subparsers.add_parser(
+        "revoke",
+        help="Immediately revoke a session, actor, team, or organization",
+    )
+    session_revoke.add_argument(
+        "--scope",
+        required=True,
+        choices=["session", "actor", "team", "organization"],
+    )
+    session_revoke.add_argument(
+        "--target",
+        help="Session, actor, or team ID; omit only for organization scope",
+    )
+    session_revoke.add_argument(
+        "--reason",
+        required=True,
+        choices=[
+            "access_change",
+            "employment_change",
+            "security_incident",
+            "administrative",
+        ],
+    )
+    for command in (session_list, session_revoke):
+        command.add_argument("--gateway", required=True, help="Hormuz gateway base URL")
+        credential = command.add_mutually_exclusive_group()
+        credential.add_argument(
+            "--credential-env",
+            help="Administrator credential environment variable (default: HORMUZ_TOKEN)",
         )
         credential.add_argument(
             "--profile",
@@ -420,6 +474,8 @@ def main(argv: list[str] | None = None) -> int:
         )
     if args.command == "dlp":
         return _dlp_approval_command(args)
+    if args.command == "sessions":
+        return _session_admin_command(args)
     if args.command == "context-benchmark":
         try:
             result, exit_code = run_benchmark(
@@ -991,6 +1047,64 @@ def _dlp_approval_command(args: argparse.Namespace) -> int:
             result = client.approve(args.request_id)
     except (DLPApprovalClientError, SessionClientError, CredentialStoreError) as error:
         print(f"DLP approval failed: {error.code}", file=sys.stderr)
+        return 1
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0
+
+
+def _session_admin_command(args: argparse.Namespace) -> int:
+    try:
+        if args.profile is not None:
+            credential = session_access_token(
+                gateway=args.gateway,
+                profile=args.profile,
+                allow_insecure_http=args.allow_insecure_http,
+            )
+        else:
+            env_name = args.credential_env or "HORMUZ_TOKEN"
+            if (
+                not env_name
+                or not env_name.replace("_", "A").isalnum()
+                or env_name[0].isdigit()
+            ):
+                print("credential environment variable name is invalid", file=sys.stderr)
+                return 2
+            credential = os.environ.get(env_name, "")
+            if not credential:
+                print(f"credential environment variable is not set: {env_name}", file=sys.stderr)
+                return 1
+        client = SessionAdminClient(
+            args.gateway,
+            credential=credential,
+            allow_insecure_http=args.allow_insecure_http,
+        )
+        if args.sessions_command == "list":
+            result = client.list_sessions(
+                actor_id=args.actor,
+                team_id=args.team,
+                limit=args.limit,
+                cursor=args.cursor,
+            )
+        elif args.sessions_command == "revoke":
+            if (args.scope == "organization") != (args.target is None):
+                print(
+                    "--target is required except for organization scope",
+                    file=sys.stderr,
+                )
+                return 2
+            result = client.revoke(
+                scope=args.scope,
+                target=args.target,
+                reason_code=args.reason,
+            )
+        else:
+            return 2
+    except (
+        SessionAdminClientError,
+        SessionClientError,
+        CredentialStoreError,
+    ) as error:
+        print(f"session administration failed: {error.code}", file=sys.stderr)
         return 1
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0

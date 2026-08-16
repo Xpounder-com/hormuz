@@ -54,8 +54,9 @@ The HTTP path authenticates first, derives organization/team/actor from the stat
 - `hormuz/server.py` owns HTTP compatibility, authentication, upstream forwarding, streaming, and protocol-shaped errors.
 - `hormuz/auth.py` verifies bootstrap, workload OIDC JWT, and login ID-token signatures against configured issuers.
 - `hormuz/session.py` owns authorization-code + PKCE protocol behavior and maps opaque sessions back to current configured identities.
-- `hormuz/session_store.py` owns a separate local session database, keyed credential hashes, encrypted transient flow state, atomic rotation, replay detection, and revocation.
+- `hormuz/session_store.py` owns a separate local session database, event-time identity bindings, keyed credential hashes, encrypted transient flow state, atomic rotation, replay detection, tenant-scoped administration, and revocation.
 - `hormuz/credential_store.py` and `hormuz/session_client.py` own fail-closed OS secure-store custody and the CLI login/refresh/logout path.
+- `hormuz/session_admin_client.py` owns the authenticated, redirect-refusing session-administration CLI transport and validates the metadata-only response contract.
 - `hormuz/config.py` validates configuration, defines identity/route/rate-card policy data, and resolves monotonic organization/team/person DLP actions for the exact provider and routed model.
 - `hormuz/policy.py` evaluates access, fallback, caps, and budgets without transport concerns.
 - `hormuz/store.py` owns the SQLite schema and monthly aggregations.
@@ -79,4 +80,4 @@ Hormuz implements the provider endpoints and local MCP stdio integration require
 
 ## Identity boundary
 
-OIDC supports both a workload resource-server path and a human authorization-code + PKCE session path. Discovery and JWKS metadata are cached, an unknown signing-key ID triggers one refresh, and authorization attributes come only from the configured `(issuer, subject)` mapping. Hormuz does not trust caller-provided group or team claims. The local session kernel is single-node; real-IdP validation, SCIM, administrator revocation, and HA persistence remain enterprise milestones. See [OIDC.md](OIDC.md).
+OIDC supports both a workload resource-server path and a human authorization-code + PKCE session path. Discovery and JWKS metadata are cached, an unknown signing-key ID triggers one refresh, and authorization attributes come only from the configured `(issuer, subject)` mapping. Hormuz does not trust caller-provided group or team claims. The local session kernel binds every new session to its organization, actor, team, clearance, and client; a mapping change or capability-gated administrative action revokes it before provider work. The kernel remains single-node; real-IdP validation, SCIM, shared immediate revocation, KMS, and HA persistence remain enterprise milestones. See [OIDC.md](OIDC.md) and [SESSION_ADMIN_API.md](SESSION_ADMIN_API.md).

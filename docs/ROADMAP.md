@@ -14,6 +14,7 @@ The private alpha currently has:
 - pre-provider secret controls plus a bounded structured-DLP subset with high-confidence SSN/card redaction, low-confidence email detection, provider/model-scoped company dictionaries, monotonic identity-derived team/person tightening, provider-format-aware opaque-media denial, and metadata-only non-self, 15-minute, exact single-use approval grants; remaining #10 gates stay open;
 - generic OIDC JWT discovery/JWKS verification with explicit issuer-subject identity mapping;
 - accepted generic OIDC authorization-code + PKCE login, opaque rotating human sessions, replay-family revocation, and fail-closed OS secure-store custody;
+- tenant/actor/team/clearance-bound human sessions plus capability-gated, tenant-scoped local listing and immediate administrative revocation;
 - metadata-only audit export;
 - a separate local persistent governed-context repository plus deterministic authorization-first context packs;
 - authenticated authorization-first context-pack REST retrieval with server-owned caps, versioned retrieval/render manifests, explicit authorized freshness/provisional outcomes, fail-closed durable metadata-only read audit, and no provider side effects;
@@ -22,7 +23,7 @@ The private alpha currently has:
 - a reproducible 60-task synthetic retrieval benchmark whose strict version-2 release profile passes current authorization, lifecycle, dependency, quarantine, contradiction, budget, determinism, leakage, and latency thresholds;
 - local and GitHub package/client verification.
 
-The foundation is not an enterprise release. The local usage/approval, context, and session databases are single-node, and the local context codec is plaintext; none is an accepted hosted persistence design. Real-IdP validation, shared tenancy, SCIM, administrator revocation, source connectors, automatic verification/promotion/decay and resumable revalidation, context injection, remaining structured-DLP coverage, cache policy, invoice reconciliation, HA deployment, KMS, and independent security review remain open gates.
+The foundation is not an enterprise release. The local usage/approval, context, and session databases are single-node, and the local context codec is plaintext; none is an accepted hosted persistence design. Real-IdP validation, shared tenancy and multi-node revocation, SCIM, source connectors, automatic verification/promotion/decay and resumable revalidation, context injection, remaining structured-DLP coverage, cache policy, invoice reconciliation, HA deployment, KMS, and independent security review remain open gates.
 
 ## Material decisions awaiting owner approval
 
@@ -31,7 +32,7 @@ These issues record product decisions and block dependent implementation. They m
 1. [#1 — Approve the enterprise tenancy, authorization, and persistence topology](https://github.com/Xpounder-com/hormuz/issues/1) — [Proposed ADR 0002](decisions/0002-enterprise-tenancy-and-persistence.md)
 2. [#3 — Define provider and Hormuz cache privacy tiers](https://github.com/Xpounder-com/hormuz/issues/3) — [Proposed ADR 0003](decisions/0003-cache-privacy-tiers.md)
 
-[ADR 0001](decisions/0001-oidc-login-and-session-architecture.md) was accepted by the product owner on 2026-08-15. Its implementation evidence is tracked under #13; acceptance of the decision does not close the remaining real-IdP, SCIM, administrator-revocation, and HA gates.
+[ADR 0001](decisions/0001-oidc-login-and-session-architecture.md) was accepted by the product owner on 2026-08-15. Its implementation evidence is tracked under #13; acceptance of the decision does not close the remaining real-IdP, SCIM, shared-revocation, and HA gates.
 
 [ADR 0004](decisions/0004-structured-dlp-and-approval-boundary.md) was accepted by the product owner on 2026-08-15. The deterministic detector/action subset, monotonic team/person overlays, provider-format-aware opaque-media denial, and local replay-safe approval workflow now exist, but source classification, arbitrary encoded/archive decoding, semantic evaluation, multi-node approval operations, cache invalidation, and the full #10 release evidence remain open.
 

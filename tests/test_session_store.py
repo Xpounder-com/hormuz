@@ -62,6 +62,10 @@ class SessionStoreTests(unittest.TestCase):
         self.store.authorize_enrollment(
             enrollment_id=enrollment.enrollment_id,
             subject="stable-alice-subject",
+            organization_id="xpounder",
+            actor_id="alice",
+            team_id="engineering",
+            clearance="confidential",
         )
         return enrollment.enrollment_id
 
@@ -74,6 +78,10 @@ class SessionStoreTests(unittest.TestCase):
         principal = self.store.authenticate_access(pair.access_token)
         self.assertEqual(principal.subject, "stable-alice-subject")
         self.assertEqual(principal.client_name, "codex")
+        self.assertEqual(principal.organization_id, "xpounder")
+        self.assertEqual(principal.actor_id, "alice")
+        self.assertEqual(principal.team_id, "engineering")
+        self.assertEqual(principal.clearance, "confidential")
         with self.assertRaisesRegex(SessionStoreError, "enrollment_not_redeemable"):
             self.store.redeem_enrollment(
                 enrollment_id=enrollment_id,
@@ -207,6 +215,10 @@ class SessionStoreTests(unittest.TestCase):
         second_store.authorize_enrollment(
             enrollment_id=created.enrollment_id,
             subject="stable-alice-subject",
+            organization_id="xpounder",
+            actor_id="alice",
+            team_id="engineering",
+            clearance="confidential",
         )
         pair = second_store.redeem_enrollment(
             enrollment_id=created.enrollment_id,
@@ -243,6 +255,175 @@ class SessionStoreTests(unittest.TestCase):
         self.assertEqual(failures, ["refresh_replay_detected"])
         with self.assertRaisesRegex(SessionStoreError, "invalid_session_credential"):
             self.store.authenticate_access(successes[0].access_token)
+
+    def test_admin_listing_and_revocation_are_tenant_scoped_and_metadata_only(self) -> None:
+        alice = self.store.redeem_enrollment(
+            enrollment_id=self._authorized_enrollment(),
+            enrollment_secret=self.enrollment_secret,
+        )
+        second_alice = self.store.redeem_enrollment(
+            enrollment_id=self._authorized_enrollment(),
+            enrollment_secret=self.enrollment_secret,
+        )
+
+        other_secret = "other_enrollment_" + "s" * 32
+        enrollment = self.store.create_enrollment(
+            issuer="https://issuer.example",
+            client_name="claude-code",
+            enrollment_secret=other_secret,
+        )
+        self.store.begin_authorization(
+            enrollment_id=enrollment.enrollment_id,
+            state="other_state_" + "a" * 32,
+            browser_cookie="other_browser_" + "b" * 32,
+            nonce="other_nonce_" + "n" * 32,
+            pkce_verifier="other_verifier_" + "v" * 64,
+        )
+        self.store.consume_callback(
+            state="other_state_" + "a" * 32,
+            browser_cookie="other_browser_" + "b" * 32,
+        )
+        self.store.authorize_enrollment(
+            enrollment_id=enrollment.enrollment_id,
+            subject="other-tenant-subject",
+            organization_id="other-tenant",
+            actor_id="mallory",
+            team_id="other-team",
+            clearance="internal",
+        )
+        other = self.store.redeem_enrollment(
+            enrollment_id=enrollment.enrollment_id,
+            enrollment_secret=other_secret,
+        )
+
+        page, cursor = self.store.list_active_sessions(
+            organization_id="xpounder",
+            limit=1,
+        )
+        self.assertIsNotNone(cursor)
+        self.assertEqual(len(page), 1)
+        self.assertEqual(page[0].actor_id, "alice")
+        self.assertEqual(page[0].organization_id, "xpounder")
+        self.assertNotIn(alice.access_token, repr(page))
+        self.assertNotIn(alice.refresh_token, repr(page))
+        second_page, final_cursor = self.store.list_active_sessions(
+            organization_id="xpounder",
+            limit=1,
+            cursor=cursor,
+        )
+        self.assertIsNone(final_cursor)
+        self.assertEqual(len(second_page), 1)
+        self.assertNotEqual(page[0].session_id, second_page[0].session_id)
+
+        revoked = self.store.revoke_administratively(
+            organization_id="xpounder",
+            actor_id="alice",
+            decision_actor_id="security-admin",
+            reason_code="access_change",
+        )
+        self.assertEqual(revoked, 2)
+        with self.assertRaisesRegex(SessionStoreError, "invalid_session_credential"):
+            self.store.authenticate_access(alice.access_token)
+        with self.assertRaisesRegex(SessionStoreError, "invalid_session_credential"):
+            self.store.authenticate_access(second_alice.access_token)
+        self.assertEqual(self.store.authenticate_access(other.access_token).actor_id, "mallory")
+
+        with sqlite3.connect(self.path) as connection:
+            connection.row_factory = sqlite3.Row
+            event = connection.execute(
+                "SELECT * FROM session_security_events WHERE event_type = 'admin_revocation'"
+            ).fetchone()
+        self.assertIsNotNone(event)
+        self.assertEqual(event["organization_id"], "xpounder")
+        self.assertEqual(event["target_actor_id"], "alice")
+        self.assertEqual(event["decision_actor_id"], "security-admin")
+        self.assertEqual(event["reason_code"], "access_change")
+        self.assertNotIn(alice.access_token, repr(dict(event)))
+        self.assertNotIn(alice.refresh_token, repr(dict(event)))
+
+    def test_v1_migration_revokes_sessions_without_tenant_binding(self) -> None:
+        now = self.clock().isoformat()
+        expiry = (self.clock() + timedelta(hours=1)).isoformat()
+        with sqlite3.connect(self.path) as connection:
+            connection.execute(
+                """
+                INSERT INTO human_sessions (
+                    id, issuer, subject, client_name, access_hash, refresh_hash,
+                    access_expires_at, absolute_expires_at, generation, created_at,
+                    refreshed_at, organization_id, actor_id, team_id, clearance
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "legacy-session",
+                    "https://issuer.example",
+                    "legacy-subject",
+                    "codex",
+                    b"legacy-access-hash",
+                    b"legacy-refresh-hash",
+                    expiry,
+                    expiry,
+                    now,
+                    now,
+                    "xpounder",
+                    "legacy",
+                    "engineering",
+                    "internal",
+                ),
+            )
+            connection.execute("DROP INDEX idx_human_sessions_admin_scope")
+            for table, column in (
+                ("session_enrollments", "organization_id"),
+                ("session_enrollments", "actor_id"),
+                ("session_enrollments", "team_id"),
+                ("session_enrollments", "clearance"),
+                ("human_sessions", "organization_id"),
+                ("human_sessions", "actor_id"),
+                ("human_sessions", "team_id"),
+                ("human_sessions", "clearance"),
+                ("session_security_events", "organization_id"),
+                ("session_security_events", "target_actor_id"),
+                ("session_security_events", "target_team_id"),
+                ("session_security_events", "decision_actor_id"),
+                ("session_security_events", "decision_scope"),
+                ("session_security_events", "reason_code"),
+            ):
+                connection.execute(f"ALTER TABLE {table} DROP COLUMN {column}")
+            connection.execute("PRAGMA user_version = 1")
+
+        migrated = SQLiteSessionStore(
+            self.path,
+            master_key=b"m" * 32,
+            access_ttl_seconds=600,
+            absolute_ttl_seconds=43_200,
+            enrollment_ttl_seconds=300,
+            clock=self.clock,
+        )
+        with sqlite3.connect(self.path) as connection:
+            version = connection.execute("PRAGMA user_version").fetchone()[0]
+            columns = {
+                row[1]: row[3]
+                for row in connection.execute("PRAGMA table_info(human_sessions)")
+            }
+            revoked_at = connection.execute(
+                "SELECT revoked_at FROM human_sessions WHERE id = 'legacy-session'"
+            ).fetchone()[0]
+            event = connection.execute(
+                """
+                SELECT event_type FROM session_security_events
+                WHERE session_id = 'legacy-session'
+                """
+            ).fetchone()[0]
+        self.assertEqual(version, 2)
+        self.assertEqual(columns["organization_id"], 1)
+        self.assertEqual(columns["actor_id"], 1)
+        self.assertEqual(columns["team_id"], 1)
+        self.assertEqual(columns["clearance"], 1)
+        self.assertIsNotNone(revoked_at)
+        self.assertEqual(event, "migration_identity_binding_required")
+        self.assertEqual(
+            migrated.list_active_sessions(organization_id="xpounder", limit=10),
+            ((), None),
+        )
 
 
 if __name__ == "__main__":

@@ -350,6 +350,26 @@ Observed local result:
 
 This closes one fail-open composition defect; it does not expand the media-inspection claim. Hormuz still does not inspect accepted opaque bytes, fetch URLs or provider file IDs, decode arbitrary encoded values, or classify provider headers and JSON keys. Issue #10 remains open for those and the other enterprise DLP release gates.
 
+### Tenant-scoped human-session administration
+
+The accepted OIDC session architecture, session-store v1-to-v2 migration, authenticated administrator API, real CLI client, and both existing AI-client paths were exercised on August 15, 2026.
+
+Observed local result:
+
+- every newly redeemed human session was bound to its event-time organization, actor, team, clearance, and Codex or Claude Code client; changing a mapped team revoked the family and returned `401` before policy or provider work;
+- a red-first persistence regression proved the prior issuer/subject-only schema could not safely list or revoke by tenant, employee, or team. Session-store schema version 2 added the explicit bindings and an indexed administrative scope;
+- the v1-to-v2 migration preserved the database, added non-null legacy sentinels, revoked every active unbound legacy session, recorded a metadata-only `migration_identity_binding_required` event, and required re-login rather than guessing a tenant binding;
+- `GET /v1/admin/sessions` required the explicit `session_admin` capability, derived organization scope only from the authenticated administrator, supported actor/team filtering plus bounded opaque cursor pagination, and returned no access credential, refresh credential, OIDC subject, provider token, or content;
+- `POST /v1/admin/session-revocations` revoked one session, actor, team, or organization scope atomically inside the local store. Cross-tenant selectors matched nothing, retries were idempotent, and each affected session received a metadata-only event with decision actor, target scope, and one bounded reason code;
+- invalid capability, target shape, cursor, limit, reason, and organization-target combinations returned stable `400` or `403` JSON errors. A valid actor revocation invalidated both that employee's active sessions immediately;
+- the real `hormuz sessions list` and `hormuz sessions revoke` commands exercised the authenticated loopback contract. Newly issued IDs use a `ses_` prefix so values cannot be parsed as CLI options; pre-v2 IDs beginning with `-` remain supported through `--target=<id>`;
+- all 182 source tests passed with the installed Codex and official Claude Code compatibility paths enabled;
+- the frozen 60-task context release profile remained green with precision `1.00`, recall `1.00`, useful-pack rate `1.00`, mean compression ratio `0.840593`, zero safety failures, and p95 in-process selection latency `0.196083 ms`; corpus SHA-256 remained `9822d592868202c7c7539bcdac7d4a5894c01f9e6dba7a434846516b67b32c17`;
+- an isolated source distribution and wheel included the new API document, client, implementation, and tests. A clean Python 3.14 environment installed the exact wheel from outside the checkout, loaded Hormuz from `site-packages`, created session schema version 2, displayed both administrator CLI commands, and passed bytecode compilation;
+- `git diff --check`, source bytecode compilation, frozen-corpus regeneration, and a source/wheel runtime scan for private-key, OpenAI, Anthropic, and GitHub credential values passed.
+
+This closes the single-node administrator-revocation slice of issue #13, not the identity or enterprise-tenancy milestone. Real owner-selected IdP validation, live configuration reload, SCIM/event-driven deprovisioning, shared multi-node revocation, PostgreSQL tenant isolation, KMS custody, immutable session-event export, HA, backup/restore, and independent review remain open. Those shared persistence decisions still depend on proposed ADR 0002.
+
 ## Reproduce locally
 
 The default suite uses only loopback fake providers:

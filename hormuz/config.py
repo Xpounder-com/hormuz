@@ -1306,7 +1306,7 @@ def _dlp_identifier(value: Any, path: str) -> str:
 
 def _identity_capabilities(value: Any, path: str) -> tuple[str, ...]:
     capabilities = _string_tuple(value, path)
-    supported = {"dlp_approver"}
+    supported = {"dlp_approver", "session_admin"}
     unknown = sorted(set(capabilities) - supported)
     if unknown:
         raise ConfigError(f"Unknown {path}: " + ", ".join(unknown))

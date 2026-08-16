@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
 import hmac
 import json
@@ -17,7 +19,13 @@ from typing import Callable
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 
-SESSION_STORE_SCHEMA_VERSION = 1
+SESSION_STORE_SCHEMA_VERSION = 2
+_ADMIN_REASON_CODES = {
+    "access_change",
+    "employment_change",
+    "security_incident",
+    "administrative",
+}
 
 
 class SessionStoreError(RuntimeError):
@@ -72,8 +80,38 @@ class SessionPrincipal:
     issuer: str
     subject: str
     client_name: str
+    organization_id: str
+    actor_id: str
+    team_id: str
+    clearance: str
     access_expires_at: datetime
     session_expires_at: datetime
+
+
+@dataclass(frozen=True)
+class SessionSummary:
+    session_id: str
+    organization_id: str
+    actor_id: str
+    team_id: str
+    client_name: str
+    created_at: datetime
+    refreshed_at: datetime
+    access_expires_at: datetime
+    session_expires_at: datetime
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "session_id": self.session_id,
+            "organization_id": self.organization_id,
+            "actor_id": self.actor_id,
+            "team_id": self.team_id,
+            "client_name": self.client_name,
+            "created_at": _isoformat(self.created_at),
+            "refreshed_at": _isoformat(self.refreshed_at),
+            "access_expires_at": _isoformat(self.access_expires_at),
+            "session_expires_at": _isoformat(self.session_expires_at),
+        }
 
 
 class SQLiteSessionStore:
@@ -252,18 +290,41 @@ class SQLiteSessionStore:
                 pkce_verifier=str(flow["pkce_verifier"]),
             )
 
-    def authorize_enrollment(self, *, enrollment_id: str, subject: str) -> None:
-        if not subject or len(subject.encode("utf-8")) > 1024:
-            raise SessionStoreError("invalid_subject")
+    def authorize_enrollment(
+        self,
+        *,
+        enrollment_id: str,
+        subject: str,
+        organization_id: str,
+        actor_id: str,
+        team_id: str,
+        clearance: str,
+    ) -> None:
+        _require_binding(subject, "invalid_subject")
+        _require_binding(organization_id, "invalid_organization_id")
+        _require_binding(actor_id, "invalid_actor_id")
+        _require_binding(team_id, "invalid_team_id")
+        _require_binding(clearance, "invalid_clearance")
         now = self._now()
         with self._lock, self._connection() as connection:
             cursor = connection.execute(
                 """
                 UPDATE session_enrollments
-                SET status = 'authorized', subject = ?, authorized_at = ?, encrypted_flow = NULL
+                SET status = 'authorized', subject = ?, organization_id = ?,
+                    actor_id = ?, team_id = ?, clearance = ?, authorized_at = ?,
+                    encrypted_flow = NULL
                 WHERE id = ? AND status = 'exchanging' AND expires_at > ?
                 """,
-                (subject, _isoformat(now), enrollment_id, _isoformat(now)),
+                (
+                    subject,
+                    organization_id,
+                    actor_id,
+                    team_id,
+                    clearance,
+                    _isoformat(now),
+                    enrollment_id,
+                    _isoformat(now),
+                ),
             )
             if cursor.rowcount != 1:
                 raise SessionStoreError("enrollment_unavailable")
@@ -289,12 +350,13 @@ class SQLiteSessionStore:
         _require_secret(enrollment_secret, "invalid_enrollment_secret")
         now = self._now()
         pair = self._new_pair(now=now, absolute_expires_at=now + self._absolute_ttl)
-        session_id = secrets.token_urlsafe(24)
+        session_id = "ses_" + secrets.token_urlsafe(24)
         with self._lock, self._connection() as connection:
             connection.execute("BEGIN IMMEDIATE")
             row = connection.execute(
                 """
-                SELECT secret_hash, issuer, subject, client_name, status, expires_at
+                SELECT secret_hash, issuer, subject, client_name, organization_id,
+                       actor_id, team_id, clearance, status, expires_at
                 FROM session_enrollments WHERE id = ?
                 """,
                 (enrollment_id,),
@@ -314,8 +376,9 @@ class SQLiteSessionStore:
                 INSERT INTO human_sessions (
                     id, issuer, subject, client_name, access_hash, refresh_hash,
                     access_expires_at, absolute_expires_at, generation,
-                    created_at, refreshed_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+                    created_at, refreshed_at, organization_id, actor_id, team_id,
+                    clearance
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     session_id,
@@ -328,6 +391,10 @@ class SQLiteSessionStore:
                     _isoformat(pair.session_expires_at),
                     _isoformat(now),
                     _isoformat(now),
+                    row["organization_id"],
+                    row["actor_id"],
+                    row["team_id"],
+                    row["clearance"],
                 ),
             )
             connection.execute(
@@ -348,7 +415,8 @@ class SQLiteSessionStore:
         with self._lock, self._connection() as connection:
             row = connection.execute(
                 """
-                SELECT id, issuer, subject, client_name, access_expires_at,
+                SELECT id, issuer, subject, client_name, organization_id,
+                       actor_id, team_id, clearance, access_expires_at,
                        absolute_expires_at, revoked_at
                 FROM human_sessions WHERE access_hash = ?
                 """,
@@ -365,6 +433,10 @@ class SQLiteSessionStore:
                 issuer=str(row["issuer"]),
                 subject=str(row["subject"]),
                 client_name=str(row["client_name"]),
+                organization_id=str(row["organization_id"]),
+                actor_id=str(row["actor_id"]),
+                team_id=str(row["team_id"]),
+                clearance=str(row["clearance"]),
                 access_expires_at=access_expires_at,
                 session_expires_at=absolute_expires_at,
             )
@@ -485,6 +557,13 @@ class SQLiteSessionStore:
         now = self._now()
         with self._lock, self._connection() as connection:
             connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                """
+                SELECT organization_id, actor_id, team_id
+                FROM human_sessions WHERE id = ?
+                """,
+                (session_id,),
+            ).fetchone()
             connection.execute(
                 "UPDATE human_sessions SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL",
                 (_isoformat(now), session_id),
@@ -494,7 +573,142 @@ class SQLiteSessionStore:
                 session_id=session_id,
                 event_type=event_type,
                 occurred_at=now,
+                organization_id=str(row["organization_id"]) if row is not None else None,
+                target_actor_id=str(row["actor_id"]) if row is not None else None,
+                target_team_id=str(row["team_id"]) if row is not None else None,
             )
+
+    def list_active_sessions(
+        self,
+        *,
+        organization_id: str,
+        limit: int,
+        cursor: str | None = None,
+        actor_id: str | None = None,
+        team_id: str | None = None,
+    ) -> tuple[tuple[SessionSummary, ...], str | None]:
+        _require_binding(organization_id, "invalid_organization_id")
+        if actor_id is not None:
+            _require_binding(actor_id, "invalid_actor_id")
+        if team_id is not None:
+            _require_binding(team_id, "invalid_team_id")
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 100:
+            raise SessionStoreError("invalid_session_page_limit")
+        before = _decode_cursor(cursor) if cursor is not None else None
+        now = self._now()
+        conditions = [
+            "organization_id = ?",
+            "revoked_at IS NULL",
+            "absolute_expires_at > ?",
+        ]
+        parameters: list[object] = [organization_id, _isoformat(now)]
+        if actor_id is not None:
+            conditions.append("actor_id = ?")
+            parameters.append(actor_id)
+        if team_id is not None:
+            conditions.append("team_id = ?")
+            parameters.append(team_id)
+        if before is not None:
+            conditions.append("(created_at < ? OR (created_at = ? AND id < ?))")
+            parameters.extend((before[0], before[0], before[1]))
+        parameters.append(limit + 1)
+        query = (
+            "SELECT id, organization_id, actor_id, team_id, client_name, created_at, "
+            "refreshed_at, access_expires_at, absolute_expires_at FROM human_sessions WHERE "
+            + " AND ".join(conditions)
+            + " ORDER BY created_at DESC, id DESC LIMIT ?"
+        )
+        with self._lock, self._connection() as connection:
+            rows = connection.execute(query, tuple(parameters)).fetchall()
+        has_more = len(rows) > limit
+        selected = rows[:limit]
+        items = tuple(
+            SessionSummary(
+                session_id=str(row["id"]),
+                organization_id=str(row["organization_id"]),
+                actor_id=str(row["actor_id"]),
+                team_id=str(row["team_id"]),
+                client_name=str(row["client_name"]),
+                created_at=_parse_time(row["created_at"]),
+                refreshed_at=_parse_time(row["refreshed_at"]),
+                access_expires_at=_parse_time(row["access_expires_at"]),
+                session_expires_at=_parse_time(row["absolute_expires_at"]),
+            )
+            for row in selected
+        )
+        next_cursor = (
+            _encode_cursor(str(selected[-1]["created_at"]), str(selected[-1]["id"]))
+            if has_more and selected
+            else None
+        )
+        return items, next_cursor
+
+    def revoke_administratively(
+        self,
+        *,
+        organization_id: str,
+        decision_actor_id: str,
+        reason_code: str,
+        session_id: str | None = None,
+        actor_id: str | None = None,
+        team_id: str | None = None,
+    ) -> int:
+        _require_binding(organization_id, "invalid_organization_id")
+        _require_binding(decision_actor_id, "invalid_decision_actor_id")
+        if reason_code not in _ADMIN_REASON_CODES:
+            raise SessionStoreError("invalid_admin_revocation_reason")
+        selectors = [session_id is not None, actor_id is not None, team_id is not None]
+        if sum(selectors) > 1:
+            raise SessionStoreError("invalid_admin_revocation_selector")
+        conditions = [
+            "organization_id = ?",
+            "revoked_at IS NULL",
+            "absolute_expires_at > ?",
+        ]
+        now = self._now()
+        parameters: list[object] = [organization_id, _isoformat(now)]
+        scope = "organization"
+        if session_id is not None:
+            _require_binding(session_id, "invalid_session_id")
+            conditions.append("id = ?")
+            parameters.append(session_id)
+            scope = "session"
+        elif actor_id is not None:
+            _require_binding(actor_id, "invalid_actor_id")
+            conditions.append("actor_id = ?")
+            parameters.append(actor_id)
+            scope = "actor"
+        elif team_id is not None:
+            _require_binding(team_id, "invalid_team_id")
+            conditions.append("team_id = ?")
+            parameters.append(team_id)
+            scope = "team"
+        query = (
+            "SELECT id, organization_id, actor_id, team_id FROM human_sessions WHERE "
+            + " AND ".join(conditions)
+            + " ORDER BY id"
+        )
+        with self._lock, self._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            rows = connection.execute(query, tuple(parameters)).fetchall()
+            for row in rows:
+                connection.execute(
+                    "UPDATE human_sessions SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL",
+                    (_isoformat(now), row["id"]),
+                )
+                self._record_event(
+                    connection,
+                    session_id=str(row["id"]),
+                    event_type="admin_revocation",
+                    occurred_at=now,
+                    organization_id=str(row["organization_id"]),
+                    target_actor_id=str(row["actor_id"]),
+                    target_team_id=str(row["team_id"]),
+                    decision_actor_id=decision_actor_id,
+                    decision_scope=scope,
+                    reason_code=reason_code,
+                )
+            return len(rows)
 
     def _new_pair(
         self,
@@ -576,8 +790,13 @@ class SQLiteSessionStore:
             version = int(connection.execute("PRAGMA user_version").fetchone()[0])
             if version > SESSION_STORE_SCHEMA_VERSION:
                 raise SessionStoreError("session_store_schema_newer_than_binary")
-            if version not in {0, SESSION_STORE_SCHEMA_VERSION}:
+            if version not in {0, 1, SESSION_STORE_SCHEMA_VERSION}:
                 raise SessionStoreError("session_store_schema_migration_required")
+            if version == 1:
+                self._migrate_v1_to_v2(connection)
+                return
+            if version == SESSION_STORE_SCHEMA_VERSION:
+                return
             connection.execute("PRAGMA journal_mode = WAL")
             connection.executescript(
                 """
@@ -594,6 +813,10 @@ class SQLiteSessionStore:
                     browser_cookie_hash BLOB,
                     encrypted_flow BLOB,
                     subject TEXT,
+                    organization_id TEXT,
+                    actor_id TEXT,
+                    team_id TEXT,
+                    clearance TEXT,
                     created_at TEXT NOT NULL,
                     expires_at TEXT NOT NULL,
                     authorization_started_at TEXT,
@@ -614,10 +837,16 @@ class SQLiteSessionStore:
                     generation INTEGER NOT NULL CHECK (generation >= 0),
                     created_at TEXT NOT NULL,
                     refreshed_at TEXT NOT NULL,
+                    organization_id TEXT NOT NULL,
+                    actor_id TEXT NOT NULL,
+                    team_id TEXT NOT NULL,
+                    clearance TEXT NOT NULL,
                     revoked_at TEXT
                 );
                 CREATE INDEX IF NOT EXISTS idx_human_sessions_subject
                     ON human_sessions(issuer, subject, revoked_at);
+                CREATE INDEX IF NOT EXISTS idx_human_sessions_admin_scope
+                    ON human_sessions(organization_id, revoked_at, actor_id, team_id, created_at, id);
                 CREATE TABLE IF NOT EXISTS consumed_refresh_credentials (
                     credential_hash BLOB PRIMARY KEY,
                     session_id TEXT NOT NULL REFERENCES human_sessions(id) ON DELETE CASCADE,
@@ -628,12 +857,77 @@ class SQLiteSessionStore:
                     id TEXT PRIMARY KEY,
                     occurred_at TEXT NOT NULL,
                     session_id TEXT NOT NULL,
-                    event_type TEXT NOT NULL
+                    event_type TEXT NOT NULL,
+                    organization_id TEXT,
+                    target_actor_id TEXT,
+                    target_team_id TEXT,
+                    decision_actor_id TEXT,
+                    decision_scope TEXT,
+                    reason_code TEXT
                 );
-                PRAGMA user_version = 1;
+                PRAGMA user_version = 2;
                 COMMIT;
                 """
             )
+
+    def _migrate_v1_to_v2(self, connection: sqlite3.Connection) -> None:
+        now = _isoformat(self._now())
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            for table, definition in (
+                ("session_enrollments", "organization_id TEXT"),
+                ("session_enrollments", "actor_id TEXT"),
+                ("session_enrollments", "team_id TEXT"),
+                ("session_enrollments", "clearance TEXT"),
+                (
+                    "human_sessions",
+                    "organization_id TEXT NOT NULL DEFAULT '__legacy_unbound__'",
+                ),
+                (
+                    "human_sessions",
+                    "actor_id TEXT NOT NULL DEFAULT '__legacy_unbound__'",
+                ),
+                (
+                    "human_sessions",
+                    "team_id TEXT NOT NULL DEFAULT '__legacy_unbound__'",
+                ),
+                (
+                    "human_sessions",
+                    "clearance TEXT NOT NULL DEFAULT '__legacy_unbound__'",
+                ),
+                ("session_security_events", "organization_id TEXT"),
+                ("session_security_events", "target_actor_id TEXT"),
+                ("session_security_events", "target_team_id TEXT"),
+                ("session_security_events", "decision_actor_id TEXT"),
+                ("session_security_events", "decision_scope TEXT"),
+                ("session_security_events", "reason_code TEXT"),
+            ):
+                connection.execute(f"ALTER TABLE {table} ADD COLUMN {definition}")
+            legacy = connection.execute(
+                "SELECT id FROM human_sessions WHERE revoked_at IS NULL ORDER BY id"
+            ).fetchall()
+            for row in legacy:
+                connection.execute(
+                    "UPDATE human_sessions SET revoked_at = ? WHERE id = ?",
+                    (now, row["id"]),
+                )
+                self._record_event(
+                    connection,
+                    session_id=str(row["id"]),
+                    event_type="migration_identity_binding_required",
+                    occurred_at=self._now(),
+                )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_human_sessions_admin_scope
+                ON human_sessions(organization_id, revoked_at, actor_id, team_id, created_at, id)
+                """
+            )
+            connection.execute("PRAGMA user_version = 2")
+            connection.commit()
+        except sqlite3.Error as error:
+            connection.rollback()
+            raise SessionStoreError("session_store_migration_failed") from error
 
     def _record_event(
         self,
@@ -642,13 +936,33 @@ class SQLiteSessionStore:
         session_id: str,
         event_type: str,
         occurred_at: datetime,
+        organization_id: str | None = None,
+        target_actor_id: str | None = None,
+        target_team_id: str | None = None,
+        decision_actor_id: str | None = None,
+        decision_scope: str | None = None,
+        reason_code: str | None = None,
     ) -> None:
         connection.execute(
             """
-            INSERT INTO session_security_events (id, occurred_at, session_id, event_type)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO session_security_events (
+                id, occurred_at, session_id, event_type, organization_id,
+                target_actor_id, target_team_id, decision_actor_id,
+                decision_scope, reason_code
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (secrets.token_urlsafe(18), _isoformat(occurred_at), session_id, event_type),
+            (
+                secrets.token_urlsafe(18),
+                _isoformat(occurred_at),
+                session_id,
+                event_type,
+                organization_id,
+                target_actor_id,
+                target_team_id,
+                decision_actor_id,
+                decision_scope,
+                reason_code,
+            ),
         )
 
     def _secure_files(self) -> None:
@@ -664,6 +978,48 @@ class SQLiteSessionStore:
 def _require_secret(value: str, code: str) -> None:
     if not isinstance(value, str) or not 20 <= len(value.encode("utf-8")) <= 4096:
         raise SessionStoreError(code)
+
+
+def _require_binding(value: str, code: str) -> None:
+    if (
+        not isinstance(value, str)
+        or not value
+        or len(value.encode("utf-8")) > 1024
+        or any(character in value for character in ("\n", "\r", "\x00"))
+    ):
+        raise SessionStoreError(code)
+
+
+def _encode_cursor(created_at: str, session_id: str) -> str:
+    value = json.dumps([created_at, session_id], separators=(",", ":")).encode("utf-8")
+    return base64.urlsafe_b64encode(value).rstrip(b"=").decode("ascii")
+
+
+def _decode_cursor(value: str) -> tuple[str, str]:
+    if (
+        not isinstance(value, str)
+        or not value
+        or len(value) > 2048
+        or any(character not in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_" for character in value)
+    ):
+        raise SessionStoreError("invalid_session_cursor")
+    try:
+        raw = base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
+        parsed = json.loads(raw)
+    except (ValueError, UnicodeDecodeError, binascii.Error, RecursionError) as error:
+        raise SessionStoreError("invalid_session_cursor") from error
+    if (
+        not isinstance(parsed, list)
+        or len(parsed) != 2
+        or not all(isinstance(item, str) for item in parsed)
+    ):
+        raise SessionStoreError("invalid_session_cursor")
+    try:
+        _parse_time(parsed[0])
+        _require_binding(parsed[1], "invalid_session_cursor")
+    except SessionStoreError as error:
+        raise SessionStoreError("invalid_session_cursor") from error
+    return parsed[0], parsed[1]
     if any(character in value for character in ("\n", "\r", "\x00")):
         raise SessionStoreError(code)
 

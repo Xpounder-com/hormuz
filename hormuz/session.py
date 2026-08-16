@@ -17,6 +17,7 @@ from .session_store import (
     Enrollment,
     SQLiteSessionStore,
     SessionCredentialPair,
+    SessionSummary,
     SessionStoreError,
 )
 
@@ -183,6 +184,10 @@ class SessionBroker:
             self.store.authorize_enrollment(
                 enrollment_id=flow.enrollment_id,
                 subject=subject,
+                organization_id=identity.organization_id,
+                actor_id=identity.actor_id,
+                team_id=identity.team_id,
+                clearance=identity.clearance,
             )
         except (AuthenticationError, SessionStoreError) as error:
             self.store.fail_enrollment(enrollment_id=flow.enrollment_id)
@@ -217,6 +222,57 @@ class SessionBroker:
         except SessionStoreError as error:
             raise SessionBrokerError(error.code) from error
 
+    def list_active_sessions(
+        self,
+        *,
+        administrator: Identity,
+        limit: int,
+        cursor: str | None = None,
+        actor_id: str | None = None,
+        team_id: str | None = None,
+    ) -> tuple[tuple[SessionSummary, ...], str | None]:
+        if "session_admin" not in administrator.capabilities:
+            raise SessionBrokerError("session_admin_capability_required")
+        try:
+            return self.store.list_active_sessions(
+                organization_id=administrator.organization_id,
+                limit=limit,
+                cursor=cursor,
+                actor_id=actor_id,
+                team_id=team_id,
+            )
+        except SessionStoreError as error:
+            raise SessionBrokerError(error.code) from error
+
+    def revoke_administratively(
+        self,
+        *,
+        administrator: Identity,
+        scope: str,
+        target: str | None,
+        reason_code: str,
+    ) -> int:
+        if "session_admin" not in administrator.capabilities:
+            raise SessionBrokerError("session_admin_capability_required")
+        selectors: dict[str, str | None] = {
+            "session_id": target if scope == "session" else None,
+            "actor_id": target if scope == "actor" else None,
+            "team_id": target if scope == "team" else None,
+        }
+        if scope not in {"session", "actor", "team", "organization"}:
+            raise SessionBrokerError("invalid_admin_revocation_selector")
+        if (scope == "organization") != (target is None):
+            raise SessionBrokerError("invalid_admin_revocation_selector")
+        try:
+            return self.store.revoke_administratively(
+                organization_id=administrator.organization_id,
+                decision_actor_id=administrator.actor_id,
+                reason_code=reason_code,
+                **selectors,
+            )
+        except SessionStoreError as error:
+            raise SessionBrokerError(error.code) from error
+
     def authenticate(self, access_token: str) -> Identity:
         try:
             principal = self.store.authenticate_access(access_token)
@@ -225,6 +281,11 @@ class SessionBroker:
         identity = self.config.identity_for_subject(principal.issuer, principal.subject)
         if identity is None or (
             identity.allowed_clients and principal.client_name not in identity.allowed_clients
+        ) or (
+            identity.organization_id != principal.organization_id
+            or identity.actor_id != principal.actor_id
+            or identity.team_id != principal.team_id
+            or identity.clearance != principal.clearance
         ):
             self.store.revoke_session(
                 principal.session_id,

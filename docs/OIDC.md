@@ -81,7 +81,7 @@ hormuz --config /etc/hormuz/hormuz.json client-config claude \
 
 Hormuz supports macOS Keychain, Windows Credential Manager, and Linux Secret Service/KWallet through an allowlisted `keyring` backend. Persistent login fails when none is available; it does not silently write a refresh credential to a dotfile. `hormuz logout --gateway ... --profile ...` revokes the server-side family before deleting the local entry.
 
-The session database contains keyed credential hashes, encrypted temporary PKCE verifier/nonce state, and session metadata. It does not contain raw Hormuz credentials or retained provider tokens. Reuse of any rotated refresh credential revokes the current family.
+The session database contains keyed credential hashes, encrypted temporary PKCE verifier/nonce state, and tenant/actor/team/client binding metadata. It does not contain raw Hormuz credentials or retained provider tokens. Reuse of any rotated refresh credential revokes the current family. See [SESSION_ADMIN_API.md](SESSION_ADMIN_API.md) for capability-gated listing and immediate session, actor, team, or organization revocation.
 
 ## Workload JWT resource-server path
 
@@ -190,4 +190,4 @@ Authentication logs contain only a stable failure code. Hormuz does not log toke
 
 [Accepted ADR 0001](decisions/0001-oidc-login-and-session-architecture.md) governs the implemented login architecture. The repository includes protocol, persistence, HTTP, and CLI integration tests against a standards-shaped fake IdP. It has not yet been validated against the owner-selected real identity provider, and the local SQLite broker is not a claim of multi-node availability.
 
-SCIM provisioning/deprovisioning, tenant-admin revocation APIs, workload identity exchange, KMS-backed session storage, immutable security-event export, and distributed enrollment throttling remain enterprise gates. Until live configuration reload and SCIM exist, removing a subject mapping takes effect after a service reload/restart; the next request then invalidates that session. `hormuz logout` provides employee-initiated revocation.
+The local `session_admin` API and CLI provide immediate tenant-scoped revocation on this process and persist metadata-only decision evidence. SCIM provisioning/deprovisioning, workload identity exchange, KMS-backed shared session storage, immutable security-event export, and distributed enrollment throttling remain enterprise gates. Until live configuration reload and SCIM exist, changing a subject mapping takes effect after a service reload/restart; the next request then compares the stored organization/actor/team/clearance binding, revokes on mismatch, and fails closed. `hormuz logout` provides employee-initiated revocation.

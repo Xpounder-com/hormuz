@@ -3,7 +3,9 @@ from __future__ import annotations
 import base64
 import hashlib
 import http.client
+import io
 import json
+import os
 import socket
 import sqlite3
 import tempfile
@@ -11,7 +13,9 @@ import threading
 import time
 import unittest
 import urllib.parse
+from unittest import mock
 from contextlib import nullcontext
+from contextlib import redirect_stdout
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -21,6 +25,7 @@ import jwt
 from cryptography.hazmat.primitives.asymmetric import rsa
 
 from hormuz.config import GatewayConfig, ListenConfig
+from hormuz.cli import main as cli_main
 from hormuz.credential_store import CredentialStoreError, SecureCredentialStore
 from hormuz.server import GatewayServer, serve_in_thread
 from hormuz.session_client import access_token, login, logout
@@ -188,6 +193,8 @@ class SessionBrokerIntegrationTests(unittest.TestCase):
             environ={
                 "HORMUZ_SESSION_MASTER_KEY": master_key,
                 "HORMUZ_OIDC_CLIENT_SECRET": "super-secret-client-value",
+                "HORMUZ_ADMIN_TOKEN": "admin-token-" + "a" * 32,
+                "HORMUZ_EMPLOYEE_TOKEN": "employee-token-" + "e" * 32,
             },
         )
         self.gateway = GatewayServer(self.config)
@@ -249,6 +256,29 @@ class SessionBrokerIntegrationTests(unittest.TestCase):
                     ]
                 },
             },
+            "identities": [
+                {
+                    "token_env": "HORMUZ_ADMIN_TOKEN",
+                    "actor_id": "security-admin",
+                    "actor_name": "Security Admin",
+                    "team_id": "security",
+                    "team_name": "Security",
+                    "organization_id": "xpounder",
+                    "clearance": "restricted",
+                    "allowed_clients": ["codex", "claude-code"],
+                    "capabilities": ["session_admin"],
+                },
+                {
+                    "token_env": "HORMUZ_EMPLOYEE_TOKEN",
+                    "actor_id": "employee",
+                    "actor_name": "Employee",
+                    "team_id": "engineering",
+                    "team_name": "Engineering",
+                    "organization_id": "xpounder",
+                    "clearance": "internal",
+                    "allowed_clients": ["codex", "claude-code"],
+                },
+            ],
             "model_routes": {
                 "gpt-test": {"protocol": "openai", "upstream_model": "gpt-test"},
                 "claude-test": {"protocol": "anthropic", "upstream_model": "claude-test"},
@@ -273,6 +303,29 @@ class SessionBrokerIntegrationTests(unittest.TestCase):
             body=body,
             headers={"Content-Type": "application/json", "Content-Length": str(len(body))},
         )
+        response = connection.getresponse()
+        parsed = json.loads(response.read())
+        connection.close()
+        return response.status, parsed
+
+    def _admin_request(
+        self,
+        method: str,
+        path: str,
+        *,
+        token: str,
+        value: object | None = None,
+    ) -> tuple[int, dict[str, object]]:
+        body = json.dumps(value).encode("utf-8") if value is not None else None
+        headers = {"Authorization": "Bearer " + token, "Accept": "application/json"}
+        if body is not None:
+            headers.update(
+                {"Content-Type": "application/json", "Content-Length": str(len(body))}
+            )
+        connection = http.client.HTTPConnection(
+            "127.0.0.1", self.config.listen.port, timeout=5
+        )
+        connection.request(method, path, body=body, headers=headers)
         response = connection.getresponse()
         parsed = json.loads(response.read())
         connection.close()
@@ -514,6 +567,41 @@ class SessionBrokerIntegrationTests(unittest.TestCase):
         finally:
             self.config.identities_by_subject[identity_key] = original
 
+    def test_session_is_revoked_when_identity_binding_changes(self) -> None:
+        pair = self._login(client="codex")
+        identity_key = (self.idp.issuer, "oidc-alice")  # type: ignore[attr-defined]
+        original = self.config.identities_by_subject[identity_key]
+        self.config.identities_by_subject[identity_key] = replace(
+            original,
+            team_id="platform",
+            team_name="Platform",
+        )
+        try:
+            connection = http.client.HTTPConnection(
+                "127.0.0.1", self.config.listen.port, timeout=5
+            )
+            connection.request(
+                "GET",
+                "/v1/gateway/whoami",
+                headers={"Authorization": "Bearer " + str(pair["access_token"])},
+            )
+            response = connection.getresponse()
+            response.read()
+            connection.close()
+            self.assertEqual(response.status, 401)
+        finally:
+            self.config.identities_by_subject[identity_key] = original
+
+        with sqlite3.connect(self.root / "sessions.sqlite3") as connection:
+            row = connection.execute(
+                """
+                SELECT revoked_at FROM human_sessions
+                WHERE actor_id = 'alice' ORDER BY created_at DESC LIMIT 1
+                """
+            ).fetchone()
+        self.assertIsNotNone(row)
+        self.assertIsNotNone(row[0])
+
     def test_cli_login_refresh_and_logout_use_secure_store_profile(self) -> None:
         backend = _MemoryKeyring()
         store = SecureCredentialStore(backend, trust_injected_backend=True)
@@ -597,6 +685,148 @@ class SessionBrokerIntegrationTests(unittest.TestCase):
             ).fetchone()
         self.assertIsNotNone(row)
         self.assertIsNotNone(row[0])
+
+    def test_session_admin_lists_and_revokes_only_with_explicit_capability(self) -> None:
+        pair = self._login(client="codex")
+        second_pair = self._login(client="claude-code")
+        admin_token = "admin-token-" + "a" * 32
+        employee_token = "employee-token-" + "e" * 32
+
+        status, forbidden = self._admin_request(
+            "GET",
+            "/v1/admin/sessions",
+            token=employee_token,
+        )
+        self.assertEqual(status, 403)
+        self.assertEqual(forbidden["error"]["code"], "session_admin_capability_required")
+
+        status, listing = self._admin_request(
+            "GET",
+            "/v1/admin/sessions?actor_id=alice&limit=1",
+            token=admin_token,
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(listing["schema_version"], 1)
+        self.assertIsInstance(listing["next_cursor"], str)
+        self.assertEqual(len(listing["sessions"]), 1)
+        session = listing["sessions"][0]
+        self.assertEqual(session["actor_id"], "alice")
+        self.assertEqual(session["organization_id"], "xpounder")
+        self.assertNotIn(str(pair["access_token"]), repr(listing))
+        self.assertNotIn(str(pair["refresh_token"]), repr(listing))
+        self.assertNotIn(str(second_pair["access_token"]), repr(listing))
+
+        status, final_page = self._admin_request(
+            "GET",
+            "/v1/admin/sessions?actor_id=alice&limit=1&cursor="
+            + urllib.parse.quote(str(listing["next_cursor"]), safe=""),
+            token=admin_token,
+        )
+        self.assertEqual(status, 200)
+        self.assertIsNone(final_page["next_cursor"])
+        self.assertEqual(len(final_page["sessions"]), 1)
+        self.assertNotEqual(
+            session["session_id"],
+            final_page["sessions"][0]["session_id"],
+        )
+
+        status, invalid_cursor = self._admin_request(
+            "GET",
+            "/v1/admin/sessions?cursor=not-a-valid-cursor",
+            token=admin_token,
+        )
+        self.assertEqual(status, 400)
+        self.assertEqual(
+            invalid_cursor["error"]["code"],
+            "invalid_session_list_request",
+        )
+
+        status, revoked = self._admin_request(
+            "POST",
+            "/v1/admin/session-revocations",
+            token=admin_token,
+            value={
+                "scope": "actor",
+                "target": "alice",
+                "reason_code": "access_change",
+            },
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(revoked["schema_version"], 1)
+        self.assertEqual(revoked["scope"], "actor")
+        self.assertEqual(revoked["revoked_sessions"], 2)
+
+        connection = http.client.HTTPConnection(
+            "127.0.0.1", self.config.listen.port, timeout=5
+        )
+        connection.request(
+            "GET",
+            "/v1/gateway/whoami",
+            headers={"Authorization": "Bearer " + str(pair["access_token"])},
+        )
+        response = connection.getresponse()
+        response.read()
+        connection.close()
+        self.assertEqual(response.status, 401)
+
+        status, invalid = self._admin_request(
+            "POST",
+            "/v1/admin/session-revocations",
+            token=admin_token,
+            value={"scope": "organization", "target": "not-allowed", "reason_code": "administrative"},
+        )
+        self.assertEqual(status, 400)
+        self.assertEqual(invalid["error"]["code"], "invalid_session_revocation")
+
+    def test_session_admin_cli_uses_the_authenticated_gateway_contract(self) -> None:
+        pair = self._login(client="claude-code")
+        output = io.StringIO()
+        with mock.patch.dict(
+            os.environ,
+            {"HORMUZ_ADMIN_TOKEN": "admin-token-" + "a" * 32},
+        ), redirect_stdout(output):
+            result = cli_main(
+                [
+                    "sessions",
+                    "list",
+                    "--gateway",
+                    self.gateway_url,
+                    "--credential-env",
+                    "HORMUZ_ADMIN_TOKEN",
+                    "--actor",
+                    "alice",
+                    "--allow-insecure-http",
+                ]
+            )
+        self.assertEqual(result, 0)
+        listing = json.loads(output.getvalue())
+        self.assertEqual(listing["sessions"][0]["client_name"], "claude-code")
+        self.assertNotIn(str(pair["access_token"]), output.getvalue())
+
+        output = io.StringIO()
+        with mock.patch.dict(
+            os.environ,
+            {"HORMUZ_ADMIN_TOKEN": "admin-token-" + "a" * 32},
+        ), redirect_stdout(output):
+            result = cli_main(
+                [
+                    "sessions",
+                    "revoke",
+                    "--gateway",
+                    self.gateway_url,
+                    "--credential-env",
+                    "HORMUZ_ADMIN_TOKEN",
+                    "--scope",
+                    "session",
+                    "--target",
+                    listing["sessions"][0]["session_id"],
+                    "--reason",
+                    "security_incident",
+                    "--allow-insecure-http",
+                ]
+            )
+        self.assertEqual(result, 0)
+        self.assertEqual(json.loads(output.getvalue())["revoked_sessions"], 1)
 
 
 def _single_values(query: str) -> dict[str, str] | None:

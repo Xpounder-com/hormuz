@@ -183,6 +183,9 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         identity = self._authenticate()
         if identity is None:
             return
+        if path == "/v1/admin/sessions":
+            self._list_human_sessions(identity, request_url.query)
+            return
         if path == "/v1/gateway/whoami":
             self._send_json(
                 HTTPStatus.OK,
@@ -250,6 +253,12 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             return
         if path == "/v1/auth/logout":
             self._logout_human_session()
+            return
+        if path == "/v1/admin/session-revocations":
+            identity = self._authenticate()
+            if identity is None:
+                return
+            self._revoke_human_sessions(identity)
             return
         if path == "/v1/context/packs":
             identity = self._authenticate()
@@ -532,6 +541,159 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         except (SessionBrokerError, SessionStoreError):
             pass
         self._send_json(HTTPStatus.OK, {"revoked": True})
+
+    def _list_human_sessions(self, identity: Identity, query: str) -> None:
+        broker = self._require_session_broker()
+        if broker is None:
+            return
+        try:
+            values = urllib.parse.parse_qs(
+                query,
+                keep_blank_values=True,
+                strict_parsing=True,
+                max_num_fields=4,
+            )
+        except ValueError:
+            self._send_error(
+                "invalid_session_list_request",
+                "Session list query is invalid",
+                HTTPStatus.BAD_REQUEST,
+            )
+            return
+        if set(values) - {"actor_id", "team_id", "cursor", "limit"} or any(
+            len(items) != 1 or not items[0] for items in values.values()
+        ):
+            self._send_error(
+                "invalid_session_list_request",
+                "Session list query contains unsupported or repeated fields",
+                HTTPStatus.BAD_REQUEST,
+            )
+            return
+        try:
+            limit = int(values.get("limit", ["50"])[0])
+        except ValueError:
+            self._send_error(
+                "invalid_session_list_request",
+                "Session list limit must be an integer from 1 to 100",
+                HTTPStatus.BAD_REQUEST,
+            )
+            return
+        try:
+            sessions, next_cursor = broker.list_active_sessions(
+                administrator=identity,
+                limit=limit,
+                cursor=values.get("cursor", [None])[0],
+                actor_id=values.get("actor_id", [None])[0],
+                team_id=values.get("team_id", [None])[0],
+            )
+        except SessionBrokerError as error:
+            self._send_session_admin_error(error, list_request=True)
+            return
+        self._send_json(
+            HTTPStatus.OK,
+            {
+                "schema_version": 1,
+                "sessions": [session.to_dict() for session in sessions],
+                "next_cursor": next_cursor,
+            },
+        )
+
+    def _revoke_human_sessions(self, identity: Identity) -> None:
+        broker = self._require_session_broker()
+        if broker is None:
+            return
+        request = self._read_json_body(max_bytes=MAX_AUTH_REQUEST_BYTES)
+        if request is None:
+            return
+        if set(request) != {"scope", "reason_code"} and set(request) != {
+            "scope",
+            "target",
+            "reason_code",
+        }:
+            self._send_error(
+                "invalid_session_revocation",
+                "Request must contain scope, reason_code, and target when required",
+                HTTPStatus.BAD_REQUEST,
+            )
+            return
+        scope = request.get("scope")
+        target = request.get("target")
+        reason_code = request.get("reason_code")
+        if (
+            not isinstance(scope, str)
+            or not isinstance(reason_code, str)
+            or (target is not None and not isinstance(target, str))
+        ):
+            self._send_error(
+                "invalid_session_revocation",
+                "Session revocation fields have invalid types",
+                HTTPStatus.BAD_REQUEST,
+            )
+            return
+        try:
+            revoked = broker.revoke_administratively(
+                administrator=identity,
+                scope=scope,
+                target=target,
+                reason_code=reason_code,
+            )
+        except SessionBrokerError as error:
+            self._send_session_admin_error(error, list_request=False)
+            return
+        LOGGER.info(
+            "session_admin_revocation organization=%s decision_actor=%s scope=%s target=%s reason=%s revoked=%d",
+            identity.organization_id,
+            identity.actor_id,
+            scope,
+            target or "-",
+            reason_code,
+            revoked,
+        )
+        self._send_json(
+            HTTPStatus.OK,
+            {
+                "schema_version": 1,
+                "scope": scope,
+                "target": target,
+                "reason_code": reason_code,
+                "revoked_sessions": revoked,
+            },
+        )
+
+    def _send_session_admin_error(
+        self,
+        error: SessionBrokerError,
+        *,
+        list_request: bool,
+    ) -> None:
+        if error.code == "session_admin_capability_required":
+            self._send_error(
+                "session_admin_capability_required",
+                "Session administrator capability is required",
+                HTTPStatus.FORBIDDEN,
+            )
+            return
+        invalid = {
+            "invalid_session_page_limit",
+            "invalid_session_cursor",
+            "invalid_actor_id",
+            "invalid_team_id",
+            "invalid_session_id",
+            "invalid_admin_revocation_reason",
+            "invalid_admin_revocation_selector",
+        }
+        if error.code in invalid:
+            self._send_error(
+                "invalid_session_list_request" if list_request else "invalid_session_revocation",
+                "Session administration request is invalid",
+                HTTPStatus.BAD_REQUEST,
+            )
+            return
+        self._send_error(
+            "session_admin_unavailable",
+            "Session administration is temporarily unavailable",
+            HTTPStatus.SERVICE_UNAVAILABLE,
+        )
 
     def _require_session_broker(self, *, browser: bool = False) -> SessionBroker | None:
         broker = self.server.session_broker
