@@ -11,8 +11,21 @@ from typing import Mapping, Sequence
 MAX_REPORT_PAGES = 1_000
 MAX_REPORT_BUCKETS = 50_000
 MAX_REPORT_ITEMS = 500_000
+MAX_REPORT_PAGE_BYTES = 16 * 1024 * 1024
+MAX_REPORT_TOTAL_BYTES = 32 * 1024 * 1024
 MAX_AMOUNT_USD = Decimal("1000000000000")
 MAX_AMOUNT_DECIMAL_PLACES = 12
+
+_AUTHENTICATED_SOURCE_CONTRACTS = {
+    "openai": (
+        "openai.organization.costs.v1",
+        "organization_all_projects_line_items",
+    ),
+    "anthropic": (
+        "anthropic.organization.cost_report.2023-06-01",
+        "organization_all_workspaces_descriptions",
+    ),
+}
 
 
 class ProviderBillingError(ValueError):
@@ -47,9 +60,71 @@ class ProviderCostReport:
     items: tuple[ProviderCostItem, ...]
 
 
+@dataclass(frozen=True)
+class ProviderCostSource:
+    kind: str
+    api_contract: str | None = None
+    query_start: str | None = None
+    query_end: str | None = None
+    query_scope: str | None = None
+
+    @classmethod
+    def offline(cls) -> ProviderCostSource:
+        return cls(kind="offline_upload")
+
+    @classmethod
+    def authenticated(
+        cls,
+        *,
+        provider: str,
+        query_start: str,
+        query_end: str,
+    ) -> ProviderCostSource:
+        contract = _AUTHENTICATED_SOURCE_CONTRACTS.get(provider)
+        if contract is None:
+            raise ProviderBillingError("Provider must be openai or anthropic")
+        return cls(
+            kind="authenticated_api",
+            api_contract=contract[0],
+            query_start=_rfc3339(query_start, "Provider query start"),
+            query_end=_rfc3339(query_end, "Provider query end"),
+            query_scope=contract[1],
+        )
+
+
+def decode_provider_cost_page(payload: bytes) -> dict[str, object]:
+    if not isinstance(payload, bytes):
+        raise ProviderBillingError("Billing input page must be bytes")
+    if len(payload) > MAX_REPORT_PAGE_BYTES:
+        raise ProviderBillingError("Billing input page cannot exceed 16 MiB")
+    try:
+        text = payload.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise ProviderBillingError("Billing input page must be UTF-8 JSON") from error
+    try:
+        value = json.loads(
+            text,
+            parse_float=Decimal,
+            parse_constant=_invalid_json_constant,
+            object_pairs_hook=_unique_json_object,
+        )
+    except json.JSONDecodeError as error:
+        raise ProviderBillingError(
+            f"Billing input page must be valid JSON at line {error.lineno}, column {error.colno}"
+        ) from error
+    except RecursionError as error:
+        raise ProviderBillingError("Billing input page exceeds the supported JSON depth") from error
+    if not isinstance(value, dict):
+        raise ProviderBillingError("Billing input page must be a JSON object")
+    return value
+
+
 def parse_provider_cost_pages(
     provider: str,
     pages: Sequence[Mapping[str, object]],
+    *,
+    expected_start: str | None = None,
+    expected_end: str | None = None,
 ) -> ProviderCostReport:
     if provider not in {"openai", "anthropic"}:
         raise ProviderBillingError("Provider must be openai or anthropic")
@@ -59,6 +134,15 @@ def parse_provider_cost_pages(
         raise ProviderBillingError(
             f"Provider cost report must contain 1 to {MAX_REPORT_PAGES} pages"
         )
+    if (expected_start is None) != (expected_end is None):
+        raise ProviderBillingError("Provider cost query bounds must be supplied together")
+    normalized_expected_start: str | None = None
+    normalized_expected_end: str | None = None
+    if expected_start is not None and expected_end is not None:
+        normalized_expected_start = _rfc3339(expected_start, "Provider query start")
+        normalized_expected_end = _rfc3339(expected_end, "Provider query end")
+        if normalized_expected_end <= normalized_expected_start:
+            raise ProviderBillingError("Provider cost query end must be after its start")
 
     items: list[ProviderCostItem] = []
     bucket_bounds: list[tuple[str, str]] = []
@@ -104,10 +188,19 @@ def parse_provider_cost_pages(
         items.extend(page_items)
         bucket_bounds.extend(page_bounds)
 
-    if not bucket_bounds:
+    if not bucket_bounds and normalized_expected_start is None:
         raise ProviderBillingError("Provider cost report must contain at least one bucket")
-    report_start = min(start for start, _ in bucket_bounds)
-    report_end = max(end for _, end in bucket_bounds)
+    if normalized_expected_start is not None and normalized_expected_end is not None:
+        if any(
+            start < normalized_expected_start or end > normalized_expected_end
+            for start, end in bucket_bounds
+        ):
+            raise ProviderBillingError("Provider cost bucket is outside the authenticated query window")
+        report_start = normalized_expected_start
+        report_end = normalized_expected_end
+    else:
+        report_start = min(start for start, _ in bucket_bounds)
+        report_end = max(end for _, end in bucket_bounds)
     canonical_items = sorted(
         (asdict(item) for item in items),
         key=lambda item: json.dumps(item, sort_keys=True, separators=(",", ":")),
@@ -305,3 +398,16 @@ def _rfc3339(value: object, label: str) -> str:
 def _validate_bucket(start: str, end: str) -> None:
     if end <= start:
         raise ProviderBillingError("Provider cost bucket end must be after its start")
+
+
+def _unique_json_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ProviderBillingError("Billing input contains a duplicate JSON object member")
+        result[key] = value
+    return result
+
+
+def _invalid_json_constant(_value: str) -> object:
+    raise ProviderBillingError("Billing input contains a non-standard JSON numeric constant")

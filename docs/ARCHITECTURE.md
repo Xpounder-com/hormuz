@@ -29,16 +29,21 @@ OpenAI Responses API / Anthropic Messages API
 SQLite usage ledger
 ```
 
-Provider billing evidence has a separate offline path into that metadata ledger:
+Provider billing evidence has separate authenticated and offline paths into that metadata ledger:
 
 ```text
-complete OpenAI / Anthropic cost-report JSON pages
-        |
-        | bounded schema parsing, exact decimal normalization, pagination check
-        v
+provider admin key in operator environment      complete cost-report JSON pages
+        |                                                |
+        | fixed HTTPS origin, no redirects               | offline operator evidence
+        | exact query scope and cursor chain              |
+        +--------------------------+---------------------+
+                                   |
+                                   | bounded schema parsing, exact decimal normalization
+                                   v
 immutable organization/provider cost snapshot
         |
-        +--> raw response discarded; normalized project/workspace/line-item fields retained
+        +--> raw response and credential discarded; normalized billing metadata retained
+        +--> authenticated source records exact API contract, query window, and fixed scope
         +--> compare aggregate provider-reported cost with organization-bound request estimates
         +--> expose unresolved variance without allocating it to employees or calling it bypass
 ```
@@ -87,6 +92,7 @@ The HTTP path authenticates first, derives organization/team/actor from the stat
 - The authenticated Claude Code catalog path resolves static organization/team/person model authorization through the policy engine and exposes only compatible policy aliases. It never contacts an upstream, reserves budget, or records usage; generation remains the authoritative budget and routing check.
 - `hormuz/store.py` owns the SQLite schema and monthly aggregations.
 - `hormuz/billing.py` validates complete OpenAI and Anthropic cost-report pages and normalizes exact provider amounts and supported billing dimensions without persistence or credentials.
+- `hormuz/billing_client.py` owns fixed-origin authenticated provider cost collection, bounded retry and pagination, stable content-free errors, and query-source evidence without persistence.
 - `hormuz/usage.py` parses bounded provider usage and actual-model metadata through provider-specific allowlists without storing response content.
 - `hormuz/redaction.py` applies bounded credential, regulated-identifier, low-confidence PII, exact-dictionary, and provider-format-aware opaque-media rules to provider-bound JSON plus transport-supplied unredactable strings.
 - `hormuz/dlp_evaluation.py` measures one configured organization detector over a strict local labeled corpus and emits aggregate content-free evidence without provider, transport, or persistence behavior.
@@ -100,11 +106,11 @@ The HTTP path authenticates first, derives organization/team/actor from the stat
 - `hormuz/context_store.py` implements the local governed-record, trusted-snapshot, immutable evidence, and resumable revalidation repository with optimistic concurrency, leases, integrity checks, and metadata-only mutation/read/lifecycle audit behind a content-codec boundary.
 - `hormuz/mcp.py` implements the bounded dual-era MCP stdio protocol and an HTTPS client for the authenticated Context Pack API; it has no repository or provider access.
 - `hormuz/context_benchmark.py` evaluates the production context-pack kernel against frozen synthetic snapshots and separated outcomes; it has no provider, network, or context-repository dependency.
-- `hormuz/cli.py` exposes serving, diagnostics, policy checks, client configuration, usage and billing reporting, offline DLP detector evaluation, local lifecycle operations, and config-independent remote connector commands.
+- `hormuz/cli.py` exposes serving, diagnostics, policy checks, client configuration, usage and billing ingestion/reporting, offline DLP detector evaluation, local lifecycle operations, and config-independent remote connector commands.
 
 ## Trust boundary
 
-Hormuz is trusted with plaintext requests and responses because it must inspect and relay them. The usage and DLP approval stores are deliberately metadata-only; the latter keeps only a keyed fingerprint and bounded binding metadata, never the payload. Provider billing imports add normalized financial metadata such as project/workspace IDs and line-item descriptions, but discard the raw provider response and never receive the administrator credential. Governed content is held in a different SQLite database; usage lineage stores pack/record IDs and versions, never record content or the retrieval query. The current local context codec is plainly labeled as unencrypted and is not an enterprise storage claim. Automatic context lookup occurs only after authentication and model authorization; its metadata-only pack-read audit must commit before content can enter the provider-bound request. DLP then runs on the complete request, including injected context, before provider storage policy, generation-budget reservation, and upstream serialization. Anthropic token-count requests use the same context mutation and DLP path but do not reserve a generation budget or create an inference-usage row. They retain the context-read audit and any metadata-only DLP security evidence. DLP inspects provider-bound JSON, one UTF-8 form-decoded view of the raw provider query, and the exact allowlisted caller headers that the transport will forward; JSON keys, the raw query, and header values are preserved, so would-be redaction in those locations fails closed. Team and actor overlays are selected only from the authenticated identity and can only strengthen an enabled organization rule; callers cannot request a weaker scope. Recognized opaque provider media is denied before egress unless the organization explicitly turns that rule off; Hormuz does not claim to inspect the underlying bytes. The off-mode exemption is limited to each recognized opaque object, so inspectable siblings remain governed by credential and DLP rules. Approval consumption is atomic, binds the operation/body/raw-query/forwarded-header map, and precedes egress, so mutation or concurrent replay cannot duplicate the exception. DLP may transform rendered context; pack lineage identifies the selected governed sources rather than attesting to exact post-redaction provider bytes.
+Hormuz is trusted with plaintext requests and responses because it must inspect and relay them. The usage and DLP approval stores are deliberately metadata-only; the latter keeps only a keyed fingerprint and bounded binding metadata, never the payload. Offline provider billing import never receives an administrator credential. Authenticated billing fetch holds one transiently in the operator process and sends it only to the fixed provider HTTPS origin; neither path persists the credential or raw response. Both retain normalized financial metadata such as project/workspace IDs and line-item descriptions. Governed content is held in a different SQLite database; usage lineage stores pack/record IDs and versions, never record content or the retrieval query. The current local context codec is plainly labeled as unencrypted and is not an enterprise storage claim. Automatic context lookup occurs only after authentication and model authorization; its metadata-only pack-read audit must commit before content can enter the provider-bound request. DLP then runs on the complete request, including injected context, before provider storage policy, generation-budget reservation, and upstream serialization. Anthropic token-count requests use the same context mutation and DLP path but do not reserve a generation budget or create an inference-usage row. They retain the context-read audit and any metadata-only DLP security evidence. DLP inspects provider-bound JSON, one UTF-8 form-decoded view of the raw provider query, and the exact allowlisted caller headers that the transport will forward; JSON keys, the raw query, and header values are preserved, so would-be redaction in those locations fails closed. Team and actor overlays are selected only from the authenticated identity and can only strengthen an enabled organization rule; callers cannot request a weaker scope. Recognized opaque provider media is denied before egress unless the organization explicitly turns that rule off; Hormuz does not claim to inspect the underlying bytes. The off-mode exemption is limited to each recognized opaque object, so inspectable siblings remain governed by credential and DLP rules. Approval consumption is atomic, binds the operation/body/raw-query/forwarded-header map, and precedes egress, so mutation or concurrent replay cannot duplicate the exception. DLP may transform rendered context; pack lineage identifies the selected governed sources rather than attesting to exact post-redaction provider bytes.
 
 ## Compatibility boundary
 

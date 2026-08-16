@@ -7,13 +7,20 @@ import unittest
 import io
 import json
 import copy
+import os
 from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
+from unittest import mock
 
-from hormuz.billing import ProviderBillingError, parse_provider_cost_pages
+from hormuz.billing import (
+    ProviderBillingError,
+    ProviderCostSource,
+    parse_provider_cost_pages,
+)
+from hormuz.billing_client import ProviderCostFetchResult
 from hormuz.cli import _billing_command, build_parser
 from hormuz.config import GatewayConfig, Identity
 from hormuz.store import UsageStore
@@ -54,8 +61,15 @@ def _openai_page(
     }
 
 
-def _anthropic_page(*, amount_cents: str = "123.78912") -> dict[str, object]:
-    start, end = _utc_day()
+def _anthropic_page(
+    *,
+    amount_cents: str = "123.78912",
+    start: datetime | None = None,
+) -> dict[str, object]:
+    if start is None:
+        start, end = _utc_day()
+    else:
+        end = start + timedelta(days=1)
     return {
         "data": [
             {
@@ -163,6 +177,177 @@ class ProviderCostParserTests(unittest.TestCase):
 
 
 class ProviderCostStoreTests(unittest.TestCase):
+    def test_legacy_positive_bucket_constraint_migrates_without_data_loss(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "usage.sqlite3"
+            with sqlite3.connect(path) as connection:
+                connection.execute(
+                    """
+                    CREATE TABLE gateway_provider_cost_imports (
+                        id TEXT PRIMARY KEY,
+                        imported_at TEXT NOT NULL,
+                        organization_id TEXT NOT NULL,
+                        provider TEXT NOT NULL CHECK (provider IN ('openai', 'anthropic')),
+                        source_sha256 TEXT NOT NULL,
+                        report_start TEXT NOT NULL,
+                        report_end TEXT NOT NULL,
+                        page_count INTEGER NOT NULL CHECK (page_count > 0),
+                        bucket_count INTEGER NOT NULL CHECK (bucket_count > 0),
+                        item_count INTEGER NOT NULL CHECK (item_count >= 0),
+                        UNIQUE (organization_id, provider, source_sha256)
+                    )
+                    """
+                )
+                connection.execute(
+                    """
+                    INSERT INTO gateway_provider_cost_imports VALUES (
+                        'pci_legacy', '2026-08-01T00:00:00+00:00', 'org-a', 'openai',
+                        ?, '2026-08-01T00:00:00+00:00', '2026-08-02T00:00:00+00:00',
+                        1, 1, 0
+                    )
+                    """,
+                    ("a" * 64,),
+                )
+
+            UsageStore(path)
+
+            with sqlite3.connect(path) as connection:
+                sql = connection.execute(
+                    "SELECT sql FROM sqlite_master WHERE name = 'gateway_provider_cost_imports'"
+                ).fetchone()[0]
+                self.assertIn("bucket_count >= 0", sql)
+                self.assertEqual(
+                    connection.execute(
+                        "SELECT id, bucket_count FROM gateway_provider_cost_imports"
+                    ).fetchone(),
+                    ("pci_legacy", 1),
+                )
+                self.assertEqual(
+                    connection.execute(
+                        "SELECT source_kind FROM gateway_provider_cost_sources WHERE import_id = ?",
+                        ("pci_legacy",),
+                    ).fetchone(),
+                    ("offline_upload",),
+                )
+
+    def test_source_evidence_cannot_claim_a_different_authenticated_scope(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            store = UsageStore(Path(temporary) / "usage.sqlite3")
+            report = parse_provider_cost_pages("openai", [_openai_page()])
+            forged = ProviderCostSource(
+                kind="authenticated_api",
+                api_contract="openai.organization.costs.v1",
+                query_start="2026-01-01T00:00:00+00:00",
+                query_end="2026-01-02T00:00:00+00:00",
+                query_scope="organization_all_projects_line_items",
+            )
+            with self.assertRaisesRegex(ValueError, "does not match"):
+                store.import_provider_cost_report(
+                    organization_id="org-a",
+                    report=report,
+                    source=forged,
+                )
+            with sqlite3.connect(store.path) as connection:
+                self.assertEqual(
+                    connection.execute(
+                        "SELECT COUNT(*) FROM gateway_provider_cost_imports"
+                    ).fetchone()[0],
+                    0,
+                )
+
+    def test_empty_authenticated_report_is_persisted_and_reconciles_as_zero(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            store = UsageStore(Path(temporary) / "usage.sqlite3")
+            page = {
+                "object": "page",
+                "data": [],
+                "has_more": False,
+                "next_page": None,
+            }
+            report = parse_provider_cost_pages(
+                "openai",
+                [page],
+                expected_start="2026-08-01T00:00:00+00:00",
+                expected_end="2026-08-02T00:00:00+00:00",
+            )
+            source = ProviderCostSource.authenticated(
+                provider="openai",
+                query_start=report.report_start,
+                query_end=report.report_end,
+            )
+
+            imported = store.import_provider_cost_report(
+                organization_id="org-a",
+                report=report,
+                source=source,
+            )
+            result = store.reconcile_provider_costs(
+                organization_id="org-a",
+                provider="openai",
+                import_id=imported.import_id,
+            )
+
+            self.assertEqual(imported.bucket_count, 0)
+            self.assertEqual(result["provider_cost_usd"], "0")
+            self.assertEqual(
+                result["provider_report_completeness"],
+                "authenticated_query_pagination_complete",
+            )
+            self.assertEqual(
+                result["coverage_status"],
+                "partial_authenticated_provider_endpoint_scope",
+            )
+            self.assertEqual(result["provider_source_kind"], "authenticated_api")
+            self.assertEqual(result["query_start"], report.report_start)
+            self.assertEqual(result["query_end"], report.report_end)
+            self.assertFalse(result["credential_retained"])
+            UsageStore(store.path)
+            with sqlite3.connect(store.path) as connection:
+                self.assertEqual(
+                    connection.execute(
+                        "SELECT source_kind FROM gateway_provider_cost_sources"
+                    ).fetchall(),
+                    [("authenticated_api",)],
+                )
+
+    def test_authenticated_observation_upgrades_provenance_without_duplicate_items(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "usage.sqlite3"
+            store = UsageStore(path)
+            report = parse_provider_cost_pages("anthropic", [_anthropic_page()])
+            offline = store.import_provider_cost_report(
+                organization_id="org-a",
+                report=report,
+            )
+            source = ProviderCostSource.authenticated(
+                provider="anthropic",
+                query_start=report.report_start,
+                query_end=report.report_end,
+            )
+            fetched = store.import_provider_cost_report(
+                organization_id="org-a",
+                report=report,
+                source=source,
+            )
+
+            self.assertEqual(fetched.import_id, offline.import_id)
+            self.assertFalse(fetched.created)
+            self.assertTrue(fetched.source_evidence_created)
+            self.assertEqual(fetched.source_kind, "authenticated_api")
+            with sqlite3.connect(path) as connection:
+                self.assertEqual(
+                    connection.execute("SELECT COUNT(*) FROM gateway_provider_cost_imports").fetchone()[0],
+                    1,
+                )
+                self.assertEqual(
+                    connection.execute("SELECT COUNT(*) FROM gateway_provider_cost_items").fetchone()[0],
+                    1,
+                )
+                self.assertEqual(
+                    connection.execute("SELECT COUNT(*) FROM gateway_provider_cost_sources").fetchone()[0],
+                    2,
+                )
+
     def test_store_revalidates_normalized_input_and_detects_missing_items(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "usage.sqlite3"
@@ -485,6 +670,87 @@ class ProviderCostCLITests(unittest.TestCase):
                     self.assertEqual(_billing_command(config, args), 2)
                     self.assertIn(message, error.getvalue())
 
+            self.assertFalse(config.database_path.exists())
+
+    def test_cli_fetch_uses_environment_admin_key_without_retaining_it(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config = replace(self.config, database_path=root / "usage.sqlite3")
+            organization = next(iter(config.identities_by_actor.values())).organization_id
+            report = parse_provider_cost_pages(
+                "anthropic",
+                [_anthropic_page(start=datetime(2026, 8, 1, tzinfo=timezone.utc))],
+                expected_start="2026-08-01T00:00:00+00:00",
+                expected_end="2026-08-02T00:00:00+00:00",
+            )
+            fetched = ProviderCostFetchResult(
+                report=report,
+                source=ProviderCostSource.authenticated(
+                    provider="anthropic",
+                    query_start=report.report_start,
+                    query_end=report.report_end,
+                ),
+            )
+            args = build_parser().parse_args(
+                [
+                    "billing",
+                    "fetch",
+                    "--organization",
+                    organization,
+                    "--provider",
+                    "anthropic",
+                    "--start",
+                    "2026-08-01",
+                    "--end",
+                    "2026-08-02",
+                    "--credential-env",
+                    "TEST_ANTHROPIC_ADMIN_KEY",
+                ]
+            )
+            secret = "admin-secret-must-not-persist"
+            output = io.StringIO()
+            with (
+                mock.patch.dict(os.environ, {"TEST_ANTHROPIC_ADMIN_KEY": secret}, clear=False),
+                mock.patch("hormuz.cli.ProviderBillingClient") as client_type,
+                redirect_stdout(output),
+            ):
+                client_type.return_value.fetch.return_value = fetched
+                self.assertEqual(_billing_command(config, args), 0)
+
+            client_type.assert_called_once_with("anthropic", credential=secret)
+            client_type.return_value.fetch.assert_called_once()
+            result = json.loads(output.getvalue())
+            self.assertEqual(result["source_kind"], "authenticated_api")
+            self.assertFalse(result["credential_retained"])
+            self.assertNotIn(secret, output.getvalue())
+            self.assertNotIn(secret.encode("utf-8"), config.database_path.read_bytes())
+
+    def test_cli_fetch_failure_does_not_create_usage_database(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config = replace(self.config, database_path=root / "usage.sqlite3")
+            organization = next(iter(config.identities_by_actor.values())).organization_id
+            args = build_parser().parse_args(
+                [
+                    "billing",
+                    "fetch",
+                    "--organization",
+                    organization,
+                    "--provider",
+                    "openai",
+                    "--start",
+                    "2026-08-01",
+                    "--end",
+                    "2026-08-02",
+                ]
+            )
+            error = io.StringIO()
+            with redirect_stderr(error):
+                self.assertEqual(_billing_command(config, args), 1)
+            self.assertEqual(
+                error.getvalue(),
+                "billing fetch failed: credential environment variable is not set: OPENAI_ADMIN_KEY\n",
+            )
             self.assertFalse(config.database_path.exists())
 
 

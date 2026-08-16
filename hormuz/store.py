@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
-from .billing import ProviderCostReport
+from .billing import ProviderBillingError, ProviderCostReport, ProviderCostSource
 from .config import Identity
 from .usage import sanitize_provider_usage
 
@@ -148,10 +148,17 @@ class ProviderCostImportResult:
     page_count: int
     bucket_count: int
     item_count: int
+    source_kind: str
+    source_evidence_created: bool
+    provider_report_completeness: str
+    api_contract: str | None = None
+    query_start: str | None = None
+    query_end: str | None = None
+    query_scope: str | None = None
 
     def to_dict(self) -> dict[str, object]:
         return {
-            "schema_version": 1,
+            "schema_version": 2,
             "import_id": self.import_id,
             "created": self.created,
             "organization_id": self.organization_id,
@@ -162,7 +169,15 @@ class ProviderCostImportResult:
             "page_count": self.page_count,
             "bucket_count": self.bucket_count,
             "item_count": self.item_count,
+            "source_kind": self.source_kind,
+            "source_evidence_created": self.source_evidence_created,
+            "provider_report_completeness": self.provider_report_completeness,
+            "api_contract": self.api_contract,
+            "query_start": self.query_start,
+            "query_end": self.query_end,
+            "query_scope": self.query_scope,
             "raw_payload_retained": False,
+            "credential_retained": False,
         }
 
 
@@ -390,7 +405,7 @@ class UsageStore:
                     report_start TEXT NOT NULL,
                     report_end TEXT NOT NULL,
                     page_count INTEGER NOT NULL CHECK (page_count > 0),
-                    bucket_count INTEGER NOT NULL CHECK (bucket_count > 0),
+                    bucket_count INTEGER NOT NULL CHECK (bucket_count >= 0),
                     item_count INTEGER NOT NULL CHECK (item_count >= 0),
                     UNIQUE (organization_id, provider, source_sha256)
                 );
@@ -421,6 +436,38 @@ class UsageStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_gateway_provider_cost_item_import
                     ON gateway_provider_cost_items(import_id, bucket_start, bucket_end);
+                CREATE TABLE IF NOT EXISTS gateway_provider_cost_sources (
+                    id TEXT PRIMARY KEY,
+                    import_id TEXT NOT NULL,
+                    observed_at TEXT NOT NULL,
+                    source_kind TEXT NOT NULL CHECK (
+                        source_kind IN ('offline_upload', 'authenticated_api')
+                    ),
+                    api_contract TEXT,
+                    query_start TEXT,
+                    query_end TEXT,
+                    query_scope TEXT
+                );
+                CREATE INDEX IF NOT EXISTS idx_gateway_provider_cost_source_import
+                    ON gateway_provider_cost_sources(import_id, source_kind, observed_at, id);
+                """
+            )
+            _migrate_provider_cost_bucket_count(connection)
+            connection.execute(
+                """
+                INSERT OR IGNORE INTO gateway_provider_cost_sources (
+                    id, import_id, observed_at, source_kind,
+                    api_contract, query_start, query_end, query_scope
+                )
+                SELECT 'pcisrc_legacy_' || imports.id, imports.id,
+                       imports.imported_at, 'offline_upload',
+                       NULL, NULL, NULL, NULL
+                FROM gateway_provider_cost_imports AS imports
+                WHERE NOT EXISTS (
+                    SELECT 1
+                    FROM gateway_provider_cost_sources AS sources
+                    WHERE sources.import_id = imports.id
+                )
                 """
             )
             columns = {
@@ -710,6 +757,7 @@ class UsageStore:
         *,
         organization_id: str,
         report: ProviderCostReport,
+        source: ProviderCostSource | None = None,
     ) -> ProviderCostImportResult:
         organization_id = _bounded_billing_identifier(
             organization_id,
@@ -717,6 +765,8 @@ class UsageStore:
             maximum=256,
         )
         _validate_provider_cost_report_storage(report)
+        source = source or ProviderCostSource.offline()
+        _validate_provider_cost_source(report=report, source=source)
         imported_at = datetime.now(timezone.utc).isoformat()
         with self._lock, self._connection() as connection:
             connection.execute("BEGIN IMMEDIATE")
@@ -730,7 +780,18 @@ class UsageStore:
                 (organization_id, report.provider, report.source_sha256),
             ).fetchone()
             if existing is not None:
-                return _provider_cost_import_result(existing, created=False)
+                source_created = _insert_provider_cost_source(
+                    connection,
+                    import_id=str(existing["id"]),
+                    observed_at=imported_at,
+                    source=source,
+                )
+                return _provider_cost_import_result(
+                    existing,
+                    created=False,
+                    source=source,
+                    source_evidence_created=source_created,
+                )
 
             import_id = "pci_" + uuid.uuid4().hex
             connection.execute(
@@ -782,18 +843,28 @@ class UsageStore:
                         item.inference_geo,
                     ),
                 )
-        return ProviderCostImportResult(
-            import_id=import_id,
-            created=True,
-            organization_id=organization_id,
-            provider=report.provider,
-            source_sha256=report.source_sha256,
-            report_start=report.report_start,
-            report_end=report.report_end,
-            page_count=report.page_count,
-            bucket_count=report.bucket_count,
-            item_count=len(report.items),
-        )
+            source_created = _insert_provider_cost_source(
+                connection,
+                import_id=import_id,
+                observed_at=imported_at,
+                source=source,
+            )
+            inserted = connection.execute(
+                """
+                SELECT id, organization_id, provider, source_sha256, report_start, report_end,
+                       page_count, bucket_count, item_count
+                FROM gateway_provider_cost_imports
+                WHERE id = ?
+                """,
+                (import_id,),
+            ).fetchone()
+            assert inserted is not None
+            return _provider_cost_import_result(
+                inserted,
+                created=True,
+                source=source,
+                source_evidence_created=source_created,
+            )
 
     def reconcile_provider_costs(
         self,
@@ -836,6 +907,19 @@ class UsageStore:
             ).fetchone()
             if imported is None:
                 raise ValueError("Provider cost import not found in this organization and provider scope")
+            source = connection.execute(
+                """
+                SELECT source_kind, api_contract, query_start, query_end, query_scope
+                FROM gateway_provider_cost_sources
+                WHERE import_id = ?
+                ORDER BY CASE source_kind WHEN 'authenticated_api' THEN 0 ELSE 1 END,
+                         observed_at DESC, id DESC
+                LIMIT 1
+                """,
+                (imported["id"],),
+            ).fetchone()
+            if source is None:
+                raise ValueError("Provider billing source evidence is missing")
             cost_rows = connection.execute(
                 """
                 SELECT amount_usd, provider_scope_kind, provider_scope_id,
@@ -904,6 +988,7 @@ class UsageStore:
         zero_items = sum(1 for amount in provider_amounts if amount == 0)
         unclassified_items = sum(1 for row in cost_rows if row["cost_type"] is None)
         legacy_requests = int(legacy["requests"])
+        authenticated_source = source["source_kind"] == "authenticated_api"
         return {
             "schema_version": 1,
             "organization_id": organization_id,
@@ -940,9 +1025,26 @@ class UsageStore:
                 if legacy_requests == 0
                 else "partial_legacy_unattributed_gateway_window"
             ),
-            "provider_report_completeness": "not_verifiable_from_response",
-            "coverage_status": "partial_unverified_provider_scope",
-            "provider_scope_attribution": "operator_bound_to_organization",
+            "provider_report_completeness": (
+                "authenticated_query_pagination_complete"
+                if authenticated_source
+                else "not_verifiable_from_response"
+            ),
+            "coverage_status": (
+                "partial_authenticated_provider_endpoint_scope"
+                if authenticated_source
+                else "partial_unverified_provider_scope"
+            ),
+            "provider_scope_attribution": (
+                "provider_admin_credential_bound_query"
+                if authenticated_source
+                else "operator_bound_to_organization"
+            ),
+            "provider_source_kind": str(source["source_kind"]),
+            "provider_api_contract": source["api_contract"],
+            "query_start": source["query_start"],
+            "query_end": source["query_end"],
+            "query_scope": source["query_scope"],
             "person_cost_basis": "estimated",
             "request_final_cost_available": False,
             "variance_proves_gateway_bypass": False,
@@ -953,6 +1055,7 @@ class UsageStore:
             "cache_batch_line_item_treatment": "provider_dimensions_preserved_without_repricing",
             "failed_rate_limited_treatment": "gateway_status_counts_reported_separately",
             "raw_payload_retained": False,
+            "credential_retained": False,
         }
 
     def record_secret_event(
@@ -2224,11 +2327,13 @@ def _validate_provider_cost_report_storage(report: ProviderCostReport) -> None:
     if (
         isinstance(report.bucket_count, bool)
         or not isinstance(report.bucket_count, int)
-        or not 1 <= report.bucket_count <= 50_000
+        or not 0 <= report.bucket_count <= 50_000
     ):
         raise ValueError("Provider cost report bucket count is invalid")
     if not isinstance(report.items, tuple) or len(report.items) > 500_000:
         raise ValueError("Provider cost report items are invalid")
+    if report.bucket_count == 0 and report.items:
+        raise ValueError("Empty provider cost report cannot contain items")
     report_start = _bounded_billing_identifier(
         report.report_start,
         label="report start",
@@ -2293,6 +2398,8 @@ def _provider_cost_import_result(
     row: sqlite3.Row,
     *,
     created: bool,
+    source: ProviderCostSource,
+    source_evidence_created: bool,
 ) -> ProviderCostImportResult:
     return ProviderCostImportResult(
         import_id=str(row["id"]),
@@ -2305,6 +2412,142 @@ def _provider_cost_import_result(
         page_count=int(row["page_count"]),
         bucket_count=int(row["bucket_count"]),
         item_count=int(row["item_count"]),
+        source_kind=source.kind,
+        source_evidence_created=source_evidence_created,
+        provider_report_completeness=(
+            "authenticated_query_pagination_complete"
+            if source.kind == "authenticated_api"
+            else "not_verifiable_from_response"
+        ),
+        api_contract=source.api_contract,
+        query_start=source.query_start,
+        query_end=source.query_end,
+        query_scope=source.query_scope,
+    )
+
+
+def _validate_provider_cost_source(
+    *,
+    report: ProviderCostReport,
+    source: ProviderCostSource,
+) -> None:
+    if not isinstance(source, ProviderCostSource):
+        raise ValueError("Provider cost source evidence is invalid")
+    if source.kind == "offline_upload":
+        if any(
+            value is not None
+            for value in (
+                source.api_contract,
+                source.query_start,
+                source.query_end,
+                source.query_scope,
+            )
+        ):
+            raise ValueError("Offline provider cost source cannot claim authenticated query scope")
+        return
+    if source.kind != "authenticated_api":
+        raise ValueError("Provider cost source kind is invalid")
+    try:
+        expected = ProviderCostSource.authenticated(
+            provider=report.provider,
+            query_start=report.report_start,
+            query_end=report.report_end,
+        )
+    except ProviderBillingError as error:
+        raise ValueError("Authenticated provider cost source is invalid") from error
+    if source != expected:
+        raise ValueError("Authenticated provider cost source does not match its report")
+
+
+def _insert_provider_cost_source(
+    connection: sqlite3.Connection,
+    *,
+    import_id: str,
+    observed_at: str,
+    source: ProviderCostSource,
+) -> bool:
+    canonical = json.dumps(
+        {
+            "import_id": import_id,
+            "source_kind": source.kind,
+            "api_contract": source.api_contract,
+            "query_start": source.query_start,
+            "query_end": source.query_end,
+            "query_scope": source.query_scope,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    source_id = "pcisrc_" + hashlib.sha256(canonical).hexdigest()[:32]
+    inserted = connection.execute(
+        """
+        INSERT OR IGNORE INTO gateway_provider_cost_sources (
+            id, import_id, observed_at, source_kind,
+            api_contract, query_start, query_end, query_scope
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            source_id,
+            import_id,
+            observed_at,
+            source.kind,
+            source.api_contract,
+            source.query_start,
+            source.query_end,
+            source.query_scope,
+        ),
+    )
+    return inserted.rowcount == 1
+
+
+def _migrate_provider_cost_bucket_count(connection: sqlite3.Connection) -> None:
+    row = connection.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?",
+        ("gateway_provider_cost_imports",),
+    ).fetchone()
+    if row is None or not isinstance(row["sql"], str):
+        raise ValueError("Provider billing import schema is unavailable")
+    normalized = " ".join(str(row["sql"]).lower().split())
+    if "bucket_count integer not null check (bucket_count > 0)" not in normalized:
+        return
+    connection.execute("DROP INDEX IF EXISTS idx_gateway_provider_cost_import_scope")
+    connection.execute(
+        "ALTER TABLE gateway_provider_cost_imports RENAME TO gateway_provider_cost_imports_legacy"
+    )
+    connection.execute(
+        """
+        CREATE TABLE gateway_provider_cost_imports (
+            id TEXT PRIMARY KEY,
+            imported_at TEXT NOT NULL,
+            organization_id TEXT NOT NULL,
+            provider TEXT NOT NULL CHECK (provider IN ('openai', 'anthropic')),
+            source_sha256 TEXT NOT NULL,
+            report_start TEXT NOT NULL,
+            report_end TEXT NOT NULL,
+            page_count INTEGER NOT NULL CHECK (page_count > 0),
+            bucket_count INTEGER NOT NULL CHECK (bucket_count >= 0),
+            item_count INTEGER NOT NULL CHECK (item_count >= 0),
+            UNIQUE (organization_id, provider, source_sha256)
+        )
+        """
+    )
+    connection.execute(
+        """
+        INSERT INTO gateway_provider_cost_imports (
+            id, imported_at, organization_id, provider, source_sha256,
+            report_start, report_end, page_count, bucket_count, item_count
+        )
+        SELECT id, imported_at, organization_id, provider, source_sha256,
+               report_start, report_end, page_count, bucket_count, item_count
+        FROM gateway_provider_cost_imports_legacy
+        """
+    )
+    connection.execute("DROP TABLE gateway_provider_cost_imports_legacy")
+    connection.execute(
+        """
+        CREATE INDEX idx_gateway_provider_cost_import_scope
+        ON gateway_provider_cost_imports(organization_id, provider, imported_at, id)
+        """
     )
 
 

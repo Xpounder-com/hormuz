@@ -1,17 +1,45 @@
 # Provider cost import and reconciliation
 
-Hormuz can import complete cost-report API responses from OpenAI and Anthropic, preserve their normalized billing dimensions in the local usage database, and compare one immutable provider snapshot with request-time Hormuz estimates for the same provider, organization, and time window.
+Hormuz can fetch or import complete cost-report API responses from OpenAI and Anthropic, preserve their normalized billing dimensions in the local usage database, and compare one immutable provider snapshot with request-time Hormuz estimates for the same provider, organization, and time window.
 
-This is an offline reconciliation kernel. Hormuz does not yet fetch reports with an administrator credential, ingest a final invoice, or claim that aggregate provider cost is a final per-person charge. The commands deliberately keep provider administrator keys outside the Hormuz process: an operator downloads the reports, then imports the JSON files.
+The authenticated fetch path is an operator-run ingestion checkpoint, not a hosted billing service or final-invoice workflow. It binds the stored evidence to the exact fixed provider endpoint, date window, grouping, and completed cursor chain used by Hormuz. It does not prove provider data freshness, include every external billing adjustment, or turn aggregate provider cost into a final per-person charge.
 
 ## Supported provider contracts
 
-- OpenAI: `GET /v1/organization/costs`. The [official Costs API](https://platform.openai.com/docs/api-reference/usage/costs) returns daily buckets with decimal USD values and optional project and line-item dimensions. OpenAI recommends the Costs endpoint for financial reconciliation rather than deriving spend only from token usage.
+- OpenAI: `GET /v1/organization/costs`. The [official Costs API](https://developers.openai.com/api/reference/resources/admin/subresources/organization/subresources/usage/methods/costs) returns daily buckets with decimal USD values and project, line-item, and API-key grouping options. Hormuz fixes its authenticated query to all projects grouped by `project_id` and `line_item`, with no project or API-key filters.
 - Anthropic: `GET /v1/organizations/cost_report`. The [official Usage and Cost Admin API](https://platform.claude.com/docs/en/manage-claude/usage-cost-api) returns daily cost buckets. Amounts are decimal strings in cents, including fractional cents; grouping by workspace and description exposes model, service-tier, token-type, cache, and other cost dimensions when available.
 
-Both endpoints use administrator credentials that are different from ordinary inference credentials. Those credentials are needed to download organization billing reports, but they are not read or stored by `hormuz billing import`.
+Both endpoints use administrator credentials that are different from ordinary inference credentials. `billing fetch` reads the selected credential from an environment variable for the duration of the process; it never accepts the value as a CLI argument and does not persist or print it. `billing import` remains credential-free.
 
-## Download complete reports
+The Anthropic integration in this milestone is specifically for Claude Platform organizations using the Admin API. Claude Enterprise uses a separate Analytics API and key, and Claude Platform on AWS does not currently expose this endpoint. Anthropic also states that Priority Tier costs are not included in the cost endpoint. Those cases are outside this fetch contract.
+
+## Fetch with an administrator credential
+
+Inject the provider admin key from the organization's secret manager into the operator process. Do not put it in `hormuz.json`, shell history, source control, or a command-line argument. The defaults are `OPENAI_ADMIN_KEY` and `ANTHROPIC_ADMIN_KEY`; `--credential-env` can select another valid environment-variable name.
+
+OpenAI example, with date-only UTC bounds where start is inclusive and end is exclusive:
+
+```bash
+hormuz --config hormuz.json billing fetch \
+  --organization xpounder \
+  --provider openai \
+  --start 2026-08-01 \
+  --end 2026-08-16
+```
+
+Anthropic example:
+
+```bash
+hormuz --config hormuz.json billing fetch \
+  --organization xpounder \
+  --provider anthropic \
+  --start 2026-08-01 \
+  --end 2026-08-16
+```
+
+Hormuz sends credentials only to the provider's fixed HTTPS origin, refuses redirects, applies bounded retries to transient failures, follows the provider cursor through `has_more=false`, validates every page before committing, and imports the normalized snapshot atomically. The raw response pages are transient and are not retained. Empty authenticated windows are valid and remain bound to the requested dates.
+
+## Offline download and import
 
 Example OpenAI request:
 
@@ -43,7 +71,7 @@ curl --get 'https://api.anthropic.com/v1/organizations/cost_report' \
 
 If a response has `has_more: true`, download the next page using its `next_page` value and continue until the final response has `has_more: false`. Save the responses separately and retain their order. Hormuz rejects an import whose last supplied page says more data exists, or whose intermediate pagination flags are inconsistent.
 
-The response body does not prove which filters were used to obtain it, and it does not carry the cursor that requested the current page. The offline importer therefore cannot independently prove that separately supplied files belong to one unfiltered query. Preserve the download command and report files as operator evidence. A future authenticated fetcher can bind request parameters and page cursors to the import evidence.
+The response body does not prove which filters were used to obtain it, and it does not carry the cursor that requested the current page. The offline importer therefore cannot independently prove that separately supplied files belong to one unfiltered query. Preserve the download command and report files as operator evidence. Use `billing fetch` when Hormuz itself should bind the request parameters and page chain to the stored source evidence.
 
 ## Import and reconcile
 
@@ -82,10 +110,10 @@ Omit `--import-id` to use the latest imported snapshot for that organization and
 - Provider cost reports do not universally map a billed amount to a Hormuz request, employee, or team. Per-person and per-team costs remain estimates unless the organization isolates provider projects or workspaces at that exact accounting boundary and records an explicit mapping.
 - Pre-migration usage rows without a trustworthy organization binding are excluded from the organization comparison and counted as `legacy_unattributed_gateway_requests`.
 
-`provider_report_completeness` is currently `not_verifiable_from_response`, and overall `coverage_status` is therefore `partial_unverified_provider_scope`. Do not present the result as total organizational spend or a final invoice.
+For an offline import, `provider_report_completeness` is `not_verifiable_from_response` and `coverage_status` is `partial_unverified_provider_scope`. For an authenticated fetch, they become `authenticated_query_pagination_complete` and `partial_authenticated_provider_endpoint_scope`. The latter proves the completed fixed Hormuz query, not final invoice completeness, provider freshness, or coverage outside the endpoint's documented scope. Do not present either result as a final invoice.
 
 ## Stored data and limits
 
-Hormuz stores the organization ID, provider, import fingerprint, timestamps, exact decimal amount, project/workspace ID, provider line item, and supported Anthropic billing dimensions. It does not store the raw provider JSON, administrator credential, prompt, response, code, filename, or matched secret. Unknown provider response fields are not retained.
+Hormuz stores the organization ID, provider, import fingerprint, timestamps, exact decimal amount, project/workspace ID, provider line item, supported Anthropic billing dimensions, and metadata-only source evidence. Authenticated source evidence includes the API contract identifier, UTC query window, and fixed query scope. It does not store the raw provider JSON, administrator credential, prompt, response, code, filename, or matched secret. Unknown provider response fields are not retained.
 
-Each input page is limited to 16 MiB, the complete import to 32 MiB and 100 pages, and duplicate JSON object members and non-standard numeric constants fail closed. The database is still the local single-node SQLite usage store. Shared tenant isolation, RBAC for billing operators, encrypted/KMS-backed storage, authenticated provider polling, invoice/credit reconciliation, retention, HA, and immutable external audit remain enterprise release work.
+Each page is limited to 16 MiB, the complete report to 32 MiB and 100 pages, and duplicate JSON object members and non-standard numeric constants fail closed. Authenticated date windows are limited to 366 days. The database is still the local single-node SQLite usage store. Scheduled polling, secure hosted credential custody, shared tenant isolation, RBAC for billing operators, encrypted/KMS-backed storage, invoice/credit reconciliation, retention, HA, and immutable external audit remain enterprise release work.

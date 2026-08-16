@@ -18,7 +18,7 @@ Hormuz is alpha software. The local prototype proves routing and policy behavior
 - Model fallback, output-token caps, monthly token limits, and USD budget limits.
 - Per-person attribution using unique bootstrap tokens, generic OIDC JWT access tokens, or revocable Hormuz human sessions mapped by issuer and subject.
 - Input, output, cache-read, cache-write, reasoning, and normalized billable-token accounting when providers report them.
-- Immutable USD rate-card version, cost-basis, and allowlisted provider-native usage snapshots for every accounted gateway outcome, plus exact-decimal, idempotent local import and honest aggregate reconciliation of complete OpenAI and Anthropic cost-report API responses.
+- Immutable USD rate-card version, cost-basis, and allowlisted provider-native usage snapshots for every accounted gateway outcome, plus exact-decimal, idempotent offline or authenticated OpenAI/Anthropic cost-report ingestion and honest aggregate reconciliation.
 - Metadata-only SQLite usage ledger. Prompts and responses are relayed, not persisted.
 - Metadata-only JSONL audit export for usage, secret-egress, and structured-DLP evidence, with private file permissions and a SHA-256 checksum.
 - Pre-provider JSON string value/key, provider URL-query, and allowlisted provider-header inspection for credentials, valid hyphenated US SSNs, Luhn-valid cards, low-confidence email syntax, and organization dictionaries, with provider/model-scoped detect, redact, deny, or approval-required actions. Keys, raw queries, and forwarded header values are never mutated: enforced redaction findings in any of them fail closed. Identity-derived team/person DLP overlays can narrow scope and only strengthen organization actions. Bounded UTF-8 base64/base64url strings and textual data URIs, including ASCII MIME whitespace inside the encoded payload, are decoded, recursively inspected, and safely re-encoded after value transformation. Recognized encoded compression/archive containers and OpenAI/Anthropic image/file content are denied by default when their bytes cannot be inspected; inspectable inline text documents continue through the ordinary redaction path. Optional approvals are metadata-only, non-self, exact-request-material/model bound, 15-minute, and atomically single-use.
@@ -119,7 +119,17 @@ hormuz usage report \
 
 The server derives organization scope from the credential. See [docs/USAGE_ADMIN_API.md](docs/USAGE_ADMIN_API.md) for pagination, RBAC, audit, and coverage semantics.
 
-Import a provider cost-report snapshot and compare it with Hormuz request-time estimates without giving the Hormuz process a provider administrator key:
+Fetch a provider cost-report snapshot through the fixed official endpoint. Inject the provider admin key into the operator process from a secret manager; Hormuz accepts only the environment-variable name and never stores the key or raw provider response:
+
+```bash
+python3 -m hormuz --config hormuz.json billing fetch \
+  --organization xpounder \
+  --provider openai \
+  --start 2026-08-01 \
+  --end 2026-08-16
+```
+
+Or import an already downloaded snapshot without giving the Hormuz process a provider administrator key:
 
 ```bash
 python3 -m hormuz --config hormuz.json billing import \
@@ -269,4 +279,4 @@ The GitHub publication gate also tests Python 3.11 through 3.14, validates the f
 
 ## Roadmap boundary
 
-The current milestone includes the enforcement, versioned estimate accounting, offline provider cost-report reconciliation, deterministic secret egress, bounded encoded-text inspection, a bounded structured-DLP detector/action subset, provider-format-aware opaque-media denial, replay-safe approval grants, metadata audit, local persistent context records/packs, trusted lifecycle snapshot evaluation, opt-in evidence-driven promotion/invalidation with resumable local revalidation, authenticated provider-neutral connector transport, MCP retrieval, bounded disabled-by-default automatic injection for verified non-repository context, OIDC JWT verification, and a single-node OIDC login/session kernel with tenant-scoped administrator revocation. The usage, approval, context, and session databases are deliberately local implementations; they are not the pending enterprise tenancy, HA, or KMS design. Before an enterprise release, Hormuz still needs one owner-selected real-IdP validation, SCIM-driven deprovisioning, shared multi-node revocation, remaining accepted DLP architecture, durable multi-tenant persistence, TLS and deployment hardening, signed or externally immutable audit retention, authenticated provider polling and final invoice/credit reconciliation, broader provider conformance coverage, source-specific lifecycle collectors and signed-event verification, remaining decay policy, repository-scoped injection and continuation binding, cache, accepted-task outcome evidence, and outcome writeback.
+The current milestone includes the enforcement, versioned estimate accounting, operator-run authenticated and offline provider cost-report ingestion, aggregate reconciliation, deterministic secret egress, bounded encoded-text inspection, a bounded structured-DLP detector/action subset, provider-format-aware opaque-media denial, replay-safe approval grants, metadata audit, local persistent context records/packs, trusted lifecycle snapshot evaluation, opt-in evidence-driven promotion/invalidation with resumable local revalidation, authenticated provider-neutral connector transport, MCP retrieval, bounded disabled-by-default automatic injection for verified non-repository context, OIDC JWT verification, and a single-node OIDC login/session kernel with tenant-scoped administrator revocation. The usage, approval, context, and session databases are deliberately local implementations; they are not the pending enterprise tenancy, HA, or KMS design. Before an enterprise release, Hormuz still needs one owner-selected real-IdP validation, SCIM-driven deprovisioning, shared multi-node revocation, remaining accepted DLP architecture, durable multi-tenant persistence, TLS and deployment hardening, signed or externally immutable audit retention, scheduled provider polling with hosted credential custody, final invoice/credit reconciliation, broader provider conformance coverage, source-specific lifecycle collectors and signed-event verification, remaining decay policy, repository-scoped injection and continuation binding, cache, accepted-task outcome evidence, and outcome writeback.

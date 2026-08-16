@@ -8,13 +8,19 @@ import os
 import shlex
 import signal
 import sys
-from datetime import datetime, timezone
-from decimal import Decimal
+from datetime import date, datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
 from .auth import AuthenticationError, Authenticator
-from .billing import ProviderBillingError, parse_provider_cost_pages
+from .billing import (
+    MAX_REPORT_PAGE_BYTES,
+    MAX_REPORT_TOTAL_BYTES,
+    ProviderBillingError,
+    decode_provider_cost_page,
+    parse_provider_cost_pages,
+)
+from .billing_client import ProviderBillingClient, ProviderBillingClientError
 from .config import ConfigError, GatewayConfig, Identity
 from .context import (
     CLASSIFICATIONS,
@@ -154,6 +160,30 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         action="append",
         help="Official provider cost-report JSON page; repeat in pagination order",
+    )
+    billing_fetch = billing_subparsers.add_parser(
+        "fetch",
+        help="Fetch and import an authenticated provider cost-report window",
+    )
+    billing_fetch.add_argument("--organization", required=True, help="Configured organization ID")
+    billing_fetch.add_argument(
+        "--provider",
+        required=True,
+        choices=["openai", "anthropic"],
+    )
+    billing_fetch.add_argument(
+        "--start",
+        required=True,
+        help="Inclusive UTC date in YYYY-MM-DD form",
+    )
+    billing_fetch.add_argument(
+        "--end",
+        required=True,
+        help="Exclusive UTC date in YYYY-MM-DD form",
+    )
+    billing_fetch.add_argument(
+        "--credential-env",
+        help="Admin credential environment variable (provider-specific default)",
     )
     billing_reconcile = billing_subparsers.add_parser(
         "reconcile",
@@ -968,6 +998,43 @@ def _billing_command(config: GatewayConfig, args: argparse.Namespace) -> int:
             )
             print(json.dumps(result.to_dict(), indent=2))
             return 0
+        if args.billing_command == "fetch":
+            env_name = args.credential_env or (
+                "OPENAI_ADMIN_KEY" if args.provider == "openai" else "ANTHROPIC_ADMIN_KEY"
+            )
+            if not _valid_environment_name(env_name):
+                print(
+                    "billing fetch failed: credential environment variable name is invalid",
+                    file=sys.stderr,
+                )
+                return 2
+            credential = os.environ.get(env_name, "")
+            if not credential:
+                print(
+                    f"billing fetch failed: credential environment variable is not set: {env_name}",
+                    file=sys.stderr,
+                )
+                return 1
+            try:
+                start = date.fromisoformat(args.start)
+                end = date.fromisoformat(args.end)
+            except ValueError as error:
+                raise ProviderBillingError(
+                    "Billing fetch dates must use YYYY-MM-DD"
+                ) from error
+            if start.isoformat() != args.start or end.isoformat() != args.end:
+                raise ProviderBillingError("Billing fetch dates must use YYYY-MM-DD")
+            fetched = ProviderBillingClient(
+                args.provider,
+                credential=credential,
+            ).fetch(start=start, end=end)
+            result = UsageStore(config.database_path).import_provider_cost_report(
+                organization_id=args.organization,
+                report=fetched.report,
+                source=fetched.source,
+            )
+            print(json.dumps(result.to_dict(), indent=2))
+            return 0
         if args.billing_command == "reconcile":
             result = UsageStore(config.database_path).reconcile_provider_costs(
                 organization_id=args.organization,
@@ -996,6 +1063,9 @@ def _billing_command(config: GatewayConfig, args: argparse.Namespace) -> int:
                     "gateway bypass or provide actual per-person cost."
                 )
             return 0
+    except ProviderBillingClientError as error:
+        print(f"billing fetch failed: {error.code}", file=sys.stderr)
+        return 1
     except (OSError, UnicodeDecodeError, ProviderBillingError, ValueError) as error:
         print(f"billing error: {error}", file=sys.stderr)
         return 2
@@ -1007,54 +1077,35 @@ def _load_provider_cost_pages(paths: list[str]) -> list[dict[str, object]]:
         raise ProviderBillingError("Billing import accepts 1 to 100 input pages")
     if "-" in paths and paths != ["-"]:
         raise ProviderBillingError("Standard input must be the only billing input page")
-    page_limit = 16 * 1024 * 1024
-    total_limit = 32 * 1024 * 1024
     total = 0
     pages: list[dict[str, object]] = []
     for raw_path in paths:
         if raw_path == "-":
             stream = getattr(sys.stdin, "buffer", sys.stdin)
-            payload = stream.read(page_limit + 1)
+            payload = stream.read(MAX_REPORT_PAGE_BYTES + 1)
             if isinstance(payload, str):
                 payload = payload.encode("utf-8")
         else:
             path = Path(raw_path).expanduser().absolute()
-            if path.stat().st_size > page_limit:
+            if path.stat().st_size > MAX_REPORT_PAGE_BYTES:
                 raise ProviderBillingError("Billing input page cannot exceed 16 MiB")
             payload = path.read_bytes()
-        if len(payload) > page_limit:
+        if len(payload) > MAX_REPORT_PAGE_BYTES:
             raise ProviderBillingError("Billing input page cannot exceed 16 MiB")
         total += len(payload)
-        if total > total_limit:
+        if total > MAX_REPORT_TOTAL_BYTES:
             raise ProviderBillingError("Billing input pages cannot exceed 32 MiB total")
-        try:
-            value = json.loads(
-                payload.decode("utf-8"),
-                parse_float=Decimal,
-                parse_constant=_invalid_billing_json_constant,
-                object_pairs_hook=_unique_json_object,
-            )
-        except json.JSONDecodeError as error:
-            raise ProviderBillingError(
-                f"Billing input page must be valid JSON at line {error.lineno}, column {error.colno}"
-            ) from error
-        if not isinstance(value, dict):
-            raise ProviderBillingError("Billing input page must be a JSON object")
-        pages.append(value)
+        pages.append(decode_provider_cost_page(payload))
     return pages
 
 
-def _unique_json_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
-    result: dict[str, object] = {}
-    for key, value in pairs:
-        if key in result:
-            raise ProviderBillingError("Billing input contains a duplicate JSON object member")
-        result[key] = value
-    return result
-
-
-def _invalid_billing_json_constant(_value: str) -> object:
-    raise ProviderBillingError("Billing input contains a non-standard JSON numeric constant")
+def _valid_environment_name(value: str) -> bool:
+    return (
+        isinstance(value, str)
+        and bool(value)
+        and value.replace("_", "A").isalnum()
+        and not value[0].isdigit()
+    )
 
 
 def _budget_for_scope(
