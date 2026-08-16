@@ -134,6 +134,12 @@ class ResponseUsageParserTests(unittest.TestCase):
         self.assertEqual(usage.input_tokens, 0)
         self.assertEqual(usage.output_tokens, 1)
 
+        for model in ("model with content", "unsafe-model-🚀", "m" * 257):
+            with self.subTest(model=model[:32]):
+                parser = ResponseUsageParser("openai", is_event_stream=False)
+                parser.feed(json.dumps({"model": model}).encode("utf-8"))
+                self.assertIsNone(parser.finish().actual_model)
+
 
 if __name__ == "__main__":
     unittest.main()

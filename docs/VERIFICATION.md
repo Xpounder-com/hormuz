@@ -747,6 +747,20 @@ A focused failure-first security review of model routing metadata was exercised 
 
 This closes the identified model-metadata injection and request-thread failure path, not the independent security-review gate. Other provider-derived or deployment-generated metadata, reverse-proxy behavior, TLS, shared persistence, KMS, HA, backup/restore, and the broader enterprise review remain open.
 
+### Bounded provider-response metadata
+
+A focused failure-first review of the provider-response boundary was exercised locally on August 16, 2026 through real Hormuz HTTP transport and a provider-compatible loopback fake. No live provider credential or endpoint was used.
+
+- red-first tests proved that folded `Content-Type`, provider request ID, processing-time, and rate-limit values could cross into downstream response metadata, while arbitrary printable provider model and unbounded request-ID values could enter the content-free usage ledger;
+- Hormuz now applies gateway-owned header-name, visible-ASCII, length, identifier, and duplicate rules before provider metadata reaches `send_header` or storage. Unsafe fields are omitted and counted through a content-free diagnostic without retaining their values;
+- the usage parser and store independently require safe bounded provider model and request identifiers, preventing a future caller from bypassing the transport boundary;
+- adversarial CRLF/folded-header, Unicode, content-like, duplicate, and overlong values were absent from downstream metadata and the usage audit. The provider body still reached the caller unchanged, proving that compatibility did not depend on dropping the response;
+- a valid OpenAI request ID continued to reach both the employee response and usage ledger for provider reconciliation;
+- the complete 333-test source suite passed in `103.093` seconds. The environment-gated official Claude Code case was the sole local skip; and
+- source/test bytecode compilation and `git diff --check` passed.
+
+This closes the identified application-level provider-response metadata path, not production deployment issue #11. Reverse proxies, TLS termination, service meshes, provider-side content, shared persistence, HA, KMS, backup/restore, and independent security review remain separate gates.
+
 ## Reproduce locally
 
 The default suite uses only loopback fake providers:

@@ -45,6 +45,9 @@ class FakeProviderHandler(BaseHTTPRequestHandler):
     requests: list[dict[str, object]] = []
     lock = threading.Lock()
     actual_model_override: str | None = None
+    response_content_type: str = "application/json"
+    response_request_id_override: str | None = None
+    response_extra_headers: tuple[tuple[str, str], ...] = ()
     request_started: threading.Event | None = None
     release_response: threading.Event | None = None
 
@@ -177,10 +180,13 @@ class FakeProviderHandler(BaseHTTPRequestHandler):
     def _send_json(self, value, *, status: int = 200, request_id: str | None = None) -> None:
         data = json.dumps(value).encode("utf-8")
         self.send_response(status)
-        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Type", self.__class__.response_content_type)
         self.send_header("Content-Length", str(len(data)))
-        if request_id:
-            self.send_header("x-request-id", request_id)
+        effective_request_id = self.__class__.response_request_id_override or request_id
+        if effective_request_id:
+            self.send_header("x-request-id", effective_request_id)
+        for name, value in self.__class__.response_extra_headers:
+            self.send_header(name, value)
         self.end_headers()
         self.wfile.write(data)
 
@@ -305,6 +311,9 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.root = Path(self.temporary.name)
         FakeProviderHandler.requests = []
         FakeProviderHandler.actual_model_override = None
+        FakeProviderHandler.response_content_type = "application/json"
+        FakeProviderHandler.response_request_id_override = None
+        FakeProviderHandler.response_extra_headers = ()
         FakeProviderHandler.request_started = None
         FakeProviderHandler.release_response = None
         self.provider = ThreadingHTTPServer(("127.0.0.1", 0), FakeProviderHandler)
@@ -368,6 +377,43 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertEqual(event["rate_card_version"], "test-openai-v1")
         self.assertEqual(event["actual_model"], "gpt-test-fast")
         self.assertEqual(event["provider_usage"]["total_tokens"], 150)
+        self.assertEqual(event["provider_request_id"], "req_openai_test")
+        self.assertEqual(headers["x-request-id"], "req_openai_test")
+
+    def test_provider_response_metadata_is_bounded_before_headers_and_usage_storage(self) -> None:
+        marker = "provider-metadata-must-not-propagate"
+        FakeProviderHandler.actual_model_override = "unsafe-model-🚀"
+        FakeProviderHandler.response_content_type = f"application/json\r\n X-Marker: {marker}"
+        FakeProviderHandler.response_request_id_override = f"req_safe\r\n X-Marker: {marker}"
+        FakeProviderHandler.response_extra_headers = (
+            ("x-request-id", "req_duplicate"),
+            ("openai-processing-ms", f"12\r\n X-Marker: {marker}"),
+            ("x-ratelimit-limit-requests", f"100\r\n X-Marker: {marker}"),
+        )
+
+        status, headers, response = self._post(
+            "/v1/responses",
+            {
+                "model": "gpt-5.4-mini",
+                "input": "ordinary request",
+                "max_output_tokens": 20,
+            },
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["content-type"], "application/json")
+        self.assertNotIn("x-request-id", headers)
+        self.assertNotIn("openai-processing-ms", headers)
+        self.assertNotIn("x-ratelimit-limit-requests", headers)
+        self.assertNotIn(marker, repr(headers))
+        self.assertEqual(json.loads(response)["model"], "unsafe-model-🚀")
+        event = self.gateway.store.audit_events(
+            since="2000-01-01T00:00:00+00:00",
+            kind="usage",
+        )[0]
+        self.assertIsNone(event["actual_model"])
+        self.assertIsNone(event["provider_request_id"])
+        self.assertNotIn(marker, repr(event))
 
     def test_fallback_rejects_unsafe_model_metadata_before_policy_or_provider(self) -> None:
         before_provider = len(FakeProviderHandler.requests)

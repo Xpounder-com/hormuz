@@ -73,7 +73,7 @@ from .store import (
     SecurityStoreError,
     UsageStore,
 )
-from .usage import ResponseUsageParser
+from .usage import ResponseUsageParser, sanitize_provider_request_id
 from .usage_reporting import REPORT_DIMENSIONS, enrich_usage_rows
 
 
@@ -2751,10 +2751,26 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             return
 
         status = getattr(response, "status", response.getcode())
-        content_type = response.headers.get("Content-Type", "application/json")
+        raw_content_type = response.headers.get("Content-Type", "application/json")
+        content_type = _safe_provider_content_type(raw_content_type)
+        response_headers, dropped_response_headers = _safe_provider_response_headers(
+            response.headers
+        )
+        if content_type != raw_content_type or dropped_response_headers:
+            LOGGER.warning(
+                "provider_response_metadata_dropped protocol=%s fields=%d",
+                protocol,
+                dropped_response_headers + (1 if content_type != raw_content_type else 0),
+            )
         is_event_stream = "text/event-stream" in content_type.lower()
         parser = ResponseUsageParser(protocol, is_event_stream=is_event_stream)
-        provider_request_id = response.headers.get("x-request-id") or response.headers.get("request-id")
+        x_request_id = response_headers.get("x-request-id")
+        request_id = response_headers.get("request-id")
+        provider_request_id = (
+            x_request_id[1]
+            if x_request_id is not None
+            else request_id[1] if request_id is not None else None
+        )
 
         self.send_response(status)
         self.send_header("Content-Type", content_type)
@@ -2771,12 +2787,8 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             self.send_header("X-Hormuz-DLP-Detections", str(dlp_detection_count))
         if approval_request_id is not None:
             self.send_header("X-Hormuz-DLP-Approval-Request", approval_request_id)
-        for name, value in response.headers.items():
-            lowered = name.lower()
-            if lowered in {"x-request-id", "request-id", "openai-processing-ms"} or lowered.startswith(
-                ("x-ratelimit-", "anthropic-ratelimit-")
-            ):
-                self.send_header(name, value)
+        for name, value in response_headers.values():
+            self.send_header(name, value)
         self.end_headers()
         self.close_connection = True
 
@@ -3131,6 +3143,77 @@ def _content_free_http_route(target: object) -> str:
             return "/v1/dlp/approval-requests/{id}/decisions"
         return "/v1/dlp/approval-requests/{id}"
     return "unknown"
+
+
+def _safe_provider_content_type(value: object) -> str:
+    if _safe_provider_header_value(value, maximum_bytes=256):
+        assert isinstance(value, str)
+        return value
+    return "application/json"
+
+
+def _safe_provider_response_headers(
+    headers: object,
+) -> tuple[dict[str, tuple[str, str]], int]:
+    """Select bounded provider metadata without reflecting arbitrary header bytes."""
+
+    selected: dict[str, tuple[str, str]] = {}
+    rejected: set[str] = set()
+    dropped = 0
+    for name, value in headers.items():
+        lowered = name.lower()
+        if not (
+            lowered in {"x-request-id", "request-id", "openai-processing-ms"}
+            or lowered.startswith(("x-ratelimit-", "anthropic-ratelimit-"))
+        ):
+            continue
+        if lowered in rejected or lowered in selected:
+            selected.pop(lowered, None)
+            rejected.add(lowered)
+            dropped += 1
+            continue
+        if not _safe_provider_header_name(name):
+            rejected.add(lowered)
+            dropped += 1
+            continue
+        if lowered in {"x-request-id", "request-id"}:
+            safe_value = sanitize_provider_request_id(value)
+        else:
+            safe_value = value if _safe_provider_header_value(value) else None
+        if safe_value is None:
+            rejected.add(lowered)
+            dropped += 1
+            continue
+        selected[lowered] = (_canonical_provider_header_name(lowered), safe_value)
+    return selected, dropped
+
+
+def _safe_provider_header_name(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and 1 <= len(value) <= 64
+        and value.isascii()
+        and all(character.isalnum() or character == "-" for character in value)
+    )
+
+
+def _safe_provider_header_value(value: object, *, maximum_bytes: int = 512) -> bool:
+    return (
+        isinstance(value, str)
+        and 0 < len(value) <= maximum_bytes
+        and value.isascii()
+        and all(" " <= character <= "~" for character in value)
+    )
+
+
+def _canonical_provider_header_name(lowered: str) -> str:
+    if lowered == "x-request-id":
+        return "X-Request-Id"
+    if lowered == "request-id":
+        return "Request-Id"
+    if lowered == "openai-processing-ms":
+        return "OpenAI-Processing-Ms"
+    return "-".join(part.capitalize() for part in lowered.split("-"))
 
 
 def _valid_context_scope(value: object) -> bool:

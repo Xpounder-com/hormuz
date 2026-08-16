@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import codecs
 import json
+import re
 from dataclasses import dataclass, field
 from typing import Any
+
+from .config import is_model_identifier
 
 
 @dataclass
@@ -49,6 +52,7 @@ _ANTHROPIC_USAGE_SPEC: dict[str, object] = {
     "service_tier": "string",
     "inference_geo": "string",
 }
+_PROVIDER_REQUEST_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/@+=-]{0,255}\Z")
 
 
 class ResponseUsageParser:
@@ -101,7 +105,7 @@ class ResponseUsageParser:
         if self.protocol == "openai":
             response = value.get("response") if value.get("type") == "response.completed" else value
             if isinstance(response, dict):
-                self.usage.actual_model = _bounded_string(
+                self.usage.actual_model = _bounded_model_identifier(
                     response.get("model"),
                     self.usage.actual_model,
                 )
@@ -109,13 +113,13 @@ class ResponseUsageParser:
         elif self.protocol == "anthropic":
             if value.get("type") == "message_start" and isinstance(value.get("message"), dict):
                 message = value["message"]
-                self.usage.actual_model = _bounded_string(
+                self.usage.actual_model = _bounded_model_identifier(
                     message.get("model"),
                     self.usage.actual_model,
                 )
                 self._apply_anthropic_usage(message.get("usage"))
             else:
-                self.usage.actual_model = _bounded_string(
+                self.usage.actual_model = _bounded_model_identifier(
                     value.get("model"),
                     self.usage.actual_model,
                 )
@@ -183,6 +187,26 @@ def sanitize_provider_usage(protocol: str, value: Any) -> dict[str, Any]:
     return _sanitize_usage_object(value, spec)
 
 
+def sanitize_provider_model_id(value: object) -> str | None:
+    """Return a bounded provider model identifier safe for control metadata."""
+
+    if (
+        not is_model_identifier(value)
+        or not isinstance(value, str)
+        or len(value.encode("ascii")) > 256
+    ):
+        return None
+    return value
+
+
+def sanitize_provider_request_id(value: object) -> str | None:
+    """Return an opaque bounded provider request ID or omit unsafe metadata."""
+
+    if not isinstance(value, str) or _PROVIDER_REQUEST_ID.fullmatch(value) is None:
+        return None
+    return value
+
+
 def _sanitize_usage_object(value: dict[str, Any], spec: dict[str, object]) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for key, kind in spec.items():
@@ -219,15 +243,8 @@ def _nonnegative_int(value: Any, fallback: int) -> int:
     return value
 
 
-def _bounded_string(value: Any, fallback: str | None) -> str | None:
-    if (
-        not isinstance(value, str)
-        or not value
-        or len(value.encode("utf-8")) > 256
-        or not all(character.isprintable() for character in value)
-    ):
-        return fallback
-    return value
+def _bounded_model_identifier(value: Any, fallback: str | None) -> str | None:
+    return sanitize_provider_model_id(value) or fallback
 
 
 def _bounded_sum(*values: int) -> int:

@@ -14,7 +14,11 @@ from pathlib import Path
 from .billing import ProviderBillingError, ProviderCostReport, ProviderCostSource
 from .config import Identity
 from .content_free import ContentFreeSchemaError, validate_content_free_schema
-from .usage import sanitize_provider_usage
+from .usage import (
+    sanitize_provider_model_id,
+    sanitize_provider_request_id,
+    sanitize_provider_usage,
+)
 
 
 @dataclass(frozen=True)
@@ -662,13 +666,12 @@ class UsageStore:
         normalized_provider_usage = sanitize_provider_usage(protocol, provider_usage or {})
         if provider_usage and not normalized_provider_usage:
             raise ValueError("Usage provider metadata contains no supported fields")
-        if actual_model is not None and (
-            not isinstance(actual_model, str)
-            or not actual_model
-            or len(actual_model.encode("utf-8")) > 256
-            or not all(character.isprintable() for character in actual_model)
-        ):
-            raise ValueError("Usage actual model must be a bounded printable string")
+        normalized_actual_model = sanitize_provider_model_id(actual_model)
+        if actual_model is not None and normalized_actual_model is None:
+            raise ValueError("Usage actual model must be a safe bounded model identifier")
+        normalized_provider_request_id = sanitize_provider_request_id(provider_request_id)
+        if provider_request_id is not None and normalized_provider_request_id is None:
+            raise ValueError("Usage provider request ID must be a safe bounded identifier")
         normalized_input_tokens = _sqlite_nonnegative(input_tokens)
         normalized_output_tokens = _sqlite_nonnegative(output_tokens)
         normalized_cache_read_tokens = _sqlite_nonnegative(cache_read_tokens)
@@ -724,7 +727,7 @@ class UsageStore:
                     requested_model,
                     resolved_alias,
                     upstream_model,
-                    actual_model,
+                    normalized_actual_model,
                     policy_action,
                     status,
                     normalized_input_tokens,
@@ -738,7 +741,7 @@ class UsageStore:
                     currency,
                     rate_card_version,
                     json.dumps(normalized_provider_usage, sort_keys=True, separators=(",", ":")),
-                    provider_request_id,
+                    normalized_provider_request_id,
                     _sqlite_nonnegative(redaction_count),
                     json.dumps(sorted(set(redaction_rules)), separators=(",", ":")),
                     lineage.mode,

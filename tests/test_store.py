@@ -19,6 +19,62 @@ from hormuz.store import (
 
 
 class UsageStoreMigrationTests(unittest.TestCase):
+    def test_usage_store_rejects_unbounded_provider_identifiers(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            store = UsageStore(Path(temporary) / "usage.sqlite3")
+            identity = Identity(
+                token_env="ALICE_TOKEN",
+                token="alice-employee-token",
+                actor_id="alice",
+                actor_name="Alice",
+                team_id="engineering",
+                team_name="Engineering",
+                organization_id="org-a",
+            )
+            common = {
+                "identity": identity,
+                "client": "codex",
+                "protocol": "openai",
+                "requested_model": "gpt-fast",
+                "resolved_alias": "gpt-fast",
+                "upstream_model": "gpt-upstream",
+                "policy_action": "allowed",
+                "status": "succeeded",
+                "cost_basis": "estimated",
+            }
+
+            for provider_request_id in (
+                "req_safe\r\nX-Injected: yes",
+                "request id with content",
+                "req-🚀",
+                "r" * 257,
+            ):
+                with self.subTest(provider_request_id=provider_request_id[:32]):
+                    with self.assertRaisesRegex(ValueError, "provider request ID"):
+                        store.record(
+                            **common,
+                            provider_request_id=provider_request_id,
+                        )
+
+            for actual_model in (
+                "model with content",
+                "unsafe-model-🚀",
+                "m" * 257,
+            ):
+                with self.subTest(actual_model=actual_model[:32]):
+                    with self.assertRaisesRegex(ValueError, "actual model"):
+                        store.record(
+                            **common,
+                            actual_model=actual_model,
+                        )
+
+            store.record(**common, provider_request_id="req_safe-123_ABC")
+            event = store.audit_events(
+                since="2000-01-01T00:00:00+00:00",
+                kind="usage",
+            )[0]
+            self.assertEqual(event["provider_request_id"], "req_safe-123_ABC")
+
     def test_usage_context_lineage_is_metadata_only_and_exported_explicitly(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             store = UsageStore(Path(temporary) / "usage.sqlite3")
