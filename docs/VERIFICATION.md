@@ -283,7 +283,8 @@ Observed local result:
 - the complete source suite passed all 160 tests with the installed Codex and official Claude Code executable paths both enabled;
 - the frozen 60-task context release profile remained green with precision `1.00`, recall `1.00`, useful-pack rate `1.00`, mean compression ratio `0.840593`, zero safety failures, and p95 in-process selection latency `0.168458 ms`; corpus SHA-256 remained `9822d592868202c7c7539bcdac7d4a5894c01f9e6dba7a434846516b67b32c17`;
 - an isolated source/wheel build included the approval implementation, API document, and tests; a clean Python 3.14 environment installed the wheel and loaded the approval CLI, fingerprint implementation, and empty approval schema successfully;
-- a source scan excluding generated artifacts found no private-key, OpenAI, Anthropic, or GitHub credential pattern; ignored local environment files were not read.
+- a source scan excluding generated artifacts found no private-key, OpenAI, Anthropic, or GitHub credential pattern; ignored local environment files were not read;
+- GitHub Actions push run `31921828391` and pull-request run `31921830188` both passed all seven publication jobs for implementation commit `fb41cd3`: Python 3.11–3.14, strict context benchmark, source/wheel build and install, and pinned official Codex/Claude Code compatibility.
 
 This is a verified single-node approval workflow, not completion of issue #10 or an enterprise release. It has no approver queue/notification connector, rejection reason workflow, signed or externally immutable audit sink, shared PostgreSQL tenancy, KMS/BYOK key custody, HA failover, or independent security review. The exact client retry can also fail to match if a client changes any outbound field between attempts; Hormuz deliberately creates a new blocked request rather than weakening the approved binding.
 
