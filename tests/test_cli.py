@@ -817,6 +817,32 @@ class ClientConfigTests(unittest.TestCase):
             with self.assertRaisesRegex(ConfigError, "bounded single-line"):
                 GatewayConfig.load(path, environ={"HORMUZ_TOKEN": "test-identity-token"})
 
+    def test_model_routes_require_header_safe_identifiers(self) -> None:
+        cases = (
+            ("alias newline", "alias", "unsafe\r\nX-Injected: yes"),
+            ("alias unicode", "alias", "unsafe-🚀"),
+            ("upstream newline", "upstream", "unsafe\r\nX-Injected: yes"),
+            ("upstream unicode", "upstream", "unsafe-🚀"),
+            ("upstream oversized", "upstream", "m" * 513),
+        )
+        for name, location, invalid in cases:
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                raw = json.loads((ROOT / "config.example.json").read_text(encoding="utf-8"))
+                route = raw["model_routes"]["gpt-5.4-mini"]
+                if location == "alias":
+                    del raw["model_routes"]["gpt-5.4-mini"]
+                    raw["model_routes"][invalid] = route
+                else:
+                    route["upstream_model"] = invalid
+                path = root / "hormuz.json"
+                path.write_text(json.dumps(raw), encoding="utf-8")
+                with self.assertRaisesRegex(ConfigError, "safe model identifier"):
+                    GatewayConfig.load(
+                        path,
+                        environ={"HORMUZ_TOKEN": "test-identity-token"},
+                    )
+
     def test_policy_check_reports_effective_team_dlp_without_provider_work(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             config = replace(

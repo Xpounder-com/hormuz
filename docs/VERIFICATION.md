@@ -734,6 +734,19 @@ The tag, source, privilege, signing, provenance, package, evidence, and rollback
 
 This proves the local and static automation contract, not a signed image or registry release. A real tag run must still prove Actions package permission, private repository linkage, OIDC certificate identity, public transparency behavior, remote digest aliases, Cosign signature and SLSA-attestation verification, and final release assets. Tag governance, protected release review, package retention/access, customer-registry/KMS options, TLS, shared persistence, HA, backup/restore, RPO/RTO, and independent security review remain open.
 
+### Safe model-metadata boundary
+
+A focused failure-first security review of model routing metadata was exercised locally on August 16, 2026. No live provider credential or endpoint was used.
+
+- fallback routing previously allowed an arbitrary caller-supplied requested-model value to survive policy selection and reach logs plus the `X-Hormuz-Requested-Model` response header. Control characters could construct an unsafe header value, while non-Latin text could terminate the request thread during header encoding;
+- request-time model identifiers now require a bounded ASCII identifier before policy evaluation, provider work, persistence, logging, or response headers. Unsafe values return a fixed `400 invalid_request` response;
+- configured route aliases and upstream model identifiers use the same 512-character grammar, preventing an administrator-controlled route from recreating the header/log boundary at startup;
+- adversarial tests covered CRLF, Unicode, and overlong identifiers. Each produced zero provider calls and zero usage-ledger events, and the CRLF marker was absent from response headers;
+- the complete 331-test source suite passed in `102.680` seconds. The environment-gated official Claude Code case was the sole local skip; and
+- source/test bytecode compilation and `git diff --check` passed.
+
+This closes the identified model-metadata injection and request-thread failure path, not the independent security-review gate. Other provider-derived or deployment-generated metadata, reverse-proxy behavior, TLS, shared persistence, KMS, HA, backup/restore, and the broader enterprise review remain open.
+
 ## Reproduce locally
 
 The default suite uses only loopback fake providers:

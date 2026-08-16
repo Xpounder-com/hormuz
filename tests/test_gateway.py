@@ -369,6 +369,34 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertEqual(event["actual_model"], "gpt-test-fast")
         self.assertEqual(event["provider_usage"]["total_tokens"], 150)
 
+    def test_fallback_rejects_unsafe_model_metadata_before_policy_or_provider(self) -> None:
+        before_provider = len(FakeProviderHandler.requests)
+        before_usage = self.gateway.store.monthly_totals(actor_id="alice").requests
+
+        for requested_model in (
+            "unsafe\r\nX-Injected: yes",
+            "unsafe-🚀",
+            "m" * 513,
+        ):
+            with self.subTest(requested_model=requested_model[:32]):
+                status, headers, response = self._post(
+                    "/v1/responses",
+                    {
+                        "model": requested_model,
+                        "input": "ordinary request",
+                        "max_output_tokens": 20,
+                    },
+                )
+                self.assertEqual(status, 400)
+                self.assertEqual(json.loads(response)["error"]["code"], "invalid_request")
+                self.assertNotIn("x-injected", headers)
+
+        self.assertEqual(len(FakeProviderHandler.requests), before_provider)
+        self.assertEqual(
+            self.gateway.store.monthly_totals(actor_id="alice").requests,
+            before_usage,
+        )
+
     def test_health_contract_and_drain_admission_are_content_free(self) -> None:
         before_provider = len(FakeProviderHandler.requests)
         before_usage = self.gateway.store.monthly_totals(actor_id="alice").requests

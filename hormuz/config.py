@@ -511,8 +511,10 @@ class GatewayConfig:
             raise ConfigError("model_routes must contain at least one route")
         model_routes: dict[str, ModelRoute] = {}
         for alias, value in routes_raw.items():
-            if not isinstance(alias, str) or not alias.strip():
-                raise ConfigError("model_routes keys must be non-empty strings")
+            if not is_model_identifier(alias):
+                raise ConfigError(
+                    "model_routes keys must be safe model identifiers up to 512 characters"
+                )
             item = _object(value, f"model_routes.{alias}")
             protocol = _string(item.get("protocol"), f"model_routes.{alias}.protocol")
             if protocol not in upstreams:
@@ -538,7 +540,10 @@ class GatewayConfig:
             model_routes[alias] = ModelRoute(
                 alias=alias,
                 protocol=protocol,
-                upstream_model=_string(item.get("upstream_model"), f"model_routes.{alias}.upstream_model"),
+                upstream_model=_model_identifier(
+                    item.get("upstream_model"),
+                    f"model_routes.{alias}.upstream_model",
+                ),
                 rate_card_version=rate_card_version,
                 currency=currency,
                 input_cost_per_million=_number(item.get("input_cost_per_million", 0), f"model_routes.{alias}.input_cost_per_million"),
@@ -1121,6 +1126,7 @@ _DLP_BUILTINS = {
 }
 _DLP_RULE_ID = re.compile(r"[a-z][a-z0-9_.-]{0,63}\Z")
 _CONTEXT_SELECTOR = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/@:+-]{0,511}\Z")
+_MODEL_IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,511}\Z")
 
 
 def _dlp_controls(value: Any, env: dict[str, str]) -> DLPControls:
@@ -1497,6 +1503,12 @@ def is_context_selector(value: object) -> bool:
     return isinstance(value, str) and _CONTEXT_SELECTOR.fullmatch(value) is not None
 
 
+def is_model_identifier(value: object) -> bool:
+    """Return whether a model alias is safe for policy, logs, and HTTP metadata."""
+
+    return isinstance(value, str) and _MODEL_IDENTIFIER.fullmatch(value) is not None
+
+
 def _context_lifecycle_automation_config(value: Any) -> ContextLifecycleAutomationConfig:
     path = "context_service.lifecycle"
     item = _object(value, path)
@@ -1587,6 +1599,13 @@ def _string(value: Any, path: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ConfigError(f"{path} must be a non-empty string")
     return value.strip()
+
+
+def _model_identifier(value: Any, path: str) -> str:
+    result = _string(value, path)
+    if not is_model_identifier(result):
+        raise ConfigError(f"{path} must be a safe model identifier up to 512 characters")
+    return result
 
 
 def _url(value: Any, path: str) -> str:

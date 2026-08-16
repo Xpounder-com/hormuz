@@ -27,6 +27,7 @@ from .config import (
     ModelRoute,
     UpstreamConfig,
     is_context_selector,
+    is_model_identifier,
 )
 from .context import (
     CLASSIFICATIONS,
@@ -2172,6 +2173,13 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             self._send_protocol_error(protocol, "Request field model must be a non-empty string", HTTPStatus.BAD_REQUEST)
             return
         requested_model = requested_model.strip()
+        if not is_model_identifier(requested_model):
+            self._send_protocol_error(
+                protocol,
+                "Request field model must be a safe model identifier",
+                HTTPStatus.BAD_REQUEST,
+            )
+            return
         output_field = "max_output_tokens" if protocol == "openai" else "max_tokens"
         requested_output = request_body.get(output_field)
         if requested_output is not None and (
