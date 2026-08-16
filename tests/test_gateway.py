@@ -489,6 +489,45 @@ class GatewayIntegrationTests(unittest.TestCase):
                     effective_at=now - timedelta(days=1),
                     verified_at=now - timedelta(days=1),
                 ),
+                ContextRecord(
+                    record_id="expired-retry",
+                    record_kind="decision",
+                    title="Expired retry standard",
+                    content="Use the retired retry policy.",
+                    owner_id="alice",
+                    organization_id=identity.organization_id,
+                    visibility="team",
+                    scope_id=identity.team_id,
+                    classification="internal",
+                    source_uri="https://example.test/adr/expired-retry",
+                    source_revision="git:expired",
+                    source_item_key="expired-retry",
+                    repository_id="acme/api",
+                    verification="verified",
+                    verification_evidence=("ci:passed",),
+                    effective_at=now - timedelta(days=2),
+                    verified_at=now - timedelta(days=2),
+                    expires_at=now - timedelta(seconds=1),
+                    tags=("retry",),
+                ),
+                ContextRecord(
+                    record_id="provisional-retry",
+                    record_kind="claim",
+                    title="Provisional retry experiment",
+                    content="A provisional retry experiment has not been approved.",
+                    owner_id="alice",
+                    organization_id=identity.organization_id,
+                    visibility="team",
+                    scope_id=identity.team_id,
+                    classification="internal",
+                    source_uri="https://example.test/experiment/provisional-retry",
+                    source_revision="git:provisional",
+                    source_item_key="provisional-retry",
+                    repository_id="acme/api",
+                    verification="provisional",
+                    effective_at=now - timedelta(days=1),
+                    tags=("retry",),
+                ),
             ],
             actor_id="alice",
             policy_version="test-context-v1",
@@ -510,10 +549,20 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertEqual(headers["cache-control"], "no-store")
         pack = json.loads(response)
         self.assertEqual(pack["policy_version"], "test-context-v1")
+        self.assertEqual(pack["retrieval_version"], "lexical-v1")
+        self.assertEqual(pack["render_version"], "json-v1")
         self.assertEqual(pack["scope"]["organization_id"], identity.organization_id)
         self.assertEqual(pack["scope"]["team_id"], identity.team_id)
         self.assertEqual(pack["scope"]["actor_id"], "alice")
         self.assertEqual([item["id"] for item in pack["items"]], ["team-retry"])
+        self.assertEqual(pack["lifecycle"]["outcome"], "partial")
+        self.assertEqual(
+            {item["record_id"]: item["reason"] for item in pack["exclusions"]},
+            {
+                "expired-retry": "expired",
+                "provisional-retry": "provisional_not_allowed",
+            },
+        )
         self.assertNotIn("storage", pack["items"][0])
         self.assertEqual(len(FakeProviderHandler.requests), provider_before)
         self.assertEqual(self.gateway.store.monthly_totals(actor_id="alice").requests, 0)
@@ -530,6 +579,7 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertEqual(access["team_id"], identity.team_id)
         self.assertEqual(access["pack_id"], pack["pack_id"])
         self.assertEqual(access["selected_records"], 1)
+        self.assertEqual(access["excluded_records"], 2)
         self.assertEqual(access["estimated_tokens"], pack["estimated_tokens"])
         serialized_access = json.dumps(access)
         self.assertNotIn("retry jitter", serialized_access)
@@ -543,7 +593,9 @@ class GatewayIntegrationTests(unittest.TestCase):
             token=CLAUDE_ONLY_TOKEN,
         )
         self.assertEqual(bob_status, 200)
-        self.assertEqual(json.loads(bob_response)["items"], [])
+        bob_pack = json.loads(bob_response)
+        self.assertEqual(bob_pack["items"], [])
+        self.assertEqual(bob_pack["exclusions"], [])
 
     def test_context_pack_api_applies_trusted_lifecycle_before_returning_content(self) -> None:
         identity = self.config.identities_by_actor["alice"]
@@ -783,6 +835,11 @@ class GatewayIntegrationTests(unittest.TestCase):
                 "context_invalid_request",
             ),
             (
+                {"query": "retry", "token_budget": 100, "cursor": "next-page"},
+                400,
+                "context_invalid_request",
+            ),
+            (
                 {"query": "!!!", "token_budget": 100},
                 400,
                 "context_invalid_request",
@@ -870,7 +927,7 @@ class GatewayIntegrationTests(unittest.TestCase):
         with self.assertLogs("hormuz", level="ERROR") as logs:
             with mock.patch.object(
                 self.gateway.context_repository,
-                "list_authorized",
+                "list_access_authorized",
                 side_effect=ContextStoreError("SECRET-INTERNAL-STORAGE-DETAIL"),
             ):
                 status, _, response = self._post(

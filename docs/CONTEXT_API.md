@@ -84,6 +84,8 @@ A successful response is `hormuz.context-pack.v1`:
   "manifest_sha256": "...",
   "query": "How should API retries work?",
   "policy_version": "engineering-context-v1",
+  "retrieval_version": "lexical-v1",
+  "render_version": "json-v1",
   "as_of": "2026-08-15T22:00:00Z",
   "scope": {
     "organization_id": "xpounder",
@@ -114,11 +116,19 @@ A successful response is `hormuz.context-pack.v1`:
 
 Items use the same content-bearing, source-linked manifest contract documented in [CONTEXT.md](CONTEXT.md). Storage versions and persistence rows are never returned. An empty authorized or lexical result is `200 OK` with an empty `items` array, not `404`.
 
-The additive lifecycle result is `complete`, `partial`, or `requires_resolution`. `partial` means at least one otherwise-authorized record was excluded by dependency, source-revision, or quarantine evaluation. `requires_resolution` means active structured assertions disagree; every conflicting record is excluded, and `contradictions` returns its authorized source references and assertion values. Because exclusions and contradictions contain authorized source metadata, the complete response remains company content.
+`policy_version`, `retrieval_version`, and `render_version` are included in the deterministic manifest and pack identity. A retrieval or serialization implementation change therefore cannot silently reuse the identity of a pack produced by different logic.
+
+The additive lifecycle result is `complete`, `partial`, or `requires_resolution`. `partial` means at least one identity-authorized lexical match was excluded as provisional, not yet effective, verified in the future, expired, dependency-stale, source-revision-stale, or quarantined. `requires_resolution` means active structured assertions disagree; every conflicting record is excluded, and `contradictions` returns its authorized source references and assertion values. Because exclusions and contradictions contain authorized source metadata, the complete response remains company content. Records outside the authenticated organization, visibility, repository, branch, or clearance never appear in items, exclusions, counts, diagnostics, or audit events.
 
 When both `repository_id` and `branch` are requested, the server loads the latest trusted snapshot stored for that exact authenticated organization scope. Callers cannot submit a lifecycle snapshot to the HTTP endpoint. A record with explicit dependencies fails closed when its dependency observation is missing, including when no exact snapshot has been stored.
 
 Every response uses `Cache-Control: no-store`. Hormuz does not cache an authorization decision, pack, prompt, or model answer in this path.
+
+Context Pack v1 is deliberately not paginated. One response is bounded by the organization token and item caps, and pagination would let a caller accumulate context beyond that policy boundary. Pagination or cursor fields are rejected as unknown input. A future administrative record-discovery API can define its own authorization-bound cursor contract without weakening the model-facing pack budget.
+
+## Compatibility
+
+This change is additive within `hormuz.context-pack.v1`: the route, required request fields, field types, authentication, status codes, and error envelope are unchanged. Clients must ignore unknown response fields and already had to handle the existing `complete`, `partial`, and `requires_resolution` outcomes. The new version fields make the active retrieval and rendering behavior explicit; no route or request migration is required.
 
 ## Errors
 
@@ -154,9 +164,9 @@ The request path is:
 1. authenticate bootstrap, workload OIDC, or opaque human-session identity;
 2. enforce actor rate limit;
 3. validate and apply server-owned policy caps;
-4. filter organization, visibility, classification, repository, branch, verification, and freshness in SQLite before content decode;
+4. filter organization, visibility, classification, repository, and branch in SQLite before content decode;
 5. load the server-owned lifecycle snapshot for the exact authenticated organization/repository/branch scope;
-6. repeat authorization checks, identify lexical matches, then quarantine high-confidence prompt injection, invalidate changed dependencies and `git:` source revisions, and exclude explicit contradiction groups without disclosing unrelated lifecycle findings;
+6. repeat access checks, identify authorized lexical matches, report verification/freshness exclusions, then quarantine high-confidence prompt injection, invalidate changed dependencies and `git:` source revisions, and exclude explicit contradiction groups without disclosing unrelated or unauthorized findings;
 7. rank deterministically and enforce the token/item budget;
 8. durably commit a metadata-only pack-read event, including only lifecycle outcome and aggregate exclusion/contradiction counts;
 9. return the explicit manifest with `no-store`.

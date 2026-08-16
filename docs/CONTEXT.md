@@ -172,8 +172,8 @@ Hormuz applies these stages in order:
 2. Match organization, team, or actor visibility against the configured actor.
 3. Enforce classification clearance.
 4. Match repository and branch scopes.
-5. Exclude provisional records unless `--include-provisional` is explicit.
-6. Exclude records not yet effective, verified in the future, or expired at `--as-of`.
+5. Mark provisional records ineligible unless `--include-provisional` is explicit.
+6. Mark records not yet effective, verified in the future, or expired at `--as-of` ineligible.
 7. Apply active, authorized supersession chains.
 8. Identify lexical query matches without returning or scanning unrelated records.
 9. Quarantine matched records whose model-visible fields match the bounded high-confidence prompt-injection indicators.
@@ -184,11 +184,11 @@ Hormuz applies these stages in order:
    classification, and audit-facing metadata, then select whole items within the
    token budget and item cap.
 
-Steps 1–6 execute in SQLite before stored content is decoded. The pack builder repeats those checks as a defense-in-depth boundary before ranking.
+Steps 1–4 execute in SQLite before stored content is decoded, so an unauthorized record is never passed to the pack builder. The builder repeats those access checks, then returns explicit exclusions for authorized lexical matches that fail steps 5–6. This makes stale and provisional outcomes observable without revealing that an unauthorized record exists.
 
-The SHA-256 pack identity covers the query, actor/team/org/repository/branch scope, clearance, policy version, token budget, selected record metadata, provenance, content hashes, scores, token estimates, lifecycle snapshot hash, exclusions, contradictions, and lifecycle outcome. Input ordering cannot change the pack. Evaluation time remains in the output but does not change the identity when authorization, freshness, lifecycle state, selection, and content are unchanged.
+The SHA-256 pack identity covers the query, actor/team/org/repository/branch scope, clearance, policy, retrieval and render versions, token budget, selected record metadata, provenance, content hashes, scores, token estimates, lifecycle snapshot hash, exclusions, contradictions, and lifecycle outcome. Input ordering cannot change the pack. Evaluation time remains in the output but does not change the identity when authorization, freshness, lifecycle state, selection, and content are unchanged.
 
-The additive pack-v1 lifecycle outcome is `complete`, `partial`, or `requires_resolution`. `exclusions` explain authorized records removed by lifecycle evaluation. `contradictions` deliberately include authorized source locators and structured assertion values so an employee or approval workflow can resolve the disagreement; treat the complete response as company content.
+The additive pack-v1 lifecycle outcome is `complete`, `partial`, or `requires_resolution`. `exclusions` explain authorized lexical matches removed by verification, freshness, or lifecycle evaluation. `contradictions` deliberately include authorized source locators and structured assertion values so an employee or approval workflow can resolve the disagreement; treat the complete response as company content.
 
 ## Current boundary
 

@@ -209,6 +209,24 @@ Observed result:
 
 This verifies deterministic immediate evaluation of trusted lifecycle observations and the frozen synthetic retrieval contract. Issue #16 was closed after its complete acceptance checklist and remote release gate were verified. That closure is not evidence of source connectors, automatic verification/promotion/decay, resumable background revalidation, semantic prompt-injection detection, distributed tenancy, mandatory client injection, customer-data performance, or improved model/employee outcomes; issue #12 remains open for the applicable lifecycle capabilities.
 
+### Context Pack v1 contract-completion path
+
+The REST, MCP, JSONL CLI, repository-backed CLI, deterministic manifest, and access-first SQLite candidate path were exercised together on August 15, 2026.
+
+Observed local result:
+
+- every pack now names `policy_version`, `retrieval_version=lexical-v1`, and `render_version=json-v1`; all three participate in the deterministic manifest and pack identity;
+- SQLite filters organization, visibility, classification, repository, and branch before content decode, while the shared pack kernel returns explicit exclusions only for identity-authorized lexical matches that are provisional, not yet effective, verified in the future, expired, dependency-stale, source-revision-stale, quarantined, or contradictory;
+- cross-organization, cross-team, cross-actor, cross-repository, cross-branch, and over-classification candidates appeared in neither items nor exclusions, including through the authenticated REST route;
+- the service returned stable `401`/`403` request-level outcomes for invalid identity or over-clearance, rejected pagination cursors as unknown input, enforced the `64 KiB` request ceiling, and retained the single token/item-bounded response contract;
+- MCP timeout, redirect refusal, response-size limits, stable error mapping, identity-injection rejection, and explicit cancellation suppression remained green; both CLI input modes emitted the same `hormuz.context-pack.v1` contract;
+- the complete source suite passed 131 tests with only the separately gated official Claude Code executable test skipped, and that Claude Code test passed independently;
+- the frozen version-2 corpus reproduced hash `9822d592868202c7c7539bcdac7d4a5894c01f9e6dba7a434846516b67b32c17`; the five-iteration full release profile passed with precision `1.00`, recall `1.00`, useful-pack rate `1.00`, zero authorization/lifecycle/dependency/malicious/contradiction/budget/determinism failures, and p95 in-process selection latency `0.180125 ms`;
+- isolated source and wheel builds passed; a clean Python 3.14 environment installed the wheel from outside the source tree, imported `hormuz.context` from site-packages, reported context schema version 3 and the expected pack/retrieval/render versions, displayed the packaged CLI contract, and passed the bundled release profile;
+- a tracked-file scan found no private-key, OpenAI, Anthropic, or GitHub credential pattern, and the local `.env.local` remained ignored and unread.
+
+This closes the bounded model-facing pack-service contract, not record browsing, mandatory client injection, semantic/vector retrieval, distributed authorization, automatic lifecycle jobs, caching, or production tenancy. Context Pack v1 intentionally has no pagination because accumulating pages would bypass its pack budget; any future administrative discovery surface requires its own authorization-bound cursor contract.
+
 ## Reproduce locally
 
 The default suite uses only loopback fake providers:

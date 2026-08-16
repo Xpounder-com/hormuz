@@ -15,7 +15,7 @@ The private alpha currently has:
 - accepted generic OIDC authorization-code + PKCE login, opaque rotating human sessions, replay-family revocation, and fail-closed OS secure-store custody;
 - metadata-only audit export;
 - a separate local persistent governed-context repository plus deterministic authorization-first context packs;
-- authenticated authorization-first context-pack REST retrieval with server-owned caps, fail-closed durable metadata-only read audit, and no provider side effects;
+- authenticated authorization-first context-pack REST retrieval with server-owned caps, versioned retrieval/render manifests, explicit authorized freshness/provisional outcomes, fail-closed durable metadata-only read audit, and no provider side effects;
 - a dual-era read-only MCP adapter that connects Codex and Claude Code to that REST boundary without granting repository access or identity overrides;
 - trusted, versioned repository/dependency snapshots with immediate per-read source/dependency invalidation, bounded high-confidence prompt-injection quarantine, and explicit structured contradiction outcomes;
 - a reproducible 60-task synthetic retrieval benchmark whose strict version-2 release profile passes current authorization, lifecycle, dependency, quarantine, contradiction, budget, determinism, leakage, and latency thresholds;

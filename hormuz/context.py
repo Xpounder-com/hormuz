@@ -11,6 +11,8 @@ from typing import Any, Iterable
 
 CONTEXT_PACK_SCHEMA = "hormuz.context-pack.v1"
 CONTEXT_LIFECYCLE_SCHEMA = "hormuz.context-lifecycle-snapshot.v1"
+CONTEXT_RETRIEVAL_VERSION = "lexical-v1"
+CONTEXT_RENDER_VERSION = "json-v1"
 CLASSIFICATIONS = ("public", "internal", "confidential", "restricted")
 VISIBILITIES = ("organization", "team", "actor")
 VERIFICATION_STATES = ("provisional", "verified")
@@ -645,6 +647,8 @@ class ContextPack:
             "manifest_sha256": self.manifest_sha256,
             "query": self.request.query,
             "policy_version": self.request.policy_version,
+            "retrieval_version": CONTEXT_RETRIEVAL_VERSION,
+            "render_version": CONTEXT_RENDER_VERSION,
             "as_of": _isoformat(self.request.as_of),
             "scope": {
                 "organization_id": principal.organization_id,
@@ -692,15 +696,29 @@ def build_context_pack(
         by_id[record.record_id] = record
     _validate_supersession_graph(by_id)
 
-    active = [record for record in by_id.values() if _is_authorized(record, request)]
+    access_authorized = [
+        record for record in by_id.values() if _is_access_authorized(record, request)
+    ]
+    eligible = [
+        record
+        for record in access_authorized
+        if _eligibility_exclusion_reason(record, request) is None
+    ]
     superseded_ids = {
         record.supersedes_id
-        for record in active
+        for record in eligible
         if record.supersedes_id is not None and record.supersedes_id in by_id
     }
-    active = [record for record in active if record.record_id not in superseded_ids]
+    active = [record for record in eligible if record.record_id not in superseded_ids]
 
     query_terms = _terms(request.query)
+    exclusions: list[ContextPackExclusion] = []
+    for record in access_authorized:
+        reason = _eligibility_exclusion_reason(record, request)
+        if reason is None or _relevance_score(record, request.query, query_terms) <= 0:
+            continue
+        exclusions.append(_pack_exclusion(record, reason))
+
     matched_candidates: list[tuple[int, datetime, str, ContextRecord]] = []
     for record in active:
         score = _relevance_score(record, request.query, query_terms)
@@ -711,7 +729,6 @@ def build_context_pack(
             (score, verified_at.astimezone(timezone.utc), record.record_id, record)
         )
 
-    exclusions: list[ContextPackExclusion] = []
     lifecycle_active: list[tuple[int, datetime, str, ContextRecord]] = []
     for candidate in matched_candidates:
         record = candidate[3]
@@ -810,7 +827,7 @@ def estimate_record_tokens(record: ContextRecord) -> int:
     return max(1, math.ceil(len(rendered.encode("utf-8")) / 3))
 
 
-def _is_authorized(record: ContextRecord, request: ContextPackRequest) -> bool:
+def _is_access_authorized(record: ContextRecord, request: ContextPackRequest) -> bool:
     principal = request.principal
     if record.organization_id != principal.organization_id:
         return False
@@ -827,16 +844,23 @@ def _is_authorized(record: ContextRecord, request: ContextPackRequest) -> bool:
         return False
     if record.branch is not None and record.branch != principal.branch:
         return False
+    return True
+
+
+def _eligibility_exclusion_reason(
+    record: ContextRecord,
+    request: ContextPackRequest,
+) -> str | None:
     if record.verification != "verified" and not request.include_provisional:
-        return False
+        return "provisional_not_allowed"
     as_of = request.as_of.astimezone(timezone.utc)
     if record.effective_at is not None and record.effective_at.astimezone(timezone.utc) > as_of:
-        return False
+        return "not_yet_effective"
     if record.verified_at is not None and record.verified_at.astimezone(timezone.utc) > as_of:
-        return False
+        return "verification_in_future"
     if record.expires_at is not None and record.expires_at.astimezone(timezone.utc) <= as_of:
-        return False
-    return True
+        return "expired"
+    return None
 
 
 def _lifecycle_exclusion_reason(
@@ -997,6 +1021,8 @@ def _pack_manifest(
         "schema_version": CONTEXT_PACK_SCHEMA,
         "query": request.query,
         "policy_version": request.policy_version,
+        "retrieval_version": CONTEXT_RETRIEVAL_VERSION,
+        "render_version": CONTEXT_RENDER_VERSION,
         "scope": {
             "organization_id": principal.organization_id,
             "team_id": principal.team_id,

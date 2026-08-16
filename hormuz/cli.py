@@ -1059,11 +1059,7 @@ def _context_pack(config: GatewayConfig, args: argparse.Namespace) -> int:
             if args.snapshot_file:
                 raise ContextError("--snapshot-file is only valid with --records")
             repository = SQLiteContextRepository(config.context_database_path)
-            stored = repository.list_authorized(
-                principal,
-                as_of=as_of,
-                include_provisional=args.include_provisional,
-            )
+            stored = repository.list_access_authorized(principal)
             records = [item.record for item in stored]
             if args.repository is not None and args.branch is not None:
                 stored_snapshot = repository.get_lifecycle_snapshot(

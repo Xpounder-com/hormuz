@@ -411,6 +411,9 @@ class ClientConfigTests(unittest.TestCase):
                 self.assertEqual(_context_pack(self.config, args), 0)
 
             pack = json.loads(output.getvalue())
+            self.assertEqual(pack["schema_version"], "hormuz.context-pack.v1")
+            self.assertEqual(pack["retrieval_version"], "lexical-v1")
+            self.assertEqual(pack["render_version"], "json-v1")
             self.assertEqual(pack["scope"]["actor_id"], "alice")
             self.assertEqual(pack["scope"]["team_id"], "engineering")
             self.assertEqual(pack["items"][0]["id"], "engineering-standard")
@@ -558,6 +561,9 @@ class ClientConfigTests(unittest.TestCase):
             with redirect_stdout(output := io.StringIO()):
                 self.assertEqual(_context_pack(config, pack_args), 0)
             packed = json.loads(output.getvalue())
+            self.assertEqual(packed["schema_version"], "hormuz.context-pack.v1")
+            self.assertEqual(packed["retrieval_version"], "lexical-v1")
+            self.assertEqual(packed["render_version"], "json-v1")
             self.assertEqual([item["id"] for item in packed["items"]], ["retry-v2"])
 
             export_path = root / "export.jsonl"

@@ -830,6 +830,43 @@ class SQLiteContextRepository:
             )
         ]
 
+    def list_access_authorized(
+        self,
+        principal: ContextPrincipal,
+    ) -> list[StoredContextRecord]:
+        """Load identity-authorized candidates before lifecycle eligibility filtering."""
+        if not isinstance(principal, ContextPrincipal):
+            raise ContextStoreError("context_principal_required")
+        allowed_classifications = CLASSIFICATIONS[: _CLASSIFICATION_RANK[principal.clearance] + 1]
+        clauses = [
+            "organization_id = ?",
+            f"classification IN ({', '.join('?' for _ in allowed_classifications)})",
+            "((visibility = 'organization' AND scope_id = ?) "
+            "OR (visibility = 'team' AND scope_id = ?) "
+            "OR (visibility = 'actor' AND scope_id = ?))",
+            "(repository_id IS NULL OR repository_id = ?)",
+            "(branch IS NULL OR branch = ?)",
+        ]
+        parameters: list[object] = [
+            principal.organization_id,
+            *allowed_classifications,
+            principal.organization_id,
+            principal.team_id,
+            principal.actor_id,
+            principal.repository_id,
+            principal.branch,
+        ]
+        with self._lock, self._connection() as connection:
+            rows = connection.execute(
+                f"SELECT * FROM context_records WHERE {' AND '.join(clauses)} ORDER BY id",
+                parameters,
+            ).fetchall()
+        return [
+            self._row_to_stored(row)
+            for row in rows
+            if self._row_metadata_is_access_authorized(row, principal=principal)
+        ]
+
     def record_pack_read(
         self,
         pack: ContextPack,
@@ -1120,6 +1157,28 @@ class SQLiteContextRepository:
         as_of: datetime,
         include_provisional: bool,
     ) -> bool:
+        if not self._row_metadata_is_access_authorized(row, principal=principal):
+            return False
+        verification = str(row["verification"])
+        if verification not in {"provisional", "verified"}:
+            raise ContextStoreError("context_record_verification_corrupt")
+        if verification != "verified" and not include_provisional:
+            return False
+        effective_at = _parse_required_datetime(row["effective_at"])
+        verified_at = _parse_nullable_datetime(row["verified_at"])
+        expires_at = _parse_nullable_datetime(row["expires_at"])
+        if effective_at > as_of or (verified_at is not None and verified_at > as_of):
+            return False
+        if expires_at is not None and expires_at <= as_of:
+            return False
+        return True
+
+    def _row_metadata_is_access_authorized(
+        self,
+        row: sqlite3.Row,
+        *,
+        principal: ContextPrincipal,
+    ) -> bool:
         classification = str(row["classification"])
         if classification not in _CLASSIFICATION_RANK:
             raise ContextStoreError("context_record_classification_corrupt")
@@ -1144,18 +1203,6 @@ class SQLiteContextRepository:
         if repository_id is not None and repository_id != principal.repository_id:
             return False
         if branch is not None and branch != principal.branch:
-            return False
-        verification = str(row["verification"])
-        if verification not in {"provisional", "verified"}:
-            raise ContextStoreError("context_record_verification_corrupt")
-        if verification != "verified" and not include_provisional:
-            return False
-        effective_at = _parse_required_datetime(row["effective_at"])
-        verified_at = _parse_nullable_datetime(row["verified_at"])
-        expires_at = _parse_nullable_datetime(row["expires_at"])
-        if effective_at > as_of or (verified_at is not None and verified_at > as_of):
-            return False
-        if expires_at is not None and expires_at <= as_of:
             return False
         return True
 

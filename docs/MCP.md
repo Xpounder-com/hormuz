@@ -135,11 +135,17 @@ repository. The employee cannot expand identity or policy scope through MCP.
 The success result includes the complete `hormuz.context-pack.v1` object as
 both structured content and JSON text for older clients. Provider-neutral
 items retain classification, verification, freshness, provenance, content
-hash, relevance, and token-estimate metadata. The additive lifecycle object
+hash, relevance, and token-estimate metadata. The response and deterministic
+pack identity name the active policy, retrieval, and render versions. The additive lifecycle object
 reports a trusted snapshot hash, `complete`, `partial`, or
 `requires_resolution`, plus explicit authorized exclusions and contradiction
 sources. Empty authorized retrieval is a successful pack with an empty `items`
 array.
+
+The tool returns one organization-bounded pack and has no pagination argument.
+The server rejects cursor or page fields so repeated pages cannot bypass the
+token and item caps. MCP calls retain explicit transport timeouts, bounded
+responses, and cancellation suppression.
 
 Gateway denials are returned as MCP tool errors with the stable Context Pack
 API code, such as `context_policy_denied`, `unauthorized`, or

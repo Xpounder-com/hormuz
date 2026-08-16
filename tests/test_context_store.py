@@ -630,6 +630,23 @@ class ContextStoreTests(unittest.TestCase):
             self.assertEqual([item.record.record_id for item in authorized], ["allowed"])
             self.assertEqual(codec.decode_calls, 1)
 
+            codec.decode_calls = 0
+            access_authorized = repository.list_access_authorized(
+                ContextPrincipal(
+                    organization_id="xpounder",
+                    team_id="engineering",
+                    actor_id="alice",
+                    clearance="internal",
+                    repository_id="acme/api",
+                    branch="main",
+                )
+            )
+            self.assertEqual(
+                [item.record.record_id for item in access_authorized],
+                ["allowed", "expired", "future", "provisional"],
+            )
+            self.assertEqual(codec.decode_calls, 4)
+
             connection = sqlite3.connect(repository.path)
             try:
                 connection.execute(
@@ -641,7 +658,7 @@ class ContextStoreTests(unittest.TestCase):
                 connection.close()
             codec.decode_calls = 0
             with self.assertRaisesRegex(ContextStoreError, "context_record_classification_corrupt"):
-                repository.list_authorized(
+                repository.list_access_authorized(
                     ContextPrincipal(
                         organization_id="xpounder",
                         team_id="engineering",
@@ -649,8 +666,7 @@ class ContextStoreTests(unittest.TestCase):
                         clearance="internal",
                         repository_id="acme/api",
                         branch="main",
-                    ),
-                    as_of=NOW,
+                    )
                 )
             self.assertEqual(codec.decode_calls, 0)
 

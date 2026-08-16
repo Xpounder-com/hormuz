@@ -7,6 +7,8 @@ from datetime import datetime, timedelta, timezone
 
 from hormuz.context import (
     CONTEXT_PACK_SCHEMA,
+    CONTEXT_RENDER_VERSION,
+    CONTEXT_RETRIEVAL_VERSION,
     ContextArtifact,
     ContextError,
     ContextLifecycleSnapshot,
@@ -114,6 +116,27 @@ class ContextPackTests(unittest.TestCase):
         self.assertEqual(pack.matched_records, 3)
         self.assertLessEqual(pack.estimated_tokens, pack.request.token_budget)
         self.assertEqual(pack.to_dict()["schema_version"], CONTEXT_PACK_SCHEMA)
+        self.assertEqual(pack.to_dict()["retrieval_version"], CONTEXT_RETRIEVAL_VERSION)
+        self.assertEqual(pack.to_dict()["render_version"], CONTEXT_RENDER_VERSION)
+        exclusion_reasons = {item.record_id: item.reason for item in pack.exclusions}
+        self.assertEqual(
+            exclusion_reasons,
+            {
+                "expired": "expired",
+                "future": "verification_in_future",
+                "provisional": "provisional_not_allowed",
+            },
+        )
+        self.assertTrue(
+            {
+                "other-org",
+                "other-team",
+                "other-actor",
+                "other-repo",
+                "other-branch",
+                "too-sensitive",
+            }.isdisjoint(exclusion_reasons)
+        )
 
     def test_supersession_is_authorized_active_and_order_independent(self) -> None:
         old = record("old", verified_at=NOW - timedelta(days=10))
@@ -246,7 +269,23 @@ class ContextPackTests(unittest.TestCase):
         )
 
         self.assertEqual(default_pack.items, ())
+        self.assertEqual(default_pack.outcome, "partial")
+        self.assertEqual(default_pack.exclusions[0].reason, "provisional_not_allowed")
         self.assertEqual([item.record.record_id for item in opted_in.items], ["draft"])
+        self.assertEqual(opted_in.exclusions, ())
+
+    def test_not_yet_effective_authorized_match_is_an_explicit_partial_outcome(self) -> None:
+        future = replace(
+            record("future-effective"),
+            effective_at=NOW + timedelta(minutes=1),
+        )
+
+        pack = build_context_pack([future], request())
+
+        self.assertEqual(pack.items, ())
+        self.assertEqual(pack.outcome, "partial")
+        self.assertEqual(pack.exclusions[0].record_id, "future-effective")
+        self.assertEqual(pack.exclusions[0].reason, "not_yet_effective")
 
     def test_lifecycle_snapshot_invalidates_dependencies_quarantines_injection_and_surfaces_conflict(self) -> None:
         old_dependency = ContextArtifact(

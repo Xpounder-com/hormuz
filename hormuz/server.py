@@ -664,11 +664,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 include_provisional=include_provisional,
                 as_of=as_of,
             )
-            stored = self.server.context_repository.list_authorized(
-                principal,
-                as_of=as_of,
-                include_provisional=include_provisional,
-            )
+            stored = self.server.context_repository.list_access_authorized(principal)
             lifecycle_snapshot = None
             if principal.repository_id is not None and principal.branch is not None:
                 stored_snapshot = self.server.context_repository.get_lifecycle_snapshot(
