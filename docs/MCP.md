@@ -19,6 +19,7 @@ POST /v1/context/packs
         +--> authenticate employee
         +--> derive organization, team, actor, and policy
         +--> authorize and budget before content decode
+        +--> apply server-owned lifecycle state and contradiction/quarantine rules
         +--> commit metadata-only read audit
         v
 governed context pack
@@ -134,8 +135,11 @@ repository. The employee cannot expand identity or policy scope through MCP.
 The success result includes the complete `hormuz.context-pack.v1` object as
 both structured content and JSON text for older clients. Provider-neutral
 items retain classification, verification, freshness, provenance, content
-hash, relevance, and token-estimate metadata. Empty authorized retrieval is a
-successful pack with an empty `items` array.
+hash, relevance, and token-estimate metadata. The additive lifecycle object
+reports a trusted snapshot hash, `complete`, `partial`, or
+`requires_resolution`, plus explicit authorized exclusions and contradiction
+sources. Empty authorized retrieval is a successful pack with an empty `items`
+array.
 
 Gateway denials are returned as MCP tool errors with the stable Context Pack
 API code, such as `context_policy_denied`, `unauthorized`, or

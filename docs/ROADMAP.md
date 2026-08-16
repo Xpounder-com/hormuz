@@ -17,10 +17,11 @@ The private alpha currently has:
 - a separate local persistent governed-context repository plus deterministic authorization-first context packs;
 - authenticated authorization-first context-pack REST retrieval with server-owned caps, fail-closed durable metadata-only read audit, and no provider side effects;
 - a dual-era read-only MCP adapter that connects Codex and Claude Code to that REST boundary without granting repository access or identity overrides;
-- a reproducible 60-task synthetic retrieval benchmark whose regression profile enforces current authorization, lifecycle, budget, determinism, leakage, and latency guarantees while its stricter release profile exposes dependency, malicious-context, and contradiction gaps;
+- trusted, versioned repository/dependency snapshots with immediate per-read source/dependency invalidation, bounded high-confidence prompt-injection quarantine, and explicit structured contradiction outcomes;
+- a reproducible 60-task synthetic retrieval benchmark whose strict version-2 release profile passes current authorization, lifecycle, dependency, quarantine, contradiction, budget, determinism, leakage, and latency thresholds;
 - local and GitHub package/client verification.
 
-The foundation is not an enterprise release. The local context database is single-node and plaintext, and the local session broker is also single-node; neither is an accepted hosted persistence design. Real-IdP validation, shared tenancy, SCIM, administrator revocation, automatic lifecycle/invalidation, context injection, structured DLP, cache policy, invoice reconciliation, HA deployment, KMS, and independent security review remain open gates.
+The foundation is not an enterprise release. The local context database is single-node and plaintext, and the local session broker is also single-node; neither is an accepted hosted persistence design. Real-IdP validation, shared tenancy, SCIM, administrator revocation, source connectors, automatic verification/promotion/decay and resumable revalidation, context injection, structured DLP, cache policy, invoice reconciliation, HA deployment, KMS, and independent security review remain open gates.
 
 ## Material decisions awaiting owner approval
 

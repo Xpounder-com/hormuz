@@ -56,6 +56,14 @@ Each non-empty JSONL line is one object:
   "expires_at": null,
   "supersedes_id": null,
   "invalidation_rules": ["source_revision_changed"],
+  "dependencies": [
+    {
+      "uri": "repo://Xpounder-com/hormuz/config/retry-policy.json",
+      "revision": "git:abc123",
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  ],
+  "assertion": {"key": "retry.transient.enabled", "value": "true"},
   "tags": ["reliability", "api"]
 }
 ```
@@ -68,10 +76,32 @@ Unknown fields, malformed timestamps, bad hashes, and content/hash mismatches fa
 - `verification`: `verified` or `provisional`. The persistent repository requires verified records to have a timezone-aware `verified_at` and at least one evidence identifier.
 - `repository_id` and `branch`: optional narrowing scopes. A branch requires a repository.
 - `effective_at`, `expires_at`, `supersedes_id`, and `invalidation_rules`: explicit lifecycle controls.
+- `dependencies`: immutable artifact identities. A dependency-bearing record is excluded unless the exact URI has a trusted observation whose revision and optional SHA-256 still match.
+- `assertion`: an optional structured key/value claim used to detect active disagreement. Both fields are required together; multiline values are rejected.
 
 For compatibility with the earlier JSONL format, an omitted owner becomes the importing actor, an omitted source item key becomes the record ID, an omitted effective time becomes the verification time, and an omitted source hash becomes the imported record-content hash. Production connectors should always provide the actual immutable source-artifact hash and stable item key.
 
 The tuple `(organization, source URI, source revision, source item key)` is idempotent. Reusing it for different data fails closed. Changing content through the repository update API requires a new source identity or revision, and every update/delete uses an expected storage version for optimistic concurrency. Metadata-only mutation events retain the actor, action, record/version references, policy version, classification, visibility, and repository ID without title, content, source URI, or source hashes. Successful repository-backed pack reads record a separate metadata-only event containing the trusted organization/team/actor scope, pack ID, policy version, repository/branch, clearance, provisional flag, and aggregate record/token counts. It excludes query text, titles, content, source locators and hashes, and selected record IDs.
+
+## Record trusted lifecycle state
+
+A connector or trusted operator records the current repository and dependency state in an exact organization/repository/branch envelope:
+
+```bash
+python3 -m hormuz --config hormuz.json context-snapshot-import \
+  --snapshot examples/context-lifecycle-snapshot.json \
+  --actor alice \
+  --policy-version engineering-lifecycle-v1
+
+python3 -m hormuz --config hormuz.json context-snapshot-show \
+  --actor alice \
+  --repository Xpounder-com/hormuz \
+  --branch main
+```
+
+Snapshot creation is idempotent. Replacing a different snapshot requires `--expected-version`; concurrent writers using the same version produce exactly one winner. Snapshot audit events retain scope, actor, policy, version, hash, and artifact count, but not artifact URIs or revisions. The local snapshot row does retain those artifact identities because pack evaluation needs them; it does not contain source content.
+
+The CLI envelope is `hormuz.context-lifecycle-envelope.v1`, and its nested trusted state is `hormuz.context-lifecycle-snapshot.v1`. The HTTP Context Pack API never accepts a caller-supplied snapshot: it loads only the latest server-side snapshot for the authenticated organization and exact requested repository/branch.
 
 ## Inspect and export
 
@@ -145,14 +175,20 @@ Hormuz applies these stages in order:
 5. Exclude provisional records unless `--include-provisional` is explicit.
 6. Exclude records not yet effective, verified in the future, or expired at `--as-of`.
 7. Apply active, authorized supersession chains.
-8. Rank remaining records lexically and deterministically.
-9. Estimate each complete emitted item, including content, provenance, lifecycle,
+8. Identify lexical query matches without returning or scanning unrelated records.
+9. Quarantine matched records whose model-visible fields match the bounded high-confidence prompt-injection indicators.
+10. Evaluate matched `git:` source revisions and explicit artifact dependencies against the trusted lifecycle snapshot. Missing or mismatched dependency observations fail closed.
+11. Group matched structured assertions by key. When active authorized candidates disagree, exclude every conflicting record and return `requires_resolution` with each authorized source reference and value.
+12. Rank remaining records lexically and deterministically.
+13. Estimate each complete emitted item, including content, provenance, lifecycle,
    classification, and audit-facing metadata, then select whole items within the
    token budget and item cap.
 
 Steps 1–6 execute in SQLite before stored content is decoded. The pack builder repeats those checks as a defense-in-depth boundary before ranking.
 
-The SHA-256 pack identity covers the query, actor/team/org/repository/branch scope, clearance, policy version, token budget, selected record metadata, provenance, content hashes, scores, and token estimates. Input ordering cannot change the pack. Evaluation time remains in the output but does not change the identity when authorization, freshness, selection, and content are unchanged.
+The SHA-256 pack identity covers the query, actor/team/org/repository/branch scope, clearance, policy version, token budget, selected record metadata, provenance, content hashes, scores, token estimates, lifecycle snapshot hash, exclusions, contradictions, and lifecycle outcome. Input ordering cannot change the pack. Evaluation time remains in the output but does not change the identity when authorization, freshness, lifecycle state, selection, and content are unchanged.
+
+The additive pack-v1 lifecycle outcome is `complete`, `partial`, or `requires_resolution`. `exclusions` explain authorized records removed by lifecycle evaluation. `contradictions` deliberately include authorized source locators and structured assertion values so an employee or approval workflow can resolve the disagreement; treat the complete response as company content.
 
 ## Current boundary
 
@@ -161,11 +197,13 @@ This is a durable local governance kernel, not the final enterprise context serv
 - retrieval is lexical; there is no embedding provider, symbol index, or vector index;
 - the SQLite implementation is single-node and plaintext, with no accepted enterprise tenancy, KMS, backup, restore, legal-hold, or HA contract;
 - mutation commands trust the local configuration operator rather than a dedicated context-writer RBAC permission;
-- active authorized supersession means an expired successor can leave its prior record eligible; automatic invalidation and contradiction policy remain open lifecycle work;
+- active authorized supersession means an expired successor can leave its prior record eligible;
+- snapshot evaluation is immediate and deterministic on every pack read, but source connectors, automatic verification/promotion/decay, resumable background revalidation, and approval workflows remain open lifecycle work;
+- the prompt-injection quarantine uses narrow high-confidence text patterns. It lowers obvious risk but is not semantic prompt-injection prevention, and a safe record can still contain adversarial instructions that do not match those patterns;
 - the token estimate covers the complete serialized item contract and is
   deterministic, but it excludes the response wrapper and is not a provider
   tokenizer guarantee;
-- there is no automatic prompt injection, context-pack cache, approval workflow, connector, or outcome writeback;
+- there is no automatic context injection, context-pack cache, connector, or outcome writeback;
 - if a pack is later injected, injection must happen before the existing secret-egress boundary so all added content is inspected.
 
 No context caching has been enabled. Cache privacy remains blocked on proposed ADR 0003, and the hosted persistence topology remains blocked on proposed ADR 0002.

@@ -98,11 +98,25 @@ A successful response is `hormuz.context-pack.v1`:
   "eligible_records": 0,
   "matched_records": 0,
   "selected_records": 0,
+  "lifecycle": {
+    "version": "v1",
+    "outcome": "complete",
+    "snapshot_sha256": null,
+    "repository_revision": null,
+    "excluded_records": 0,
+    "contradiction_groups": 0
+  },
+  "exclusions": [],
+  "contradictions": [],
   "items": []
 }
 ```
 
 Items use the same content-bearing, source-linked manifest contract documented in [CONTEXT.md](CONTEXT.md). Storage versions and persistence rows are never returned. An empty authorized or lexical result is `200 OK` with an empty `items` array, not `404`.
+
+The additive lifecycle result is `complete`, `partial`, or `requires_resolution`. `partial` means at least one otherwise-authorized record was excluded by dependency, source-revision, or quarantine evaluation. `requires_resolution` means active structured assertions disagree; every conflicting record is excluded, and `contradictions` returns its authorized source references and assertion values. Because exclusions and contradictions contain authorized source metadata, the complete response remains company content.
+
+When both `repository_id` and `branch` are requested, the server loads the latest trusted snapshot stored for that exact authenticated organization scope. Callers cannot submit a lifecycle snapshot to the HTTP endpoint. A record with explicit dependencies fails closed when its dependency observation is missing, including when no exact snapshot has been stored.
 
 Every response uses `Cache-Control: no-store`. Hormuz does not cache an authorization decision, pack, prompt, or model answer in this path.
 
@@ -141,11 +155,13 @@ The request path is:
 2. enforce actor rate limit;
 3. validate and apply server-owned policy caps;
 4. filter organization, visibility, classification, repository, branch, verification, and freshness in SQLite before content decode;
-5. repeat authorization checks, rank deterministically, and enforce the token/item budget;
-6. durably commit a metadata-only pack-read event;
-7. return the explicit manifest with `no-store`.
+5. load the server-owned lifecycle snapshot for the exact authenticated organization/repository/branch scope;
+6. repeat authorization checks, identify lexical matches, then quarantine high-confidence prompt injection, invalidate changed dependencies and `git:` source revisions, and exclude explicit contradiction groups without disclosing unrelated lifecycle findings;
+7. rank deterministically and enforce the token/item budget;
+8. durably commit a metadata-only pack-read event, including only lifecycle outcome and aggregate exclusion/contradiction counts;
+9. return the explicit manifest with `no-store`.
 
-The endpoint does not call OpenAI or Anthropic, consume a provider credential, mutate the usage ledger, inject content into Codex or Claude Code, or enable the proposed cache. Every successful response first commits a durable metadata-only read event containing actor/team/org, repository/branch, clearance, policy version, pack ID, provisional flag, and aggregate record/token counts. It does not contain the query, context content, titles, source locators or hashes, or selected record IDs. If that audit write fails, Hormuz returns the sanitized `503` envelope and no pack. Reader-specific enterprise RBAC remains open work.
+The endpoint does not call OpenAI or Anthropic, consume a provider credential, mutate the usage ledger, inject content into Codex or Claude Code, or enable the proposed cache. Every successful response first commits a durable metadata-only read event containing actor/team/org, repository/branch, clearance, policy version, pack ID, provisional flag, lifecycle outcome, and aggregate record/token/exclusion/contradiction counts. It does not contain the query, context content, titles, source locators or hashes, assertion values, or selected record IDs. If that audit write fails, Hormuz returns the sanitized `503` envelope and no pack. Reader-specific enterprise RBAC remains open work.
 
 ## Example
 

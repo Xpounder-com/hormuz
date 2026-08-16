@@ -99,7 +99,7 @@ Observed result:
 - tests proved idempotency conflicts, full batch rollback on a late conflict, immutable source revisions, required verification evidence, content-integrity checks, supersession cycles/references, physical-delete controls, metadata-only mutation audit, and exactly one winner under concurrent optimistic updates;
 - the complete source suite passed 61 tests locally, with only the opt-in official Claude Code executable test skipped.
 
-This is evidence for a single-node local repository contract. It is not evidence of encryption at rest, hosted multi-tenant isolation, KMS/BYOK, backup/restore, retention/legal hold, writer RBAC, automatic invalidation, context injection, or caching. Those gates remain open, and proposed ADRs 0002 and 0003 remain unaccepted.
+This is evidence for the original single-node local repository contract. It is not evidence of encryption at rest, hosted multi-tenant isolation, KMS/BYOK, backup/restore, retention/legal hold, writer RBAC, source connectors, automatic promotion/decay, context injection, or caching. Those gates remain open, and proposed ADRs 0002 and 0003 remain unaccepted.
 
 ### Authenticated Context Pack REST path
 
@@ -149,9 +149,9 @@ Observed result:
 
 This is evidence for a real, model-controlled read-only context tool in both clients. It is not evidence of mandatory context injection, session-profile authentication inside the MCP adapter, shared rate limiting, automatic context invalidation, or a production hosted topology. Those remain separate gates.
 
-### Governed context benchmark path
+### Governed context benchmark path (version 1, historical baseline)
 
-The bundled version-1 synthetic corpus and separated reference outcomes were generated from the checked-in deterministic generator and then verified byte-for-byte with its `--check` mode.
+Before trusted lifecycle snapshots were implemented, the bundled version-1 synthetic corpus and separated reference outcomes were generated from the checked-in deterministic generator and then verified byte-for-byte with its `--check` mode. The failed strict-profile result below is retained as historical evidence of the gap; version 2 supersedes it later in this document.
 
 Observed result:
 
@@ -186,6 +186,27 @@ Observed result on August 15, 2026:
 - fresh source and wheel distributions contained the new protocol, persistence, CLI, documentation, and tests; a clean Python 3.14 environment installed the wheel, displayed `login`, `logout`, and `auth token`, and passed the bundled context regression profile.
 
 This verifies the local, single-node protocol kernel and real macOS secure-store adapter. It is not a real enterprise IdP result, Windows/Linux secure-store runner evidence, SCIM or administrator revocation, KMS-backed/HA session persistence, immutable security-audit export, or a hosted deployment claim. Issue #13 remains open until those applicable acceptance gates are satisfied.
+
+### Trusted context lifecycle and benchmark-v2 path
+
+The additive context-pack lifecycle contract, SQLite schema version 3, CLI snapshot flow, authenticated REST route, deterministic benchmark generator, source package, and installed wheel were exercised on August 15, 2026.
+
+Observed result:
+
+- exact organization/repository/branch lifecycle snapshots were created idempotently, replaced only with the expected version, and produced exactly one winner under concurrent changed-snapshot writes;
+- schema-version-1 and schema-version-2 context databases migrated in place to version 3 while preserving records and mutation history; legacy records received empty dependency and assertion fields;
+- corrupted snapshot hashes, cross-organization CLI envelopes, malformed lifecycle metadata, missing dependency observations, changed dependency revisions/hashes, changed `git:` source revisions, and stale snapshot updates failed closed;
+- lifecycle evaluation occurs only after authorization and only for lexical query matches, preventing unrelated exclusions or contradiction sources from appearing in a pack;
+- bounded high-confidence policy-override, secret-exfiltration, and instruction-escalation patterns were quarantined across model-visible record fields before ranking;
+- conflicting matched records sharing a structured assertion key were excluded and returned as `requires_resolution` with both authorized source references rather than silently merged;
+- lifecycle audit events retained scope, versions, actor, policy, snapshot hash, and artifact count without artifact URIs/revisions, while pack-read events retained only lifecycle outcome and aggregate exclusion/contradiction counts;
+- the actual authenticated Context Pack API applied the stored snapshot, returned only the safe relevant record, committed the metadata-only read event first, and made zero provider requests or usage-ledger writes;
+- the generated version-2 corpus hash was `9822d592868202c7c7539bcdac7d4a5894c01f9e6dba7a434846516b67b32c17`, and `--check` reproduced both frozen files exactly;
+- the full 60-task release profile passed with precision `1.00`, recall `1.00`, useful-pack rate `1.00`, mean compression `0.840593`, zero authorization/lifecycle/dependency/malicious/contradiction/budget/determinism failures, and p95 in-process selection latency `0.13975 ms` in the five-iteration local run;
+- the complete local source suite passed 130 tests with one separately gated official Claude Code executable test skipped; that Claude Code test then passed independently, and a separate temporary installation of the pinned current Codex `0.147.0` and Claude Code `2.1.233` releases routed both clients through Hormuz successfully;
+- a fresh source distribution and wheel contained the v1 historical corpus, v2 default corpus/references, lifecycle example, docs, CLI, and code; a clean Python 3.14 environment installed the wheel from outside the source checkout, reported context schema version 3, displayed both snapshot commands, and passed the bundled strict release profile.
+
+This verifies deterministic immediate evaluation of trusted lifecycle observations and the frozen synthetic retrieval contract. It is not evidence of source connectors, automatic verification/promotion/decay, resumable background revalidation, semantic prompt-injection detection, distributed tenancy, mandatory client injection, customer-data performance, or improved model/employee outcomes. Issue #12 remains open for those lifecycle capabilities, and issue #16 should be evaluated against its remaining acceptance criteria rather than inferred complete from one green synthetic profile.
 
 ## Reproduce locally
 

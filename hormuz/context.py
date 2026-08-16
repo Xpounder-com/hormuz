@@ -10,6 +10,7 @@ from typing import Any, Iterable
 
 
 CONTEXT_PACK_SCHEMA = "hormuz.context-pack.v1"
+CONTEXT_LIFECYCLE_SCHEMA = "hormuz.context-lifecycle-snapshot.v1"
 CLASSIFICATIONS = ("public", "internal", "confidential", "restricted")
 VISIBILITIES = ("organization", "team", "actor")
 VERIFICATION_STATES = ("provisional", "verified")
@@ -18,10 +19,163 @@ _CLASSIFICATION_RANK = {name: index for index, name in enumerate(CLASSIFICATIONS
 _TERM_PATTERN = re.compile(r"[^\W_]+", re.UNICODE)
 _SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
 _TOKEN_ESTIMATE_INTEGER_SENTINEL = 9_999_999_999
+_RETRIEVAL_STOP_WORDS = frozenset(
+    {
+        "a",
+        "an",
+        "and",
+        "as",
+        "at",
+        "be",
+        "by",
+        "for",
+        "from",
+        "how",
+        "in",
+        "is",
+        "it",
+        "of",
+        "on",
+        "or",
+        "that",
+        "the",
+        "this",
+        "to",
+        "with",
+        "without",
+    }
+)
+_PROMPT_INJECTION_INDICATORS = (
+    (
+        "policy_override",
+        re.compile(
+            r"\b(?:bypass|disregard|ignore|override)\b.{0,96}\b(?:instructions?|policy|policies)\b",
+            re.IGNORECASE | re.DOTALL,
+        ),
+    ),
+    (
+        "secret_exfiltration",
+        re.compile(
+            r"\b(?:exfiltrate|print|reveal|send)\b.{0,96}\b(?:api[ -]?keys?|credentials?|environment (?:variables?|credentials?)|secrets?)\b",
+            re.IGNORECASE | re.DOTALL,
+        ),
+    ),
+    (
+        "instruction_escalation",
+        re.compile(
+            r"\btreat\b.{0,96}\b(?:developer|system) instructions?\b",
+            re.IGNORECASE | re.DOTALL,
+        ),
+    ),
+)
 
 
 class ContextError(ValueError):
     pass
+
+
+@dataclass(frozen=True, order=True)
+class ContextArtifact:
+    """A content-free immutable artifact identity used for lifecycle evaluation."""
+
+    uri: str
+    revision: str
+    sha256: str = ""
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.uri, str) or not self.uri.strip():
+            raise ContextError("context artifact uri must be a non-empty string")
+        if not isinstance(self.revision, str) or not self.revision.strip():
+            raise ContextError("context artifact revision must be a non-empty string")
+        if len(self.uri.encode("utf-8")) > 4096 or len(self.revision.encode("utf-8")) > 4096:
+            raise ContextError("context artifact identity must not exceed 4096 bytes")
+        if not isinstance(self.sha256, str):
+            raise ContextError("context artifact sha256 must be a string")
+        if self.sha256 and not _SHA256_PATTERN.fullmatch(self.sha256):
+            raise ContextError(
+                "context artifact sha256 must be 64 lowercase hexadecimal characters"
+            )
+        if any(
+            character in self.uri or character in self.revision
+            for character in ("\n", "\r", "\x00")
+        ):
+            raise ContextError("context artifact identity contains a control character")
+
+    def to_dict(self) -> dict[str, str]:
+        return {"uri": self.uri, "revision": self.revision, "sha256": self.sha256}
+
+    @classmethod
+    def from_dict(cls, value: object) -> "ContextArtifact":
+        if not isinstance(value, dict):
+            raise ContextError("context artifact must be an object")
+        unknown = sorted(set(value) - {"uri", "revision", "sha256"})
+        if unknown:
+            raise ContextError(f"unknown context artifact fields: {', '.join(unknown)}")
+        return cls(
+            uri=_required_string(value, "uri"),
+            revision=_required_string(value, "revision"),
+            sha256=_optional_empty_string(value, "sha256"),
+        )
+
+
+@dataclass(frozen=True)
+class ContextLifecycleSnapshot:
+    """Trusted repository/dependency state evaluated before context ranking."""
+
+    repository_revision: str
+    artifacts: tuple[ContextArtifact, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.repository_revision, str) or not self.repository_revision.strip():
+            raise ContextError("context lifecycle repository_revision must be a non-empty string")
+        if len(self.repository_revision.encode("utf-8")) > 512 or any(
+            character in self.repository_revision for character in ("\n", "\r", "\x00")
+        ):
+            raise ContextError(
+                "context lifecycle repository_revision must be a bounded single-line string"
+            )
+        if not isinstance(self.artifacts, tuple) or any(
+            not isinstance(item, ContextArtifact) for item in self.artifacts
+        ):
+            raise ContextError("context lifecycle artifacts must be ContextArtifact values")
+        if len(self.artifacts) > 10_000:
+            raise ContextError("context lifecycle snapshot cannot exceed 10000 artifacts")
+        uris = [item.uri for item in self.artifacts]
+        if len(uris) != len(set(uris)):
+            raise ContextError("context lifecycle artifact URIs must be unique")
+
+    @property
+    def snapshot_sha256(self) -> str:
+        canonical = json.dumps(
+            self.to_dict(), sort_keys=True, separators=(",", ":"), ensure_ascii=False
+        )
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": CONTEXT_LIFECYCLE_SCHEMA,
+            "repository_revision": self.repository_revision,
+            "artifacts": [item.to_dict() for item in sorted(self.artifacts)],
+        }
+
+    @classmethod
+    def from_dict(cls, value: object) -> "ContextLifecycleSnapshot":
+        if not isinstance(value, dict):
+            raise ContextError("context lifecycle snapshot must be an object")
+        unknown = sorted(
+            set(value) - {"schema_version", "repository_revision", "artifacts"}
+        )
+        if unknown:
+            raise ContextError(f"unknown context lifecycle fields: {', '.join(unknown)}")
+        if value.get("schema_version") != CONTEXT_LIFECYCLE_SCHEMA:
+            raise ContextError("unsupported context lifecycle schema_version")
+        artifacts = value.get("artifacts")
+        if not isinstance(artifacts, list):
+            raise ContextError("context lifecycle artifacts must be an array")
+        return cls(
+            repository_revision=_required_string(value, "repository_revision"),
+            artifacts=tuple(ContextArtifact.from_dict(item) for item in artifacts),
+        )
 
 
 @dataclass(frozen=True)
@@ -48,6 +202,9 @@ class ContextRecord:
     expires_at: datetime | None = None
     supersedes_id: str | None = None
     invalidation_rules: tuple[str, ...] = ()
+    dependencies: tuple[ContextArtifact, ...] = ()
+    assertion_key: str | None = None
+    assertion_value: str | None = None
     tags: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
@@ -126,6 +283,30 @@ class ContextRecord:
                 raise ContextError(f"context record {name} must be a tuple")
             if any(not isinstance(item, str) or not item.strip() for item in values):
                 raise ContextError(f"context record {name} must contain non-empty strings")
+        if not isinstance(self.dependencies, tuple) or any(
+            not isinstance(item, ContextArtifact) for item in self.dependencies
+        ):
+            raise ContextError("context record dependencies must be ContextArtifact values")
+        if len(self.dependencies) > 1_000:
+            raise ContextError("context record cannot exceed 1000 dependencies")
+        dependency_uris = [item.uri for item in self.dependencies]
+        if len(dependency_uris) != len(set(dependency_uris)):
+            raise ContextError("context record dependency URIs must be unique")
+        if (self.assertion_key is None) != (self.assertion_value is None):
+            raise ContextError("context record assertion requires both key and value")
+        for name, value in (
+            ("assertion_key", self.assertion_key),
+            ("assertion_value", self.assertion_value),
+        ):
+            if value is not None and (
+                not isinstance(value, str)
+                or not value.strip()
+                or len(value.encode("utf-8")) > 4096
+                or any(character in value for character in ("\n", "\r", "\x00"))
+            ):
+                raise ContextError(
+                    f"context record {name} must be null or a bounded non-empty string"
+                )
 
     @property
     def content_sha256(self) -> str:
@@ -157,6 +338,12 @@ class ContextRecord:
             "expires_at": _isoformat(self.expires_at),
             "supersedes_id": self.supersedes_id,
             "invalidation_rules": list(self.invalidation_rules),
+            "dependencies": [item.to_dict() for item in sorted(self.dependencies)],
+            "assertion": (
+                {"key": self.assertion_key, "value": self.assertion_value}
+                if self.assertion_key is not None
+                else None
+            ),
             "tags": list(self.tags),
             "content_sha256": self.content_sha256,
         }
@@ -183,6 +370,8 @@ class ContextRecord:
             "expires_at",
             "supersedes_id",
             "invalidation_rules",
+            "dependencies",
+            "assertion",
             "tags",
             "content_sha256",
         }
@@ -204,6 +393,18 @@ class ContextRecord:
         invalidation_rules = value.get("invalidation_rules", [])
         if not isinstance(invalidation_rules, list):
             raise ContextError("context record invalidation_rules must be an array")
+        dependencies = value.get("dependencies", [])
+        if not isinstance(dependencies, list):
+            raise ContextError("context record dependencies must be an array")
+        assertion = value.get("assertion")
+        if assertion is not None:
+            if not isinstance(assertion, dict):
+                raise ContextError("context record assertion must be null or an object")
+            unknown_assertion = sorted(set(assertion) - {"key", "value"})
+            if unknown_assertion:
+                raise ContextError(
+                    f"unknown context assertion fields: {', '.join(unknown_assertion)}"
+                )
         expected_content_sha256 = value.get("content_sha256")
         if expected_content_sha256 is not None and (
             not isinstance(expected_content_sha256, str)
@@ -235,6 +436,13 @@ class ContextRecord:
             expires_at=_nullable_datetime(value, "expires_at"),
             supersedes_id=_nullable_string(value, "supersedes_id"),
             invalidation_rules=tuple(invalidation_rules),
+            dependencies=tuple(ContextArtifact.from_dict(item) for item in dependencies),
+            assertion_key=(
+                _required_string(assertion, "key") if assertion is not None else None
+            ),
+            assertion_value=(
+                _required_string(assertion, "value") if assertion is not None else None
+            ),
             tags=tuple(tags),
         )
         if expected_content_sha256 is not None and record.content_sha256 != expected_content_sha256:
@@ -347,6 +555,12 @@ def _context_pack_item_dict(
         "expires_at": _isoformat(record.expires_at),
         "supersedes_id": record.supersedes_id,
         "invalidation_rules": list(record.invalidation_rules),
+        "dependencies": [item.to_dict() for item in sorted(record.dependencies)],
+        "assertion": (
+            {"key": record.assertion_key, "value": record.assertion_value}
+            if record.assertion_key is not None
+            else None
+        ),
         "tags": list(record.tags),
         "source": {
             "uri": record.source_uri,
@@ -361,6 +575,54 @@ def _context_pack_item_dict(
 
 
 @dataclass(frozen=True)
+class ContextPackExclusion:
+    record_id: str
+    reason: str
+    source_uri: str
+    source_revision: str
+    source_sha256: str
+
+    def to_dict(self) -> dict[str, str]:
+        return {
+            "record_id": self.record_id,
+            "reason": self.reason,
+            "source_uri": self.source_uri,
+            "source_revision": self.source_revision,
+            "source_sha256": self.source_sha256,
+        }
+
+
+@dataclass(frozen=True)
+class ContextContradictionSource:
+    record_id: str
+    assertion_value: str
+    source_uri: str
+    source_revision: str
+    source_sha256: str
+
+    def to_dict(self) -> dict[str, str]:
+        return {
+            "record_id": self.record_id,
+            "assertion_value": self.assertion_value,
+            "source_uri": self.source_uri,
+            "source_revision": self.source_revision,
+            "source_sha256": self.source_sha256,
+        }
+
+
+@dataclass(frozen=True)
+class ContextContradiction:
+    assertion_key: str
+    sources: tuple[ContextContradictionSource, ...]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "assertion_key": self.assertion_key,
+            "sources": [item.to_dict() for item in self.sources],
+        }
+
+
+@dataclass(frozen=True)
 class ContextPack:
     pack_id: str
     manifest_sha256: str
@@ -369,6 +631,11 @@ class ContextPack:
     estimated_tokens: int
     eligible_records: int
     matched_records: int
+    outcome: str
+    lifecycle_snapshot_sha256: str | None
+    repository_revision: str | None
+    exclusions: tuple[ContextPackExclusion, ...]
+    contradictions: tuple[ContextContradiction, ...]
 
     def to_dict(self) -> dict[str, Any]:
         principal = self.request.principal
@@ -392,6 +659,16 @@ class ContextPack:
             "eligible_records": self.eligible_records,
             "matched_records": self.matched_records,
             "selected_records": len(self.items),
+            "lifecycle": {
+                "version": "v1",
+                "outcome": self.outcome,
+                "snapshot_sha256": self.lifecycle_snapshot_sha256,
+                "repository_revision": self.repository_revision,
+                "excluded_records": len(self.exclusions),
+                "contradiction_groups": len(self.contradictions),
+            },
+            "exclusions": [item.to_dict() for item in self.exclusions],
+            "contradictions": [item.to_dict() for item in self.contradictions],
             "items": [item.to_dict() for item in self.items],
         }
 
@@ -399,7 +676,13 @@ class ContextPack:
 def build_context_pack(
     records: Iterable[ContextRecord],
     request: ContextPackRequest,
+    *,
+    lifecycle_snapshot: ContextLifecycleSnapshot | None = None,
 ) -> ContextPack:
+    if lifecycle_snapshot is not None and not isinstance(
+        lifecycle_snapshot, ContextLifecycleSnapshot
+    ):
+        raise ContextError("context lifecycle_snapshot must be a ContextLifecycleSnapshot")
     by_id: dict[str, ContextRecord] = {}
     for record in records:
         if not isinstance(record, ContextRecord):
@@ -418,13 +701,40 @@ def build_context_pack(
     active = [record for record in active if record.record_id not in superseded_ids]
 
     query_terms = _terms(request.query)
-    ranked: list[tuple[int, datetime, str, ContextRecord]] = []
+    matched_candidates: list[tuple[int, datetime, str, ContextRecord]] = []
     for record in active:
         score = _relevance_score(record, request.query, query_terms)
         if score <= 0:
             continue
         verified_at = record.verified_at or datetime.min.replace(tzinfo=timezone.utc)
-        ranked.append((score, verified_at.astimezone(timezone.utc), record.record_id, record))
+        matched_candidates.append(
+            (score, verified_at.astimezone(timezone.utc), record.record_id, record)
+        )
+
+    exclusions: list[ContextPackExclusion] = []
+    lifecycle_active: list[tuple[int, datetime, str, ContextRecord]] = []
+    for candidate in matched_candidates:
+        record = candidate[3]
+        reason = _lifecycle_exclusion_reason(record, lifecycle_snapshot)
+        if reason is None:
+            lifecycle_active.append(candidate)
+        else:
+            exclusions.append(_pack_exclusion(record, reason))
+
+    contradictions, contradictory_ids = _find_contradictions(
+        candidate[3] for candidate in lifecycle_active
+    )
+    if contradictory_ids:
+        for _score, _verified_at, _record_id, record in lifecycle_active:
+            if record.record_id in contradictory_ids:
+                exclusions.append(_pack_exclusion(record, "active_contradiction"))
+        lifecycle_active = [
+            candidate
+            for candidate in lifecycle_active
+            if candidate[3].record_id not in contradictory_ids
+        ]
+
+    ranked = lifecycle_active
     ranked.sort(key=lambda item: (-item[0], -_datetime_rank(item[1]), item[2]))
 
     selected: list[ContextPackItem] = []
@@ -444,7 +754,23 @@ def build_context_pack(
         if len(selected) >= request.max_items:
             break
 
-    manifest = _pack_manifest(request, selected, total_tokens)
+    exclusions.sort(key=lambda item: (item.reason, item.record_id))
+    outcome = (
+        "requires_resolution"
+        if contradictions
+        else "partial"
+        if exclusions
+        else "complete"
+    )
+    manifest = _pack_manifest(
+        request,
+        selected,
+        total_tokens,
+        lifecycle_snapshot=lifecycle_snapshot,
+        outcome=outcome,
+        exclusions=exclusions,
+        contradictions=contradictions,
+    )
     canonical = json.dumps(manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     checksum = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
     return ContextPack(
@@ -455,6 +781,15 @@ def build_context_pack(
         estimated_tokens=total_tokens,
         eligible_records=len(active),
         matched_records=len(ranked),
+        outcome=outcome,
+        lifecycle_snapshot_sha256=(
+            lifecycle_snapshot.snapshot_sha256 if lifecycle_snapshot is not None else None
+        ),
+        repository_revision=(
+            lifecycle_snapshot.repository_revision if lifecycle_snapshot is not None else None
+        ),
+        exclusions=tuple(exclusions),
+        contradictions=contradictions,
     )
 
 
@@ -504,6 +839,113 @@ def _is_authorized(record: ContextRecord, request: ContextPackRequest) -> bool:
     return True
 
 
+def _lifecycle_exclusion_reason(
+    record: ContextRecord,
+    snapshot: ContextLifecycleSnapshot | None,
+) -> str | None:
+    indicator = _prompt_injection_indicator(record)
+    if indicator is not None:
+        return f"quarantined_prompt_injection:{indicator}"
+    if (
+        snapshot is not None
+        and "source_revision_changed" in record.invalidation_rules
+        and record.source_revision.startswith("git:")
+        and not _revisions_match(record.source_revision, snapshot.repository_revision)
+    ):
+        return "source_revision_changed"
+    if not record.dependencies:
+        return None
+    observations = {
+        artifact.uri: artifact for artifact in (() if snapshot is None else snapshot.artifacts)
+    }
+    for dependency in sorted(record.dependencies):
+        observed = observations.get(dependency.uri)
+        if observed is None:
+            return "dependency_observation_missing"
+        if not _revisions_match(dependency.revision, observed.revision):
+            return "dependency_revision_mismatch"
+        if dependency.sha256 and dependency.sha256 != observed.sha256:
+            return "dependency_hash_mismatch"
+    return None
+
+
+def _prompt_injection_indicator(record: ContextRecord) -> str | None:
+    model_visible_values = (
+        record.title,
+        record.content,
+        record.owner_id,
+        record.scope_id,
+        record.source_uri,
+        record.source_revision,
+        record.source_item_key,
+        record.repository_id or "",
+        record.branch or "",
+        *record.verification_evidence,
+        *record.invalidation_rules,
+        *(item.uri for item in record.dependencies),
+        *(item.revision for item in record.dependencies),
+        record.assertion_key or "",
+        record.assertion_value or "",
+        *record.tags,
+    )
+    content = "\n".join(model_visible_values)
+    for indicator, pattern in _PROMPT_INJECTION_INDICATORS:
+        if pattern.search(content):
+            return indicator
+    return None
+
+
+def _revisions_match(expected: str, observed: str) -> bool:
+    def normalized(value: str) -> str:
+        return value[4:] if value.startswith("git:") else value
+
+    return normalized(expected) == normalized(observed)
+
+
+def _pack_exclusion(record: ContextRecord, reason: str) -> ContextPackExclusion:
+    return ContextPackExclusion(
+        record_id=record.record_id,
+        reason=reason,
+        source_uri=record.source_uri,
+        source_revision=record.source_revision,
+        source_sha256=record.source_sha256,
+    )
+
+
+def _find_contradictions(
+    records: Iterable[ContextRecord],
+) -> tuple[tuple[ContextContradiction, ...], frozenset[str]]:
+    grouped: dict[str, list[ContextRecord]] = {}
+    for record in records:
+        if record.assertion_key is not None:
+            grouped.setdefault(record.assertion_key, []).append(record)
+    contradictions: list[ContextContradiction] = []
+    record_ids: set[str] = set()
+    for assertion_key, candidates in grouped.items():
+        values = {record.assertion_value for record in candidates}
+        if len(values) <= 1:
+            continue
+        ordered = sorted(candidates, key=lambda record: record.record_id)
+        record_ids.update(record.record_id for record in ordered)
+        contradictions.append(
+            ContextContradiction(
+                assertion_key=assertion_key,
+                sources=tuple(
+                    ContextContradictionSource(
+                        record_id=record.record_id,
+                        assertion_value=record.assertion_value or "",
+                        source_uri=record.source_uri,
+                        source_revision=record.source_revision,
+                        source_sha256=record.source_sha256,
+                    )
+                    for record in ordered
+                ),
+            )
+        )
+    contradictions.sort(key=lambda item: item.assertion_key)
+    return tuple(contradictions), frozenset(record_ids)
+
+
 def _relevance_score(record: ContextRecord, query: str, query_terms: set[str]) -> int:
     title_terms = _terms(record.title)
     tag_terms = _terms(" ".join(record.tags))
@@ -522,7 +964,11 @@ def _relevance_score(record: ContextRecord, query: str, query_terms: set[str]) -
 
 
 def _terms(value: str) -> set[str]:
-    return {match.group(0).casefold() for match in _TERM_PATTERN.finditer(value)}
+    return {
+        term
+        for match in _TERM_PATTERN.finditer(value)
+        if len(term := match.group(0).casefold()) > 1 and term not in _RETRIEVAL_STOP_WORDS
+    }
 
 
 def _validate_supersession_graph(records: dict[str, ContextRecord]) -> None:
@@ -540,6 +986,11 @@ def _pack_manifest(
     request: ContextPackRequest,
     selected: list[ContextPackItem],
     total_tokens: int,
+    *,
+    lifecycle_snapshot: ContextLifecycleSnapshot | None,
+    outcome: str,
+    exclusions: list[ContextPackExclusion],
+    contradictions: tuple[ContextContradiction, ...],
 ) -> dict[str, Any]:
     principal = request.principal
     return {
@@ -558,6 +1009,22 @@ def _pack_manifest(
         "max_items": request.max_items,
         "include_provisional": request.include_provisional,
         "estimated_tokens": total_tokens,
+        "lifecycle": {
+            "version": "v1",
+            "outcome": outcome,
+            "snapshot_sha256": (
+                lifecycle_snapshot.snapshot_sha256
+                if lifecycle_snapshot is not None
+                else None
+            ),
+            "repository_revision": (
+                lifecycle_snapshot.repository_revision
+                if lifecycle_snapshot is not None
+                else None
+            ),
+            "exclusions": [item.to_dict() for item in exclusions],
+            "contradictions": [item.to_dict() for item in contradictions],
+        },
         "items": [
             {
                 "id": item.record.record_id,
@@ -581,6 +1048,18 @@ def _pack_manifest(
                 "expires_at": _isoformat(item.record.expires_at),
                 "supersedes_id": item.record.supersedes_id,
                 "invalidation_rules": list(item.record.invalidation_rules),
+                "dependencies": [
+                    dependency.to_dict()
+                    for dependency in sorted(item.record.dependencies)
+                ],
+                "assertion": (
+                    {
+                        "key": item.record.assertion_key,
+                        "value": item.record.assertion_value,
+                    }
+                    if item.record.assertion_key is not None
+                    else None
+                ),
                 "tags": list(item.record.tags),
                 "content_sha256": item.record.content_sha256,
                 "relevance_score": item.relevance_score,

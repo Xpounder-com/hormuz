@@ -16,6 +16,7 @@ from typing import Any, Callable, Iterable
 from . import __version__
 from .context import (
     ContextError,
+    ContextLifecycleSnapshot,
     ContextPackRequest,
     ContextPrincipal,
     ContextRecord,
@@ -24,12 +25,12 @@ from .context import (
 )
 
 
-CORPUS_SCHEMA = "hormuz.context-benchmark-corpus.v1"
-REFERENCE_SCHEMA = "hormuz.context-benchmark-references.v1"
-RESULT_SCHEMA = "hormuz.context-benchmark-result.v1"
-DEFAULT_CORPUS_PATH = Path(__file__).resolve().parent / "benchmark_data" / "context-corpus.v1.json"
+CORPUS_SCHEMA = "hormuz.context-benchmark-corpus.v2"
+REFERENCE_SCHEMA = "hormuz.context-benchmark-references.v2"
+RESULT_SCHEMA = "hormuz.context-benchmark-result.v2"
+DEFAULT_CORPUS_PATH = Path(__file__).resolve().parent / "benchmark_data" / "context-corpus.v2.json"
 DEFAULT_REFERENCES_PATH = (
-    Path(__file__).resolve().parent / "benchmark_data" / "context-references.v1.json"
+    Path(__file__).resolve().parent / "benchmark_data" / "context-references.v2.json"
 )
 MAX_BENCHMARK_FILE_BYTES = 32 * 1024 * 1024
 BASELINES = ("no_memory", "full_history", "simple_lexical", "hormuz_governed")
@@ -75,6 +76,7 @@ class BenchmarkTask:
     as_of: datetime
     principal: ContextPrincipal
     repository_revision: str
+    lifecycle_snapshot: ContextLifecycleSnapshot
     memory_snapshot_sha256: str
     records: tuple[ContextRecord, ...]
 
@@ -179,14 +181,22 @@ def run_benchmark(
     task_evidence: list[dict[str, Any]] = []
     for task in loaded.tasks:
         reference = loaded.references[task.task_id]
+        governed_manifest = selections["hormuz_governed"][task.task_id].manifest or {}
+        governed_lifecycle = governed_manifest.get("lifecycle", {})
         task_evidence.append(
             {
                 "task_id": task.task_id,
                 "category": task.category,
                 "challenge": task.challenge,
                 "repository_revision": task.repository_revision,
+                "lifecycle_snapshot_sha256": task.lifecycle_snapshot.snapshot_sha256,
                 "memory_snapshot_sha256": task.memory_snapshot_sha256,
                 "relevant_record_count": len(reference.relevant_record_ids),
+                "governed_lifecycle": {
+                    "outcome": governed_lifecycle.get("outcome"),
+                    "excluded_records": governed_lifecycle.get("excluded_records"),
+                    "contradiction_groups": governed_lifecycle.get("contradiction_groups"),
+                },
                 "selected": {
                     baseline: {
                         "record_ids": list(selections[baseline][task.task_id].ids),
@@ -220,7 +230,7 @@ def run_benchmark(
             "category_counts": _count_values(task.category for task in loaded.tasks),
             "challenge_counts": _count_values(task.challenge for task in loaded.tasks),
             "ci_subset": ci_subset,
-            "leakage_review_method": "separate-outcome exact-text and SHA-256 v1",
+            "leakage_review_method": "separate-outcome exact-text and SHA-256 v2",
             "leakage_review_failures": len(loaded.leakage_failures),
             "leakage_failure_task_ids": list(loaded.leakage_failures),
         },
@@ -228,13 +238,11 @@ def run_benchmark(
         "thresholds": threshold_results,
         "contract_observations": {
             "authorization_before_governed_ranking": True,
-            "repository_revision_in_pack_manifest": False,
-            "contradiction_outcome_explicit": False,
-            "dependency_invalidation_automatic": False,
-            "malicious_context_quarantine": False,
-            "note": (
-                "False values are current measured contract gaps, not benchmark failures hidden by the runner."
-            ),
+            "repository_revision_in_pack_manifest": True,
+            "contradiction_outcome_explicit": True,
+            "dependency_invalidation_automatic": True,
+            "malicious_context_quarantine": True,
+            "note": "Lifecycle assertions are evaluated from corpus-visible source metadata, never hidden outcome labels.",
         },
         "tasks": task_evidence,
     }
@@ -397,6 +405,7 @@ def _parse_task(value: object, index: int) -> BenchmarkTask:
             "as_of",
             "principal",
             "repository_snapshot",
+            "lifecycle_snapshot",
             "memory_snapshot_sha256",
             "records",
         },
@@ -445,6 +454,16 @@ def _parse_task(value: object, index: int) -> BenchmarkTask:
     repository_revision = _required_string(snapshot, "revision", f"{label}.repository_snapshot")
     if not _SHA256.fullmatch(repository_revision):
         raise ContextBenchmarkError(f"{label}.repository_snapshot.revision must be a SHA-256 value")
+    try:
+        lifecycle_snapshot = ContextLifecycleSnapshot.from_dict(
+            value.get("lifecycle_snapshot")
+        )
+    except ContextError as error:
+        raise ContextBenchmarkError(f"invalid {label}.lifecycle_snapshot: {error}") from error
+    if lifecycle_snapshot.repository_revision != repository_revision:
+        raise ContextBenchmarkError(
+            f"{label}.lifecycle_snapshot repository revision does not match repository snapshot"
+        )
     records_raw = value.get("records")
     if not isinstance(records_raw, list) or not records_raw:
         raise ContextBenchmarkError(f"{label}.records must be a non-empty array")
@@ -488,6 +507,7 @@ def _parse_task(value: object, index: int) -> BenchmarkTask:
         as_of=as_of,
         principal=principal,
         repository_revision=repository_revision,
+        lifecycle_snapshot=lifecycle_snapshot,
         memory_snapshot_sha256=calculated_memory_sha,
         records=tuple(records),
     )
@@ -559,7 +579,11 @@ def _select_hormuz(task: BenchmarkTask) -> Selection:
         max_items=task.max_items,
         as_of=task.as_of,
     )
-    pack = build_context_pack(task.records, request)
+    pack = build_context_pack(
+        task.records,
+        request,
+        lifecycle_snapshot=task.lifecycle_snapshot,
+    )
     return Selection(
         ids=tuple(item.record.record_id for item in pack.items),
         estimated_tokens=pack.estimated_tokens,

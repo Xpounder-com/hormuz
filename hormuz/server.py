@@ -669,7 +669,20 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 as_of=as_of,
                 include_provisional=include_provisional,
             )
-            pack = build_context_pack((item.record for item in stored), request)
+            lifecycle_snapshot = None
+            if principal.repository_id is not None and principal.branch is not None:
+                stored_snapshot = self.server.context_repository.get_lifecycle_snapshot(
+                    organization_id=principal.organization_id,
+                    repository_id=principal.repository_id,
+                    branch=principal.branch,
+                )
+                if stored_snapshot is not None:
+                    lifecycle_snapshot = stored_snapshot.snapshot
+            pack = build_context_pack(
+                (item.record for item in stored),
+                request,
+                lifecycle_snapshot=lifecycle_snapshot,
+            )
             # No content leaves this boundary unless the metadata-only read event
             # has committed successfully.
             self.server.context_repository.record_pack_read(pack, occurred_at=as_of)
@@ -694,7 +707,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             )
             return
         LOGGER.info(
-            "context_pack_created actor=%s team=%s organization=%s repository=%s branch=%s pack_id=%s selected=%d estimated_tokens=%d",
+            "context_pack_created actor=%s team=%s organization=%s repository=%s branch=%s pack_id=%s selected=%d excluded=%d contradictions=%d outcome=%s estimated_tokens=%d",
             identity.actor_id,
             identity.team_id,
             identity.organization_id,
@@ -702,6 +715,9 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             principal.branch or "-",
             pack.pack_id,
             len(pack.items),
+            len(pack.exclusions),
+            len(pack.contradictions),
+            pack.outcome,
             pack.estimated_tokens,
         )
         self._send_json(HTTPStatus.OK, pack.to_dict())

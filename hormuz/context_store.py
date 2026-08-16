@@ -15,14 +15,16 @@ from typing import Iterable, Protocol
 
 from .context import (
     CLASSIFICATIONS,
+    ContextArtifact,
     ContextError,
+    ContextLifecycleSnapshot,
     ContextPack,
     ContextPrincipal,
     ContextRecord,
 )
 
 
-CONTEXT_STORE_SCHEMA_VERSION = 2
+CONTEXT_STORE_SCHEMA_VERSION = 3
 MAX_CONTEXT_CONTENT_BYTES = 25 * 1024 * 1024
 _CLASSIFICATION_RANK = {name: index for index, name in enumerate(CLASSIFICATIONS)}
 _LEGACY_EFFECTIVE_AT = datetime(1970, 1, 1, tzinfo=timezone.utc)
@@ -87,6 +89,33 @@ class IngestResult:
     created: bool
 
 
+@dataclass(frozen=True)
+class StoredLifecycleSnapshot:
+    organization_id: str
+    repository_id: str
+    branch: str
+    snapshot: ContextLifecycleSnapshot
+    version: int
+    observed_at: datetime
+    actor_id: str
+    policy_version: str
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            **self.snapshot.to_dict(),
+            "organization_id": self.organization_id,
+            "repository_id": self.repository_id,
+            "branch": self.branch,
+            "snapshot_sha256": self.snapshot.snapshot_sha256,
+            "storage": {
+                "version": self.version,
+                "observed_at": _isoformat(self.observed_at),
+                "actor_id": self.actor_id,
+                "policy_version": self.policy_version,
+            },
+        }
+
+
 class SQLiteContextRepository:
     """Single-node local repository; not the accepted enterprise persistence topology."""
 
@@ -144,7 +173,7 @@ class SQLiteContextRepository:
             schema_version = int(connection.execute("PRAGMA user_version").fetchone()[0])
             if schema_version > CONTEXT_STORE_SCHEMA_VERSION:
                 raise ContextStoreError("context_store_schema_newer_than_binary")
-            if schema_version not in {0, 1, CONTEXT_STORE_SCHEMA_VERSION}:
+            if schema_version not in {0, 1, 2, CONTEXT_STORE_SCHEMA_VERSION}:
                 raise ContextStoreError("context_store_schema_migration_required")
             connection.execute("PRAGMA journal_mode = WAL")
             connection.executescript(
@@ -178,6 +207,9 @@ class SQLiteContextRepository:
                     expires_at TEXT,
                     supersedes_id TEXT,
                     invalidation_rules_json TEXT NOT NULL,
+                    dependencies_json TEXT NOT NULL DEFAULT '[]',
+                    assertion_key TEXT,
+                    assertion_value TEXT,
                     tags_json TEXT NOT NULL,
                     version INTEGER NOT NULL CHECK (version >= 1),
                     created_at TEXT NOT NULL,
@@ -234,16 +266,86 @@ class SQLiteContextRepository:
                     selected_records INTEGER NOT NULL CHECK (selected_records >= 0),
                     eligible_records INTEGER NOT NULL CHECK (eligible_records >= 0),
                     matched_records INTEGER NOT NULL CHECK (matched_records >= 0),
-                    estimated_tokens INTEGER NOT NULL CHECK (estimated_tokens >= 0)
+                    estimated_tokens INTEGER NOT NULL CHECK (estimated_tokens >= 0),
+                    lifecycle_outcome TEXT NOT NULL DEFAULT 'complete' CHECK (
+                        lifecycle_outcome IN ('complete', 'partial', 'requires_resolution')
+                    ),
+                    excluded_records INTEGER NOT NULL DEFAULT 0 CHECK (excluded_records >= 0),
+                    contradiction_groups INTEGER NOT NULL DEFAULT 0 CHECK (contradiction_groups >= 0)
                 );
                 CREATE INDEX IF NOT EXISTS idx_context_access_org_time
                     ON context_access_events (organization_id, occurred_at, id);
                 CREATE INDEX IF NOT EXISTS idx_context_access_actor_time
                     ON context_access_events (organization_id, actor_id, occurred_at);
-                PRAGMA user_version = {CONTEXT_STORE_SCHEMA_VERSION};
+
+                CREATE TABLE IF NOT EXISTS context_lifecycle_snapshots (
+                    organization_id TEXT NOT NULL,
+                    repository_id TEXT NOT NULL,
+                    branch TEXT NOT NULL,
+                    repository_revision TEXT NOT NULL,
+                    artifacts_json TEXT NOT NULL,
+                    snapshot_sha256 TEXT NOT NULL,
+                    version INTEGER NOT NULL CHECK (version >= 1),
+                    observed_at TEXT NOT NULL,
+                    actor_id TEXT NOT NULL,
+                    policy_version TEXT NOT NULL,
+                    PRIMARY KEY (organization_id, repository_id, branch)
+                );
+                CREATE INDEX IF NOT EXISTS idx_context_lifecycle_observed
+                    ON context_lifecycle_snapshots (organization_id, observed_at);
+
+                CREATE TABLE IF NOT EXISTS context_lifecycle_events (
+                    id TEXT PRIMARY KEY,
+                    occurred_at TEXT NOT NULL,
+                    organization_id TEXT NOT NULL,
+                    repository_id TEXT NOT NULL,
+                    branch TEXT NOT NULL,
+                    action TEXT NOT NULL CHECK (action IN ('snapshot_create', 'snapshot_update')),
+                    prior_version INTEGER,
+                    new_version INTEGER NOT NULL,
+                    snapshot_sha256 TEXT NOT NULL,
+                    artifact_count INTEGER NOT NULL CHECK (artifact_count >= 0),
+                    actor_id TEXT NOT NULL,
+                    policy_version TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_context_lifecycle_events_org_time
+                    ON context_lifecycle_events (organization_id, occurred_at, id);
                 COMMIT;
                 """
             )
+            connection.execute("BEGIN IMMEDIATE")
+            record_columns = {
+                str(row[1]) for row in connection.execute("PRAGMA table_info(context_records)")
+            }
+            if "dependencies_json" not in record_columns:
+                connection.execute(
+                    "ALTER TABLE context_records ADD COLUMN dependencies_json TEXT NOT NULL DEFAULT '[]'"
+                )
+            if "assertion_key" not in record_columns:
+                connection.execute("ALTER TABLE context_records ADD COLUMN assertion_key TEXT")
+            if "assertion_value" not in record_columns:
+                connection.execute("ALTER TABLE context_records ADD COLUMN assertion_value TEXT")
+            access_columns = {
+                str(row[1])
+                for row in connection.execute("PRAGMA table_info(context_access_events)")
+            }
+            if "lifecycle_outcome" not in access_columns:
+                connection.execute(
+                    "ALTER TABLE context_access_events ADD COLUMN lifecycle_outcome "
+                    "TEXT NOT NULL DEFAULT 'complete'"
+                )
+            if "excluded_records" not in access_columns:
+                connection.execute(
+                    "ALTER TABLE context_access_events ADD COLUMN excluded_records "
+                    "INTEGER NOT NULL DEFAULT 0"
+                )
+            if "contradiction_groups" not in access_columns:
+                connection.execute(
+                    "ALTER TABLE context_access_events ADD COLUMN contradiction_groups "
+                    "INTEGER NOT NULL DEFAULT 0"
+                )
+            connection.execute(f"PRAGMA user_version = {CONTEXT_STORE_SCHEMA_VERSION}")
+            connection.commit()
 
     def ingest(
         self,
@@ -328,9 +430,14 @@ class SQLiteContextRepository:
                 classification_rank, source_uri, source_revision, source_sha256,
                 source_item_key, repository_id, branch, verification,
                 verification_evidence_json, effective_at, verified_at, expires_at,
-                supersedes_id, invalidation_rules_json, tags_json, version,
+                supersedes_id, invalidation_rules_json, dependencies_json,
+                assertion_key, assertion_value, tags_json, version,
                 created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+            ) VALUES (
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?
+            )
             """,
             _record_values(record, encoded, self.codec.codec_id) + (now_value, now_value),
         )
@@ -413,6 +520,7 @@ class SQLiteContextRepository:
                     repository_id = ?, branch = ?, verification = ?,
                     verification_evidence_json = ?, effective_at = ?, verified_at = ?,
                     expires_at = ?, supersedes_id = ?, invalidation_rules_json = ?,
+                    dependencies_json = ?, assertion_key = ?, assertion_value = ?,
                     tags_json = ?, version = ?, updated_at = ?
                 WHERE organization_id = ? AND id = ? AND version = ?
                 """,
@@ -505,6 +613,170 @@ class SQLiteContextRepository:
             )
         self._checkpoint_deleted_content()
 
+    def observe_lifecycle_snapshot(
+        self,
+        *,
+        organization_id: str,
+        repository_id: str,
+        branch: str,
+        snapshot: ContextLifecycleSnapshot,
+        expected_version: int | None,
+        actor_id: str,
+        policy_version: str,
+        occurred_at: datetime | None = None,
+    ) -> StoredLifecycleSnapshot:
+        """Atomically record trusted source/dependency state for later pack evaluation."""
+        for name, value in (
+            ("organization_id", organization_id),
+            ("repository_id", repository_id),
+            ("branch", branch),
+        ):
+            if (
+                not isinstance(value, str)
+                or not value.strip()
+                or len(value.encode("utf-8")) > 512
+                or any(character in value for character in ("\n", "\r", "\x00"))
+            ):
+                raise ContextStoreError(f"context_lifecycle_{name}_required")
+        if not isinstance(snapshot, ContextLifecycleSnapshot):
+            raise ContextStoreError("context_lifecycle_snapshot_required")
+        if expected_version is not None and (
+            isinstance(expected_version, bool)
+            or not isinstance(expected_version, int)
+            or expected_version < 1
+        ):
+            raise ContextStoreError("context_lifecycle_expected_version_invalid")
+        _validate_mutation_identity(actor_id=actor_id, policy_version=policy_version)
+        now = _utc(occurred_at or datetime.now(timezone.utc))
+        artifacts_json = _json_artifact_tuple(snapshot.artifacts)
+        snapshot_sha256 = snapshot.snapshot_sha256
+        with self._lock, self._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                """
+                SELECT * FROM context_lifecycle_snapshots
+                WHERE organization_id = ? AND repository_id = ? AND branch = ?
+                """,
+                (organization_id, repository_id, branch),
+            ).fetchone()
+            if row is not None and str(row["snapshot_sha256"]) == snapshot_sha256:
+                return self._row_to_lifecycle_snapshot(row)
+            if row is None:
+                if expected_version is not None:
+                    raise ContextConflict("context_lifecycle_version_conflict")
+                new_version = 1
+                action = "snapshot_create"
+                prior_version = None
+                connection.execute(
+                    """
+                    INSERT INTO context_lifecycle_snapshots (
+                        organization_id, repository_id, branch, repository_revision,
+                        artifacts_json, snapshot_sha256, version, observed_at,
+                        actor_id, policy_version
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        organization_id,
+                        repository_id,
+                        branch,
+                        snapshot.repository_revision,
+                        artifacts_json,
+                        snapshot_sha256,
+                        new_version,
+                        _isoformat(now),
+                        actor_id,
+                        policy_version,
+                    ),
+                )
+            else:
+                prior_version = int(row["version"])
+                if expected_version != prior_version:
+                    raise ContextConflict("context_lifecycle_version_conflict")
+                new_version = prior_version + 1
+                action = "snapshot_update"
+                cursor = connection.execute(
+                    """
+                    UPDATE context_lifecycle_snapshots
+                    SET repository_revision = ?, artifacts_json = ?, snapshot_sha256 = ?,
+                        version = ?, observed_at = ?, actor_id = ?, policy_version = ?
+                    WHERE organization_id = ? AND repository_id = ? AND branch = ?
+                      AND version = ?
+                    """,
+                    (
+                        snapshot.repository_revision,
+                        artifacts_json,
+                        snapshot_sha256,
+                        new_version,
+                        _isoformat(now),
+                        actor_id,
+                        policy_version,
+                        organization_id,
+                        repository_id,
+                        branch,
+                        prior_version,
+                    ),
+                )
+                if cursor.rowcount != 1:
+                    raise ContextConflict("context_lifecycle_version_conflict")
+            connection.execute(
+                """
+                INSERT INTO context_lifecycle_events (
+                    id, occurred_at, organization_id, repository_id, branch,
+                    action, prior_version, new_version, snapshot_sha256,
+                    artifact_count, actor_id, policy_version
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    str(uuid.uuid4()),
+                    _isoformat(now),
+                    organization_id,
+                    repository_id,
+                    branch,
+                    action,
+                    prior_version,
+                    new_version,
+                    snapshot_sha256,
+                    len(snapshot.artifacts),
+                    actor_id,
+                    policy_version,
+                ),
+            )
+            stored = connection.execute(
+                """
+                SELECT * FROM context_lifecycle_snapshots
+                WHERE organization_id = ? AND repository_id = ? AND branch = ?
+                """,
+                (organization_id, repository_id, branch),
+            ).fetchone()
+            if stored is None:  # pragma: no cover - SQLite invariant
+                raise ContextStoreError("context_lifecycle_missing_after_write")
+            return self._row_to_lifecycle_snapshot(stored)
+
+    def get_lifecycle_snapshot(
+        self,
+        *,
+        organization_id: str,
+        repository_id: str,
+        branch: str,
+    ) -> StoredLifecycleSnapshot | None:
+        for value in (organization_id, repository_id, branch):
+            if (
+                not isinstance(value, str)
+                or not value.strip()
+                or len(value.encode("utf-8")) > 512
+                or any(character in value for character in ("\n", "\r", "\x00"))
+            ):
+                raise ContextStoreError("context_lifecycle_scope_required")
+        with self._lock, self._connection() as connection:
+            row = connection.execute(
+                """
+                SELECT * FROM context_lifecycle_snapshots
+                WHERE organization_id = ? AND repository_id = ? AND branch = ?
+                """,
+                (organization_id, repository_id, branch),
+            ).fetchone()
+        return None if row is None else self._row_to_lifecycle_snapshot(row)
+
     def list_authorized(
         self,
         principal: ContextPrincipal,
@@ -575,14 +847,25 @@ class SQLiteContextRepository:
             pack.eligible_records,
             pack.matched_records,
             pack.estimated_tokens,
+            len(pack.exclusions),
+            len(pack.contradictions),
         )
         if any(
             isinstance(value, bool) or not isinstance(value, int) or value < 0
             for value in counts
         ):
             raise ContextStoreError("context_access_audit_invalid")
-        selected_records, eligible_records, matched_records, _estimated_tokens = counts
+        (
+            selected_records,
+            eligible_records,
+            matched_records,
+            _estimated_tokens,
+            _excluded_records,
+            _contradiction_groups,
+        ) = counts
         if selected_records > matched_records or matched_records > eligible_records:
+            raise ContextStoreError("context_access_audit_invalid")
+        if pack.outcome not in {"complete", "partial", "requires_resolution"}:
             raise ContextStoreError("context_access_audit_invalid")
         event_id = str(uuid.uuid4())
         now = _utc(occurred_at or datetime.now(timezone.utc))
@@ -594,8 +877,9 @@ class SQLiteContextRepository:
                         id, occurred_at, organization_id, team_id, actor_id, action,
                         pack_id, policy_version, repository_id, branch, clearance,
                         include_provisional, selected_records, eligible_records,
-                        matched_records, estimated_tokens
-                    ) VALUES (?, ?, ?, ?, ?, 'pack', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        matched_records, estimated_tokens, lifecycle_outcome,
+                        excluded_records, contradiction_groups
+                    ) VALUES (?, ?, ?, ?, ?, 'pack', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         event_id,
@@ -613,6 +897,9 @@ class SQLiteContextRepository:
                         pack.eligible_records,
                         pack.matched_records,
                         pack.estimated_tokens,
+                        pack.outcome,
+                        len(pack.exclusions),
+                        len(pack.contradictions),
                     ),
                 )
         except sqlite3.Error as error:
@@ -649,8 +936,21 @@ class SQLiteContextRepository:
                     id, occurred_at, organization_id, team_id, actor_id, action,
                     pack_id, policy_version, repository_id, branch, clearance,
                     include_provisional, selected_records, eligible_records,
-                    matched_records, estimated_tokens
+                    matched_records, estimated_tokens, lifecycle_outcome,
+                    excluded_records, contradiction_groups
                 FROM context_access_events
+                WHERE {' AND '.join(clauses)}
+                ORDER BY occurred_at, id
+                """,
+                parameters,
+            ).fetchall()
+            lifecycle_rows = connection.execute(
+                f"""
+                SELECT
+                    id, occurred_at, organization_id, repository_id, branch,
+                    action, prior_version, new_version, snapshot_sha256,
+                    artifact_count, actor_id, policy_version
+                FROM context_lifecycle_events
                 WHERE {' AND '.join(clauses)}
                 ORDER BY occurred_at, id
                 """,
@@ -672,6 +972,14 @@ class SQLiteContextRepository:
                 "include_provisional": bool(row["include_provisional"]),
             }
             for row in access_rows
+        )
+        events.extend(
+            {
+                "schema_version": 1,
+                "event_type": "context.lifecycle",
+                **dict(row),
+            }
+            for row in lifecycle_rows
         )
         events.sort(key=lambda event: (str(event["occurred_at"]), str(event["id"])))
         return events
@@ -734,6 +1042,31 @@ class SQLiteContextRepository:
             )
             current_id = str(row["supersedes_id"]) if row is not None and row["supersedes_id"] else None
 
+    def _row_to_lifecycle_snapshot(self, row: sqlite3.Row) -> StoredLifecycleSnapshot:
+        try:
+            artifacts = _json_artifacts(row, "artifacts_json")
+            snapshot = ContextLifecycleSnapshot(
+                repository_revision=str(row["repository_revision"]),
+                artifacts=artifacts,
+            )
+        except (ContextError, ContextStoreError) as error:
+            raise ContextStoreError("context_lifecycle_snapshot_corrupt") from error
+        if snapshot.snapshot_sha256 != str(row["snapshot_sha256"]):
+            raise ContextStoreError("context_lifecycle_snapshot_integrity_failed")
+        version = int(row["version"])
+        if version < 1:
+            raise ContextStoreError("context_lifecycle_snapshot_corrupt")
+        return StoredLifecycleSnapshot(
+            organization_id=str(row["organization_id"]),
+            repository_id=str(row["repository_id"]),
+            branch=str(row["branch"]),
+            snapshot=snapshot,
+            version=version,
+            observed_at=_parse_required_datetime(row["observed_at"]),
+            actor_id=str(row["actor_id"]),
+            policy_version=str(row["policy_version"]),
+        )
+
     def _row_to_stored(self, row: sqlite3.Row) -> StoredContextRecord:
         if str(row["content_encoding"]) != self.codec.codec_id:
             raise ContextStoreError("context_content_codec_unavailable")
@@ -765,6 +1098,9 @@ class SQLiteContextRepository:
                 expires_at=_parse_nullable_datetime(row["expires_at"]),
                 supersedes_id=_nullable_row_string(row, "supersedes_id"),
                 invalidation_rules=_json_string_tuple(row, "invalidation_rules_json"),
+                dependencies=_json_artifacts(row, "dependencies_json"),
+                assertion_key=_nullable_row_string(row, "assertion_key"),
+                assertion_value=_nullable_row_string(row, "assertion_value"),
                 tags=_json_string_tuple(row, "tags_json"),
             )
         except ContextError as error:
@@ -960,6 +1296,9 @@ def _record_values(
         _isoformat(record.expires_at),
         record.supersedes_id,
         _json_tuple(record.invalidation_rules),
+        _json_artifact_tuple(record.dependencies),
+        record.assertion_key,
+        record.assertion_value,
         _json_tuple(record.tags),
     )
 
@@ -982,6 +1321,15 @@ def _json_tuple(values: tuple[str, ...]) -> str:
     return json.dumps(list(values), separators=(",", ":"), ensure_ascii=False)
 
 
+def _json_artifact_tuple(values: tuple[ContextArtifact, ...]) -> str:
+    return json.dumps(
+        [item.to_dict() for item in sorted(values)],
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
+
+
 def _json_string_tuple(row: sqlite3.Row, name: str) -> tuple[str, ...]:
     try:
         value = json.loads(str(row[name]))
@@ -990,6 +1338,16 @@ def _json_string_tuple(row: sqlite3.Row, name: str) -> tuple[str, ...]:
     if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
         raise ContextStoreError("context_record_json_corrupt")
     return tuple(value)
+
+
+def _json_artifacts(row: sqlite3.Row, name: str) -> tuple[ContextArtifact, ...]:
+    try:
+        value = json.loads(str(row[name]))
+        if not isinstance(value, list):
+            raise ContextError("context artifacts must be an array")
+        return tuple(ContextArtifact.from_dict(item) for item in value)
+    except (json.JSONDecodeError, ContextError) as error:
+        raise ContextStoreError("context_record_json_corrupt") from error
 
 
 def _nullable_row_string(row: sqlite3.Row, name: str) -> str | None:

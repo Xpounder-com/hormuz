@@ -23,10 +23,10 @@ Hormuz is alpha software. The local prototype proves routing and policy behavior
 - OpenAI response storage and background mode disabled by default as enforceable provider privacy policy.
 - Configuration output for installed Codex and Claude Code clients.
 - A separate local governed-context repository with atomic idempotent import, verification evidence, classification/scope authorization, optimistic concurrency, metadata-only mutation/read audit export, private content export, and physical deletion controls.
-- Explicit, provider-neutral governed context packs retrieved authorization-first from that repository, with expiry, supersession, deterministic lexical ranking, and token-budget enforcement.
+- Explicit, provider-neutral governed context packs retrieved authorization-first from that repository, with expiry, supersession, trusted dependency snapshots, prompt-injection quarantine, structured contradiction outcomes, deterministic lexical ranking, and token-budget enforcement.
 - Authenticated `POST /v1/context/packs` retrieval with identity-derived scope, server-owned caps, per-actor rate limiting, stable errors, and no provider or usage-ledger side effects.
 - A real `hormuz_get_context` MCP stdio tool for Codex and Claude Code that reuses the authenticated Context Pack API, supports current and next-generation MCP handshakes, and cannot override employee identity or organization policy.
-- A bundled 60-task synthetic context benchmark with no-memory, full-history, simple-lexical, and governed baselines; a green regression profile and a deliberately stricter release profile expose current lifecycle and untrusted-context gaps.
+- A bundled 60-task synthetic context benchmark with no-memory, full-history, simple-lexical, and governed baselines; its strict lifecycle release profile is green on the frozen version-2 corpus.
 - Generic OIDC discovery/JWKS verification with strict issuer, audience, expiry, asymmetric-algorithm, subject-mapping, and signing-key-rotation enforcement.
 - Generic OIDC authorization-code + PKCE browser login with opaque 10-minute Hormuz access credentials, atomic refresh rotation, replay-family revocation, and fail-closed OS secure-store custody.
 
@@ -118,6 +118,10 @@ python3 -m hormuz --config hormuz.json context-import \
 python3 -m hormuz --config hormuz.json context-list \
   --actor alice \
   --repository Xpounder-com/hormuz
+python3 -m hormuz --config hormuz.json context-snapshot-import \
+  --snapshot examples/context-lifecycle-snapshot.json \
+  --actor alice \
+  --policy-version engineering-lifecycle-v1
 python3 -m hormuz --config hormuz.json context-pack \
   --query "How should API retries work?" \
   --organization xpounder \
@@ -137,13 +141,12 @@ Measure the bundled governed-context contract without a gateway configuration or
 
 ```bash
 python3 -m hormuz context-benchmark \
-  --profile regression \
-  --ci-subset \
+  --profile release \
   --iterations 5 \
-  --output context-benchmark.json
+  --output context-benchmark-release.json
 ```
 
-See [docs/CONTEXT_BENCHMARK.md](docs/CONTEXT_BENCHMARK.md) for the corpus, formulas, evidence format, and the intentionally failing enterprise release profile.
+See [docs/CONTEXT_BENCHMARK.md](docs/CONTEXT_BENCHMARK.md) for the corpus, formulas, evidence format, strict thresholds, and interpretation limits.
 
 ## Test
 
@@ -161,4 +164,4 @@ The GitHub publication gate also tests Python 3.11 through 3.14, validates the f
 
 ## Roadmap boundary
 
-The current milestone includes the enforcement, accounting, deterministic secret-egress, metadata-audit, local persistent context-record/context-pack, MCP retrieval, OIDC JWT verification, and a single-node OIDC login/session kernel. The context and session databases are deliberately local implementations; they are not the pending enterprise tenancy, HA, or KMS design. Before an enterprise release, Hormuz still needs one owner-selected real-IdP validation, SCIM-driven deprovisioning, admin revocation APIs, structured PII/semantic DLP, durable multi-tenant persistence, TLS and deployment hardening, signed or externally immutable audit retention, invoice reconciliation, broader provider conformance coverage, and automatic context approvals, invalidation, cache, mandatory injection, and outcome writeback.
+The current milestone includes the enforcement, accounting, deterministic secret-egress, metadata-audit, local persistent context-record/context-pack, trusted lifecycle snapshot evaluation, MCP retrieval, OIDC JWT verification, and a single-node OIDC login/session kernel. The context and session databases are deliberately local implementations; they are not the pending enterprise tenancy, HA, or KMS design. Before an enterprise release, Hormuz still needs one owner-selected real-IdP validation, SCIM-driven deprovisioning, admin revocation APIs, structured PII/semantic DLP, durable multi-tenant persistence, TLS and deployment hardening, signed or externally immutable audit retention, invoice reconciliation, broader provider conformance coverage, automatic context verification/promotion/decay and resumable revalidation, cache, mandatory injection, and outcome writeback.

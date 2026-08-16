@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import io
 import json
 import os
@@ -28,6 +29,8 @@ from hormuz.cli import (
     _context_import,
     _context_list,
     _context_pack,
+    _context_snapshot_import,
+    _context_snapshot_show,
     build_parser,
 )
 from hormuz.config import (
@@ -42,6 +45,17 @@ from hormuz.context import ContextError
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def envelope_hash(envelope: dict[str, object]) -> str:
+    snapshot = envelope["snapshot"]
+    canonical = json.dumps(
+        snapshot,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 class ClientConfigTests(unittest.TestCase):
@@ -613,6 +627,185 @@ class ClientConfigTests(unittest.TestCase):
             )
             with redirect_stdout(io.StringIO()):
                 self.assertEqual(_context_delete(config, delete_args), 0)
+
+    def test_persistent_lifecycle_snapshot_controls_pack_and_uses_optimistic_versioning(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config = replace(self.config, context_database_path=root / "context.sqlite3")
+            records_path = root / "records.jsonl"
+            dependency_uri = "repo://acme/api/config/retries.json"
+            base = {
+                "kind": "decision",
+                "organization_id": "xpounder",
+                "visibility": "team",
+                "scope_id": "engineering",
+                "classification": "internal",
+                "repository_id": "acme/api",
+                "branch": "main",
+                "verification": "verified",
+                "verification_evidence": ["ci:passed"],
+                "effective_at": "2026-08-14T12:00:00Z",
+                "verified_at": "2026-08-14T12:00:00Z",
+                "tags": ["retry"],
+            }
+            current = {
+                **base,
+                "id": "current",
+                "title": "Current retry policy",
+                "content": "Use bounded retry policy with jitter.",
+                "source": {
+                    "uri": "https://example.test/current",
+                    "revision": "git:current",
+                    "item_key": "current",
+                },
+                "invalidation_rules": ["source_revision_changed"],
+            }
+            stale = {
+                **base,
+                "id": "stale-dependency",
+                "title": "Legacy retry policy",
+                "content": "Use the legacy retry policy.",
+                "source": {
+                    "uri": "https://example.test/stale",
+                    "revision": "git:current",
+                    "item_key": "stale-dependency",
+                },
+                "dependencies": [
+                    {"uri": dependency_uri, "revision": "old", "sha256": "a" * 64}
+                ],
+            }
+            records_path.write_text(
+                json.dumps(current) + "\n" + json.dumps(stale) + "\n",
+                encoding="utf-8",
+            )
+            import_args = build_parser().parse_args(
+                ["context-import", "--records", str(records_path), "--actor", "alice"]
+            )
+            with redirect_stdout(io.StringIO()):
+                self.assertEqual(_context_import(config, import_args), 0)
+
+            snapshot_path = root / "snapshot.json"
+            envelope = {
+                "schema_version": "hormuz.context-lifecycle-envelope.v1",
+                "organization_id": "xpounder",
+                "repository_id": "acme/api",
+                "branch": "main",
+                "snapshot": {
+                    "schema_version": "hormuz.context-lifecycle-snapshot.v1",
+                    "repository_revision": "current",
+                    "artifacts": [
+                        {"uri": dependency_uri, "revision": "new", "sha256": "b" * 64}
+                    ],
+                },
+            }
+            snapshot_path.write_text(json.dumps(envelope), encoding="utf-8")
+            snapshot_args = build_parser().parse_args(
+                [
+                    "context-snapshot-import",
+                    "--snapshot",
+                    str(snapshot_path),
+                    "--actor",
+                    "alice",
+                    "--policy-version",
+                    "lifecycle-v1",
+                ]
+            )
+            with redirect_stdout(output := io.StringIO()):
+                self.assertEqual(_context_snapshot_import(config, snapshot_args), 0)
+            self.assertEqual(json.loads(output.getvalue())["storage"]["version"], 1)
+            with redirect_stdout(output := io.StringIO()):
+                self.assertEqual(_context_snapshot_import(config, snapshot_args), 0)
+            self.assertEqual(json.loads(output.getvalue())["storage"]["version"], 1)
+
+            show_args = build_parser().parse_args(
+                [
+                    "context-snapshot-show",
+                    "--actor",
+                    "alice",
+                    "--repository",
+                    "acme/api",
+                    "--branch",
+                    "main",
+                ]
+            )
+            with redirect_stdout(output := io.StringIO()):
+                self.assertEqual(_context_snapshot_show(config, show_args), 0)
+            self.assertEqual(json.loads(output.getvalue())["snapshot_sha256"], envelope_hash(envelope))
+
+            pack_args = build_parser().parse_args(
+                [
+                    "context-pack",
+                    "--query",
+                    "retry policy",
+                    "--organization",
+                    "xpounder",
+                    "--actor",
+                    "alice",
+                    "--repository",
+                    "acme/api",
+                    "--branch",
+                    "main",
+                    "--token-budget",
+                    "1000",
+                    "--as-of",
+                    "2026-08-15T12:00:00Z",
+                ]
+            )
+            with redirect_stdout(output := io.StringIO()):
+                self.assertEqual(_context_pack(config, pack_args), 0)
+            packed = json.loads(output.getvalue())
+            self.assertEqual([item["id"] for item in packed["items"]], ["current"])
+            self.assertEqual(packed["lifecycle"]["outcome"], "partial")
+            self.assertEqual(
+                packed["exclusions"][0]["reason"],
+                "dependency_revision_mismatch",
+            )
+
+            changed = json.loads(json.dumps(envelope))
+            changed["snapshot"]["repository_revision"] = "next"
+            snapshot_path.write_text(json.dumps(changed), encoding="utf-8")
+            with redirect_stderr(io.StringIO()):
+                self.assertEqual(_context_snapshot_import(config, snapshot_args), 2)
+            snapshot_args.expected_version = 1
+            with redirect_stdout(output := io.StringIO()):
+                self.assertEqual(_context_snapshot_import(config, snapshot_args), 0)
+            self.assertEqual(json.loads(output.getvalue())["storage"]["version"], 2)
+
+    def test_lifecycle_snapshot_import_rejects_cross_organization_scope_before_write(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config = replace(self.config, context_database_path=root / "context.sqlite3")
+            path = root / "snapshot.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": "hormuz.context-lifecycle-envelope.v1",
+                        "organization_id": "another-organization",
+                        "repository_id": "acme/api",
+                        "branch": "main",
+                        "snapshot": {
+                            "schema_version": "hormuz.context-lifecycle-snapshot.v1",
+                            "repository_revision": "current",
+                            "artifacts": [],
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            args = build_parser().parse_args(
+                ["context-snapshot-import", "--snapshot", str(path), "--actor", "alice"]
+            )
+            with redirect_stderr(io.StringIO()):
+                self.assertEqual(_context_snapshot_import(config, args), 2)
+            if config.context_database_path.exists():
+                connection = sqlite3.connect(config.context_database_path)
+                try:
+                    count = connection.execute(
+                        "SELECT COUNT(*) FROM context_lifecycle_snapshots"
+                    ).fetchone()[0]
+                finally:
+                    connection.close()
+                self.assertEqual(count, 0)
 
     def test_context_import_rejects_the_entire_batch_before_cross_scope_write(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

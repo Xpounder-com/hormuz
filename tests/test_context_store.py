@@ -13,6 +13,8 @@ from pathlib import Path
 from threading import Barrier
 
 from hormuz.context import (
+    ContextArtifact,
+    ContextLifecycleSnapshot,
     ContextPackRequest,
     ContextPrincipal,
     ContextRecord,
@@ -194,6 +196,9 @@ class ContextStoreTests(unittest.TestCase):
             self.assertEqual(access["branch"], "main")
             self.assertEqual(access["selected_records"], 1)
             self.assertEqual(access["estimated_tokens"], pack.estimated_tokens)
+            self.assertEqual(access["lifecycle_outcome"], "complete")
+            self.assertEqual(access["excluded_records"], 0)
+            self.assertEqual(access["contradiction_groups"], 0)
             self.assertIs(access["include_provisional"], False)
             serialized = json.dumps(access)
             for secret in (
@@ -206,64 +211,104 @@ class ContextStoreTests(unittest.TestCase):
             ):
                 self.assertNotIn(secret, serialized)
 
-    def test_schema_v1_is_migrated_in_place_without_losing_records_or_audit(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            path = Path(temporary) / "context.sqlite3"
-            repository = SQLiteContextRepository(path)
-            original = record("migration")
-            repository.ingest(
-                original,
-                actor_id="alice",
-                policy_version="mutation-v1",
-                occurred_at=NOW - timedelta(minutes=1),
-            )
-            # Schema v2 only adds context_access_events, so removing that table
-            # recreates the complete v1 layout produced by the prior binary.
-            connection = sqlite3.connect(path)
-            try:
-                connection.execute("DROP TABLE context_access_events")
-                connection.execute("PRAGMA user_version = 1")
-                connection.commit()
-            finally:
-                connection.close()
+    def test_schema_v1_and_v2_are_migrated_without_losing_records_or_audit(self) -> None:
+        for old_version in (1, 2):
+            with self.subTest(old_version=old_version), tempfile.TemporaryDirectory() as temporary:
+                path = Path(temporary) / "context.sqlite3"
+                repository = SQLiteContextRepository(path)
+                original = record("migration")
+                repository.ingest(
+                    original,
+                    actor_id="alice",
+                    policy_version="mutation-v1",
+                    occurred_at=NOW - timedelta(minutes=1),
+                )
+                connection = sqlite3.connect(path)
+                try:
+                    connection.execute("DROP TABLE context_lifecycle_events")
+                    connection.execute("DROP TABLE context_lifecycle_snapshots")
+                    connection.execute("ALTER TABLE context_records DROP COLUMN dependencies_json")
+                    connection.execute("ALTER TABLE context_records DROP COLUMN assertion_key")
+                    connection.execute("ALTER TABLE context_records DROP COLUMN assertion_value")
+                    if old_version == 1:
+                        connection.execute("DROP TABLE context_access_events")
+                    else:
+                        connection.execute(
+                            "ALTER TABLE context_access_events DROP COLUMN lifecycle_outcome"
+                        )
+                        connection.execute(
+                            "ALTER TABLE context_access_events DROP COLUMN excluded_records"
+                        )
+                        connection.execute(
+                            "ALTER TABLE context_access_events DROP COLUMN contradiction_groups"
+                        )
+                    connection.execute(f"PRAGMA user_version = {old_version}")
+                    connection.commit()
+                finally:
+                    connection.close()
 
-            migrated = SQLiteContextRepository(path)
+                migrated = SQLiteContextRepository(path)
 
-            connection = sqlite3.connect(path)
-            try:
-                schema_version = connection.execute("PRAGMA user_version").fetchone()[0]
-                access_table = connection.execute(
-                    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'context_access_events'"
-                ).fetchone()
-            finally:
-                connection.close()
-            self.assertEqual(schema_version, 2)
-            self.assertIsNotNone(access_table)
-            stored = migrated.list_authorized(
-                ContextPrincipal("xpounder", "engineering", "alice"),
-                as_of=NOW,
-            )
-            self.assertEqual([item.record.record_id for item in stored], ["migration"])
-            self.assertEqual(
-                [event["event_type"] for event in migrated.audit_events(organization_id="xpounder")],
-                ["context.mutation"],
-            )
-
-            pack = build_context_pack(
-                [original],
-                ContextPackRequest(
-                    query="engineering guidance",
-                    principal=ContextPrincipal("xpounder", "engineering", "alice"),
-                    token_budget=1_000,
-                    policy_version="read-v2",
+                connection = sqlite3.connect(path)
+                try:
+                    schema_version = connection.execute("PRAGMA user_version").fetchone()[0]
+                    record_columns = {
+                        str(row[1])
+                        for row in connection.execute("PRAGMA table_info(context_records)")
+                    }
+                    access_columns = {
+                        str(row[1])
+                        for row in connection.execute("PRAGMA table_info(context_access_events)")
+                    }
+                    lifecycle_table = connection.execute(
+                        "SELECT name FROM sqlite_master WHERE type = 'table' "
+                        "AND name = 'context_lifecycle_snapshots'"
+                    ).fetchone()
+                finally:
+                    connection.close()
+                self.assertEqual(schema_version, 3)
+                self.assertTrue(
+                    {"dependencies_json", "assertion_key", "assertion_value"}
+                    <= record_columns
+                )
+                self.assertTrue(
+                    {"lifecycle_outcome", "excluded_records", "contradiction_groups"}
+                    <= access_columns
+                )
+                self.assertIsNotNone(lifecycle_table)
+                stored = migrated.list_authorized(
+                    ContextPrincipal("xpounder", "engineering", "alice"),
                     as_of=NOW,
-                ),
-            )
-            migrated.record_pack_read(pack, occurred_at=NOW)
-            self.assertEqual(
-                [event["event_type"] for event in migrated.audit_events(organization_id="xpounder")],
-                ["context.mutation", "context.read"],
-            )
+                )
+                self.assertEqual([item.record.record_id for item in stored], ["migration"])
+                self.assertEqual(stored[0].record.dependencies, ())
+                self.assertIsNone(stored[0].record.assertion_key)
+                self.assertEqual(
+                    [
+                        event["event_type"]
+                        for event in migrated.audit_events(organization_id="xpounder")
+                    ],
+                    ["context.mutation"],
+                )
+
+                pack = build_context_pack(
+                    [original],
+                    ContextPackRequest(
+                        query="engineering guidance",
+                        principal=ContextPrincipal("xpounder", "engineering", "alice"),
+                        token_budget=1_000,
+                        policy_version="read-v3",
+                        as_of=NOW,
+                    ),
+                )
+                migrated.record_pack_read(pack, occurred_at=NOW)
+                self.assertEqual(
+                    [
+                        event["event_type"]
+                        for event in migrated.audit_events(organization_id="xpounder")
+                    ],
+                    ["context.mutation", "context.read"],
+                )
 
     def test_source_identity_and_record_id_conflicts_fail_closed(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -347,6 +392,157 @@ class ContextStoreTests(unittest.TestCase):
             self.assertCountEqual(outcomes, ["updated", "conflict"])
             events = SQLiteContextRepository(path).audit_events(organization_id="xpounder")
             self.assertEqual([event["action"] for event in events], ["ingest", "update"])
+
+    def test_lifecycle_snapshot_is_idempotent_versioned_and_metadata_audited(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = SQLiteContextRepository(Path(temporary) / "context.sqlite3")
+            first_snapshot = ContextLifecycleSnapshot(
+                repository_revision="abc123",
+                artifacts=(
+                    ContextArtifact(
+                        uri="repo://SECRET-PATH/config.json",
+                        revision="SECRET-REVISION",
+                        sha256="a" * 64,
+                    ),
+                ),
+            )
+
+            first = repository.observe_lifecycle_snapshot(
+                organization_id="xpounder",
+                repository_id="acme/api",
+                branch="main",
+                snapshot=first_snapshot,
+                expected_version=None,
+                actor_id="alice",
+                policy_version="lifecycle-v1",
+                occurred_at=NOW,
+            )
+            duplicate = repository.observe_lifecycle_snapshot(
+                organization_id="xpounder",
+                repository_id="acme/api",
+                branch="main",
+                snapshot=first_snapshot,
+                expected_version=None,
+                actor_id="alice",
+                policy_version="lifecycle-v1",
+                occurred_at=NOW + timedelta(seconds=1),
+            )
+
+            self.assertEqual(first.version, 1)
+            self.assertEqual(duplicate.version, 1)
+            changed = ContextLifecycleSnapshot(repository_revision="def456")
+            with self.assertRaisesRegex(ContextConflict, "version_conflict"):
+                repository.observe_lifecycle_snapshot(
+                    organization_id="xpounder",
+                    repository_id="acme/api",
+                    branch="main",
+                    snapshot=changed,
+                    expected_version=None,
+                    actor_id="alice",
+                    policy_version="lifecycle-v2",
+                )
+            updated = repository.observe_lifecycle_snapshot(
+                organization_id="xpounder",
+                repository_id="acme/api",
+                branch="main",
+                snapshot=changed,
+                expected_version=1,
+                actor_id="alice",
+                policy_version="lifecycle-v2",
+                occurred_at=NOW + timedelta(seconds=2),
+            )
+
+            self.assertEqual(updated.version, 2)
+            self.assertEqual(updated.snapshot, changed)
+            self.assertEqual(
+                repository.get_lifecycle_snapshot(
+                    organization_id="xpounder",
+                    repository_id="acme/api",
+                    branch="main",
+                ),
+                updated,
+            )
+            events = repository.audit_events(organization_id="xpounder")
+            self.assertEqual(
+                [event["action"] for event in events],
+                ["snapshot_create", "snapshot_update"],
+            )
+            serialized = json.dumps(events)
+            self.assertNotIn("SECRET-PATH", serialized)
+            self.assertNotIn("SECRET-REVISION", serialized)
+
+    def test_lifecycle_snapshot_concurrency_allows_exactly_one_changed_writer(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "context.sqlite3"
+            SQLiteContextRepository(path).observe_lifecycle_snapshot(
+                organization_id="xpounder",
+                repository_id="acme/api",
+                branch="main",
+                snapshot=ContextLifecycleSnapshot(repository_revision="base"),
+                expected_version=None,
+                actor_id="alice",
+                policy_version="p1",
+            )
+            barrier = Barrier(2)
+
+            def update(revision: str) -> str:
+                repository = SQLiteContextRepository(path)
+                barrier.wait()
+                try:
+                    repository.observe_lifecycle_snapshot(
+                        organization_id="xpounder",
+                        repository_id="acme/api",
+                        branch="main",
+                        snapshot=ContextLifecycleSnapshot(repository_revision=revision),
+                        expected_version=1,
+                        actor_id="alice",
+                        policy_version="p2",
+                    )
+                    return "updated"
+                except ContextConflict:
+                    return "conflict"
+
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                outcomes = list(executor.map(update, ("writer-one", "writer-two")))
+
+            self.assertCountEqual(outcomes, ["updated", "conflict"])
+            stored = SQLiteContextRepository(path).get_lifecycle_snapshot(
+                organization_id="xpounder",
+                repository_id="acme/api",
+                branch="main",
+            )
+            self.assertIsNotNone(stored)
+            self.assertEqual(stored.version, 2)  # type: ignore[union-attr]
+
+    def test_lifecycle_snapshot_hash_tampering_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "context.sqlite3"
+            repository = SQLiteContextRepository(path)
+            repository.observe_lifecycle_snapshot(
+                organization_id="xpounder",
+                repository_id="acme/api",
+                branch="main",
+                snapshot=ContextLifecycleSnapshot(repository_revision="current"),
+                expected_version=None,
+                actor_id="alice",
+                policy_version="p1",
+            )
+            connection = sqlite3.connect(path)
+            try:
+                connection.execute(
+                    "UPDATE context_lifecycle_snapshots SET snapshot_sha256 = ?",
+                    ("0" * 64,),
+                )
+                connection.commit()
+            finally:
+                connection.close()
+
+            with self.assertRaisesRegex(ContextStoreError, "integrity_failed"):
+                repository.get_lifecycle_snapshot(
+                    organization_id="xpounder",
+                    repository_id="acme/api",
+                    branch="main",
+                )
 
     def test_update_rejects_invalid_codec_output_without_mutating_record(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -498,7 +694,14 @@ class ContextStoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "context.sqlite3"
             repository = SQLiteContextRepository(path)
-            original = record("round-trip")
+            original = record(
+                "round-trip",
+                dependencies=(
+                    ContextArtifact(uri="repo://dependency", revision="git:one"),
+                ),
+                assertion_key="retry.exception",
+                assertion_value="deny",
+            )
             stored = repository.ingest(original, actor_id="alice", policy_version="p1").stored
             restored = ContextRecord.from_dict(stored.record.to_dict())
             self.assertEqual(restored, stored.record)

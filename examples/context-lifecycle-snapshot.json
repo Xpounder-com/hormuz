@@ -1,0 +1,17 @@
+{
+  "schema_version": "hormuz.context-lifecycle-envelope.v1",
+  "organization_id": "xpounder",
+  "repository_id": "Xpounder-com/hormuz",
+  "branch": "main",
+  "snapshot": {
+    "schema_version": "hormuz.context-lifecycle-snapshot.v1",
+    "repository_revision": "example:v1",
+    "artifacts": [
+      {
+        "uri": "repo://Xpounder-com/hormuz/config/retry-policy.json",
+        "revision": "git:abc123",
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    ]
+  }
+}

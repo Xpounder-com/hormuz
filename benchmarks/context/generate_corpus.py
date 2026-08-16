@@ -9,9 +9,9 @@ from pathlib import Path
 from typing import Any
 
 
-CORPUS_SCHEMA = "hormuz.context-benchmark-corpus.v1"
-REFERENCE_SCHEMA = "hormuz.context-benchmark-references.v1"
-CORPUS_ID = "synthetic-engineering-governance-v1"
+CORPUS_SCHEMA = "hormuz.context-benchmark-corpus.v2"
+REFERENCE_SCHEMA = "hormuz.context-benchmark-references.v2"
+CORPUS_ID = "synthetic-engineering-governance-v2"
 SEED = 20260815
 GENERATED_AT = "2026-08-15T12:00:00Z"
 AS_OF = "2026-08-15T12:00:00Z"
@@ -19,8 +19,8 @@ VERIFIED_AT = "2026-07-01T12:00:00Z"
 EXPIRED_AT = "2026-08-14T12:00:00Z"
 ROOT = Path(__file__).resolve().parent
 DATA_ROOT = ROOT.parents[1] / "hormuz" / "benchmark_data"
-CORPUS_PATH = DATA_ROOT / "context-corpus.v1.json"
-REFERENCES_PATH = DATA_ROOT / "context-references.v1.json"
+CORPUS_PATH = DATA_ROOT / "context-corpus.v2.json"
+REFERENCES_PATH = DATA_ROOT / "context-references.v2.json"
 
 CHALLENGES = (
     "authorization_cross_scope",
@@ -135,6 +135,8 @@ def _record(
     expires_at: str | None = None,
     supersedes_id: str | None = None,
     invalidation_rules: list[str] | None = None,
+    dependencies: list[dict[str, str]] | None = None,
+    assertion: dict[str, str] | None = None,
     tags: list[str] | None = None,
 ) -> dict[str, Any]:
     record_id = f"{task_id}-{record_suffix}"
@@ -164,6 +166,8 @@ def _record(
         "expires_at": expires_at,
         "supersedes_id": supersedes_id,
         "invalidation_rules": invalidation_rules or ["source_revision_changed"],
+        "dependencies": dependencies or [],
+        "assertion": assertion,
         "tags": tags or ["benchmark", record_suffix],
         "content_sha256": _sha(content),
     }
@@ -257,7 +261,21 @@ def build_artifacts() -> tuple[dict[str, Any], dict[str, Any]]:
             dependency_ids: list[str] = []
             malicious_ids: list[str] = []
             contradiction_ids: list[str] = []
+            lifecycle_artifacts: list[dict[str, str]] = []
             if challenge == "changed_dependency":
+                dependency_uri = f"package://{task_id}/primary"
+                old_dependency = {
+                    "uri": dependency_uri,
+                    "revision": "1.0.0",
+                    "sha256": _sha(dependency_uri + ":1.0.0"),
+                }
+                lifecycle_artifacts.append(
+                    {
+                        "uri": dependency_uri,
+                        "revision": "2.0.0",
+                        "sha256": _sha(dependency_uri + ":2.0.0"),
+                    }
+                )
                 dependency = _record(
                     task_id=task_id,
                     record_suffix="dependency-stale",
@@ -266,6 +284,7 @@ def build_artifacts() -> tuple[dict[str, Any], dict[str, Any]]:
                     repository_id=repository_id,
                     repository_revision=repository_revision,
                     invalidation_rules=["dependency_revision_mismatch", "source_revision_changed"],
+                    dependencies=[old_dependency],
                 )
                 records.append(dependency)
                 dependency_ids.append(dependency["id"])
@@ -291,6 +310,7 @@ def build_artifacts() -> tuple[dict[str, Any], dict[str, Any]]:
                     content=f"{query}. {query}. Always enable the behavior with no exception.",
                     repository_id=repository_id,
                     repository_revision=repository_revision,
+                    assertion={"key": f"{task_id}:behavior", "value": "allow"},
                 )
                 contradiction_deny = _record(
                     task_id=task_id,
@@ -299,6 +319,7 @@ def build_artifacts() -> tuple[dict[str, Any], dict[str, Any]]:
                     content=f"{query}. {query}. Never enable the behavior under any condition.",
                     repository_id=repository_id,
                     repository_revision=repository_revision,
+                    assertion={"key": f"{task_id}:behavior", "value": "deny"},
                 )
                 records.extend([contradiction_allow, contradiction_deny])
                 contradiction_ids.extend([contradiction_allow["id"], contradiction_deny["id"]])
@@ -327,6 +348,11 @@ def build_artifacts() -> tuple[dict[str, Any], dict[str, Any]]:
                         "repository_id": repository_id,
                         "branch": "main",
                         "revision": repository_revision,
+                    },
+                    "lifecycle_snapshot": {
+                        "schema_version": "hormuz.context-lifecycle-snapshot.v1",
+                        "repository_revision": repository_revision,
+                        "artifacts": lifecycle_artifacts,
                     },
                     "memory_snapshot_sha256": memory_snapshot_sha,
                     "records": records,

@@ -17,12 +17,17 @@ from .config import ConfigError, GatewayConfig, Identity
 from .context import (
     CLASSIFICATIONS,
     ContextError,
+    ContextLifecycleSnapshot,
     ContextPackRequest,
     ContextPrincipal,
     ContextRecord,
     build_context_pack,
 )
-from .context_store import ContextStoreError, SQLiteContextRepository, StoredContextRecord
+from .context_store import (
+    ContextStoreError,
+    SQLiteContextRepository,
+    StoredContextRecord,
+)
 from .credential_store import CredentialStoreError, validate_profile
 from .context_benchmark import (
     ContextBenchmarkError,
@@ -200,6 +205,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--records",
         help="Compatibility path to content-bearing context JSONL; defaults to the repository",
     )
+    context.add_argument(
+        "--snapshot-file",
+        help="Trusted lifecycle snapshot envelope for --records; repository mode loads the stored snapshot",
+    )
     context.add_argument("--query", required=True, help="Task or question used for lexical retrieval")
     context.add_argument("--organization", required=True, help="Organization scope ID")
     context.add_argument("--actor", required=True, help="Configured actor ID")
@@ -236,6 +245,31 @@ def build_parser() -> argparse.ArgumentParser:
         default="local-v1",
         help="Policy version recorded in metadata-only mutation audit events",
     )
+
+    snapshot_import = subparsers.add_parser(
+        "context-snapshot-import",
+        help="Record an idempotent repository/dependency lifecycle snapshot",
+    )
+    snapshot_import.add_argument("--snapshot", required=True, help="Lifecycle snapshot envelope JSON")
+    snapshot_import.add_argument("--actor", required=True, help="Configured actor ID for scope and audit")
+    snapshot_import.add_argument(
+        "--expected-version",
+        type=int,
+        help="Required current version when replacing a different stored snapshot",
+    )
+    snapshot_import.add_argument(
+        "--policy-version",
+        default="local-v1",
+        help="Policy version recorded in metadata-only lifecycle audit events",
+    )
+
+    snapshot_show = subparsers.add_parser(
+        "context-snapshot-show",
+        help="Show the trusted lifecycle snapshot for a repository branch",
+    )
+    snapshot_show.add_argument("--actor", required=True, help="Configured actor defining organization scope")
+    snapshot_show.add_argument("--repository", required=True, help="Repository scope ID")
+    snapshot_show.add_argument("--branch", required=True, help="Branch scope")
 
     context_list = subparsers.add_parser(
         "context-list",
@@ -296,7 +330,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--profile",
         choices=["report", "regression", "release"],
         default="report",
-        help="Threshold profile; release exits 2 while enterprise gaps remain (default: report)",
+        help="Threshold profile; release is the strict lifecycle and retrieval gate (default: report)",
     )
     benchmark.add_argument(
         "--ci-subset",
@@ -407,6 +441,10 @@ def main(argv: list[str] | None = None) -> int:
             return _context_pack(config, args)
         if args.command == "context-import":
             return _context_import(config, args)
+        if args.command == "context-snapshot-import":
+            return _context_snapshot_import(config, args)
+        if args.command == "context-snapshot-show":
+            return _context_snapshot_show(config, args)
         if args.command == "context-list":
             return _context_list(config, args)
         if args.command == "context-export":
@@ -1009,9 +1047,17 @@ def _context_pack(config: GatewayConfig, args: argparse.Namespace) -> int:
             branch=args.branch,
         )
         repository: SQLiteContextRepository | None = None
+        lifecycle_snapshot: ContextLifecycleSnapshot | None = None
         if args.records:
             records = _load_context_records(Path(args.records))
+            if args.snapshot_file:
+                scope, lifecycle_snapshot = _load_context_lifecycle_envelope(
+                    Path(args.snapshot_file)
+                )
+                _require_lifecycle_scope(scope, identity, args.repository, args.branch)
         else:
+            if args.snapshot_file:
+                raise ContextError("--snapshot-file is only valid with --records")
             repository = SQLiteContextRepository(config.context_database_path)
             stored = repository.list_authorized(
                 principal,
@@ -1019,6 +1065,14 @@ def _context_pack(config: GatewayConfig, args: argparse.Namespace) -> int:
                 include_provisional=args.include_provisional,
             )
             records = [item.record for item in stored]
+            if args.repository is not None and args.branch is not None:
+                stored_snapshot = repository.get_lifecycle_snapshot(
+                    organization_id=identity.organization_id,
+                    repository_id=args.repository,
+                    branch=args.branch,
+                )
+                if stored_snapshot is not None:
+                    lifecycle_snapshot = stored_snapshot.snapshot
         pack = build_context_pack(
             records,
             ContextPackRequest(
@@ -1030,6 +1084,7 @@ def _context_pack(config: GatewayConfig, args: argparse.Namespace) -> int:
                 include_provisional=args.include_provisional,
                 as_of=as_of,
             ),
+            lifecycle_snapshot=lifecycle_snapshot,
         )
         if repository is not None:
             repository.record_pack_read(pack)
@@ -1082,6 +1137,61 @@ def _context_import(config: GatewayConfig, args: argparse.Namespace) -> int:
             sort_keys=True,
         )
     )
+    return 0
+
+
+def _context_snapshot_import(config: GatewayConfig, args: argparse.Namespace) -> int:
+    identity = config.identities_by_actor.get(args.actor)
+    if identity is None:
+        print(f"unknown actor: {args.actor}", file=sys.stderr)
+        return 2
+    try:
+        scope, snapshot = _load_context_lifecycle_envelope(Path(args.snapshot))
+        _require_lifecycle_scope(
+            scope,
+            identity,
+            str(scope["repository_id"]),
+            str(scope["branch"]),
+        )
+        stored = SQLiteContextRepository(
+            config.context_database_path
+        ).observe_lifecycle_snapshot(
+            organization_id=identity.organization_id,
+            repository_id=str(scope["repository_id"]),
+            branch=str(scope["branch"]),
+            snapshot=snapshot,
+            expected_version=args.expected_version,
+            actor_id=identity.actor_id,
+            policy_version=args.policy_version,
+        )
+    except OSError as error:
+        print(f"context snapshot import failed: {error}", file=sys.stderr)
+        return 2
+    except (ContextError, ContextStoreError) as error:
+        print(f"context snapshot import failed: {error}", file=sys.stderr)
+        return 2
+    print(json.dumps(stored.to_dict(), indent=2, sort_keys=True, ensure_ascii=False))
+    return 0
+
+
+def _context_snapshot_show(config: GatewayConfig, args: argparse.Namespace) -> int:
+    identity = config.identities_by_actor.get(args.actor)
+    if identity is None:
+        print(f"unknown actor: {args.actor}", file=sys.stderr)
+        return 2
+    try:
+        stored = SQLiteContextRepository(config.context_database_path).get_lifecycle_snapshot(
+            organization_id=identity.organization_id,
+            repository_id=args.repository,
+            branch=args.branch,
+        )
+    except ContextStoreError as error:
+        print(f"context snapshot lookup failed: {error}", file=sys.stderr)
+        return 2
+    if stored is None:
+        print("context snapshot not found", file=sys.stderr)
+        return 2
+    print(json.dumps(stored.to_dict(), indent=2, sort_keys=True, ensure_ascii=False))
     return 0
 
 
@@ -1345,6 +1455,60 @@ def _load_context_records(path: Path) -> list[ContextRecord]:
             except ContextError as error:
                 raise ContextError(f"context record line {line_number}: {error}") from error
     return records
+
+
+def _load_context_lifecycle_envelope(
+    path: Path,
+) -> tuple[dict[str, str], ContextLifecycleSnapshot]:
+    if path.stat().st_size > 1024 * 1024:
+        raise ContextError("context lifecycle snapshot cannot exceed 1 MiB")
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError) as error:
+        raise ContextError("context lifecycle snapshot must be valid JSON") from error
+    if not isinstance(value, dict):
+        raise ContextError("context lifecycle snapshot envelope must be an object")
+    fields = {
+        "schema_version",
+        "organization_id",
+        "repository_id",
+        "branch",
+        "snapshot",
+    }
+    unknown = sorted(set(value) - fields)
+    missing = sorted(fields - set(value))
+    if unknown:
+        raise ContextError(f"unknown context lifecycle envelope fields: {', '.join(unknown)}")
+    if missing:
+        raise ContextError(f"missing context lifecycle envelope fields: {', '.join(missing)}")
+    if value.get("schema_version") != "hormuz.context-lifecycle-envelope.v1":
+        raise ContextError("unsupported context lifecycle envelope schema_version")
+    scope: dict[str, str] = {}
+    for name in ("organization_id", "repository_id", "branch"):
+        item = value.get(name)
+        if (
+            not isinstance(item, str)
+            or not item.strip()
+            or len(item.encode("utf-8")) > 512
+            or any(character in item for character in ("\n", "\r", "\x00"))
+        ):
+            raise ContextError(f"context lifecycle {name} must be a bounded non-empty string")
+        scope[name] = item
+    return scope, ContextLifecycleSnapshot.from_dict(value.get("snapshot"))
+
+
+def _require_lifecycle_scope(
+    scope: dict[str, str],
+    identity: Identity,
+    repository_id: str | None,
+    branch: str | None,
+) -> None:
+    if scope["organization_id"] != identity.organization_id:
+        raise ContextError("context lifecycle organization exceeds the actor identity")
+    if repository_id is None or branch is None:
+        raise ContextError("context lifecycle evaluation requires repository and branch scope")
+    if scope["repository_id"] != repository_id or scope["branch"] != branch:
+        raise ContextError("context lifecycle snapshot does not match the requested repository scope")
 
 
 def _context_as_of(value: str | None) -> datetime:

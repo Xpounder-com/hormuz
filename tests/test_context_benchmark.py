@@ -20,8 +20,8 @@ from hormuz.context_benchmark import (
 
 
 ROOT = Path(__file__).resolve().parents[1]
-CORPUS = ROOT / "hormuz" / "benchmark_data" / "context-corpus.v1.json"
-REFERENCES = ROOT / "hormuz" / "benchmark_data" / "context-references.v1.json"
+CORPUS = ROOT / "hormuz" / "benchmark_data" / "context-corpus.v2.json"
+REFERENCES = ROOT / "hormuz" / "benchmark_data" / "context-references.v2.json"
 CATEGORIES = {
     "bug_fix",
     "feature",
@@ -73,12 +73,15 @@ class ContextBenchmarkTests(unittest.TestCase):
         self.assertEqual(sum(task["ci"] for task in corpus["tasks"]), 12)
         self.assertEqual(references["corpus_sha256"], canonical_sha256(corpus))
         self.assertNotIn("reference_outcome", CORPUS.read_text(encoding="utf-8"))
+        self.assertTrue(
+            all(task["lifecycle_snapshot"]["repository_revision"] for task in corpus["tasks"])
+        )
 
         loaded = load_benchmark(CORPUS, REFERENCES)
         self.assertEqual(loaded.leakage_failures, ())
         self.assertEqual(len(loaded.tasks), 60)
 
-    def test_report_exposes_safety_guarantees_and_current_release_gaps(self) -> None:
+    def test_report_exposes_lifecycle_safety_guarantees(self) -> None:
         result, exit_code = run_benchmark(CORPUS, REFERENCES, profile="report", iterations=2)
         governed = result["baselines"]["hormuz_governed"]
 
@@ -89,13 +92,21 @@ class ContextBenchmarkTests(unittest.TestCase):
         self.assertEqual(governed["token_budget_violations"], 0)
         self.assertEqual(governed["determinism_failures"], 0)
         self.assertEqual(governed["recall"], 1)
+        self.assertEqual(governed["precision"], 1)
+        self.assertEqual(governed["useful_pack_rate"], 1)
+        self.assertEqual(governed["dependency_stale_challenge_rate"], 0)
+        self.assertEqual(governed["malicious_challenge_selection_rate"], 0)
+        self.assertEqual(governed["contradiction_challenge_selection_rate"], 0)
         self.assertGreater(result["baselines"]["full_history"]["authorization_leak_task_rate"], 0)
         self.assertGreater(result["baselines"]["simple_lexical"]["lifecycle_stale_task_rate"], 0)
-        self.assertFalse(result["contract_observations"]["dependency_invalidation_automatic"])
-        self.assertFalse(result["contract_observations"]["malicious_context_quarantine"])
-        self.assertFalse(result["contract_observations"]["contradiction_outcome_explicit"])
+        self.assertTrue(result["contract_observations"]["dependency_invalidation_automatic"])
+        self.assertTrue(result["contract_observations"]["malicious_context_quarantine"])
+        self.assertTrue(result["contract_observations"]["contradiction_outcome_explicit"])
+        self.assertTrue(
+            all(task["governed_lifecycle"]["outcome"] for task in result["tasks"])
+        )
 
-    def test_regression_subset_passes_and_release_profile_fails_known_gaps(self) -> None:
+    def test_regression_subset_and_full_release_profile_pass(self) -> None:
         regression, regression_exit = run_benchmark(
             CORPUS,
             REFERENCES,
@@ -108,20 +119,28 @@ class ContextBenchmarkTests(unittest.TestCase):
         self.assertEqual(regression_exit, 0)
         self.assertEqual(regression["status"], "passed")
         self.assertEqual(regression["corpus"]["task_count"], 12)
-        self.assertEqual(release_exit, 2)
-        self.assertEqual(release["status"], "failed")
+        self.assertEqual(release_exit, 0)
+        self.assertEqual(release["status"], "passed")
         failed = {item["metric"] for item in release["thresholds"] if not item["passed"]}
-        self.assertEqual(
-            failed,
-            {
-                "hormuz_governed.precision",
-                "hormuz_governed.useful_pack_rate",
-                "hormuz_governed.stale_selection_task_rate",
-                "hormuz_governed.dependency_stale_challenge_rate",
-                "hormuz_governed.malicious_challenge_selection_rate",
-                "hormuz_governed.contradiction_challenge_selection_rate",
-            },
-        )
+        self.assertEqual(failed, set())
+
+    def test_hidden_reference_labels_do_not_change_governed_selection(self) -> None:
+        corpus = json.loads(CORPUS.read_text(encoding="utf-8"))
+        references = json.loads(REFERENCES.read_text(encoding="utf-8"))
+        original, _ = run_benchmark(CORPUS, REFERENCES, profile="report")
+        first_task = corpus["tasks"][0]
+        replacement = first_task["records"][-1]["id"]
+        references["outcomes"][0]["relevant_record_ids"] = [replacement]
+        with tempfile.TemporaryDirectory() as temporary:
+            corpus_path = Path(temporary) / "corpus.json"
+            references_path = Path(temporary) / "references.json"
+            corpus_path.write_text(json.dumps(corpus), encoding="utf-8")
+            references_path.write_text(json.dumps(references), encoding="utf-8")
+            relabeled, _ = run_benchmark(corpus_path, references_path, profile="report")
+
+        original_selected = original["tasks"][0]["selected"]["hormuz_governed"]["record_ids"]
+        relabeled_selected = relabeled["tasks"][0]["selected"]["hormuz_governed"]["record_ids"]
+        self.assertEqual(original_selected, relabeled_selected)
 
     def test_tampered_frozen_snapshot_and_unknown_fields_fail_closed(self) -> None:
         original_corpus = json.loads(CORPUS.read_text(encoding="utf-8"))
