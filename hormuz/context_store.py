@@ -28,6 +28,7 @@ from .context_lifecycle import (
     evaluate_record_lifecycle,
     lifecycle_subject_sha256,
 )
+from .content_free import ContentFreeSchemaError, validate_content_free_schema
 
 
 CONTEXT_STORE_SCHEMA_VERSION = 4
@@ -533,6 +534,10 @@ class SQLiteContextRepository:
                     "INTEGER NOT NULL DEFAULT 0"
                 )
             connection.execute(f"PRAGMA user_version = {CONTEXT_STORE_SCHEMA_VERSION}")
+            try:
+                validate_content_free_schema(connection, store_kind="context")
+            except ContentFreeSchemaError as error:
+                raise ContextStoreError(error.code) from error
             connection.commit()
 
     def ingest(

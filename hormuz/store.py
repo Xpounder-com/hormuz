@@ -13,6 +13,7 @@ from pathlib import Path
 
 from .billing import ProviderBillingError, ProviderCostReport, ProviderCostSource
 from .config import Identity
+from .content_free import ContentFreeSchemaError, validate_content_free_schema
 from .usage import sanitize_provider_usage
 
 
@@ -614,6 +615,10 @@ class UsageStore:
                 connection.execute(
                     "ALTER TABLE gateway_dlp_approval_events ADD COLUMN actual_model TEXT"
                 )
+            try:
+                validate_content_free_schema(connection, store_kind="usage")
+            except ContentFreeSchemaError as error:
+                raise SecurityStoreError(error.code) from error
 
     def record(
         self,

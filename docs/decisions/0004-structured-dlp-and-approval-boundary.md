@@ -112,6 +112,8 @@ Accepted in the product-development conversation on 2026-08-15. The owner explic
 
 On 2026-08-16 the owner explicitly accepted content-free control-plane observability: Hormuz may inspect provider-bound content transiently, while routine logs, usage/security records, and approvals retain only bounded metadata rather than prompts, responses, code, filenames, matched values, secrets, or raw request material. The separate governed-context repository remains intentionally content-bearing and is not reclassified as telemetry by this clarification.
 
+The implementation records that boundary as versioned exact-column manifests for routine usage/security/billing, session-security, and governed-context audit tables. Local stores validate the applicable manifest after creation or supported migration and fail closed on unreviewed schema drift. Authentication state, canonical context records, and lifecycle snapshots are explicitly outside this telemetry manifest and keep their separate security requirements.
+
 GitHub acceptance record: [issue #10 comment](https://github.com/Xpounder-com/hormuz/issues/10#issuecomment-5305144582).
 
 Acceptance authorizes implementation under [#10](https://github.com/Xpounder-com/hormuz/issues/10). The local deterministic subset, monotonic identity-derived team/person overlays, provider-format-aware denial of recognized opaque media, and single-node approval workflow have implementation evidence, but acceptance does not claim the remaining structured-DLP or enterprise release gates are complete.

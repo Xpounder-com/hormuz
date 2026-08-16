@@ -681,6 +681,22 @@ The owner-approved content-free default was exercised locally on August 16, 2026
 
 This verifies Hormuz's application-level observability boundary, not every deployment component. Reverse proxies, load balancers, service meshes, crash reporters, packet captures, and provider-side storage must independently disable raw URL/body/header capture. The governed-context repository and its private content export remain intentionally content-bearing and require the still-open hosted encryption, KMS, retention, deletion, tenancy, backup, and independent-review gates.
 
+### Content-free storage schema conformance
+
+The structural persistence backstop for the owner-approved content-free default was exercised locally on August 16, 2026.
+
+- `hormuz.content-free-schema.v1` enumerates the exact permitted columns for nine gateway usage/security/billing tables, one session-security table, and five governed-context audit tables;
+- fresh usage, session, and context stores matched their manifests exactly, while the existing legacy usage and session migrations plus context schema versions 1, 2, and 3 continued to reach the accepted schemas without losing their prior migration coverage;
+- adding `prompt` to usage telemetry, `raw_query` to session-security audit, or `source_content` to context-read audit caused the corresponding store to refuse its next startup with only `content_free_schema_incompatible`;
+- canonical context records/lifecycle snapshots and session credential/authentication-state tables are explicitly absent from the telemetry manifest, preventing the product from misrepresenting intentionally content-bearing or secret-bearing storage as content-free;
+- audit export remains independently allowlisted, so an unknown physical column introduced after process initialization still does not enter JSONL output before restart-time drift detection;
+- all 309 source tests passed. The opt-in official-client cases were then run explicitly with installed Codex `0.139.0` and pinned official Claude Code `2.1.233`; both completed provider-compatible requests through Hormuz and loopback fakes;
+- the frozen 60-task release benchmark passed five iterations with precision `1.00`, recall `1.00`, useful-pack rate `1.00`, mean compression ratio `0.840593`, zero authorization, stale-lifecycle, dependency-stale, malicious, contradiction, token-budget, leakage, or determinism failures, and p95 in-process selection latency `0.162667 ms`. Corpus SHA-256 remained `9822d592868202c7c7539bcdac7d4a5894c01f9e6dba7a434846516b67b32c17`;
+- isolated source/wheel builds succeeded. A clean Python `3.14.0` environment installed the wheel outside the source checkout, loaded `hormuz.content_free` from `site-packages`, initialized all three store types, observed all 15 manifested tables, compiled the installed package, displayed the installed CLI, and passed the installed regression benchmark; and
+- deterministic corpus verification, source/test bytecode compilation, local Markdown-link validation, `git diff --check`, and high-confidence runtime-source plus extracted-wheel scans for private-key, OpenAI, Anthropic, GitHub, AWS, Google, Slack, and Hormuz-session credential patterns passed.
+
+This manifest prevents silent column drift; it does not replace value validation, database access controls, encryption, retention/deletion, immutable export, or deployment-component logging policy. The hosted database topology and KMS boundary remain owner-pending enterprise decisions.
+
 ## Reproduce locally
 
 The default suite uses only loopback fake providers:

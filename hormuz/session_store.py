@@ -18,6 +18,8 @@ from typing import Callable
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
+from .content_free import ContentFreeSchemaError, validate_content_free_schema
+
 
 SESSION_STORE_SCHEMA_VERSION = 2
 _ADMIN_REASON_CODES = {
@@ -934,6 +936,7 @@ class SQLiteSessionStore:
                 raise SessionStoreError("session_store_schema_migration_required")
             if version == 1:
                 self._migrate_v1_to_v2(connection)
+                self._validate_content_free_schema(connection)
                 return
             if version == SESSION_STORE_SCHEMA_VERSION:
                 connection.execute(
@@ -945,6 +948,7 @@ class SQLiteSessionStore:
                     )
                     """
                 )
+                self._validate_content_free_schema(connection)
                 return
             connection.execute("PRAGMA journal_mode = WAL")
             connection.executescript(
@@ -1023,6 +1027,13 @@ class SQLiteSessionStore:
                 COMMIT;
                 """
             )
+            self._validate_content_free_schema(connection)
+
+    def _validate_content_free_schema(self, connection: sqlite3.Connection) -> None:
+        try:
+            validate_content_free_schema(connection, store_kind="session")
+        except ContentFreeSchemaError as error:
+            raise SessionStoreError(error.code) from error
 
     def _migrate_v1_to_v2(self, connection: sqlite3.Connection) -> None:
         now = _isoformat(self._now())

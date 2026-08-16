@@ -44,6 +44,12 @@ Context event types are `context.mutation`, `context.read`, `context.lifecycle`,
 
 The governed-context repository itself is intentionally content-bearing. Its private content export is therefore outside the content-free telemetry contract even though its mutation, read, lifecycle, evidence, and revalidation audits remain metadata-only.
 
+## Content-free storage manifest
+
+`hormuz.content-free-schema.v1` is the structural allowlist for routine observability. It names the exact permitted columns in the usage, secret/DLP, approval, budget, administrative-access, provider-cost, session-security, and governed-context audit tables. Each local store validates its applicable tables after creation or supported migration and refuses startup with the fixed `content_free_schema_incompatible` error when a column is missing or added. A schema migration therefore cannot add a content-bearing telemetry field without an explicit manifest and privacy-contract change.
+
+The manifest is a structural backstop, not a claim that every Hormuz table is content-free. Canonical governed-context records and lifecycle snapshots are intentionally content-bearing. Session enrollments, human sessions, and consumed-credential state belong to the separate authentication-secret contract. Those tables are excluded rather than mislabeled as telemetry. The audit-export field allowlist remains an independent defense: unknown physical columns are not exported automatically, including before a restarted process detects drift.
+
 ## Schema versions
 
 Every line is one JSON object containing:
