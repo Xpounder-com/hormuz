@@ -32,6 +32,7 @@ from hormuz.server import (
     serve_in_thread,
 )
 from hormuz.store import DLPApprovalStoreError, SecurityStoreError, UsageStore
+from hormuz.usage import MAX_PROVIDER_USAGE_SSE_LINE_BYTES
 
 
 GATEWAY_TOKEN = "company-user-token-never-forward"
@@ -48,6 +49,8 @@ class FakeProviderHandler(BaseHTTPRequestHandler):
     response_content_type: str = "application/json"
     response_request_id_override: str | None = None
     response_extra_headers: tuple[tuple[str, str], ...] = ()
+    response_stream_prefix: bytes = b""
+    response_stream_override: bytes | None = None
     redirect_url: str | None = None
     request_started: threading.Event | None = None
     release_response: threading.Event | None = None
@@ -167,9 +170,11 @@ class FakeProviderHandler(BaseHTTPRequestHandler):
                 ),
                 ("message_stop", {"type": "message_stop"}),
             ]
-            body_bytes = "".join(
-                f"event: {event}\ndata: {json.dumps(payload, separators=(',', ':'))}\n\n" for event, payload in events
-            ).encode("utf-8")
+            body_bytes = self.__class__.response_stream_override
+            if body_bytes is None:
+                body_bytes = self.__class__.response_stream_prefix + "".join(
+                    f"event: {event}\ndata: {json.dumps(payload, separators=(',', ':'))}\n\n" for event, payload in events
+                ).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
             self.send_header("Content-Length", str(len(body_bytes)))
@@ -259,9 +264,11 @@ class FakeProviderHandler(BaseHTTPRequestHandler):
             },
             {"type": "response.completed", "response": completed, "sequence_number": 7},
         ]
-        body_bytes = "".join(
-            f"event: {event['type']}\ndata: {json.dumps(event, separators=(',', ':'))}\n\n" for event in events
-        ).encode("utf-8")
+        body_bytes = self.__class__.response_stream_override
+        if body_bytes is None:
+            body_bytes = self.__class__.response_stream_prefix + "".join(
+                f"event: {event['type']}\ndata: {json.dumps(event, separators=(',', ':'))}\n\n" for event in events
+            ).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Content-Length", str(len(body_bytes)))
@@ -362,6 +369,8 @@ class GatewayIntegrationTests(unittest.TestCase):
         FakeProviderHandler.response_content_type = "application/json"
         FakeProviderHandler.response_request_id_override = None
         FakeProviderHandler.response_extra_headers = ()
+        FakeProviderHandler.response_stream_prefix = b""
+        FakeProviderHandler.response_stream_override = None
         FakeProviderHandler.redirect_url = None
         FakeProviderHandler.request_started = None
         FakeProviderHandler.release_response = None
@@ -781,6 +790,75 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertEqual(event["rate_card_version"], "test-anthropic-v1")
         self.assertEqual(event["actual_model"], "claude-sonnet-5")
         self.assertEqual(event["provider_usage"]["cache_read_input_tokens"], 20)
+
+    def test_oversized_sse_accounting_line_is_relayed_and_later_usage_is_recorded(
+        self,
+    ) -> None:
+        oversized_line = (
+            b"data: "
+            + (b"x" * (MAX_PROVIDER_USAGE_SSE_LINE_BYTES + 1))
+            + b"\n\n"
+        )
+        FakeProviderHandler.response_stream_prefix = oversized_line
+
+        status, headers, response = self._post(
+            "/v1/messages",
+            {
+                "model": "claude-sonnet-5",
+                "messages": [{"role": "user", "content": "ordinary request"}],
+                "max_tokens": 50,
+                "stream": True,
+            },
+            extra_headers={"Anthropic-Version": "2023-06-01"},
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["content-type"], "text/event-stream")
+        self.assertTrue(response.startswith(oversized_line))
+        self.assertIn(b"event: message_stop", response)
+        event = self.gateway.store.audit_events(
+            since="2000-01-01T00:00:00+00:00",
+            kind="usage",
+        )[0]
+        self.assertEqual(event["status"], "succeeded")
+        self.assertEqual(event["input_tokens"], 80)
+        self.assertEqual(event["output_tokens"], 12)
+        self.assertEqual(event["actual_model"], "claude-sonnet-5")
+        self.assertEqual(event["cost_basis"], "estimated")
+
+    def test_success_without_complete_provider_usage_is_recorded_as_unpriced(
+        self,
+    ) -> None:
+        malformed = (
+            b"data: "
+            + (b"[" * 100_000)
+            + b"0"
+            + (b"]" * 100_000)
+            + b"\n\n"
+        )
+        FakeProviderHandler.response_stream_override = malformed
+
+        status, _, response = self._post(
+            "/v1/messages",
+            {
+                "model": "claude-sonnet-5",
+                "messages": [{"role": "user", "content": "ordinary request"}],
+                "max_tokens": 50,
+                "stream": True,
+            },
+            extra_headers={"Anthropic-Version": "2023-06-01"},
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(response, malformed)
+        event = self.gateway.store.audit_events(
+            since="2000-01-01T00:00:00+00:00",
+            kind="usage",
+        )[0]
+        self.assertEqual(event["status"], "succeeded")
+        self.assertEqual(event["cost_basis"], "not_available")
+        self.assertEqual(event["cost_microusd"], 0)
+        self.assertEqual(event["billable_tokens"], 0)
 
     def test_missing_upstream_credential_is_recorded_as_unpriced_failure(self) -> None:
         with mock.patch.dict(os.environ, {"TEST_OPENAI_KEY": ""}):

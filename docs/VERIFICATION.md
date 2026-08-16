@@ -774,6 +774,20 @@ A focused failure-first review of the provider-response boundary was exercised l
 
 This closes the identified application-level provider-response metadata path, not production deployment issue #11. Reverse proxies, TLS termination, service meshes, provider-side content, shared persistence, HA, KMS, backup/restore, and independent security review remain separate gates.
 
+### Bounded provider-usage accounting parser
+
+A focused failure-first review of the provider-response accounting parser was exercised locally on August 16, 2026 through parser-level adversarial inputs, real Hormuz HTTP relay, and provider-compatible OpenAI and Anthropic loopback fakes. No live provider credential or endpoint was used.
+
+- red-first tests proved that the pre-change SSE and non-stream accumulators could retain at least one byte beyond their intended ceilings, while a newline-free SSE event had no application-owned bound. A size-bounded but deeply nested SSE value also raised `RecursionError` through the gateway accounting path;
+- the accounting parser now caps its input buffer at 1 MiB for one SSE line and 10 MiB for one non-stream JSON response. It discards an oversized line until the next newline, ignores malformed/deep accounting values, recovers for later valid events, and releases its transient buffers at completion;
+- the real gateway relayed an oversized SSE line byte-for-byte to the employee, then parsed the later terminal Anthropic usage and recorded the ordinary estimated event. The bound therefore protects internal metadata parsing without truncating the provider response;
+- complete valid input/output usage from a non-stream response or terminal stream event is now required for `cost_basis=estimated`. Initial/provisional, missing, incomplete, oversized, or malformed successful-response usage produces an explicit `not_available` event with zero estimated cost, so reporting surfaces it as unpriced rather than free;
+- ordinary OpenAI non-streaming and Anthropic streaming usage, native metadata allowlisting, actual-model capture, cache/reasoning categories, and provider-compatible response relay remained intact;
+- the complete 343-test source suite passed in `105.927` seconds. The environment-gated official Claude Code case was the sole local skip; and
+- source/test bytecode compilation and `git diff --check` passed.
+
+This closes the identified per-request accounting-buffer and false-zero-estimate paths, not provider invoice completeness or process-wide resource governance. Concurrent-stream limits, total response duration, provider-side behavior, workload egress, final invoice/credit reconciliation, shared persistence, HA, KMS, disaster recovery, and independent security review remain open gates.
+
 ### Remote provider HTTPS enforcement
 
 The provider-upstream configuration boundary was exercised locally on August 16, 2026 without a live provider credential or remote provider request.

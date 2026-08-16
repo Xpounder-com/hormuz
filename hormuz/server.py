@@ -2911,11 +2911,15 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 )
         if account_usage:
             successful = 200 <= status < 300 and downstream_ok
-            cost = route.estimate_cost_microusd(
-                input_tokens=usage.input_tokens,
-                output_tokens=usage.output_tokens,
-                cache_read_tokens=usage.cache_read_tokens,
-                cache_write_tokens=usage.cache_write_tokens,
+            cost = (
+                route.estimate_cost_microusd(
+                    input_tokens=usage.input_tokens,
+                    output_tokens=usage.output_tokens,
+                    cache_read_tokens=usage.cache_read_tokens,
+                    cache_write_tokens=usage.cache_write_tokens,
+                )
+                if usage.usage_reported
+                else 0
             )
             self.server.store.record(
                 identity=identity,
@@ -2934,7 +2938,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 reasoning_tokens=usage.reasoning_tokens,
                 billable_tokens=usage.billable_tokens,
                 cost_microusd=cost,
-                cost_basis="estimated",
+                cost_basis="estimated" if usage.usage_reported else "not_available",
                 currency=route.currency,
                 rate_card_version=route.rate_card_version,
                 provider_usage=usage.provider_usage,

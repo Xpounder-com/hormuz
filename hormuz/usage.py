@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import codecs
 import json
 import re
 from dataclasses import dataclass, field
@@ -18,6 +17,7 @@ class Usage:
     reasoning_tokens: int = 0
     billable_tokens: int = 0
     actual_model: str | None = None
+    usage_reported: bool = False
     provider_usage: dict[str, Any] = field(default_factory=dict, repr=False)
 
 
@@ -53,6 +53,8 @@ _ANTHROPIC_USAGE_SPEC: dict[str, object] = {
     "inference_geo": "string",
 }
 _PROVIDER_REQUEST_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/@+=-]{0,255}\Z")
+MAX_PROVIDER_USAGE_SSE_LINE_BYTES = 1024 * 1024
+MAX_PROVIDER_USAGE_JSON_BYTES = 10 * 1024 * 1024
 
 
 class ResponseUsageParser:
@@ -62,30 +64,76 @@ class ResponseUsageParser:
         self.protocol = protocol
         self.is_event_stream = is_event_stream
         self.usage = Usage()
-        self._decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
-        self._line_buffer = ""
+        self._sse_line_buffer = bytearray()
+        self._discarding_sse_line = False
         self._json_buffer = bytearray()
+        self._json_oversized = False
+        self._input_usage_reported = False
+        self._output_usage_reported = False
+        self._terminal_usage_reported = not is_event_stream
 
     def feed(self, data: bytes) -> None:
         if self.is_event_stream:
-            self._line_buffer += self._decoder.decode(data)
-            while "\n" in self._line_buffer:
-                line, self._line_buffer = self._line_buffer.split("\n", 1)
-                self._parse_sse_line(line.rstrip("\r"))
-        elif len(self._json_buffer) < 10 * 1024 * 1024:
-            self._json_buffer.extend(data)
+            self._feed_sse(data)
+        elif not self._json_oversized:
+            remaining = MAX_PROVIDER_USAGE_JSON_BYTES - len(self._json_buffer)
+            if len(data) > remaining:
+                self._json_buffer.clear()
+                self._json_oversized = True
+            else:
+                self._json_buffer.extend(data)
 
     def finish(self) -> Usage:
         if self.is_event_stream:
-            self._line_buffer += self._decoder.decode(b"", final=True)
-            if self._line_buffer:
-                self._parse_sse_line(self._line_buffer.rstrip("\r"))
+            if not self._discarding_sse_line and self._sse_line_buffer:
+                self._parse_sse_line_bytes(self._sse_line_buffer)
+            self._sse_line_buffer.clear()
+            self._discarding_sse_line = False
         elif self._json_buffer:
             try:
                 self._parse_object(json.loads(self._json_buffer))
-            except (json.JSONDecodeError, UnicodeDecodeError):
+            except (ValueError, RecursionError):
                 pass
+            finally:
+                self._json_buffer.clear()
+        self._json_oversized = False
         return self.usage
+
+    def _feed_sse(self, data: bytes) -> None:
+        offset = 0
+        while offset < len(data):
+            if self._discarding_sse_line:
+                newline = data.find(b"\n", offset)
+                if newline < 0:
+                    return
+                self._discarding_sse_line = False
+                offset = newline + 1
+                continue
+
+            newline = data.find(b"\n", offset)
+            segment_end = len(data) if newline < 0 else newline
+            remaining = MAX_PROVIDER_USAGE_SSE_LINE_BYTES - len(
+                self._sse_line_buffer
+            )
+            if segment_end - offset > remaining:
+                self._sse_line_buffer.clear()
+                if newline < 0:
+                    self._discarding_sse_line = True
+                    return
+                offset = newline + 1
+                continue
+
+            self._sse_line_buffer.extend(data[offset:segment_end])
+            if newline < 0:
+                return
+            self._parse_sse_line_bytes(self._sse_line_buffer)
+            self._sse_line_buffer.clear()
+            offset = newline + 1
+
+    def _parse_sse_line_bytes(self, line: bytearray) -> None:
+        self._parse_sse_line(
+            bytes(line).rstrip(b"\r").decode("utf-8", errors="replace")
+        )
 
     def _parse_sse_line(self, line: str) -> None:
         if not line.startswith("data:"):
@@ -95,7 +143,7 @@ class ResponseUsageParser:
             return
         try:
             value = json.loads(payload)
-        except json.JSONDecodeError:
+        except (ValueError, RecursionError):
             return
         self._parse_object(value)
 
@@ -103,13 +151,17 @@ class ResponseUsageParser:
         if not isinstance(value, dict):
             return
         if self.protocol == "openai":
-            response = value.get("response") if value.get("type") == "response.completed" else value
+            completed = value.get("type") == "response.completed"
+            response = value.get("response") if completed else value
             if isinstance(response, dict):
                 self.usage.actual_model = _bounded_model_identifier(
                     response.get("model"),
                     self.usage.actual_model,
                 )
                 self._apply_openai_usage(response.get("usage"))
+                if completed:
+                    self._terminal_usage_reported = True
+                    self._update_usage_reported()
         elif self.protocol == "anthropic":
             if value.get("type") == "message_start" and isinstance(value.get("message"), dict):
                 message = value["message"]
@@ -124,11 +176,22 @@ class ResponseUsageParser:
                     self.usage.actual_model,
                 )
                 self._apply_anthropic_usage(value.get("usage"))
+                if (
+                    value.get("type") == "message_delta"
+                    and isinstance(value.get("usage"), dict)
+                    and _is_nonnegative_int(value["usage"].get("output_tokens"))
+                ):
+                    self._terminal_usage_reported = True
+                    self._update_usage_reported()
 
     def _apply_openai_usage(self, value: Any) -> None:
         if not isinstance(value, dict):
             return
         self._merge_provider_usage(sanitize_provider_usage("openai", value))
+        if _is_nonnegative_int(value.get("input_tokens")):
+            self._input_usage_reported = True
+        if _is_nonnegative_int(value.get("output_tokens")):
+            self._output_usage_reported = True
         self.usage.input_tokens = _nonnegative_int(value.get("input_tokens"), self.usage.input_tokens)
         self.usage.output_tokens = _nonnegative_int(value.get("output_tokens"), self.usage.output_tokens)
         input_details = value.get("input_tokens_details")
@@ -145,11 +208,16 @@ class ResponseUsageParser:
             self.usage.input_tokens,
             self.usage.output_tokens,
         )
+        self._update_usage_reported()
 
     def _apply_anthropic_usage(self, value: Any) -> None:
         if not isinstance(value, dict):
             return
         self._merge_provider_usage(sanitize_provider_usage("anthropic", value))
+        if _is_nonnegative_int(value.get("input_tokens")):
+            self._input_usage_reported = True
+        if _is_nonnegative_int(value.get("output_tokens")):
+            self._output_usage_reported = True
         self.usage.input_tokens = _nonnegative_int(value.get("input_tokens"), self.usage.input_tokens)
         self.usage.output_tokens = _nonnegative_int(value.get("output_tokens"), self.usage.output_tokens)
         self.usage.cache_read_tokens = _nonnegative_int(
@@ -163,6 +231,13 @@ class ResponseUsageParser:
             self.usage.output_tokens,
             self.usage.cache_read_tokens,
             self.usage.cache_write_tokens,
+        )
+        self._update_usage_reported()
+
+    def _update_usage_reported(self) -> None:
+        self.usage.usage_reported = (
+            self._input_usage_reported and self._output_usage_reported
+            and self._terminal_usage_reported
         )
 
     def _merge_provider_usage(self, value: dict[str, Any]) -> None:
@@ -233,14 +308,17 @@ def _sanitize_usage_object(value: dict[str, Any], spec: dict[str, object]) -> di
 
 
 def _nonnegative_int(value: Any, fallback: int) -> int:
-    if (
-        isinstance(value, bool)
-        or not isinstance(value, int)
-        or value < 0
-        or value > 2**63 - 1
-    ):
+    if not _is_nonnegative_int(value):
         return fallback
     return value
+
+
+def _is_nonnegative_int(value: Any) -> bool:
+    return (
+        isinstance(value, int)
+        and not isinstance(value, bool)
+        and 0 <= value <= 2**63 - 1
+    )
 
 
 def _bounded_model_identifier(value: Any, fallback: str | None) -> str | None:

@@ -94,7 +94,7 @@ The HTTP path authenticates first, derives organization/team/actor from the stat
 - `hormuz/store.py` owns the SQLite schema and monthly aggregations.
 - `hormuz/billing.py` validates complete OpenAI and Anthropic cost-report pages and normalizes exact provider amounts and supported billing dimensions without persistence or credentials.
 - `hormuz/billing_client.py` owns fixed-origin authenticated provider cost collection, bounded retry and pagination, stable content-free errors, and query-source evidence without persistence.
-- `hormuz/usage.py` parses bounded provider usage and actual-model metadata through provider-specific allowlists without storing response content.
+- `hormuz/usage.py` parses provider usage and actual-model metadata through provider-specific allowlists without storing response content. Its accounting-only buffers are capped at 1 MiB per SSE line and 10 MiB per non-stream JSON response; malformed or oversized metadata is discarded while the independent downstream relay remains unchanged. Complete non-stream or terminal-stream input/output usage is required before a request receives estimated-cost status.
 - `hormuz/redaction.py` applies bounded credential, regulated-identifier, low-confidence PII, exact-dictionary, and provider-format-aware opaque-media rules to provider-bound JSON plus transport-supplied unredactable strings.
 - `hormuz/dlp_evaluation.py` measures one configured organization detector over a strict local labeled corpus and emits aggregate content-free evidence without provider, transport, or persistence behavior.
 - `hormuz/dlp_approval.py` computes domain-separated keyed fingerprints over canonical provider request material without persistence or transport concerns.
