@@ -1437,14 +1437,18 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertNotIn(ssn, upstream)
         self.assertIn("[REDACTED:HORMUZ_DLP]", upstream)
 
-    def test_organization_can_explicitly_disable_opaque_media_rule(self) -> None:
+    def test_organization_can_disable_opaque_media_without_disabling_sibling_dlp(self) -> None:
         config_value = self._config(self.provider.server_port, _free_port())
         config_value["egress_controls"] = {
             "dlp": {"rules": {"opaque_media": {"action": "off"}}}
         }
         self._restart_gateway(config_value)
+        ssn = "123-45-6789"
+        openai_image_url = "https://example.invalid/openai-allowed-by-policy.png"
+        anthropic_image_url = "https://example.invalid/anthropic-allowed-by-policy.png"
+        before = len(FakeProviderHandler.requests)
 
-        status, _, _ = self._post(
+        openai_status, openai_headers, _ = self._post(
             "/v1/responses",
             {
                 "model": "engineering-fast",
@@ -1454,19 +1458,65 @@ class GatewayIntegrationTests(unittest.TestCase):
                         "content": [
                             {
                                 "type": "input_image",
-                                "image_url": "https://example.invalid/allowed-by-policy.png",
-                            }
+                                "image_url": openai_image_url,
+                            },
+                            {"type": "input_text", "text": f"Employee ID {ssn}."},
                         ],
                     }
                 ],
             },
         )
+        anthropic_status, anthropic_headers, _ = self._post(
+            "/v1/messages",
+            {
+                "model": "claude-standard",
+                "max_tokens": 20,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "image",
+                                "source": {
+                                    "type": "url",
+                                    "url": anthropic_image_url,
+                                },
+                            },
+                            {"type": "text", "text": f"Employee ID {ssn}."},
+                        ],
+                    }
+                ],
+            },
+            extra_headers={"Anthropic-Version": "2023-06-01"},
+        )
 
-        self.assertEqual(status, 200)
+        self.assertEqual(openai_status, 200)
+        self.assertEqual(anthropic_status, 200)
+        self.assertEqual(openai_headers["x-hormuz-redactions"], "1")
+        self.assertEqual(anthropic_headers["x-hormuz-redactions"], "1")
+        self.assertEqual(openai_headers["x-hormuz-dlp-detections"], "1")
+        self.assertEqual(anthropic_headers["x-hormuz-dlp-detections"], "1")
+        self.assertEqual(len(FakeProviderHandler.requests), before + 2)
+        forwarded = json.dumps(FakeProviderHandler.requests[before:])
+        self.assertNotIn(ssn, forwarded)
+        self.assertEqual(forwarded.count("[REDACTED:HORMUZ_DLP]"), 2)
+        self.assertIn(openai_image_url, forwarded)
+        self.assertIn(anthropic_image_url, forwarded)
         self.assertEqual(
-            FakeProviderHandler.requests[-1]["body"]["input"][0]["content"][0]["type"],
+            FakeProviderHandler.requests[-2]["body"]["input"][0]["content"][0]["type"],
             "input_image",
         )
+        security = self.gateway.store.audit_events(
+            since="2000-01-01T00:00:00+00:00",
+            kind="security",
+        )
+        self.assertEqual(len(security), 2)
+        self.assertEqual({event["protocol"] for event in security}, {"openai", "anthropic"})
+        self.assertTrue(all(event["action"] == "redacted" for event in security))
+        self.assertTrue(all(event["rules"] == ["us_ssn"] for event in security))
+        self.assertTrue(all(event["detection_count"] == 1 for event in security))
+        self.assertNotIn(ssn, repr(security))
+        self.assertNotIn(ssn.encode("utf-8"), self.config.database_path.read_bytes())
 
     def test_company_dictionary_deny_blocks_before_egress_and_never_persists_value(self) -> None:
         protected = "PROJECT-ORBITAL"

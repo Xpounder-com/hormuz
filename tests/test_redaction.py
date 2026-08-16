@@ -360,6 +360,59 @@ class SecretRedactorTests(unittest.TestCase):
         self.assertEqual(result.value, value)
         self.assertIn(opaque_secret, result.value["input"][0]["content"][0]["file_data"])
 
+    def test_disabling_opaque_media_does_not_disable_sibling_dlp(self) -> None:
+        controls = DLPControls(
+            policy_version="opaque-off-v1",
+            rules=(
+                DLPRuleConfig(
+                    rule_id="opaque_media",
+                    category="unsupported_media",
+                    confidence="high",
+                    action="off",
+                    providers=("openai",),
+                ),
+                DLPRuleConfig(
+                    rule_id="us_ssn",
+                    category="regulated_identifier",
+                    confidence="high",
+                    action="redact",
+                    providers=("openai",),
+                ),
+            ),
+        )
+        ssn = "123-45-6789"
+        image_url = "https://example.invalid/allowed-by-policy.png"
+        value = {
+            "input": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "input_image", "image_url": image_url},
+                        {"type": "input_text", "text": f"Employee ID {ssn}."},
+                    ],
+                }
+            ]
+        }
+
+        result = SecretRedactor(
+            SecretControls(mode="redact"),
+            dlp_controls=controls,
+        ).inspect(value, protocol="openai", model="gpt-test")
+
+        self.assertEqual(result.action, "redact")
+        self.assertEqual(result.count, 1)
+        self.assertEqual(result.redaction_count, 1)
+        self.assertEqual(result.rules, ("us_ssn",))
+        self.assertEqual(
+            result.value["input"][0]["content"][0]["image_url"],
+            image_url,
+        )
+        self.assertNotIn(ssn, result.value["input"][0]["content"][1]["text"])
+        self.assertIn(
+            "[REDACTED:HORMUZ_DLP]",
+            result.value["input"][0]["content"][1]["text"],
+        )
+
     def test_strongest_scoped_action_wins_without_leaking_dictionary_value(self) -> None:
         protected = "PROJECT-ORBITAL"
         controls = DLPControls(

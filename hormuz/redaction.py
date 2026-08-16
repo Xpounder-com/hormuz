@@ -126,7 +126,7 @@ class SecretRedactor:
                 ),
                 None,
             )
-            if opaque_rule is not None:
+            if opaque_rule is not None and opaque_rule.action != "off":
                 finding = DLPFinding(
                     rule_id=opaque_rule.rule_id,
                     category=opaque_rule.category,

@@ -120,7 +120,7 @@ Hormuz does not fetch or decode those bytes yet. With the secure default, `opaqu
 
 Anthropic document sources whose type is `text` or `content` remain inspectable. Their nested JSON strings continue through secret and structured-DLP transformation, so a regulated identifier in an inline text document is redacted rather than causing a blanket media denial.
 
-The `opaque_media` action accepts only `deny` or `off`. `off` is an explicit organization risk acceptance that permits supported provider media to pass without byte inspection. Hormuz refuses `detect`, `redact`, or `require_approval` for this rule rather than implying that an opaque file was reviewed or safely transformed.
+The `opaque_media` action accepts only `deny` or `off`. `off` is an explicit organization risk acceptance that permits supported provider media to pass without byte inspection. That exception is object-local: Hormuz skips generic string scanning only for the recognized opaque object while continuing credential and DLP inspection of inspectable sibling text and values in the same request. Hormuz refuses `detect`, `redact`, or `require_approval` for this rule rather than implying that an opaque file was reviewed or safely transformed.
 
 ## Exact single-use approval
 
@@ -187,6 +187,7 @@ python3 -m unittest -v \
   tests.test_gateway.GatewayIntegrationTests.test_regulated_identifier_is_redacted_on_anthropic_path_before_provider \
   tests.test_gateway.GatewayIntegrationTests.test_opaque_media_is_denied_for_openai_and_anthropic_before_provider \
   tests.test_gateway.GatewayIntegrationTests.test_opaque_media_denial_on_token_count_has_no_usage_charge \
+  tests.test_gateway.GatewayIntegrationTests.test_organization_can_disable_opaque_media_without_disabling_sibling_dlp \
   tests.test_gateway.GatewayIntegrationTests.test_inline_anthropic_text_document_remains_inspectable \
   tests.test_gateway.GatewayIntegrationTests.test_company_dictionary_deny_blocks_before_egress_and_never_persists_value \
   tests.test_gateway.GatewayIntegrationTests.test_approval_requirement_binds_to_exact_routed_model_and_fails_closed \
@@ -195,4 +196,4 @@ python3 -m unittest -v \
   tests.test_store.UsageStoreMigrationTests.test_dlp_approval_expiry_and_concurrent_retry_fail_closed
 ```
 
-These tests prove credential and regulated-identifier transformation, detect-only forwarding, monotonic team/person tightening, provider-format-aware opaque denial, inspectable text-document transformation, deny-before-egress, exact routed-model scoping, non-self authorization, CLI/API approval, exact single-use consumption, expiry, concurrent replay rejection, model-mismatch evidence, store-outage denial, and metadata-only evidence across the OpenAI and Anthropic compatibility paths.
+These tests prove credential and regulated-identifier transformation, detect-only forwarding, monotonic team/person tightening, provider-format-aware opaque denial, object-local opaque-media risk acceptance, inspectable text-document transformation, deny-before-egress, exact routed-model scoping, non-self authorization, CLI/API approval, exact single-use consumption, expiry, concurrent replay rejection, model-mismatch evidence, store-outage denial, and metadata-only evidence across the OpenAI and Anthropic compatibility paths.

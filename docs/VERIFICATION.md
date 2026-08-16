@@ -331,6 +331,24 @@ Observed local result:
 
 This closes the local configuration and enforcement slice for monotonic team/person DLP overlays. It does not establish dynamic RBAC policy administration, PostgreSQL tenant isolation, SCIM group synchronization, policy-change audit, distributed cache invalidation, or a hosted control-plane schema; those depend on the owner-pending enterprise tenancy decision. Issue #10 also remains open for source classification, arbitrary encoded text/archive decoding, provider-header and JSON-key coverage, semantic detector evaluation, multi-node approval operations, externally immutable audit, and independent security review.
 
+### Opaque-media off-mode isolation
+
+The explicit `opaque_media: off` risk acceptance and its interaction with ordinary inspectable sibling values were exercised on August 15, 2026.
+
+Observed local result:
+
+- a red-first domain regression reproduced an early-return path where the presence of an off-mode opaque-media rule incorrectly bypassed all ordinary credential and DLP inspection for the request;
+- the domain fix makes the off-mode exception object-local: recognized opaque objects remain unchanged and are not falsely reported as byte-inspected, while inspectable sibling values continue through the ordinary transformation pipeline;
+- both OpenAI Responses and Anthropic Messages gateway tests sent a recognized opaque image URL beside a hyphenated US SSN. Both provider calls succeeded with the original opaque URL, the SSN was redacted before egress, and provider captures contained no unredacted identifier;
+- the two metadata-only `security.dlp` events recorded one `us_ssn` finding each, contained no opaque-media finding for the accepted objects, and neither the audit representation nor the SQLite database contained the SSN;
+- the secure default denial path, Anthropic token-count no-charge path, and inspectable inline Anthropic text-document path remained green;
+- all 177 source tests passed with both the installed Codex and official Claude Code compatibility paths enabled;
+- the frozen 60-task context release profile remained green with precision `1.00`, recall `1.00`, useful-pack rate `1.00`, mean compression ratio `0.840593`, zero authorization/lifecycle/dependency/malicious/contradiction/budget/determinism failures, and p95 in-process selection latency `0.167417 ms`; corpus SHA-256 remained `9822d592868202c7c7539bcdac7d4a5894c01f9e6dba7a434846516b67b32c17`.
+- isolated source and wheel builds succeeded; a clean Python 3.14 environment loaded `hormuz.redaction` from the installed wheel under `site-packages` and reproduced the object-local off-mode behavior with the opaque URL unchanged and the sibling SSN redacted;
+- installed-package bytecode compilation and `git diff --check` passed. A source-code scan excluding documented placeholders and test fixtures, plus a scan of the wheel's runtime package, found no private-key, OpenAI, or Anthropic credential pattern.
+
+This closes one fail-open composition defect; it does not expand the media-inspection claim. Hormuz still does not inspect accepted opaque bytes, fetch URLs or provider file IDs, decode arbitrary encoded values, or classify provider headers and JSON keys. Issue #10 remains open for those and the other enterprise DLP release gates.
+
 ## Reproduce locally
 
 The default suite uses only loopback fake providers:
