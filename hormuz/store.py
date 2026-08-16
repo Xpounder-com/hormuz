@@ -7,8 +7,10 @@ import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
+from .billing import ProviderCostReport
 from .config import Identity
 from .usage import sanitize_provider_usage
 
@@ -118,6 +120,36 @@ class DLPApprovalTotals:
 
 
 @dataclass(frozen=True)
+class ProviderCostImportResult:
+    import_id: str
+    created: bool
+    organization_id: str
+    provider: str
+    source_sha256: str
+    report_start: str
+    report_end: str
+    page_count: int
+    bucket_count: int
+    item_count: int
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "schema_version": 1,
+            "import_id": self.import_id,
+            "created": self.created,
+            "organization_id": self.organization_id,
+            "provider": self.provider,
+            "source_sha256": self.source_sha256,
+            "report_start": self.report_start,
+            "report_end": self.report_end,
+            "page_count": self.page_count,
+            "bucket_count": self.bucket_count,
+            "item_count": self.item_count,
+            "raw_payload_retained": False,
+        }
+
+
+@dataclass(frozen=True)
 class ReservationScope:
     name: str
     actor_id: str | None = None
@@ -169,6 +201,7 @@ class UsageStore:
                 CREATE TABLE IF NOT EXISTS gateway_usage_events (
                     id TEXT PRIMARY KEY,
                     occurred_at TEXT NOT NULL,
+                    organization_id TEXT,
                     actor_id TEXT NOT NULL,
                     actor_name TEXT NOT NULL,
                     team_id TEXT NOT NULL,
@@ -301,6 +334,46 @@ class UsageStore:
                     ON gateway_dlp_approval_events(occurred_at);
                 CREATE INDEX IF NOT EXISTS idx_gateway_dlp_approval_event_org
                     ON gateway_dlp_approval_events(organization_id, occurred_at);
+                CREATE TABLE IF NOT EXISTS gateway_provider_cost_imports (
+                    id TEXT PRIMARY KEY,
+                    imported_at TEXT NOT NULL,
+                    organization_id TEXT NOT NULL,
+                    provider TEXT NOT NULL CHECK (provider IN ('openai', 'anthropic')),
+                    source_sha256 TEXT NOT NULL,
+                    report_start TEXT NOT NULL,
+                    report_end TEXT NOT NULL,
+                    page_count INTEGER NOT NULL CHECK (page_count > 0),
+                    bucket_count INTEGER NOT NULL CHECK (bucket_count > 0),
+                    item_count INTEGER NOT NULL CHECK (item_count >= 0),
+                    UNIQUE (organization_id, provider, source_sha256)
+                );
+                CREATE INDEX IF NOT EXISTS idx_gateway_provider_cost_import_scope
+                    ON gateway_provider_cost_imports(
+                        organization_id, provider, imported_at, id
+                    );
+                CREATE TABLE IF NOT EXISTS gateway_provider_cost_items (
+                    id TEXT PRIMARY KEY,
+                    import_id TEXT NOT NULL,
+                    item_ordinal INTEGER NOT NULL CHECK (item_ordinal >= 0),
+                    bucket_start TEXT NOT NULL,
+                    bucket_end TEXT NOT NULL,
+                    amount_usd TEXT NOT NULL,
+                    currency TEXT NOT NULL CHECK (currency = 'USD'),
+                    provider_scope_kind TEXT NOT NULL CHECK (
+                        provider_scope_kind IN ('project', 'workspace', 'unscoped')
+                    ),
+                    provider_scope_id TEXT,
+                    line_item TEXT,
+                    cost_type TEXT,
+                    model TEXT,
+                    service_tier TEXT,
+                    token_type TEXT,
+                    context_window TEXT,
+                    inference_geo TEXT,
+                    UNIQUE (import_id, item_ordinal)
+                );
+                CREATE INDEX IF NOT EXISTS idx_gateway_provider_cost_item_import
+                    ON gateway_provider_cost_items(import_id, bucket_start, bucket_end);
                 """
             )
             columns = {
@@ -311,6 +384,16 @@ class UsageStore:
                 connection.execute(
                     "ALTER TABLE gateway_usage_events ADD COLUMN redaction_count INTEGER NOT NULL DEFAULT 0"
                 )
+            if "organization_id" not in columns:
+                connection.execute(
+                    "ALTER TABLE gateway_usage_events ADD COLUMN organization_id TEXT"
+                )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_gateway_usage_org_provider_month
+                ON gateway_usage_events(organization_id, protocol, occurred_at)
+                """
+            )
             if "redaction_rules" not in columns:
                 connection.execute(
                     "ALTER TABLE gateway_usage_events ADD COLUMN redaction_rules TEXT NOT NULL DEFAULT '[]'"
@@ -462,18 +545,20 @@ class UsageStore:
             connection.execute(
                 """
                 INSERT INTO gateway_usage_events (
-                    id, occurred_at, actor_id, actor_name, team_id, team_name, client, protocol,
+                    id, occurred_at, organization_id, actor_id, actor_name, team_id, team_name,
+                    client, protocol,
                     requested_model, resolved_alias, upstream_model, actual_model,
                     policy_action, status,
                     input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
                     reasoning_tokens, billable_tokens, cost_microusd, cost_basis, currency,
                     rate_card_version, provider_usage_json, provider_request_id,
                     redaction_count, redaction_rules
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     event_id,
                     datetime.now(timezone.utc).isoformat(),
+                    identity.organization_id,
                     identity.actor_id,
                     identity.actor_name,
                     identity.team_id,
@@ -503,6 +588,256 @@ class UsageStore:
                 ),
             )
         return event_id
+
+    def import_provider_cost_report(
+        self,
+        *,
+        organization_id: str,
+        report: ProviderCostReport,
+    ) -> ProviderCostImportResult:
+        organization_id = _bounded_billing_identifier(
+            organization_id,
+            label="organization ID",
+            maximum=256,
+        )
+        _validate_provider_cost_report_storage(report)
+        imported_at = datetime.now(timezone.utc).isoformat()
+        with self._lock, self._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            existing = connection.execute(
+                """
+                SELECT id, organization_id, provider, source_sha256, report_start, report_end,
+                       page_count, bucket_count, item_count
+                FROM gateway_provider_cost_imports
+                WHERE organization_id = ? AND provider = ? AND source_sha256 = ?
+                """,
+                (organization_id, report.provider, report.source_sha256),
+            ).fetchone()
+            if existing is not None:
+                return _provider_cost_import_result(existing, created=False)
+
+            import_id = "pci_" + uuid.uuid4().hex
+            connection.execute(
+                """
+                INSERT INTO gateway_provider_cost_imports (
+                    id, imported_at, organization_id, provider, source_sha256,
+                    report_start, report_end, page_count, bucket_count, item_count
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    import_id,
+                    imported_at,
+                    organization_id,
+                    report.provider,
+                    report.source_sha256,
+                    report.report_start,
+                    report.report_end,
+                    report.page_count,
+                    report.bucket_count,
+                    len(report.items),
+                ),
+            )
+            for ordinal, item in enumerate(report.items):
+                connection.execute(
+                    """
+                    INSERT INTO gateway_provider_cost_items (
+                        id, import_id, item_ordinal, bucket_start, bucket_end,
+                        amount_usd, currency, provider_scope_kind, provider_scope_id,
+                        line_item, cost_type, model, service_tier, token_type,
+                        context_window, inference_geo
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        "pciitem_" + uuid.uuid4().hex,
+                        import_id,
+                        ordinal,
+                        item.bucket_start,
+                        item.bucket_end,
+                        item.amount_usd,
+                        item.currency,
+                        item.provider_scope_kind,
+                        item.provider_scope_id,
+                        item.line_item,
+                        item.cost_type,
+                        item.model,
+                        item.service_tier,
+                        item.token_type,
+                        item.context_window,
+                        item.inference_geo,
+                    ),
+                )
+        return ProviderCostImportResult(
+            import_id=import_id,
+            created=True,
+            organization_id=organization_id,
+            provider=report.provider,
+            source_sha256=report.source_sha256,
+            report_start=report.report_start,
+            report_end=report.report_end,
+            page_count=report.page_count,
+            bucket_count=report.bucket_count,
+            item_count=len(report.items),
+        )
+
+    def reconcile_provider_costs(
+        self,
+        *,
+        organization_id: str,
+        provider: str,
+        import_id: str | None = None,
+    ) -> dict[str, object]:
+        organization_id = _bounded_billing_identifier(
+            organization_id,
+            label="organization ID",
+            maximum=256,
+        )
+        if provider not in {"openai", "anthropic"}:
+            raise ValueError("Provider must be openai or anthropic")
+        if import_id is not None:
+            import_id = _bounded_billing_identifier(
+                import_id,
+                label="provider cost import ID",
+                maximum=64,
+            )
+            if not import_id.startswith("pci_"):
+                raise ValueError("Provider cost import ID is invalid")
+        with self._lock, self._connection() as connection:
+            parameters: list[object] = [organization_id, provider]
+            import_clause = ""
+            if import_id is not None:
+                import_clause = "AND id = ?"
+                parameters.append(import_id)
+            imported = connection.execute(
+                f"""
+                SELECT id, imported_at, organization_id, provider, source_sha256,
+                       report_start, report_end, page_count, bucket_count, item_count
+                FROM gateway_provider_cost_imports
+                WHERE organization_id = ? AND provider = ? {import_clause}
+                ORDER BY imported_at DESC, id DESC
+                LIMIT 1
+                """,
+                parameters,
+            ).fetchone()
+            if imported is None:
+                raise ValueError("Provider cost import not found in this organization and provider scope")
+            cost_rows = connection.execute(
+                """
+                SELECT amount_usd, provider_scope_kind, provider_scope_id,
+                       line_item, cost_type
+                FROM gateway_provider_cost_items
+                WHERE import_id = ?
+                ORDER BY item_ordinal
+                """,
+                (imported["id"],),
+            ).fetchall()
+            if len(cost_rows) != int(imported["item_count"]):
+                raise ValueError("Provider billing store item count does not match its import")
+            gateway = connection.execute(
+                """
+                SELECT COUNT(*) AS requests,
+                       COALESCE(SUM(CASE WHEN status = 'succeeded' THEN 1 ELSE 0 END), 0)
+                           AS succeeded,
+                       COALESCE(SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END), 0)
+                           AS failed,
+                       COALESCE(SUM(CASE WHEN status = 'denied' THEN 1 ELSE 0 END), 0)
+                           AS denied,
+                       COALESCE(SUM(CASE WHEN cost_basis LIKE 'estimated%'
+                           THEN cost_microusd ELSE 0 END), 0) AS estimated_cost_microusd,
+                       COALESCE(SUM(CASE WHEN cost_basis = 'not_available'
+                           THEN 1 ELSE 0 END), 0) AS unpriced_requests,
+                       COUNT(DISTINCT actor_id) AS active_actors,
+                       COUNT(DISTINCT team_id) AS active_teams
+                FROM gateway_usage_events
+                WHERE organization_id = ? AND protocol = ?
+                  AND occurred_at >= ? AND occurred_at < ?
+                """,
+                (
+                    organization_id,
+                    provider,
+                    imported["report_start"],
+                    imported["report_end"],
+                ),
+            ).fetchone()
+            legacy = connection.execute(
+                """
+                SELECT COUNT(*) AS requests
+                FROM gateway_usage_events
+                WHERE organization_id IS NULL AND protocol = ?
+                  AND occurred_at >= ? AND occurred_at < ?
+                """,
+                (provider, imported["report_start"], imported["report_end"]),
+            ).fetchone()
+
+        provider_amounts: list[Decimal] = []
+        try:
+            for row in cost_rows:
+                amount = Decimal(str(row["amount_usd"]))
+                if not amount.is_finite():
+                    raise InvalidOperation
+                provider_amounts.append(amount)
+        except InvalidOperation as error:
+            raise ValueError("Provider billing store contains an invalid amount") from error
+        provider_cost = sum(provider_amounts, Decimal(0))
+        estimated_cost = Decimal(int(gateway["estimated_cost_microusd"])) / Decimal(1_000_000)
+        variance = provider_cost - estimated_cost
+        positive_unexplained = max(variance, Decimal(0))
+        unscoped_items = sum(
+            1 for row in cost_rows if row["provider_scope_kind"] == "unscoped"
+        )
+        negative_items = sum(1 for amount in provider_amounts if amount < 0)
+        zero_items = sum(1 for amount in provider_amounts if amount == 0)
+        unclassified_items = sum(1 for row in cost_rows if row["cost_type"] is None)
+        legacy_requests = int(legacy["requests"])
+        return {
+            "schema_version": 1,
+            "organization_id": organization_id,
+            "provider": provider,
+            "import_id": str(imported["id"]),
+            "imported_at": str(imported["imported_at"]),
+            "source_sha256": str(imported["source_sha256"]),
+            "report_start": str(imported["report_start"]),
+            "report_end": str(imported["report_end"]),
+            "page_count": int(imported["page_count"]),
+            "bucket_count": int(imported["bucket_count"]),
+            "provider_items": len(cost_rows),
+            "scoped_provider_items": len(cost_rows) - unscoped_items,
+            "unscoped_provider_items": unscoped_items,
+            "negative_provider_items": negative_items,
+            "zero_provider_items": zero_items,
+            "unclassified_provider_items": unclassified_items,
+            "provider_cost_basis": "provider_reported",
+            "provider_cost_usd": _decimal_text(provider_cost),
+            "gateway_cost_basis": "request_time_estimated",
+            "gateway_estimated_cost_usd": _decimal_text(estimated_cost),
+            "variance_usd": _decimal_text(variance),
+            "possible_unobserved_or_adjusted_cost_usd": _decimal_text(positive_unexplained),
+            "gateway_requests": int(gateway["requests"]),
+            "gateway_succeeded": int(gateway["succeeded"]),
+            "gateway_failed": int(gateway["failed"]),
+            "gateway_denied": int(gateway["denied"]),
+            "gateway_unpriced_requests": int(gateway["unpriced_requests"]),
+            "active_actors": int(gateway["active_actors"]),
+            "active_teams": int(gateway["active_teams"]),
+            "legacy_unattributed_gateway_requests": legacy_requests,
+            "gateway_scope_status": (
+                "organization_scoped_gateway_window"
+                if legacy_requests == 0
+                else "partial_legacy_unattributed_gateway_window"
+            ),
+            "provider_report_completeness": "not_verifiable_from_response",
+            "coverage_status": "partial_unverified_provider_scope",
+            "provider_scope_attribution": "operator_bound_to_organization",
+            "person_cost_basis": "estimated",
+            "request_final_cost_available": False,
+            "variance_proves_gateway_bypass": False,
+            "credits_discounts_adjustments_treatment": (
+                "signed_provider_amounts_included_without_reclassification"
+            ),
+            "rounding_treatment": "exact_provider_decimal_and_gateway_micro_usd",
+            "cache_batch_line_item_treatment": "provider_dimensions_preserved_without_repricing",
+            "failed_rate_limited_treatment": "gateway_status_counts_reported_separately",
+            "raw_payload_retained": False,
+        }
 
     def record_secret_event(
         self,
@@ -1334,7 +1669,7 @@ class UsageStore:
                 rows = connection.execute(
                     """
                     SELECT
-                        id, occurred_at, actor_id, actor_name, team_id, team_name,
+                        id, occurred_at, organization_id, actor_id, actor_name, team_id, team_name,
                         client, protocol, requested_model, resolved_alias, upstream_model,
                         actual_model, policy_action, status, input_tokens, output_tokens,
                         cache_read_tokens, cache_write_tokens, reasoning_tokens,
@@ -1536,6 +1871,132 @@ def _approval_binding(
     if isinstance(ttl_seconds, bool) or not isinstance(ttl_seconds, int) or not 1 <= ttl_seconds <= 900:
         raise ValueError("DLP approval TTL must be between 1 and 900 seconds")
     return {"rules_json": json.dumps(normalized_rules, separators=(",", ":"))}
+
+
+def _validate_provider_cost_report_storage(report: ProviderCostReport) -> None:
+    if not isinstance(report, ProviderCostReport):
+        raise ValueError("Provider cost report must be normalized before storage")
+    if report.provider not in {"openai", "anthropic"}:
+        raise ValueError("Provider cost report provider must be openai or anthropic")
+    if (
+        not isinstance(report.source_sha256, str)
+        or len(report.source_sha256) != 64
+        or any(character not in "0123456789abcdef" for character in report.source_sha256)
+    ):
+        raise ValueError("Provider cost report fingerprint is invalid")
+    if (
+        isinstance(report.page_count, bool)
+        or not isinstance(report.page_count, int)
+        or not 1 <= report.page_count <= 1_000
+    ):
+        raise ValueError("Provider cost report page count is invalid")
+    if (
+        isinstance(report.bucket_count, bool)
+        or not isinstance(report.bucket_count, int)
+        or not 1 <= report.bucket_count <= 50_000
+    ):
+        raise ValueError("Provider cost report bucket count is invalid")
+    if not isinstance(report.items, tuple) or len(report.items) > 500_000:
+        raise ValueError("Provider cost report items are invalid")
+    report_start = _bounded_billing_identifier(
+        report.report_start,
+        label="report start",
+        maximum=64,
+    )
+    report_end = _bounded_billing_identifier(
+        report.report_end,
+        label="report end",
+        maximum=64,
+    )
+    if report_end <= report_start:
+        raise ValueError("Provider cost report time range is invalid")
+    for item in report.items:
+        bucket_start = _bounded_billing_identifier(
+            item.bucket_start,
+            label="bucket start",
+            maximum=64,
+        )
+        bucket_end = _bounded_billing_identifier(
+            item.bucket_end,
+            label="bucket end",
+            maximum=64,
+        )
+        if bucket_end <= bucket_start or bucket_start < report_start or bucket_end > report_end:
+            raise ValueError("Provider cost report item bucket is outside its report range")
+        try:
+            amount = Decimal(item.amount_usd)
+        except (InvalidOperation, TypeError, ValueError) as error:
+            raise ValueError("Provider cost report item amount is invalid") from error
+        if (
+            not amount.is_finite()
+            or abs(amount) > Decimal("1000000000000")
+            or amount.as_tuple().exponent < -12
+            or _decimal_text(amount) != item.amount_usd
+        ):
+            raise ValueError("Provider cost report item amount is not canonical")
+        if item.currency != "USD":
+            raise ValueError("Provider cost report item currency must be USD")
+        expected_scope = "project" if report.provider == "openai" else "workspace"
+        if item.provider_scope_kind not in {expected_scope, "unscoped"}:
+            raise ValueError("Provider cost report item scope kind is invalid")
+        if item.provider_scope_kind == "unscoped":
+            if item.provider_scope_id is not None:
+                raise ValueError("Unscoped provider cost item cannot carry a scope ID")
+        elif item.provider_scope_id is None:
+            raise ValueError("Scoped provider cost item requires a scope ID")
+        for label, value, maximum in (
+            ("provider scope ID", item.provider_scope_id, 256),
+            ("line item", item.line_item, 512),
+            ("cost type", item.cost_type, 128),
+            ("model", item.model, 256),
+            ("service tier", item.service_tier, 128),
+            ("token type", item.token_type, 128),
+            ("context window", item.context_window, 128),
+            ("inference geo", item.inference_geo, 128),
+        ):
+            if value is not None:
+                _bounded_billing_identifier(value, label=label, maximum=maximum)
+
+
+def _provider_cost_import_result(
+    row: sqlite3.Row,
+    *,
+    created: bool,
+) -> ProviderCostImportResult:
+    return ProviderCostImportResult(
+        import_id=str(row["id"]),
+        created=created,
+        organization_id=str(row["organization_id"]),
+        provider=str(row["provider"]),
+        source_sha256=str(row["source_sha256"]),
+        report_start=str(row["report_start"]),
+        report_end=str(row["report_end"]),
+        page_count=int(row["page_count"]),
+        bucket_count=int(row["bucket_count"]),
+        item_count=int(row["item_count"]),
+    )
+
+
+def _bounded_billing_identifier(value: str, *, label: str, maximum: int) -> str:
+    if (
+        not isinstance(value, str)
+        or not value
+        or len(value.encode("utf-8")) > maximum
+        or any(character in value for character in ("\n", "\r", "\x00"))
+    ):
+        raise ValueError(f"Provider billing {label} must be a bounded single-line string")
+    return value
+
+
+def _decimal_text(value: Decimal) -> str:
+    if not value.is_finite():
+        raise ValueError("Provider billing store contains a non-finite amount")
+    if value == 0:
+        return "0"
+    rendered = format(value, "f")
+    if "." in rendered:
+        rendered = rendered.rstrip("0").rstrip(".")
+    return rendered
 
 
 def _approval_request_id(value: str) -> str:

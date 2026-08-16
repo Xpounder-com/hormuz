@@ -9,10 +9,12 @@ import shlex
 import signal
 import sys
 from datetime import datetime, timezone
+from decimal import Decimal
 from pathlib import Path
 from urllib.parse import urlparse
 
 from .auth import AuthenticationError, Authenticator
+from .billing import ProviderBillingError, parse_provider_cost_pages
 from .config import ConfigError, GatewayConfig, Identity
 from .context import (
     CLASSIFICATIONS,
@@ -80,6 +82,43 @@ def build_parser() -> argparse.ArgumentParser:
     )
     status.add_argument("--team", help="Limit the report to a configured team ID")
     status.add_argument("--actor", help="Limit the report to a configured actor ID")
+
+    billing = subparsers.add_parser(
+        "billing",
+        help="Import and reconcile provider-reported organization costs",
+    )
+    billing_subparsers = billing.add_subparsers(dest="billing_command", required=True)
+    billing_import = billing_subparsers.add_parser(
+        "import",
+        help="Import complete OpenAI or Anthropic cost-report API pages",
+    )
+    billing_import.add_argument("--organization", required=True, help="Configured organization ID")
+    billing_import.add_argument(
+        "--provider",
+        required=True,
+        choices=["openai", "anthropic"],
+    )
+    billing_import.add_argument(
+        "--input",
+        required=True,
+        action="append",
+        help="Official provider cost-report JSON page; repeat in pagination order",
+    )
+    billing_reconcile = billing_subparsers.add_parser(
+        "reconcile",
+        help="Compare one provider-reported cost snapshot with Hormuz request estimates",
+    )
+    billing_reconcile.add_argument("--organization", required=True, help="Configured organization ID")
+    billing_reconcile.add_argument(
+        "--provider",
+        required=True,
+        choices=["openai", "anthropic"],
+    )
+    billing_reconcile.add_argument(
+        "--import-id",
+        help="Exact pci_ import ID; defaults to the latest import for the provider",
+    )
+    billing_reconcile.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
 
     policy = subparsers.add_parser("policy-check", help="Evaluate a request without sending it upstream")
     policy.add_argument("--actor", required=True, help="Configured actor ID")
@@ -534,6 +573,8 @@ def main(argv: list[str] | None = None) -> int:
             return _doctor(config)
         if args.command == "status":
             return _status(config, args)
+        if args.command == "billing":
+            return _billing_command(config, args)
         if args.command == "policy-check":
             return _policy_check(config, args)
         if args.command == "client-config":
@@ -712,6 +753,112 @@ def _status(config: GatewayConfig, args: argparse.Namespace) -> int:
             f"{','.join(row['cost_bases'])}\t{','.join(row['rate_card_versions'])}"
         )
     return 0
+
+
+def _billing_command(config: GatewayConfig, args: argparse.Namespace) -> int:
+    organizations = {
+        identity.organization_id for identity in config.identities_by_actor.values()
+    }
+    if args.organization not in organizations:
+        print("billing error: organization is not configured", file=sys.stderr)
+        return 2
+    try:
+        if args.billing_command == "import":
+            pages = _load_provider_cost_pages(args.input)
+            report = parse_provider_cost_pages(args.provider, pages)
+            result = UsageStore(config.database_path).import_provider_cost_report(
+                organization_id=args.organization,
+                report=report,
+            )
+            print(json.dumps(result.to_dict(), indent=2))
+            return 0
+        if args.billing_command == "reconcile":
+            result = UsageStore(config.database_path).reconcile_provider_costs(
+                organization_id=args.organization,
+                provider=args.provider,
+                import_id=args.import_id,
+            )
+            if args.json:
+                print(json.dumps(result, indent=2))
+            else:
+                print(
+                    f"{result['organization_id']} {result['provider']} "
+                    f"{result['report_start']}..{result['report_end']}"
+                )
+                print(
+                    f"provider-reported USD={result['provider_cost_usd']} "
+                    f"gateway-estimated USD={result['gateway_estimated_cost_usd']} "
+                    f"variance USD={result['variance_usd']}"
+                )
+                print(
+                    f"requests={result['gateway_requests']} "
+                    f"unpriced={result['gateway_unpriced_requests']} "
+                    f"coverage={result['coverage_status']}"
+                )
+                print(
+                    "Variance is unresolved aggregate evidence; it does not by itself prove "
+                    "gateway bypass or provide actual per-person cost."
+                )
+            return 0
+    except (OSError, UnicodeDecodeError, ProviderBillingError, ValueError) as error:
+        print(f"billing error: {error}", file=sys.stderr)
+        return 2
+    return 2
+
+
+def _load_provider_cost_pages(paths: list[str]) -> list[dict[str, object]]:
+    if not 1 <= len(paths) <= 100:
+        raise ProviderBillingError("Billing import accepts 1 to 100 input pages")
+    if "-" in paths and paths != ["-"]:
+        raise ProviderBillingError("Standard input must be the only billing input page")
+    page_limit = 16 * 1024 * 1024
+    total_limit = 32 * 1024 * 1024
+    total = 0
+    pages: list[dict[str, object]] = []
+    for raw_path in paths:
+        if raw_path == "-":
+            stream = getattr(sys.stdin, "buffer", sys.stdin)
+            payload = stream.read(page_limit + 1)
+            if isinstance(payload, str):
+                payload = payload.encode("utf-8")
+        else:
+            path = Path(raw_path).expanduser().absolute()
+            if path.stat().st_size > page_limit:
+                raise ProviderBillingError("Billing input page cannot exceed 16 MiB")
+            payload = path.read_bytes()
+        if len(payload) > page_limit:
+            raise ProviderBillingError("Billing input page cannot exceed 16 MiB")
+        total += len(payload)
+        if total > total_limit:
+            raise ProviderBillingError("Billing input pages cannot exceed 32 MiB total")
+        try:
+            value = json.loads(
+                payload.decode("utf-8"),
+                parse_float=Decimal,
+                parse_constant=_invalid_billing_json_constant,
+                object_pairs_hook=_unique_json_object,
+            )
+        except json.JSONDecodeError as error:
+            raise ProviderBillingError(
+                f"Billing input page must be valid JSON at line {error.lineno}, column {error.colno}"
+            ) from error
+        if not isinstance(value, dict):
+            raise ProviderBillingError("Billing input page must be a JSON object")
+        pages.append(value)
+    return pages
+
+
+def _unique_json_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ProviderBillingError("Billing input contains a duplicate JSON object member")
+        result[key] = value
+    return result
+
+
+def _invalid_billing_json_constant(_value: str) -> object:
+    raise ProviderBillingError("Billing input contains a non-standard JSON numeric constant")
 
 
 def _budget_for_scope(

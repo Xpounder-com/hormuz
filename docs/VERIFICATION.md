@@ -248,6 +248,26 @@ Observed local result:
 
 This is the request-level accounting and immutable-estimate foundation for issue #8, not provider billing ingestion or invoice reconciliation. OpenAI and Anthropic cost reports are aggregate across provider dimensions and do not universally assign a final invoiced cost to one Hormuz request. Team/person values therefore remain estimates unless the customer isolates provider accounting boundaries; Hormuz does not label an inferred allocation as final.
 
+### Provider cost-report import and aggregate reconciliation
+
+The bounded offline import parser, additive usage-ledger schema, exact-decimal snapshot store, and CLI reconciliation path were exercised on August 15, 2026 against the documented OpenAI organization Costs and Anthropic organization Cost Report response contracts.
+
+Observed local result:
+
+- OpenAI dollar-valued cost results retained project and line-item dimensions; Anthropic decimal-cent results retained workspace, description, cost type, model, service tier, token type, context window, and inference geo. The Anthropic fixture amount `123.78912` cents remained exactly `1.2378912` USD without binary floating-point conversion or micro-USD rounding;
+- incomplete pagination, an inconsistent intermediate/final flag, an exact duplicate page, duplicate JSON members, non-standard numeric constants, unsupported currency, malformed amount, invalid bucket order, a forged normalized fingerprint, and a missing stored item failed closed. The normalized fingerprint was stable when the same buckets and items were returned with a different page size;
+- the import stored only normalized billing metadata and a SHA-256 fingerprint. An unknown raw-field sentinel did not appear in SQLite, and import/reconciliation outputs explicitly reported `raw_payload_retained: false`;
+- two concurrent imports of one organization/provider snapshot converged on one `pci_` import ID with one writer and one idempotent reader. Reimporting the same snapshot did not duplicate its cost items;
+- newly recorded usage events carried the trusted event-time organization ID, and metadata-only usage audit output exposed that binding. Cross-organization request estimates did not enter reconciliation; pre-migration rows with no trustworthy organization binding remained null, were excluded, and were counted as legacy unattributed coverage;
+- provider-reported aggregate cost and gateway request-time estimate remained separate decimal values. Positive, zero, and negative provider entries were included without guessing whether free-form line items were credits, discounts, or adjustments. Cache/batch/provider dimensions were preserved without repricing, while succeeded, failed, denied, and unpriced gateway counts remained separate;
+- every offline provider response reported `provider_report_completeness: not_verifiable_from_response`, `coverage_status: partial_unverified_provider_scope`, `person_cost_basis: estimated`, and `variance_proves_gateway_bypass: false`. The CLI never labels aggregate variance as causal proof or final employee cost;
+- all 194 source tests passed with both the installed Codex and official Claude Code executable compatibility paths enabled;
+- the frozen 60-task governed-context release profile remained green with precision `1.00`, recall `1.00`, useful-pack rate `1.00`, mean compression ratio `0.840593`, zero authorization/lifecycle/dependency/malicious/contradiction/budget/determinism failures, and p95 in-process selection latency `0.183792 ms`; corpus SHA-256 remained `9822d592868202c7c7539bcdac7d4a5894c01f9e6dba7a434846516b67b32c17`;
+- an isolated source distribution included the billing module, implementation document, and tests, while the wheel contained the runtime billing module and CLI. A clean Python 3.14 environment installed the wheel outside the checkout, loaded `hormuz.billing` from `site-packages`, preserved the fractional-cent fixture, displayed both billing subcommands, passed bytecode compilation, and passed the bundled strict benchmark;
+- `git diff --check`, source bytecode compilation, and source/runtime credential-pattern scans passed. No provider administrator credential was created, read, or stored by the importer.
+
+This closes a local, offline reconciliation kernel for issue #8, not the issue or finance release gate. The provider response cannot prove which filters produced it or bind separately downloaded pages to their request cursors. Authenticated polling, secure administrator-credential custody, explicit provider project/workspace mappings, invoice/credit imports, configurable variance thresholds and exceptions, historical supersession policy, shared tenant storage/RBAC, retention, HA, and finance review workflows remain open. Aggregate provider cost still cannot be silently allocated as final team or employee spend.
+
 ### Structured DLP detector and enforcement subset
 
 The versioned rule configuration, recursive detector, additive security-ledger migration, OpenAI and Anthropic egress paths, and metadata-only evidence boundary were exercised on August 15, 2026.

@@ -27,6 +27,20 @@ OpenAI Responses API / Anthropic Messages API
 SQLite usage ledger
 ```
 
+Provider billing evidence has a separate offline path into that metadata ledger:
+
+```text
+complete OpenAI / Anthropic cost-report JSON pages
+        |
+        | bounded schema parsing, exact decimal normalization, pagination check
+        v
+immutable organization/provider cost snapshot
+        |
+        +--> raw response discarded; normalized project/workspace/line-item fields retained
+        +--> compare aggregate provider-reported cost with organization-bound request estimates
+        +--> expose unresolved variance without allocating it to employees or calling it bypass
+```
+
 Governed context has explicit CLI and authenticated HTTP paths:
 
 ```text
@@ -60,6 +74,7 @@ The HTTP path authenticates first, derives organization/team/actor from the stat
 - `hormuz/config.py` validates configuration, defines identity/route/rate-card policy data, and resolves monotonic organization/team/person DLP actions for the exact provider and routed model.
 - `hormuz/policy.py` evaluates access, fallback, caps, and budgets without transport concerns.
 - `hormuz/store.py` owns the SQLite schema and monthly aggregations.
+- `hormuz/billing.py` validates complete OpenAI and Anthropic cost-report pages and normalizes exact provider amounts and supported billing dimensions without persistence or credentials.
 - `hormuz/usage.py` parses bounded provider usage and actual-model metadata through provider-specific allowlists without storing response content.
 - `hormuz/redaction.py` applies bounded credential, regulated-identifier, low-confidence PII, exact-dictionary, and provider-format-aware opaque-media rules to provider-bound JSON values.
 - `hormuz/dlp_approval.py` computes domain-separated keyed fingerprints over canonical provider operation/payload values without persistence or transport concerns.
@@ -68,11 +83,11 @@ The HTTP path authenticates first, derives organization/team/actor from the stat
 - `hormuz/context_store.py` implements the local governed-record and trusted-snapshot repository, optimistic concurrency, integrity checks, and metadata-only mutation/read/lifecycle audit behind a content-codec boundary.
 - `hormuz/mcp.py` implements the bounded dual-era MCP stdio protocol and an HTTPS client for the authenticated Context Pack API; it has no repository or provider access.
 - `hormuz/context_benchmark.py` evaluates the production context-pack kernel against frozen synthetic snapshots and separated outcomes; it has no provider, network, or context-repository dependency.
-- `hormuz/cli.py` exposes serving, diagnostics, policy checks, client configuration, usage reporting, and explicit context lifecycle commands.
+- `hormuz/cli.py` exposes serving, diagnostics, policy checks, client configuration, usage and billing reporting, and explicit context lifecycle commands.
 
 ## Trust boundary
 
-Hormuz is trusted with plaintext requests and responses because it must inspect and relay them. The usage and DLP approval stores are deliberately metadata-only; the latter keeps only a keyed fingerprint and bounded binding metadata, never the payload. Governed content is held in a different SQLite database and never written to the usage ledger. The current local context codec is plainly labeled as unencrypted and is not an enterprise storage claim. DLP runs after authentication and exact provider/model routing but before provider storage policy and upstream serialization. Team and actor overlays are selected only from the authenticated identity and can only strengthen an enabled organization rule; callers cannot request a weaker scope. Recognized opaque provider media is denied before egress unless the organization explicitly turns that rule off; Hormuz does not claim to inspect the underlying bytes. The off-mode exemption is limited to each recognized opaque object, so inspectable siblings remain governed by credential and DLP rules. Approval consumption is atomic and precedes egress, so concurrent replay cannot duplicate the exception. Future reusable-context injection must run after context authorization and before DLP so newly added context is inspected by the same egress controls.
+Hormuz is trusted with plaintext requests and responses because it must inspect and relay them. The usage and DLP approval stores are deliberately metadata-only; the latter keeps only a keyed fingerprint and bounded binding metadata, never the payload. Provider billing imports add normalized financial metadata such as project/workspace IDs and line-item descriptions, but discard the raw provider response and never receive the administrator credential. Governed content is held in a different SQLite database and never written to the usage ledger. The current local context codec is plainly labeled as unencrypted and is not an enterprise storage claim. DLP runs after authentication and exact provider/model routing but before provider storage policy and upstream serialization. Team and actor overlays are selected only from the authenticated identity and can only strengthen an enabled organization rule; callers cannot request a weaker scope. Recognized opaque provider media is denied before egress unless the organization explicitly turns that rule off; Hormuz does not claim to inspect the underlying bytes. The off-mode exemption is limited to each recognized opaque object, so inspectable siblings remain governed by credential and DLP rules. Approval consumption is atomic and precedes egress, so concurrent replay cannot duplicate the exception. Future reusable-context injection must run after context authorization and before DLP so newly added context is inspected by the same egress controls.
 
 ## Compatibility boundary
 

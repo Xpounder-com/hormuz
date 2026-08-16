@@ -17,7 +17,7 @@ Hormuz is alpha software. The local prototype proves routing and policy behavior
 - Model fallback, output-token caps, monthly token limits, and USD budget limits.
 - Per-person attribution using unique bootstrap tokens, generic OIDC JWT access tokens, or revocable Hormuz human sessions mapped by issuer and subject.
 - Input, output, cache-read, cache-write, reasoning, and normalized billable-token accounting when providers report them.
-- Immutable USD rate-card version, cost-basis, and allowlisted provider-native usage snapshots for every accounted gateway outcome; invoice imports and reconciliation remain open.
+- Immutable USD rate-card version, cost-basis, and allowlisted provider-native usage snapshots for every accounted gateway outcome, plus exact-decimal, idempotent local import and honest aggregate reconciliation of complete OpenAI and Anthropic cost-report API responses.
 - Metadata-only SQLite usage ledger. Prompts and responses are relayed, not persisted.
 - Metadata-only JSONL audit export for usage, secret-egress, and structured-DLP evidence, with private file permissions and a SHA-256 checksum.
 - Pre-provider credential, valid hyphenated US SSN, Luhn-valid card, low-confidence email, and organization dictionary detection with provider/model-scoped detect, redact, deny, or approval-required actions. Identity-derived team/person DLP overlays can narrow scope and only strengthen organization actions. Recognized OpenAI and Anthropic image/file content is denied by default when its bytes cannot be inspected; inspectable inline text documents continue through the ordinary redaction path. Optional approvals are metadata-only, non-self, exact-payload/model bound, 15-minute, and atomically single-use.
@@ -102,6 +102,22 @@ python3 -m hormuz --config hormuz.json status --group-by model --team engineerin
 python3 -m hormuz --config hormuz.json status --json
 ```
 
+Import a provider cost-report snapshot and compare it with Hormuz request-time estimates without giving the Hormuz process a provider administrator key:
+
+```bash
+python3 -m hormuz --config hormuz.json billing import \
+  --organization xpounder \
+  --provider openai \
+  --input openai-costs-page-1.json
+
+python3 -m hormuz --config hormuz.json billing reconcile \
+  --organization xpounder \
+  --provider openai \
+  --json
+```
+
+Provider cost is aggregate evidence, not a universal final cost per request, employee, or team. See [docs/BILLING_RECONCILIATION.md](docs/BILLING_RECONCILIATION.md) for the official report contracts, pagination, exact-decimal treatment, coverage labels, and remaining invoice boundary.
+
 Export metadata-only audit evidence for the current month:
 
 ```bash
@@ -151,7 +167,7 @@ python3 -m hormuz --config hormuz.json context-audit-export \
   --output hormuz-context-audit.jsonl
 ```
 
-See [docs/ROADMAP.md](docs/ROADMAP.md) for the evidence-gated enterprise program, [docs/decisions/README.md](docs/decisions/README.md) for proposed and accepted architecture decisions, [docs/CLIENTS.md](docs/CLIENTS.md) for provider routing, [docs/MCP.md](docs/MCP.md) for governed context in Codex and Claude Code, [docs/OIDC.md](docs/OIDC.md) for generic enterprise identity, [docs/SESSION_ADMIN_API.md](docs/SESSION_ADMIN_API.md) for tenant-scoped session control, [docs/USAGE.md](docs/USAGE.md) for team/person/model cost and budget reporting, [docs/AUDIT.md](docs/AUDIT.md) for the export contract and limitations, [docs/SECRET_CONTROLS.md](docs/SECRET_CONTROLS.md) for the egress boundary, [docs/DLP_APPROVAL_API.md](docs/DLP_APPROVAL_API.md) for the approver contract, [docs/CONTEXT.md](docs/CONTEXT.md) for governed record/pack semantics, [docs/CONTEXT_API.md](docs/CONTEXT_API.md) for authenticated retrieval, [docs/VERIFICATION.md](docs/VERIFICATION.md) for executable compatibility evidence, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the request path and current trust boundary.
+See [docs/ROADMAP.md](docs/ROADMAP.md) for the evidence-gated enterprise program, [docs/decisions/README.md](docs/decisions/README.md) for proposed and accepted architecture decisions, [docs/CLIENTS.md](docs/CLIENTS.md) for provider routing, [docs/MCP.md](docs/MCP.md) for governed context in Codex and Claude Code, [docs/OIDC.md](docs/OIDC.md) for generic enterprise identity, [docs/SESSION_ADMIN_API.md](docs/SESSION_ADMIN_API.md) for tenant-scoped session control, [docs/USAGE.md](docs/USAGE.md) for team/person/model cost and budget reporting, [docs/BILLING_RECONCILIATION.md](docs/BILLING_RECONCILIATION.md) for provider cost imports and aggregate reconciliation, [docs/AUDIT.md](docs/AUDIT.md) for the export contract and limitations, [docs/SECRET_CONTROLS.md](docs/SECRET_CONTROLS.md) for the egress boundary, [docs/DLP_APPROVAL_API.md](docs/DLP_APPROVAL_API.md) for the approver contract, [docs/CONTEXT.md](docs/CONTEXT.md) for governed record/pack semantics, [docs/CONTEXT_API.md](docs/CONTEXT_API.md) for authenticated retrieval, [docs/VERIFICATION.md](docs/VERIFICATION.md) for executable compatibility evidence, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the request path and current trust boundary.
 
 Measure the bundled governed-context contract without a gateway configuration or provider credential:
 
@@ -180,4 +196,4 @@ The GitHub publication gate also tests Python 3.11 through 3.14, validates the f
 
 ## Roadmap boundary
 
-The current milestone includes the enforcement, versioned estimate accounting, deterministic secret egress, a bounded structured-DLP detector/action subset, provider-format-aware opaque-media denial, replay-safe approval grants, metadata audit, local persistent context records/packs, trusted lifecycle snapshot evaluation, MCP retrieval, OIDC JWT verification, and a single-node OIDC login/session kernel with tenant-scoped administrator revocation. The usage, approval, context, and session databases are deliberately local implementations; they are not the pending enterprise tenancy, HA, or KMS design. Before an enterprise release, Hormuz still needs one owner-selected real-IdP validation, SCIM-driven deprovisioning, shared multi-node revocation, remaining accepted DLP architecture, durable multi-tenant persistence, TLS and deployment hardening, signed or externally immutable audit retention, invoice reconciliation, broader provider conformance coverage, automatic context verification/promotion/decay and resumable revalidation, cache, mandatory injection, and outcome writeback.
+The current milestone includes the enforcement, versioned estimate accounting, offline provider cost-report reconciliation, deterministic secret egress, a bounded structured-DLP detector/action subset, provider-format-aware opaque-media denial, replay-safe approval grants, metadata audit, local persistent context records/packs, trusted lifecycle snapshot evaluation, MCP retrieval, OIDC JWT verification, and a single-node OIDC login/session kernel with tenant-scoped administrator revocation. The usage, approval, context, and session databases are deliberately local implementations; they are not the pending enterprise tenancy, HA, or KMS design. Before an enterprise release, Hormuz still needs one owner-selected real-IdP validation, SCIM-driven deprovisioning, shared multi-node revocation, remaining accepted DLP architecture, durable multi-tenant persistence, TLS and deployment hardening, signed or externally immutable audit retention, authenticated provider polling and final invoice/credit reconciliation, broader provider conformance coverage, automatic context verification/promotion/decay and resumable revalidation, cache, mandatory injection, and outcome writeback.

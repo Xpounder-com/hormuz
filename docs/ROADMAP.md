@@ -10,7 +10,7 @@ The private alpha currently has:
 
 - OpenAI Responses and Anthropic Messages proxy compatibility, including streaming;
 - organization/team/actor model policy, fallback, output caps, atomic token/spend reservations, and metadata-only reporting;
-- request-level actual-model, provider-native usage, billable-token, cost-basis, currency, and immutable rate-card-version snapshots; provider billing imports and reconciliation remain open;
+- request-level actual-model, provider-native usage, billable-token, cost-basis, currency, and immutable rate-card-version snapshots, plus a local exact-decimal OpenAI/Anthropic cost-report import and aggregate variance kernel; authenticated polling, provable report scope, final invoice/credit reconciliation, and finance workflows remain open;
 - pre-provider secret controls plus a bounded structured-DLP subset with high-confidence SSN/card redaction, low-confidence email detection, provider/model-scoped company dictionaries, monotonic identity-derived team/person tightening, provider-format-aware opaque-media denial, and metadata-only non-self, 15-minute, exact single-use approval grants; remaining #10 gates stay open;
 - generic OIDC JWT discovery/JWKS verification with explicit issuer-subject identity mapping;
 - accepted generic OIDC authorization-code + PKCE login, opaque rotating human sessions, replay-family revocation, and fail-closed OS secure-store custody;
@@ -23,7 +23,7 @@ The private alpha currently has:
 - a reproducible 60-task synthetic retrieval benchmark whose strict version-2 release profile passes current authorization, lifecycle, dependency, quarantine, contradiction, budget, determinism, leakage, and latency thresholds;
 - local and GitHub package/client verification.
 
-The foundation is not an enterprise release. The local usage/approval, context, and session databases are single-node, and the local context codec is plaintext; none is an accepted hosted persistence design. Real-IdP validation, shared tenancy and multi-node revocation, SCIM, source connectors, automatic verification/promotion/decay and resumable revalidation, context injection, remaining structured-DLP coverage, cache policy, invoice reconciliation, HA deployment, KMS, and independent security review remain open gates.
+The foundation is not an enterprise release. The local usage/approval, context, and session databases are single-node, and the local context codec is plaintext; none is an accepted hosted persistence design. Real-IdP validation, shared tenancy and multi-node revocation, SCIM, source connectors, automatic verification/promotion/decay and resumable revalidation, context injection, remaining structured-DLP coverage, cache policy, authenticated billing ingestion and final invoice reconciliation, HA deployment, KMS, and independent security review remain open gates.
 
 ## Material decisions awaiting owner approval
 
