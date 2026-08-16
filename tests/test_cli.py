@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import io
 import json
@@ -360,6 +361,55 @@ class ClientConfigTests(unittest.TestCase):
             path.write_text(json.dumps(raw), encoding="utf-8")
             with self.assertRaisesRegex(ConfigError, "bounded single-line"):
                 GatewayConfig.load(path, environ={"HORMUZ_TOKEN": "test-identity-token"})
+
+    def test_dlp_approval_config_requires_key_and_organization_approver(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            raw = json.loads((ROOT / "config.example.json").read_text(encoding="utf-8"))
+            raw["identities"][0]["capabilities"] = ["dlp_approver"]
+            raw["egress_controls"]["dlp"]["approval"] = {
+                "enabled": True,
+                "fingerprint_key_env": "DLP_FINGERPRINT_KEY",
+            }
+            raw["egress_controls"]["dlp"]["dictionaries"].append(
+                {
+                    "rule_id": "company.approval_term",
+                    "action": "require_approval",
+                    "providers": ["openai"],
+                    "values_env": "DLP_APPROVAL_TERMS",
+                }
+            )
+            path = root / "hormuz.json"
+            path.write_text(json.dumps(raw), encoding="utf-8")
+            key = base64.urlsafe_b64encode(b"k" * 32).decode("ascii")
+            environment = {
+                "HORMUZ_TOKEN": "test-identity-token",
+                "DLP_FINGERPRINT_KEY": key,
+                "DLP_APPROVAL_TERMS": json.dumps(["PROJECT-TRIDENT"]),
+            }
+
+            config = GatewayConfig.load(path, environ=environment)
+            self.assertTrue(config.dlp_controls.approval.enabled)
+            self.assertEqual(config.dlp_controls.approval.ttl_seconds, 900)
+            self.assertEqual(
+                config.identities_by_actor["alice"].capabilities,
+                ("dlp_approver",),
+            )
+            self.assertNotIn(key, repr(config))
+
+            invalid_environment = {**environment, "DLP_FINGERPRINT_KEY": "invalid"}
+            with self.assertRaisesRegex(ConfigError, "decode to exactly 32 bytes|must be base64url"):
+                GatewayConfig.load(path, environ=invalid_environment)
+
+            raw["identities"][0]["capabilities"] = []
+            path.write_text(json.dumps(raw), encoding="utf-8")
+            with self.assertRaisesRegex(ConfigError, "no dlp_approver"):
+                GatewayConfig.load(path, environ=environment)
+
+            raw["identities"][0]["capabilities"] = ["organization_owner"]
+            path.write_text(json.dumps(raw), encoding="utf-8")
+            with self.assertRaisesRegex(ConfigError, r"Unknown identities\[0\].capabilities"):
+                GatewayConfig.load(path, environ=environment)
 
     def test_usage_report_budget_matches_policy_scope(self) -> None:
         self.assertEqual(

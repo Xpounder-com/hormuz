@@ -20,7 +20,7 @@ Hormuz is alpha software. The local prototype proves routing and policy behavior
 - Immutable USD rate-card version, cost-basis, and allowlisted provider-native usage snapshots for every accounted gateway outcome; invoice imports and reconciliation remain open.
 - Metadata-only SQLite usage ledger. Prompts and responses are relayed, not persisted.
 - Metadata-only JSONL audit export for usage, secret-egress, and structured-DLP evidence, with private file permissions and a SHA-256 checksum.
-- Pre-provider credential, valid hyphenated US SSN, Luhn-valid card, low-confidence email, and organization dictionary detection with provider/model-scoped detect, redact, deny, or fail-closed approval-required actions. Approval grants are not yet shipped.
+- Pre-provider credential, valid hyphenated US SSN, Luhn-valid card, low-confidence email, and organization dictionary detection with provider/model-scoped detect, redact, deny, or approval-required actions. Optional approvals are metadata-only, non-self, exact-payload/model bound, 15-minute, and atomically single-use.
 - OpenAI response storage and background mode disabled by default as enforceable provider privacy policy.
 - Configuration output for installed Codex and Claude Code clients.
 - A separate local governed-context repository with atomic idempotent import, verification evidence, classification/scope authorization, optimistic concurrency, metadata-only mutation/read audit export, private content export, and physical deletion controls.
@@ -109,6 +109,20 @@ python3 -m hormuz --config hormuz.json audit-export \
   --output hormuz-audit.jsonl
 ```
 
+When an enforced DLP rule requires approval, the employee keeps using Codex or Claude Code. Hormuz returns an opaque `apr_...` request ID; a separately authorized approver inspects metadata and approves it, then the employee retries the unchanged request once:
+
+```bash
+hormuz dlp approval show apr_0123456789abcdef0123456789abcdef \
+  --gateway https://hormuz.example.com \
+  --profile security-approver
+
+hormuz dlp approval approve apr_0123456789abcdef0123456789abcdef \
+  --gateway https://hormuz.example.com \
+  --profile security-approver
+```
+
+No prompt or matched value is returned to the approver or stored in the approval ledger. See [docs/SECRET_CONTROLS.md](docs/SECRET_CONTROLS.md) for key generation, capability configuration, exact retry semantics, and failure behavior.
+
 Import the sample into the separate local context repository, inspect metadata, and build a pack without injecting or sending it to a provider:
 
 ```bash
@@ -136,7 +150,7 @@ python3 -m hormuz --config hormuz.json context-audit-export \
   --output hormuz-context-audit.jsonl
 ```
 
-See [docs/ROADMAP.md](docs/ROADMAP.md) for the evidence-gated enterprise program, [docs/decisions/README.md](docs/decisions/README.md) for proposed and accepted architecture decisions, [docs/CLIENTS.md](docs/CLIENTS.md) for provider routing, [docs/MCP.md](docs/MCP.md) for governed context in Codex and Claude Code, [docs/OIDC.md](docs/OIDC.md) for generic enterprise identity, [docs/USAGE.md](docs/USAGE.md) for team/person/model cost and budget reporting, [docs/AUDIT.md](docs/AUDIT.md) for the export contract and limitations, [docs/SECRET_CONTROLS.md](docs/SECRET_CONTROLS.md) for the egress boundary, [docs/CONTEXT.md](docs/CONTEXT.md) for governed record/pack semantics, [docs/CONTEXT_API.md](docs/CONTEXT_API.md) for authenticated retrieval, [docs/VERIFICATION.md](docs/VERIFICATION.md) for executable compatibility evidence, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the request path and current trust boundary.
+See [docs/ROADMAP.md](docs/ROADMAP.md) for the evidence-gated enterprise program, [docs/decisions/README.md](docs/decisions/README.md) for proposed and accepted architecture decisions, [docs/CLIENTS.md](docs/CLIENTS.md) for provider routing, [docs/MCP.md](docs/MCP.md) for governed context in Codex and Claude Code, [docs/OIDC.md](docs/OIDC.md) for generic enterprise identity, [docs/USAGE.md](docs/USAGE.md) for team/person/model cost and budget reporting, [docs/AUDIT.md](docs/AUDIT.md) for the export contract and limitations, [docs/SECRET_CONTROLS.md](docs/SECRET_CONTROLS.md) for the egress boundary, [docs/DLP_APPROVAL_API.md](docs/DLP_APPROVAL_API.md) for the approver contract, [docs/CONTEXT.md](docs/CONTEXT.md) for governed record/pack semantics, [docs/CONTEXT_API.md](docs/CONTEXT_API.md) for authenticated retrieval, [docs/VERIFICATION.md](docs/VERIFICATION.md) for executable compatibility evidence, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the request path and current trust boundary.
 
 Measure the bundled governed-context contract without a gateway configuration or provider credential:
 
@@ -165,4 +179,4 @@ The GitHub publication gate also tests Python 3.11 through 3.14, validates the f
 
 ## Roadmap boundary
 
-The current milestone includes the enforcement, versioned estimate accounting, deterministic secret egress, a bounded structured-DLP detector/action subset, metadata audit, local persistent context records/packs, trusted lifecycle snapshot evaluation, MCP retrieval, OIDC JWT verification, and a single-node OIDC login/session kernel. The context and session databases are deliberately local implementations; they are not the pending enterprise tenancy, HA, or KMS design. Before an enterprise release, Hormuz still needs one owner-selected real-IdP validation, SCIM-driven deprovisioning, admin revocation APIs, the approval grant/consumption workflow and remaining accepted DLP architecture, durable multi-tenant persistence, TLS and deployment hardening, signed or externally immutable audit retention, invoice reconciliation, broader provider conformance coverage, automatic context verification/promotion/decay and resumable revalidation, cache, mandatory injection, and outcome writeback.
+The current milestone includes the enforcement, versioned estimate accounting, deterministic secret egress, a bounded structured-DLP detector/action subset, replay-safe approval grants, metadata audit, local persistent context records/packs, trusted lifecycle snapshot evaluation, MCP retrieval, OIDC JWT verification, and a single-node OIDC login/session kernel. The usage, approval, context, and session databases are deliberately local implementations; they are not the pending enterprise tenancy, HA, or KMS design. Before an enterprise release, Hormuz still needs one owner-selected real-IdP validation, SCIM-driven deprovisioning, admin revocation APIs, remaining accepted DLP architecture, durable multi-tenant persistence, TLS and deployment hardening, signed or externally immutable audit retention, invoice reconciliation, broader provider conformance coverage, automatic context verification/promotion/decay and resumable revalidation, cache, mandatory injection, and outcome writeback.

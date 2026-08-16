@@ -34,12 +34,12 @@ shasum -a 256 hormuz-audit.jsonl
 Every line is one JSON object containing:
 
 - `schema_version`: currently `1`.
-- `event_type`: `usage`, `security.secret`, or `security.dlp`.
+- `event_type`: `usage`, `security.secret`, `security.dlp`, or `security.dlp.approval`.
 - `id` and `occurred_at`: the event identifier and UTC occurrence time.
 - event-time actor, team, client, protocol, requested/resolved/routed/actual model, policy, status, normalized token, cost-basis, currency, rate-card-version, provider-request, and redaction metadata when applicable.
 - `provider_usage`: a provider-specific allowlisted object containing only documented usage counters and bounded categorical metadata. Unknown fields and content-bearing provider data are removed before the event is written.
 
-Array fields such as `redaction_rules`, `rules`, and DLP `findings` are emitted as JSON arrays. A finding is restricted to rule ID, category, confidence, action, and count. DLP events also carry the policy version and exact routed upstream model. Events are ordered by occurrence time and ID, and object keys are serialized deterministically. Rate-card versions and estimates are immutable event snapshots, not a lookup through the current configuration. The store snapshots actor and team names on each request, so administrators should treat audit files as access-controlled employee metadata even though request content is absent.
+Array fields such as `redaction_rules`, `rules`, and DLP `findings` are emitted as JSON arrays. A finding is restricted to rule ID, category, confidence, action, and count. DLP events also carry the policy version and exact routed upstream model. Approval events record `requested`, `approved`, `consumed`, or post-egress `model_mismatch` transitions with the opaque request ID, event-time employee/team, separate decision actor, provider/model/policy, and rule IDs. They exclude the keyed payload fingerprint as well as all content. Events are ordered by occurrence time and ID, and object keys are serialized deterministically. Rate-card versions and estimates are immutable event snapshots, not a lookup through the current configuration. The store snapshots actor and team names on each request, so administrators should treat audit files as access-controlled employee metadata even though request content is absent.
 
 ## Security boundary
 

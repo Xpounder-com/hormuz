@@ -28,6 +28,7 @@ from .context_store import (
     SQLiteContextRepository,
     StoredContextRecord,
 )
+from .dlp_client import DLPApprovalClient, DLPApprovalClientError
 from .credential_store import CredentialStoreError, validate_profile
 from .context_benchmark import (
     ContextBenchmarkError,
@@ -190,6 +191,39 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Allow loopback HTTP for local development only",
     )
+
+    dlp = subparsers.add_parser("dlp", help="Review organization DLP exceptions")
+    dlp_subparsers = dlp.add_subparsers(dest="dlp_command", required=True)
+    approval = dlp_subparsers.add_parser("approval", help="Inspect or approve one DLP exception")
+    approval_subparsers = approval.add_subparsers(
+        dest="dlp_approval_command",
+        required=True,
+    )
+    for action in ("show", "approve"):
+        command = approval_subparsers.add_parser(
+            action,
+            help=(
+                "Show metadata for one DLP approval request"
+                if action == "show"
+                else "Approve one exact DLP request for a single retry"
+            ),
+        )
+        command.add_argument("request_id", help="Opaque apr_ approval request ID")
+        command.add_argument("--gateway", required=True, help="Hormuz gateway base URL")
+        credential = command.add_mutually_exclusive_group()
+        credential.add_argument(
+            "--credential-env",
+            help="Approver credential environment variable (default: HORMUZ_TOKEN)",
+        )
+        credential.add_argument(
+            "--profile",
+            help="Saved human-session profile instead of an environment credential",
+        )
+        command.add_argument(
+            "--allow-insecure-http",
+            action="store_true",
+            help="Allow loopback HTTP for local development only",
+        )
 
     audit = subparsers.add_parser("audit-export", help="Export metadata-only usage and security events as JSONL")
     audit.add_argument("--kind", choices=["all", "usage", "security"], default="all")
@@ -384,6 +418,8 @@ def main(argv: list[str] | None = None) -> int:
             profile=args.profile,
             allow_insecure_http=args.allow_insecure_http,
         )
+    if args.command == "dlp":
+        return _dlp_approval_command(args)
     if args.command == "context-benchmark":
         try:
             result, exit_code = run_benchmark(
@@ -505,6 +541,19 @@ def _doctor(config: GatewayConfig) -> int:
     print(f"secret egress control: {config.secret_controls.mode}")
     print(f"DLP policy version: {config.dlp_controls.policy_version}")
     print(f"DLP rules: {len(config.dlp_controls.rules)}")
+    print(
+        "DLP approval: "
+        + ("enabled (15-minute single-use)" if config.dlp_controls.approval.enabled else "disabled")
+    )
+    print(
+        "DLP approvers: "
+        + str(
+            sum(
+                "dlp_approver" in identity.capabilities
+                for identity in config.identities_by_actor.values()
+            )
+        )
+    )
     if config.dlp_controls.rules:
         action_counts: dict[str, int] = {}
         for rule in config.dlp_controls.rules:
@@ -875,6 +924,48 @@ def _auth_token(
         print(f"credential environment variable is invalid: {selected_env}", file=sys.stderr)
         return 1
     print(value)
+    return 0
+
+
+def _dlp_approval_command(args: argparse.Namespace) -> int:
+    if args.dlp_command != "approval" or args.dlp_approval_command not in {
+        "show",
+        "approve",
+    }:
+        return 2
+    try:
+        if args.profile is not None:
+            credential = session_access_token(
+                gateway=args.gateway,
+                profile=args.profile,
+                allow_insecure_http=args.allow_insecure_http,
+            )
+        else:
+            env_name = args.credential_env or "HORMUZ_TOKEN"
+            if (
+                not env_name
+                or not env_name.replace("_", "A").isalnum()
+                or env_name[0].isdigit()
+            ):
+                print("credential environment variable name is invalid", file=sys.stderr)
+                return 2
+            credential = os.environ.get(env_name, "")
+            if not credential:
+                print(f"credential environment variable is not set: {env_name}", file=sys.stderr)
+                return 1
+        client = DLPApprovalClient(
+            args.gateway,
+            credential=credential,
+            allow_insecure_http=args.allow_insecure_http,
+        )
+        if args.dlp_approval_command == "show":
+            result = client.show(args.request_id)
+        else:
+            result = client.approve(args.request_id)
+    except (DLPApprovalClientError, SessionClientError, CredentialStoreError) as error:
+        print(f"DLP approval failed: {error.code}", file=sys.stderr)
+        return 1
+    print(json.dumps(result, indent=2, sort_keys=True))
     return 0
 
 

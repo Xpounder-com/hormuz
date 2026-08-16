@@ -68,6 +68,8 @@ jobs:
           "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" mcp-config --help
           "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" context-benchmark --help
           "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" auth token --help
+          "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" dlp approval show --help
+          "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" dlp approval approve --help
           "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" login --help
           "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" logout --help
       - name: Preserve distribution evidence

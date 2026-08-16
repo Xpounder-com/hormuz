@@ -9,7 +9,7 @@ description = "Enterprise AI policy, usage, and governed-context control plane."
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [
-  { name = "NeuralInt" }
+  { name = "Xpounder, Inc." }
 ]
 classifiers = [
   "Development Status :: 3 - Alpha",

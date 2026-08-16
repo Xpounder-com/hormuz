@@ -9,7 +9,7 @@ Hormuz is alpha software and has not received a third-party security review. Do 
 - Prompt and response bodies are relayed in memory and are not written to the usage database.
 - Usage storage contains identity, team, client, protocol, model, policy outcome, token, cost, status, and provider-request metadata.
 - Configurable egress controls inspect high-confidence credential formats, every configured Hormuz/provider credential, valid hyphenated US SSNs, Luhn-valid card candidates, low-confidence email syntax, and bounded organization dictionaries before upstream serialization.
-- DLP rules support provider and exact routed-model scopes plus detect, redact, deny, and fail-closed approval-required actions. The approval grant/consumption workflow is not yet shipped.
+- DLP rules support provider and exact routed-model scopes plus detect, redact, deny, and approval-required actions. Optional approvals require a separate `dlp_approver`, reject self-approval, bind a keyed canonical payload/operation fingerprint to event-time scope and policy, expire after 15 minutes, and atomically permit one retry.
 - Security evidence stores only policy/rule metadata and counts, never matched values.
 - OpenAI Responses requests are forced to `store: false`, and background mode is denied, unless an administrator explicitly allows those storage modes.
 - Identity-token comparisons use constant-time comparison.
@@ -29,7 +29,7 @@ Hormuz is alpha software and has not received a third-party security review. Do 
 - Real-IdP validation, SCIM provisioning/deprovisioning, administrator revocation APIs, distributed throttling, KMS-backed custody, and HA session persistence remain release gates.
 - SQLite is a single-node development store.
 - Configuration contains rate cards and policy, but there is not yet a signed configuration or change-approval workflow.
-- Structured DLP is deterministic and text-only. It does not inspect images, decode arbitrary encodings or archives, classify source paths, or infer semantically sensitive company information. Email matching remains detect-only; approval grants, opaque-media denial, and organization evaluation are open gates.
+- Structured DLP is deterministic and text-only. It does not inspect images, decode arbitrary encodings or archives, classify source paths, or infer semantically sensitive company information. Email matching remains detect-only; opaque-media denial, organization evaluation, approval notifications/queue UX, and HA approval persistence are open gates.
 - Governed context matching narrow high-confidence policy-override, secret-exfiltration, or instruction-escalation patterns is quarantined before ranking. This is a deterministic safety layer, not comprehensive semantic prompt-injection detection; all returned context remains untrusted reference data.
 - MCP makes returned context available to the model but does not itself enforce tool use or prevent an unrecognized injection. Provider-bound tool results are inspected by the existing egress controls when the client sends the next model request through Hormuz.
 - Lifecycle snapshots are trusted operator/connector input. The local snapshot store contains artifact URIs and revisions, while metadata-only lifecycle audit events contain only scope, versions, hash, and artifact count.

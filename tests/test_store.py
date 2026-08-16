@@ -4,13 +4,262 @@ import sqlite3
 import tempfile
 import threading
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from hormuz.config import Identity
-from hormuz.store import ReservationDenied, ReservationScope, UsageStore
+from hormuz.dlp_approval import payload_fingerprint
+from hormuz.store import (
+    DLPApprovalStoreError,
+    ReservationDenied,
+    ReservationScope,
+    UsageStore,
+)
 
 
 class UsageStoreMigrationTests(unittest.TestCase):
+    def test_dlp_approval_is_metadata_only_non_self_exact_and_single_use(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            store = UsageStore(Path(temporary) / "usage.sqlite3")
+            alice = Identity(
+                token_env="ALICE_TOKEN",
+                token="alice-employee-token",
+                actor_id="alice",
+                actor_name="Alice",
+                team_id="engineering",
+                team_name="Engineering",
+                organization_id="org-a",
+                capabilities=("dlp_approver",),
+            )
+            bob = Identity(
+                token_env="BOB_TOKEN",
+                token="bob-approver-token",
+                actor_id="bob",
+                actor_name="Bob",
+                team_id="security",
+                team_name="Security",
+                organization_id="org-a",
+                capabilities=("dlp_approver",),
+            )
+            charlie = Identity(
+                token_env="CHARLIE_TOKEN",
+                token="charlie-employee-token",
+                actor_id="charlie",
+                actor_name="Charlie",
+                team_id="security",
+                team_name="Security",
+                organization_id="org-a",
+            )
+            mallory = Identity(
+                token_env="MALLORY_TOKEN",
+                token="mallory-approver-token",
+                actor_id="mallory",
+                actor_name="Mallory",
+                team_id="security",
+                team_name="Security",
+                organization_id="org-b",
+                capabilities=("dlp_approver",),
+            )
+            protected = "PROJECT-TRIDENT-MUST-NOT-PERSIST"
+            fingerprint = payload_fingerprint(
+                {"model": "gpt-test", "input": protected},
+                key=b"f" * 32,
+            )
+            base = datetime(2026, 8, 15, 12, 0, tzinfo=timezone.utc)
+            arguments = {
+                "identity": alice,
+                "client": "codex",
+                "protocol": "openai",
+                "requested_model": "engineering-fast",
+                "routed_model": "gpt-test",
+                "policy_version": "dlp-v1",
+                "payload_fingerprint": fingerprint,
+                "rules": ("company.codename",),
+                "detection_count": 1,
+                "ttl_seconds": 900,
+            }
+
+            first = store.authorize_or_request_dlp_approval(**arguments, now=base)
+            duplicate = store.authorize_or_request_dlp_approval(
+                **arguments,
+                now=base + timedelta(seconds=1),
+            )
+            self.assertEqual(first.request_id, duplicate.request_id)
+            self.assertFalse(first.authorized)
+
+            with self.assertRaisesRegex(
+                DLPApprovalStoreError,
+                "approval_self_approval_forbidden",
+            ):
+                store.approve_dlp_approval_request(
+                    first.request_id,
+                    approver=alice,
+                    ttl_seconds=900,
+                    now=base + timedelta(seconds=2),
+                )
+            with self.assertRaisesRegex(
+                DLPApprovalStoreError,
+                "approval_capability_required",
+            ):
+                store.approve_dlp_approval_request(
+                    first.request_id,
+                    approver=charlie,
+                    ttl_seconds=900,
+                    now=base + timedelta(seconds=2),
+                )
+            with self.assertRaisesRegex(
+                DLPApprovalStoreError,
+                "approval_request_not_found",
+            ):
+                store.approve_dlp_approval_request(
+                    first.request_id,
+                    approver=mallory,
+                    ttl_seconds=900,
+                    now=base + timedelta(seconds=2),
+                )
+
+            approved = store.approve_dlp_approval_request(
+                first.request_id,
+                approver=bob,
+                ttl_seconds=900,
+                now=base + timedelta(seconds=2),
+            )
+            idempotent = store.approve_dlp_approval_request(
+                first.request_id,
+                approver=bob,
+                ttl_seconds=900,
+                now=base + timedelta(seconds=3),
+            )
+            self.assertEqual(approved, idempotent)
+            self.assertEqual(approved.status, "approved")
+
+            mutated = store.authorize_or_request_dlp_approval(
+                **{
+                    **arguments,
+                    "payload_fingerprint": payload_fingerprint(
+                        {"model": "gpt-test", "input": protected + " changed"},
+                        key=b"f" * 32,
+                    ),
+                },
+                now=base + timedelta(seconds=4),
+            )
+            self.assertFalse(mutated.authorized)
+            self.assertNotEqual(mutated.request_id, first.request_id)
+
+            consumed = store.authorize_or_request_dlp_approval(
+                **arguments,
+                now=base + timedelta(seconds=5),
+            )
+            replay = store.authorize_or_request_dlp_approval(
+                **arguments,
+                now=base + timedelta(seconds=6),
+            )
+            self.assertTrue(consumed.authorized)
+            self.assertEqual(consumed.request_id, first.request_id)
+            self.assertFalse(replay.authorized)
+            self.assertNotEqual(replay.request_id, first.request_id)
+
+            events = store.audit_events(
+                since="2000-01-01T00:00:00+00:00",
+                kind="security",
+            )
+            approval_events = [
+                event for event in events if event["event_type"] == "security.dlp.approval"
+            ]
+            self.assertEqual(
+                [event["action"] for event in approval_events],
+                ["requested", "approved", "requested", "consumed", "requested"],
+            )
+            serialized = repr(events)
+            self.assertNotIn(protected, serialized)
+            self.assertNotIn(protected.encode("utf-8"), store.path.read_bytes())
+
+    def test_dlp_approval_expiry_and_concurrent_retry_fail_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            store = UsageStore(Path(temporary) / "usage.sqlite3")
+            alice = Identity(
+                token_env="ALICE_TOKEN",
+                token="alice-employee-token",
+                actor_id="alice",
+                actor_name="Alice",
+                team_id="engineering",
+                team_name="Engineering",
+                organization_id="org-a",
+            )
+            bob = Identity(
+                token_env="BOB_TOKEN",
+                token="bob-approver-token",
+                actor_id="bob",
+                actor_name="Bob",
+                team_id="security",
+                team_name="Security",
+                organization_id="org-a",
+                capabilities=("dlp_approver",),
+            )
+            base = datetime(2026, 8, 15, 12, 0, tzinfo=timezone.utc)
+            arguments = {
+                "identity": alice,
+                "client": "codex",
+                "protocol": "openai",
+                "requested_model": "engineering-fast",
+                "routed_model": "gpt-test",
+                "policy_version": "dlp-v1",
+                "payload_fingerprint": payload_fingerprint(
+                    {"model": "gpt-test", "input": "protected"},
+                    key=b"f" * 32,
+                ),
+                "rules": ("company.codename",),
+                "detection_count": 1,
+                "ttl_seconds": 900,
+            }
+            pending = store.authorize_or_request_dlp_approval(**arguments, now=base)
+            store.approve_dlp_approval_request(
+                pending.request_id,
+                approver=bob,
+                ttl_seconds=900,
+                now=base,
+            )
+
+            barrier = threading.Barrier(2)
+            results = []
+
+            def consume() -> None:
+                barrier.wait()
+                results.append(
+                    store.authorize_or_request_dlp_approval(
+                        **arguments,
+                        now=base + timedelta(seconds=1),
+                    )
+                )
+
+            threads = [threading.Thread(target=consume) for _ in range(2)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+            self.assertEqual(sum(result.authorized for result in results), 1)
+            self.assertEqual(sum(not result.authorized for result in results), 1)
+
+            pending_after_replay = next(result for result in results if not result.authorized)
+            store.approve_dlp_approval_request(
+                pending_after_replay.request_id,
+                approver=bob,
+                ttl_seconds=900,
+                now=base + timedelta(seconds=2),
+            )
+            after_expiry = store.authorize_or_request_dlp_approval(
+                **arguments,
+                now=base + timedelta(seconds=903),
+            )
+            self.assertFalse(after_expiry.authorized)
+            self.assertNotEqual(after_expiry.request_id, pending_after_replay.request_id)
+            expired = store.get_dlp_approval_request(
+                pending_after_replay.request_id,
+                organization_id="org-a",
+                now=base + timedelta(seconds=903),
+            )
+            self.assertEqual(expired.status, "expired")
+
     def test_existing_usage_rows_receive_conservative_accounting_backfills(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "usage.sqlite3"
@@ -84,6 +333,12 @@ class UsageStoreMigrationTests(unittest.TestCase):
                 WHERE id = 'legacy-anthropic'
                 """
             ).fetchone()
+            tables = {
+                item[0]
+                for item in connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table'"
+                ).fetchall()
+            }
             connection.close()
             self.assertEqual(dict(row), {
                 "actual_model": None,
@@ -93,6 +348,8 @@ class UsageStoreMigrationTests(unittest.TestCase):
                 "rate_card_version": "unversioned",
                 "provider_usage_json": "{}",
             })
+            self.assertIn("gateway_dlp_approval_requests", tables)
+            self.assertIn("gateway_dlp_approval_events", tables)
 
     def test_existing_usage_database_gains_redaction_metadata_columns(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

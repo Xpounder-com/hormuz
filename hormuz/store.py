@@ -48,6 +48,76 @@ class SecretTotals:
 
 
 @dataclass(frozen=True)
+class DLPApprovalResult:
+    request_id: str
+    status: str
+    expires_at: str
+
+    @property
+    def authorized(self) -> bool:
+        return self.status == "consumed"
+
+
+@dataclass(frozen=True)
+class DLPApprovalRequest:
+    request_id: str
+    created_at: str
+    updated_at: str
+    expires_at: str
+    organization_id: str
+    actor_id: str
+    actor_name: str
+    team_id: str
+    team_name: str
+    client: str
+    protocol: str
+    requested_model: str
+    routed_model: str
+    policy_version: str
+    rules: tuple[str, ...]
+    detection_count: int
+    status: str
+    approved_by_actor_id: str | None = None
+    approved_by_actor_name: str | None = None
+    approved_at: str | None = None
+    consumed_at: str | None = None
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "schema_version": 1,
+            "request_id": self.request_id,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+            "expires_at": self.expires_at,
+            "organization_id": self.organization_id,
+            "actor_id": self.actor_id,
+            "actor_name": self.actor_name,
+            "team_id": self.team_id,
+            "team_name": self.team_name,
+            "client": self.client,
+            "protocol": self.protocol,
+            "requested_model": self.requested_model,
+            "routed_model": self.routed_model,
+            "policy_version": self.policy_version,
+            "rules": list(self.rules),
+            "detection_count": self.detection_count,
+            "status": self.status,
+            "approved_by_actor_id": self.approved_by_actor_id,
+            "approved_by_actor_name": self.approved_by_actor_name,
+            "approved_at": self.approved_at,
+            "consumed_at": self.consumed_at,
+        }
+
+
+@dataclass(frozen=True)
+class DLPApprovalTotals:
+    requests: int = 0
+    approved: int = 0
+    consumed: int = 0
+    model_mismatches: int = 0
+
+
+@dataclass(frozen=True)
 class ReservationScope:
     name: str
     actor_id: str | None = None
@@ -62,6 +132,12 @@ class ReservationDenied(RuntimeError):
 
 class SecurityStoreError(RuntimeError):
     pass
+
+
+class DLPApprovalStoreError(SecurityStoreError):
+    def __init__(self, code: str):
+        super().__init__(code)
+        self.code = code
 
 
 class UsageStore:
@@ -166,6 +242,65 @@ class UsageStore:
                     ON gateway_budget_reservations(actor_id, expires_at);
                 CREATE INDEX IF NOT EXISTS idx_gateway_reservation_team
                     ON gateway_budget_reservations(team_id, expires_at);
+                CREATE TABLE IF NOT EXISTS gateway_dlp_approval_requests (
+                    id TEXT PRIMARY KEY,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    organization_id TEXT NOT NULL,
+                    actor_id TEXT NOT NULL,
+                    actor_name TEXT NOT NULL,
+                    team_id TEXT NOT NULL,
+                    team_name TEXT NOT NULL,
+                    client TEXT NOT NULL,
+                    protocol TEXT NOT NULL CHECK (protocol IN ('openai', 'anthropic')),
+                    requested_model TEXT NOT NULL,
+                    routed_model TEXT NOT NULL,
+                    policy_version TEXT NOT NULL,
+                    payload_fingerprint TEXT NOT NULL,
+                    rules_json TEXT NOT NULL,
+                    detection_count INTEGER NOT NULL CHECK (detection_count > 0),
+                    status TEXT NOT NULL CHECK (
+                        status IN ('pending', 'approved', 'consumed', 'expired')
+                    ),
+                    approved_by_actor_id TEXT,
+                    approved_by_actor_name TEXT,
+                    approved_at TEXT,
+                    consumed_at TEXT
+                );
+                CREATE INDEX IF NOT EXISTS idx_gateway_dlp_approval_binding
+                    ON gateway_dlp_approval_requests(
+                        organization_id, actor_id, protocol, routed_model,
+                        policy_version, payload_fingerprint, status, expires_at
+                    );
+                CREATE INDEX IF NOT EXISTS idx_gateway_dlp_approval_lookup
+                    ON gateway_dlp_approval_requests(organization_id, id);
+                CREATE TABLE IF NOT EXISTS gateway_dlp_approval_events (
+                    id TEXT PRIMARY KEY,
+                    occurred_at TEXT NOT NULL,
+                    request_id TEXT NOT NULL,
+                    organization_id TEXT NOT NULL,
+                    actor_id TEXT NOT NULL,
+                    actor_name TEXT NOT NULL,
+                    team_id TEXT NOT NULL,
+                    team_name TEXT NOT NULL,
+                    decision_actor_id TEXT,
+                    decision_actor_name TEXT,
+                    client TEXT NOT NULL,
+                    protocol TEXT NOT NULL CHECK (protocol IN ('openai', 'anthropic')),
+                    requested_model TEXT NOT NULL,
+                    routed_model TEXT NOT NULL,
+                    actual_model TEXT,
+                    policy_version TEXT NOT NULL,
+                    rules_json TEXT NOT NULL,
+                    action TEXT NOT NULL CHECK (
+                        action IN ('requested', 'approved', 'consumed', 'model_mismatch')
+                    )
+                );
+                CREATE INDEX IF NOT EXISTS idx_gateway_dlp_approval_event_time
+                    ON gateway_dlp_approval_events(occurred_at);
+                CREATE INDEX IF NOT EXISTS idx_gateway_dlp_approval_event_org
+                    ON gateway_dlp_approval_events(organization_id, occurred_at);
                 """
             )
             columns = {
@@ -245,6 +380,16 @@ class UsageStore:
             for column, statement in security_migrations.items():
                 if column not in security_columns:
                     connection.execute(statement)
+            approval_event_columns = {
+                row["name"]
+                for row in connection.execute(
+                    "PRAGMA table_info(gateway_dlp_approval_events)"
+                ).fetchall()
+            }
+            if "actual_model" not in approval_event_columns:
+                connection.execute(
+                    "ALTER TABLE gateway_dlp_approval_events ADD COLUMN actual_model TEXT"
+                )
 
     def record(
         self,
@@ -400,7 +545,13 @@ class UsageStore:
         policy_version: str,
         findings: tuple[dict[str, object], ...],
     ) -> str:
-        if action not in {"detected", "redacted", "denied", "approval_required"}:
+        if action not in {
+            "detected",
+            "redacted",
+            "denied",
+            "approval_required",
+            "approved",
+        }:
             raise ValueError("Unsupported DLP event action")
         normalized_findings = _sanitize_dlp_findings(findings)
         return self._record_security_event(
@@ -416,6 +567,357 @@ class UsageStore:
             event_type="security.dlp",
             policy_version=policy_version,
             findings=normalized_findings,
+        )
+
+    def authorize_or_request_dlp_approval(
+        self,
+        *,
+        identity: Identity,
+        client: str,
+        protocol: str,
+        requested_model: str,
+        routed_model: str,
+        policy_version: str,
+        payload_fingerprint: str,
+        rules: tuple[str, ...],
+        detection_count: int,
+        ttl_seconds: int,
+        now: datetime | None = None,
+    ) -> DLPApprovalResult:
+        binding = _approval_binding(
+            identity=identity,
+            client=client,
+            protocol=protocol,
+            requested_model=requested_model,
+            routed_model=routed_model,
+            policy_version=policy_version,
+            payload_fingerprint=payload_fingerprint,
+            rules=rules,
+            detection_count=detection_count,
+            ttl_seconds=ttl_seconds,
+        )
+        current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+        current_value = current.isoformat()
+        pending_expiry = (current + timedelta(seconds=ttl_seconds)).isoformat()
+        try:
+            with self._lock, self._connection() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                self._expire_dlp_approvals(connection, current_value)
+                parameters = (
+                    identity.organization_id,
+                    identity.actor_id,
+                    client,
+                    protocol,
+                    requested_model,
+                    routed_model,
+                    policy_version,
+                    payload_fingerprint,
+                    binding["rules_json"],
+                )
+                approved = connection.execute(
+                    """
+                    SELECT * FROM gateway_dlp_approval_requests
+                    WHERE organization_id = ? AND actor_id = ? AND client = ?
+                        AND protocol = ? AND requested_model = ? AND routed_model = ?
+                        AND policy_version = ? AND payload_fingerprint = ?
+                        AND rules_json = ? AND status = 'approved' AND expires_at > ?
+                    ORDER BY approved_at, id
+                    LIMIT 1
+                    """,
+                    (*parameters, current_value),
+                ).fetchone()
+                if approved is not None:
+                    changed = connection.execute(
+                        """
+                        UPDATE gateway_dlp_approval_requests
+                        SET status = 'consumed', updated_at = ?, consumed_at = ?
+                        WHERE id = ? AND status = 'approved' AND expires_at > ?
+                        """,
+                        (current_value, current_value, approved["id"], current_value),
+                    ).rowcount
+                    if changed != 1:  # pragma: no cover - BEGIN IMMEDIATE serializes this path
+                        raise DLPApprovalStoreError("approval_replay_rejected")
+                    consumed = connection.execute(
+                        "SELECT * FROM gateway_dlp_approval_requests WHERE id = ?",
+                        (approved["id"],),
+                    ).fetchone()
+                    self._record_dlp_approval_event(
+                        connection,
+                        request=consumed,
+                        action="consumed",
+                        occurred_at=current_value,
+                        decision_actor_id=consumed["approved_by_actor_id"],
+                        decision_actor_name=consumed["approved_by_actor_name"],
+                    )
+                    return DLPApprovalResult(
+                        request_id=str(consumed["id"]),
+                        status="consumed",
+                        expires_at=str(consumed["expires_at"]),
+                    )
+
+                pending = connection.execute(
+                    """
+                    SELECT * FROM gateway_dlp_approval_requests
+                    WHERE organization_id = ? AND actor_id = ? AND client = ?
+                        AND protocol = ? AND requested_model = ? AND routed_model = ?
+                        AND policy_version = ? AND payload_fingerprint = ?
+                        AND rules_json = ? AND status = 'pending' AND expires_at > ?
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT 1
+                    """,
+                    (*parameters, current_value),
+                ).fetchone()
+                if pending is not None:
+                    return DLPApprovalResult(
+                        request_id=str(pending["id"]),
+                        status="pending",
+                        expires_at=str(pending["expires_at"]),
+                    )
+
+                request_id = "apr_" + uuid.uuid4().hex
+                connection.execute(
+                    """
+                    INSERT INTO gateway_dlp_approval_requests (
+                        id, created_at, updated_at, expires_at, organization_id,
+                        actor_id, actor_name, team_id, team_name, client, protocol,
+                        requested_model, routed_model, policy_version, payload_fingerprint,
+                        rules_json, detection_count, status
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+                    """,
+                    (
+                        request_id,
+                        current_value,
+                        current_value,
+                        pending_expiry,
+                        identity.organization_id,
+                        identity.actor_id,
+                        identity.actor_name,
+                        identity.team_id,
+                        identity.team_name,
+                        client,
+                        protocol,
+                        requested_model,
+                        routed_model,
+                        policy_version,
+                        payload_fingerprint,
+                        binding["rules_json"],
+                        detection_count,
+                    ),
+                )
+                created = connection.execute(
+                    "SELECT * FROM gateway_dlp_approval_requests WHERE id = ?",
+                    (request_id,),
+                ).fetchone()
+                self._record_dlp_approval_event(
+                    connection,
+                    request=created,
+                    action="requested",
+                    occurred_at=current_value,
+                )
+                return DLPApprovalResult(
+                    request_id=request_id,
+                    status="pending",
+                    expires_at=pending_expiry,
+                )
+        except DLPApprovalStoreError:
+            raise
+        except sqlite3.Error as error:
+            raise DLPApprovalStoreError("approval_store_unavailable") from error
+
+    def get_dlp_approval_request(
+        self,
+        request_id: str,
+        *,
+        organization_id: str,
+        now: datetime | None = None,
+    ) -> DLPApprovalRequest:
+        _approval_request_id(request_id)
+        current_value = (now or datetime.now(timezone.utc)).astimezone(timezone.utc).isoformat()
+        try:
+            with self._lock, self._connection() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                self._expire_dlp_approvals(connection, current_value)
+                row = connection.execute(
+                    """
+                    SELECT * FROM gateway_dlp_approval_requests
+                    WHERE id = ? AND organization_id = ?
+                    """,
+                    (request_id, organization_id),
+                ).fetchone()
+        except sqlite3.Error as error:
+            raise DLPApprovalStoreError("approval_store_unavailable") from error
+        if row is None:
+            raise DLPApprovalStoreError("approval_request_not_found")
+        return _dlp_approval_request(row)
+
+    def approve_dlp_approval_request(
+        self,
+        request_id: str,
+        *,
+        approver: Identity,
+        ttl_seconds: int,
+        now: datetime | None = None,
+    ) -> DLPApprovalRequest:
+        _approval_request_id(request_id)
+        if "dlp_approver" not in approver.capabilities:
+            raise DLPApprovalStoreError("approval_capability_required")
+        if not 1 <= ttl_seconds <= 900:
+            raise ValueError("DLP approval TTL must be between 1 and 900 seconds")
+        current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+        current_value = current.isoformat()
+        expires_at = (current + timedelta(seconds=ttl_seconds)).isoformat()
+        try:
+            with self._lock, self._connection() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                self._expire_dlp_approvals(connection, current_value)
+                row = connection.execute(
+                    """
+                    SELECT * FROM gateway_dlp_approval_requests
+                    WHERE id = ? AND organization_id = ?
+                    """,
+                    (request_id, approver.organization_id),
+                ).fetchone()
+                if row is None:
+                    raise DLPApprovalStoreError("approval_request_not_found")
+                if row["actor_id"] == approver.actor_id:
+                    raise DLPApprovalStoreError("approval_self_approval_forbidden")
+                if row["status"] == "approved":
+                    if row["approved_by_actor_id"] == approver.actor_id:
+                        return _dlp_approval_request(row)
+                    raise DLPApprovalStoreError("approval_request_already_decided")
+                if row["status"] != "pending":
+                    raise DLPApprovalStoreError("approval_request_not_approvable")
+                connection.execute(
+                    """
+                    UPDATE gateway_dlp_approval_requests
+                    SET status = 'approved', updated_at = ?, expires_at = ?,
+                        approved_by_actor_id = ?, approved_by_actor_name = ?, approved_at = ?
+                    WHERE id = ? AND status = 'pending'
+                    """,
+                    (
+                        current_value,
+                        expires_at,
+                        approver.actor_id,
+                        approver.actor_name,
+                        current_value,
+                        request_id,
+                    ),
+                )
+                approved = connection.execute(
+                    "SELECT * FROM gateway_dlp_approval_requests WHERE id = ?",
+                    (request_id,),
+                ).fetchone()
+                self._record_dlp_approval_event(
+                    connection,
+                    request=approved,
+                    action="approved",
+                    occurred_at=current_value,
+                    decision_actor_id=approver.actor_id,
+                    decision_actor_name=approver.actor_name,
+                )
+                return _dlp_approval_request(approved)
+        except DLPApprovalStoreError:
+            raise
+        except sqlite3.Error as error:
+            raise DLPApprovalStoreError("approval_store_unavailable") from error
+
+    def record_dlp_approval_model_mismatch(
+        self,
+        request_id: str,
+        *,
+        organization_id: str,
+        actual_model: str,
+        now: datetime | None = None,
+    ) -> None:
+        _approval_request_id(request_id)
+        if (
+            not isinstance(actual_model, str)
+            or not actual_model
+            or len(actual_model.encode("utf-8")) > 128
+            or any(
+                not (character.isalnum() or character in {"-", "_", ".", ":", "/"})
+                for character in actual_model
+            )
+        ):
+            raise ValueError("DLP approval actual model must be a bounded single-line string")
+        current_value = (now or datetime.now(timezone.utc)).astimezone(timezone.utc).isoformat()
+        try:
+            with self._lock, self._connection() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                request = connection.execute(
+                    """
+                    SELECT * FROM gateway_dlp_approval_requests
+                    WHERE id = ? AND organization_id = ?
+                    """,
+                    (request_id, organization_id),
+                ).fetchone()
+                if request is None:
+                    raise DLPApprovalStoreError("approval_request_not_found")
+                self._record_dlp_approval_event(
+                    connection,
+                    request=request,
+                    action="model_mismatch",
+                    occurred_at=current_value,
+                    actual_model=actual_model,
+                )
+        except DLPApprovalStoreError:
+            raise
+        except sqlite3.Error as error:
+            raise DLPApprovalStoreError("approval_store_unavailable") from error
+
+    @staticmethod
+    def _expire_dlp_approvals(connection: sqlite3.Connection, current_value: str) -> None:
+        connection.execute(
+            """
+            UPDATE gateway_dlp_approval_requests
+            SET status = 'expired', updated_at = ?
+            WHERE status IN ('pending', 'approved') AND expires_at <= ?
+            """,
+            (current_value, current_value),
+        )
+
+    @staticmethod
+    def _record_dlp_approval_event(
+        connection: sqlite3.Connection,
+        *,
+        request: sqlite3.Row,
+        action: str,
+        occurred_at: str,
+        decision_actor_id: str | None = None,
+        decision_actor_name: str | None = None,
+        actual_model: str | None = None,
+    ) -> None:
+        if action not in {"requested", "approved", "consumed", "model_mismatch"}:
+            raise ValueError("Unsupported DLP approval event action")
+        connection.execute(
+            """
+            INSERT INTO gateway_dlp_approval_events (
+                id, occurred_at, request_id, organization_id, actor_id, actor_name,
+                team_id, team_name, decision_actor_id, decision_actor_name, client,
+                protocol, requested_model, routed_model, policy_version, rules_json,
+                actual_model, action
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                str(uuid.uuid4()),
+                occurred_at,
+                request["id"],
+                request["organization_id"],
+                request["actor_id"],
+                request["actor_name"],
+                request["team_id"],
+                request["team_name"],
+                decision_actor_id,
+                decision_actor_name,
+                request["client"],
+                request["protocol"],
+                request["requested_model"],
+                request["routed_model"],
+                request["policy_version"],
+                request["rules_json"],
+                actual_model,
+                action,
+            ),
         )
 
     def _record_security_event(
@@ -784,6 +1286,44 @@ class UsageStore:
             row = connection.execute(query, parameters).fetchone()
         return SecretTotals(**dict(row))
 
+    def monthly_dlp_approval_totals(
+        self,
+        *,
+        actor_id: str | None = None,
+        team_id: str | None = None,
+    ) -> DLPApprovalTotals:
+        start = datetime.now(timezone.utc).replace(
+            day=1,
+            hour=0,
+            minute=0,
+            second=0,
+            microsecond=0,
+        ).isoformat()
+        clauses = ["occurred_at >= ?"]
+        parameters: list[object] = [start]
+        if actor_id is not None:
+            clauses.append("actor_id = ?")
+            parameters.append(actor_id)
+        if team_id is not None:
+            clauses.append("team_id = ?")
+            parameters.append(team_id)
+        query = f"""
+            SELECT
+                COALESCE(SUM(CASE WHEN action = 'requested' THEN 1 ELSE 0 END), 0)
+                    AS requests,
+                COALESCE(SUM(CASE WHEN action = 'approved' THEN 1 ELSE 0 END), 0)
+                    AS approved,
+                COALESCE(SUM(CASE WHEN action = 'consumed' THEN 1 ELSE 0 END), 0)
+                    AS consumed,
+                COALESCE(SUM(CASE WHEN action = 'model_mismatch' THEN 1 ELSE 0 END), 0)
+                    AS model_mismatches
+            FROM gateway_dlp_approval_events
+            WHERE {' AND '.join(clauses)}
+        """
+        with self._lock, self._connection() as connection:
+            row = connection.execute(query, parameters).fetchone()
+        return DLPApprovalTotals(**dict(row))
+
     def audit_events(self, *, since: str, kind: str = "all") -> list[dict[str, object]]:
         if kind not in {"all", "usage", "security"}:
             raise ValueError(f"Unsupported audit event kind: {kind}")
@@ -841,6 +1381,29 @@ class UsageStore:
                         {
                             "schema_version": 1,
                             "event_type": event_type,
+                            **event,
+                        }
+                    )
+                approval_rows = connection.execute(
+                    """
+                    SELECT
+                        id, occurred_at, request_id, organization_id, actor_id,
+                        actor_name, team_id, team_name, decision_actor_id,
+                        decision_actor_name, client, protocol, requested_model,
+                        routed_model, actual_model, policy_version, rules_json, action
+                    FROM gateway_dlp_approval_events
+                    WHERE occurred_at >= ?
+                    ORDER BY occurred_at, id
+                    """,
+                    (since,),
+                ).fetchall()
+                for row in approval_rows:
+                    event = dict(row)
+                    event["rules"] = json.loads(str(event.pop("rules_json")))
+                    events.append(
+                        {
+                            "schema_version": 1,
+                            "event_type": "security.dlp.approval",
                             **event,
                         }
                     )
@@ -913,4 +1476,114 @@ def _sanitize_dlp_findings(
                 str(item["action"]),
             ),
         )
+    )
+
+
+def _approval_binding(
+    *,
+    identity: Identity,
+    client: str,
+    protocol: str,
+    requested_model: str,
+    routed_model: str,
+    policy_version: str,
+    payload_fingerprint: str,
+    rules: tuple[str, ...],
+    detection_count: int,
+    ttl_seconds: int,
+) -> dict[str, str]:
+    for label, value, maximum in (
+        ("organization_id", identity.organization_id, 256),
+        ("actor_id", identity.actor_id, 256),
+        ("client", client, 64),
+        ("requested_model", requested_model, 256),
+        ("routed_model", routed_model, 256),
+        ("policy_version", policy_version, 128),
+    ):
+        if (
+            not isinstance(value, str)
+            or not value
+            or len(value.encode("utf-8")) > maximum
+            or any(character in value for character in ("\n", "\r", "\x00"))
+        ):
+            raise ValueError(f"DLP approval {label} must be a bounded single-line string")
+    if protocol not in {"openai", "anthropic"}:
+        raise ValueError("DLP approval protocol must be openai or anthropic")
+    if (
+        not isinstance(payload_fingerprint, str)
+        or not payload_fingerprint.startswith("hdf_v1_")
+        or len(payload_fingerprint) != 71
+        or any(character not in "0123456789abcdef" for character in payload_fingerprint[7:])
+    ):
+        raise ValueError("DLP approval payload fingerprint is invalid")
+    normalized_rules = tuple(sorted(set(rules)))
+    if not normalized_rules or len(normalized_rules) > 100:
+        raise ValueError("DLP approval rules must contain 1 to 100 identifiers")
+    for rule in normalized_rules:
+        if (
+            not isinstance(rule, str)
+            or not rule
+            or len(rule.encode("utf-8")) > 64
+            or any(not (character.isalnum() or character in {"-", "_", "."}) for character in rule)
+        ):
+            raise ValueError("DLP approval rule identifiers are invalid")
+    if (
+        isinstance(detection_count, bool)
+        or not isinstance(detection_count, int)
+        or not 1 <= detection_count <= 2**63 - 1
+    ):
+        raise ValueError("DLP approval detection count must be positive")
+    if isinstance(ttl_seconds, bool) or not isinstance(ttl_seconds, int) or not 1 <= ttl_seconds <= 900:
+        raise ValueError("DLP approval TTL must be between 1 and 900 seconds")
+    return {"rules_json": json.dumps(normalized_rules, separators=(",", ":"))}
+
+
+def _approval_request_id(value: str) -> str:
+    if (
+        not isinstance(value, str)
+        or not value.startswith("apr_")
+        or len(value) != 36
+        or any(character not in "0123456789abcdef" for character in value[4:])
+    ):
+        raise DLPApprovalStoreError("approval_request_not_found")
+    return value
+
+
+def _dlp_approval_request(row: sqlite3.Row) -> DLPApprovalRequest:
+    try:
+        rules_value = json.loads(str(row["rules_json"]))
+    except (json.JSONDecodeError, TypeError, ValueError) as error:
+        raise DLPApprovalStoreError("approval_store_corrupt") from error
+    if not isinstance(rules_value, list) or any(not isinstance(rule, str) for rule in rules_value):
+        raise DLPApprovalStoreError("approval_store_corrupt")
+    return DLPApprovalRequest(
+        request_id=str(row["id"]),
+        created_at=str(row["created_at"]),
+        updated_at=str(row["updated_at"]),
+        expires_at=str(row["expires_at"]),
+        organization_id=str(row["organization_id"]),
+        actor_id=str(row["actor_id"]),
+        actor_name=str(row["actor_name"]),
+        team_id=str(row["team_id"]),
+        team_name=str(row["team_name"]),
+        client=str(row["client"]),
+        protocol=str(row["protocol"]),
+        requested_model=str(row["requested_model"]),
+        routed_model=str(row["routed_model"]),
+        policy_version=str(row["policy_version"]),
+        rules=tuple(rules_value),
+        detection_count=int(row["detection_count"]),
+        status=str(row["status"]),
+        approved_by_actor_id=(
+            str(row["approved_by_actor_id"])
+            if row["approved_by_actor_id"] is not None
+            else None
+        ),
+        approved_by_actor_name=(
+            str(row["approved_by_actor_name"])
+            if row["approved_by_actor_name"] is not None
+            else None
+        ),
+        approved_at=str(row["approved_at"]) if row["approved_at"] is not None else None,
+        consumed_at=str(row["consumed_at"]) if row["consumed_at"] is not None else None,
     )

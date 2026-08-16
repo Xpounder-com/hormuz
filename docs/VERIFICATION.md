@@ -265,7 +265,27 @@ Observed local result:
 - isolated source and wheel builds succeeded; the source distribution contained the DLP decision, implementation docs, and detector/gateway tests, and a clean Python 3.14 environment installed the wheel from outside the source tree and loaded `organization-dlp-v1` with all three built-in rules.
 - GitHub Actions push run `31920655595` and pull-request run `31920657597` both passed all seven publication jobs for implementation commit `695fff4`: Python 3.11–3.14, strict context benchmark, source/wheel build and install, and pinned official Codex/Claude Code compatibility.
 
-This is a bounded deterministic #10 implementation slice, not issue completion. Approval grants, replay-safe consumption, post-approval actual-model mismatch evidence, team/person DLP overlays, source classification, opaque-media denial, provider-header and JSON-key inspection, semantic detection, context-cache invalidation, and organization-representative detector evaluation remain open gates.
+This was the bounded deterministic detector/enforcement checkpoint for #10. The subsequent approval checkpoint below closes the local grant, replay-safe consumption, and post-approval model-mismatch items; team/person DLP overlays, source classification, opaque-media denial, provider-header and JSON-key inspection, semantic detection, context-cache invalidation, organization-representative detector evaluation, and enterprise deployment gates remain open.
+
+### Replay-safe DLP approval workflow
+
+The owner-approved transparent retry design, keyed fingerprint boundary, additive approval schema, approver API/CLI, both provider paths, and privacy evidence were exercised on August 15, 2026.
+
+Observed local result:
+
+- optional approval configuration requires a base64url key that decodes to exactly 32 random bytes, hides both key forms from configuration representations, treats the encoded form as an exact egress secret, and rejects enabled `require_approval` policy for an organization with no configured `dlp_approver`;
+- the gateway canonicalized the final transformed JSON together with the provider operation and stored only a domain-separated HMAC-SHA-256 fingerprint plus bounded event-time metadata; protected dictionary values, prompts, and the fingerprint key were absent from SQLite, API/CLI results, audit output, logs, and errors;
+- an opaque pending request bound organization, employee, client, provider, requested model, exact routed model, policy version, rule IDs, operation, and payload. A separately authenticated capability holder could inspect metadata and approve it, while missing capability, self-approval, cross-organization lookup, mutation, policy/provider/model/actor change, expiry, and key rotation failed closed;
+- the same unchanged OpenAI Responses or Anthropic Messages retry atomically consumed one approved grant before egress without a client-supplied approval header. Concurrent retry produced exactly one consumed result, later replay created a new pending request, and an upstream failure could not restore a consumed grant;
+- approval-store outage returned `hormuz_dlp_approval_unavailable` before a provider call. The same-approver decision endpoint was idempotent without extending expiry, while expired, consumed, or differently decided requests returned stable conflicts;
+- provider-returned actual model remained separate usage metadata; a mismatch from the approved routed model produced a metadata-only `security.dlp.approval` `model_mismatch` event after egress;
+- the real `hormuz dlp approval show` and `approve` CLI commands exercised the authenticated REST boundary. The client rejected redirects and non-loopback plaintext HTTP, and both existing AI-client request formats remained unchanged;
+- the complete source suite passed all 160 tests with the installed Codex and official Claude Code executable paths both enabled;
+- the frozen 60-task context release profile remained green with precision `1.00`, recall `1.00`, useful-pack rate `1.00`, mean compression ratio `0.840593`, zero safety failures, and p95 in-process selection latency `0.168458 ms`; corpus SHA-256 remained `9822d592868202c7c7539bcdac7d4a5894c01f9e6dba7a434846516b67b32c17`;
+- an isolated source/wheel build included the approval implementation, API document, and tests; a clean Python 3.14 environment installed the wheel and loaded the approval CLI, fingerprint implementation, and empty approval schema successfully;
+- a source scan excluding generated artifacts found no private-key, OpenAI, Anthropic, or GitHub credential pattern; ignored local environment files were not read.
+
+This is a verified single-node approval workflow, not completion of issue #10 or an enterprise release. It has no approver queue/notification connector, rejection reason workflow, signed or externally immutable audit sink, shared PostgreSQL tenancy, KMS/BYOK key custody, HA failover, or independent security review. The exact client retry can also fail to match if a client changes any outbound field between attempts; Hormuz deliberately creates a new blocked request rather than weakening the approved binding.
 
 ## Reproduce locally
 

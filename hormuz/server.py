@@ -26,17 +26,19 @@ from .context import (
     build_context_pack,
 )
 from .context_store import ContextStoreError, SQLiteContextRepository
+from .dlp_approval import DLPApprovalError, payload_fingerprint
 from .policy import PolicyDecision, PolicyEngine
 from .redaction import RedactionError, SecretRedactor
 from .session import SessionBroker, SessionBrokerError
 from .session_store import SQLiteSessionStore, SessionStoreError
-from .store import ReservationDenied, SecurityStoreError, UsageStore
+from .store import DLPApprovalStoreError, ReservationDenied, SecurityStoreError, UsageStore
 from .usage import ResponseUsageParser
 
 
 LOGGER = logging.getLogger("hormuz")
 MAX_CONTEXT_REQUEST_BYTES = 64 * 1024
 MAX_AUTH_REQUEST_BYTES = 8 * 1024
+MAX_DLP_APPROVAL_REQUEST_BYTES = 2 * 1024
 
 
 class ContextRateLimiter:
@@ -107,6 +109,13 @@ class GatewayServer(ThreadingHTTPServer):
             protected_values.append(
                 ("session_master_key", config.session_broker.master_key_source)
             )
+        if len(config.dlp_controls.approval.fingerprint_key_source) >= 8:
+            protected_values.append(
+                (
+                    "dlp_approval_fingerprint_key",
+                    config.dlp_controls.approval.fingerprint_key_source,
+                )
+            )
         self.secret_redactor = SecretRedactor(
             config.secret_controls,
             tuple(protected_values),
@@ -134,6 +143,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                         "hormuz-context-packs",
                     ],
                     "human_login": self.server.session_broker is not None,
+                    "dlp_approval": self.server.config.dlp_controls.approval.enabled,
                 },
             )
             return
@@ -156,6 +166,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                     "team_name": identity.team_name,
                     "organization_id": identity.organization_id,
                     "allowed_clients": list(identity.allowed_clients),
+                    "capabilities": list(identity.capabilities),
                     "authentication_source": identity.authentication_source,
                 },
             )
@@ -163,6 +174,9 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         if path == "/v1/gateway/usage":
             totals = self.server.store.monthly_totals(actor_id=identity.actor_id)
             secret_totals = self.server.store.monthly_secret_totals(actor_id=identity.actor_id)
+            approval_totals = self.server.store.monthly_dlp_approval_totals(
+                actor_id=identity.actor_id
+            )
             self._send_json(
                 HTTPStatus.OK,
                 {
@@ -183,8 +197,16 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                     "dlp_detections": secret_totals.dlp_detections,
                     "dlp_detected_requests": secret_totals.detected_requests,
                     "dlp_approval_required_requests": secret_totals.approval_required_requests,
+                    "dlp_approval_requests": approval_totals.requests,
+                    "dlp_approvals_granted": approval_totals.approved,
+                    "dlp_approvals_consumed": approval_totals.consumed,
+                    "dlp_approval_model_mismatches": approval_totals.model_mismatches,
                 },
             )
+            return
+        approval_request_id = _approval_request_id_from_path(path)
+        if approval_request_id is not None:
+            self._get_dlp_approval_request(identity, approval_request_id)
             return
         self._send_error("not_found", "Route not found", HTTPStatus.NOT_FOUND)
 
@@ -220,6 +242,13 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 )
                 return
             self._create_context_pack(identity)
+            return
+        approval_request_id = _approval_decision_id_from_path(path)
+        if approval_request_id is not None:
+            identity = self._authenticate()
+            if identity is None:
+                return
+            self._approve_dlp_request(identity, approval_request_id)
             return
         routes = {
             "/v1/responses": ("openai", "codex", True),
@@ -539,6 +568,114 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _get_dlp_approval_request(
+        self,
+        identity: Identity,
+        request_id: str,
+    ) -> None:
+        if not self.server.config.dlp_controls.approval.enabled:
+            self._send_error(
+                "dlp_approval_disabled",
+                "DLP approval is not enabled",
+                HTTPStatus.NOT_FOUND,
+            )
+            return
+        if "dlp_approver" not in identity.capabilities:
+            self._send_error(
+                "dlp_approval_forbidden",
+                "DLP approver capability is required",
+                HTTPStatus.FORBIDDEN,
+            )
+            return
+        try:
+            request = self.server.store.get_dlp_approval_request(
+                request_id,
+                organization_id=identity.organization_id,
+            )
+        except DLPApprovalStoreError as error:
+            self._send_dlp_approval_error(error)
+            return
+        self._send_json(HTTPStatus.OK, request.to_dict())
+
+    def _approve_dlp_request(
+        self,
+        identity: Identity,
+        request_id: str,
+    ) -> None:
+        approval_config = self.server.config.dlp_controls.approval
+        if not approval_config.enabled:
+            self._send_error(
+                "dlp_approval_disabled",
+                "DLP approval is not enabled",
+                HTTPStatus.NOT_FOUND,
+            )
+            return
+        if "dlp_approver" not in identity.capabilities:
+            self._send_error(
+                "dlp_approval_forbidden",
+                "DLP approver capability is required",
+                HTTPStatus.FORBIDDEN,
+            )
+            return
+        body = self._read_json_body(max_bytes=MAX_DLP_APPROVAL_REQUEST_BYTES)
+        if body is None:
+            return
+        if body != {"decision": "approve"}:
+            self._send_error(
+                "invalid_dlp_approval_decision",
+                "Request body must contain only decision=approve",
+                HTTPStatus.BAD_REQUEST,
+            )
+            return
+        try:
+            request = self.server.store.approve_dlp_approval_request(
+                request_id,
+                approver=identity,
+                ttl_seconds=approval_config.ttl_seconds,
+            )
+        except DLPApprovalStoreError as error:
+            self._send_dlp_approval_error(error)
+            return
+        LOGGER.info(
+            "dlp_approval_granted request_id=%s approver=%s actor=%s organization=%s routed_model=%s policy_version=%s",
+            request.request_id,
+            identity.actor_id,
+            request.actor_id,
+            identity.organization_id,
+            request.routed_model,
+            request.policy_version,
+        )
+        self._send_json(HTTPStatus.OK, request.to_dict())
+
+    def _send_dlp_approval_error(self, error: DLPApprovalStoreError) -> None:
+        status = HTTPStatus.SERVICE_UNAVAILABLE
+        public_code = "dlp_approval_unavailable"
+        message = "DLP approval service is unavailable"
+        if error.code == "approval_request_not_found":
+            status = HTTPStatus.NOT_FOUND
+            public_code = "dlp_approval_not_found"
+            message = "DLP approval request was not found"
+        elif error.code in {
+            "approval_capability_required",
+            "approval_self_approval_forbidden",
+        }:
+            status = HTTPStatus.FORBIDDEN
+            public_code = "dlp_approval_forbidden"
+            message = (
+                "The request actor cannot approve their own DLP exception"
+                if error.code == "approval_self_approval_forbidden"
+                else "DLP approver capability is required"
+            )
+        elif error.code in {
+            "approval_request_already_decided",
+            "approval_request_not_approvable",
+            "approval_replay_rejected",
+        }:
+            status = HTTPStatus.CONFLICT
+            public_code = "dlp_approval_conflict"
+            message = "DLP approval request is no longer approvable"
+        self._send_error(public_code, message, status)
+
     def _create_context_pack(self, identity: Identity) -> None:
         request_body = self._read_json_body(max_bytes=MAX_CONTEXT_REQUEST_BYTES)
         if request_body is None:
@@ -805,6 +942,55 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
 
         dlp_findings = tuple(finding for finding in redaction.findings if finding.origin == "dlp")
         dlp_detection_count = sum(finding.count for finding in dlp_findings)
+        approval_request_id: str | None = None
+        approval_authorized = False
+        if redaction.action == "require_approval":
+            approval_config = self.server.config.dlp_controls.approval
+            if approval_config.enabled:
+                approval_findings = tuple(
+                    finding for finding in dlp_findings if finding.action == "require_approval"
+                )
+                try:
+                    fingerprint = payload_fingerprint(
+                        {
+                            "operation": urlsplit(self.path).path,
+                            "payload": redaction.value,
+                        },
+                        key=approval_config.fingerprint_key,
+                    )
+                    approval = self.server.store.authorize_or_request_dlp_approval(
+                        identity=identity,
+                        client=client,
+                        protocol=protocol,
+                        requested_model=decision.requested_model,
+                        routed_model=decision.route.upstream_model,
+                        policy_version=redaction.policy_version,
+                        payload_fingerprint=fingerprint,
+                        rules=tuple(
+                            sorted({finding.rule_id for finding in approval_findings})
+                        ),
+                        detection_count=sum(finding.count for finding in approval_findings),
+                        ttl_seconds=approval_config.ttl_seconds,
+                    )
+                except (DLPApprovalError, DLPApprovalStoreError):
+                    LOGGER.error(
+                        "dlp_approval_store_failed actor=%s team=%s client=%s protocol=%s requested_model=%s routed_model=%s",
+                        identity.actor_id,
+                        identity.team_id,
+                        client,
+                        protocol,
+                        decision.requested_model,
+                        decision.route.upstream_model,
+                    )
+                    self._send_protocol_error(
+                        protocol,
+                        "Request blocked because DLP approval state could not be committed.",
+                        HTTPStatus.SERVICE_UNAVAILABLE,
+                        code="hormuz_dlp_approval_unavailable",
+                    )
+                    return
+                approval_request_id = approval.request_id
+                approval_authorized = approval.authorized
         redaction_rules = tuple(
             sorted(
                 {
@@ -817,12 +1003,16 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         try:
             if redaction.count:
                 if dlp_findings:
-                    security_action = {
-                        "detect": "detected",
-                        "redact": "redacted",
-                        "deny": "denied",
-                        "require_approval": "approval_required",
-                    }[redaction.action]
+                    security_action = (
+                        "approved"
+                        if approval_authorized
+                        else {
+                            "detect": "detected",
+                            "redact": "redacted",
+                            "deny": "denied",
+                            "require_approval": "approval_required",
+                        }[redaction.action]
+                    )
                     self.server.store.record_dlp_event(
                         identity=identity,
                         client=client,
@@ -904,7 +1094,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             )
             return
 
-        if redaction.action == "require_approval":
+        if redaction.action == "require_approval" and not approval_authorized:
             if account_usage:
                 self.server.store.record(
                     identity=identity,
@@ -935,9 +1125,19 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             )
             self._send_protocol_error(
                 protocol,
-                "Request requires an authorized DLP approval before provider egress.",
+                (
+                    "Request requires an authorized DLP approval before provider egress. "
+                    f"Approval request: {approval_request_id}."
+                    if approval_request_id is not None
+                    else "Request requires an authorized DLP approval before provider egress."
+                ),
                 HTTPStatus.FORBIDDEN,
                 code="hormuz_dlp_approval_required",
+                headers=(
+                    {"X-Hormuz-DLP-Approval-Request": approval_request_id}
+                    if approval_request_id is not None
+                    else None
+                ),
             )
             return
 
@@ -985,6 +1185,8 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         policy_action = decision.action
         if redaction.redaction_count:
             policy_action = f"{policy_action}+redacted"
+        if approval_authorized:
+            policy_action = f"{policy_action}+dlp-approved"
         body = json.dumps(redaction.value, separators=(",", ":")).encode("utf-8")
         reservation_id: str | None = None
         if account_usage:
@@ -1051,6 +1253,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 dlp_detection_count=dlp_detection_count,
                 reservation_id=reservation_id,
                 reservation_ttl_seconds=self.server.config.upstream_timeout_seconds + 60,
+                approval_request_id=(approval_request_id if approval_authorized else None),
             )
         finally:
             self.server.store.release_budget_reservation(reservation_id)
@@ -1070,6 +1273,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         dlp_detection_count: int,
         reservation_id: str | None,
         reservation_ttl_seconds: int,
+        approval_request_id: str | None,
     ) -> None:
         route = decision.route
         assert route is not None
@@ -1149,6 +1353,8 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             self.send_header("X-Hormuz-Redactions", str(redaction_count))
         if dlp_detection_count:
             self.send_header("X-Hormuz-DLP-Detections", str(dlp_detection_count))
+        if approval_request_id is not None:
+            self.send_header("X-Hormuz-DLP-Approval-Request", approval_request_id)
         for name, value in response.headers.items():
             lowered = name.lower()
             if lowered in {"x-request-id", "request-id", "openai-processing-ms"} or lowered.startswith(
@@ -1191,6 +1397,34 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             response.close()
 
         usage = parser.finish()
+        if (
+            approval_request_id is not None
+            and usage.actual_model is not None
+            and usage.actual_model != route.upstream_model
+        ):
+            try:
+                self.server.store.record_dlp_approval_model_mismatch(
+                    approval_request_id,
+                    organization_id=identity.organization_id,
+                    actual_model=usage.actual_model,
+                )
+            except (DLPApprovalStoreError, ValueError):
+                LOGGER.critical(
+                    "dlp_approval_model_mismatch_evidence_failed request_id=%s actor=%s organization=%s routed_model=%s",
+                    approval_request_id,
+                    identity.actor_id,
+                    identity.organization_id,
+                    route.upstream_model,
+                )
+            else:
+                LOGGER.error(
+                    "dlp_approval_model_mismatch request_id=%s actor=%s organization=%s routed_model=%s actual_model=%s",
+                    approval_request_id,
+                    identity.actor_id,
+                    identity.organization_id,
+                    route.upstream_model,
+                    usage.actual_model,
+                )
         if account_usage:
             successful = 200 <= status < 300 and downstream_ok
             cost = route.estimate_cost_microusd(
@@ -1345,12 +1579,13 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         status: HTTPStatus,
         *,
         code: str = "invalid_request",
+        headers: dict[str, str] | None = None,
     ) -> None:
         if protocol == "anthropic":
             payload = {"type": "error", "error": {"type": "permission_error" if status == 403 else code, "message": message}}
         else:
             payload = {"error": {"message": message, "type": "policy_error" if status == 403 else code, "code": code}}
-        self._send_json(status, payload)
+        self._send_json(status, payload, headers=headers)
 
     def _send_error(
         self,
@@ -1436,4 +1671,33 @@ def _safe_identifier(value: str) -> bool:
     return (
         20 <= len(value) <= 128
         and all(character.isalnum() or character in {"-", "_"} for character in value)
+    )
+
+
+def _approval_request_id_from_path(path: str) -> str | None:
+    prefix = "/v1/dlp/approval-requests/"
+    if not path.startswith(prefix):
+        return None
+    value = path[len(prefix):]
+    if "/" in value or not _valid_approval_request_id(value):
+        return None
+    return value
+
+
+def _approval_decision_id_from_path(path: str) -> str | None:
+    prefix = "/v1/dlp/approval-requests/"
+    suffix = "/decisions"
+    if not path.startswith(prefix) or not path.endswith(suffix):
+        return None
+    value = path[len(prefix):-len(suffix)]
+    if "/" in value or not _valid_approval_request_id(value):
+        return None
+    return value
+
+
+def _valid_approval_request_id(value: str) -> bool:
+    return (
+        value.startswith("apr_")
+        and len(value) == 36
+        and all(character in "0123456789abcdef" for character in value[4:])
     )

@@ -43,7 +43,8 @@
       "team_name": "Engineering",
       "organization_id": "xpounder",
       "clearance": "confidential",
-      "allowed_clients": ["codex", "claude-code"]
+      "allowed_clients": ["codex", "claude-code"],
+      "capabilities": []
     }
   ],
   "model_routes": {
@@ -106,6 +107,9 @@
     },
     "dlp": {
       "policy_version": "organization-dlp-v1",
+      "approval": {
+        "enabled": false
+      },
       "rules": {
         "us_ssn": {
           "action": "redact",

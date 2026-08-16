@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import http.client
 import json
 import os
@@ -21,7 +22,7 @@ from hormuz.context import ContextArtifact, ContextLifecycleSnapshot, ContextRec
 from hormuz.context_store import ContextStoreError
 from hormuz.policy import PolicyEngine
 from hormuz.server import GatewayServer, serve_in_thread
-from hormuz.store import SecurityStoreError, UsageStore
+from hormuz.store import DLPApprovalStoreError, SecurityStoreError, UsageStore
 
 
 GATEWAY_TOKEN = "company-user-token-never-forward"
@@ -34,6 +35,7 @@ class FakeProviderHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     requests: list[dict[str, object]] = []
     lock = threading.Lock()
+    actual_model_override: str | None = None
 
     def do_POST(self) -> None:  # noqa: N802
         request_path = self.path.partition("?")[0]
@@ -53,7 +55,7 @@ class FakeProviderHandler(BaseHTTPRequestHandler):
                 "id": "resp_test",
                 "object": "response",
                 "status": "completed",
-                "model": body["model"],
+                "model": self.__class__.actual_model_override or body["model"],
                 "output": [],
                 "usage": {
                     "input_tokens": 120,
@@ -87,7 +89,7 @@ class FakeProviderHandler(BaseHTTPRequestHandler):
                         "type": "message",
                         "role": "assistant",
                         "content": [{"type": "text", "text": response_text}],
-                        "model": body["model"],
+                        "model": self.__class__.actual_model_override or body["model"],
                         "stop_reason": "end_turn",
                         "stop_sequence": None,
                         "usage": usage,
@@ -105,7 +107,7 @@ class FakeProviderHandler(BaseHTTPRequestHandler):
                             "type": "message",
                             "role": "assistant",
                             "content": [],
-                            "model": body["model"],
+                            "model": self.__class__.actual_model_override or body["model"],
                             "stop_reason": None,
                             "stop_sequence": None,
                             "usage": {
@@ -248,6 +250,7 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)
         FakeProviderHandler.requests = []
+        FakeProviderHandler.actual_model_override = None
         self.provider = ThreadingHTTPServer(("127.0.0.1", 0), FakeProviderHandler)
         self.provider_thread = threading.Thread(target=self.provider.serve_forever, daemon=True)
         self.provider_thread.start()
@@ -1258,6 +1261,230 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertEqual(security["routed_model"], "gpt-test-fast")
         self.assertNotIn(protected, repr(security))
 
+    def test_non_self_approval_allows_one_exact_retry_for_openai_and_anthropic(self) -> None:
+        protected = "PROJECT-TRIDENT"
+        fingerprint_key_source = base64.urlsafe_b64encode(b"a" * 32).decode("ascii")
+        os.environ["TEST_APPROVAL_TERMS"] = json.dumps([protected])
+        os.environ["TEST_APPROVAL_KEY"] = fingerprint_key_source
+        config_value = self._config(self.provider.server_port, _free_port())
+        config_value["identities"][0]["capabilities"] = ["dlp_approver"]
+        config_value["identities"][1]["capabilities"] = ["dlp_approver"]
+        config_value["egress_controls"] = {
+            "secrets": {"mode": "redact", "builtins": True},
+            "dlp": {
+                "policy_version": "approval-v2",
+                "approval": {
+                    "enabled": True,
+                    "fingerprint_key_env": "TEST_APPROVAL_KEY",
+                },
+                "dictionaries": [
+                    {
+                        "rule_id": "company.approval_term",
+                        "action": "require_approval",
+                        "providers": ["openai", "anthropic"],
+                        "values_env": "TEST_APPROVAL_TERMS",
+                    }
+                ],
+            },
+        }
+        self._restart_gateway(config_value)
+        os.environ.pop("TEST_APPROVAL_TERMS", None)
+        os.environ.pop("TEST_APPROVAL_KEY", None)
+        key_status, _, _ = self._post(
+            "/v1/responses",
+            {"model": "engineering-deep", "input": fingerprint_key_source},
+        )
+        self.assertEqual(key_status, 200)
+        key_upstream = json.dumps(FakeProviderHandler.requests[-1]["body"])
+        self.assertNotIn(fingerprint_key_source, key_upstream)
+        self.assertIn("[REDACTED:HORMUZ_SECRET]", key_upstream)
+        provider_before = len(FakeProviderHandler.requests)
+
+        cases = (
+            (
+                "/v1/responses",
+                {"model": "engineering-fast", "input": protected},
+                {},
+                "gpt-test-fast",
+            ),
+            (
+                "/v1/messages",
+                {
+                    "model": "claude-standard",
+                    "max_tokens": 20,
+                    "messages": [{"role": "user", "content": protected}],
+                },
+                {"Anthropic-Version": "2023-06-01"},
+                "claude-test",
+            ),
+        )
+        request_ids: list[str] = []
+        for path, body, extra_headers, routed_model in cases:
+            with self.subTest(path=path):
+                blocked, blocked_headers, blocked_body = self._post(
+                    path,
+                    body,
+                    extra_headers=extra_headers,
+                )
+                self.assertEqual(blocked, 403)
+                request_id = blocked_headers["x-hormuz-dlp-approval-request"]
+                request_ids.append(request_id)
+                self.assertIn(request_id, blocked_body.decode("utf-8"))
+                self.assertEqual(len(FakeProviderHandler.requests), provider_before)
+
+                invalid_decision, _, invalid_decision_body = self._post(
+                    f"/v1/dlp/approval-requests/{request_id}/decisions",
+                    {"decision": "deny"},
+                    token=CLAUDE_ONLY_TOKEN,
+                )
+                self.assertEqual(invalid_decision, 400)
+                self.assertEqual(
+                    json.loads(invalid_decision_body)["error"]["code"],
+                    "invalid_dlp_approval_decision",
+                )
+
+                self_approval, _, self_approval_body = self._post(
+                    f"/v1/dlp/approval-requests/{request_id}/decisions",
+                    {"decision": "approve"},
+                )
+                self.assertEqual(self_approval, 403)
+                self.assertEqual(
+                    json.loads(self_approval_body)["error"]["code"],
+                    "dlp_approval_forbidden",
+                )
+
+                shown, _, shown_body = self._get(
+                    f"/v1/dlp/approval-requests/{request_id}",
+                    token=CLAUDE_ONLY_TOKEN,
+                )
+                self.assertEqual(shown, 200)
+                metadata = json.loads(shown_body)
+                self.assertEqual(metadata["status"], "pending")
+                self.assertEqual(metadata["actor_id"], "alice")
+                self.assertEqual(metadata["routed_model"], routed_model)
+                self.assertNotIn(protected, repr(metadata))
+
+                if path == "/v1/responses":
+                    cli_base = [
+                        sys.executable,
+                        "-m",
+                        "hormuz",
+                        "dlp",
+                        "approval",
+                    ]
+                    cli_options = [
+                        request_id,
+                        "--gateway",
+                        f"http://127.0.0.1:{self.gateway.server_port}",
+                        "--credential-env",
+                        "TEST_CLAUDE_ONLY_TOKEN",
+                        "--allow-insecure-http",
+                    ]
+                    cli_show = subprocess.run(
+                        [*cli_base, "show", *cli_options],
+                        cwd=Path(__file__).resolve().parents[1],
+                        env=os.environ.copy(),
+                        text=True,
+                        capture_output=True,
+                        timeout=10,
+                    )
+                    self.assertEqual(cli_show.returncode, 0, msg=cli_show.stderr)
+                    self.assertEqual(json.loads(cli_show.stdout)["status"], "pending")
+                    cli_approve = subprocess.run(
+                        [*cli_base, "approve", *cli_options],
+                        cwd=Path(__file__).resolve().parents[1],
+                        env=os.environ.copy(),
+                        text=True,
+                        capture_output=True,
+                        timeout=10,
+                    )
+                    self.assertEqual(cli_approve.returncode, 0, msg=cli_approve.stderr)
+                    self.assertEqual(json.loads(cli_approve.stdout)["status"], "approved")
+
+                approved, _, approved_body = self._post(
+                    f"/v1/dlp/approval-requests/{request_id}/decisions",
+                    {"decision": "approve"},
+                    token=CLAUDE_ONLY_TOKEN,
+                )
+                self.assertEqual(approved, 200)
+                self.assertEqual(json.loads(approved_body)["status"], "approved")
+
+                if path == "/v1/messages":
+                    FakeProviderHandler.actual_model_override = routed_model + "-provider-version"
+                allowed, allowed_headers, _ = self._post(
+                    path,
+                    body,
+                    extra_headers=extra_headers,
+                )
+                FakeProviderHandler.actual_model_override = None
+                self.assertEqual(allowed, 200)
+                self.assertEqual(
+                    allowed_headers["x-hormuz-dlp-approval-request"],
+                    request_id,
+                )
+                self.assertIn(
+                    "dlp-approved",
+                    allowed_headers["x-hormuz-policy-decision"],
+                )
+                provider_before += 1
+                self.assertEqual(len(FakeProviderHandler.requests), provider_before)
+
+                replay, replay_headers, _ = self._post(
+                    path,
+                    body,
+                    extra_headers=extra_headers,
+                )
+                self.assertEqual(replay, 403)
+                self.assertNotEqual(
+                    replay_headers["x-hormuz-dlp-approval-request"],
+                    request_id,
+                )
+                self.assertEqual(len(FakeProviderHandler.requests), provider_before)
+
+        events = self.gateway.store.audit_events(
+            since="2000-01-01T00:00:00+00:00",
+            kind="security",
+        )
+        approval_events = [
+            event for event in events if event["event_type"] == "security.dlp.approval"
+        ]
+        self.assertEqual(
+            [event["action"] for event in approval_events],
+            [
+                "requested",
+                "approved",
+                "consumed",
+                "requested",
+                "requested",
+                "approved",
+                "consumed",
+                "model_mismatch",
+                "requested",
+            ],
+        )
+        mismatch = next(
+            event for event in approval_events if event["action"] == "model_mismatch"
+        )
+        self.assertEqual(mismatch["routed_model"], "claude-test")
+        self.assertEqual(mismatch["actual_model"], "claude-test-provider-version")
+        approval_totals = self.gateway.store.monthly_dlp_approval_totals(actor_id="alice")
+        self.assertEqual(approval_totals.requests, 4)
+        self.assertEqual(approval_totals.approved, 2)
+        self.assertEqual(approval_totals.consumed, 2)
+        self.assertEqual(approval_totals.model_mismatches, 1)
+        usage_status, _, usage_body = self._get("/v1/gateway/usage")
+        self.assertEqual(usage_status, 200)
+        usage_metrics = json.loads(usage_body)
+        self.assertEqual(usage_metrics["dlp_approval_requests"], 4)
+        self.assertEqual(usage_metrics["dlp_approvals_granted"], 2)
+        self.assertEqual(usage_metrics["dlp_approvals_consumed"], 2)
+        self.assertEqual(usage_metrics["dlp_approval_model_mismatches"], 1)
+        self.assertEqual(set(request_ids), {event["request_id"] for event in approval_events if event["action"] == "consumed"})
+        serialized = repr(events)
+        self.assertNotIn(protected, serialized)
+        self.assertNotIn(protected.encode("utf-8"), self.config.database_path.read_bytes())
+        self.assertNotIn(fingerprint_key_source.encode("utf-8"), self.config.database_path.read_bytes())
+
     def test_dlp_evidence_failure_blocks_egress_with_stable_content_free_error(self) -> None:
         email = "sensitive-person@example.com"
         before = len(FakeProviderHandler.requests)
@@ -1281,6 +1508,56 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertEqual(self.gateway.store.monthly_totals(actor_id="alice").requests, 0)
         self.assertNotIn(email, response.decode("utf-8"))
         self.assertNotIn(email, "\n".join(logs.output))
+
+    def test_dlp_approval_store_failure_blocks_before_egress_without_content_leak(self) -> None:
+        protected = "PROJECT-APPROVAL-STORE-OUTAGE"
+        os.environ["TEST_APPROVAL_TERMS"] = json.dumps([protected])
+        os.environ["TEST_APPROVAL_KEY"] = base64.urlsafe_b64encode(b"a" * 32).decode("ascii")
+        config_value = self._config(self.provider.server_port, _free_port())
+        config_value["identities"][1]["capabilities"] = ["dlp_approver"]
+        config_value["egress_controls"] = {
+            "secrets": {"mode": "redact", "builtins": True},
+            "dlp": {
+                "policy_version": "approval-outage-v1",
+                "approval": {
+                    "enabled": True,
+                    "fingerprint_key_env": "TEST_APPROVAL_KEY",
+                },
+                "dictionaries": [
+                    {
+                        "rule_id": "company.approval_term",
+                        "action": "require_approval",
+                        "providers": ["openai"],
+                        "values_env": "TEST_APPROVAL_TERMS",
+                    }
+                ],
+            },
+        }
+        self._restart_gateway(config_value)
+        os.environ.pop("TEST_APPROVAL_TERMS", None)
+        os.environ.pop("TEST_APPROVAL_KEY", None)
+        before = len(FakeProviderHandler.requests)
+
+        with mock.patch.object(
+            self.gateway.store,
+            "authorize_or_request_dlp_approval",
+            side_effect=DLPApprovalStoreError("SECRET-INTERNAL-STORE-FAILURE"),
+        ), self.assertLogs("hormuz", level="ERROR") as logs:
+            status, _, response = self._post(
+                "/v1/responses",
+                {"model": "engineering-fast", "input": protected},
+            )
+
+        self.assertEqual(status, 503)
+        self.assertEqual(
+            json.loads(response)["error"]["code"],
+            "hormuz_dlp_approval_unavailable",
+        )
+        self.assertEqual(len(FakeProviderHandler.requests), before)
+        self.assertNotIn(protected, response.decode("utf-8"))
+        self.assertNotIn(protected, "\n".join(logs.output))
+        self.assertNotIn("SECRET-INTERNAL-STORE-FAILURE", response.decode("utf-8"))
+        self.assertNotIn("SECRET-INTERNAL-STORE-FAILURE", "\n".join(logs.output))
 
     @unittest.skipUnless(shutil.which("codex"), "Codex CLI is not installed")
     def test_installed_codex_routes_through_gateway(self) -> None:
@@ -1467,6 +1744,15 @@ class GatewayIntegrationTests(unittest.TestCase):
         }
         headers.update(extra_headers or {})
         connection.request("POST", path, body=json.dumps(body), headers=headers)
+        response = connection.getresponse()
+        data = response.read()
+        response_headers = {name.lower(): value for name, value in response.getheaders()}
+        connection.close()
+        return response.status, response_headers, data
+
+    def _get(self, path: str, *, token: str = GATEWAY_TOKEN):
+        connection = http.client.HTTPConnection("127.0.0.1", self.gateway.server_port, timeout=5)
+        connection.request("GET", path, headers={"Authorization": f"Bearer {token}"})
         response = connection.getresponse()
         data = response.read()
         response_headers = {name.lower(): value for name, value in response.getheaders()}

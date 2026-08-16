@@ -106,8 +106,8 @@ This would create a concentrated sensitive-data store in the control plane. Reje
 
 ## Owner approval record
 
-Accepted in the product-development conversation on 2026-08-15. The owner explicitly approved the recommended architecture: high-confidence secret and regulated-identifier redaction by default, configurable organization policy, detect-only lower-confidence PII, short-lived non-self approvals, fail-closed enforced rules, and denial of uninspectable media under enforced DLP. The owner subsequently approved binding an approval to the exact routed upstream model available before egress, with the provider-returned model audited afterward.
+Accepted in the product-development conversation on 2026-08-15. The owner explicitly approved the recommended architecture: high-confidence secret and regulated-identifier redaction by default, configurable organization policy, detect-only lower-confidence PII, short-lived non-self approvals, fail-closed enforced rules, and denial of uninspectable media under enforced DLP. The owner subsequently approved binding an approval to the exact routed upstream model available before egress, with the provider-returned model audited afterward. The owner also accepted transparent automatic consumption when the same employee retries the exact approved operation and payload, preserving unchanged Codex and Claude Code clients instead of requiring a custom client header.
 
 GitHub acceptance record: [issue #10 comment](https://github.com/Xpounder-com/hormuz/issues/10#issuecomment-5305144582).
 
-Acceptance authorizes implementation under [#10](https://github.com/Xpounder-com/hormuz/issues/10). It does not claim that structured DLP or the approval workflow is already shipped.
+Acceptance authorizes implementation under [#10](https://github.com/Xpounder-com/hormuz/issues/10). The local deterministic subset and single-node approval workflow have implementation evidence, but acceptance does not claim the remaining structured-DLP or enterprise release gates are complete.

@@ -11,7 +11,7 @@ The private alpha currently has:
 - OpenAI Responses and Anthropic Messages proxy compatibility, including streaming;
 - organization/team/actor model policy, fallback, output caps, atomic token/spend reservations, and metadata-only reporting;
 - request-level actual-model, provider-native usage, billable-token, cost-basis, currency, and immutable rate-card-version snapshots; provider billing imports and reconciliation remain open;
-- pre-provider secret controls plus a bounded structured-DLP subset with high-confidence SSN/card redaction, low-confidence email detection, provider/model-scoped company dictionaries, deny, and fail-closed approval-required outcomes; approval grants and the remaining #10 gates stay open;
+- pre-provider secret controls plus a bounded structured-DLP subset with high-confidence SSN/card redaction, low-confidence email detection, provider/model-scoped company dictionaries, deny, and metadata-only non-self, 15-minute, exact single-use approval grants; remaining #10 gates stay open;
 - generic OIDC JWT discovery/JWKS verification with explicit issuer-subject identity mapping;
 - accepted generic OIDC authorization-code + PKCE login, opaque rotating human sessions, replay-family revocation, and fail-closed OS secure-store custody;
 - metadata-only audit export;
@@ -22,7 +22,7 @@ The private alpha currently has:
 - a reproducible 60-task synthetic retrieval benchmark whose strict version-2 release profile passes current authorization, lifecycle, dependency, quarantine, contradiction, budget, determinism, leakage, and latency thresholds;
 - local and GitHub package/client verification.
 
-The foundation is not an enterprise release. The local context database is single-node and plaintext, and the local session broker is also single-node; neither is an accepted hosted persistence design. Real-IdP validation, shared tenancy, SCIM, administrator revocation, source connectors, automatic verification/promotion/decay and resumable revalidation, context injection, structured DLP, cache policy, invoice reconciliation, HA deployment, KMS, and independent security review remain open gates.
+The foundation is not an enterprise release. The local usage/approval, context, and session databases are single-node, and the local context codec is plaintext; none is an accepted hosted persistence design. Real-IdP validation, shared tenancy, SCIM, administrator revocation, source connectors, automatic verification/promotion/decay and resumable revalidation, context injection, remaining structured-DLP coverage, cache policy, invoice reconciliation, HA deployment, KMS, and independent security review remain open gates.
 
 ## Material decisions awaiting owner approval
 
@@ -33,7 +33,7 @@ These issues record product decisions and block dependent implementation. They m
 
 [ADR 0001](decisions/0001-oidc-login-and-session-architecture.md) was accepted by the product owner on 2026-08-15. Its implementation evidence is tracked under #13; acceptance of the decision does not close the remaining real-IdP, SCIM, administrator-revocation, and HA gates.
 
-[ADR 0004](decisions/0004-structured-dlp-and-approval-boundary.md) was accepted by the product owner on 2026-08-15. The initial deterministic detector/action subset now exists, but approval grants, opaque media, source classification, semantic evaluation, scoped overlays, cache invalidation, and the full #10 release evidence remain open.
+[ADR 0004](decisions/0004-structured-dlp-and-approval-boundary.md) was accepted by the product owner on 2026-08-15. The deterministic detector/action subset and local replay-safe approval workflow now exist, but opaque media, source classification, semantic evaluation, scoped overlays, multi-node approval operations, cache invalidation, and the full #10 release evidence remain open.
 
 ## v0.2 — Enterprise identity and tenancy
 

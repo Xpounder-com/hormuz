@@ -53,9 +53,19 @@ class DLPRuleConfig:
 
 
 @dataclass(frozen=True)
+class DLPApprovalConfig:
+    enabled: bool = False
+    fingerprint_key_env: str | None = None
+    fingerprint_key: bytes = field(default=b"", repr=False)
+    fingerprint_key_source: str = field(default="", repr=False)
+    ttl_seconds: int = 900
+
+
+@dataclass(frozen=True)
 class DLPControls:
     policy_version: str = "local-dlp-v1"
     rules: tuple[DLPRuleConfig, ...] = ()
+    approval: DLPApprovalConfig = field(default_factory=DLPApprovalConfig)
 
 
 @dataclass(frozen=True)
@@ -76,6 +86,7 @@ class Identity:
     team_id: str
     team_name: str
     allowed_clients: tuple[str, ...] = ()
+    capabilities: tuple[str, ...] = ()
     organization_id: str = "organization"
     clearance: str = "internal"
     authentication_source: str = "static"
@@ -282,6 +293,10 @@ class GatewayConfig:
                 team_id=_string(item.get("team_id"), f"{prefix}.team_id"),
                 team_name=_string(item.get("team_name"), f"{prefix}.team_name"),
                 allowed_clients=_string_tuple(item.get("allowed_clients", []), f"{prefix}.allowed_clients"),
+                capabilities=_identity_capabilities(
+                    item.get("capabilities", []),
+                    f"{prefix}.capabilities",
+                ),
                 organization_id=_string(item.get("organization_id", "organization"), f"{prefix}.organization_id"),
                 clearance=_classification(item.get("clearance", "internal"), f"{prefix}.clearance"),
             )
@@ -383,6 +398,10 @@ class GatewayConfig:
                     allowed_clients=_string_tuple(
                         subject_item.get("allowed_clients", []),
                         f"{subject_prefix}.allowed_clients",
+                    ),
+                    capabilities=_identity_capabilities(
+                        subject_item.get("capabilities", []),
+                        f"{subject_prefix}.capabilities",
                     ),
                     organization_id=_string(
                         subject_item.get("organization_id", "organization"),
@@ -576,6 +595,23 @@ class GatewayConfig:
                         f"DLP rule {rule.rule_id} model {model} must match a routed upstream "
                         "model for one of the rule's providers"
                     )
+        if self.dlp_controls.approval.enabled and any(
+            rule.action == "require_approval" for rule in self.dlp_controls.rules
+        ):
+            organization_ids = {
+                identity.organization_id for identity in self.identities_by_actor.values()
+            }
+            approver_organizations = {
+                identity.organization_id
+                for identity in self.identities_by_actor.values()
+                if "dlp_approver" in identity.capabilities
+            }
+            missing = sorted(organization_ids - approver_organizations)
+            if missing:
+                raise ConfigError(
+                    "DLP approval is enabled but these organizations have no dlp_approver: "
+                    + ", ".join(missing)
+                )
 
     def identity_for_token(self, token: str) -> Identity | None:
         return self.identities_by_token.get(token)
@@ -790,7 +826,7 @@ _DLP_RULE_ID = re.compile(r"[a-z][a-z0-9_.-]{0,63}\Z")
 def _dlp_controls(value: Any, env: dict[str, str]) -> DLPControls:
     path = "egress_controls.dlp"
     item = _object(value, path)
-    unknown = sorted(set(item) - {"policy_version", "rules", "dictionaries"})
+    unknown = sorted(set(item) - {"policy_version", "rules", "dictionaries", "approval"})
     if unknown:
         raise ConfigError(f"Unknown {path} fields: " + ", ".join(unknown))
     policy_version = _bounded_policy_version(
@@ -887,7 +923,54 @@ def _dlp_controls(value: Any, env: dict[str, str]) -> DLPControls:
                 exact_values=exact_values,
             )
         )
-    return DLPControls(policy_version=policy_version, rules=tuple(rules))
+    approval = _dlp_approval_config(item.get("approval", {}), env)
+    return DLPControls(
+        policy_version=policy_version,
+        rules=tuple(rules),
+        approval=approval,
+    )
+
+
+def _dlp_approval_config(value: Any, env: dict[str, str]) -> DLPApprovalConfig:
+    path = "egress_controls.dlp.approval"
+    item = _object(value, path)
+    unknown = sorted(set(item) - {"enabled", "fingerprint_key_env"})
+    if unknown:
+        raise ConfigError(f"Unknown {path} fields: " + ", ".join(unknown))
+    enabled = _boolean(item.get("enabled", False), f"{path}.enabled")
+    if not enabled:
+        return DLPApprovalConfig()
+    fingerprint_key_env = _string(
+        item.get("fingerprint_key_env"),
+        f"{path}.fingerprint_key_env",
+    )
+    encoded_key = env.get(fingerprint_key_env, "")
+    if not encoded_key:
+        raise ConfigError(
+            "Required DLP approval fingerprint key environment variable is not set: "
+            + fingerprint_key_env
+        )
+    try:
+        padding = "=" * (-len(encoded_key) % 4)
+        fingerprint_key = base64.b64decode(
+            encoded_key + padding,
+            altchars=b"-_",
+            validate=True,
+        )
+    except (ValueError, binascii.Error) as error:
+        raise ConfigError(
+            f"DLP approval fingerprint key from {fingerprint_key_env} must be base64url"
+        ) from error
+    if len(fingerprint_key) != 32:
+        raise ConfigError(
+            f"DLP approval fingerprint key from {fingerprint_key_env} must decode to exactly 32 bytes"
+        )
+    return DLPApprovalConfig(
+        enabled=True,
+        fingerprint_key_env=fingerprint_key_env,
+        fingerprint_key=fingerprint_key,
+        fingerprint_key_source=encoded_key,
+    )
 
 
 def _dlp_rule_scope(
@@ -945,6 +1028,15 @@ def _dlp_identifier(value: Any, path: str) -> str:
     if _DLP_RULE_ID.fullmatch(result) is None:
         raise ConfigError(f"{path} must be a lowercase safe identifier up to 64 characters")
     return result
+
+
+def _identity_capabilities(value: Any, path: str) -> tuple[str, ...]:
+    capabilities = _string_tuple(value, path)
+    supported = {"dlp_approver"}
+    unknown = sorted(set(capabilities) - supported)
+    if unknown:
+        raise ConfigError(f"Unknown {path}: " + ", ".join(unknown))
+    return capabilities
 
 
 def _bounded_policy_version(value: Any, path: str) -> str:
@@ -1019,6 +1111,7 @@ def _validate_identity_consistency(identities: tuple[Identity, ...]) -> None:
             "team_id",
             "team_name",
             "allowed_clients",
+            "capabilities",
             "organization_id",
             "clearance",
         )
