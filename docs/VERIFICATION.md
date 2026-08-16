@@ -346,6 +346,7 @@ Observed local result:
 - the frozen 60-task context release profile remained green with precision `1.00`, recall `1.00`, useful-pack rate `1.00`, mean compression ratio `0.840593`, zero authorization/lifecycle/dependency/malicious/contradiction/budget/determinism failures, and p95 in-process selection latency `0.167417 ms`; corpus SHA-256 remained `9822d592868202c7c7539bcdac7d4a5894c01f9e6dba7a434846516b67b32c17`.
 - isolated source and wheel builds succeeded; a clean Python 3.14 environment loaded `hormuz.redaction` from the installed wheel under `site-packages` and reproduced the object-local off-mode behavior with the opaque URL unchanged and the sibling SSN redacted;
 - installed-package bytecode compilation and `git diff --check` passed. A source-code scan excluding documented placeholders and test fixtures, plus a scan of the wheel's runtime package, found no private-key, OpenAI, or Anthropic credential pattern.
+- GitHub Actions push run `31924440725` and pull-request run `31924442617` both passed all seven publication jobs for implementation commit `d372731`: Python 3.11–3.14, strict governed-context benchmark, source/wheel build and install, and pinned official Codex/Claude Code compatibility.
 
 This closes one fail-open composition defect; it does not expand the media-inspection claim. Hormuz still does not inspect accepted opaque bytes, fetch URLs or provider file IDs, decode arbitrary encoded values, or classify provider headers and JSON keys. Issue #10 remains open for those and the other enterprise DLP release gates.
 
