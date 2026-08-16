@@ -1,6 +1,6 @@
 # Secret and structured DLP egress controls
 
-Hormuz inspects JSON string values and recognized provider content blocks after identity and model policy evaluation and before the request is serialized to OpenAI or Anthropic. It never changes JSON keys. Prompt text, system instructions, tool outputs, and reusable context all pass through the same boundary when they are represented as JSON strings.
+Hormuz inspects JSON string values, JSON string keys, and recognized provider content blocks after identity and model policy evaluation and before the request is serialized to OpenAI or Anthropic. It never renames a JSON key: detect, deny, and approval-required findings retain their configured action, while a finding that would require key redaction is upgraded to denial because renaming can corrupt a schema, change semantics, or collide with another key. Prompt text, system instructions, tool outputs, tool schemas, metadata maps, and reusable context all pass through the same boundary when represented in inspectable JSON.
 
 ## Configuration
 
@@ -104,11 +104,13 @@ Structured DLP currently adds four deterministic built-ins:
 
 Before treating an ordinary JSON string as opaque text, Hormuz recognizes standard base64, URL-safe base64, and base64 textual data URIs whose decoded bytes are predominantly printable UTF-8. It decodes at most 1 MiB per value and at most three nested encoding layers, applies the same credential and structured-DLP rules to the decoded text, and re-encodes the value only when a redaction changed it. Detect, deny, and approval-required outcomes retain the original encoded value in memory while following their ordinary forwarding or fail-closed behavior. A direct exact-secret or DLP match on the outer value takes precedence, preserving protection for secrets that are themselves base64-shaped.
 
-This path covers encoded content in inspectable prompts, system values, Codex function/custom-tool results, Claude tool/search results, inline text documents, and other JSON string values. Benign encoded UTF-8 remains byte-for-byte unchanged. Oversized supported encoded text or a fourth nested encoding layer fails closed before provider egress with a content-free validation error.
+This path covers encoded content in inspectable prompts, system values, Codex function/custom-tool results, Claude tool/search results, inline text documents, and other JSON string values or keys. Benign encoded UTF-8 remains byte-for-byte unchanged. A protected encoded key follows the same fail-closed key rule without being renamed. Oversized supported encoded text or a fourth nested encoding layer fails closed before provider egress with a content-free validation error.
 
 The decoder does not treat provider image/file blocks as text. Those blocks remain governed by `opaque_media`. It also does not unwrap whitespace-formatted base64, percent/hex encodings, compression, archives, binary payloads, or provider file/URL references. These are explicit residual boundaries rather than claims of inspection.
 
 Each DLP rule can be limited to `openai`, `anthropic`, and exact routed upstream model IDs. `detect` forwards the original value, `redact` replaces it with `[REDACTED:HORMUZ_DLP]`, and `deny` returns `hormuz_dlp_denied` without a provider call. With approval disabled, `require_approval` continues to fail closed without creating a grant. With approval enabled, it creates a durable metadata-only request and returns `hormuz_dlp_approval_required` plus the opaque request ID in the message and `X-Hormuz-DLP-Approval-Request` header.
+
+For a JSON key, the original key is always preserved in memory. Detect-only rules may audit and forward it, explicit deny rules block it, and approval-required rules retain the ordinary exact-payload approval semantics. Credential or DLP rules configured to redact instead block the complete request: Hormuz does not claim that replacing a field name or schema property is a safe redaction. Key findings retain only rule metadata and counts in routine evidence, never the matched key.
 
 ## Team and person tightening
 
@@ -177,11 +179,11 @@ This request-level policy does not itself enroll an organization in OpenAI Zero 
 
 ## What this does not guarantee
 
-This is a bounded deterministic DLP subset, not a complete data-loss-prevention system. It inspects JSON values, the supported encoded-text forms above, and known provider media shapes, not caller-controlled provider headers or JSON keys. It denies recognized opaque media but does not inspect image/file contents, unwrap unsupported encodings or archives, classify source paths, infer proprietary meaning, or reliably detect transformed and obfuscated values. A custom exact value protects only that exact case-sensitive textual representation and its occurrence in supported decoded text. The SSN detector intentionally supports only the high-confidence hyphenated form; the email detector has not passed an organization-specific false-positive/false-negative evaluation and therefore remains detect-only.
+This is a bounded deterministic DLP subset, not a complete data-loss-prevention system. It inspects JSON string values and keys, the supported encoded-text forms above, and known provider media shapes, not caller-controlled provider headers. It denies recognized opaque media but does not inspect image/file contents, unwrap unsupported encodings or archives, classify source paths, infer proprietary meaning, or reliably detect transformed and obfuscated values. A custom exact value protects only that exact case-sensitive textual representation and its occurrence in supported decoded text. The SSN detector intentionally supports only the high-confidence hyphenated form; the email detector has not passed an organization-specific false-positive/false-negative evaluation and therefore remains detect-only.
 
 Use `deny` when forwarding a detected credential is unacceptable. Production deployments should combine Hormuz with least-privilege provider keys, short-lived employee identity, network controls, provider retention settings, code-host secret scanning, and a reviewed list of organization-specific values.
 
-The broader boundary remains governed by [accepted ADR 0004](decisions/0004-structured-dlp-and-approval-boundary.md). Source classification, semantic detection, provider-header and JSON-key inspection, unsupported encoding/archive decoding, detector-version evidence, multi-node approval persistence/notification, content-cache invalidation, and organization-specific evaluation are still open. Issue #10 remains open until those paths and the complete compatibility, failure, migration, and privacy gates pass.
+The broader boundary remains governed by [accepted ADR 0004](decisions/0004-structured-dlp-and-approval-boundary.md). Source classification, semantic detection, provider-header inspection, unsupported encoding/archive decoding, detector-version evidence, multi-node approval persistence/notification, content-cache invalidation, and organization-specific evaluation are still open. Issue #10 remains open until those paths and the complete compatibility, failure, migration, and privacy gates pass.
 
 ## Verify
 
@@ -190,6 +192,8 @@ The integration tests assert both sides of the boundary:
 ```bash
 python3 -m unittest -v \
   tests.test_gateway.GatewayIntegrationTests.test_secret_is_redacted_before_provider_and_audited \
+  tests.test_redaction.SecretRedactorTests.test_json_key_findings_preserve_keys_and_fail_closed_when_redaction_is_required \
+  tests.test_gateway.GatewayIntegrationTests.test_protected_data_in_json_key_is_denied_without_provider_or_persistence \
   tests.test_gateway.GatewayIntegrationTests.test_base64_tool_payload_secrets_are_redacted_for_both_providers \
   tests.test_gateway.GatewayIntegrationTests.test_low_confidence_dlp_detection_forwards_unchanged_and_audits_metadata_only \
   tests.test_gateway.GatewayIntegrationTests.test_team_and_actor_dlp_overlays_apply_to_both_provider_paths \
@@ -205,4 +209,4 @@ python3 -m unittest -v \
   tests.test_store.UsageStoreMigrationTests.test_dlp_approval_expiry_and_concurrent_retry_fail_closed
 ```
 
-These tests prove credential and regulated-identifier transformation, detect-only forwarding, monotonic team/person tightening, provider-format-aware opaque denial, object-local opaque-media risk acceptance, inspectable text-document transformation, deny-before-egress, exact routed-model scoping, non-self authorization, CLI/API approval, exact single-use consumption, expiry, concurrent replay rejection, model-mismatch evidence, store-outage denial, and metadata-only evidence across the OpenAI and Anthropic compatibility paths.
+These tests prove credential and regulated-identifier transformation, fail-closed JSON-key enforcement without key mutation, detect-only forwarding, monotonic team/person tightening, provider-format-aware opaque denial, object-local opaque-media risk acceptance, inspectable text-document transformation, deny-before-egress, exact routed-model scoping, non-self authorization, CLI/API approval, exact single-use consumption, expiry, concurrent replay rejection, model-mismatch evidence, store-outage denial, and metadata-only evidence across the OpenAI and Anthropic compatibility paths.

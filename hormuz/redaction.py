@@ -239,6 +239,17 @@ class SecretRedactor:
             findings: dict[tuple[str, str, str, str, str], int] = {}
             redaction_count = 0
             for key, item in value.items():
+                if isinstance(key, str):
+                    _, key_findings, _ = self._transform_string(
+                        key,
+                        protocol=protocol,
+                        model=model,
+                        encoded_depth=0,
+                    )
+                    _merge_findings(
+                        findings,
+                        _fail_closed_key_redactions(key_findings),
+                    )
                 transformed, item_findings, item_redactions = self._transform(
                     item,
                     depth=depth + 1,
@@ -631,3 +642,14 @@ def _merge_findings(
 ) -> None:
     for key, count in source.items():
         target[key] = target.get(key, 0) + count
+
+
+def _fail_closed_key_redactions(
+    findings: dict[tuple[str, str, str, str, str], int],
+) -> dict[tuple[str, str, str, str, str], int]:
+    result: dict[tuple[str, str, str, str, str], int] = {}
+    for (rule_id, category, confidence, action, origin), count in findings.items():
+        effective_action = "deny" if action == "redact" else action
+        key = (rule_id, category, confidence, effective_action, origin)
+        result[key] = result.get(key, 0) + count
+    return result

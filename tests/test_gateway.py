@@ -1428,6 +1428,95 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertNotIn(openai_secret.encode("utf-8"), self.config.database_path.read_bytes())
         self.assertNotIn(anthropic_secret.encode("utf-8"), self.config.database_path.read_bytes())
 
+    def test_protected_data_in_json_key_is_denied_without_provider_or_persistence(self) -> None:
+        openai_secret = "sk-" + "proj-" + ("J" * 24)
+        anthropic_secret = "sk-ant-" + ("Q" * 24)
+        ssn = "123-45-6789"
+        before = len(FakeProviderHandler.requests)
+
+        openai_status, _, openai_response = self._post(
+            "/v1/responses",
+            {
+                "model": "engineering-fast",
+                "input": "Classify this request.",
+                "metadata": {openai_secret: "unsafe-key"},
+            },
+        )
+        anthropic_status, _, anthropic_response = self._post(
+            "/v1/messages",
+            {
+                "model": "claude-standard",
+                "max_tokens": 20,
+                "messages": [{"role": "user", "content": "Use the schema."}],
+                "tools": [
+                    {
+                        "name": "key_probe",
+                        "description": "Exercise a provider-bound JSON schema.",
+                        "input_schema": {
+                            "type": "object",
+                            "properties": {
+                                anthropic_secret: {"type": "string"},
+                            },
+                        },
+                    }
+                ],
+            },
+            extra_headers={"Anthropic-Version": "2023-06-01"},
+        )
+        dlp_status, _, dlp_response = self._post(
+            "/v1/responses",
+            {
+                "model": "engineering-fast",
+                "input": "Classify this request.",
+                "metadata": {ssn: "unsafe-key"},
+            },
+        )
+
+        self.assertEqual(openai_status, 403)
+        self.assertEqual(anthropic_status, 403)
+        self.assertEqual(dlp_status, 403)
+        self.assertEqual(len(FakeProviderHandler.requests), before)
+        self.assertEqual(
+            json.loads(openai_response)["error"]["code"],
+            "hormuz_secret_detected",
+        )
+        self.assertEqual(
+            json.loads(anthropic_response)["error"]["type"],
+            "permission_error",
+        )
+        self.assertEqual(
+            json.loads(dlp_response)["error"]["code"],
+            "hormuz_dlp_denied",
+        )
+        for secret in (openai_secret, anthropic_secret, ssn):
+            self.assertNotIn(secret.encode("utf-8"), openai_response)
+            self.assertNotIn(secret.encode("utf-8"), anthropic_response)
+            self.assertNotIn(secret.encode("utf-8"), dlp_response)
+            self.assertNotIn(secret.encode("utf-8"), self.config.database_path.read_bytes())
+
+        usage = self.gateway.store.monthly_totals(actor_id="alice")
+        self.assertEqual(usage.requests, 3)
+        self.assertEqual(usage.denied_requests, 3)
+        self.assertEqual(usage.redaction_count, 0)
+        secret_totals = self.gateway.store.monthly_secret_totals(actor_id="alice")
+        self.assertEqual(secret_totals.events, 3)
+        self.assertEqual(secret_totals.detections, 3)
+        self.assertEqual(secret_totals.denied_requests, 3)
+        security = self.gateway.store.audit_events(
+            since="2000-01-01T00:00:00+00:00",
+            kind="security",
+        )
+        self.assertEqual(len(security), 3)
+        self.assertEqual({event["protocol"] for event in security}, {"openai", "anthropic"})
+        self.assertTrue(all(event["action"] == "denied" for event in security))
+        self.assertEqual(
+            {event["event_type"] for event in security},
+            {"security.secret", "security.dlp"},
+        )
+        self.assertNotIn(openai_secret, repr(security))
+        self.assertNotIn(anthropic_secret, repr(security))
+        self.assertNotIn(ssn, repr(security))
+
     def test_oversized_encoded_text_fails_closed_before_provider(self) -> None:
         encoded_limit = ((MAX_ENCODED_TEXT_BYTES + 2) // 3) * 4
         encoded = "A" * (encoded_limit + 4)

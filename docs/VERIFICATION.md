@@ -465,6 +465,22 @@ The recursive secret/DLP transformer, supported encoding boundary, OpenAI Respon
 
 This closes one encoded-text bypass under accepted ADR 0004, not issue #10 or the enterprise DLP release gate. It does not inspect arbitrary binaries or archives, classify source repositories or provider headers/JSON keys, provide semantic DLP, invalidate a future content cache, operate approval state across nodes, or establish customer-representative detector quality and independent security review.
 
+### JSON string-key DLP enforcement
+
+The recursive secret/DLP transformer, representative OpenAI and Anthropic JSON-key paths, package artifacts, and installed wheel were exercised locally on August 16, 2026.
+
+- a red-first reproduction proved that an OpenAI-shaped credential in a JSON metadata key previously produced zero detections and would have reached the provider unchanged;
+- the new path applies the existing direct and bounded encoded-text detectors to every JSON string key without renaming it. Detect, deny, and approval-required actions retain their ordinary semantics, while a finding configured for redaction denies the complete request because replacing a schema or metadata key can corrupt meaning or collide with another key;
+- low-level cases covered a direct fake credential, an encoded fake credential, a valid hyphenated SSN, a detect-only email, and an approval-required organization dictionary value. Every key remained byte-for-byte unchanged in memory, and routine findings retained only rule metadata and counts;
+- an OpenAI metadata key, an Anthropic tool-schema property key, and an OpenAI SSN metadata key exercised both provider compatibility paths. All three requests returned provider-shaped `403` responses before egress, made zero provider calls, recorded three denied usage outcomes and metadata-only security events, and left matched values absent from responses, SQLite, and audit representations;
+- the complete source suite ran 239 tests: 238 passed and the separately gated official Claude Code executable test skipped. The CI-pinned Codex `0.147.0` and Claude Code `2.1.233` executables then passed their two real-client fake-provider tests independently;
+- the frozen 60-task release benchmark passed five iterations with precision `1.00`, recall `1.00`, useful-pack rate `1.00`, mean compression ratio `0.840593`, zero failed safety thresholds, and p95 in-process selection latency `0.167083 ms`; corpus SHA-256 remained `9822d592868202c7c7539bcdac7d4a5894c01f9e6dba7a434846516b67b32c17`;
+- isolated source and wheel builds succeeded. The wheel SHA-256 was `956357efc8616f4d7475ca675ae3607a2ff18964321478ca9ccacc01c487ae90`; the source archive SHA-256 was `e9127681ba5734244cae0628a5c67f244fac1862e577c60d5b88c58b5caa2aa9`;
+- a clean Python 3.14 environment installed the exact wheel outside the checkout, loaded `hormuz.redaction` from `site-packages`, denied an OpenAI-shaped credential in a JSON key without renaming it, compiled the installed package, displayed CLI help, and passed the installed strict 60-task benchmark with zero failed thresholds;
+- source/test bytecode compilation, `git diff --check`, deterministic corpus verification, and high-confidence source and extracted-wheel scans for private-key, OpenAI, Anthropic, GitHub, AWS, and Google credential patterns passed.
+
+This closes the known ordinary JSON-key bypass under accepted ADR 0004, not issue #10 or the enterprise DLP release gate. Caller-controlled provider headers, source classification, whitespace-wrapped or other unsupported encodings, compression, archives, media decoding, semantic evaluation, shared approval/KMS/HA operations, future cache invalidation, customer-representative detector quality, and independent security review remain open.
+
 ## Reproduce locally
 
 The default suite uses only loopback fake providers:
