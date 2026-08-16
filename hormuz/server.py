@@ -83,6 +83,7 @@ MAX_CONTEXT_EVIDENCE_REQUEST_BYTES = 64 * 1024
 MAX_CONTEXT_REVALIDATION_REQUEST_BYTES = 8 * 1024
 MAX_AUTH_REQUEST_BYTES = 8 * 1024
 MAX_DLP_APPROVAL_REQUEST_BYTES = 2 * 1024
+MAX_PROVIDER_QUERY_DECODE_DEPTH = 3
 _CONTEXT_SCOPE_HEADERS = (
     ("X-Hormuz-Repository", "repository_id"),
     ("X-Hormuz-Branch", "branch"),
@@ -2172,8 +2173,8 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 unredactable_strings=(
                     *forwarded_headers.values(),
                     *context_scope_headers.values(),
-                    *query_strings,
                 ),
+                unredactable_string_groups=(query_strings,) if query_strings else (),
             )
         except RedactionError as error:
             self._send_protocol_error(protocol, str(error), HTTPStatus.BAD_REQUEST)
@@ -2970,9 +2971,36 @@ def _single_query_values(query: str) -> dict[str, str] | None:
 def _provider_query_inspection_strings(query: str) -> tuple[str, ...]:
     if not query:
         return ()
+    views: list[str] = []
+    current = query
+    for depth in range(1, MAX_PROVIDER_QUERY_DECODE_DEPTH + 1):
+        try:
+            decoded = (
+                urllib.parse.unquote_plus(
+                    current,
+                    encoding="utf-8",
+                    errors="strict",
+                )
+                if depth == 1
+                else urllib.parse.unquote(
+                    current,
+                    encoding="utf-8",
+                    errors="strict",
+                )
+            )
+        except UnicodeDecodeError as error:
+            raise RedactionError(
+                "Provider query percent-encoding must decode to valid UTF-8"
+            ) from error
+        if not views or decoded != views[-1]:
+            views.append(decoded)
+        if decoded == current:
+            return tuple(views)
+        current = decoded
+
     try:
-        decoded = urllib.parse.unquote_plus(
-            query,
+        next_view = urllib.parse.unquote(
+            current,
             encoding="utf-8",
             errors="strict",
         )
@@ -2980,7 +3008,12 @@ def _provider_query_inspection_strings(query: str) -> tuple[str, ...]:
         raise RedactionError(
             "Provider query percent-encoding must decode to valid UTF-8"
         ) from error
-    return (decoded,)
+    if next_view != current:
+        raise RedactionError(
+            "Provider query exceeds the maximum nested percent-decoding depth of "
+            f"{MAX_PROVIDER_QUERY_DECODE_DEPTH}"
+        )
+    return tuple(views)
 
 
 def _safe_identifier(value: str) -> bool:

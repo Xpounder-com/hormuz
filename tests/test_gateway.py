@@ -13,6 +13,7 @@ import sys
 import tempfile
 import threading
 import unittest
+import urllib.parse
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -253,13 +254,29 @@ class FakeProviderHandler(BaseHTTPRequestHandler):
 
 
 class ProviderQueryInspectionTests(unittest.TestCase):
-    def test_query_is_form_decoded_once_without_changing_forwarded_material(self) -> None:
+    def test_query_is_form_decoded_then_percent_decoded_with_bounded_views(self) -> None:
         query = "owner=query%2Downer%40example.com+internal&feature=%2573%256B"
 
         self.assertEqual(
             _provider_query_inspection_strings(query),
-            ("owner=query-owner@example.com internal&feature=%73%6B",),
+            (
+                "owner=query-owner@example.com internal&feature=%73%6B",
+                "owner=query-owner@example.com internal&feature=sk",
+            ),
         )
+
+    def test_nested_percent_decoding_preserves_a_percent_encoded_literal_plus(self) -> None:
+        self.assertEqual(
+            _provider_query_inspection_strings("value=%252B+literal"),
+            ("value=%2B literal", "value=+ literal"),
+        )
+
+    def test_query_nested_percent_decoding_fails_closed_past_three_views(self) -> None:
+        with self.assertRaisesRegex(
+            ValueError,
+            "maximum nested percent-decoding depth of 3",
+        ):
+            _provider_query_inspection_strings("feature=%25252573%2525256B")
 
     def test_non_utf8_percent_encoding_fails_closed(self) -> None:
         with self.assertRaisesRegex(
@@ -267,6 +284,12 @@ class ProviderQueryInspectionTests(unittest.TestCase):
             "Provider query percent-encoding must decode to valid UTF-8",
         ):
             _provider_query_inspection_strings("feature=%FF")
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "Provider query percent-encoding must decode to valid UTF-8",
+        ):
+            _provider_query_inspection_strings("feature=%25FF")
 
 
 class GatewayIntegrationTests(unittest.TestCase):
@@ -2663,6 +2686,81 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertNotIn(email, repr(security))
         self.assertNotIn(email.encode("utf-8"), self.config.database_path.read_bytes())
 
+    def test_nested_percent_encoded_query_is_inspected_for_both_providers(self) -> None:
+        openai_secret = "sk-" + "proj-" + ("N" * 24)
+        anthropic_secret = "sk-ant-" + ("M" * 24)
+
+        def encode_layers(value: str, layers: int) -> str:
+            value = "".join(f"%{byte:02X}" for byte in value.encode("utf-8"))
+            for _ in range(layers - 1):
+                value = urllib.parse.quote(value, safe="")
+            return value
+
+        cases = (
+            (
+                f"/v1/responses?feature={encode_layers(openai_secret, 3)}",
+                {"model": "engineering-fast", "input": "safe"},
+                None,
+                openai_secret,
+                "hormuz_secret_detected",
+            ),
+            (
+                f"/v1/messages?feature={encode_layers(anthropic_secret, 2)}",
+                {
+                    "model": "claude-standard",
+                    "max_tokens": 20,
+                    "messages": [{"role": "user", "content": "safe"}],
+                },
+                {"Anthropic-Version": "2023-06-01"},
+                anthropic_secret,
+                "permission_error",
+            ),
+        )
+        before = len(FakeProviderHandler.requests)
+
+        for path, body, headers, protected, expected_code in cases:
+            with self.subTest(path=path):
+                status, _, response = self._post(path, body, extra_headers=headers)
+
+                self.assertEqual(status, 403)
+                error = json.loads(response)["error"]
+                self.assertEqual(error.get("code", error.get("type")), expected_code)
+                self.assertNotIn(protected.encode("utf-8"), response)
+
+        self.assertEqual(len(FakeProviderHandler.requests), before)
+        security = self.gateway.store.audit_events(
+            since="2000-01-01T00:00:00+00:00",
+            kind="security",
+        )
+        self.assertEqual(len(security), len(cases))
+        self.assertTrue(all(event["detection_count"] == 1 for event in security))
+        self.assertNotIn(openai_secret, repr(security))
+        self.assertNotIn(anthropic_secret, repr(security))
+        database = self.config.database_path.read_bytes()
+        self.assertNotIn(openai_secret.encode("utf-8"), database)
+        self.assertNotIn(anthropic_secret.encode("utf-8"), database)
+
+    def test_nested_detect_only_query_is_forwarded_raw_once(self) -> None:
+        email = "nested-query-owner@example.com"
+        encoded = urllib.parse.quote(urllib.parse.quote(email, safe=""), safe="")
+        path = f"/v1/responses?owner={encoded}"
+
+        status, headers, _ = self._post(
+            path,
+            {"model": "engineering-fast", "input": "safe"},
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["x-hormuz-dlp-detections"], "1")
+        self.assertEqual(FakeProviderHandler.requests[-1]["path"], path)
+        security = self.gateway.store.audit_events(
+            since="2000-01-01T00:00:00+00:00",
+            kind="security",
+        )
+        self.assertEqual(security[-1]["detection_count"], 1)
+        self.assertNotIn(email, repr(security))
+        self.assertNotIn(email.encode("utf-8"), self.config.database_path.read_bytes())
+
     def test_query_approval_is_bound_to_exact_raw_query(self) -> None:
         protected = "PROJECT-QUERY-TRIDENT"
         changed = protected + "-CHANGED"
@@ -2755,6 +2853,27 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertNotIn(b"%FF", response)
         self.assertEqual(len(FakeProviderHandler.requests), before)
         self.assertEqual(self.gateway.store.monthly_totals(actor_id="alice").requests, 0)
+
+    def test_excessively_nested_percent_encoded_query_fails_content_free(self) -> None:
+        protected = "sk-" + "proj-" + ("Q" * 24)
+        encoded = "".join(f"%{byte:02X}" for byte in protected.encode("utf-8"))
+        for _ in range(3):
+            encoded = urllib.parse.quote(encoded, safe="")
+        before = len(FakeProviderHandler.requests)
+
+        status, _, response = self._post(
+            f"/v1/responses?feature={encoded}",
+            {"model": "engineering-fast", "input": "safe"},
+        )
+
+        self.assertEqual(status, 400)
+        payload = json.loads(response)
+        self.assertEqual(payload["error"]["type"], "invalid_request")
+        self.assertIn("maximum nested percent-decoding depth of 3", payload["error"]["message"])
+        self.assertNotIn(protected.encode("utf-8"), response)
+        self.assertEqual(len(FakeProviderHandler.requests), before)
+        self.assertEqual(self.gateway.store.monthly_totals(actor_id="alice").requests, 0)
+        self.assertNotIn(protected.encode("utf-8"), self.config.database_path.read_bytes())
 
     def test_oversized_encoded_text_fails_closed_before_provider(self) -> None:
         encoded_limit = ((MAX_ENCODED_TEXT_BYTES + 2) // 3) * 4

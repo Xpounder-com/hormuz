@@ -187,6 +187,7 @@ class SecretRedactor:
         protocol: str = "",
         model: str = "",
         unredactable_strings: tuple[str, ...] = (),
+        unredactable_string_groups: tuple[tuple[str, ...], ...] = (),
     ) -> RedactionResult:
         if self.controls.mode == "off" and not self.dlp_controls.rules:
             return RedactionResult(
@@ -238,6 +239,24 @@ class SecretRedactor:
                 findings,
                 _fail_closed_unredactable_redactions(preserved_findings),
             )
+        for alternatives in unredactable_string_groups:
+            logical_findings: dict[tuple[str, str, str, str, str], int] = {}
+            for preserved in dict.fromkeys(alternatives):
+                _, preserved_findings, _ = self._transform_string(
+                    preserved,
+                    protocol=protocol,
+                    model=model,
+                    encoded_depth=0,
+                )
+                for key, count in _fail_closed_unredactable_redactions(
+                    preserved_findings
+                ).items():
+                    # Alternative decoded representations describe one logical
+                    # provider-bound source. Keep the strongest observed count
+                    # instead of inflating evidence by counting that source
+                    # once per representation.
+                    logical_findings[key] = max(logical_findings.get(key, 0), count)
+            _merge_findings(findings, logical_findings)
         assert isinstance(transformed, dict)
         result_findings = tuple(
             DLPFinding(

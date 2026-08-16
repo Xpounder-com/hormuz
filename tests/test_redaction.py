@@ -250,6 +250,19 @@ class SecretRedactorTests(unittest.TestCase):
                 self.assertEqual(result.findings[0].action, action)
                 self.assertNotIn(forwarded, repr(result.findings))
 
+    def test_unredactable_alternative_views_count_one_logical_source_once(self) -> None:
+        secret = "sk-" + "proj-" + ("V" * 24)
+        result = SecretRedactor(SecretControls(mode="redact")).inspect(
+            {"input": "safe"},
+            unredactable_string_groups=((f"feature={secret}%25", f"feature={secret}%"),),
+        )
+
+        self.assertEqual(result.action, "deny")
+        self.assertEqual(result.count, 1)
+        self.assertEqual(result.redaction_count, 0)
+        self.assertEqual(result.rules, ("openai_api_key",))
+        self.assertNotIn(secret, repr(result.findings))
+
     def test_off_mode_returns_original_value(self) -> None:
         value = {"input": "sk-" + "proj-" + ("D" * 24)}
         result = SecretRedactor(SecretControls(mode="off")).inspect(value)

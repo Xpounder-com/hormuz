@@ -649,6 +649,22 @@ The next accepted-ADR-0004 slice was exercised locally on August 16, 2026. No pr
 
 This completes the reusable content-free evaluation mechanism, not the customer-specific ADR gate or issue #10. An organization must still freeze and review a representative corpus, set acceptable false-positive/false-negative thresholds, approve any action change, and retain that decision through its security process. Source-path classification, semantic detection, unknown encodings/containers, archive-content inspection, application-specific repeated query decoding, multi-node approval operations, cache invalidation, shared KMS/HA, externally immutable audit, and independent security review remain open.
 
+### Bounded nested provider-query DLP enforcement
+
+The accepted-ADR-0004 provider-query boundary was exercised locally on August 16, 2026. No live provider credential or endpoint was used; deterministic requests reached provider-compatible loopback fakes through the real Hormuz transport.
+
+- red-first unit coverage proved that the existing helper stopped after one form-decoded view, leaving a further percent-encoded representation uninspected;
+- Hormuz now applies one strict UTF-8 form decode followed by percent-only decoding through at most three distinct views. A `+` produced from `%2B` remains a literal plus on later passes, invalid UTF-8 at any pass fails closed, and a fourth changing layer returns a stable content-free `400` before provider work;
+- all decoded views represent one raw query. The same rule visible in multiple views contributes the maximum per-view count once, preserving intermediate exact-value detection without inflating routine evidence;
+- nested OpenAI- and Anthropic-shaped fake credentials returned the existing provider-shaped secret denials with one finding each and zero provider calls. Neither value entered the response, security evidence, or SQLite;
+- a doubly encoded detect-only email reached the fake OpenAI endpoint with the exact original raw query, one detection, and no transformation. Existing query-bearing approval tests continued to bind the exact raw query, reject changed material, permit one exact approved retry, and reject replay;
+- all 302 source tests passed with both official-client gates enabled and no skips. Installed Codex `0.139.0` and Claude Code `2.1.233` each completed their ordinary provider-compatible gateway path;
+- the frozen 60-task release benchmark passed five iterations with precision `1.00`, recall `1.00`, useful-pack rate `1.00`, mean compression ratio `0.840593`, zero authorization, stale-lifecycle, dependency-stale, malicious, contradiction, token-budget, leakage, or determinism failures, and p95 in-process selection latency `0.158292 ms`. Corpus SHA-256 remained `9822d592868202c7c7539bcdac7d4a5894c01f9e6dba7a434846516b67b32c17`;
+- isolated source and wheel builds succeeded. A clean Python `3.14.0` environment installed the exact wheel outside the checkout, loaded Hormuz from `site-packages`, produced two bounded views for a nested fake credential, denied the one logical source with count one, compiled the installed package, displayed the installed CLI, and passed the installed strict benchmark with zero failed thresholds; and
+- source/test bytecode compilation, deterministic corpus verification, `git diff --check`, and high-confidence runtime-source plus extracted-wheel scans for private-key, OpenAI, Anthropic, GitHub, AWS, and Google credential patterns passed.
+
+This closes the ordinary bounded nested-percent query bypass, not issue #10 or the enterprise DLP release gate. Hormuz does not model application-specific parsing beyond the three decoded views, and source classification, semantic detection, unsupported encodings and container contents, provider file/URL retrieval, organization-representative threshold approval, future cache invalidation, shared approval/KMS/HA operations, externally immutable audit, and independent review remain open.
+
 ## Reproduce locally
 
 The default suite uses only loopback fake providers:
