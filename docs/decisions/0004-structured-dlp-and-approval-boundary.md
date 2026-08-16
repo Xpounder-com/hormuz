@@ -66,6 +66,8 @@ The future UI or CLI may display a separately authorized minimal review excerpt,
 
 Routine security events contain only event-time identity/scope, client, provider, requested and actual model, policy and detector versions, rule identifiers, action, counts, approval metadata, timing, and a non-reversible keyed fingerprint where required. They never contain prompt or response text, matched values, filenames, source content, embeddings, provider credentials, authorization codes, session credentials, or unkeyed content hashes.
 
+The raw HTTP request target is content-bearing because provider parameters, OAuth callback values, or attacker-controlled paths can appear in its query or path. Hormuz access logs therefore use canonical route labels and bounded method/status/query-presence metadata; verbose mode cannot restore raw targets. Public provider-connection errors omit internal exception detail and credential configuration names. Deployment components in front of Hormuz must independently follow this contract.
+
 Detector access, exception decisions, policy changes, and exports require separate capabilities and auditable access. Token and spend reporting must not become an employee performance score.
 
 ## Alternatives considered
@@ -107,6 +109,8 @@ This would create a concentrated sensitive-data store in the control plane. Reje
 ## Owner approval record
 
 Accepted in the product-development conversation on 2026-08-15. The owner explicitly approved the recommended architecture: high-confidence secret and regulated-identifier redaction by default, configurable organization policy, detect-only lower-confidence PII, short-lived non-self approvals, fail-closed enforced rules, and denial of uninspectable media under enforced DLP. The owner subsequently approved binding an approval to the exact routed upstream model available before egress, with the provider-returned model audited afterward. The owner also accepted transparent automatic consumption when the same employee retries the exact approved operation and payload, preserving unchanged Codex and Claude Code clients instead of requiring a custom client header.
+
+On 2026-08-16 the owner explicitly accepted content-free control-plane observability: Hormuz may inspect provider-bound content transiently, while routine logs, usage/security records, and approvals retain only bounded metadata rather than prompts, responses, code, filenames, matched values, secrets, or raw request material. The separate governed-context repository remains intentionally content-bearing and is not reclassified as telemetry by this clarification.
 
 GitHub acceptance record: [issue #10 comment](https://github.com/Xpounder-com/hormuz/issues/10#issuecomment-5305144582).
 

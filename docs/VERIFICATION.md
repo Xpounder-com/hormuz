@@ -665,6 +665,22 @@ The accepted-ADR-0004 provider-query boundary was exercised locally on August 16
 
 This closes the ordinary bounded nested-percent query bypass, not issue #10 or the enterprise DLP release gate. Hormuz does not model application-specific parsing beyond the three decoded views, and source classification, semantic detection, unsupported encodings and container contents, provider file/URL retrieval, organization-representative threshold approval, future cache invalidation, shared approval/KMS/HA operations, externally immutable audit, and independent review remain open.
 
+### Content-free application observability
+
+The owner-approved content-free default was exercised locally on August 16, 2026 across the built-in HTTP access logger, provider-connection error boundary, both provider transports, installed clients, package artifacts, and clean wheel. No live provider credential or endpoint was used.
+
+- the audit identified that verbose mode inherited a raw HTTP request-target logger. That target can contain provider query values, OAuth authorization codes/state, or an attacker-controlled path even when databases and structured audit events remain content-free;
+- Hormuz now logs only the allowlisted canonical route or a fixed dynamic template/`unknown`, method, query-presence flag, status, and response-size metadata when available. The fallback server/protocol logger also discards caller-controlled formatting details;
+- adversarial gateway tests placed distinct markers in an OpenAI query, prompt, unknown path, OAuth callback code/state, simulated internal provider exception, and upstream credential environment-variable name. None appeared in captured debug/error logs or public error bodies. The provider query still reached the fake provider unchanged in the detect-only case, proving privacy did not come from dropping compatibility data;
+- provider-unavailable responses now use one fixed public message. Missing-credential responses no longer disclose the configured environment-variable name;
+- all 304 source tests passed with no skips while installed Codex `0.139.0` and official Claude Code `2.1.233` each completed their ordinary provider-compatible Hormuz path;
+- the frozen 60-task release benchmark passed five iterations with precision `1.00`, recall `1.00`, useful-pack rate `1.00`, mean compression ratio `0.840593`, zero authorization, stale-lifecycle, dependency-stale, malicious, contradiction, token-budget, leakage, or determinism failures, and p95 in-process selection latency `0.154708 ms`. Corpus SHA-256 remained `9822d592868202c7c7539bcdac7d4a5894c01f9e6dba7a434846516b67b32c17`;
+- isolated source and wheel builds succeeded. The final install-tested local wheel SHA-256 was `71380516bc0d6fb1066ff4287d4d97b061e49550ba7bb036ac2e15633f774d65`; the source archive is not self-hashed inside this embedded record because changing the record necessarily changes that archive;
+- a clean Python `3.14.0` environment installed that exact wheel outside the checkout, loaded `hormuz.server` from `site-packages`, confirmed the packaged canonical logger, displayed the installed CLI, and passed the bundled regression benchmark; and
+- deterministic corpus verification, source/test bytecode compilation, local Markdown-link validation, `git diff --check`, and high-confidence runtime-source plus extracted-wheel scans for private-key, OpenAI, Anthropic, GitHub, AWS, Google, Slack, and Hormuz-session credential patterns passed.
+
+This verifies Hormuz's application-level observability boundary, not every deployment component. Reverse proxies, load balancers, service meshes, crash reporters, packet captures, and provider-side storage must independently disable raw URL/body/header capture. The governed-context repository and its private content export remain intentionally content-bearing and require the still-open hosted encryption, KMS, retention, deletion, tenancy, backup, and independent-review gates.
+
 ## Reproduce locally
 
 The default suite uses only loopback fake providers:

@@ -89,6 +89,31 @@ _CONTEXT_SCOPE_HEADERS = (
     ("X-Hormuz-Branch", "branch"),
     ("X-Hormuz-Revision", "revision"),
 )
+_CONTENT_FREE_HTTP_ROUTES = frozenset(
+    {
+        "/health",
+        "/v1/admin/session-events",
+        "/v1/admin/session-revocations",
+        "/v1/admin/sessions",
+        "/v1/admin/usage",
+        "/v1/auth/callback",
+        "/v1/auth/enrollments",
+        "/v1/auth/login",
+        "/v1/auth/logout",
+        "/v1/auth/refresh",
+        "/v1/context/evidence",
+        "/v1/context/lifecycle-snapshots",
+        "/v1/context/packs",
+        "/v1/context/revalidation-batches",
+        "/v1/gateway/usage",
+        "/v1/gateway/whoami",
+        "/v1/messages",
+        "/v1/messages/count_tokens",
+        "/v1/models",
+        "/v1/responses",
+        "/v1/responses/compact",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -2557,7 +2582,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 )
             self._send_protocol_error(
                 protocol,
-                f"Gateway upstream credential is unavailable: {upstream.api_key_env}",
+                "Gateway upstream credential is unavailable.",
                 HTTPStatus.SERVICE_UNAVAILABLE,
                 code="gateway_upstream_not_configured",
             )
@@ -2574,7 +2599,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             response = urllib.request.urlopen(request, timeout=self.server.config.upstream_timeout_seconds)
         except urllib.error.HTTPError as error:
             response = error
-        except (urllib.error.URLError, TimeoutError, OSError) as error:
+        except (urllib.error.URLError, TimeoutError, OSError):
             if account_usage:
                 self.server.store.record(
                     identity=identity,
@@ -2594,7 +2619,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 )
             self._send_protocol_error(
                 protocol,
-                f"Upstream provider is unavailable: {error}",
+                "Upstream provider is unavailable.",
                 HTTPStatus.BAD_GATEWAY,
                 code="gateway_upstream_error",
             )
@@ -2911,14 +2936,64 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def log_request(self, code: int | str = "-", size: int | str = "-") -> None:
+        """Emit access metadata without the raw request target or query."""
+        status = str(code) if isinstance(code, int) else "-"
+        response_bytes = str(size) if isinstance(size, int) and size >= 0 else "-"
+        LOGGER.debug(
+            "http_request method=%s route=%s query_present=%s status=%s bytes=%s",
+            _content_free_http_method(self.command),
+            _content_free_http_route(self.path),
+            "true" if "?" in self.path else "false",
+            status,
+            response_bytes,
+        )
+
+    def log_error(self, format: str, *args: object) -> None:
+        """Suppress parser/server details that can contain attacker-controlled bytes."""
+        LOGGER.warning(
+            "http_protocol_error method=%s route=%s",
+            _content_free_http_method(getattr(self, "command", "")),
+            _content_free_http_route(getattr(self, "path", "")),
+        )
+
     def log_message(self, format: str, *args: object) -> None:
-        LOGGER.debug("http " + format, *args)
+        """Keep unexpected base-server messages content-free as a final backstop."""
+        LOGGER.debug(
+            "http_server_event method=%s route=%s",
+            _content_free_http_method(getattr(self, "command", "")),
+            _content_free_http_route(getattr(self, "path", "")),
+        )
 
 
 def serve_in_thread(server: GatewayServer) -> threading.Thread:
     thread = threading.Thread(target=server.serve_forever, name="hormuz", daemon=True)
     thread.start()
     return thread
+
+
+def _content_free_http_method(value: object) -> str:
+    if value in {"GET", "POST", "PUT"}:
+        return str(value)
+    return "OTHER"
+
+
+def _content_free_http_route(target: object) -> str:
+    if not isinstance(target, str):
+        return "unknown"
+    try:
+        path = urlsplit(target).path
+    except ValueError:
+        return "unknown"
+    if path in _CONTENT_FREE_HTTP_ROUTES:
+        return path
+    if path.startswith("/v1/auth/enrollments/") and path.endswith("/redeem"):
+        return "/v1/auth/enrollments/{id}/redeem"
+    if path.startswith("/v1/dlp/approval-requests/"):
+        if path.endswith("/decisions"):
+            return "/v1/dlp/approval-requests/{id}/decisions"
+        return "/v1/dlp/approval-requests/{id}"
+    return "unknown"
 
 
 def _valid_context_scope(value: object) -> bool:

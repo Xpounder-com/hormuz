@@ -462,6 +462,7 @@ class GatewayIntegrationTests(unittest.TestCase):
             json.loads(response)["error"]["code"],
             "gateway_upstream_not_configured",
         )
+        self.assertNotIn(b"TEST_OPENAI_KEY", response)
         event = self.gateway.store.audit_events(
             since="2000-01-01T00:00:00+00:00",
             kind="usage",
@@ -469,6 +470,30 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertEqual(event["status"], "failed")
         self.assertEqual(event["cost_basis"], "not_available")
         self.assertEqual(event["rate_card_version"], "test-openai-v1")
+
+    def test_upstream_failure_response_and_logs_hide_internal_detail_and_request_content(
+        self,
+    ) -> None:
+        internal_detail = "PRIVATE-UPSTREAM-ENDPOINT-FAILURE"
+        request_content = "PRIVATE-REQUEST-CONTENT"
+        raw_query = "trace=PRIVATE-RAW-QUERY"
+
+        with mock.patch(
+            "hormuz.server.urllib.request.urlopen",
+            side_effect=OSError(internal_detail),
+        ), self.assertLogs("hormuz", level="DEBUG") as logs:
+            status, _, response = self._post(
+                f"/v1/responses?{raw_query}",
+                {"model": "engineering-fast", "input": request_content},
+            )
+
+        self.assertEqual(status, 502)
+        self.assertEqual(json.loads(response)["error"]["code"], "gateway_upstream_error")
+        observable = response.decode("utf-8") + "\n" + "\n".join(logs.output)
+        self.assertNotIn(internal_detail, observable)
+        self.assertNotIn(request_content, observable)
+        self.assertNotIn(raw_query, observable)
+        self.assertIn("route=/v1/responses", observable)
 
     def test_disallowed_client_is_rejected_before_provider_call(self) -> None:
         before = len(FakeProviderHandler.requests)
@@ -2658,6 +2683,43 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertNotIn(openai_secret.encode("utf-8"), database)
         self.assertNotIn(anthropic_secret.encode("utf-8"), database)
         self.assertNotIn(ssn.encode("utf-8"), database)
+
+    def test_verbose_http_access_logs_use_only_canonical_content_free_routes(self) -> None:
+        query_value = "verbose-query-owner@example.com"
+        unknown_path_value = "PRIVATE-UNKNOWN-PATH"
+        authorization_code = "PRIVATE-OIDC-AUTHORIZATION-CODE"
+        state = "PRIVATE-OIDC-STATE"
+
+        with self.assertLogs("hormuz", level="DEBUG") as logs:
+            query_status, _, _ = self._post(
+                "/v1/responses?owner=" + urllib.parse.quote(query_value, safe=""),
+                {"model": "engineering-fast", "input": "safe"},
+            )
+            unknown_status, _, _ = self._get(
+                "/unrecognized/" + unknown_path_value,
+                include_authorization=False,
+            )
+            callback_status, _, _ = self._get(
+                "/v1/auth/callback?code="
+                + urllib.parse.quote(authorization_code, safe="")
+                + "&state="
+                + urllib.parse.quote(state, safe=""),
+                include_authorization=False,
+            )
+
+        self.assertEqual(query_status, 200)
+        self.assertEqual(unknown_status, 401)
+        self.assertEqual(callback_status, 404)
+        output = "\n".join(logs.output)
+        for protected in (query_value, unknown_path_value, authorization_code, state):
+            self.assertNotIn(protected, output)
+            self.assertNotIn(urllib.parse.quote(protected, safe=""), output)
+        self.assertIn(
+            "http_request method=POST route=/v1/responses query_present=true status=200",
+            output,
+        )
+        self.assertIn("http_request method=GET route=unknown", output)
+        self.assertIn("http_request method=GET route=/v1/auth/callback", output)
 
     def test_detect_only_percent_encoded_query_is_forwarded_raw_and_audited_metadata_only(self) -> None:
         email = "query-owner@example.com"

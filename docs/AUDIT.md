@@ -2,6 +2,8 @@
 
 Hormuz can export the local usage and security-egress ledgers as deterministic, metadata-only JSON Lines. The export is intended for inspection, incident evidence, or ingestion into an organization-controlled SIEM or immutable archive. It does not contain prompts, responses, matched values, source files, or provider credentials.
 
+This content-free boundary also applies to the built-in HTTP access log and public gateway errors. Access records contain a canonical route label, method, response status, response-size metadata when available, and whether a query was present. They do not contain the raw path, query, body, headers, OAuth callback values, or internal provider exception. An unrecognized or dynamic path is logged as `unknown` or a fixed route template rather than copied from the request. This guarantee does not extend automatically to a reverse proxy, load balancer, service mesh, crash reporter, or packet capture placed in front of Hormuz; operators must apply the same policy there.
+
 ## Export
 
 The default lower bound is the start of the current UTC month:
@@ -39,6 +41,8 @@ python3 -m hormuz --config hormuz.json context-audit-export \
 ```
 
 Context event types are `context.mutation`, `context.read`, `context.lifecycle`, `context.evidence`, and `context.revalidation`. Evidence events include only the record ID/version, signal family, actor, and policy metadata; the submitted evidence reference and its fingerprint are omitted. Revalidation events expose job, batch status, scope, actor, and policy metadata. The ordinary mutation event records each verification flip, while the current job JSON reports bounded aggregate promotion, invalidation, unchanged, deferred, and processed counts. Neither surface includes record content, source locators, dependency identities, query text, or raw evidence references.
+
+The governed-context repository itself is intentionally content-bearing. Its private content export is therefore outside the content-free telemetry contract even though its mutation, read, lifecycle, evidence, and revalidation audits remain metadata-only.
 
 ## Schema versions
 
