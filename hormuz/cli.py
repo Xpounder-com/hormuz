@@ -228,7 +228,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     sessions = subparsers.add_parser(
         "sessions",
-        help="List and revoke human sessions as a tenant administrator",
+        help="Inspect and revoke human sessions as a tenant administrator",
     )
     session_subparsers = sessions.add_subparsers(dest="sessions_command", required=True)
     session_list = session_subparsers.add_parser(
@@ -262,7 +262,26 @@ def build_parser() -> argparse.ArgumentParser:
             "administrative",
         ],
     )
-    for command in (session_list, session_revoke):
+    session_events = session_subparsers.add_parser(
+        "events",
+        help="List metadata-only session security events in the administrator's organization",
+    )
+    session_events.add_argument("--actor", help="Filter by exact target actor ID")
+    session_events.add_argument("--team", help="Filter by exact target team ID")
+    session_events.add_argument(
+        "--event-type",
+        choices=[
+            "refresh_replay",
+            "logout",
+            "authorization_mapping_removed",
+            "admin_revocation",
+        ],
+        help="Filter by security event type",
+    )
+    session_events.add_argument("--since", help="UTC ISO-8601 lower bound")
+    session_events.add_argument("--limit", type=int, default=50, help="Page size from 1 to 100")
+    session_events.add_argument("--cursor", help="Opaque cursor returned by the previous page")
+    for command in (session_list, session_revoke, session_events):
         command.add_argument("--gateway", required=True, help="Hormuz gateway base URL")
         credential = command.add_mutually_exclusive_group()
         credential.add_argument(
@@ -1096,6 +1115,15 @@ def _session_admin_command(args: argparse.Namespace) -> int:
                 scope=args.scope,
                 target=args.target,
                 reason_code=args.reason,
+            )
+        elif args.sessions_command == "events":
+            result = client.list_events(
+                actor_id=args.actor,
+                team_id=args.team,
+                event_type=args.event_type,
+                since=args.since,
+                limit=args.limit,
+                cursor=args.cursor,
             )
         else:
             return 2

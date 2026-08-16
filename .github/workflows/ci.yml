@@ -65,6 +65,7 @@ jobs:
           "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" context-export --help
           "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" context-audit-export --help
           "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" sessions list --help
+          "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" sessions events --help
           "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" sessions revoke --help
           "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" mcp --help
           "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" mcp-config --help

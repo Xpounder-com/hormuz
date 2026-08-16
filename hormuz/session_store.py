@@ -26,6 +26,14 @@ _ADMIN_REASON_CODES = {
     "security_incident",
     "administrative",
 }
+SESSION_SECURITY_EVENT_TYPES = frozenset(
+    {
+        "refresh_replay",
+        "logout",
+        "authorization_mapping_removed",
+        "admin_revocation",
+    }
+)
 
 
 class SessionStoreError(RuntimeError):
@@ -111,6 +119,34 @@ class SessionSummary:
             "refreshed_at": _isoformat(self.refreshed_at),
             "access_expires_at": _isoformat(self.access_expires_at),
             "session_expires_at": _isoformat(self.session_expires_at),
+        }
+
+
+@dataclass(frozen=True)
+class SessionSecurityEvent:
+    event_id: str
+    occurred_at: datetime
+    session_id: str
+    event_type: str
+    organization_id: str
+    target_actor_id: str
+    target_team_id: str
+    decision_actor_id: str | None
+    decision_scope: str | None
+    reason_code: str | None
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "event_id": self.event_id,
+            "occurred_at": _isoformat(self.occurred_at),
+            "session_id": self.session_id,
+            "event_type": self.event_type,
+            "organization_id": self.organization_id,
+            "target_actor_id": self.target_actor_id,
+            "target_team_id": self.target_team_id,
+            "decision_actor_id": self.decision_actor_id,
+            "decision_scope": self.decision_scope,
+            "reason_code": self.reason_code,
         }
 
 
@@ -458,7 +494,13 @@ class SQLiteSessionStore:
                 ).fetchone()
                 if row is None:
                     consumed = connection.execute(
-                        "SELECT session_id FROM consumed_refresh_credentials WHERE credential_hash = ?",
+                        """
+                        SELECT consumed.session_id, sessions.organization_id,
+                               sessions.actor_id, sessions.team_id
+                        FROM consumed_refresh_credentials AS consumed
+                        JOIN human_sessions AS sessions ON sessions.id = consumed.session_id
+                        WHERE consumed.credential_hash = ?
+                        """,
                         (old_hash,),
                     ).fetchone()
                     if consumed is not None:
@@ -471,6 +513,9 @@ class SQLiteSessionStore:
                             session_id=str(consumed["session_id"]),
                             event_type="refresh_replay",
                             occurred_at=now,
+                            organization_id=str(consumed["organization_id"]),
+                            target_actor_id=str(consumed["actor_id"]),
+                            target_team_id=str(consumed["team_id"]),
                         )
                         connection.commit()
                         raise SessionStoreError("refresh_replay_detected")
@@ -528,14 +573,20 @@ class SQLiteSessionStore:
             connection.execute("BEGIN IMMEDIATE")
             row = connection.execute(
                 """
-                SELECT id FROM human_sessions
+                SELECT id, organization_id, actor_id, team_id FROM human_sessions
                 WHERE access_hash = ? OR refresh_hash = ?
                 """,
                 (access_hash, refresh_hash),
             ).fetchone()
             if row is None:
                 consumed = connection.execute(
-                    "SELECT session_id AS id FROM consumed_refresh_credentials WHERE credential_hash = ?",
+                    """
+                    SELECT sessions.id, sessions.organization_id,
+                           sessions.actor_id, sessions.team_id
+                    FROM consumed_refresh_credentials AS consumed
+                    JOIN human_sessions AS sessions ON sessions.id = consumed.session_id
+                    WHERE consumed.credential_hash = ?
+                    """,
                     (refresh_hash,),
                 ).fetchone()
                 row = consumed
@@ -550,6 +601,9 @@ class SQLiteSessionStore:
                 session_id=str(row["id"]),
                 event_type="logout",
                 occurred_at=now,
+                organization_id=str(row["organization_id"]),
+                target_actor_id=str(row["actor_id"]),
+                target_team_id=str(row["team_id"]),
             )
             return True
 
@@ -710,6 +764,92 @@ class SQLiteSessionStore:
                 )
             return len(rows)
 
+    def list_security_events(
+        self,
+        *,
+        organization_id: str,
+        limit: int,
+        cursor: str | None = None,
+        actor_id: str | None = None,
+        team_id: str | None = None,
+        event_type: str | None = None,
+        since: datetime | None = None,
+    ) -> tuple[tuple[SessionSecurityEvent, ...], str | None]:
+        _require_binding(organization_id, "invalid_organization_id")
+        if actor_id is not None:
+            _require_binding(actor_id, "invalid_actor_id")
+        if team_id is not None:
+            _require_binding(team_id, "invalid_team_id")
+        if event_type is not None and event_type not in SESSION_SECURITY_EVENT_TYPES:
+            raise SessionStoreError("invalid_session_event_type")
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 100:
+            raise SessionStoreError("invalid_session_page_limit")
+        if since is not None:
+            if not isinstance(since, datetime) or since.tzinfo is None:
+                raise SessionStoreError("invalid_session_event_since")
+            since = since.astimezone(timezone.utc)
+        before = _decode_cursor(cursor) if cursor is not None else None
+        conditions = ["organization_id = ?"]
+        parameters: list[object] = [organization_id]
+        if actor_id is not None:
+            conditions.append("target_actor_id = ?")
+            parameters.append(actor_id)
+        if team_id is not None:
+            conditions.append("target_team_id = ?")
+            parameters.append(team_id)
+        if event_type is not None:
+            conditions.append("event_type = ?")
+            parameters.append(event_type)
+        if since is not None:
+            conditions.append("occurred_at >= ?")
+            parameters.append(_isoformat(since))
+        if before is not None:
+            conditions.append("(occurred_at < ? OR (occurred_at = ? AND id < ?))")
+            parameters.extend((before[0], before[0], before[1]))
+        parameters.append(limit + 1)
+        query = (
+            "SELECT id, occurred_at, session_id, event_type, organization_id, "
+            "target_actor_id, target_team_id, decision_actor_id, decision_scope, "
+            "reason_code FROM session_security_events WHERE "
+            + " AND ".join(conditions)
+            + " ORDER BY occurred_at DESC, id DESC LIMIT ?"
+        )
+        with self._lock, self._connection() as connection:
+            rows = connection.execute(query, tuple(parameters)).fetchall()
+        has_more = len(rows) > limit
+        selected = rows[:limit]
+        items = tuple(
+            SessionSecurityEvent(
+                event_id=str(row["id"]),
+                occurred_at=_parse_time(row["occurred_at"]),
+                session_id=str(row["session_id"]),
+                event_type=str(row["event_type"]),
+                organization_id=str(row["organization_id"]),
+                target_actor_id=str(row["target_actor_id"]),
+                target_team_id=str(row["target_team_id"]),
+                decision_actor_id=(
+                    str(row["decision_actor_id"])
+                    if row["decision_actor_id"] is not None
+                    else None
+                ),
+                decision_scope=(
+                    str(row["decision_scope"])
+                    if row["decision_scope"] is not None
+                    else None
+                ),
+                reason_code=(
+                    str(row["reason_code"]) if row["reason_code"] is not None else None
+                ),
+            )
+            for row in selected
+        )
+        next_cursor = (
+            _encode_cursor(str(selected[-1]["occurred_at"]), str(selected[-1]["id"]))
+            if has_more and selected
+            else None
+        )
+        return items, next_cursor
+
     def _new_pair(
         self,
         *,
@@ -796,6 +936,15 @@ class SQLiteSessionStore:
                 self._migrate_v1_to_v2(connection)
                 return
             if version == SESSION_STORE_SCHEMA_VERSION:
+                connection.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS idx_session_security_events_admin_scope
+                    ON session_security_events(
+                        organization_id, event_type, target_actor_id,
+                        target_team_id, occurred_at, id
+                    )
+                    """
+                )
                 return
             connection.execute("PRAGMA journal_mode = WAL")
             connection.executescript(
@@ -865,6 +1014,11 @@ class SQLiteSessionStore:
                     decision_scope TEXT,
                     reason_code TEXT
                 );
+                CREATE INDEX IF NOT EXISTS idx_session_security_events_admin_scope
+                    ON session_security_events(
+                        organization_id, event_type, target_actor_id,
+                        target_team_id, occurred_at, id
+                    );
                 PRAGMA user_version = 2;
                 COMMIT;
                 """
@@ -923,6 +1077,15 @@ class SQLiteSessionStore:
                 ON human_sessions(organization_id, revoked_at, actor_id, team_id, created_at, id)
                 """
             )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_session_security_events_admin_scope
+                ON session_security_events(
+                    organization_id, event_type, target_actor_id,
+                    target_team_id, occurred_at, id
+                )
+                """
+            )
             connection.execute("PRAGMA user_version = 2")
             connection.commit()
         except sqlite3.Error as error:
@@ -952,7 +1115,7 @@ class SQLiteSessionStore:
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                secrets.token_urlsafe(18),
+                "sev_" + secrets.token_urlsafe(18),
                 _isoformat(occurred_at),
                 session_id,
                 event_type,

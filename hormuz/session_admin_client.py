@@ -16,6 +16,12 @@ _REASON_CODES = {
     "security_incident",
     "administrative",
 }
+_EVENT_TYPES = {
+    "refresh_replay",
+    "logout",
+    "authorization_mapping_removed",
+    "admin_revocation",
+}
 
 
 class SessionAdminClientError(RuntimeError):
@@ -128,6 +134,67 @@ class SessionAdminClient:
             or int(response["revoked_sessions"]) < 0
         ):
             raise SessionAdminClientError("invalid_gateway_response")
+        return response
+
+    def list_events(
+        self,
+        *,
+        actor_id: str | None = None,
+        team_id: str | None = None,
+        event_type: str | None = None,
+        since: str | None = None,
+        limit: int = 50,
+        cursor: str | None = None,
+    ) -> dict[str, object]:
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 100:
+            raise SessionAdminClientError("invalid_session_page_limit")
+        if event_type is not None and event_type not in _EVENT_TYPES:
+            raise SessionAdminClientError("invalid_session_event_request")
+        query: dict[str, str] = {"limit": str(limit)}
+        for key, value in (
+            ("actor_id", actor_id),
+            ("team_id", team_id),
+            ("event_type", event_type),
+            ("since", since),
+            ("cursor", cursor),
+        ):
+            if value is not None:
+                _bounded_value(value, "invalid_session_event_request")
+                query[key] = value
+        response = self._request(
+            "GET",
+            "/v1/admin/session-events?" + urllib.parse.urlencode(query),
+            None,
+        )
+        if response.get("schema_version") != 1:
+            raise SessionAdminClientError("invalid_gateway_response")
+        events = response.get("events")
+        next_cursor = response.get("next_cursor")
+        if not isinstance(events, list) or not (
+            next_cursor is None or isinstance(next_cursor, str)
+        ):
+            raise SessionAdminClientError("invalid_gateway_response")
+        required_strings = {
+            "event_id",
+            "occurred_at",
+            "session_id",
+            "event_type",
+            "organization_id",
+            "target_actor_id",
+            "target_team_id",
+        }
+        nullable_strings = {"decision_actor_id", "decision_scope", "reason_code"}
+        required = required_strings | nullable_strings
+        for item in events:
+            if not isinstance(item, dict) or set(item) != required:
+                raise SessionAdminClientError("invalid_gateway_response")
+            if not all(
+                isinstance(item[key], str) and bool(item[key]) for key in required_strings
+            ) or not all(
+                item[key] is None or (isinstance(item[key], str) and bool(item[key]))
+                for key in nullable_strings
+            ):
+                raise SessionAdminClientError("invalid_gateway_response")
         return response
 
     def _request(

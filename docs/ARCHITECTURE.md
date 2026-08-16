@@ -54,9 +54,9 @@ The HTTP path authenticates first, derives organization/team/actor from the stat
 - `hormuz/server.py` owns HTTP compatibility, authentication, upstream forwarding, streaming, and protocol-shaped errors.
 - `hormuz/auth.py` verifies bootstrap, workload OIDC JWT, and login ID-token signatures against configured issuers.
 - `hormuz/session.py` owns authorization-code + PKCE protocol behavior and maps opaque sessions back to current configured identities.
-- `hormuz/session_store.py` owns a separate local session database, event-time identity bindings, keyed credential hashes, encrypted transient flow state, atomic rotation, replay detection, tenant-scoped administration, and revocation.
+- `hormuz/session_store.py` owns a separate local session database, event-time identity bindings, keyed credential hashes, encrypted transient flow state, atomic rotation, replay detection, tenant-scoped administration, revocation, and metadata-only security events.
 - `hormuz/credential_store.py` and `hormuz/session_client.py` own fail-closed OS secure-store custody and the CLI login/refresh/logout path.
-- `hormuz/session_admin_client.py` owns the authenticated, redirect-refusing session-administration CLI transport and validates the metadata-only response contract.
+- `hormuz/session_admin_client.py` owns the authenticated, redirect-refusing session-administration CLI transport and validates the metadata-only session and security-event response contracts.
 - `hormuz/config.py` validates configuration, defines identity/route/rate-card policy data, and resolves monotonic organization/team/person DLP actions for the exact provider and routed model.
 - `hormuz/policy.py` evaluates access, fallback, caps, and budgets without transport concerns.
 - `hormuz/store.py` owns the SQLite schema and monthly aggregations.

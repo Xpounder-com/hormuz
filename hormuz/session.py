@@ -9,6 +9,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import replace
+from datetime import datetime
 from typing import Any
 
 from .auth import AuthenticationError, Authenticator, _validate_remote_url
@@ -17,6 +18,7 @@ from .session_store import (
     Enrollment,
     SQLiteSessionStore,
     SessionCredentialPair,
+    SessionSecurityEvent,
     SessionSummary,
     SessionStoreError,
 )
@@ -269,6 +271,32 @@ class SessionBroker:
                 decision_actor_id=administrator.actor_id,
                 reason_code=reason_code,
                 **selectors,
+            )
+        except SessionStoreError as error:
+            raise SessionBrokerError(error.code) from error
+
+    def list_security_events(
+        self,
+        *,
+        administrator: Identity,
+        limit: int,
+        cursor: str | None = None,
+        actor_id: str | None = None,
+        team_id: str | None = None,
+        event_type: str | None = None,
+        since: datetime | None = None,
+    ) -> tuple[tuple[SessionSecurityEvent, ...], str | None]:
+        if "session_admin" not in administrator.capabilities:
+            raise SessionBrokerError("session_admin_capability_required")
+        try:
+            return self.store.list_security_events(
+                organization_id=administrator.organization_id,
+                limit=limit,
+                cursor=cursor,
+                actor_id=actor_id,
+                team_id=team_id,
+                event_type=event_type,
+                since=since,
             )
         except SessionStoreError as error:
             raise SessionBrokerError(error.code) from error

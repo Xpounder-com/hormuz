@@ -30,7 +30,11 @@ from .dlp_approval import DLPApprovalError, payload_fingerprint
 from .policy import PolicyDecision, PolicyEngine
 from .redaction import RedactionError, SecretRedactor
 from .session import SessionBroker, SessionBrokerError
-from .session_store import SQLiteSessionStore, SessionStoreError
+from .session_store import (
+    SESSION_SECURITY_EVENT_TYPES,
+    SQLiteSessionStore,
+    SessionStoreError,
+)
 from .store import DLPApprovalStoreError, ReservationDenied, SecurityStoreError, UsageStore
 from .usage import ResponseUsageParser
 
@@ -185,6 +189,9 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             return
         if path == "/v1/admin/sessions":
             self._list_human_sessions(identity, request_url.query)
+            return
+        if path == "/v1/admin/session-events":
+            self._list_session_security_events(identity, request_url.query)
             return
         if path == "/v1/gateway/whoami":
             self._send_json(
@@ -658,6 +665,104 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 "reason_code": reason_code,
                 "revoked_sessions": revoked,
             },
+        )
+
+    def _list_session_security_events(self, identity: Identity, query: str) -> None:
+        broker = self._require_session_broker()
+        if broker is None:
+            return
+        try:
+            values = urllib.parse.parse_qs(
+                query,
+                keep_blank_values=True,
+                strict_parsing=True,
+                max_num_fields=6,
+            )
+        except ValueError:
+            self._send_error(
+                "invalid_session_event_request",
+                "Session event query is invalid",
+                HTTPStatus.BAD_REQUEST,
+            )
+            return
+        allowed = {"actor_id", "team_id", "event_type", "since", "cursor", "limit"}
+        if set(values) - allowed or any(
+            len(items) != 1 or not items[0] for items in values.values()
+        ):
+            self._send_error(
+                "invalid_session_event_request",
+                "Session event query contains unsupported or repeated fields",
+                HTTPStatus.BAD_REQUEST,
+            )
+            return
+        event_type = values.get("event_type", [None])[0]
+        if event_type is not None and event_type not in SESSION_SECURITY_EVENT_TYPES:
+            self._send_error(
+                "invalid_session_event_request",
+                "Session event type is unsupported",
+                HTTPStatus.BAD_REQUEST,
+            )
+            return
+        try:
+            limit = int(values.get("limit", ["50"])[0])
+            since_value = values.get("since", [None])[0]
+            since = _parse_utc_filter(since_value) if since_value is not None else None
+        except (ValueError, TypeError, OverflowError):
+            self._send_error(
+                "invalid_session_event_request",
+                "Session event query values are invalid",
+                HTTPStatus.BAD_REQUEST,
+            )
+            return
+        try:
+            events, next_cursor = broker.list_security_events(
+                administrator=identity,
+                limit=limit,
+                cursor=values.get("cursor", [None])[0],
+                actor_id=values.get("actor_id", [None])[0],
+                team_id=values.get("team_id", [None])[0],
+                event_type=event_type,
+                since=since,
+            )
+        except SessionBrokerError as error:
+            self._send_session_event_error(error)
+            return
+        self._send_json(
+            HTTPStatus.OK,
+            {
+                "schema_version": 1,
+                "events": [event.to_dict() for event in events],
+                "next_cursor": next_cursor,
+            },
+        )
+
+    def _send_session_event_error(self, error: SessionBrokerError) -> None:
+        if error.code == "session_admin_capability_required":
+            self._send_error(
+                "session_admin_capability_required",
+                "Session administrator capability is required",
+                HTTPStatus.FORBIDDEN,
+            )
+            return
+        invalid = {
+            "invalid_session_page_limit",
+            "invalid_session_cursor",
+            "invalid_actor_id",
+            "invalid_team_id",
+            "invalid_session_event_type",
+            "invalid_session_event_since",
+        }
+        if error.code in invalid:
+            self._send_error(
+                "invalid_session_event_request",
+                "Session event query is invalid",
+                HTTPStatus.BAD_REQUEST,
+            )
+            return
+        self._send_error(
+            "session_admin_unavailable",
+            "Session administration is temporarily unavailable",
+            HTTPStatus.SERVICE_UNAVAILABLE,
         )
 
     def _send_session_admin_error(
@@ -1865,6 +1970,13 @@ def _safe_identifier(value: str) -> bool:
         20 <= len(value) <= 128
         and all(character.isalnum() or character in {"-", "_"} for character in value)
     )
+
+
+def _parse_utc_filter(value: str) -> datetime:
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        raise ValueError("timezone required")
+    return parsed.astimezone(timezone.utc)
 
 
 def _approval_request_id_from_path(path: str) -> str | None:

@@ -30,7 +30,7 @@ Hormuz is alpha software. The local prototype proves routing and policy behavior
 - A bundled 60-task synthetic context benchmark with no-memory, full-history, simple-lexical, and governed baselines; its strict lifecycle release profile is green on the frozen version-2 corpus.
 - Generic OIDC discovery/JWKS verification with strict issuer, audience, expiry, asymmetric-algorithm, subject-mapping, and signing-key-rotation enforcement.
 - Generic OIDC authorization-code + PKCE browser login with opaque 10-minute Hormuz access credentials, atomic refresh rotation, replay-family revocation, and fail-closed OS secure-store custody.
-- Capability-gated, tenant-scoped `hormuz sessions` listing and immediate session, employee, team, or organization revocation with metadata-only evidence.
+- Capability-gated, tenant-scoped `hormuz sessions` listing, metadata-only security-event inspection, and immediate session, employee, team, or organization revocation.
 
 ## Quick start
 

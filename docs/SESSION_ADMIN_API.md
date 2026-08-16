@@ -19,7 +19,7 @@ Grant `session_admin` only to the static or OIDC subject mappings that operate s
 }
 ```
 
-Authentication alone is insufficient. A valid identity without this explicit capability receives `403 session_admin_capability_required`. Every list and revocation operation derives `organization_id` from the authenticated administrator; callers cannot request another organization.
+Authentication alone is insufficient. A valid identity without this explicit capability receives `403 session_admin_capability_required`. Every session, event, and revocation operation derives `organization_id` from the authenticated administrator; callers cannot request another organization.
 
 ## CLI
 
@@ -36,6 +36,19 @@ hormuz sessions list \
 ```
 
 The JSON result contains session ID, organization, actor, team, bound client, creation/refresh times, access expiry, absolute expiry, and an optional opaque `next_cursor`. It never contains an access token, refresh token, OIDC subject, provider token, or prompt content. Pass `--cursor` to fetch the next page.
+
+Inspect session-security evidence, optionally filtering by target actor, target team, event type, or an inclusive UTC lower bound:
+
+```bash
+hormuz sessions events \
+  --gateway https://hormuz.example.com \
+  --credential-env HORMUZ_ADMIN_TOKEN \
+  --event-type admin_revocation \
+  --since 2026-08-01T00:00:00Z \
+  --limit 50
+```
+
+Visible event types are `refresh_replay`, `logout`, `authorization_mapping_removed`, and `admin_revocation`. Results contain only event/session IDs, event time and type, target organization/actor/team, and nullable administrative decision actor/scope/reason. They contain no session credential, OIDC subject, provider key, prompt, response, or model payload. Events are ordered newest first; pass the opaque `next_cursor` unchanged to fetch the next page.
 
 Revoke one session, every session for an actor, every session for a team, or every active session in the administrator's organization:
 
@@ -70,6 +83,29 @@ A saved administrator human-session profile can replace the environment credenti
 }
 ```
 
+`GET /v1/admin/session-events` accepts optional single-valued `actor_id`, `team_id`, `event_type`, `since`, `limit` (1–100), and opaque `cursor` query fields. `since` must be an offset-aware ISO-8601 timestamp. The response is:
+
+```json
+{
+  "schema_version": 1,
+  "events": [
+    {
+      "event_id": "sev_example",
+      "occurred_at": "2026-08-15T20:00:00+00:00",
+      "session_id": "ses_example",
+      "event_type": "admin_revocation",
+      "organization_id": "xpounder",
+      "target_actor_id": "alice",
+      "target_team_id": "engineering",
+      "decision_actor_id": "security-admin",
+      "decision_scope": "actor",
+      "reason_code": "access_change"
+    }
+  ],
+  "next_cursor": null
+}
+```
+
 `POST /v1/admin/session-revocations` accepts exactly:
 
 ```json
@@ -86,6 +122,6 @@ Organization scope omits `target`. The response includes the same scope, target,
 
 Session-store schema version 2 binds each newly issued session to the event-time organization, actor, team, clearance, and AI client. On every use, Hormuz compares that binding with the current authoritative issuer-subject mapping. Changing the organization, actor, team, clearance, or allowed client revokes the session before policy or provider work.
 
-The v1-to-v2 migration cannot reconstruct trustworthy historical tenant bindings from credential hashes alone. It therefore revokes every unbound legacy session and requires those employees to sign in again. Administrative revocation records one metadata-only local security event per affected session with target organization/actor/team, decision actor, scope, and bounded reason code.
+The v1-to-v2 migration cannot reconstruct trustworthy historical tenant bindings from credential hashes alone. It therefore revokes every unbound legacy session and requires those employees to sign in again. Newly recorded logout, refresh-replay, mapping-removal, and administrative-revocation events carry the trusted session binding. Migration evidence and older pre-v2 events without a trustworthy organization binding are deliberately excluded from the tenant event API.
 
-This is the verified single-node control, not the pending enterprise persistence design. Shared PostgreSQL tenancy, multi-node immediate revocation, SCIM/event-driven deprovisioning, KMS custody, live configuration reload, externally immutable session-event export, HA, backup/restore, and a real owner-selected IdP remain open gates.
+This is a queryable local evidence ledger, not an immutable enterprise audit sink. Shared PostgreSQL tenancy, multi-node immediate revocation, SCIM/event-driven deprovisioning, KMS custody, live configuration reload, signed or externally immutable session-event export, retention controls, SIEM delivery, HA, backup/restore, and a real owner-selected IdP remain open gates.

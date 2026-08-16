@@ -119,6 +119,18 @@ class SessionStoreTests(unittest.TestCase):
         with self.assertRaisesRegex(SessionStoreError, "expired_session_credential"):
             self.store.refresh(second.refresh_token)
 
+        events, cursor = self.store.list_security_events(
+            organization_id="xpounder",
+            limit=10,
+            event_type="refresh_replay",
+        )
+        self.assertIsNone(cursor)
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0].target_actor_id, "alice")
+        self.assertEqual(events[0].target_team_id, "engineering")
+        self.assertEqual(events[0].organization_id, "xpounder")
+        self.assertNotIn(first.refresh_token, repr(events))
+
         with sqlite3.connect(self.path) as connection:
             event_types = [row[0] for row in connection.execute(
                 "SELECT event_type FROM session_security_events"
@@ -227,6 +239,15 @@ class SessionStoreTests(unittest.TestCase):
         self.assertTrue(second_store.revoke(pair.refresh_token))
         with self.assertRaisesRegex(SessionStoreError, "invalid_session_credential"):
             second_store.authenticate_access(pair.access_token)
+        events, cursor = second_store.list_security_events(
+            organization_id="xpounder",
+            limit=10,
+            event_type="logout",
+        )
+        self.assertIsNone(cursor)
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0].target_actor_id, "alice")
+        self.assertEqual(events[0].target_team_id, "engineering")
 
     def test_concurrent_refresh_reuse_revokes_the_winning_family(self) -> None:
         pair = self.store.redeem_enrollment(
@@ -341,6 +362,53 @@ class SessionStoreTests(unittest.TestCase):
         self.assertNotIn(alice.access_token, repr(dict(event)))
         self.assertNotIn(alice.refresh_token, repr(dict(event)))
 
+        events, cursor = self.store.list_security_events(
+            organization_id="xpounder",
+            limit=1,
+            event_type="admin_revocation",
+        )
+        self.assertIsNotNone(cursor)
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0].decision_actor_id, "security-admin")
+        self.assertEqual(events[0].decision_scope, "actor")
+        self.assertEqual(events[0].reason_code, "access_change")
+        final_events, final_cursor = self.store.list_security_events(
+            organization_id="xpounder",
+            limit=1,
+            cursor=cursor,
+            event_type="admin_revocation",
+        )
+        self.assertIsNone(final_cursor)
+        self.assertEqual(len(final_events), 1)
+        self.assertNotEqual(events[0].event_id, final_events[0].event_id)
+
+        other_revoked = self.store.revoke_administratively(
+            organization_id="other-tenant",
+            actor_id="mallory",
+            decision_actor_id="other-admin",
+            reason_code="administrative",
+        )
+        self.assertEqual(other_revoked, 1)
+        xpounder_events, _ = self.store.list_security_events(
+            organization_id="xpounder",
+            limit=10,
+        )
+        self.assertEqual({item.organization_id for item in xpounder_events}, {"xpounder"})
+        self.assertNotIn("mallory", repr(xpounder_events))
+        future_events, future_cursor = self.store.list_security_events(
+            organization_id="xpounder",
+            limit=10,
+            since=self.clock() + timedelta(seconds=1),
+        )
+        self.assertEqual(future_events, ())
+        self.assertIsNone(future_cursor)
+        with self.assertRaisesRegex(SessionStoreError, "invalid_session_event_since"):
+            self.store.list_security_events(
+                organization_id="xpounder",
+                limit=10,
+                since=datetime(2026, 8, 15, 12, 0),
+            )
+
     def test_v1_migration_revokes_sessions_without_tenant_binding(self) -> None:
         now = self.clock().isoformat()
         expiry = (self.clock() + timedelta(hours=1)).isoformat()
@@ -371,6 +439,7 @@ class SessionStoreTests(unittest.TestCase):
                 ),
             )
             connection.execute("DROP INDEX idx_human_sessions_admin_scope")
+            connection.execute("DROP INDEX idx_session_security_events_admin_scope")
             for table, column in (
                 ("session_enrollments", "organization_id"),
                 ("session_enrollments", "actor_id"),

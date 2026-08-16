@@ -778,6 +778,80 @@ class SessionBrokerIntegrationTests(unittest.TestCase):
         self.assertEqual(status, 400)
         self.assertEqual(invalid["error"]["code"], "invalid_session_revocation")
 
+        status, forbidden_events = self._admin_request(
+            "GET",
+            "/v1/admin/session-events",
+            token=employee_token,
+        )
+        self.assertEqual(status, 403)
+        self.assertEqual(
+            forbidden_events["error"]["code"],
+            "session_admin_capability_required",
+        )
+
+        status, events = self._admin_request(
+            "GET",
+            "/v1/admin/session-events?event_type=admin_revocation&limit=1",
+            token=admin_token,
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(events["schema_version"], 1)
+        self.assertEqual(len(events["events"]), 1)
+        self.assertIsInstance(events["next_cursor"], str)
+        event = events["events"][0]
+        self.assertEqual(event["organization_id"], "xpounder")
+        self.assertEqual(event["target_actor_id"], "alice")
+        self.assertEqual(event["decision_actor_id"], "security-admin")
+        self.assertEqual(event["reason_code"], "access_change")
+        self.assertNotIn(str(pair["access_token"]), repr(events))
+        self.assertNotIn(str(second_pair["refresh_token"]), repr(events))
+
+        status, final_events = self._admin_request(
+            "GET",
+            "/v1/admin/session-events?event_type=admin_revocation&limit=1&cursor="
+            + urllib.parse.quote(str(events["next_cursor"]), safe=""),
+            token=admin_token,
+        )
+        self.assertEqual(status, 200)
+        self.assertIsNone(final_events["next_cursor"])
+        self.assertEqual(len(final_events["events"]), 1)
+        self.assertNotEqual(event["event_id"], final_events["events"][0]["event_id"])
+
+        status, future_events = self._admin_request(
+            "GET",
+            "/v1/admin/session-events?since=2999-01-01T00%3A00%3A00Z",
+            token=admin_token,
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(future_events["events"], [])
+        self.assertIsNone(future_events["next_cursor"])
+
+        status, invalid_event = self._admin_request(
+            "GET",
+            "/v1/admin/session-events?event_type=provider_request",
+            token=admin_token,
+        )
+        self.assertEqual(status, 400)
+        self.assertEqual(
+            invalid_event["error"]["code"],
+            "invalid_session_event_request",
+        )
+
+        for invalid_timestamp in (
+            "2026-08-15T12%3A00%3A00",
+            "0001-01-01T00%3A00%3A00%2B14%3A00",
+        ):
+            status, invalid_since = self._admin_request(
+                "GET",
+                "/v1/admin/session-events?since=" + invalid_timestamp,
+                token=admin_token,
+            )
+            self.assertEqual(status, 400)
+            self.assertEqual(
+                invalid_since["error"]["code"],
+                "invalid_session_event_request",
+            )
+
     def test_session_admin_cli_uses_the_authenticated_gateway_contract(self) -> None:
         pair = self._login(client="claude-code")
         output = io.StringIO()
@@ -827,6 +901,29 @@ class SessionBrokerIntegrationTests(unittest.TestCase):
             )
         self.assertEqual(result, 0)
         self.assertEqual(json.loads(output.getvalue())["revoked_sessions"], 1)
+
+        output = io.StringIO()
+        with mock.patch.dict(
+            os.environ,
+            {"HORMUZ_ADMIN_TOKEN": "admin-token-" + "a" * 32},
+        ), redirect_stdout(output):
+            result = cli_main(
+                [
+                    "sessions",
+                    "events",
+                    "--gateway",
+                    self.gateway_url,
+                    "--credential-env",
+                    "HORMUZ_ADMIN_TOKEN",
+                    "--event-type",
+                    "admin_revocation",
+                    "--allow-insecure-http",
+                ]
+            )
+        self.assertEqual(result, 0)
+        events = json.loads(output.getvalue())
+        self.assertEqual(events["events"][0]["reason_code"], "security_incident")
+        self.assertNotIn(str(pair["refresh_token"]), output.getvalue())
 
 
 def _single_values(query: str) -> dict[str, str] | None:
