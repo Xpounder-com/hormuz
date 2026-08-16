@@ -49,7 +49,7 @@ Exit outcome: employees and workloads authenticate through a deployable company 
 [Milestone](https://github.com/Xpounder-com/hormuz/milestone/1)
 
 - [#4 — Persist governed context outside the usage ledger](https://github.com/Xpounder-com/hormuz/issues/4)
-- [#18 — Authorization-first Context Pack API and MCP tool](https://github.com/Xpounder-com/hormuz/issues/18)
+- [#18 — completed authorization-first Context Pack API and MCP tool](https://github.com/Xpounder-com/hormuz/issues/18)
 - [#12 — Automatic verification, promotion, decay, contradiction, and invalidation](https://github.com/Xpounder-com/hormuz/issues/12)
 - [#5 — Inject governed context into Codex and Claude without a new UI](https://github.com/Xpounder-com/hormuz/issues/5)
 - [#16 — completed retrieval, freshness, and authorization benchmark](https://github.com/Xpounder-com/hormuz/issues/16)

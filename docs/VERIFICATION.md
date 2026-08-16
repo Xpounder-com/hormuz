@@ -224,6 +224,7 @@ Observed local result:
 - the frozen version-2 corpus reproduced hash `9822d592868202c7c7539bcdac7d4a5894c01f9e6dba7a434846516b67b32c17`; the five-iteration full release profile passed with precision `1.00`, recall `1.00`, useful-pack rate `1.00`, zero authorization/lifecycle/dependency/malicious/contradiction/budget/determinism failures, and p95 in-process selection latency `0.180125 ms`;
 - isolated source and wheel builds passed; a clean Python 3.14 environment installed the wheel from outside the source tree, imported `hormuz.context` from site-packages, reported context schema version 3 and the expected pack/retrieval/render versions, displayed the packaged CLI contract, and passed the bundled release profile;
 - a tracked-file scan found no private-key, OpenAI, Anthropic, or GitHub credential pattern, and the local `.env.local` remained ignored and unread.
+- GitHub Actions run `31918906731` passed all seven publication jobs for implementation commit `4efe325`: Python 3.11–3.14, the full strict benchmark with preserved evidence, source/wheel build and installed CLI smoke, and pinned official Codex/Claude Code compatibility.
 
 This closes the bounded model-facing pack-service contract, not record browsing, mandatory client injection, semantic/vector retrieval, distributed authorization, automatic lifecycle jobs, caching, or production tenancy. Context Pack v1 intentionally has no pagination because accumulating pages would bypass its pack budget; any future administrative discovery surface requires its own authorization-bound cursor contract.
 
