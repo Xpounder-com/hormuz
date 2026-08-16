@@ -1,15 +1,18 @@
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import logging
 import os
+import sqlite3
 import threading
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from collections import defaultdict, deque
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from http.cookies import SimpleCookie
@@ -50,6 +53,7 @@ from .session_store import (
 )
 from .store import DLPApprovalStoreError, ReservationDenied, SecurityStoreError, UsageStore
 from .usage import ResponseUsageParser
+from .usage_reporting import REPORT_DIMENSIONS, enrich_usage_rows
 
 
 LOGGER = logging.getLogger("hormuz")
@@ -59,6 +63,73 @@ MAX_CONTEXT_EVIDENCE_REQUEST_BYTES = 64 * 1024
 MAX_CONTEXT_REVALIDATION_REQUEST_BYTES = 8 * 1024
 MAX_AUTH_REQUEST_BYTES = 8 * 1024
 MAX_DLP_APPROVAL_REQUEST_BYTES = 2 * 1024
+
+
+def _encode_usage_cursor(
+    *,
+    group_by: str,
+    actor_id: str | None,
+    team_id: str | None,
+    window_end: str,
+    offset: int,
+) -> str:
+    payload = json.dumps(
+        {
+            "v": 1,
+            "group_by": group_by,
+            "actor_id": actor_id,
+            "team_id": team_id,
+            "window_end": window_end,
+            "offset": offset,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return base64.urlsafe_b64encode(payload).rstrip(b"=").decode("ascii")
+
+
+def _decode_usage_cursor(cursor: str) -> dict[str, object]:
+    if len(cursor.encode("utf-8")) > 4096:
+        raise ValueError("invalid cursor")
+    padding = "=" * (-len(cursor) % 4)
+    try:
+        payload = base64.b64decode(
+            (cursor + padding).encode("ascii"),
+            altchars=b"-_",
+            validate=True,
+        )
+        value = json.loads(payload)
+    except (ValueError, UnicodeError, binascii.Error, json.JSONDecodeError) as error:
+        raise ValueError("invalid cursor") from error
+    if not isinstance(value, dict) or set(value) != {
+        "v",
+        "group_by",
+        "actor_id",
+        "team_id",
+        "window_end",
+        "offset",
+    }:
+        raise ValueError("invalid cursor")
+    if value["v"] != 1 or value["group_by"] not in REPORT_DIMENSIONS:
+        raise ValueError("invalid cursor")
+    if not isinstance(value["window_end"], str):
+        raise ValueError("invalid cursor")
+    if (
+        isinstance(value["offset"], bool)
+        or not isinstance(value["offset"], int)
+        or not 0 <= value["offset"] <= 1_000_000
+    ):
+        raise ValueError("invalid cursor")
+    for key in ("actor_id", "team_id"):
+        item = value[key]
+        if item is not None and (
+            not isinstance(item, str)
+            or not item
+            or len(item.encode("utf-8")) > 256
+            or any(character in item for character in ("\n", "\r", "\x00"))
+        ):
+            raise ValueError("invalid cursor")
+    return value
 
 
 class ContextRateLimiter:
@@ -209,6 +280,9 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         if path == "/v1/admin/session-events":
             self._list_session_security_events(identity, request_url.query)
             return
+        if path == "/v1/admin/usage":
+            self._list_usage_report(identity, request_url.query)
+            return
         if path == "/v1/gateway/whoami":
             self._send_json(
                 HTTPStatus.OK,
@@ -225,10 +299,17 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             )
             return
         if path == "/v1/gateway/usage":
-            totals = self.server.store.monthly_totals(actor_id=identity.actor_id)
-            secret_totals = self.server.store.monthly_secret_totals(actor_id=identity.actor_id)
+            totals = self.server.store.monthly_totals(
+                organization_id=identity.organization_id,
+                actor_id=identity.actor_id,
+            )
+            secret_totals = self.server.store.monthly_secret_totals(
+                organization_id=identity.organization_id,
+                actor_id=identity.actor_id,
+            )
             approval_totals = self.server.store.monthly_dlp_approval_totals(
-                actor_id=identity.actor_id
+                organization_id=identity.organization_id,
+                actor_id=identity.actor_id,
             )
             self._send_json(
                 HTTPStatus.OK,
@@ -262,6 +343,152 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             self._get_dlp_approval_request(identity, approval_request_id)
             return
         self._send_error("not_found", "Route not found", HTTPStatus.NOT_FOUND)
+
+    def _list_usage_report(self, identity: Identity, query: str) -> None:
+        if "usage_viewer" not in identity.capabilities:
+            self._send_error(
+                "usage_viewer_capability_required",
+                "Usage viewer capability is required",
+                HTTPStatus.FORBIDDEN,
+            )
+            return
+        try:
+            values = urllib.parse.parse_qs(
+                query,
+                keep_blank_values=True,
+                strict_parsing=True,
+                max_num_fields=5,
+            )
+        except ValueError:
+            self._send_usage_report_error()
+            return
+        allowed = {"group_by", "actor_id", "team_id", "cursor", "limit"}
+        if set(values) - allowed or any(
+            len(items) != 1 or not items[0] for items in values.values()
+        ):
+            self._send_usage_report_error()
+            return
+        group_by = values.get("group_by", [None])[0]
+        actor_id = values.get("actor_id", [None])[0]
+        team_id = values.get("team_id", [None])[0]
+        cursor = values.get("cursor", [None])[0]
+        try:
+            limit = int(values.get("limit", ["50"])[0])
+            if group_by not in REPORT_DIMENSIONS or not 1 <= limit <= 100:
+                raise ValueError
+            for scope_filter in (actor_id, team_id):
+                if scope_filter is not None and (
+                    len(scope_filter.encode("utf-8")) > 256
+                    or any(character in scope_filter for character in ("\n", "\r", "\x00"))
+                ):
+                    raise ValueError
+            if cursor is None:
+                window_end = datetime.now(timezone.utc)
+                offset = 0
+            else:
+                cursor_value = _decode_usage_cursor(cursor)
+                if (
+                    cursor_value["group_by"] != group_by
+                    or cursor_value["actor_id"] != actor_id
+                    or cursor_value["team_id"] != team_id
+                ):
+                    raise ValueError
+                window_end = datetime.fromisoformat(str(cursor_value["window_end"]))
+                offset = int(cursor_value["offset"])
+                if window_end.tzinfo is None or window_end.utcoffset() is None:
+                    raise ValueError
+                window_end = window_end.astimezone(timezone.utc)
+                if window_end > datetime.now(timezone.utc) + timedelta(seconds=5):
+                    raise ValueError
+            window_start = window_end.replace(
+                day=1,
+                hour=0,
+                minute=0,
+                second=0,
+                microsecond=0,
+            )
+        except (ValueError, TypeError, OverflowError):
+            self._send_usage_report_error()
+            return
+        try:
+            raw_rows = self.server.store.report_rows(
+                group_by=str(group_by),
+                organization_id=identity.organization_id,
+                actor_id=actor_id,
+                team_id=team_id,
+                start=window_start.isoformat(),
+                end=window_end.isoformat(),
+                limit=limit + 1,
+                offset=offset,
+            )
+            has_more = len(raw_rows) > limit
+            rows = enrich_usage_rows(
+                self.server.config,
+                raw_rows[:limit],
+                group_by=str(group_by),
+                actor_filter=actor_id,
+                team_filter=team_id,
+            )
+            self.server.store.record_admin_usage_read(
+                administrator=identity,
+                group_by=str(group_by),
+                actor_filter=actor_id,
+                team_filter=team_id,
+                window_start=window_start.isoformat(),
+                window_end=window_end.isoformat(),
+                result_count=len(rows),
+            )
+        except (ValueError, sqlite3.Error, SecurityStoreError):
+            self._send_error(
+                "usage_admin_unavailable",
+                "Usage administration is temporarily unavailable",
+                HTTPStatus.SERVICE_UNAVAILABLE,
+            )
+            return
+        next_cursor = None
+        if has_more:
+            next_cursor = _encode_usage_cursor(
+                group_by=str(group_by),
+                actor_id=actor_id,
+                team_id=team_id,
+                window_end=window_end.isoformat(),
+                offset=offset + len(rows),
+            )
+        LOGGER.info(
+            "usage_admin_read organization=%s decision_actor=%s group_by=%s rows=%d",
+            identity.organization_id,
+            identity.actor_id,
+            group_by,
+            len(rows),
+        )
+        self._send_json(
+            HTTPStatus.OK,
+            {
+                "schema_version": 1,
+                "organization_id": identity.organization_id,
+                "group_by": group_by,
+                "filters": {"actor_id": actor_id, "team_id": team_id},
+                "window": {
+                    "start": window_start.isoformat(),
+                    "end": window_end.isoformat(),
+                    "timezone": "UTC",
+                },
+                "coverage": {
+                    "scope": "gateway_captured_requests_only",
+                    "legacy_unattributed_rows_excluded": True,
+                    "provider_invoice_reconciled": False,
+                },
+                "rows": rows,
+                "next_cursor": next_cursor,
+            },
+        )
+
+    def _send_usage_report_error(self) -> None:
+        self._send_error(
+            "invalid_usage_report_request",
+            "Usage report query is invalid",
+            HTTPStatus.BAD_REQUEST,
+        )
 
     def do_POST(self) -> None:  # noqa: N802
         path = urlsplit(self.path).path

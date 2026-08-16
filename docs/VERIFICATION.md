@@ -430,6 +430,23 @@ The provider-neutral evidence, snapshot, and revalidation transport was exercise
 
 This verifies a reusable authenticated connector boundary, not automatic GitHub/GitLab/CI collection, webhook signature validation, signed attestations, hosted scheduling, cross-node leases, or the truth of an external event. Issue #12 remains open for those source-specific and hosted lifecycle gates.
 
+### Authenticated tenant usage administration
+
+The tenant-scoped reporting API, CLI, read-audit boundary, and supporting usage-store isolation changes were exercised locally on August 16, 2026.
+
+- `GET /v1/admin/usage` authenticated before reporting, required the explicit `usage_viewer` capability, derived organization only from the mapped identity, accepted bounded team/actor filters, and returned current-month team, person, model, client, provider, or organization aggregates without content or credentials;
+- a deliberate collision reused the same actor and team IDs in two organizations. Administrator reports and the ordinary employee `/v1/gateway/usage` result returned only the authenticated organization; the other tenant's names, requests, and cost were absent;
+- monthly policy totals, secret/DLP summaries, concurrent budget reservations, and local `status` reporting now include the organization key. Migrated unattributed usage and security rows remain null and are excluded rather than guessed; obsolete unscoped reservations are discarded during migration because they are short-lived and cannot be assigned safely;
+- the first report page froze an exclusive UTC window and returned a bounded opaque cursor. A second page reused the same window; malformed and filter-mismatched cursors failed with stable `400` responses, and pagination ordering remained deterministic;
+- every successful page committed a metadata-only `security.admin.usage_read` event containing the viewer, organization, grouping, frozen window, result count, and only SHA-256 digests of optional actor/team filters. An injected audit-store failure returned `503 usage_admin_unavailable` and no report rows;
+- the config-independent `hormuz usage report` CLI exercised the real authenticated loopback endpoint. Its client rejected redirects and non-loopback plaintext HTTP, bounded credentials and responses, and required the exact versioned response envelope;
+- the complete source suite ran 230 tests: 229 passed and the explicitly opt-in Claude Code executable test skipped. The exact CI-pinned Codex `0.147.0` and Claude Code `2.1.233` releases then passed their real installed-client fake-provider tests separately;
+- the frozen 60-task release benchmark passed with precision `1.00`, recall `1.00`, useful-pack rate `1.00`, zero failed safety thresholds, and p95 in-process selection latency `0.254667 ms`; corpus SHA-256 remained `9822d592868202c7c7539bcdac7d4a5894c01f9e6dba7a434846516b67b32c17`;
+- isolated source and wheel builds included the usage administrator client, shared report semantics, API documentation, and tests. A clean Python 3.14 environment installed the wheel outside the checkout, loaded Hormuz from `site-packages`, created the administrative-access table and organization-scoped security column, displayed `hormuz usage report --help`, passed bytecode compilation, and passed the installed regression benchmark with zero failed thresholds;
+- `git diff --check`, source/test bytecode compilation, and high-confidence tracked-source and extracted-wheel scans for private-key, OpenAI, Anthropic, GitHub, AWS, and Google credential patterns passed.
+
+This closes a real single-node usage-administration slice without accepting proposed ADR 0002. SQLite is not evidence for shared hosted tenancy, PostgreSQL row security, HA, externally immutable audit, SCIM, SIEM delivery, final invoice coverage, or complete provider-account usage. Person-level tokens and estimated spend remain consumption metadata, not employee-performance evidence.
+
 ## Reproduce locally
 
 The default suite uses only loopback fake providers:

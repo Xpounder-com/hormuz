@@ -33,6 +33,7 @@ Hormuz is alpha software. The local prototype proves routing and policy behavior
 - Generic OIDC discovery/JWKS verification with strict issuer, audience, expiry, asymmetric-algorithm, subject-mapping, and signing-key-rotation enforcement.
 - Generic OIDC authorization-code + PKCE browser login with opaque 10-minute Hormuz access credentials, atomic refresh rotation, replay-family revocation, and fail-closed OS secure-store custody.
 - Capability-gated, tenant-scoped `hormuz sessions` listing, metadata-only security-event inspection, and immediate session, employee, team, or organization revocation.
+- Capability-gated, tenant-scoped `hormuz usage report` administration over the authenticated gateway, with frozen-window pagination, team/person/model/client/provider drill-downs, and mandatory metadata-only read audit.
 
 ## Quick start
 
@@ -103,6 +104,17 @@ python3 -m hormuz --config hormuz.json status --group-by team
 python3 -m hormuz --config hormuz.json status --group-by model --team engineering
 python3 -m hormuz --config hormuz.json status --json
 ```
+
+Give an authorized operator the configured `usage_viewer` capability, then inspect the same metadata without granting server filesystem or database access:
+
+```bash
+hormuz usage report \
+  --gateway https://hormuz.example.com \
+  --profile ai-operations \
+  --group-by team
+```
+
+The server derives organization scope from the credential. See [docs/USAGE_ADMIN_API.md](docs/USAGE_ADMIN_API.md) for pagination, RBAC, audit, and coverage semantics.
 
 Import a provider cost-report snapshot and compare it with Hormuz request-time estimates without giving the Hormuz process a provider administrator key:
 
@@ -209,7 +221,7 @@ hormuz lifecycle revalidate \
 
 This authenticates who submitted the normalized attestation; it does not yet verify a GitHub webhook or independently prove the external event. See [docs/CONTEXT_LIFECYCLE_API.md](docs/CONTEXT_LIFECYCLE_API.md) for the exact connector contract, status codes, retry behavior, and trust boundary.
 
-See [docs/ROADMAP.md](docs/ROADMAP.md) for the evidence-gated enterprise program, [docs/decisions/README.md](docs/decisions/README.md) for proposed and accepted architecture decisions, [docs/CLIENTS.md](docs/CLIENTS.md) for provider routing, [docs/MCP.md](docs/MCP.md) for governed context in Codex and Claude Code, [docs/OIDC.md](docs/OIDC.md) for generic enterprise identity, [docs/SESSION_ADMIN_API.md](docs/SESSION_ADMIN_API.md) for tenant-scoped session control, [docs/USAGE.md](docs/USAGE.md) for team/person/model cost and budget reporting, [docs/BILLING_RECONCILIATION.md](docs/BILLING_RECONCILIATION.md) for provider cost imports and aggregate reconciliation, [docs/AUDIT.md](docs/AUDIT.md) for the export contract and limitations, [docs/SECRET_CONTROLS.md](docs/SECRET_CONTROLS.md) for the egress boundary, [docs/DLP_APPROVAL_API.md](docs/DLP_APPROVAL_API.md) for the approver contract, [docs/CONTEXT.md](docs/CONTEXT.md) for governed record/pack semantics, [docs/CONTEXT_LIFECYCLE.md](docs/CONTEXT_LIFECYCLE.md) for evidence-driven promotion and revalidation, [docs/CONTEXT_API.md](docs/CONTEXT_API.md) for authenticated retrieval, [docs/CONTEXT_LIFECYCLE_API.md](docs/CONTEXT_LIFECYCLE_API.md) for authenticated lifecycle mutation, [docs/VERIFICATION.md](docs/VERIFICATION.md) for executable compatibility evidence, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the request path and current trust boundary.
+See [docs/ROADMAP.md](docs/ROADMAP.md) for the evidence-gated enterprise program, [docs/decisions/README.md](docs/decisions/README.md) for proposed and accepted architecture decisions, [docs/CLIENTS.md](docs/CLIENTS.md) for provider routing, [docs/MCP.md](docs/MCP.md) for governed context in Codex and Claude Code, [docs/OIDC.md](docs/OIDC.md) for generic enterprise identity, [docs/SESSION_ADMIN_API.md](docs/SESSION_ADMIN_API.md) for tenant-scoped session control, [docs/USAGE.md](docs/USAGE.md) for team/person/model cost and budget reporting, [docs/USAGE_ADMIN_API.md](docs/USAGE_ADMIN_API.md) for authenticated tenant usage administration, [docs/BILLING_RECONCILIATION.md](docs/BILLING_RECONCILIATION.md) for provider cost imports and aggregate reconciliation, [docs/AUDIT.md](docs/AUDIT.md) for the export contract and limitations, [docs/SECRET_CONTROLS.md](docs/SECRET_CONTROLS.md) for the egress boundary, [docs/DLP_APPROVAL_API.md](docs/DLP_APPROVAL_API.md) for the approver contract, [docs/CONTEXT.md](docs/CONTEXT.md) for governed record/pack semantics, [docs/CONTEXT_LIFECYCLE.md](docs/CONTEXT_LIFECYCLE.md) for evidence-driven promotion and revalidation, [docs/CONTEXT_API.md](docs/CONTEXT_API.md) for authenticated retrieval, [docs/CONTEXT_LIFECYCLE_API.md](docs/CONTEXT_LIFECYCLE_API.md) for authenticated lifecycle mutation, [docs/VERIFICATION.md](docs/VERIFICATION.md) for executable compatibility evidence, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the request path and current trust boundary.
 
 Measure the bundled governed-context contract without a gateway configuration or provider credential:
 

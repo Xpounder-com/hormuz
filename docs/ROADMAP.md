@@ -15,6 +15,7 @@ The private alpha currently has:
 - generic OIDC JWT discovery/JWKS verification with explicit issuer-subject identity mapping;
 - accepted generic OIDC authorization-code + PKCE login, opaque rotating human sessions, replay-family revocation, and fail-closed OS secure-store custody;
 - tenant/actor/team/clearance-bound human sessions plus capability-gated, tenant-scoped local session and security-event inspection with immediate administrative revocation;
+- capability-gated remote usage administration with identity-derived organization scope, frozen-window pagination, per-page read audit, and organization-scoped self usage, secret summaries, policy totals, and concurrent reservations;
 - metadata-only audit export;
 - a separate local persistent governed-context repository plus deterministic authorization-first context packs;
 - authenticated authorization-first context-pack REST retrieval with server-owned caps, versioned retrieval/render manifests, explicit authorized freshness/provisional outcomes, fail-closed durable metadata-only read audit, and no provider side effects;

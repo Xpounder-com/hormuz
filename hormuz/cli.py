@@ -60,6 +60,8 @@ from .session_client import (
 )
 from .session_admin_client import SessionAdminClient, SessionAdminClientError
 from .store import UsageStore
+from .usage_admin_client import UsageAdminClient, UsageAdminClientError
+from .usage_reporting import budget_for_scope, enrich_usage_rows
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -87,6 +89,44 @@ def build_parser() -> argparse.ArgumentParser:
     )
     status.add_argument("--team", help="Limit the report to a configured team ID")
     status.add_argument("--actor", help="Limit the report to a configured actor ID")
+    status.add_argument(
+        "--organization",
+        help="Configured organization ID; required when the config contains more than one",
+    )
+
+    usage = subparsers.add_parser(
+        "usage",
+        help="Inspect tenant-scoped usage through an authenticated Hormuz gateway",
+    )
+    usage_subparsers = usage.add_subparsers(dest="usage_command", required=True)
+    usage_report = usage_subparsers.add_parser(
+        "report",
+        help="Read a metadata-only current-month usage report",
+    )
+    usage_report.add_argument(
+        "--group-by",
+        choices=["organization", "team", "person", "model", "client", "provider"],
+        default="person",
+    )
+    usage_report.add_argument("--actor", help="Filter by exact event-time actor ID")
+    usage_report.add_argument("--team", help="Filter by exact event-time team ID")
+    usage_report.add_argument("--limit", type=int, default=50, help="Page size from 1 to 100")
+    usage_report.add_argument("--cursor", help="Opaque cursor returned by the previous page")
+    usage_report.add_argument("--gateway", required=True, help="Hormuz gateway base URL")
+    usage_credential = usage_report.add_mutually_exclusive_group()
+    usage_credential.add_argument(
+        "--credential-env",
+        help="Usage viewer credential environment variable (default: HORMUZ_TOKEN)",
+    )
+    usage_credential.add_argument(
+        "--profile",
+        help="Saved human-session profile instead of an environment credential",
+    )
+    usage_report.add_argument(
+        "--allow-insecure-http",
+        action="store_true",
+        help="Allow loopback HTTP for local development only",
+    )
 
     billing = subparsers.add_parser(
         "billing",
@@ -633,6 +673,8 @@ def main(argv: list[str] | None = None) -> int:
         return _dlp_approval_command(args)
     if args.command == "sessions":
         return _session_admin_command(args)
+    if args.command == "usage":
+        return _usage_admin_command(args)
     if args.command == "lifecycle":
         return _lifecycle_remote_command(args)
     if args.command == "context-benchmark":
@@ -807,32 +849,34 @@ def _doctor(config: GatewayConfig) -> int:
 
 
 def _status(config: GatewayConfig, args: argparse.Namespace) -> int:
+    organizations = sorted(
+        {identity.organization_id for identity in config.identities_by_actor.values()}
+    )
+    organization_id = getattr(args, "organization", None)
+    if organization_id is None:
+        if len(organizations) != 1:
+            print(
+                "status error: --organization is required when multiple organizations are configured",
+                file=sys.stderr,
+            )
+            return 2
+        organization_id = organizations[0]
+    if organization_id not in organizations:
+        print("status error: organization is not configured", file=sys.stderr)
+        return 2
     rows = UsageStore(config.database_path).report_rows(
         group_by=args.group_by,
+        organization_id=organization_id,
         actor_id=args.actor,
         team_id=args.team,
     )
-    report = []
-    for row in rows:
-        cost_usd = row["cost_microusd"] / 1_000_000
-        estimated_cost_usd = row["estimated_cost_microusd"] / 1_000_000
-        budget_usd = _budget_for_scope(
-            config,
-            args.group_by,
-            row,
-            actor_filter=args.actor,
-            team_filter=args.team,
-        )
-        report.append(
-            {
-                **row,
-                "cost_usd": cost_usd,
-                "estimated_cost_usd": estimated_cost_usd,
-                "budget_usd": budget_usd,
-                "budget_remaining_usd": max(0.0, budget_usd - cost_usd) if budget_usd is not None else None,
-                "budget_used_percent": (cost_usd / budget_usd * 100) if budget_usd else None,
-            }
-        )
+    report = enrich_usage_rows(
+        config,
+        rows,
+        group_by=args.group_by,
+        actor_filter=args.actor,
+        team_filter=args.team,
+    )
     if args.json:
         print(json.dumps(report, indent=2))
         return 0
@@ -974,35 +1018,13 @@ def _budget_for_scope(
     actor_filter: str | None = None,
     team_filter: str | None = None,
 ) -> float | None:
-    scope_id = str(row["scope_id"])
-    if group_by == "organization":
-        if actor_filter is not None or team_filter is not None:
-            return None
-        return config.organization_policy.monthly_budget_usd
-    if group_by == "team":
-        if actor_filter is not None:
-            return None
-        policy = config.team_policies.get(scope_id)
-        return policy.monthly_budget_usd if policy is not None else None
-    if group_by != "person":
-        return None
-
-    identity = config.identities_by_actor.get(scope_id)
-    if identity is None:
-        return None
-    caps = [
-        policy.per_actor_monthly_budget_usd
-        for policy in (
-            config.organization_policy,
-            config.team_policies.get(identity.team_id),
-            config.actor_policies.get(identity.actor_id),
-        )
-        if policy is not None and policy.per_actor_monthly_budget_usd is not None
-    ]
-    actor_policy = config.actor_policies.get(identity.actor_id)
-    if actor_policy is not None and actor_policy.monthly_budget_usd is not None:
-        caps.append(actor_policy.monthly_budget_usd)
-    return min(caps) if caps else None
+    return budget_for_scope(
+        config,
+        group_by,
+        row,
+        actor_filter=actor_filter,
+        team_filter=team_filter,
+    )
 
 
 def _display_number(value: object) -> str:
@@ -1461,6 +1483,52 @@ def _session_admin_command(args: argparse.Namespace) -> int:
         CredentialStoreError,
     ) as error:
         print(f"session administration failed: {error.code}", file=sys.stderr)
+        return 1
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0
+
+
+def _usage_admin_command(args: argparse.Namespace) -> int:
+    try:
+        if args.profile is not None:
+            credential = session_access_token(
+                gateway=args.gateway,
+                profile=args.profile,
+                allow_insecure_http=args.allow_insecure_http,
+            )
+        else:
+            env_name = args.credential_env or "HORMUZ_TOKEN"
+            if (
+                not env_name
+                or not env_name.replace("_", "A").isalnum()
+                or env_name[0].isdigit()
+            ):
+                print("credential environment variable name is invalid", file=sys.stderr)
+                return 2
+            credential = os.environ.get(env_name, "")
+            if not credential:
+                print(f"credential environment variable is not set: {env_name}", file=sys.stderr)
+                return 1
+        client = UsageAdminClient(
+            args.gateway,
+            credential=credential,
+            allow_insecure_http=args.allow_insecure_http,
+        )
+        if args.usage_command != "report":
+            return 2
+        result = client.report(
+            group_by=args.group_by,
+            actor_id=args.actor,
+            team_id=args.team,
+            limit=args.limit,
+            cursor=args.cursor,
+        )
+    except (
+        UsageAdminClientError,
+        SessionClientError,
+        CredentialStoreError,
+    ) as error:
+        print(f"usage administration failed: {error.code}", file=sys.stderr)
         return 1
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0

@@ -1393,7 +1393,7 @@ def _context_lifecycle_automation_config(value: Any) -> ContextLifecycleAutomati
 
 def _identity_capabilities(value: Any, path: str) -> tuple[str, ...]:
     capabilities = _string_tuple(value, path)
-    supported = {"context_promoter", "dlp_approver", "session_admin"}
+    supported = {"context_promoter", "dlp_approver", "session_admin", "usage_viewer"}
     unknown = sorted(set(capabilities) - supported)
     if unknown:
         raise ConfigError(f"Unknown {path}: " + ", ".join(unknown))

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 import threading
@@ -238,6 +239,7 @@ class UsageStore:
                 CREATE TABLE IF NOT EXISTS gateway_secret_events (
                     id TEXT PRIMARY KEY,
                     occurred_at TEXT NOT NULL,
+                    organization_id TEXT,
                     actor_id TEXT NOT NULL,
                     actor_name TEXT NOT NULL,
                     team_id TEXT NOT NULL,
@@ -264,6 +266,7 @@ class UsageStore:
                     id TEXT PRIMARY KEY,
                     created_at TEXT NOT NULL,
                     expires_at TEXT NOT NULL,
+                    organization_id TEXT,
                     actor_id TEXT NOT NULL,
                     team_id TEXT NOT NULL,
                     reserved_tokens INTEGER NOT NULL,
@@ -275,6 +278,22 @@ class UsageStore:
                     ON gateway_budget_reservations(actor_id, expires_at);
                 CREATE INDEX IF NOT EXISTS idx_gateway_reservation_team
                     ON gateway_budget_reservations(team_id, expires_at);
+                CREATE TABLE IF NOT EXISTS gateway_admin_access_events (
+                    id TEXT PRIMARY KEY,
+                    occurred_at TEXT NOT NULL,
+                    organization_id TEXT NOT NULL,
+                    decision_actor_id TEXT NOT NULL,
+                    decision_actor_name TEXT NOT NULL,
+                    action TEXT NOT NULL CHECK (action = 'usage.report.read'),
+                    group_by TEXT NOT NULL,
+                    actor_filter_sha256 TEXT,
+                    team_filter_sha256 TEXT,
+                    window_start TEXT NOT NULL,
+                    window_end TEXT NOT NULL,
+                    result_count INTEGER NOT NULL CHECK (result_count >= 0)
+                );
+                CREATE INDEX IF NOT EXISTS idx_gateway_admin_access_org_time
+                    ON gateway_admin_access_events(organization_id, occurred_at, id);
                 CREATE TABLE IF NOT EXISTS gateway_dlp_approval_requests (
                     id TEXT PRIMARY KEY,
                     created_at TEXT NOT NULL,
@@ -442,6 +461,9 @@ class UsageStore:
                 for row in connection.execute("PRAGMA table_info(gateway_secret_events)").fetchall()
             }
             security_migrations = {
+                "organization_id": (
+                    "ALTER TABLE gateway_secret_events ADD COLUMN organization_id TEXT"
+                ),
                 "routed_model": "ALTER TABLE gateway_secret_events ADD COLUMN routed_model TEXT",
                 "redaction_count": (
                     "ALTER TABLE gateway_secret_events ADD COLUMN redaction_count "
@@ -463,6 +485,31 @@ class UsageStore:
             for column, statement in security_migrations.items():
                 if column not in security_columns:
                     connection.execute(statement)
+            reservation_columns = {
+                row["name"]
+                for row in connection.execute(
+                    "PRAGMA table_info(gateway_budget_reservations)"
+                ).fetchall()
+            }
+            if "organization_id" not in reservation_columns:
+                connection.execute(
+                    "ALTER TABLE gateway_budget_reservations ADD COLUMN organization_id TEXT"
+                )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_gateway_secret_org_month
+                ON gateway_secret_events(organization_id, occurred_at)
+                """
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_gateway_reservation_org_expires
+                ON gateway_budget_reservations(organization_id, expires_at)
+                """
+            )
+            connection.execute(
+                "DELETE FROM gateway_budget_reservations WHERE organization_id IS NULL"
+            )
             approval_event_columns = {
                 row["name"]
                 for row in connection.execute(
@@ -1286,15 +1333,16 @@ class UsageStore:
                 connection.execute(
                     """
                     INSERT INTO gateway_secret_events (
-                        id, occurred_at, actor_id, actor_name, team_id, team_name,
+                        id, occurred_at, organization_id, actor_id, actor_name, team_id, team_name,
                         client, protocol, requested_model, routed_model, action,
                         detection_count, redaction_count, rules, event_type, policy_version,
                         findings_json
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         event_id,
                         datetime.now(timezone.utc).isoformat(),
+                        identity.organization_id,
                         identity.actor_id,
                         identity.actor_name,
                         identity.team_id,
@@ -1343,10 +1391,10 @@ class UsageStore:
                 (now_value,),
             )
             for scope in constrained:
-                usage_clauses = ["occurred_at >= ?"]
-                reservation_clauses = ["expires_at > ?"]
-                usage_parameters: list[object] = [month_start]
-                reservation_parameters: list[object] = [now_value]
+                usage_clauses = ["occurred_at >= ?", "organization_id = ?"]
+                reservation_clauses = ["expires_at > ?", "organization_id = ?"]
+                usage_parameters: list[object] = [month_start, identity.organization_id]
+                reservation_parameters: list[object] = [now_value, identity.organization_id]
                 if scope.actor_id is not None:
                     usage_clauses.append("actor_id = ?")
                     reservation_clauses.append("actor_id = ?")
@@ -1392,14 +1440,15 @@ class UsageStore:
             connection.execute(
                 """
                 INSERT INTO gateway_budget_reservations (
-                    id, created_at, expires_at, actor_id, team_id,
+                    id, created_at, expires_at, organization_id, actor_id, team_id,
                     reserved_tokens, reserved_cost_microusd
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     reservation_id,
                     now_value,
                     (now + timedelta(seconds=max(1, ttl_seconds))).isoformat(),
+                    identity.organization_id,
                     identity.actor_id,
                     identity.team_id,
                     max(0, reserved_tokens),
@@ -1436,10 +1485,19 @@ class UsageStore:
             ).fetchone()
         return int(row["count"])
 
-    def monthly_totals(self, *, actor_id: str | None = None, team_id: str | None = None) -> MonthlyTotals:
+    def monthly_totals(
+        self,
+        *,
+        organization_id: str | None = None,
+        actor_id: str | None = None,
+        team_id: str | None = None,
+    ) -> MonthlyTotals:
         start = datetime.now(timezone.utc).replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat()
         clauses = ["occurred_at >= ?"]
         parameters: list[object] = [start]
+        if organization_id is not None:
+            clauses.append("organization_id = ?")
+            parameters.append(organization_id)
         if actor_id is not None:
             clauses.append("actor_id = ?")
             parameters.append(actor_id)
@@ -1490,13 +1548,18 @@ class UsageStore:
         self,
         *,
         group_by: str,
+        organization_id: str | None = None,
         actor_id: str | None = None,
         team_id: str | None = None,
+        start: str | None = None,
+        end: str | None = None,
+        limit: int | None = None,
+        offset: int = 0,
     ) -> list[dict[str, object]]:
         dimensions: dict[str, tuple[list[str], list[str]]] = {
             "organization": (
-                ["'organization' AS scope_id", "'Organization' AS scope_name"],
-                [],
+                ["organization_id AS scope_id", "organization_id AS scope_name"],
+                ["organization_id"],
             ),
             "team": (
                 ["team_id AS scope_id", "team_name AS scope_name"],
@@ -1536,9 +1599,27 @@ class UsageStore:
         except KeyError as error:
             raise ValueError(f"Unsupported usage report dimension: {group_by}") from error
 
-        start = datetime.now(timezone.utc).replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat()
+        if isinstance(offset, bool) or not isinstance(offset, int) or offset < 0:
+            raise ValueError("Usage report offset must be a non-negative integer")
+        if limit is not None and (
+            isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 101
+        ):
+            raise ValueError("Usage report limit must be an integer from 1 to 101")
+        start = start or datetime.now(timezone.utc).replace(
+            day=1,
+            hour=0,
+            minute=0,
+            second=0,
+            microsecond=0,
+        ).isoformat()
         clauses = ["occurred_at >= ?"]
         parameters: list[object] = [start]
+        if end is not None:
+            clauses.append("occurred_at < ?")
+            parameters.append(end)
+        if organization_id is not None:
+            clauses.append("organization_id = ?")
+            parameters.append(organization_id)
         if actor_id is not None:
             clauses.append("actor_id = ?")
             parameters.append(actor_id)
@@ -1546,6 +1627,11 @@ class UsageStore:
             clauses.append("team_id = ?")
             parameters.append(team_id)
         grouping = f"GROUP BY {', '.join(group_dimensions)}" if group_dimensions else ""
+        tie_breakers = ", " + ", ".join(group_dimensions) if group_dimensions else ""
+        page = ""
+        if limit is not None:
+            page = "LIMIT ? OFFSET ?"
+            parameters.extend((limit, offset))
         query = f"""
             SELECT
                 {', '.join(select_dimensions)},
@@ -1573,7 +1659,9 @@ class UsageStore:
             FROM gateway_usage_events
             WHERE {' AND '.join(clauses)}
             {grouping}
-            ORDER BY cost_microusd DESC, total_tokens DESC, scope_name ASC
+            ORDER BY cost_microusd DESC, total_tokens DESC, scope_name ASC, scope_id ASC
+                {tie_breakers}
+            {page}
         """
         with self._lock, self._connection() as connection:
             rows = connection.execute(query, parameters).fetchall()
@@ -1589,12 +1677,16 @@ class UsageStore:
     def monthly_secret_totals(
         self,
         *,
+        organization_id: str | None = None,
         actor_id: str | None = None,
         team_id: str | None = None,
     ) -> SecretTotals:
         start = datetime.now(timezone.utc).replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat()
         clauses = ["occurred_at >= ?"]
         parameters: list[object] = [start]
+        if organization_id is not None:
+            clauses.append("organization_id = ?")
+            parameters.append(organization_id)
         if actor_id is not None:
             clauses.append("actor_id = ?")
             parameters.append(actor_id)
@@ -1624,6 +1716,7 @@ class UsageStore:
     def monthly_dlp_approval_totals(
         self,
         *,
+        organization_id: str | None = None,
         actor_id: str | None = None,
         team_id: str | None = None,
     ) -> DLPApprovalTotals:
@@ -1636,6 +1729,9 @@ class UsageStore:
         ).isoformat()
         clauses = ["occurred_at >= ?"]
         parameters: list[object] = [start]
+        if organization_id is not None:
+            clauses.append("organization_id = ?")
+            parameters.append(organization_id)
         if actor_id is not None:
             clauses.append("actor_id = ?")
             parameters.append(actor_id)
@@ -1658,6 +1754,52 @@ class UsageStore:
         with self._lock, self._connection() as connection:
             row = connection.execute(query, parameters).fetchone()
         return DLPApprovalTotals(**dict(row))
+
+    def record_admin_usage_read(
+        self,
+        *,
+        administrator: Identity,
+        group_by: str,
+        actor_filter: str | None,
+        team_filter: str | None,
+        window_start: str,
+        window_end: str,
+        result_count: int,
+    ) -> str:
+        if "usage_viewer" not in administrator.capabilities:
+            raise SecurityStoreError("usage_viewer_capability_required")
+        if group_by not in {"organization", "team", "person", "model", "client", "provider"}:
+            raise SecurityStoreError("invalid_usage_report_request")
+        if isinstance(result_count, bool) or not isinstance(result_count, int) or result_count < 0:
+            raise SecurityStoreError("invalid_usage_report_request")
+        event_id = str(uuid.uuid4())
+        try:
+            with self._lock, self._connection() as connection:
+                connection.execute(
+                    """
+                    INSERT INTO gateway_admin_access_events (
+                        id, occurred_at, organization_id, decision_actor_id,
+                        decision_actor_name, action, group_by, actor_filter_sha256,
+                        team_filter_sha256, window_start, window_end, result_count
+                    ) VALUES (?, ?, ?, ?, ?, 'usage.report.read', ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        event_id,
+                        datetime.now(timezone.utc).isoformat(),
+                        administrator.organization_id,
+                        administrator.actor_id,
+                        administrator.actor_name,
+                        group_by,
+                        _optional_sha256(actor_filter),
+                        _optional_sha256(team_filter),
+                        window_start,
+                        window_end,
+                        result_count,
+                    ),
+                )
+        except sqlite3.Error as error:
+            raise SecurityStoreError("usage_admin_audit_unavailable") from error
+        return event_id
 
     def audit_events(self, *, since: str, kind: str = "all") -> list[dict[str, object]]:
         if kind not in {"all", "usage", "security"}:
@@ -1697,7 +1839,7 @@ class UsageStore:
                 rows = connection.execute(
                     """
                     SELECT
-                        id, occurred_at, actor_id, actor_name, team_id, team_name,
+                        id, occurred_at, organization_id, actor_id, actor_name, team_id, team_name,
                         client, protocol, requested_model, routed_model, action,
                         detection_count, redaction_count, rules, event_type,
                         policy_version, findings_json
@@ -1717,6 +1859,26 @@ class UsageStore:
                             "schema_version": 1,
                             "event_type": event_type,
                             **event,
+                        }
+                    )
+                admin_rows = connection.execute(
+                    """
+                    SELECT
+                        id, occurred_at, organization_id, decision_actor_id,
+                        decision_actor_name, action, group_by, actor_filter_sha256,
+                        team_filter_sha256, window_start, window_end, result_count
+                    FROM gateway_admin_access_events
+                    WHERE occurred_at >= ?
+                    ORDER BY occurred_at, id
+                    """,
+                    (since,),
+                ).fetchall()
+                for row in admin_rows:
+                    events.append(
+                        {
+                            "schema_version": 1,
+                            "event_type": "security.admin.usage_read",
+                            **dict(row),
                         }
                     )
                 approval_rows = connection.execute(
@@ -1750,6 +1912,12 @@ def _sorted_csv(value: object) -> list[str]:
     if not isinstance(value, str) or not value:
         return []
     return sorted(set(value.split(",")))
+
+
+def _optional_sha256(value: str | None) -> str | None:
+    if value is None:
+        return None
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
 def _sqlite_nonnegative(value: object) -> int:

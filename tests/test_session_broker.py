@@ -24,11 +24,12 @@ from pathlib import Path
 import jwt
 from cryptography.hazmat.primitives.asymmetric import rsa
 
-from hormuz.config import GatewayConfig, ListenConfig
+from hormuz.config import GatewayConfig, Identity, ListenConfig
 from hormuz.cli import main as cli_main
 from hormuz.credential_store import CredentialStoreError, SecureCredentialStore
 from hormuz.server import GatewayServer, serve_in_thread
 from hormuz.session_client import access_token, login, logout
+from hormuz.store import SecurityStoreError
 
 
 class FakeLoginIdPHandler(BaseHTTPRequestHandler):
@@ -266,7 +267,7 @@ class SessionBrokerIntegrationTests(unittest.TestCase):
                     "organization_id": "xpounder",
                     "clearance": "restricted",
                     "allowed_clients": ["codex", "claude-code"],
-                    "capabilities": ["session_admin"],
+                    "capabilities": ["session_admin", "usage_viewer"],
                 },
                 {
                     "token_env": "HORMUZ_EMPLOYEE_TOKEN",
@@ -851,6 +852,171 @@ class SessionBrokerIntegrationTests(unittest.TestCase):
                 invalid_since["error"]["code"],
                 "invalid_session_event_request",
             )
+
+    def test_usage_admin_is_tenant_scoped_paginated_and_audited(self) -> None:
+        employee = self.config.identities_by_actor["employee"]
+        admin = self.config.identities_by_actor["security-admin"]
+        outsider = Identity(
+            token_env="OUTSIDER_TOKEN",
+            token="outsider-token-" + "o" * 32,
+            actor_id=employee.actor_id,
+            actor_name="Other Employee",
+            team_id=employee.team_id,
+            team_name=employee.team_name,
+            organization_id="other-company",
+        )
+        for identity, model, cost in (
+            (employee, "gpt-test", 1_000),
+            (admin, "claude-test", 2_000),
+            (outsider, "gpt-test", 9_000),
+        ):
+            self.gateway.store.record(
+                identity=identity,
+                client="codex",
+                protocol="openai",
+                requested_model=model,
+                resolved_alias=model,
+                upstream_model=model,
+                policy_action="allowed",
+                status="succeeded",
+                input_tokens=10,
+                output_tokens=2,
+                billable_tokens=12,
+                cost_microusd=cost,
+                cost_basis="estimated",
+            )
+
+        employee_token = "employee-token-" + "e" * 32
+        status, forbidden = self._admin_request(
+            "GET",
+            "/v1/admin/usage?group_by=person",
+            token=employee_token,
+        )
+        self.assertEqual(status, 403)
+        self.assertEqual(
+            forbidden["error"]["code"],
+            "usage_viewer_capability_required",
+        )
+
+        admin_token = "admin-token-" + "a" * 32
+        status, first = self._admin_request(
+            "GET",
+            "/v1/admin/usage?group_by=person&limit=1",
+            token=admin_token,
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(first["organization_id"], "xpounder")
+        self.assertEqual(first["coverage"]["scope"], "gateway_captured_requests_only")
+        self.assertEqual(len(first["rows"]), 1)
+        self.assertIsInstance(first["next_cursor"], str)
+        self.assertNotIn("Other Employee", repr(first))
+        self.assertNotIn("9000", repr(first))
+
+        status, second = self._admin_request(
+            "GET",
+            "/v1/admin/usage?group_by=person&limit=1&cursor="
+            + urllib.parse.quote(str(first["next_cursor"]), safe=""),
+            token=admin_token,
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(len(second["rows"]), 1)
+        self.assertIsNone(second["next_cursor"])
+        self.assertNotEqual(
+            first["rows"][0]["scope_id"],
+            second["rows"][0]["scope_id"],
+        )
+
+        status, self_usage = self._admin_request(
+            "GET",
+            "/v1/gateway/usage",
+            token=employee_token,
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(self_usage["requests"], 1)
+        self.assertEqual(self_usage["cost_usd"], 0.001)
+
+        status, invalid = self._admin_request(
+            "GET",
+            "/v1/admin/usage?group_by=provider&cursor="
+            + urllib.parse.quote(str(first["next_cursor"]), safe=""),
+            token=admin_token,
+        )
+        self.assertEqual(status, 400)
+        self.assertEqual(invalid["error"]["code"], "invalid_usage_report_request")
+
+        audit = self.gateway.store.audit_events(
+            since="2000-01-01T00:00:00+00:00",
+            kind="security",
+        )
+        reads = [
+            event
+            for event in audit
+            if event["event_type"] == "security.admin.usage_read"
+        ]
+        self.assertEqual(len(reads), 2)
+        self.assertTrue(
+            all(event["organization_id"] == "xpounder" for event in reads)
+        )
+        self.assertTrue(
+            all(event["decision_actor_id"] == "security-admin" for event in reads)
+        )
+
+    def test_usage_admin_cli_uses_the_authenticated_gateway_contract(self) -> None:
+        identity = self.config.identities_by_actor["employee"]
+        self.gateway.store.record(
+            identity=identity,
+            client="claude-code",
+            protocol="anthropic",
+            requested_model="claude-test",
+            resolved_alias="claude-test",
+            upstream_model="claude-test",
+            policy_action="allowed",
+            status="succeeded",
+            input_tokens=20,
+            output_tokens=4,
+            billable_tokens=24,
+            cost_microusd=1_500,
+            cost_basis="estimated",
+        )
+        output = io.StringIO()
+        with mock.patch.dict(
+            os.environ,
+            {"HORMUZ_ADMIN_TOKEN": "admin-token-" + "a" * 32},
+        ), redirect_stdout(output):
+            result = cli_main(
+                [
+                    "usage",
+                    "report",
+                    "--gateway",
+                    self.gateway_url,
+                    "--credential-env",
+                    "HORMUZ_ADMIN_TOKEN",
+                    "--group-by",
+                    "team",
+                    "--allow-insecure-http",
+                ]
+            )
+        self.assertEqual(result, 0)
+        report = json.loads(output.getvalue())
+        self.assertEqual(report["organization_id"], "xpounder")
+        self.assertEqual(report["rows"][0]["scope_id"], "engineering")
+        self.assertEqual(report["rows"][0]["billable_tokens"], 24)
+
+    def test_usage_admin_returns_no_rows_when_read_audit_cannot_commit(self) -> None:
+        admin_token = "admin-token-" + "a" * 32
+        with mock.patch.object(
+            self.gateway.store,
+            "record_admin_usage_read",
+            side_effect=SecurityStoreError("usage_admin_audit_unavailable"),
+        ):
+            status, response = self._admin_request(
+                "GET",
+                "/v1/admin/usage?group_by=organization",
+                token=admin_token,
+            )
+        self.assertEqual(status, 503)
+        self.assertEqual(response["error"]["code"], "usage_admin_unavailable")
+        self.assertNotIn("rows", response)
 
     def test_session_admin_cli_uses_the_authenticated_gateway_contract(self) -> None:
         pair = self._login(client="claude-code")

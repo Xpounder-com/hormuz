@@ -10,6 +10,8 @@ Hormuz records one metadata-only usage event for each accounted generation attem
 hormuz --config hormuz.json status
 ```
 
+Local reports are explicitly organization-scoped. A configuration containing one organization selects it automatically; a configuration containing more than one requires `--organization`. Legacy rows without an organization are excluded from an organization report.
+
 Available dimensions:
 
 ```bash
@@ -33,6 +35,17 @@ Use JSON for scripts, exports, or a future dashboard:
 ```bash
 hormuz --config hormuz.json status --group-by person --json
 ```
+
+An administrator who should not receive filesystem or database access can use the authenticated gateway contract instead:
+
+```bash
+hormuz usage report \
+  --gateway https://hormuz.example.com \
+  --profile ai-operations \
+  --group-by person
+```
+
+This route requires the explicit `usage_viewer` capability, derives organization from the credential, supports frozen-window cursor pagination, and audits every returned page. See [USAGE_ADMIN_API.md](USAGE_ADMIN_API.md).
 
 ## Field semantics
 

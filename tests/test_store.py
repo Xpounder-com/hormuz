@@ -772,6 +772,93 @@ class UsageStoreMigrationTests(unittest.TestCase):
                 {("rates-v1", 1_000), ("rates-v2", 2_000)},
             )
 
+    def test_usage_security_and_reservations_are_isolated_by_organization(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            store = UsageStore(Path(temporary) / "usage.sqlite3")
+            first = Identity(
+                token_env="FIRST_TOKEN",
+                token="first-token-long",
+                actor_id="shared-actor",
+                actor_name="First Actor",
+                team_id="engineering",
+                team_name="Engineering",
+                organization_id="first-company",
+            )
+            second = Identity(
+                token_env="SECOND_TOKEN",
+                token="second-token-long",
+                actor_id="shared-actor",
+                actor_name="Second Actor",
+                team_id="engineering",
+                team_name="Engineering",
+                organization_id="second-company",
+            )
+            for identity, cost in ((first, 1_000), (second, 9_000)):
+                store.record(
+                    identity=identity,
+                    client="codex",
+                    protocol="openai",
+                    requested_model="gpt-test",
+                    resolved_alias="gpt-test",
+                    upstream_model="gpt-test",
+                    policy_action="allowed",
+                    status="succeeded",
+                    input_tokens=10,
+                    output_tokens=2,
+                    billable_tokens=12,
+                    cost_microusd=cost,
+                    cost_basis="estimated",
+                )
+                store.record_secret_event(
+                    identity=identity,
+                    client="codex",
+                    protocol="openai",
+                    requested_model="gpt-test",
+                    action="denied",
+                    detection_count=1,
+                    rules=("openai_api_key",),
+                )
+
+            first_totals = store.monthly_totals(
+                organization_id="first-company",
+                actor_id="shared-actor",
+            )
+            self.assertEqual(first_totals.requests, 1)
+            self.assertEqual(first_totals.cost_microusd, 1_000)
+            self.assertEqual(
+                store.monthly_secret_totals(
+                    organization_id="first-company",
+                    actor_id="shared-actor",
+                ).events,
+                1,
+            )
+            report = store.report_rows(
+                group_by="organization",
+                organization_id="first-company",
+            )
+            self.assertEqual(len(report), 1)
+            self.assertEqual(report[0]["scope_id"], "first-company")
+            self.assertEqual(report[0]["cost_microusd"], 1_000)
+
+            budget_store = UsageStore(Path(temporary) / "budget.sqlite3")
+            scope = ReservationScope(name="organization", cost_limit_microusd=1_000)
+            first_reservation = budget_store.reserve_budget(
+                identity=first,
+                scopes=(scope,),
+                reserved_tokens=0,
+                reserved_cost_microusd=600,
+                ttl_seconds=60,
+            )
+            second_reservation = budget_store.reserve_budget(
+                identity=second,
+                scopes=(scope,),
+                reserved_tokens=0,
+                reserved_cost_microusd=600,
+                ttl_seconds=60,
+            )
+            self.assertIsNotNone(first_reservation)
+            self.assertIsNotNone(second_reservation)
+
     def test_atomic_budget_reservation_allows_only_one_competing_request(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "usage.sqlite3"
