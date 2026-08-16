@@ -21,6 +21,7 @@ An agent, test result, or convenient implementation detail cannot move a decisio
 | [0004](0004-structured-dlp-and-approval-boundary.md) | Accepted | Structured DLP and approval boundary | [#10](https://github.com/Xpounder-com/hormuz/issues/10) |
 | [0005](0005-github-lifecycle-event-trust.md) | Proposed | GitHub lifecycle event trust and collection | [#12](https://github.com/Xpounder-com/hormuz/issues/12) |
 | [0006](0006-automatic-context-injection.md) | Accepted | Automatic governed-context injection | [#5](https://github.com/Xpounder-com/hormuz/issues/5) |
+| [0007](0007-accepted-task-evaluation.md) | Proposed | Accepted-task economics evaluation | [#15](https://github.com/Xpounder-com/hormuz/issues/15) |
 
 ## Acceptance record
 
