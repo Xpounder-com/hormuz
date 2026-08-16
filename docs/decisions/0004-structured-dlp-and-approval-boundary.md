@@ -43,9 +43,10 @@ Promotion from detect-only to redact, approval, or deny requires a labeled organ
 An approval is a narrow exception for one exact outbound payload after all deterministic transformations:
 
 - the request receives a keyed payload fingerprint that cannot reveal the raw content;
-- the approval record binds organization, actor, rule IDs, provider, actual model, policy version, and fingerprint;
+- the approval record binds organization, actor, rule IDs, provider, the exact routed upstream model known before egress, policy version, and fingerprint;
 - the approval identifier is opaque, single-use, and expires after 15 minutes;
 - replay, payload mutation, model/provider change, policy change, expiry, or actor change invalidates it;
+- the provider-returned actual model is audited after egress; a mismatch from the approved routed model raises a security event rather than retroactively broadening the approval;
 - the approval record and notification contain no prompt, matched value, response, file content, or provider credential;
 - only a principal with the `dlp_approver` capability may approve;
 - the request actor cannot approve their own exception;
@@ -105,7 +106,7 @@ This would create a concentrated sensitive-data store in the control plane. Reje
 
 ## Owner approval record
 
-Accepted in the product-development conversation on 2026-08-15. The owner explicitly approved the recommended architecture: high-confidence secret and regulated-identifier redaction by default, configurable organization policy, detect-only lower-confidence PII, short-lived non-self approvals, fail-closed enforced rules, and denial of uninspectable media under enforced DLP.
+Accepted in the product-development conversation on 2026-08-15. The owner explicitly approved the recommended architecture: high-confidence secret and regulated-identifier redaction by default, configurable organization policy, detect-only lower-confidence PII, short-lived non-self approvals, fail-closed enforced rules, and denial of uninspectable media under enforced DLP. The owner subsequently approved binding an approval to the exact routed upstream model available before egress, with the provider-returned model audited afterward.
 
 GitHub acceptance record: [issue #10 comment](https://github.com/Xpounder-com/hormuz/issues/10#issuecomment-5305144582).
 

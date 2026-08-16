@@ -21,7 +21,7 @@ from hormuz.context import ContextArtifact, ContextLifecycleSnapshot, ContextRec
 from hormuz.context_store import ContextStoreError
 from hormuz.policy import PolicyEngine
 from hormuz.server import GatewayServer, serve_in_thread
-from hormuz.store import UsageStore
+from hormuz.store import SecurityStoreError, UsageStore
 
 
 GATEWAY_TOKEN = "company-user-token-never-forward"
@@ -320,6 +320,29 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertEqual(len(FakeProviderHandler.requests), before)
         self.assertEqual(json.loads(response)["error"]["code"], "hormuz_provider_policy_denied")
         self.assertEqual(self.gateway.store.monthly_totals(actor_id="alice").denied_requests, 1)
+
+    def test_dlp_evidence_commits_before_provider_storage_policy_denial(self) -> None:
+        before = len(FakeProviderHandler.requests)
+
+        status, _, response = self._post(
+            "/v1/responses",
+            {
+                "model": "engineering-fast",
+                "input": "Contact engineer@example.com",
+                "background": True,
+            },
+        )
+
+        self.assertEqual(status, 403)
+        self.assertEqual(len(FakeProviderHandler.requests), before)
+        self.assertEqual(json.loads(response)["error"]["code"], "hormuz_provider_policy_denied")
+        security = self.gateway.store.audit_events(
+            since="2000-01-01T00:00:00+00:00",
+            kind="security",
+        )
+        self.assertEqual(len(security), 1)
+        self.assertEqual(security[0]["event_type"], "security.dlp")
+        self.assertEqual(security[0]["action"], "detected")
 
     def test_admin_can_explicitly_allow_openai_storage_and_background_mode(self) -> None:
         config_value = self._config(self.provider.server_port, _free_port())
@@ -1086,6 +1109,178 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertEqual(secret_totals.detections, 1)
         self.assertEqual(secret_totals.redacted_requests, 1)
         self.assertNotIn(secret, json.dumps(FakeProviderHandler.requests[-1]["body"]))
+
+    def test_low_confidence_dlp_detection_forwards_unchanged_and_audits_metadata_only(self) -> None:
+        email = "engineer@example.com"
+
+        status, headers, _ = self._post(
+            "/v1/responses",
+            {"model": "engineering-fast", "input": f"Contact {email} for review."},
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["x-hormuz-dlp-detections"], "1")
+        self.assertNotIn("x-hormuz-redactions", headers)
+        self.assertIn(email, json.dumps(FakeProviderHandler.requests[-1]["body"]))
+        totals = self.gateway.store.monthly_secret_totals(actor_id="alice")
+        self.assertEqual(totals.dlp_events, 1)
+        self.assertEqual(totals.dlp_detections, 1)
+        self.assertEqual(totals.detected_requests, 1)
+        events = self.gateway.store.audit_events(
+            since="2000-01-01T00:00:00+00:00",
+            kind="security",
+        )
+        self.assertEqual(events[0]["event_type"], "security.dlp")
+        self.assertEqual(events[0]["findings"][0]["rule_id"], "email_address")
+        self.assertNotIn(email, repr(events))
+        self.assertNotIn(email.encode("utf-8"), self.config.database_path.read_bytes())
+
+    def test_regulated_identifier_is_redacted_on_anthropic_path_before_provider(self) -> None:
+        ssn = "123-45-6789"
+
+        status, headers, _ = self._post(
+            "/v1/messages",
+            {
+                "model": "claude-standard",
+                "max_tokens": 20,
+                "messages": [{"role": "user", "content": f"Tax identifier {ssn}"}],
+            },
+            extra_headers={"Anthropic-Version": "2023-06-01"},
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["x-hormuz-redactions"], "1")
+        self.assertEqual(headers["x-hormuz-dlp-detections"], "1")
+        upstream = json.dumps(FakeProviderHandler.requests[-1]["body"])
+        self.assertNotIn(ssn, upstream)
+        self.assertIn("[REDACTED:HORMUZ_DLP]", upstream)
+        events = self.gateway.store.audit_events(
+            since="2000-01-01T00:00:00+00:00",
+            kind="security",
+        )
+        self.assertEqual(events[0]["routed_model"], "claude-test")
+        self.assertEqual(events[0]["redaction_count"], 1)
+        self.assertNotIn(ssn, repr(events))
+
+    def test_company_dictionary_deny_blocks_before_egress_and_never_persists_value(self) -> None:
+        protected = "PROJECT-ORBITAL"
+        os.environ["TEST_COMPANY_TERMS"] = json.dumps([protected])
+        config_value = self._config(self.provider.server_port, _free_port())
+        config_value["egress_controls"] = {
+            "secrets": {"mode": "redact", "builtins": True},
+            "dlp": {
+                "policy_version": "company-dlp-v7",
+                "dictionaries": [
+                    {
+                        "rule_id": "company.codename",
+                        "category": "company_dictionary",
+                        "confidence": "high",
+                        "action": "deny",
+                        "providers": ["openai"],
+                        "models": ["gpt-test-fast"],
+                        "values_env": "TEST_COMPANY_TERMS",
+                    }
+                ],
+            },
+        }
+        self._restart_gateway(config_value)
+        os.environ.pop("TEST_COMPANY_TERMS", None)
+        before = len(FakeProviderHandler.requests)
+
+        status, _, response = self._post(
+            "/v1/responses",
+            {"model": "engineering-fast", "input": f"Discuss {protected}"},
+        )
+
+        self.assertEqual(status, 403)
+        self.assertEqual(json.loads(response)["error"]["code"], "hormuz_dlp_denied")
+        self.assertEqual(len(FakeProviderHandler.requests), before)
+        usage = self.gateway.store.audit_events(
+            since="2000-01-01T00:00:00+00:00",
+            kind="usage",
+        )[0]
+        self.assertEqual(usage["policy_action"], "dlp_denied")
+        self.assertEqual(usage["upstream_model"], "gpt-test-fast")
+        security = self.gateway.store.audit_events(
+            since="2000-01-01T00:00:00+00:00",
+            kind="security",
+        )[0]
+        self.assertEqual(security["policy_version"], "company-dlp-v7")
+        self.assertEqual(security["routed_model"], "gpt-test-fast")
+        self.assertNotIn(protected, repr(security))
+        self.assertNotIn(protected.encode("utf-8"), self.config.database_path.read_bytes())
+
+    def test_approval_requirement_binds_to_exact_routed_model_and_fails_closed(self) -> None:
+        protected = "PROJECT-NEPTUNE"
+        os.environ["TEST_APPROVAL_TERMS"] = json.dumps([protected])
+        config_value = self._config(self.provider.server_port, _free_port())
+        config_value["egress_controls"] = {
+            "secrets": {"mode": "redact", "builtins": True},
+            "dlp": {
+                "policy_version": "approval-v1",
+                "dictionaries": [
+                    {
+                        "rule_id": "company.approval_term",
+                        "action": "require_approval",
+                        "providers": ["openai"],
+                        "models": ["gpt-test-fast"],
+                        "values_env": "TEST_APPROVAL_TERMS",
+                    }
+                ],
+            },
+        }
+        self._restart_gateway(config_value)
+        os.environ.pop("TEST_APPROVAL_TERMS", None)
+        before = len(FakeProviderHandler.requests)
+
+        blocked_status, _, blocked_response = self._post(
+            "/v1/responses",
+            {"model": "engineering-fast", "input": protected},
+        )
+        allowed_status, _, _ = self._post(
+            "/v1/responses",
+            {"model": "engineering-deep", "input": protected},
+        )
+
+        self.assertEqual(blocked_status, 403)
+        self.assertEqual(
+            json.loads(blocked_response)["error"]["code"],
+            "hormuz_dlp_approval_required",
+        )
+        self.assertEqual(allowed_status, 200)
+        self.assertEqual(len(FakeProviderHandler.requests), before + 1)
+        self.assertEqual(FakeProviderHandler.requests[-1]["body"]["model"], "gpt-test-deep")
+        security = self.gateway.store.audit_events(
+            since="2000-01-01T00:00:00+00:00",
+            kind="security",
+        )[0]
+        self.assertEqual(security["action"], "approval_required")
+        self.assertEqual(security["routed_model"], "gpt-test-fast")
+        self.assertNotIn(protected, repr(security))
+
+    def test_dlp_evidence_failure_blocks_egress_with_stable_content_free_error(self) -> None:
+        email = "sensitive-person@example.com"
+        before = len(FakeProviderHandler.requests)
+
+        with mock.patch.object(
+            self.gateway.store,
+            "record_dlp_event",
+            side_effect=SecurityStoreError("security_store_unavailable"),
+        ), self.assertLogs("hormuz", level="ERROR") as logs:
+            status, _, response = self._post(
+                "/v1/responses",
+                {"model": "engineering-fast", "input": email},
+            )
+
+        self.assertEqual(status, 503)
+        self.assertEqual(
+            json.loads(response)["error"]["code"],
+            "hormuz_dlp_evidence_unavailable",
+        )
+        self.assertEqual(len(FakeProviderHandler.requests), before)
+        self.assertEqual(self.gateway.store.monthly_totals(actor_id="alice").requests, 0)
+        self.assertNotIn(email, response.decode("utf-8"))
+        self.assertNotIn(email, "\n".join(logs.output))
 
     @unittest.skipUnless(shutil.which("codex"), "Codex CLI is not installed")
     def test_installed_codex_routes_through_gateway(self) -> None:

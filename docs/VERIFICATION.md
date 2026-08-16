@@ -248,6 +248,24 @@ Observed local result:
 
 This is the request-level accounting and immutable-estimate foundation for issue #8, not provider billing ingestion or invoice reconciliation. OpenAI and Anthropic cost reports are aggregate across provider dimensions and do not universally assign a final invoiced cost to one Hormuz request. Team/person values therefore remain estimates unless the customer isolates provider accounting boundaries; Hormuz does not label an inferred allocation as final.
 
+### Structured DLP detector and enforcement subset
+
+The versioned rule configuration, recursive detector, additive security-ledger migration, OpenAI and Anthropic egress paths, and metadata-only evidence boundary were exercised on August 15, 2026.
+
+Observed local result:
+
+- high-confidence hyphenated US SSNs and Luhn-valid 13-to-19-digit payment-card candidates were redacted by default, invalid and Unicode-confusable numeric candidates were not classified, and conventional email syntax remained detect-only;
+- bounded environment-backed company dictionaries supported provider and exact routed-upstream-model scopes plus detect, redact, deny, and fail-closed approval-required actions, while configured values stayed out of object representations, logs, errors, SQLite, and audit output;
+- exact routed-model scope was enforced before egress, matching the owner-approved approval binding; the durable non-self approval grant/consumption workflow is deliberately not claimed by this subset;
+- the OpenAI Responses and Anthropic Messages compatibility paths both inspected after model routing and before provider storage policy or serialization; redaction reached the fake provider only as `[REDACTED:HORMUZ_DLP]`, denial and approval-required made zero provider calls, and detect-only traffic was forwarded unchanged with an explicit detection header;
+- security events committed before provider egress and stored only event-time scope, requested/routed model, policy version, rule/category/confidence/action/count metadata, and transformation counts. A simulated evidence-store outage returned `hormuz_dlp_evidence_unavailable` and made zero provider calls;
+- an additive migration preserved legacy `security.secret` rows and added routed model, policy version, transformation count, event type, and a strict metadata-only finding envelope; a future content-bearing column was still excluded from export;
+- the complete default source suite passed 153 tests with only the separately gated official Claude Code executable test skipped; that official Claude Code test then passed independently, while the installed Codex path passed in the default suite;
+- the frozen 60-task context release profile remained green with precision `1.00`, recall `1.00`, useful-pack rate `1.00`, zero authorization/lifecycle/dependency/malicious/contradiction/budget/determinism failures, and p95 in-process selection latency `0.179375 ms`;
+- isolated source and wheel builds succeeded; the source distribution contained the DLP decision, implementation docs, and detector/gateway tests, and a clean Python 3.14 environment installed the wheel from outside the source tree and loaded `organization-dlp-v1` with all three built-in rules.
+
+This is a bounded deterministic #10 implementation slice, not issue completion. Approval grants, replay-safe consumption, post-approval actual-model mismatch evidence, team/person DLP overlays, source classification, opaque-media denial, provider-header and JSON-key inspection, semantic detection, context-cache invalidation, and organization-representative detector evaluation remain open gates.
+
 ## Reproduce locally
 
 The default suite uses only loopback fake providers:

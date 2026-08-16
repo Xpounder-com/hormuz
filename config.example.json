@@ -103,6 +103,24 @@
       "mode": "redact",
       "builtins": true,
       "custom_secret_envs": []
+    },
+    "dlp": {
+      "policy_version": "organization-dlp-v1",
+      "rules": {
+        "us_ssn": {
+          "action": "redact",
+          "providers": ["openai", "anthropic"]
+        },
+        "payment_card": {
+          "action": "redact",
+          "providers": ["openai", "anthropic"]
+        },
+        "email_address": {
+          "action": "detect",
+          "providers": ["openai", "anthropic"]
+        }
+      },
+      "dictionaries": []
     }
   },
   "policies": {

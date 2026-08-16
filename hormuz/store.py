@@ -39,8 +39,12 @@ class MonthlyTotals:
 class SecretTotals:
     events: int = 0
     detections: int = 0
+    dlp_events: int = 0
+    dlp_detections: int = 0
+    detected_requests: int = 0
     redacted_requests: int = 0
     denied_requests: int = 0
+    approval_required_requests: int = 0
 
 
 @dataclass(frozen=True)
@@ -53,6 +57,10 @@ class ReservationScope:
 
 
 class ReservationDenied(RuntimeError):
+    pass
+
+
+class SecurityStoreError(RuntimeError):
     pass
 
 
@@ -128,9 +136,14 @@ class UsageStore:
                     client TEXT NOT NULL,
                     protocol TEXT NOT NULL,
                     requested_model TEXT NOT NULL,
+                    routed_model TEXT,
                     action TEXT NOT NULL,
                     detection_count INTEGER NOT NULL,
-                    rules TEXT NOT NULL
+                    redaction_count INTEGER NOT NULL DEFAULT 0,
+                    rules TEXT NOT NULL,
+                    event_type TEXT NOT NULL DEFAULT 'security.secret',
+                    policy_version TEXT NOT NULL DEFAULT 'legacy-secret-v1',
+                    findings_json TEXT NOT NULL DEFAULT '[]'
                 );
                 CREATE INDEX IF NOT EXISTS idx_gateway_secret_occurred_at
                     ON gateway_secret_events(occurred_at);
@@ -206,6 +219,32 @@ class UsageStore:
                 connection.execute(
                     "ALTER TABLE gateway_usage_events ADD COLUMN provider_usage_json TEXT NOT NULL DEFAULT '{}'"
                 )
+            security_columns = {
+                row["name"]
+                for row in connection.execute("PRAGMA table_info(gateway_secret_events)").fetchall()
+            }
+            security_migrations = {
+                "routed_model": "ALTER TABLE gateway_secret_events ADD COLUMN routed_model TEXT",
+                "redaction_count": (
+                    "ALTER TABLE gateway_secret_events ADD COLUMN redaction_count "
+                    "INTEGER NOT NULL DEFAULT 0"
+                ),
+                "event_type": (
+                    "ALTER TABLE gateway_secret_events ADD COLUMN event_type "
+                    "TEXT NOT NULL DEFAULT 'security.secret'"
+                ),
+                "policy_version": (
+                    "ALTER TABLE gateway_secret_events ADD COLUMN policy_version "
+                    "TEXT NOT NULL DEFAULT 'legacy-secret-v1'"
+                ),
+                "findings_json": (
+                    "ALTER TABLE gateway_secret_events ADD COLUMN findings_json "
+                    "TEXT NOT NULL DEFAULT '[]'"
+                ),
+            }
+            for column, statement in security_migrations.items():
+                if column not in security_columns:
+                    connection.execute(statement)
 
     def record(
         self,
@@ -333,30 +372,111 @@ class UsageStore:
     ) -> str:
         if action not in {"redacted", "denied"}:
             raise ValueError("Secret event action must be redacted or denied")
+        return self._record_security_event(
+            identity=identity,
+            client=client,
+            protocol=protocol,
+            requested_model=requested_model,
+            routed_model=None,
+            action=action,
+            detection_count=detection_count,
+            redaction_count=detection_count,
+            rules=rules,
+            event_type="security.secret",
+            policy_version="legacy-secret-v1",
+            findings=(),
+        )
+
+    def record_dlp_event(
+        self,
+        *,
+        identity: Identity,
+        client: str,
+        protocol: str,
+        requested_model: str,
+        routed_model: str,
+        action: str,
+        redaction_count: int,
+        policy_version: str,
+        findings: tuple[dict[str, object], ...],
+    ) -> str:
+        if action not in {"detected", "redacted", "denied", "approval_required"}:
+            raise ValueError("Unsupported DLP event action")
+        normalized_findings = _sanitize_dlp_findings(findings)
+        return self._record_security_event(
+            identity=identity,
+            client=client,
+            protocol=protocol,
+            requested_model=requested_model,
+            routed_model=routed_model,
+            action=action,
+            detection_count=sum(int(finding["count"]) for finding in normalized_findings),
+            redaction_count=redaction_count,
+            rules=tuple(str(finding["rule_id"]) for finding in normalized_findings),
+            event_type="security.dlp",
+            policy_version=policy_version,
+            findings=normalized_findings,
+        )
+
+    def _record_security_event(
+        self,
+        *,
+        identity: Identity,
+        client: str,
+        protocol: str,
+        requested_model: str,
+        routed_model: str | None,
+        action: str,
+        detection_count: int,
+        redaction_count: int,
+        rules: tuple[str, ...],
+        event_type: str,
+        policy_version: str,
+        findings: tuple[dict[str, object], ...],
+    ) -> str:
+        if event_type not in {"security.secret", "security.dlp"}:
+            raise ValueError("Unsupported security event type")
+        if (
+            not isinstance(policy_version, str)
+            or not policy_version
+            or len(policy_version.encode("utf-8")) > 128
+            or any(character in policy_version for character in ("\n", "\r", "\x00"))
+        ):
+            raise ValueError("Security policy version must be a bounded single-line string")
         event_id = str(uuid.uuid4())
-        with self._lock, self._connection() as connection:
-            connection.execute(
-                """
-                INSERT INTO gateway_secret_events (
-                    id, occurred_at, actor_id, actor_name, team_id, team_name,
-                    client, protocol, requested_model, action, detection_count, rules
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    event_id,
-                    datetime.now(timezone.utc).isoformat(),
-                    identity.actor_id,
-                    identity.actor_name,
-                    identity.team_id,
-                    identity.team_name,
-                    client,
-                    protocol,
-                    requested_model,
-                    action,
-                    max(0, detection_count),
-                    json.dumps(sorted(set(rules)), separators=(",", ":")),
-                ),
-            )
+        try:
+            with self._lock, self._connection() as connection:
+                connection.execute(
+                    """
+                    INSERT INTO gateway_secret_events (
+                        id, occurred_at, actor_id, actor_name, team_id, team_name,
+                        client, protocol, requested_model, routed_model, action,
+                        detection_count, redaction_count, rules, event_type, policy_version,
+                        findings_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        event_id,
+                        datetime.now(timezone.utc).isoformat(),
+                        identity.actor_id,
+                        identity.actor_name,
+                        identity.team_id,
+                        identity.team_name,
+                        client,
+                        protocol,
+                        requested_model,
+                        routed_model,
+                        action,
+                        _sqlite_nonnegative(detection_count),
+                        _sqlite_nonnegative(redaction_count),
+                        json.dumps(sorted(set(rules)), separators=(",", ":")),
+                        event_type,
+                        policy_version,
+                        json.dumps(findings, separators=(",", ":"), sort_keys=True),
+                    ),
+                )
+        except sqlite3.Error as error:
+            raise SecurityStoreError("security_store_unavailable") from error
         return event_id
 
     def reserve_budget(
@@ -648,8 +768,15 @@ class UsageStore:
             SELECT
                 COUNT(*) AS events,
                 COALESCE(SUM(detection_count), 0) AS detections,
+                COALESCE(SUM(CASE WHEN event_type = 'security.dlp' THEN 1 ELSE 0 END), 0)
+                    AS dlp_events,
+                COALESCE(SUM(CASE WHEN event_type = 'security.dlp' THEN detection_count ELSE 0 END), 0)
+                    AS dlp_detections,
+                COALESCE(SUM(CASE WHEN action = 'detected' THEN 1 ELSE 0 END), 0) AS detected_requests,
                 COALESCE(SUM(CASE WHEN action = 'redacted' THEN 1 ELSE 0 END), 0) AS redacted_requests,
-                COALESCE(SUM(CASE WHEN action = 'denied' THEN 1 ELSE 0 END), 0) AS denied_requests
+                COALESCE(SUM(CASE WHEN action = 'denied' THEN 1 ELSE 0 END), 0) AS denied_requests,
+                COALESCE(SUM(CASE WHEN action = 'approval_required' THEN 1 ELSE 0 END), 0)
+                    AS approval_required_requests
             FROM gateway_secret_events
             WHERE {' AND '.join(clauses)}
         """
@@ -696,7 +823,9 @@ class UsageStore:
                     """
                     SELECT
                         id, occurred_at, actor_id, actor_name, team_id, team_name,
-                        client, protocol, requested_model, action, detection_count, rules
+                        client, protocol, requested_model, routed_model, action,
+                        detection_count, redaction_count, rules, event_type,
+                        policy_version, findings_json
                     FROM gateway_secret_events
                     WHERE occurred_at >= ?
                     ORDER BY occurred_at, id
@@ -706,10 +835,12 @@ class UsageStore:
                 for row in rows:
                     event = dict(row)
                     event["rules"] = json.loads(str(event["rules"]))
+                    event["findings"] = json.loads(str(event.pop("findings_json")))
+                    event_type = str(event.pop("event_type"))
                     events.append(
                         {
                             "schema_version": 1,
-                            "event_type": "security.secret",
+                            "event_type": event_type,
                             **event,
                         }
                     )
@@ -727,3 +858,59 @@ def _sqlite_nonnegative(value: object) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
         return 0
     return min(max(value, 0), 2**63 - 1)
+
+
+def _sanitize_dlp_findings(
+    findings: tuple[dict[str, object], ...],
+) -> tuple[dict[str, object], ...]:
+    normalized: list[dict[str, object]] = []
+    for finding in findings:
+        if not isinstance(finding, dict) or set(finding) != {
+            "rule_id",
+            "category",
+            "confidence",
+            "action",
+            "count",
+        }:
+            raise ValueError("DLP findings must use the metadata-only finding schema")
+        rule_id = finding["rule_id"]
+        category = finding["category"]
+        confidence = finding["confidence"]
+        action = finding["action"]
+        count = finding["count"]
+        for label, value in (("rule_id", rule_id), ("category", category)):
+            if (
+                not isinstance(value, str)
+                or not value
+                or len(value.encode("utf-8")) > 64
+                or not all(character.isprintable() for character in value)
+            ):
+                raise ValueError(f"DLP finding {label} must be a bounded printable string")
+        if confidence not in {"low", "medium", "high"}:
+            raise ValueError("DLP finding confidence is invalid")
+        if action not in {"detect", "redact", "deny", "require_approval"}:
+            raise ValueError("DLP finding action is invalid")
+        if isinstance(count, bool) or not isinstance(count, int) or not 1 <= count <= 2**63 - 1:
+            raise ValueError("DLP finding count must be a positive integer")
+        normalized.append(
+            {
+                "rule_id": rule_id,
+                "category": category,
+                "confidence": confidence,
+                "action": action,
+                "count": count,
+            }
+        )
+    if not normalized:
+        raise ValueError("DLP events require at least one finding")
+    return tuple(
+        sorted(
+            normalized,
+            key=lambda item: (
+                str(item["rule_id"]),
+                str(item["category"]),
+                str(item["confidence"]),
+                str(item["action"]),
+            ),
+        )
+    )

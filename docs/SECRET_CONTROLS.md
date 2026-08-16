@@ -1,10 +1,10 @@
-# Secret egress controls
+# Secret and structured DLP egress controls
 
 Hormuz inspects JSON string values after identity and model policy evaluation and before the request is serialized to OpenAI or Anthropic. It never changes JSON keys. Prompt text, system instructions, tool outputs, and reusable context all pass through the same boundary when they are represented as JSON strings.
 
 ## Configuration
 
-Secret controls are global because every provider-bound request must cross the same organization egress boundary:
+Egress controls are global because every provider-bound request must cross the same organization boundary:
 
 ```json
 {
@@ -13,6 +13,25 @@ Secret controls are global because every provider-bound request must cross the s
       "mode": "redact",
       "builtins": true,
       "custom_secret_envs": ["HORMUZ_INTERNAL_SECRET"]
+    },
+    "dlp": {
+      "policy_version": "organization-dlp-v1",
+      "rules": {
+        "us_ssn": {"action": "redact", "providers": ["openai", "anthropic"]},
+        "payment_card": {"action": "redact", "providers": ["openai", "anthropic"]},
+        "email_address": {"action": "detect", "providers": ["openai", "anthropic"]}
+      },
+      "dictionaries": [
+        {
+          "rule_id": "company.codename",
+          "category": "company_dictionary",
+          "confidence": "high",
+          "action": "deny",
+          "providers": ["openai"],
+          "models": ["gpt-5.4"],
+          "values_env": "HORMUZ_COMPANY_TERMS"
+        }
+      ]
     }
   }
 }
@@ -22,9 +41,10 @@ Set custom values only in the Hormuz service environment:
 
 ```bash
 export HORMUZ_INTERNAL_SECRET="an-exact-company-secret-value"
+export HORMUZ_COMPANY_TERMS='["PROJECT-ORBITAL","CUSTOMER-ALPHA"]'
 ```
 
-Hormuz refuses to start when a configured custom-secret variable is absent or shorter than eight characters. The configuration stores only the environment-variable name; the value stays in the service's secret store and process memory.
+Hormuz refuses to start when a configured custom-secret variable is absent or shorter than eight characters. A DLP dictionary variable must contain a JSON array of 1 to 1000 unique or repeated strings; each value must be trimmed, printable, and 4 to 512 UTF-8 bytes, and one dictionary is capped at 256 KiB. The configuration stores only environment-variable names; values stay in the service's secret store and process memory and are hidden from configuration representations.
 
 Modes:
 
@@ -43,7 +63,15 @@ Built-in high-confidence detectors currently cover:
 
 Hormuz also treats every configured employee identity token and every available upstream provider credential as an exact protected value, regardless of its format.
 
-For redacted requests, Hormuz returns `X-Hormuz-Redactions` and appends `+redacted` to `X-Hormuz-Policy-Decision`. A separate security event stores the action, detection count, and rule identifiers for every inspected endpoint, including token-count calls that are excluded from inference usage. Accounted generation events also carry the redaction count for usage reporting. Neither ledger stores the matched value, prompt, transformed prompt, or response.
+Structured DLP currently adds three deterministic built-ins:
+
+- `us_ssn` recognizes valid hyphenated US Social Security number structure and redacts by default.
+- `payment_card` recognizes 13-to-19-digit card candidates only after a Luhn check and redacts by default.
+- `email_address` recognizes conventional email-address syntax in detect-only mode. It is deliberately low-confidence telemetry, not a complete PII classifier.
+
+Each DLP rule can be limited to `openai`, `anthropic`, and exact routed upstream model IDs. `detect` forwards the original value, `redact` replaces it with `[REDACTED:HORMUZ_DLP]`, and `deny` returns `hormuz_dlp_denied` without a provider call. `require_approval` currently returns `hormuz_dlp_approval_required` and fails closed. The durable, non-self approval grant and single-use consumption API is not shipped yet, so this action must not be configured when an operational exception path is required.
+
+For transformed requests, Hormuz returns `X-Hormuz-Redactions` and appends `+redacted` to `X-Hormuz-Policy-Decision`. DLP matches also return `X-Hormuz-DLP-Detections`; a detect-only match does not claim a transformation. A separate security event stores event-time scope, requested and exact routed model, policy version, action, counts, and finding metadata for every inspected endpoint, including token-count calls that are excluded from inference usage. Accounted generation events carry only actual transformation counts. Neither ledger stores the matched value, prompt, transformed prompt, or response.
 
 ## OpenAI provider storage policy
 
@@ -66,11 +94,11 @@ This request-level policy does not itself enroll an organization in OpenAI Zero 
 
 ## What this does not guarantee
 
-This layer is deterministic secret detection, not a complete data-loss-prevention system. It does not currently inspect image contents, decode arbitrary base64 or archives, infer proprietary meaning, or reliably detect transformed and obfuscated values. A custom exact value protects only that exact textual representation.
+This is a bounded deterministic DLP subset, not a complete data-loss-prevention system. It inspects JSON values, not caller-controlled provider headers or JSON keys. It does not inspect image contents, decode arbitrary base64 or archives, classify source paths, infer proprietary meaning, or reliably detect transformed and obfuscated values. A custom exact value protects only that exact case-sensitive textual representation. The SSN detector intentionally supports only the high-confidence hyphenated form; the email detector has not passed an organization-specific false-positive/false-negative evaluation and therefore remains detect-only.
 
 Use `deny` when forwarding a detected credential is unacceptable. Production deployments should combine Hormuz with least-privilege provider keys, short-lived employee identity, network controls, provider retention settings, code-host secret scanning, and a reviewed list of organization-specific values.
 
-Semantic classification and structured PII policies are later implementation milestones governed by [accepted ADR 0004](decisions/0004-structured-dlp-and-approval-boundary.md). High-confidence secrets and regulated identifiers redact by default; lower-confidence PII starts detect-only; enforced detectors fail closed; and any exception uses a short-lived, single-use, non-self approval. The architecture is accepted, but those structured detectors and approval workflows are not yet shipped and require measured false-positive/false-negative evaluation before enforcement.
+The broader boundary remains governed by [accepted ADR 0004](decisions/0004-structured-dlp-and-approval-boundary.md). Source classification, opaque-media denial, semantic detection, team/person DLP tightening, detector-version evidence, approval grants, content-cache invalidation, and organization-specific evaluation are still open. Issue #10 remains open until those paths and the complete compatibility, failure, migration, and privacy gates pass.
 
 ## Verify
 
@@ -79,7 +107,10 @@ The integration tests assert both sides of the boundary:
 ```bash
 python3 -m unittest -v \
   tests.test_gateway.GatewayIntegrationTests.test_secret_is_redacted_before_provider_and_audited \
-  tests.test_gateway.GatewayIntegrationTests.test_secret_deny_mode_blocks_provider_and_records_metadata
+  tests.test_gateway.GatewayIntegrationTests.test_low_confidence_dlp_detection_forwards_unchanged_and_audits_metadata_only \
+  tests.test_gateway.GatewayIntegrationTests.test_regulated_identifier_is_redacted_on_anthropic_path_before_provider \
+  tests.test_gateway.GatewayIntegrationTests.test_company_dictionary_deny_blocks_before_egress_and_never_persists_value \
+  tests.test_gateway.GatewayIntegrationTests.test_approval_requirement_binds_to_exact_routed_model_and_fails_closed
 ```
 
-The first test proves the original credential does not reach the upstream request. The second proves deny mode makes no upstream call.
+These tests prove credential and regulated-identifier transformation, detect-only forwarding, deny-before-egress, exact routed-model scoping, fail-closed approval-required behavior, and metadata-only evidence across the OpenAI and Anthropic compatibility paths.

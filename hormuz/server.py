@@ -30,7 +30,7 @@ from .policy import PolicyDecision, PolicyEngine
 from .redaction import RedactionError, SecretRedactor
 from .session import SessionBroker, SessionBrokerError
 from .session_store import SQLiteSessionStore, SessionStoreError
-from .store import ReservationDenied, UsageStore
+from .store import ReservationDenied, SecurityStoreError, UsageStore
 from .usage import ResponseUsageParser
 
 
@@ -107,7 +107,11 @@ class GatewayServer(ThreadingHTTPServer):
             protected_values.append(
                 ("session_master_key", config.session_broker.master_key_source)
             )
-        self.secret_redactor = SecretRedactor(config.secret_controls, tuple(protected_values))
+        self.secret_redactor = SecretRedactor(
+            config.secret_controls,
+            tuple(protected_values),
+            config.dlp_controls,
+        )
         super().__init__((config.listen.host, config.listen.port), GatewayRequestHandler)
 
 
@@ -175,6 +179,10 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                     "secret_events": secret_totals.events,
                     "secret_detections": secret_totals.detections,
                     "secret_denied_requests": secret_totals.denied_requests,
+                    "dlp_events": secret_totals.dlp_events,
+                    "dlp_detections": secret_totals.dlp_detections,
+                    "dlp_detected_requests": secret_totals.detected_requests,
+                    "dlp_approval_required_requests": secret_totals.approval_required_requests,
                 },
             )
             return
@@ -780,9 +788,166 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             self._send_protocol_error(protocol, decision.reason, HTTPStatus.FORBIDDEN, code="hormuz_policy_denied")
             return
 
+        request_body["model"] = decision.route.upstream_model
+        if decision.max_output_tokens is not None:
+            current_output = request_body.get(output_field)
+            if current_output is None or current_output > decision.max_output_tokens:
+                request_body[output_field] = decision.max_output_tokens
+        try:
+            redaction = self.server.secret_redactor.inspect(
+                request_body,
+                protocol=protocol,
+                model=decision.route.upstream_model,
+            )
+        except RedactionError as error:
+            self._send_protocol_error(protocol, str(error), HTTPStatus.BAD_REQUEST)
+            return
+
+        dlp_findings = tuple(finding for finding in redaction.findings if finding.origin == "dlp")
+        dlp_detection_count = sum(finding.count for finding in dlp_findings)
+        redaction_rules = tuple(
+            sorted(
+                {
+                    finding.rule_id
+                    for finding in redaction.findings
+                    if finding.action == "redact" or finding.origin == "secret"
+                }
+            )
+        )
+        try:
+            if redaction.count:
+                if dlp_findings:
+                    security_action = {
+                        "detect": "detected",
+                        "redact": "redacted",
+                        "deny": "denied",
+                        "require_approval": "approval_required",
+                    }[redaction.action]
+                    self.server.store.record_dlp_event(
+                        identity=identity,
+                        client=client,
+                        protocol=protocol,
+                        requested_model=decision.requested_model,
+                        routed_model=decision.route.upstream_model,
+                        action=security_action,
+                        redaction_count=redaction.redaction_count,
+                        policy_version=redaction.policy_version,
+                        findings=tuple(finding.to_dict() for finding in redaction.findings),
+                    )
+                else:
+                    self.server.store.record_secret_event(
+                        identity=identity,
+                        client=client,
+                        protocol=protocol,
+                        requested_model=decision.requested_model,
+                        action="denied" if redaction.action == "deny" else "redacted",
+                        detection_count=redaction.count,
+                        rules=redaction.rules,
+                    )
+        except SecurityStoreError:
+            LOGGER.error(
+                "security_evidence_failed actor=%s team=%s client=%s protocol=%s requested_model=%s routed_model=%s",
+                identity.actor_id,
+                identity.team_id,
+                client,
+                protocol,
+                decision.requested_model,
+                decision.route.upstream_model,
+            )
+            self._send_protocol_error(
+                protocol,
+                "Request blocked because DLP evidence could not be committed.",
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                code="hormuz_dlp_evidence_unavailable",
+            )
+            return
+
+        if redaction.action == "deny":
+            is_dlp_denial = bool(dlp_findings)
+            if account_usage:
+                self.server.store.record(
+                    identity=identity,
+                    client=client,
+                    protocol=protocol,
+                    requested_model=decision.requested_model,
+                    resolved_alias=decision.resolved_alias,
+                    upstream_model=decision.route.upstream_model,
+                    policy_action="dlp_denied" if is_dlp_denial else "secret_denied",
+                    status="denied",
+                    cost_basis="not_applicable",
+                    currency=decision.route.currency,
+                    rate_card_version=decision.route.rate_card_version,
+                    redaction_count=redaction.redaction_count,
+                    redaction_rules=redaction_rules,
+                )
+            LOGGER.warning(
+                "egress_denied actor=%s team=%s client=%s protocol=%s requested_model=%s routed_model=%s control=%s detections=%d rules=%s",
+                identity.actor_id,
+                identity.team_id,
+                client,
+                protocol,
+                decision.requested_model,
+                decision.route.upstream_model,
+                "dlp" if is_dlp_denial else "secret",
+                redaction.count,
+                ",".join(redaction.rules),
+            )
+            self._send_protocol_error(
+                protocol,
+                (
+                    "Request blocked by the organization's DLP policy."
+                    if is_dlp_denial
+                    else "Request blocked because Hormuz detected protected secret material."
+                ),
+                HTTPStatus.FORBIDDEN,
+                code="hormuz_dlp_denied" if is_dlp_denial else "hormuz_secret_detected",
+            )
+            return
+
+        if redaction.action == "require_approval":
+            if account_usage:
+                self.server.store.record(
+                    identity=identity,
+                    client=client,
+                    protocol=protocol,
+                    requested_model=decision.requested_model,
+                    resolved_alias=decision.resolved_alias,
+                    upstream_model=decision.route.upstream_model,
+                    policy_action="dlp_approval_required",
+                    status="denied",
+                    cost_basis="not_applicable",
+                    currency=decision.route.currency,
+                    rate_card_version=decision.route.rate_card_version,
+                    redaction_count=redaction.redaction_count,
+                    redaction_rules=redaction_rules,
+                )
+            LOGGER.warning(
+                "dlp_approval_required actor=%s team=%s client=%s protocol=%s requested_model=%s routed_model=%s policy_version=%s detections=%d rules=%s",
+                identity.actor_id,
+                identity.team_id,
+                client,
+                protocol,
+                decision.requested_model,
+                decision.route.upstream_model,
+                redaction.policy_version,
+                redaction.count,
+                ",".join(redaction.rules),
+            )
+            self._send_protocol_error(
+                protocol,
+                "Request requires an authorized DLP approval before provider egress.",
+                HTTPStatus.FORBIDDEN,
+                code="hormuz_dlp_approval_required",
+            )
+            return
+
         upstream = self.server.config.upstreams[protocol]
         is_responses_create = protocol == "openai" and urlsplit(self.path).path == "/v1/responses"
-        if is_responses_create and request_body.get("background") is True and not upstream.allow_background:
+        if (
+            is_responses_create
+            and redaction.value.get("background") is True
+            and not upstream.allow_background
+        ):
             if account_usage:
                 self.server.store.record(
                     identity=identity,
@@ -796,6 +961,8 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                     cost_basis="not_applicable",
                     currency=decision.route.currency,
                     rate_card_version=decision.route.rate_card_version,
+                    redaction_count=redaction.redaction_count,
+                    redaction_rules=redaction_rules,
                 )
             LOGGER.info(
                 "provider_policy_denied actor=%s team=%s client=%s protocol=%s requested_model=%s reason=background_disabled",
@@ -813,67 +980,10 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             )
             return
         if is_responses_create and not upstream.allow_response_storage:
-            request_body["store"] = False
-
-        request_body["model"] = decision.route.upstream_model
-        if decision.max_output_tokens is not None:
-            current_output = request_body.get(output_field)
-            if current_output is None or current_output > decision.max_output_tokens:
-                request_body[output_field] = decision.max_output_tokens
-        try:
-            redaction = self.server.secret_redactor.inspect(request_body)
-        except RedactionError as error:
-            self._send_protocol_error(protocol, str(error), HTTPStatus.BAD_REQUEST)
-            return
-
-        if redaction.count:
-            self.server.store.record_secret_event(
-                identity=identity,
-                client=client,
-                protocol=protocol,
-                requested_model=decision.requested_model,
-                action="denied" if self.server.config.secret_controls.mode == "deny" else "redacted",
-                detection_count=redaction.count,
-                rules=redaction.rules,
-            )
-
-        if redaction.count and self.server.config.secret_controls.mode == "deny":
-            if account_usage:
-                self.server.store.record(
-                    identity=identity,
-                    client=client,
-                    protocol=protocol,
-                    requested_model=decision.requested_model,
-                    resolved_alias=decision.resolved_alias,
-                    upstream_model=decision.route.upstream_model,
-                    policy_action="secret_denied",
-                    status="denied",
-                    cost_basis="not_applicable",
-                    currency=decision.route.currency,
-                    rate_card_version=decision.route.rate_card_version,
-                    redaction_count=redaction.count,
-                    redaction_rules=redaction.rules,
-                )
-            LOGGER.warning(
-                "secret_egress_denied actor=%s team=%s client=%s protocol=%s requested_model=%s detections=%d rules=%s",
-                identity.actor_id,
-                identity.team_id,
-                client,
-                protocol,
-                decision.requested_model,
-                redaction.count,
-                ",".join(redaction.rules),
-            )
-            self._send_protocol_error(
-                protocol,
-                "Request blocked because Hormuz detected protected secret material.",
-                HTTPStatus.FORBIDDEN,
-                code="hormuz_secret_detected",
-            )
-            return
+            redaction.value["store"] = False
 
         policy_action = decision.action
-        if redaction.count:
+        if redaction.redaction_count:
             policy_action = f"{policy_action}+redacted"
         body = json.dumps(redaction.value, separators=(",", ":")).encode("utf-8")
         reservation_id: str | None = None
@@ -908,8 +1018,8 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                     cost_basis="not_applicable",
                     currency=decision.route.currency,
                     rate_card_version=decision.route.rate_card_version,
-                    redaction_count=redaction.count,
-                    redaction_rules=redaction.rules,
+                    redaction_count=redaction.redaction_count,
+                    redaction_rules=redaction_rules,
                 )
                 LOGGER.info(
                     "budget_reservation_denied actor=%s team=%s client=%s protocol=%s requested_model=%s reason=%s",
@@ -936,8 +1046,9 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 body=body,
                 account_usage=account_usage,
                 policy_action=policy_action,
-                redaction_count=redaction.count,
-                redaction_rules=redaction.rules,
+                redaction_count=redaction.redaction_count,
+                redaction_rules=redaction_rules,
+                dlp_detection_count=dlp_detection_count,
                 reservation_id=reservation_id,
                 reservation_ttl_seconds=self.server.config.upstream_timeout_seconds + 60,
             )
@@ -956,6 +1067,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         policy_action: str,
         redaction_count: int,
         redaction_rules: tuple[str, ...],
+        dlp_detection_count: int,
         reservation_id: str | None,
         reservation_ttl_seconds: int,
     ) -> None:
@@ -1035,6 +1147,8 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         self.send_header("X-Hormuz-Routed-Model", route.upstream_model)
         if redaction_count:
             self.send_header("X-Hormuz-Redactions", str(redaction_count))
+        if dlp_detection_count:
+            self.send_header("X-Hormuz-DLP-Detections", str(dlp_detection_count))
         for name, value in response.headers.items():
             lowered = name.lower()
             if lowered in {"x-request-id", "request-id", "openai-processing-ms"} or lowered.startswith(

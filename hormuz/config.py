@@ -4,6 +4,7 @@ import base64
 import binascii
 import json
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -34,6 +35,27 @@ class SecretControls:
     builtins: bool = True
     custom_secret_envs: tuple[str, ...] = ()
     custom_secret_values: tuple[tuple[str, str], ...] = field(default=(), repr=False)
+
+
+@dataclass(frozen=True)
+class DLPRuleConfig:
+    rule_id: str
+    category: str
+    confidence: str
+    action: str
+    providers: tuple[str, ...] = ("openai", "anthropic")
+    models: tuple[str, ...] = ()
+    values_env: str | None = None
+    exact_values: tuple[str, ...] = field(default=(), repr=False)
+
+    def applies_to(self, *, protocol: str, model: str) -> bool:
+        return protocol in self.providers and (not self.models or model in self.models)
+
+
+@dataclass(frozen=True)
+class DLPControls:
+    policy_version: str = "local-dlp-v1"
+    rules: tuple[DLPRuleConfig, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -178,6 +200,7 @@ class GatewayConfig:
     oidc_issuers: dict[str, OIDCIssuerConfig] = field(default_factory=dict)
     identities_by_subject: dict[tuple[str, str], Identity] = field(default_factory=dict)
     secret_controls: SecretControls = field(default_factory=SecretControls)
+    dlp_controls: DLPControls = field(default_factory=DLPControls)
     team_policies: dict[str, Policy] = field(default_factory=dict)
     actor_policies: dict[str, Policy] = field(default_factory=dict)
     max_request_bytes: int = 25 * 1024 * 1024
@@ -432,7 +455,11 @@ class GatewayConfig:
             )
 
         egress_raw = _object(raw.get("egress_controls", {}), "egress_controls")
+        unknown_egress = sorted(set(egress_raw) - {"secrets", "dlp"})
+        if unknown_egress:
+            raise ConfigError("Unknown egress_controls fields: " + ", ".join(unknown_egress))
         secret_controls = _secret_controls(egress_raw.get("secrets", {}), env)
+        dlp_controls = _dlp_controls(egress_raw.get("dlp", {}), env)
         context_service_raw = _object(raw.get("context_service", {}), "context_service")
         unknown_context_service = sorted(
             set(context_service_raw)
@@ -501,6 +528,7 @@ class GatewayConfig:
             oidc_issuers=oidc_issuers,
             identities_by_subject=identities_by_subject,
             secret_controls=secret_controls,
+            dlp_controls=dlp_controls,
             team_policies=team_policies,
             actor_policies=actor_policies,
             max_request_bytes=_integer(raw.get("max_request_bytes", 25 * 1024 * 1024), "max_request_bytes", minimum=1024),
@@ -535,6 +563,18 @@ class GatewayConfig:
                     raise ConfigError(
                         f"Identity {identity.actor_id} needs an effective max_output_tokens policy "
                         "when monthly token or budget limits are configured"
+                    )
+        for rule in self.dlp_controls.rules:
+            for model in rule.models:
+                matching_routes = tuple(
+                    route
+                    for route in self.model_routes.values()
+                    if route.upstream_model == model and route.protocol in rule.providers
+                )
+                if not matching_routes:
+                    raise ConfigError(
+                        f"DLP rule {rule.rule_id} model {model} must match a routed upstream "
+                        "model for one of the rule's providers"
                     )
 
     def identity_for_token(self, token: str) -> Identity | None:
@@ -711,6 +751,9 @@ def _session_broker_config(
 
 def _secret_controls(value: Any, env: dict[str, str]) -> SecretControls:
     item = _object(value, "egress_controls.secrets")
+    unknown = sorted(set(item) - {"mode", "builtins", "custom_secret_envs"})
+    if unknown:
+        raise ConfigError("Unknown egress_controls.secrets fields: " + ", ".join(unknown))
     mode = _string(item.get("mode", "redact"), "egress_controls.secrets.mode")
     if mode not in {"off", "redact", "deny"}:
         raise ConfigError("egress_controls.secrets.mode must be off, redact, or deny")
@@ -733,6 +776,182 @@ def _secret_controls(value: Any, env: dict[str, str]) -> SecretControls:
         custom_secret_envs=secret_envs,
         custom_secret_values=tuple(secret_values),
     )
+
+
+_DLP_ACTIONS = {"off", "detect", "redact", "deny", "require_approval"}
+_DLP_BUILTINS = {
+    "us_ssn": ("regulated_identifier", "high", "redact"),
+    "payment_card": ("regulated_identifier", "high", "redact"),
+    "email_address": ("pii", "low", "detect"),
+}
+_DLP_RULE_ID = re.compile(r"[a-z][a-z0-9_.-]{0,63}\Z")
+
+
+def _dlp_controls(value: Any, env: dict[str, str]) -> DLPControls:
+    path = "egress_controls.dlp"
+    item = _object(value, path)
+    unknown = sorted(set(item) - {"policy_version", "rules", "dictionaries"})
+    if unknown:
+        raise ConfigError(f"Unknown {path} fields: " + ", ".join(unknown))
+    policy_version = _bounded_policy_version(
+        item.get("policy_version", "local-dlp-v1"),
+        f"{path}.policy_version",
+    )
+    configured_rules = _object(item.get("rules", {}), f"{path}.rules")
+    unknown_rules = sorted(set(configured_rules) - set(_DLP_BUILTINS))
+    if unknown_rules:
+        raise ConfigError(f"Unknown {path}.rules: " + ", ".join(unknown_rules))
+
+    rules: list[DLPRuleConfig] = []
+    for rule_id, (category, confidence, default_action) in _DLP_BUILTINS.items():
+        rule_path = f"{path}.rules.{rule_id}"
+        rule = _object(configured_rules.get(rule_id, {}), rule_path)
+        action, providers, models = _dlp_rule_scope(
+            rule,
+            rule_path,
+            default_action=default_action,
+        )
+        if action != "off":
+            rules.append(
+                DLPRuleConfig(
+                    rule_id=rule_id,
+                    category=category,
+                    confidence=confidence,
+                    action=action,
+                    providers=providers,
+                    models=models,
+                )
+            )
+
+    dictionaries = item.get("dictionaries", [])
+    if not isinstance(dictionaries, list):
+        raise ConfigError(f"{path}.dictionaries must be an array")
+    if len(dictionaries) > 100:
+        raise ConfigError(f"{path}.dictionaries cannot contain more than 100 rules")
+    known_ids = set(_DLP_BUILTINS)
+    for index, value in enumerate(dictionaries):
+        rule_path = f"{path}.dictionaries[{index}]"
+        rule = _object(value, rule_path)
+        unknown_rule_fields = sorted(
+            set(rule)
+            - {
+                "rule_id",
+                "category",
+                "confidence",
+                "action",
+                "providers",
+                "models",
+                "values_env",
+            }
+        )
+        if unknown_rule_fields:
+            raise ConfigError(f"Unknown {rule_path} fields: " + ", ".join(unknown_rule_fields))
+        rule_id = _dlp_identifier(rule.get("rule_id"), f"{rule_path}.rule_id")
+        if rule_id in known_ids:
+            raise ConfigError(f"Duplicate DLP rule_id: {rule_id}")
+        known_ids.add(rule_id)
+        category = _dlp_identifier(
+            rule.get("category", "company_dictionary"),
+            f"{rule_path}.category",
+        )
+        confidence = _string(rule.get("confidence", "high"), f"{rule_path}.confidence")
+        if confidence not in {"low", "medium", "high"}:
+            raise ConfigError(f"{rule_path}.confidence must be low, medium, or high")
+        action, providers, models = _dlp_rule_scope(
+            rule,
+            rule_path,
+            default_action="detect",
+            allowed_fields={
+                "rule_id",
+                "category",
+                "confidence",
+                "action",
+                "providers",
+                "models",
+                "values_env",
+            },
+        )
+        if action == "off":
+            continue
+        values_env = _string(rule.get("values_env"), f"{rule_path}.values_env")
+        exact_values = _dlp_dictionary_values(env.get(values_env), values_env, rule_path)
+        rules.append(
+            DLPRuleConfig(
+                rule_id=rule_id,
+                category=category,
+                confidence=confidence,
+                action=action,
+                providers=providers,
+                models=models,
+                values_env=values_env,
+                exact_values=exact_values,
+            )
+        )
+    return DLPControls(policy_version=policy_version, rules=tuple(rules))
+
+
+def _dlp_rule_scope(
+    value: dict[str, Any],
+    path: str,
+    *,
+    default_action: str,
+    allowed_fields: set[str] | None = None,
+) -> tuple[str, tuple[str, ...], tuple[str, ...]]:
+    allowed = {"action", "providers", "models"} if allowed_fields is None else allowed_fields
+    unknown = sorted(set(value) - allowed)
+    if unknown:
+        raise ConfigError(f"Unknown {path} fields: " + ", ".join(unknown))
+    action = _string(value.get("action", default_action), f"{path}.action")
+    if action not in _DLP_ACTIONS:
+        raise ConfigError(
+            f"{path}.action must be off, detect, redact, deny, or require_approval"
+        )
+    providers = _string_tuple(
+        value.get("providers", ["openai", "anthropic"]),
+        f"{path}.providers",
+    )
+    if not providers or any(provider not in {"openai", "anthropic"} for provider in providers):
+        raise ConfigError(f"{path}.providers must contain openai and/or anthropic")
+    models = _string_tuple(value.get("models", []), f"{path}.models")
+    return action, tuple(dict.fromkeys(providers)), tuple(dict.fromkeys(models))
+
+
+def _dlp_dictionary_values(raw: str | None, env_name: str, path: str) -> tuple[str, ...]:
+    if not raw:
+        raise ConfigError(f"Required DLP dictionary environment variable is not set: {env_name}")
+    try:
+        values = json.loads(raw)
+    except json.JSONDecodeError as error:
+        raise ConfigError(f"DLP dictionary from {env_name} must be a JSON string array") from error
+    if not isinstance(values, list) or not values or len(values) > 1000:
+        raise ConfigError(f"DLP dictionary from {env_name} must contain 1 to 1000 strings")
+    normalized: list[str] = []
+    total_bytes = 0
+    for index, value in enumerate(values):
+        if not isinstance(value, str) or value != value.strip():
+            raise ConfigError(f"{path} value {index} must be a trimmed string")
+        byte_length = len(value.encode("utf-8"))
+        if byte_length < 4 or byte_length > 512 or not all(character.isprintable() for character in value):
+            raise ConfigError(f"{path} value {index} must be printable and 4 to 512 bytes")
+        total_bytes += byte_length
+        if total_bytes > 262_144:
+            raise ConfigError(f"DLP dictionary from {env_name} exceeds 256 KiB")
+        normalized.append(value)
+    return tuple(dict.fromkeys(normalized))
+
+
+def _dlp_identifier(value: Any, path: str) -> str:
+    result = _string(value, path)
+    if _DLP_RULE_ID.fullmatch(result) is None:
+        raise ConfigError(f"{path} must be a lowercase safe identifier up to 64 characters")
+    return result
+
+
+def _bounded_policy_version(value: Any, path: str) -> str:
+    result = _string(value, path)
+    if len(result.encode("utf-8")) > 128 or not all(character.isprintable() for character in result):
+        raise ConfigError(f"{path} must be a printable string up to 128 bytes")
+    return result
 
 
 def _object(value: Any, path: str) -> dict[str, Any]:

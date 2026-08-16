@@ -503,6 +503,18 @@ def _doctor(config: GatewayConfig) -> int:
     print(f"human session broker: {'enabled' if config.session_broker.enabled else 'disabled'}")
     print(f"model routes: {len(config.model_routes)}")
     print(f"secret egress control: {config.secret_controls.mode}")
+    print(f"DLP policy version: {config.dlp_controls.policy_version}")
+    print(f"DLP rules: {len(config.dlp_controls.rules)}")
+    if config.dlp_controls.rules:
+        action_counts: dict[str, int] = {}
+        for rule in config.dlp_controls.rules:
+            action_counts[rule.action] = action_counts.get(rule.action, 0) + 1
+        print(
+            "DLP actions: "
+            + ", ".join(
+                f"{action}={action_counts[action]}" for action in sorted(action_counts)
+            )
+        )
     print(f"usage database: {config.database_path}")
     print(f"context database: {config.context_database_path}")
     if config.oidc_issuers:

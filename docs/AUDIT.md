@@ -1,6 +1,6 @@
 # Audit export
 
-Hormuz can export the local usage and secret-egress ledgers as deterministic, metadata-only JSON Lines. The export is intended for inspection, incident evidence, or ingestion into an organization-controlled SIEM or immutable archive. It does not contain prompts, responses, matched secret values, source files, or provider credentials.
+Hormuz can export the local usage and security-egress ledgers as deterministic, metadata-only JSON Lines. The export is intended for inspection, incident evidence, or ingestion into an organization-controlled SIEM or immutable archive. It does not contain prompts, responses, matched values, source files, or provider credentials.
 
 ## Export
 
@@ -34,12 +34,12 @@ shasum -a 256 hormuz-audit.jsonl
 Every line is one JSON object containing:
 
 - `schema_version`: currently `1`.
-- `event_type`: `usage` or `security.secret`.
+- `event_type`: `usage`, `security.secret`, or `security.dlp`.
 - `id` and `occurred_at`: the event identifier and UTC occurrence time.
 - event-time actor, team, client, protocol, requested/resolved/routed/actual model, policy, status, normalized token, cost-basis, currency, rate-card-version, provider-request, and redaction metadata when applicable.
 - `provider_usage`: a provider-specific allowlisted object containing only documented usage counters and bounded categorical metadata. Unknown fields and content-bearing provider data are removed before the event is written.
 
-Array fields such as `redaction_rules` and `rules` are emitted as JSON arrays. Events are ordered by occurrence time and ID, and object keys are serialized deterministically. Rate-card versions and estimates are immutable event snapshots, not a lookup through the current configuration. The store snapshots actor and team names on each request, so administrators should treat audit files as access-controlled employee metadata even though request content is absent.
+Array fields such as `redaction_rules`, `rules`, and DLP `findings` are emitted as JSON arrays. A finding is restricted to rule ID, category, confidence, action, and count. DLP events also carry the policy version and exact routed upstream model. Events are ordered by occurrence time and ID, and object keys are serialized deterministically. Rate-card versions and estimates are immutable event snapshots, not a lookup through the current configuration. The store snapshots actor and team names on each request, so administrators should treat audit files as access-controlled employee metadata even though request content is absent.
 
 ## Security boundary
 

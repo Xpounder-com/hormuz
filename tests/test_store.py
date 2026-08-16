@@ -222,6 +222,156 @@ class UsageStoreMigrationTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 store.audit_events(since="2000-01-01T00:00:00+00:00", kind="unsupported")
 
+    def test_existing_secret_events_gain_metadata_only_dlp_columns(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "usage.sqlite3"
+            connection = sqlite3.connect(path)
+            connection.execute(
+                """
+                CREATE TABLE gateway_secret_events (
+                    id TEXT PRIMARY KEY,
+                    occurred_at TEXT NOT NULL,
+                    actor_id TEXT NOT NULL,
+                    actor_name TEXT NOT NULL,
+                    team_id TEXT NOT NULL,
+                    team_name TEXT NOT NULL,
+                    client TEXT NOT NULL,
+                    protocol TEXT NOT NULL,
+                    requested_model TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    detection_count INTEGER NOT NULL,
+                    rules TEXT NOT NULL
+                )
+                """
+            )
+            connection.execute(
+                """
+                INSERT INTO gateway_secret_events (
+                    id, occurred_at, actor_id, actor_name, team_id, team_name,
+                    client, protocol, requested_model, action, detection_count, rules
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "legacy-secret",
+                    "2026-08-15T00:00:00+00:00",
+                    "alice",
+                    "Alice",
+                    "engineering",
+                    "Engineering",
+                    "codex",
+                    "openai",
+                    "gpt-test",
+                    "redacted",
+                    1,
+                    '["openai_api_key"]',
+                ),
+            )
+            connection.commit()
+            connection.close()
+
+            store = UsageStore(path)
+            event = store.audit_events(
+                since="2000-01-01T00:00:00+00:00",
+                kind="security",
+            )[0]
+
+            self.assertEqual(event["event_type"], "security.secret")
+            self.assertEqual(event["policy_version"], "legacy-secret-v1")
+            self.assertEqual(event["findings"], [])
+            self.assertEqual(event["redaction_count"], 0)
+            self.assertIsNone(event["routed_model"])
+
+    def test_dlp_events_store_only_normalized_findings_and_support_new_totals(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "usage.sqlite3"
+            store = UsageStore(path)
+            identity = Identity(
+                token_env="TEST_TOKEN",
+                token="employee-token",
+                actor_id="alice",
+                actor_name="Alice",
+                team_id="engineering",
+                team_name="Engineering",
+            )
+            store.record_dlp_event(
+                identity=identity,
+                client="codex",
+                protocol="openai",
+                requested_model="engineering-fast",
+                routed_model="gpt-test-fast",
+                action="detected",
+                redaction_count=0,
+                policy_version="company-dlp-v2",
+                findings=(
+                    {
+                        "rule_id": "email_address",
+                        "category": "pii",
+                        "confidence": "low",
+                        "action": "detect",
+                        "count": 2,
+                    },
+                ),
+            )
+            store.record_dlp_event(
+                identity=identity,
+                client="codex",
+                protocol="openai",
+                requested_model="engineering-fast",
+                routed_model="gpt-test-fast",
+                action="approval_required",
+                redaction_count=0,
+                policy_version="company-dlp-v2",
+                findings=(
+                    {
+                        "rule_id": "company.codename",
+                        "category": "company_dictionary",
+                        "confidence": "high",
+                        "action": "require_approval",
+                        "count": 1,
+                    },
+                ),
+            )
+
+            totals = store.monthly_secret_totals(actor_id="alice")
+            events = store.audit_events(
+                since="2000-01-01T00:00:00+00:00",
+                kind="security",
+            )
+
+            self.assertEqual(totals.events, 2)
+            self.assertEqual(totals.detections, 3)
+            self.assertEqual(totals.detected_requests, 1)
+            self.assertEqual(totals.approval_required_requests, 1)
+            self.assertEqual({event["event_type"] for event in events}, {"security.dlp"})
+            self.assertEqual(events[0]["routed_model"], "gpt-test-fast")
+            self.assertEqual(events[0]["policy_version"], "company-dlp-v2")
+            self.assertEqual(events[0]["findings"][0]["rule_id"], "email_address")
+            serialized = repr(events)
+            self.assertNotIn("matched_value", serialized)
+            self.assertNotIn("prompt", serialized)
+
+            with self.assertRaisesRegex(ValueError, "metadata-only finding schema"):
+                store.record_dlp_event(
+                    identity=identity,
+                    client="codex",
+                    protocol="openai",
+                    requested_model="engineering-fast",
+                    routed_model="gpt-test-fast",
+                    action="denied",
+                    redaction_count=0,
+                    policy_version="company-dlp-v2",
+                    findings=(
+                        {
+                            "rule_id": "company.codename",
+                            "category": "company_dictionary",
+                            "confidence": "high",
+                            "action": "deny",
+                            "count": 1,
+                            "matched_value": "must-never-persist",
+                        },
+                    ),
+                )
+
     def test_usage_reports_group_and_filter_without_content_fields(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             store = UsageStore(Path(temporary) / "usage.sqlite3")
