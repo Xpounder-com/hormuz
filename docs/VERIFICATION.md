@@ -565,6 +565,21 @@ The next accepted-ADR slice was exercised locally on August 16, 2026. No live pr
 
 This establishes token-count parity for a request containing direct current-user text. It does not bind a tool-only count to earlier context lineage, prove live Anthropic billing behavior, add OpenAI compaction, or close issue #5. Those remain explicit compatibility and product-decision gates.
 
+### Encoded compression/archive container denial
+
+The next accepted-ADR-0004 slice was exercised locally on August 16, 2026. No archive was decompressed and no live provider credential was used. Deterministic tests passed signature-shaped payloads through the real gateway to provider-compatible loopback fakes.
+
+- the bounded base64/base64url/data-URI decoder recognized ZIP, GZIP, BZIP2, XZ, 7z, RAR, TAR, Zstandard, and LZ4 using exact binary signatures or allowlisted declared media types before attempting UTF-8 classification;
+- the secure-default `opaque_media` rule emitted one high-confidence `unsupported_media` finding and denied the original encoded value before egress. It did not decompress, decrypt, list, transform, or persist container content;
+- unit coverage proved three-layer nested recognition, organization `off` as string-local risk acceptance, provider and exact routed-model scoping, continued sibling SSN redaction, and unchanged handling of benign encoded text and deliberately unclassified binary prefixes;
+- OpenAI function output and Anthropic tool-result requests carrying the same encoded ZIP-signature payload both returned the existing provider-shaped DLP denial, made zero provider calls, and wrote only metadata-only security and denied-usage evidence. Neither the marker nor encoded payload entered responses, audit rows, or SQLite;
+- all 267 source tests passed with official-client gates enabled and no skips. Installed Codex `0.139.0` and Claude Code `2.1.233` each completed ordinary generation through Hormuz, proving the fail-closed container path did not regress either supported employee client;
+- the frozen 60-task release benchmark passed five iterations with precision `1.00`, recall `1.00`, useful-pack rate `1.00`, mean compression ratio `0.840593`, zero authorization, stale-lifecycle, dependency-stale, malicious, contradiction, token-budget, leakage, or determinism failures, and p95 in-process selection latency `0.160167 ms`. Corpus SHA-256 remained `9822d592868202c7c7539bcdac7d4a5894c01f9e6dba7a434846516b67b32c17`;
+- isolated source and wheel builds succeeded. A clean Python 3.14 environment installed the exact wheel outside the checkout, loaded `hormuz.redaction` from `site-packages`, denied an encoded ZIP-signature payload, compiled the package, and passed the installed strict 60-task benchmark; and
+- source/test bytecode compilation, deterministic corpus verification, `git diff --check`, and high-confidence runtime-source and extracted-wheel scans for private-key, OpenAI, Anthropic, GitHub, AWS, and Google credential patterns passed. The ignored `.env.local` remained outside the build and was not needed for any provider request.
+
+This closes recognition and default denial for the named encoded container formats, not archive-content inspection or issue #10. Whitespace-wrapped and unsupported encodings, unknown or obfuscated binary/container formats, provider file/URL fetching, source classification, semantic evaluation, cache invalidation, shared KMS/HA operations, externally immutable audit, organization-representative evaluation, and independent security review remain open.
+
 ## Reproduce locally
 
 The default suite uses only loopback fake providers:

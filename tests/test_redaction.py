@@ -392,6 +392,164 @@ class SecretRedactorTests(unittest.TestCase):
                 {"input": "data:text/plain;base64," + oversized}
             )
 
+    def test_recognized_encoded_archives_follow_opaque_media_policy(self) -> None:
+        controls = DLPControls(
+            policy_version="encoded-container-v1",
+            rules=(
+                DLPRuleConfig(
+                    rule_id="opaque_media",
+                    category="unsupported_media",
+                    confidence="high",
+                    action="deny",
+                ),
+            ),
+        )
+        redactor = SecretRedactor(
+            SecretControls(mode="off"),
+            dlp_controls=controls,
+        )
+        encoded_containers = (
+            base64.b64encode(b"PK\x03\x04" + (b"Z" * 16)).decode("ascii"),
+            base64.b64encode(b"\x1f\x8b\x08\x00" + (b"G" * 16)).decode("ascii"),
+            base64.b64encode(b"BZh9" + (b"B" * 16)).decode("ascii"),
+            base64.b64encode(b"\xfd7zXZ\x00" + (b"X" * 16)).decode("ascii"),
+            base64.b64encode(b"7z\xbc\xaf\x27\x1c" + (b"S" * 16)).decode("ascii"),
+            base64.b64encode(b"Rar!\x1a\x07\x01\x00" + (b"R" * 16)).decode("ascii"),
+            base64.b64encode(b"\x28\xb5\x2f\xfd" + (b"D" * 16)).decode("ascii"),
+            base64.b64encode(b"\x04\x22\x4d\x18" + (b"L" * 16)).decode("ascii"),
+            base64.b64encode((b"T" * 257) + b"ustar" + (b"T" * 16)).decode("ascii"),
+            "data:application/zip;base64,"
+            + base64.b64encode(b"not-a-signature-but-declared-zip").decode("ascii"),
+        )
+
+        for encoded in encoded_containers:
+            with self.subTest(prefix=encoded[:32]):
+                result = redactor.inspect(
+                    {"input": encoded},
+                    protocol="openai",
+                    model="gpt-test",
+                )
+                self.assertEqual(result.action, "deny")
+                self.assertEqual(result.count, 1)
+                self.assertEqual(result.redaction_count, 0)
+                self.assertEqual(result.rules, ("opaque_media",))
+                self.assertEqual(result.findings[0].category, "unsupported_media")
+                self.assertEqual(result.value["input"], encoded)
+
+    def test_nested_archive_detection_is_bounded_and_off_is_object_local(self) -> None:
+        archive = base64.b64encode(
+            b"PK\x03\x04" + b"company-archive-bytes"
+        ).decode("ascii")
+        nested = base64.b64encode(archive.encode("utf-8")).decode("ascii")
+        deny_controls = DLPControls(
+            rules=(
+                DLPRuleConfig(
+                    rule_id="opaque_media",
+                    category="unsupported_media",
+                    confidence="high",
+                    action="deny",
+                ),
+            ),
+        )
+
+        denied = SecretRedactor(
+            SecretControls(mode="off"),
+            dlp_controls=deny_controls,
+        ).inspect({"input": nested}, protocol="anthropic", model="claude-test")
+
+        self.assertEqual(denied.action, "deny")
+        self.assertEqual(denied.rules, ("opaque_media",))
+        self.assertEqual(denied.value["input"], nested)
+
+        ssn = "123-45-6789"
+        off_controls = DLPControls(
+            rules=(
+                DLPRuleConfig(
+                    rule_id="opaque_media",
+                    category="unsupported_media",
+                    confidence="high",
+                    action="off",
+                ),
+                DLPRuleConfig(
+                    rule_id="us_ssn",
+                    category="regulated_identifier",
+                    confidence="high",
+                    action="redact",
+                ),
+            ),
+        )
+        allowed = SecretRedactor(
+            SecretControls(mode="off"),
+            dlp_controls=off_controls,
+        ).inspect(
+            {"input": [archive, f"Employee ID {ssn}"]},
+            protocol="openai",
+            model="gpt-test",
+        )
+
+        self.assertEqual(allowed.action, "redact")
+        self.assertEqual(allowed.rules, ("us_ssn",))
+        self.assertEqual(allowed.value["input"][0], archive)
+        self.assertNotIn(ssn, allowed.value["input"][1])
+
+        unknown_binaries = (
+            b"\x00\x01\x02\x03unrecognized-binary",
+            b"\x1f\x8b\x09not-a-valid-gzip-method",
+            b"BZh0not-a-valid-bzip-block-size",
+        )
+        for raw in unknown_binaries:
+            unknown_binary = base64.b64encode(raw).decode("ascii")
+            unclassified = SecretRedactor(
+                SecretControls(mode="off"),
+                dlp_controls=deny_controls,
+            ).inspect(
+                {"input": unknown_binary},
+                protocol="openai",
+                model="gpt-test",
+            )
+            self.assertEqual(unclassified.action, "allow")
+            self.assertEqual(unclassified.value["input"], unknown_binary)
+
+        anthropic_only = DLPControls(
+            rules=(
+                DLPRuleConfig(
+                    rule_id="opaque_media",
+                    category="unsupported_media",
+                    confidence="high",
+                    action="deny",
+                    providers=("anthropic",),
+                    models=("claude-approved",),
+                ),
+            ),
+        )
+        outside_scope = SecretRedactor(
+            SecretControls(mode="off"),
+            dlp_controls=anthropic_only,
+        ).inspect(
+            {"input": archive},
+            protocol="openai",
+            model="gpt-test",
+        )
+        wrong_model = SecretRedactor(
+            SecretControls(mode="off"),
+            dlp_controls=anthropic_only,
+        ).inspect(
+            {"input": archive},
+            protocol="anthropic",
+            model="claude-other",
+        )
+        in_scope = SecretRedactor(
+            SecretControls(mode="off"),
+            dlp_controls=anthropic_only,
+        ).inspect(
+            {"input": archive},
+            protocol="anthropic",
+            model="claude-approved",
+        )
+        self.assertEqual(outside_scope.action, "allow")
+        self.assertEqual(wrong_model.action, "allow")
+        self.assertEqual(in_scope.action, "deny")
+
     def test_high_confidence_regulated_identifiers_are_redacted(self) -> None:
         controls = DLPControls(
             policy_version="regulated-v3",

@@ -68,6 +68,31 @@ class _EncodedText:
         return self.prefix + encoded
 
 
+@dataclass(frozen=True)
+class _EncodedPayload:
+    raw: bytes
+    prefix: str
+    media_type: str | None
+    urlsafe: bool
+    padded: bool
+
+    def as_text(self) -> _EncodedText | None:
+        if self.media_type is not None and not _is_text_media_type(self.media_type):
+            return None
+        try:
+            decoded = self.raw.decode("utf-8")
+        except UnicodeDecodeError:
+            return None
+        if not _is_textual(decoded):
+            return None
+        return _EncodedText(
+            decoded=decoded,
+            prefix=self.prefix,
+            urlsafe=self.urlsafe,
+            padded=self.padded,
+        )
+
+
 _BUILTIN_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     (
         "private_key",
@@ -108,6 +133,35 @@ _ACTION_PRECEDENCE = {
     "deny": 4,
 }
 _OPAQUE_MEDIA_RULE_ID = "opaque_media"
+_ARCHIVE_MEDIA_TYPES = frozenset(
+    {
+        "application/gzip",
+        "application/vnd.lz4",
+        "application/vnd.rar",
+        "application/x-7z-compressed",
+        "application/x-bzip2",
+        "application/x-gzip",
+        "application/x-lz4",
+        "application/x-rar-compressed",
+        "application/x-tar",
+        "application/x-xz",
+        "application/x-zip-compressed",
+        "application/zip",
+        "application/zstd",
+    }
+)
+_ARCHIVE_PREFIXES = (
+    b"PK\x03\x04",
+    b"PK\x05\x06",
+    b"PK\x07\x08",
+    b"\x1f\x8b\x08",
+    b"\xfd7zXZ\x00",
+    b"7z\xbc\xaf\x27\x1c",
+    b"Rar!\x1a\x07\x00",
+    b"Rar!\x1a\x07\x01\x00",
+    b"\x28\xb5\x2f\xfd",
+    b"\x04\x22\x4d\x18",
+)
 
 
 class SecretRedactor:
@@ -140,14 +194,10 @@ class SecretRedactor:
             protocol=protocol,
         )
         if opaque_media_count:
-            opaque_rule = next(
-                (
-                    rule
-                    for rule in self.dlp_controls.rules
-                    if rule.rule_id == _OPAQUE_MEDIA_RULE_ID
-                    and rule.applies_to(protocol=protocol, model=model)
-                ),
-                None,
+            opaque_rule = _applicable_opaque_rule(
+                self.dlp_controls,
+                protocol=protocol,
+                model=model,
             )
             if opaque_rule is not None and opaque_rule.action != "off":
                 finding = DLPFinding(
@@ -291,7 +341,28 @@ class SecretRedactor:
         if plain_result[1]:
             return plain_result
 
-        encoded = _decode_encoded_text(value)
+        encoded_payload = _decode_encoded_payload(value)
+        if encoded_payload is not None and _is_recognized_archive(encoded_payload):
+            opaque_rule = _applicable_opaque_rule(
+                self.dlp_controls,
+                protocol=protocol,
+                model=model,
+            )
+            if opaque_rule is None or opaque_rule.action == "off":
+                return plain_result
+            findings: dict[tuple[str, str, str, str, str], int] = {}
+            _add_finding(
+                findings,
+                opaque_rule.rule_id,
+                opaque_rule.category,
+                opaque_rule.confidence,
+                opaque_rule.action,
+                1,
+                origin="dlp",
+            )
+            return value, findings, 0
+
+        encoded = encoded_payload.as_text() if encoded_payload is not None else None
         if encoded is not None:
             if encoded_depth >= MAX_ENCODED_TEXT_DEPTH:
                 raise RedactionError(
@@ -374,12 +445,13 @@ class SecretRedactor:
         return transformed, findings, redaction_count
 
 
-def _decode_encoded_text(value: str) -> _EncodedText | None:
+def _decode_encoded_payload(value: str) -> _EncodedPayload | None:
     prefix = ""
     payload = value
-    data_uri = _text_data_uri(value)
+    media_type: str | None = None
+    data_uri = _base64_data_uri(value)
     if data_uri is not None:
-        prefix, payload = data_uri
+        prefix, payload, media_type = data_uri
     elif not _looks_like_base64(payload):
         return None
 
@@ -407,21 +479,16 @@ def _decode_encoded_text(value: str) -> _EncodedText | None:
             "Encoded text exceeds the maximum decoded size of "
             f"{MAX_ENCODED_TEXT_BYTES} bytes"
         )
-    try:
-        decoded = decoded_bytes.decode("utf-8")
-    except UnicodeDecodeError:
-        return None
-    if not _is_textual(decoded):
-        return None
-    return _EncodedText(
-        decoded=decoded,
+    return _EncodedPayload(
+        raw=decoded_bytes,
         prefix=prefix,
+        media_type=media_type,
         urlsafe=urlsafe,
         padded=padded,
     )
 
 
-def _text_data_uri(value: str) -> tuple[str, str] | None:
+def _base64_data_uri(value: str) -> tuple[str, str, str] | None:
     if not value[:5].lower() == "data:":
         return None
     metadata, separator, payload = value[5:].partition(",")
@@ -431,9 +498,7 @@ def _text_data_uri(value: str) -> tuple[str, str] | None:
     if not parts or parts[-1].lower() != "base64":
         return None
     media_type = parts[0].lower() or "text/plain"
-    if not _is_text_media_type(media_type):
-        return None
-    return value[: len(value) - len(payload)], payload
+    return value[: len(value) - len(payload)], payload, media_type
 
 
 def _is_text_media_type(media_type: str) -> bool:
@@ -461,6 +526,40 @@ def _is_textual(value: str) -> bool:
         return False
     printable = sum(character.isprintable() or character.isspace() for character in value)
     return printable / len(value) >= 0.9
+
+
+def _is_recognized_archive(value: _EncodedPayload) -> bool:
+    if value.media_type in _ARCHIVE_MEDIA_TYPES:
+        return True
+    if value.raw.startswith(_ARCHIVE_PREFIXES):
+        return True
+    if (
+        len(value.raw) >= 4
+        and value.raw.startswith(b"BZh")
+        and value.raw[3:4] in b"123456789"
+    ):
+        return True
+    return len(value.raw) >= 262 and value.raw[257:262] == b"ustar"
+
+
+def _applicable_opaque_rule(
+    controls: DLPControls,
+    *,
+    protocol: str,
+    model: str,
+) -> DLPRuleConfig | None:
+    return next(
+        (
+            rule
+            for rule in controls.rules
+            if rule.rule_id == _OPAQUE_MEDIA_RULE_ID
+            and (
+                not protocol
+                or rule.applies_to(protocol=protocol, model=model)
+            )
+        ),
+        None,
+    )
 
 
 def _rule_match_count(rule: DLPRuleConfig, value: str) -> int:

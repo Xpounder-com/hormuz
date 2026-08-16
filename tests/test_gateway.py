@@ -2882,6 +2882,77 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertEqual(totals.dlp_detections, 2)
         self.assertEqual(totals.denied_requests, 2)
 
+    def test_encoded_archives_are_denied_for_both_providers_without_content_evidence(self) -> None:
+        marker = "encoded-archive-content-never-persist"
+        archive = b"PK\x03\x04" + marker.encode("utf-8")
+        encoded = base64.b64encode(archive).decode("ascii")
+        before = len(FakeProviderHandler.requests)
+
+        openai_status, _, openai_response = self._post(
+            "/v1/responses",
+            {
+                "model": "engineering-fast",
+                "input": [
+                    {
+                        "type": "function_call_output",
+                        "call_id": "call_archive",
+                        "output": encoded,
+                    }
+                ],
+            },
+        )
+        anthropic_status, _, anthropic_response = self._post(
+            "/v1/messages",
+            {
+                "model": "claude-standard",
+                "max_tokens": 20,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": "tool_archive",
+                                "content": encoded,
+                            }
+                        ],
+                    }
+                ],
+            },
+            extra_headers={"Anthropic-Version": "2023-06-01"},
+        )
+
+        self.assertEqual(openai_status, 403)
+        self.assertEqual(anthropic_status, 403)
+        self.assertEqual(len(FakeProviderHandler.requests), before)
+        self.assertEqual(json.loads(openai_response)["error"]["code"], "hormuz_dlp_denied")
+        self.assertEqual(json.loads(anthropic_response)["error"]["type"], "permission_error")
+        security = self.gateway.store.audit_events(
+            since="2000-01-01T00:00:00+00:00",
+            kind="security",
+        )
+        self.assertEqual(len(security), 2)
+        self.assertEqual({event["protocol"] for event in security}, {"openai", "anthropic"})
+        for event in security:
+            self.assertEqual(event["event_type"], "security.dlp")
+            self.assertEqual(event["action"], "denied")
+            self.assertEqual(event["detection_count"], 1)
+            self.assertEqual(event["rules"], ["opaque_media"])
+            self.assertEqual(event["findings"][0]["category"], "unsupported_media")
+        usage = self.gateway.store.audit_events(
+            since="2000-01-01T00:00:00+00:00",
+            kind="usage",
+        )
+        self.assertEqual(len(usage), 2)
+        self.assertTrue(all(event["policy_action"] == "dlp_denied" for event in usage))
+        persisted = self.config.database_path.read_bytes()
+        for protected in (marker, encoded):
+            self.assertNotIn(protected, repr(security))
+            self.assertNotIn(protected, repr(usage))
+            self.assertNotIn(protected.encode("utf-8"), openai_response)
+            self.assertNotIn(protected.encode("utf-8"), anthropic_response)
+            self.assertNotIn(protected.encode("utf-8"), persisted)
+
     def test_opaque_media_denial_on_token_count_has_no_usage_charge(self) -> None:
         before = len(FakeProviderHandler.requests)
 
