@@ -128,7 +128,20 @@
           "providers": ["openai", "anthropic"]
         }
       },
-      "dictionaries": []
+      "dictionaries": [],
+      "overlays": {
+        "teams": {
+          "engineering": {
+            "policy_version": "engineering-dlp-v1",
+            "rules": {
+              "email_address": {
+                "action": "redact"
+              }
+            }
+          }
+        },
+        "actors": {}
+      }
     }
   },
   "policies": {

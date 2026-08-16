@@ -110,4 +110,4 @@ Accepted in the product-development conversation on 2026-08-15. The owner explic
 
 GitHub acceptance record: [issue #10 comment](https://github.com/Xpounder-com/hormuz/issues/10#issuecomment-5305144582).
 
-Acceptance authorizes implementation under [#10](https://github.com/Xpounder-com/hormuz/issues/10). The local deterministic subset, provider-format-aware denial of recognized opaque media, and single-node approval workflow have implementation evidence, but acceptance does not claim the remaining structured-DLP or enterprise release gates are complete.
+Acceptance authorizes implementation under [#10](https://github.com/Xpounder-com/hormuz/issues/10). The local deterministic subset, monotonic identity-derived team/person overlays, provider-format-aware denial of recognized opaque media, and single-node approval workflow have implementation evidence, but acceptance does not claim the remaining structured-DLP or enterprise release gates are complete.

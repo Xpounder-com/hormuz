@@ -116,12 +116,39 @@ class GatewayServer(ThreadingHTTPServer):
                     config.dlp_controls.approval.fingerprint_key_source,
                 )
             )
-        self.secret_redactor = SecretRedactor(
-            config.secret_controls,
-            tuple(protected_values),
-            config.dlp_controls,
-        )
+        self.protected_values = tuple(protected_values)
+        self._redactor_cache: dict[tuple[str, str, str, str, str], SecretRedactor] = {}
+        self._redactor_cache_lock = threading.Lock()
         super().__init__((config.listen.host, config.listen.port), GatewayRequestHandler)
+
+    def redactor_for(
+        self,
+        identity: Identity,
+        *,
+        protocol: str,
+        model: str,
+    ) -> SecretRedactor:
+        cache_key = (
+            identity.organization_id,
+            identity.team_id,
+            identity.actor_id,
+            protocol,
+            model,
+        )
+        with self._redactor_cache_lock:
+            redactor = self._redactor_cache.get(cache_key)
+            if redactor is None:
+                redactor = SecretRedactor(
+                    self.config.secret_controls,
+                    self.protected_values,
+                    self.config.resolved_dlp_controls(
+                        identity,
+                        protocol=protocol,
+                        model=model,
+                    ),
+                )
+                self._redactor_cache[cache_key] = redactor
+            return redactor
 
 
 class GatewayRequestHandler(BaseHTTPRequestHandler):
@@ -931,7 +958,11 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             if current_output is None or current_output > decision.max_output_tokens:
                 request_body[output_field] = decision.max_output_tokens
         try:
-            redaction = self.server.secret_redactor.inspect(
+            redaction = self.server.redactor_for(
+                identity,
+                protocol=protocol,
+                model=decision.route.upstream_model,
+            ).inspect(
                 request_body,
                 protocol=protocol,
                 model=decision.route.upstream_model,

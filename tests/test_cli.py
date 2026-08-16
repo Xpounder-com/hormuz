@@ -32,6 +32,7 @@ from hormuz.cli import (
     _context_pack,
     _context_snapshot_import,
     _context_snapshot_show,
+    _policy_check,
     _status,
     build_parser,
 )
@@ -361,6 +362,33 @@ class ClientConfigTests(unittest.TestCase):
             path.write_text(json.dumps(raw), encoding="utf-8")
             with self.assertRaisesRegex(ConfigError, "bounded single-line"):
                 GatewayConfig.load(path, environ={"HORMUZ_TOKEN": "test-identity-token"})
+
+    def test_policy_check_reports_effective_team_dlp_without_provider_work(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            config = replace(
+                self.config,
+                database_path=Path(temporary) / "usage.sqlite3",
+            )
+            output = io.StringIO()
+            with redirect_stdout(output):
+                result = _policy_check(
+                    config,
+                    argparse.Namespace(
+                        actor="alice",
+                        client="codex",
+                        protocol="openai",
+                        model="gpt-5.4",
+                        max_output_tokens=1000,
+                    ),
+                )
+
+        self.assertEqual(result, 0)
+        payload = json.loads(output.getvalue())
+        self.assertRegex(payload["dlp_policy_version"], r"\Adlp-effective-v1:[0-9a-f]{32}\Z")
+        rules = {rule["rule_id"]: rule for rule in payload["dlp_rules"]}
+        self.assertEqual(rules["email_address"]["action"], "redact")
+        self.assertEqual(rules["email_address"]["providers"], ["openai"])
+        self.assertEqual(rules["email_address"]["models"], ["gpt-5.4"])
 
     def test_dlp_approval_config_requires_key_and_organization_approver(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

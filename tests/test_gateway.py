@@ -1138,6 +1138,127 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertNotIn(email, repr(events))
         self.assertNotIn(email.encode("utf-8"), self.config.database_path.read_bytes())
 
+    def test_team_and_actor_dlp_overlays_apply_to_both_provider_paths(self) -> None:
+        config_value = self._config(self.provider.server_port, _free_port())
+        config_value["egress_controls"] = {
+            "dlp": {
+                "policy_version": "organization-dlp-v2",
+                "rules": {"email_address": {"action": "detect"}},
+                "overlays": {
+                    "teams": {
+                        "engineering": {
+                            "policy_version": "engineering-dlp-v2",
+                            "rules": {"email_address": {"action": "redact"}},
+                        }
+                    },
+                    "actors": {
+                        "alice": {
+                            "policy_version": "alice-dlp-v1",
+                            "rules": {
+                                "email_address": {
+                                    "action": "deny",
+                                    "providers": ["openai"],
+                                    "models": ["gpt-test-fast"],
+                                }
+                            },
+                        }
+                    },
+                },
+            }
+        }
+        self._restart_gateway(config_value)
+        emails = {
+            "alice_openai": "alice-openai@example.com",
+            "alice_anthropic": "alice-anthropic@example.com",
+            "bob_anthropic": "bob-anthropic@example.com",
+        }
+        before = len(FakeProviderHandler.requests)
+
+        denied_status, denied_headers, denied_body = self._post(
+            "/v1/responses",
+            {
+                "model": "engineering-fast",
+                "input": f"Contact {emails['alice_openai']}.",
+            },
+        )
+        bob_status, bob_headers, _ = self._post(
+            "/v1/messages",
+            {
+                "model": "claude-standard",
+                "max_tokens": 20,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": f"Contact {emails['bob_anthropic']}.",
+                    }
+                ],
+            },
+            token=CLAUDE_ONLY_TOKEN,
+            extra_headers={"Anthropic-Version": "2023-06-01"},
+        )
+        alice_status, alice_headers, _ = self._post(
+            "/v1/messages",
+            {
+                "model": "claude-standard",
+                "max_tokens": 20,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": f"Contact {emails['alice_anthropic']}.",
+                    }
+                ],
+            },
+            extra_headers={"Anthropic-Version": "2023-06-01"},
+        )
+
+        self.assertEqual(denied_status, 403)
+        self.assertEqual(
+            json.loads(denied_body)["error"]["code"],
+            "hormuz_dlp_denied",
+        )
+        self.assertNotIn("x-hormuz-redactions", denied_headers)
+        self.assertEqual(bob_status, 200)
+        self.assertEqual(alice_status, 200)
+        self.assertEqual(bob_headers["x-hormuz-redactions"], "1")
+        self.assertEqual(alice_headers["x-hormuz-redactions"], "1")
+        self.assertEqual(len(FakeProviderHandler.requests), before + 2)
+        forwarded = json.dumps(FakeProviderHandler.requests[before:])
+        for email in emails.values():
+            self.assertNotIn(email, forwarded)
+        self.assertEqual(forwarded.count("[REDACTED:HORMUZ_DLP]"), 2)
+
+        security = self.gateway.store.audit_events(
+            since="2000-01-01T00:00:00+00:00",
+            kind="security",
+        )
+        self.assertEqual(len(security), 3)
+        indexed = {
+            (event["actor_id"], event["protocol"]): event
+            for event in security
+        }
+        self.assertEqual(indexed[("alice", "openai")]["action"], "denied")
+        self.assertEqual(indexed[("bob", "anthropic")]["action"], "redacted")
+        self.assertEqual(indexed[("alice", "anthropic")]["action"], "redacted")
+        self.assertEqual(indexed[("alice", "openai")]["detection_count"], 1)
+        self.assertEqual(indexed[("bob", "anthropic")]["detection_count"], 1)
+        self.assertEqual(
+            indexed[("alice", "openai")]["policy_version"],
+            indexed[("alice", "anthropic")]["policy_version"],
+        )
+        self.assertNotEqual(
+            indexed[("alice", "openai")]["policy_version"],
+            indexed[("bob", "anthropic")]["policy_version"],
+        )
+        self.assertRegex(
+            str(indexed[("alice", "openai")]["policy_version"]),
+            r"\Adlp-effective-v1:[0-9a-f]{32}\Z",
+        )
+        self.assertEqual(self.gateway.store.monthly_totals(actor_id="alice").requests, 2)
+        self.assertEqual(self.gateway.store.monthly_totals(actor_id="bob").requests, 1)
+        for email in emails.values():
+            self.assertNotIn(email, repr(security))
+            self.assertNotIn(email.encode("utf-8"), self.config.database_path.read_bytes())
+
     def test_regulated_identifier_is_redacted_on_anthropic_path_before_provider(self) -> None:
         ssn = "123-45-6789"
 

@@ -47,6 +47,8 @@ Successful responses use HTTP `200` and schema version `1`:
 
 Status is one of `pending`, `approved`, `consumed`, or `expired`. The response never contains the prompt, matched value, response, payload fingerprint, source file, provider credential, or approval fingerprint key.
 
+`policy_version` is the organization-declared DLP version when no scoped overlay applies. When a team or person overlay changes the effective rule set, Hormuz returns a bounded `dlp-effective-v1:<digest>` value instead. That digest is derived only from safe layer versions and rule metadata; exact dictionary values are excluded. It binds the approval to the resolved policy used by the retry, so operators must bump the owning organization, team, or person policy version whenever a dictionary changes.
+
 ## Approve one request
 
 ```http

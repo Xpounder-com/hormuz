@@ -541,6 +541,8 @@ def _doctor(config: GatewayConfig) -> int:
     print(f"secret egress control: {config.secret_controls.mode}")
     print(f"DLP policy version: {config.dlp_controls.policy_version}")
     print(f"DLP rules: {len(config.dlp_controls.rules)}")
+    print(f"DLP team overlays: {len(config.team_dlp_overlays)}")
+    print(f"DLP actor overlays: {len(config.actor_dlp_overlays)}")
     print(
         "DLP approval: "
         + ("enabled (15-minute single-use)" if config.dlp_controls.approval.enabled else "disabled")
@@ -693,6 +695,15 @@ def _policy_check(config: GatewayConfig, args: argparse.Namespace) -> int:
         requested_model=args.model,
         requested_output_tokens=args.max_output_tokens,
     )
+    effective_dlp = (
+        config.resolved_dlp_controls(
+            identity,
+            protocol=decision.route.protocol,
+            model=decision.route.upstream_model,
+        )
+        if decision.route is not None
+        else None
+    )
     print(
         json.dumps(
             {
@@ -703,6 +714,22 @@ def _policy_check(config: GatewayConfig, args: argparse.Namespace) -> int:
                 "resolved_alias": decision.resolved_alias,
                 "upstream_model": decision.route.upstream_model if decision.route else None,
                 "max_output_tokens": decision.max_output_tokens,
+                "dlp_policy_version": (
+                    effective_dlp.policy_version if effective_dlp is not None else None
+                ),
+                "dlp_rules": (
+                    [
+                        {
+                            "rule_id": rule.rule_id,
+                            "action": rule.action,
+                            "providers": list(rule.providers),
+                            "models": list(rule.models),
+                        }
+                        for rule in effective_dlp.rules
+                    ]
+                    if effective_dlp is not None
+                    else []
+                ),
             },
             indent=2,
         )

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import hashlib
 import json
 import os
 import re
@@ -66,6 +67,12 @@ class DLPControls:
     policy_version: str = "local-dlp-v1"
     rules: tuple[DLPRuleConfig, ...] = ()
     approval: DLPApprovalConfig = field(default_factory=DLPApprovalConfig)
+
+
+@dataclass(frozen=True)
+class DLPPolicyOverlay:
+    policy_version: str
+    rules: tuple[DLPRuleConfig, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -212,6 +219,8 @@ class GatewayConfig:
     identities_by_subject: dict[tuple[str, str], Identity] = field(default_factory=dict)
     secret_controls: SecretControls = field(default_factory=SecretControls)
     dlp_controls: DLPControls = field(default_factory=DLPControls)
+    team_dlp_overlays: dict[str, DLPPolicyOverlay] = field(default_factory=dict)
+    actor_dlp_overlays: dict[str, DLPPolicyOverlay] = field(default_factory=dict)
     team_policies: dict[str, Policy] = field(default_factory=dict)
     actor_policies: dict[str, Policy] = field(default_factory=dict)
     max_request_bytes: int = 25 * 1024 * 1024
@@ -478,7 +487,12 @@ class GatewayConfig:
         if unknown_egress:
             raise ConfigError("Unknown egress_controls fields: " + ", ".join(unknown_egress))
         secret_controls = _secret_controls(egress_raw.get("secrets", {}), env)
-        dlp_controls = _dlp_controls(egress_raw.get("dlp", {}), env)
+        dlp_raw = egress_raw.get("dlp", {})
+        dlp_controls = _dlp_controls(dlp_raw, env)
+        team_dlp_overlays, actor_dlp_overlays = _dlp_overlays(
+            dlp_raw,
+            dlp_controls,
+        )
         context_service_raw = _object(raw.get("context_service", {}), "context_service")
         unknown_context_service = sorted(
             set(context_service_raw)
@@ -548,6 +562,8 @@ class GatewayConfig:
             identities_by_subject=identities_by_subject,
             secret_controls=secret_controls,
             dlp_controls=dlp_controls,
+            team_dlp_overlays=team_dlp_overlays,
+            actor_dlp_overlays=actor_dlp_overlays,
             team_policies=team_policies,
             actor_policies=actor_policies,
             max_request_bytes=_integer(raw.get("max_request_bytes", 25 * 1024 * 1024), "max_request_bytes", minimum=1024),
@@ -583,7 +599,41 @@ class GatewayConfig:
                         f"Identity {identity.actor_id} needs an effective max_output_tokens policy "
                         "when monthly token or budget limits are configured"
                     )
-        for rule in self.dlp_controls.rules:
+        team_organizations: dict[str, set[str]] = {}
+        for identity in self.identities_by_actor.values():
+            team_organizations.setdefault(identity.team_id, set()).add(
+                identity.organization_id
+            )
+        unknown_dlp_teams = sorted(
+            set(self.team_dlp_overlays) - set(team_organizations)
+        )
+        if unknown_dlp_teams:
+            raise ConfigError(
+                "DLP overlays reference unknown teams: " + ", ".join(unknown_dlp_teams)
+            )
+        ambiguous_dlp_teams = sorted(
+            team_id
+            for team_id in self.team_dlp_overlays
+            if len(team_organizations[team_id]) != 1
+        )
+        if ambiguous_dlp_teams:
+            raise ConfigError(
+                "DLP overlay team IDs must identify exactly one organization: "
+                + ", ".join(ambiguous_dlp_teams)
+            )
+        unknown_dlp_actors = sorted(
+            set(self.actor_dlp_overlays) - set(self.identities_by_actor)
+        )
+        if unknown_dlp_actors:
+            raise ConfigError(
+                "DLP overlays reference unknown actors: " + ", ".join(unknown_dlp_actors)
+            )
+        all_dlp_rules = (
+            *self.dlp_controls.rules,
+            *(rule for overlay in self.team_dlp_overlays.values() for rule in overlay.rules),
+            *(rule for overlay in self.actor_dlp_overlays.values() for rule in overlay.rules),
+        )
+        for rule in all_dlp_rules:
             for model in rule.models:
                 matching_routes = tuple(
                     route
@@ -596,7 +646,7 @@ class GatewayConfig:
                         "model for one of the rule's providers"
                     )
         if self.dlp_controls.approval.enabled and any(
-            rule.action == "require_approval" for rule in self.dlp_controls.rules
+            rule.action == "require_approval" for rule in all_dlp_rules
         ):
             organization_ids = {
                 identity.organization_id for identity in self.identities_by_actor.values()
@@ -631,6 +681,59 @@ class GatewayConfig:
             self.organization_policy
             .overlaid(self.team_policies.get(identity.team_id))
             .overlaid(self.actor_policies.get(identity.actor_id))
+        )
+
+    def resolved_dlp_controls(
+        self,
+        identity: Identity,
+        *,
+        protocol: str,
+        model: str,
+    ) -> DLPControls:
+        overlay_items: list[tuple[str, str, DLPPolicyOverlay]] = []
+        team_overlay = self.team_dlp_overlays.get(identity.team_id)
+        if team_overlay is not None:
+            overlay_items.append(("team", identity.team_id, team_overlay))
+        actor_overlay = self.actor_dlp_overlays.get(identity.actor_id)
+        if actor_overlay is not None:
+            overlay_items.append(("actor", identity.actor_id, actor_overlay))
+        overlays = tuple(overlay_items)
+        if not overlays:
+            return self.dlp_controls
+
+        effective_rules: list[DLPRuleConfig] = []
+        for organization_rule in self.dlp_controls.rules:
+            if not organization_rule.applies_to(protocol=protocol, model=model):
+                continue
+            action = organization_rule.action
+            for _, _, overlay in overlays:
+                for override in overlay.rules:
+                    if (
+                        override.rule_id == organization_rule.rule_id
+                        and override.applies_to(protocol=protocol, model=model)
+                        and _DLP_ACTION_RANK[override.action] > _DLP_ACTION_RANK[action]
+                    ):
+                        action = override.action
+            effective_rules.append(
+                DLPRuleConfig(
+                    rule_id=organization_rule.rule_id,
+                    category=organization_rule.category,
+                    confidence=organization_rule.confidence,
+                    action=action,
+                    providers=(protocol,),
+                    models=(model,),
+                    values_env=organization_rule.values_env,
+                    exact_values=organization_rule.exact_values,
+                )
+            )
+
+        return DLPControls(
+            policy_version=_effective_dlp_policy_version(
+                self.dlp_controls,
+                overlays,
+            ),
+            rules=tuple(effective_rules),
+            approval=self.dlp_controls.approval,
         )
 
 
@@ -815,6 +918,13 @@ def _secret_controls(value: Any, env: dict[str, str]) -> SecretControls:
 
 
 _DLP_ACTIONS = {"off", "detect", "redact", "deny", "require_approval"}
+_DLP_ACTION_RANK = {
+    "off": 0,
+    "detect": 1,
+    "redact": 2,
+    "require_approval": 3,
+    "deny": 4,
+}
 _DLP_BUILTINS = {
     "us_ssn": ("regulated_identifier", "high", "redact"),
     "payment_card": ("regulated_identifier", "high", "redact"),
@@ -827,7 +937,9 @@ _DLP_RULE_ID = re.compile(r"[a-z][a-z0-9_.-]{0,63}\Z")
 def _dlp_controls(value: Any, env: dict[str, str]) -> DLPControls:
     path = "egress_controls.dlp"
     item = _object(value, path)
-    unknown = sorted(set(item) - {"policy_version", "rules", "dictionaries", "approval"})
+    unknown = sorted(
+        set(item) - {"policy_version", "rules", "dictionaries", "approval", "overlays"}
+    )
     if unknown:
         raise ConfigError(f"Unknown {path} fields: " + ", ".join(unknown))
     policy_version = _bounded_policy_version(
@@ -934,6 +1046,163 @@ def _dlp_controls(value: Any, env: dict[str, str]) -> DLPControls:
         rules=tuple(rules),
         approval=approval,
     )
+
+
+def _dlp_overlays(
+    value: Any,
+    organization: DLPControls,
+) -> tuple[dict[str, DLPPolicyOverlay], dict[str, DLPPolicyOverlay]]:
+    path = "egress_controls.dlp.overlays"
+    dlp_item = _object(value, "egress_controls.dlp")
+    item = _object(dlp_item.get("overlays", {}), path)
+    unknown = sorted(set(item) - {"teams", "actors"})
+    if unknown:
+        raise ConfigError(f"Unknown {path} fields: " + ", ".join(unknown))
+    teams = _dlp_overlay_map(item.get("teams", {}), f"{path}.teams", organization)
+    actors = _dlp_overlay_map(item.get("actors", {}), f"{path}.actors", organization)
+    return teams, actors
+
+
+def _dlp_overlay_map(
+    value: Any,
+    path: str,
+    organization: DLPControls,
+) -> dict[str, DLPPolicyOverlay]:
+    item = _object(value, path)
+    if len(item) > 10_000:
+        raise ConfigError(f"{path} cannot contain more than 10000 scopes")
+    overlays: dict[str, DLPPolicyOverlay] = {}
+    for raw_scope_id, raw_overlay in item.items():
+        scope_id = _bounded_scope_id(raw_scope_id, f"{path} scope")
+        overlays[scope_id] = _dlp_overlay(
+            raw_overlay,
+            f"{path}.{scope_id}",
+            organization,
+        )
+    return overlays
+
+
+def _dlp_overlay(
+    value: Any,
+    path: str,
+    organization: DLPControls,
+) -> DLPPolicyOverlay:
+    item = _object(value, path)
+    unknown = sorted(set(item) - {"policy_version", "rules"})
+    if unknown:
+        raise ConfigError(f"Unknown {path} fields: " + ", ".join(unknown))
+    policy_version = _bounded_policy_version(
+        item.get("policy_version"),
+        f"{path}.policy_version",
+    )
+    raw_rules = _object(item.get("rules"), f"{path}.rules")
+    if not raw_rules:
+        raise ConfigError(f"{path}.rules must contain at least one tightening rule")
+    if len(raw_rules) > len(organization.rules):
+        raise ConfigError(f"{path}.rules cannot contain more rules than organization DLP")
+    organization_rules = {rule.rule_id: rule for rule in organization.rules}
+    rules: list[DLPRuleConfig] = []
+    for raw_rule_id, raw_rule in raw_rules.items():
+        rule_id = _dlp_identifier(raw_rule_id, f"{path}.rules rule_id")
+        base = organization_rules.get(rule_id)
+        if base is None:
+            raise ConfigError(
+                f"{path}.rules.{rule_id} must reference an enabled organization DLP rule"
+            )
+        rule_path = f"{path}.rules.{rule_id}"
+        rule = _object(raw_rule, rule_path)
+        unknown_rule_fields = sorted(set(rule) - {"action", "providers", "models"})
+        if unknown_rule_fields:
+            raise ConfigError(
+                f"Unknown {rule_path} fields: " + ", ".join(unknown_rule_fields)
+            )
+        action = _string(rule.get("action"), f"{rule_path}.action")
+        if action not in _DLP_ACTIONS - {"off"}:
+            raise ConfigError(
+                f"{rule_path}.action must be detect, redact, deny, or require_approval"
+            )
+        if _DLP_ACTION_RANK[action] <= _DLP_ACTION_RANK[base.action]:
+            raise ConfigError(
+                f"{rule_path}.action must be stricter than organization action {base.action}"
+            )
+        providers = base.providers
+        if "providers" in rule:
+            providers = _string_tuple(rule["providers"], f"{rule_path}.providers")
+            if not providers or not set(providers).issubset(base.providers):
+                raise ConfigError(
+                    f"{rule_path}.providers must be a non-empty subset of organization providers"
+                )
+            providers = tuple(dict.fromkeys(providers))
+        models = base.models
+        if "models" in rule:
+            models = _string_tuple(rule["models"], f"{rule_path}.models")
+            if not models:
+                raise ConfigError(
+                    f"{rule_path}.models must be a non-empty model scope"
+                )
+            if base.models and not set(models).issubset(base.models):
+                raise ConfigError(
+                    f"{rule_path}.models must be a non-empty subset of organization models"
+                )
+            models = tuple(dict.fromkeys(models))
+        rules.append(
+            DLPRuleConfig(
+                rule_id=base.rule_id,
+                category=base.category,
+                confidence=base.confidence,
+                action=action,
+                providers=providers,
+                models=models,
+                values_env=base.values_env,
+                exact_values=base.exact_values,
+            )
+        )
+    return DLPPolicyOverlay(policy_version=policy_version, rules=tuple(rules))
+
+
+def _effective_dlp_policy_version(
+    organization: DLPControls,
+    overlays: tuple[tuple[str, str, DLPPolicyOverlay], ...],
+) -> str:
+    def rule_metadata(rule: DLPRuleConfig) -> dict[str, object]:
+        return {
+            "rule_id": rule.rule_id,
+            "category": rule.category,
+            "confidence": rule.confidence,
+            "action": rule.action,
+            "providers": rule.providers,
+            "models": rule.models,
+            "values_env": rule.values_env,
+        }
+
+    payload = {
+        "schema": "hormuz.dlp-effective-policy.v1",
+        "organization": {
+            "policy_version": organization.policy_version,
+            "approval": {
+                "enabled": organization.approval.enabled,
+                "fingerprint_key_env": organization.approval.fingerprint_key_env,
+            },
+            "rules": [
+                rule_metadata(rule)
+                for rule in sorted(organization.rules, key=lambda item: item.rule_id)
+            ],
+        },
+        "overlays": [
+            {
+                "scope_type": scope_type,
+                "scope_id": scope_id,
+                "policy_version": overlay.policy_version,
+                "rules": [
+                    rule_metadata(rule)
+                    for rule in sorted(overlay.rules, key=lambda item: item.rule_id)
+                ],
+            }
+            for scope_type, scope_id, overlay in overlays
+        ],
+    }
+    canonical = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    return "dlp-effective-v1:" + hashlib.sha256(canonical).hexdigest()[:32]
 
 
 def _dlp_approval_config(value: Any, env: dict[str, str]) -> DLPApprovalConfig:
@@ -1048,6 +1317,15 @@ def _bounded_policy_version(value: Any, path: str) -> str:
     result = _string(value, path)
     if len(result.encode("utf-8")) > 128 or not all(character.isprintable() for character in result):
         raise ConfigError(f"{path} must be a printable string up to 128 bytes")
+    return result
+
+
+def _bounded_scope_id(value: Any, path: str) -> str:
+    result = _string(value, path)
+    if len(result.encode("utf-8")) > 256 or not all(
+        character.isprintable() for character in result
+    ):
+        raise ConfigError(f"{path} must be a printable string up to 256 bytes")
     return result
 
 

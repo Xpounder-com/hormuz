@@ -93,6 +93,8 @@ The generated Codex auth command invokes `hormuz auth token --gateway ... --prof
 
 Codex and Claude Code can represent provider image and file inputs, but Hormuz does not yet have a trusted byte decoder/classifier. The secure default therefore denies recognized OpenAI image/file/screenshot blocks and Anthropic image or non-text document/file blocks before provider egress. The employee keeps the same client configuration; the request receives the provider-shaped DLP denial. Inline Anthropic text documents remain inspectable and usable.
 
+The same unchanged client configuration automatically receives the DLP policy resolved from the authenticated employee's organization, team, and actor identity. A narrower overlay can only strengthen an enabled organization rule and optionally narrow its provider/model scope; the employee cannot select or bypass the overlay in a request.
+
 An organization can set `egress_controls.dlp.rules.opaque_media.action` to `off`, but that is an explicit risk acceptance: the media then reaches the provider without Hormuz inspecting its bytes. See [SECRET_CONTROLS.md](SECRET_CONTROLS.md) for exact covered shapes and residual gaps.
 
 ## Deployment boundary

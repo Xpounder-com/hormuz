@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import tempfile
 import unittest
@@ -452,6 +453,307 @@ class SecretRedactorTests(unittest.TestCase):
             config_path.write_text(json.dumps(raw), encoding="utf-8")
             with self.assertRaisesRegex(ConfigError, "must match a routed upstream model"):
                 GatewayConfig.load(config_path, environ=environment)
+
+    def test_dlp_overlays_resolve_team_then_actor_without_duplicate_rules(self) -> None:
+        raw = json.loads((ROOT / "config.example.json").read_text(encoding="utf-8"))
+        raw["egress_controls"]["dlp"]["overlays"] = {
+            "teams": {
+                "engineering": {
+                    "policy_version": "engineering-dlp-v2",
+                    "rules": {"email_address": {"action": "redact"}},
+                }
+            },
+            "actors": {
+                "alice": {
+                    "policy_version": "alice-dlp-v1",
+                    "rules": {
+                        "email_address": {
+                            "action": "deny",
+                            "providers": ["openai"],
+                            "models": ["gpt-5.4"],
+                        }
+                    },
+                }
+            },
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            config_path = Path(temporary) / "hormuz.json"
+            config_path.write_text(json.dumps(raw), encoding="utf-8")
+            config = GatewayConfig.load(
+                config_path,
+                environ={"HORMUZ_TOKEN": "employee-token-long"},
+            )
+
+        identity = config.identities_by_actor["alice"]
+        openai = config.resolved_dlp_controls(
+            identity,
+            protocol="openai",
+            model="gpt-5.4",
+        )
+        openai_other_model = config.resolved_dlp_controls(
+            identity,
+            protocol="openai",
+            model="gpt-5.4-mini",
+        )
+        anthropic = config.resolved_dlp_controls(
+            identity,
+            protocol="anthropic",
+            model="claude-sonnet-5",
+        )
+
+        def action(controls: DLPControls, rule_id: str) -> str:
+            matches = [rule.action for rule in controls.rules if rule.rule_id == rule_id]
+            self.assertEqual(len(matches), 1)
+            return matches[0]
+
+        self.assertEqual(action(openai, "email_address"), "deny")
+        self.assertEqual(action(openai_other_model, "email_address"), "redact")
+        self.assertEqual(action(anthropic, "email_address"), "redact")
+        self.assertEqual(openai.policy_version, openai_other_model.policy_version)
+        self.assertEqual(openai.policy_version, anthropic.policy_version)
+        self.assertRegex(openai.policy_version, r"\Adlp-effective-v1:[0-9a-f]{32}\Z")
+        self.assertEqual(
+            next(
+                rule.action
+                for rule in config.dlp_controls.rules
+                if rule.rule_id == "email_address"
+            ),
+            "detect",
+        )
+
+    def test_dlp_actor_overlay_cannot_weaken_a_stronger_team_overlay(self) -> None:
+        raw = json.loads((ROOT / "config.example.json").read_text(encoding="utf-8"))
+        raw["egress_controls"]["dlp"]["overlays"] = {
+            "teams": {
+                "engineering": {
+                    "policy_version": "engineering-dlp-v3",
+                    "rules": {"email_address": {"action": "deny"}},
+                }
+            },
+            "actors": {
+                "alice": {
+                    "policy_version": "alice-dlp-v2",
+                    "rules": {"email_address": {"action": "redact"}},
+                }
+            },
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            config_path = Path(temporary) / "hormuz.json"
+            config_path.write_text(json.dumps(raw), encoding="utf-8")
+            config = GatewayConfig.load(
+                config_path,
+                environ={"HORMUZ_TOKEN": "employee-token-long"},
+            )
+
+        effective = config.resolved_dlp_controls(
+            config.identities_by_actor["alice"],
+            protocol="openai",
+            model="gpt-5.4",
+        )
+        self.assertEqual(
+            next(rule.action for rule in effective.rules if rule.rule_id == "email_address"),
+            "deny",
+        )
+
+    def test_dlp_overlay_approval_requires_an_organization_approver(self) -> None:
+        raw = json.loads((ROOT / "config.example.json").read_text(encoding="utf-8"))
+        raw["egress_controls"]["dlp"]["approval"] = {
+            "enabled": True,
+            "fingerprint_key_env": "DLP_FINGERPRINT_KEY",
+        }
+        raw["egress_controls"]["dlp"]["overlays"] = {
+            "teams": {
+                "engineering": {
+                    "policy_version": "engineering-approval-v1",
+                    "rules": {"email_address": {"action": "require_approval"}},
+                }
+            },
+            "actors": {},
+        }
+        environment = {
+            "HORMUZ_TOKEN": "employee-token-long",
+            "DLP_FINGERPRINT_KEY": base64.urlsafe_b64encode(b"k" * 32).decode("ascii"),
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            config_path = Path(temporary) / "hormuz.json"
+            config_path.write_text(json.dumps(raw), encoding="utf-8")
+            with self.assertRaisesRegex(ConfigError, "no dlp_approver"):
+                GatewayConfig.load(config_path, environ=environment)
+
+            raw["identities"][0]["capabilities"] = ["dlp_approver"]
+            config_path.write_text(json.dumps(raw), encoding="utf-8")
+            config = GatewayConfig.load(config_path, environ=environment)
+
+        effective = config.resolved_dlp_controls(
+            config.identities_by_actor["alice"],
+            protocol="openai",
+            model="gpt-5.4",
+        )
+        self.assertEqual(
+            next(rule.action for rule in effective.rules if rule.rule_id == "email_address"),
+            "require_approval",
+        )
+
+    def test_dlp_overlay_inherits_dictionary_without_exposing_values(self) -> None:
+        raw = json.loads((ROOT / "config.example.json").read_text(encoding="utf-8"))
+        raw["egress_controls"]["dlp"]["dictionaries"] = [
+            {
+                "rule_id": "company.codename",
+                "action": "detect",
+                "providers": ["openai"],
+                "values_env": "COMPANY_TERMS",
+            }
+        ]
+        raw["egress_controls"]["dlp"]["overlays"] = {
+            "teams": {
+                "engineering": {
+                    "policy_version": "engineering-codenames-v1",
+                    "rules": {"company.codename": {"action": "deny"}},
+                }
+            },
+            "actors": {},
+        }
+        protected = "PROJECT-ORBITAL"
+        with tempfile.TemporaryDirectory() as temporary:
+            config_path = Path(temporary) / "hormuz.json"
+            config_path.write_text(json.dumps(raw), encoding="utf-8")
+            config = GatewayConfig.load(
+                config_path,
+                environ={
+                    "HORMUZ_TOKEN": "employee-token-long",
+                    "COMPANY_TERMS": json.dumps([protected]),
+                },
+            )
+
+        effective = config.resolved_dlp_controls(
+            config.identities_by_actor["alice"],
+            protocol="openai",
+            model="gpt-5.4",
+        )
+        rule = next(rule for rule in effective.rules if rule.rule_id == "company.codename")
+        self.assertEqual(rule.action, "deny")
+        self.assertEqual(rule.exact_values, (protected,))
+        self.assertNotIn(protected, repr(config))
+        self.assertNotIn(protected, effective.policy_version)
+
+    def test_dlp_overlays_reject_weaker_unknown_or_expanded_scope(self) -> None:
+        baseline = json.loads((ROOT / "config.example.json").read_text(encoding="utf-8"))
+
+        cases = (
+            (
+                {"email_address": {"action": "detect"}},
+                "must be stricter than organization action detect",
+            ),
+            (
+                {"unknown.rule": {"action": "deny"}},
+                "must reference an enabled organization DLP rule",
+            ),
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            config_path = Path(temporary) / "hormuz.json"
+            for rules, message in cases:
+                raw = json.loads(json.dumps(baseline))
+                raw["egress_controls"]["dlp"]["overlays"] = {
+                    "teams": {
+                        "engineering": {
+                            "policy_version": "invalid-v1",
+                            "rules": rules,
+                        }
+                    },
+                    "actors": {},
+                }
+                config_path.write_text(json.dumps(raw), encoding="utf-8")
+                with self.subTest(message=message), self.assertRaisesRegex(ConfigError, message):
+                    GatewayConfig.load(
+                        config_path,
+                        environ={"HORMUZ_TOKEN": "employee-token-long"},
+                    )
+
+            raw = json.loads(json.dumps(baseline))
+            raw["egress_controls"]["dlp"]["rules"]["email_address"]["providers"] = [
+                "openai"
+            ]
+            raw["egress_controls"]["dlp"]["overlays"] = {
+                "teams": {
+                    "engineering": {
+                        "policy_version": "invalid-provider-v1",
+                        "rules": {
+                            "email_address": {
+                                "action": "redact",
+                                "providers": ["anthropic"],
+                            }
+                        },
+                    }
+                },
+                "actors": {},
+            }
+            config_path.write_text(json.dumps(raw), encoding="utf-8")
+            with self.assertRaisesRegex(ConfigError, "non-empty subset of organization providers"):
+                GatewayConfig.load(
+                    config_path,
+                    environ={"HORMUZ_TOKEN": "employee-token-long"},
+                )
+
+            raw = json.loads(json.dumps(baseline))
+            raw["egress_controls"]["dlp"]["overlays"] = {
+                "teams": {
+                    "engineering": {
+                        "policy_version": "invalid-model-v1",
+                        "rules": {
+                            "email_address": {
+                                "action": "redact",
+                                "models": [],
+                            }
+                        },
+                    }
+                },
+                "actors": {},
+            }
+            config_path.write_text(json.dumps(raw), encoding="utf-8")
+            with self.assertRaisesRegex(ConfigError, "non-empty model scope"):
+                GatewayConfig.load(
+                    config_path,
+                    environ={"HORMUZ_TOKEN": "employee-token-long"},
+                )
+
+            raw = json.loads(json.dumps(baseline))
+            raw["egress_controls"]["dlp"]["overlays"] = {
+                "teams": {
+                    "unknown-team": {
+                        "policy_version": "unknown-team-v1",
+                        "rules": {"email_address": {"action": "redact"}},
+                    }
+                },
+                "actors": {},
+            }
+            config_path.write_text(json.dumps(raw), encoding="utf-8")
+            with self.assertRaisesRegex(ConfigError, "unknown teams"):
+                GatewayConfig.load(
+                    config_path,
+                    environ={"HORMUZ_TOKEN": "employee-token-long"},
+                )
+
+            raw = json.loads(json.dumps(baseline))
+            raw["identities"].append(
+                {
+                    "token_env": "SECOND_HORMUZ_TOKEN",
+                    "actor_id": "bob",
+                    "actor_name": "Bob Example",
+                    "team_id": "engineering",
+                    "team_name": "Engineering",
+                    "organization_id": "another-organization",
+                    "allowed_clients": ["codex"],
+                }
+            )
+            config_path.write_text(json.dumps(raw), encoding="utf-8")
+            with self.assertRaisesRegex(ConfigError, "exactly one organization"):
+                GatewayConfig.load(
+                    config_path,
+                    environ={
+                        "HORMUZ_TOKEN": "employee-token-long",
+                        "SECOND_HORMUZ_TOKEN": "second-employee-token",
+                    },
+                )
 
     def test_dlp_dictionary_rejects_non_json_or_unsafe_configuration(self) -> None:
         raw = json.loads((ROOT / "config.example.json").read_text(encoding="utf-8"))

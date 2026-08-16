@@ -4,7 +4,7 @@ Hormuz inspects JSON string values and recognized provider content blocks after 
 
 ## Configuration
 
-Egress controls are global because every provider-bound request must cross the same organization boundary:
+Every provider-bound request crosses the organization rule boundary. Optional team and actor overlays may only tighten that organization policy:
 
 ```json
 {
@@ -36,7 +36,29 @@ Egress controls are global because every provider-bound request must cross the s
           "models": ["gpt-5.4"],
           "values_env": "HORMUZ_COMPANY_TERMS"
         }
-      ]
+      ],
+      "overlays": {
+        "teams": {
+          "engineering": {
+            "policy_version": "engineering-dlp-v1",
+            "rules": {
+              "email_address": {"action": "redact"}
+            }
+          }
+        },
+        "actors": {
+          "alice": {
+            "policy_version": "alice-dlp-v1",
+            "rules": {
+              "company.codename": {
+                "action": "deny",
+                "providers": ["openai"],
+                "models": ["gpt-5.4"]
+              }
+            }
+          }
+        }
+      }
     }
   }
 }
@@ -79,6 +101,16 @@ Structured DLP currently adds four deterministic built-ins:
 - `opaque_media` recognizes provider-defined image, file, document, and screenshot content positions whose bytes Hormuz cannot inspect. It denies by default and cannot be configured to redact or require approval because neither action produces inspected content.
 
 Each DLP rule can be limited to `openai`, `anthropic`, and exact routed upstream model IDs. `detect` forwards the original value, `redact` replaces it with `[REDACTED:HORMUZ_DLP]`, and `deny` returns `hormuz_dlp_denied` without a provider call. With approval disabled, `require_approval` continues to fail closed without creating a grant. With approval enabled, it creates a durable metadata-only request and returns `hormuz_dlp_approval_required` plus the opaque request ID in the message and `X-Hormuz-DLP-Approval-Request` header.
+
+## Team and person tightening
+
+The organization policy owns every detector, dictionary, category, confidence, base action, and maximum provider/model scope. A team or actor overlay references an enabled organization `rule_id` and supplies a required `policy_version`, a strictly stronger action, and optionally a narrower provider/model scope. It cannot add a detector, load separate dictionary values, enable a rule the organization turned off, broaden its scope, or change its metadata.
+
+Action strength is `detect` < `redact` < `require_approval` < `deny`. Hormuz applies the authenticated identity's team overlay and then actor overlay, but resolves one strongest effective rule for each request. An actor declaration therefore cannot weaken a stronger team rule. Unknown team/actor IDs, unknown rules, actions equal to or weaker than the organization action, broader scopes, and unsupported routed models fail configuration validation instead of becoming silent policy gaps. Until the enterprise tenancy ADR is implemented, an overlaid team ID must also map to identities in exactly one configured organization; ambiguous cross-organization team names fail closed.
+
+When an identity has an overlay, Hormuz derives a bounded `dlp-effective-v1:...` policy version from the safe organization/team/actor rule metadata and declared layer versions. That deterministic value binds approval retries and is stored in metadata-only DLP evidence; it contains no dictionary values. Administrators must increment the owning `policy_version` whenever an environment-backed dictionary's values change because those protected values are deliberately excluded from the digest. `hormuz policy-check` shows the exact effective rule actions for an actor, provider, and requested model before rollout.
+
+Approval remains organization-governed. If any active overlay selects `require_approval` while approvals are enabled, configuration validation still requires a same-organization `dlp_approver`; an overlay cannot grant that capability or bypass non-self approval.
 
 ## Opaque image and file boundary
 
@@ -141,7 +173,7 @@ This is a bounded deterministic DLP subset, not a complete data-loss-prevention 
 
 Use `deny` when forwarding a detected credential is unacceptable. Production deployments should combine Hormuz with least-privilege provider keys, short-lived employee identity, network controls, provider retention settings, code-host secret scanning, and a reviewed list of organization-specific values.
 
-The broader boundary remains governed by [accepted ADR 0004](decisions/0004-structured-dlp-and-approval-boundary.md). Source classification, semantic detection, team/person DLP tightening, provider-header and JSON-key inspection, arbitrary encoded-text/archive decoding, detector-version evidence, multi-node approval persistence/notification, content-cache invalidation, and organization-specific evaluation are still open. Issue #10 remains open until those paths and the complete compatibility, failure, migration, and privacy gates pass.
+The broader boundary remains governed by [accepted ADR 0004](decisions/0004-structured-dlp-and-approval-boundary.md). Source classification, semantic detection, provider-header and JSON-key inspection, arbitrary encoded-text/archive decoding, detector-version evidence, multi-node approval persistence/notification, content-cache invalidation, and organization-specific evaluation are still open. Issue #10 remains open until those paths and the complete compatibility, failure, migration, and privacy gates pass.
 
 ## Verify
 
@@ -151,6 +183,7 @@ The integration tests assert both sides of the boundary:
 python3 -m unittest -v \
   tests.test_gateway.GatewayIntegrationTests.test_secret_is_redacted_before_provider_and_audited \
   tests.test_gateway.GatewayIntegrationTests.test_low_confidence_dlp_detection_forwards_unchanged_and_audits_metadata_only \
+  tests.test_gateway.GatewayIntegrationTests.test_team_and_actor_dlp_overlays_apply_to_both_provider_paths \
   tests.test_gateway.GatewayIntegrationTests.test_regulated_identifier_is_redacted_on_anthropic_path_before_provider \
   tests.test_gateway.GatewayIntegrationTests.test_opaque_media_is_denied_for_openai_and_anthropic_before_provider \
   tests.test_gateway.GatewayIntegrationTests.test_opaque_media_denial_on_token_count_has_no_usage_charge \
@@ -162,4 +195,4 @@ python3 -m unittest -v \
   tests.test_store.UsageStoreMigrationTests.test_dlp_approval_expiry_and_concurrent_retry_fail_closed
 ```
 
-These tests prove credential and regulated-identifier transformation, detect-only forwarding, provider-format-aware opaque denial, inspectable text-document transformation, deny-before-egress, exact routed-model scoping, non-self authorization, CLI/API approval, exact single-use consumption, expiry, concurrent replay rejection, model-mismatch evidence, store-outage denial, and metadata-only evidence across the OpenAI and Anthropic compatibility paths.
+These tests prove credential and regulated-identifier transformation, detect-only forwarding, monotonic team/person tightening, provider-format-aware opaque denial, inspectable text-document transformation, deny-before-egress, exact routed-model scoping, non-self authorization, CLI/API approval, exact single-use consumption, expiry, concurrent replay rejection, model-mismatch evidence, store-outage denial, and metadata-only evidence across the OpenAI and Anthropic compatibility paths.

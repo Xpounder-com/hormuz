@@ -265,7 +265,7 @@ Observed local result:
 - isolated source and wheel builds succeeded; the source distribution contained the DLP decision, implementation docs, and detector/gateway tests, and a clean Python 3.14 environment installed the wheel from outside the source tree and loaded `organization-dlp-v1` with all three built-in rules.
 - GitHub Actions push run `31920655595` and pull-request run `31920657597` both passed all seven publication jobs for implementation commit `695fff4`: Python 3.11–3.14, strict context benchmark, source/wheel build and install, and pinned official Codex/Claude Code compatibility.
 
-This was the bounded deterministic detector/enforcement checkpoint for #10. The subsequent approval checkpoint below closes the local grant, replay-safe consumption, and post-approval model-mismatch items; team/person DLP overlays, source classification, opaque-media denial, provider-header and JSON-key inspection, semantic detection, context-cache invalidation, organization-representative detector evaluation, and enterprise deployment gates remain open.
+This was the bounded deterministic detector/enforcement checkpoint for #10. At that checkpoint, the local grant/replay flow, opaque-media denial, and team/person DLP overlays remained open; the subsequent sections below close those bounded items. Source classification, provider-header and JSON-key inspection, semantic detection, context-cache invalidation, organization-representative detector evaluation, and enterprise deployment gates remain open.
 
 ### Replay-safe DLP approval workflow
 
@@ -307,7 +307,28 @@ Observed local result:
 - bytecode compilation and `git diff --check` passed.
 - GitHub Actions push run `31922716279` and pull-request run `31922717807` both passed all seven publication jobs for implementation commit `a39f7f7`: Python 3.11–3.14, strict context benchmark, source/wheel build and install, and pinned official Codex/Claude Code compatibility.
 
-This closes the recognized provider-request media-shape gap, not issue #10 or the enterprise DLP program. Hormuz still does not fetch and inspect URLs or provider file IDs, decode arbitrary base64 hidden in ordinary text, inspect archives, classify provider headers/JSON keys/source repositories, run semantic detectors, apply team/person DLP overlays, or provide customer-representative detector evaluation, KMS/BYOK custody, HA persistence, an externally immutable audit sink, or an independent security review. Explicitly disabling the rule accepts that uninspected media can reach the provider.
+This closed the recognized provider-request media-shape gap, not issue #10 or the enterprise DLP program. At that checkpoint, team/person DLP overlays were not yet applied; the subsequent checkpoint below closes that bounded item. Hormuz still does not fetch and inspect URLs or provider file IDs, decode arbitrary base64 hidden in ordinary text, inspect archives, classify provider headers/JSON keys/source repositories, run semantic detectors, or provide customer-representative detector evaluation, KMS/BYOK custody, HA persistence, an externally immutable audit sink, or an independent security review. Explicitly disabling the rule accepts that uninspected media can reach the provider.
+
+### Monotonic team and person DLP policy
+
+The accepted ADR 0004 organization/team/person hierarchy, configuration parser, exact provider/model resolver, gateway cache, CLI diagnostics, both provider paths, approval validation, and metadata-only evidence boundary were exercised on August 15, 2026.
+
+Observed local result:
+
+- an organization rule remained the sole owner of its detector, dictionary values, category, confidence, base action, and maximum provider/model scope; team and actor overlays could reference only an enabled rule, declare a version, choose a strictly stronger action, and optionally narrow that scope;
+- `detect < redact < require_approval < deny` was enforced at configuration and resolution boundaries. A stronger team action survived a weaker actor declaration, so a person layer could not relax the effective team result;
+- unknown team/actor IDs, rules not enabled by the organization, actions equal to or weaker than the organization action, provider/model expansion, unsupported routed models, and team IDs shared by identities in multiple organizations failed configuration validation;
+- the gateway resolved one effective rule per protected value for the exact routed provider/model, avoiding duplicate findings or counts across layers. In the integration path, Alice's OpenAI-scoped actor rule denied one email with zero provider calls while the Engineering team rule redacted Bob's and Alice's Anthropic requests before provider egress;
+- environment-backed organization dictionaries were inherited by overlays without copying their values into configuration representations or the effective policy version;
+- each active identity hierarchy produced a bounded deterministic `dlp-effective-v1:...` value from safe organization/team/actor layer metadata. Alice received the same binding across her provider requests and a different binding from Bob's team-only policy; DLP evidence contained no matched email value;
+- an overlay selecting `require_approval` participated in the existing organization-approver validation, and the effective version flowed through the unchanged keyed approval and audit path;
+- the gateway memoized immutable redactors by organization, team, actor, provider, and routed model, avoiding repeated policy hashing on the request path;
+- `hormuz policy-check` returned the effective version and one safe rule/action/provider/model entry per organization rule without a provider call;
+- all 176 source tests passed with both the installed Codex and official Claude Code compatibility paths enabled;
+- the frozen 60-task context release profile remained green with precision `1.00`, recall `1.00`, useful-pack rate `1.00`, mean compression ratio `0.840593`, zero authorization/lifecycle/dependency/malicious/contradiction/budget/determinism failures, and p95 in-process selection latency `0.179167 ms`; corpus SHA-256 remained `9822d592868202c7c7539bcdac7d4a5894c01f9e6dba7a434846516b67b32c17`.
+- isolated source and wheel builds succeeded; the source distribution contained the overlay implementation, configuration, documentation, and tests, and a clean Python 3.14 environment installed the wheel from outside the source tree, loaded Hormuz from `site-packages`, and returned the expected effective Engineering email-redaction rule from the installed CLI and library.
+
+This closes the local configuration and enforcement slice for monotonic team/person DLP overlays. It does not establish dynamic RBAC policy administration, PostgreSQL tenant isolation, SCIM group synchronization, policy-change audit, distributed cache invalidation, or a hosted control-plane schema; those depend on the owner-pending enterprise tenancy decision. Issue #10 also remains open for source classification, arbitrary encoded text/archive decoding, provider-header and JSON-key coverage, semantic detector evaluation, multi-node approval operations, externally immutable audit, and independent security review.
 
 ## Reproduce locally
 
