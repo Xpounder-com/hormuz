@@ -23,7 +23,11 @@ from hormuz.context_lifecycle_client import ContextLifecycleClient
 from hormuz.context_store import ContextStoreError
 from hormuz.policy import PolicyEngine
 from hormuz.redaction import MAX_ENCODED_TEXT_BYTES
-from hormuz.server import GatewayServer, serve_in_thread
+from hormuz.server import (
+    GatewayServer,
+    _provider_query_inspection_strings,
+    serve_in_thread,
+)
 from hormuz.store import DLPApprovalStoreError, SecurityStoreError, UsageStore
 
 
@@ -245,6 +249,23 @@ class FakeProviderHandler(BaseHTTPRequestHandler):
 
     def log_message(self, format: str, *args: object) -> None:
         pass
+
+
+class ProviderQueryInspectionTests(unittest.TestCase):
+    def test_query_is_form_decoded_once_without_changing_forwarded_material(self) -> None:
+        query = "owner=query%2Downer%40example.com+internal&feature=%2573%256B"
+
+        self.assertEqual(
+            _provider_query_inspection_strings(query),
+            ("owner=query-owner@example.com internal&feature=%73%6B",),
+        )
+
+    def test_non_utf8_percent_encoding_fails_closed(self) -> None:
+        with self.assertRaisesRegex(
+            ValueError,
+            "Provider query percent-encoding must decode to valid UTF-8",
+        ):
+            _provider_query_inspection_strings("feature=%FF")
 
 
 class GatewayIntegrationTests(unittest.TestCase):
@@ -1702,6 +1723,211 @@ class GatewayIntegrationTests(unittest.TestCase):
         )
         self.assertNotIn(protected, repr(security))
         self.assertNotIn(protected.encode("utf-8"), self.config.database_path.read_bytes())
+
+    def test_protected_data_in_query_names_and_values_is_denied_without_provider_or_persistence(self) -> None:
+        openai_secret = "sk-" + "proj-" + ("Y" * 24)
+        anthropic_secret = "sk-ant-" + ("Z" * 24)
+        ssn = "123-45-6789"
+
+        def percent_encode(value: str) -> str:
+            return "".join(f"%{byte:02X}" for byte in value.encode("utf-8"))
+
+        cases = (
+            (
+                f"/v1/responses?feature={openai_secret}",
+                "openai",
+                openai_secret,
+                "hormuz_secret_detected",
+            ),
+            (
+                f"/v1/responses?{percent_encode(openai_secret)}=enabled",
+                "openai",
+                openai_secret,
+                "hormuz_secret_detected",
+            ),
+            (
+                f"/v1/messages?feature={anthropic_secret}",
+                "anthropic",
+                anthropic_secret,
+                "permission_error",
+            ),
+            (
+                f"/v1/messages?feature={percent_encode(anthropic_secret)}",
+                "anthropic",
+                anthropic_secret,
+                "permission_error",
+            ),
+            (
+                f"/v1/responses?subject={percent_encode(ssn)}",
+                "openai",
+                ssn,
+                "hormuz_dlp_denied",
+            ),
+        )
+        before = len(FakeProviderHandler.requests)
+
+        for path, protocol, protected, expected_code in cases:
+            with self.subTest(path=path):
+                if protocol == "openai":
+                    body = {"model": "engineering-fast", "input": "safe"}
+                    extra_headers = None
+                else:
+                    body = {
+                        "model": "claude-standard",
+                        "max_tokens": 20,
+                        "messages": [{"role": "user", "content": "safe"}],
+                    }
+                    extra_headers = {"Anthropic-Version": "2023-06-01"}
+                status, _, response = self._post(
+                    path,
+                    body,
+                    extra_headers=extra_headers,
+                )
+
+                self.assertEqual(status, 403)
+                error = json.loads(response)["error"]
+                code = error.get("code", error.get("type"))
+                self.assertEqual(code, expected_code)
+                self.assertNotIn(protected.encode("utf-8"), response)
+
+        self.assertEqual(len(FakeProviderHandler.requests), before)
+        usage = self.gateway.store.monthly_totals(actor_id="alice")
+        self.assertEqual(usage.requests, len(cases))
+        self.assertEqual(usage.denied_requests, len(cases))
+        self.assertEqual(usage.redaction_count, 0)
+        security = self.gateway.store.audit_events(
+            since="2000-01-01T00:00:00+00:00",
+            kind="security",
+        )
+        self.assertEqual(len(security), len(cases))
+        self.assertTrue(all(event["action"] == "denied" for event in security))
+        self.assertNotIn(openai_secret, repr(security))
+        self.assertNotIn(anthropic_secret, repr(security))
+        self.assertNotIn(ssn, repr(security))
+        database = self.config.database_path.read_bytes()
+        self.assertNotIn(openai_secret.encode("utf-8"), database)
+        self.assertNotIn(anthropic_secret.encode("utf-8"), database)
+        self.assertNotIn(ssn.encode("utf-8"), database)
+
+    def test_detect_only_percent_encoded_query_is_forwarded_raw_and_audited_metadata_only(self) -> None:
+        email = "query-owner@example.com"
+        encoded_email = "".join(
+            f"%{byte:02X}" for byte in email.encode("utf-8")
+        )
+        path = f"/v1/responses?owner={encoded_email}"
+
+        status, headers, response = self._post(
+            path,
+            {"model": "engineering-fast", "input": "safe"},
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(response)["model"], "gpt-test-fast")
+        self.assertEqual(headers["x-hormuz-dlp-detections"], "1")
+        self.assertNotIn("x-hormuz-redactions", headers)
+        self.assertEqual(FakeProviderHandler.requests[-1]["path"], path)
+        security = self.gateway.store.audit_events(
+            since="2000-01-01T00:00:00+00:00",
+            kind="security",
+        )
+        self.assertEqual(len(security), 1)
+        self.assertEqual(security[0]["action"], "detected")
+        self.assertEqual(security[0]["findings"][0]["rule_id"], "email_address")
+        self.assertNotIn(email, repr(security))
+        self.assertNotIn(email.encode("utf-8"), self.config.database_path.read_bytes())
+
+    def test_query_approval_is_bound_to_exact_raw_query(self) -> None:
+        protected = "PROJECT-QUERY-TRIDENT"
+        changed = protected + "-CHANGED"
+        fingerprint_key_source = base64.urlsafe_b64encode(b"q" * 32).decode("ascii")
+        os.environ["TEST_APPROVAL_TERMS"] = json.dumps([protected])
+        os.environ["TEST_APPROVAL_KEY"] = fingerprint_key_source
+        config_value = self._config(self.provider.server_port, _free_port())
+        config_value["identities"][1]["capabilities"] = ["dlp_approver"]
+        config_value["egress_controls"] = {
+            "secrets": {"mode": "redact", "builtins": True},
+            "dlp": {
+                "policy_version": "query-approval-v1",
+                "approval": {
+                    "enabled": True,
+                    "fingerprint_key_env": "TEST_APPROVAL_KEY",
+                },
+                "dictionaries": [
+                    {
+                        "rule_id": "company.query_term",
+                        "action": "require_approval",
+                        "providers": ["openai"],
+                        "values_env": "TEST_APPROVAL_TERMS",
+                    }
+                ],
+            },
+        }
+        self._restart_gateway(config_value)
+        os.environ.pop("TEST_APPROVAL_TERMS", None)
+        os.environ.pop("TEST_APPROVAL_KEY", None)
+        body = {"model": "engineering-fast", "input": "safe"}
+        path = f"/v1/responses?feature={protected}"
+        before = len(FakeProviderHandler.requests)
+
+        blocked, blocked_headers, blocked_body = self._post(path, body)
+        self.assertEqual(blocked, 403)
+        request_id = blocked_headers["x-hormuz-dlp-approval-request"]
+        self.assertIn(request_id, blocked_body.decode("utf-8"))
+        approved, _, approved_body = self._post(
+            f"/v1/dlp/approval-requests/{request_id}/decisions",
+            {"decision": "approve"},
+            token=CLAUDE_ONLY_TOKEN,
+        )
+        self.assertEqual(approved, 200)
+        self.assertEqual(json.loads(approved_body)["status"], "approved")
+
+        changed_status, changed_headers, _ = self._post(
+            f"/v1/responses?feature={changed}",
+            body,
+        )
+        self.assertEqual(changed_status, 403)
+        self.assertNotEqual(
+            changed_headers["x-hormuz-dlp-approval-request"],
+            request_id,
+        )
+        self.assertEqual(len(FakeProviderHandler.requests), before)
+
+        allowed, allowed_headers, _ = self._post(path, body)
+        self.assertEqual(allowed, 200)
+        self.assertEqual(
+            allowed_headers["x-hormuz-dlp-approval-request"],
+            request_id,
+        )
+        self.assertEqual(len(FakeProviderHandler.requests), before + 1)
+        self.assertEqual(FakeProviderHandler.requests[-1]["path"], path)
+
+        replay, replay_headers, _ = self._post(path, body)
+        self.assertEqual(replay, 403)
+        self.assertNotEqual(
+            replay_headers["x-hormuz-dlp-approval-request"],
+            request_id,
+        )
+        self.assertEqual(len(FakeProviderHandler.requests), before + 1)
+        security = self.gateway.store.audit_events(
+            since="2000-01-01T00:00:00+00:00",
+            kind="security",
+        )
+        self.assertNotIn(protected, repr(security))
+        self.assertNotIn(protected.encode("utf-8"), self.config.database_path.read_bytes())
+
+    def test_non_utf8_percent_encoded_query_fails_closed_before_provider(self) -> None:
+        before = len(FakeProviderHandler.requests)
+
+        status, _, response = self._post(
+            "/v1/responses?feature=%FF",
+            {"model": "engineering-fast", "input": "safe"},
+        )
+
+        self.assertEqual(status, 400)
+        self.assertEqual(json.loads(response)["error"]["code"], "invalid_request")
+        self.assertNotIn(b"%FF", response)
+        self.assertEqual(len(FakeProviderHandler.requests), before)
+        self.assertEqual(self.gateway.store.monthly_totals(actor_id="alice").requests, 0)
 
     def test_oversized_encoded_text_fails_closed_before_provider(self) -> None:
         encoded_limit = ((MAX_ENCODED_TEXT_BYTES + 2) // 3) * 4

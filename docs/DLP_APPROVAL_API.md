@@ -61,7 +61,7 @@ Content-Type: application/json
 
 The request body must contain exactly that field and value. Success returns HTTP `200` with the same resource schema and `status: approved`. Repeating the same decision with the same approver is idempotent and does not extend expiry. A decision from another approver after approval, a consumed request, or an expired request returns a conflict.
 
-Approval does not itself call a provider. A later exact retry by the original employee atomically changes the state to `consumed` before provider egress. Exact matching binds the operation, transformed JSON body, complete allowlisted forwarded-header map, routed model, identity scope, and effective policy. Changing a protected header therefore cannot consume a grant created for earlier request material.
+Approval does not itself call a provider. A later exact retry by the original employee atomically changes the state to `consumed` before provider egress. Exact matching binds the operation, transformed JSON body, raw provider query when present, complete allowlisted forwarded-header map, routed model, identity scope, and effective policy. Changing a protected query or header therefore cannot consume a grant created for earlier request material. Omitting the query field for query-free requests preserves compatibility with pending grants created before query inspection was introduced.
 
 ## Stable errors
 

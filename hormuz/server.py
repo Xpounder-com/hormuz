@@ -1738,7 +1738,9 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             if current_output is None or current_output > decision.max_output_tokens:
                 request_body[output_field] = decision.max_output_tokens
         forwarded_headers = self._forwarded_client_headers(protocol)
+        forwarded_query = urlsplit(self.path).query
         try:
+            query_strings = _provider_query_inspection_strings(forwarded_query)
             redaction = self.server.redactor_for(
                 identity,
                 protocol=protocol,
@@ -1747,7 +1749,10 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 request_body,
                 protocol=protocol,
                 model=decision.route.upstream_model,
-                unredactable_strings=tuple(forwarded_headers.values()),
+                unredactable_strings=(
+                    *forwarded_headers.values(),
+                    *query_strings,
+                ),
             )
         except RedactionError as error:
             self._send_protocol_error(protocol, str(error), HTTPStatus.BAD_REQUEST)
@@ -1764,12 +1769,15 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                     finding for finding in dlp_findings if finding.action == "require_approval"
                 )
                 try:
+                    approval_material = {
+                        "operation": urlsplit(self.path).path,
+                        "payload": redaction.value,
+                        "provider_headers": forwarded_headers,
+                    }
+                    if forwarded_query:
+                        approval_material["provider_query"] = forwarded_query
                     fingerprint = payload_fingerprint(
-                        {
-                            "operation": urlsplit(self.path).path,
-                            "payload": redaction.value,
-                            "provider_headers": forwarded_headers,
-                        },
+                        approval_material,
                         key=approval_config.fingerprint_key,
                     )
                     approval = self.server.store.authorize_or_request_dlp_approval(
@@ -2061,6 +2069,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 decision=decision,
                 body=body,
                 forwarded_headers=forwarded_headers,
+                forwarded_query=forwarded_query,
                 account_usage=account_usage,
                 policy_action=policy_action,
                 redaction_count=redaction.redaction_count,
@@ -2082,6 +2091,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         decision: PolicyDecision,
         body: bytes,
         forwarded_headers: dict[str, str],
+        forwarded_query: str,
         account_usage: bool,
         policy_action: str,
         redaction_count: int,
@@ -2119,7 +2129,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 code="gateway_upstream_not_configured",
             )
             return
-        request_url = self._upstream_url(upstream)
+        request_url = self._upstream_url(upstream, forwarded_query)
         headers = self._upstream_headers(
             protocol,
             upstream_key,
@@ -2372,13 +2382,13 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             return None
         return value
 
-    def _upstream_url(self, upstream: UpstreamConfig) -> str:
+    def _upstream_url(self, upstream: UpstreamConfig, forwarded_query: str) -> str:
         request_parts = urlsplit(self.path)
         request_path = request_parts.path
         base = upstream.base_url
         if base.endswith("/v1") and request_path.startswith("/v1/"):
             request_path = request_path[3:]
-        query = f"?{request_parts.query}" if request_parts.query else ""
+        query = f"?{forwarded_query}" if forwarded_query else ""
         return f"{base}{request_path}{query}"
 
     def _forwarded_client_headers(self, protocol: str) -> dict[str, str]:
@@ -2519,6 +2529,22 @@ def _single_query_values(query: str) -> dict[str, str] | None:
     ):
         return None
     return values
+
+
+def _provider_query_inspection_strings(query: str) -> tuple[str, ...]:
+    if not query:
+        return ()
+    try:
+        decoded = urllib.parse.unquote_plus(
+            query,
+            encoding="utf-8",
+            errors="strict",
+        )
+    except UnicodeDecodeError as error:
+        raise RedactionError(
+            "Provider query percent-encoding must decode to valid UTF-8"
+        ) from error
+    return (decoded,)
 
 
 def _safe_identifier(value: str) -> bool:

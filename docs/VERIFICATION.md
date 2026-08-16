@@ -498,6 +498,23 @@ The provider-header extraction boundary, recursive secret/DLP transformer, appro
 
 This closes the known allowlisted provider-header bypass under accepted ADR 0004, not issue #10 or the enterprise DLP release gate. Caller-controlled URL query parameters, source classification, whitespace-wrapped or other unsupported encodings, compression, archives, media decoding, semantic evaluation, shared approval/KMS/HA operations, future cache invalidation, customer-representative detector quality, and independent security review remain open.
 
+### Provider URL-query DLP enforcement
+
+The raw provider-query forwarding boundary, one-pass form decoder, recursive secret/DLP transformer, approval binding, OpenAI Responses and Anthropic Messages paths, package artifacts, and installed wheel were exercised locally on August 16, 2026.
+
+- red-first gateway tests proved that direct and fully percent-encoded fake provider credentials in query names and values reached both fake providers with HTTP `200`, a percent-encoded detect-only email produced no DLP evidence, and an approval-required company term in the query bypassed approval entirely;
+- Hormuz now extracts the exact raw query it will forward, form-decodes it once as strict UTF-8 for inspection, and supplies the decoded view to the same detector as provider-bound JSON and allowlisted headers. `%HH` encoding and `+`-encoded spaces are covered; non-UTF-8 percent bytes return a content-free `400` before provider work;
+- raw query syntax is never mutated. Detect-only findings audit and forward the original query byte-for-byte, explicit deny blocks, approval-required uses the ordinary non-self workflow, and a credential or DLP rule configured for redaction denies the request because rewriting query syntax can change provider behavior;
+- direct OpenAI and Anthropic credentials, fully percent-encoded credentials in a name and value, and a percent-encoded valid SSN all returned provider-shaped `403` responses, made zero provider calls, recorded denied usage and metadata-only security evidence, and left matched values absent from responses, SQLite, and audit representations;
+- a fully percent-encoded detect-only email reached the fake OpenAI endpoint with the exact original raw request target, one detection, and no redaction. A query-bearing approval rejected changed raw material with a different request ID, permitted one exact approved retry, and rejected replay; query-free approval fingerprints retain their previous shape for compatibility;
+- the complete source suite ran 249 tests: 248 passed and the separately gated official Claude Code executable test skipped. The CI-pinned Codex `0.147.0` and Claude Code `2.1.233` executables then passed their two real-client fake-provider tests independently;
+- the frozen 60-task release benchmark passed five iterations with precision `1.00`, recall `1.00`, useful-pack rate `1.00`, mean compression ratio `0.840593`, zero failed safety thresholds, and p95 in-process selection latency `0.160000 ms`; corpus SHA-256 remained `9822d592868202c7c7539bcdac7d4a5894c01f9e6dba7a434846516b67b32c17`;
+- isolated source and wheel builds succeeded. The wheel SHA-256 was `69fb7c45d1ce3eddd894529817053bcc6288505822e960b5a77eb0b823b36f04`; the source archive SHA-256 was `ca6431bfb97daf2a4237b8b2b1efdd8e12767923df166c9179bd90417ff23aee`, and the source archive contained the implementation, tests, approval contract, and boundary documentation;
+- a clean Python 3.14 environment installed the exact wheel outside the checkout, loaded `hormuz.server` from `site-packages`, decoded a fully percent-encoded fake credential for inspection, denied it without changing the raw query, compiled the installed package, displayed CLI help, and passed the installed strict 60-task benchmark with zero failed thresholds;
+- source/test bytecode compilation, `git diff --check`, deterministic corpus verification, and high-confidence source and extracted-wheel scans for private-key, OpenAI, Anthropic, GitHub, AWS, and Google credential patterns passed.
+
+This closes the known ordinary provider-query bypass under accepted ADR 0004, not issue #10 or the enterprise DLP release gate. Provider-specific repeated query decoding, source classification, whitespace-wrapped or other unsupported encodings, compression, archives, media decoding, semantic evaluation, shared approval/KMS/HA operations, future cache invalidation, customer-representative detector quality, and independent security review remain open.
+
 ## Reproduce locally
 
 The default suite uses only loopback fake providers:
