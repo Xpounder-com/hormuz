@@ -14,6 +14,10 @@ DLP_REPLACEMENT = "[REDACTED:HORMUZ_DLP]"
 MAX_JSON_DEPTH = 100
 MAX_ENCODED_TEXT_BYTES = 1024 * 1024
 MAX_ENCODED_TEXT_DEPTH = 3
+_MAX_ENCODED_PAYLOAD_CHARS = ((MAX_ENCODED_TEXT_BYTES + 2) // 3) * 4
+_MAX_WHITESPACE_WRAPPED_PAYLOAD_CHARS = _MAX_ENCODED_PAYLOAD_CHARS * 2
+_ASCII_BASE64_WHITESPACE = " \t\r\n"
+_ASCII_BASE64_WHITESPACE_TABLE = str.maketrans("", "", _ASCII_BASE64_WHITESPACE)
 
 
 class RedactionError(ValueError):
@@ -342,6 +346,11 @@ class SecretRedactor:
             return plain_result
 
         encoded_payload = _decode_encoded_payload(value)
+        if encoded_payload is not None and encoded_depth >= MAX_ENCODED_TEXT_DEPTH:
+            raise RedactionError(
+                "Encoded text exceeds the maximum nesting depth of "
+                f"{MAX_ENCODED_TEXT_DEPTH}"
+            )
         if encoded_payload is not None and _is_recognized_archive(encoded_payload):
             opaque_rule = _applicable_opaque_rule(
                 self.dlp_controls,
@@ -364,11 +373,6 @@ class SecretRedactor:
 
         encoded = encoded_payload.as_text() if encoded_payload is not None else None
         if encoded is not None:
-            if encoded_depth >= MAX_ENCODED_TEXT_DEPTH:
-                raise RedactionError(
-                    "Encoded text exceeds the maximum nesting depth of "
-                    f"{MAX_ENCODED_TEXT_DEPTH}"
-                )
             transformed, findings, redaction_count = self._transform_string(
                 encoded.decoded,
                 protocol=protocol,
@@ -452,23 +456,29 @@ def _decode_encoded_payload(value: str) -> _EncodedPayload | None:
     data_uri = _base64_data_uri(value)
     if data_uri is not None:
         prefix, payload, media_type = data_uri
-    elif not _looks_like_base64(payload):
+    elif not _contains_only_base64_and_ascii_whitespace(payload):
         return None
 
-    if len(payload) < 16 or len(payload) % 4 == 1:
+    if len(payload) > _MAX_WHITESPACE_WRAPPED_PAYLOAD_CHARS:
+        raise RedactionError(
+            "Encoded text exceeds the maximum whitespace-wrapped size of "
+            f"{_MAX_WHITESPACE_WRAPPED_PAYLOAD_CHARS} characters"
+        )
+    compact_payload = payload.translate(_ASCII_BASE64_WHITESPACE_TABLE)
+    if not _looks_like_base64(compact_payload):
         return None
-    if len(payload) > ((MAX_ENCODED_TEXT_BYTES + 2) // 3) * 4:
+    if len(compact_payload) > _MAX_ENCODED_PAYLOAD_CHARS:
         raise RedactionError(
             "Encoded text exceeds the maximum decoded size of "
             f"{MAX_ENCODED_TEXT_BYTES} bytes"
         )
 
-    urlsafe = "-" in payload or "_" in payload
-    padded = payload.endswith("=")
-    padding = "=" * (-len(payload) % 4)
+    urlsafe = "-" in compact_payload or "_" in compact_payload
+    padded = compact_payload.endswith("=")
+    padding = "=" * (-len(compact_payload) % 4)
     try:
         decoded_bytes = base64.b64decode(
-            (payload + padding).encode("ascii"),
+            (compact_payload + padding).encode("ascii"),
             altchars=b"-_" if urlsafe else None,
             validate=True,
         )
@@ -516,9 +526,20 @@ def _is_text_media_type(media_type: str) -> bool:
 
 
 def _looks_like_base64(value: str) -> bool:
-    if len(value) < 16 or any(character.isspace() for character in value):
+    if len(value) < 16 or len(value) % 4 == 1:
         return False
     return re.fullmatch(r"[A-Za-z0-9+/_-]*={0,2}", value) is not None
+
+
+def _contains_only_base64_and_ascii_whitespace(value: str) -> bool:
+    return all(
+        character in _ASCII_BASE64_WHITESPACE
+        or "A" <= character <= "Z"
+        or "a" <= character <= "z"
+        or "0" <= character <= "9"
+        or character in "+/_-="
+        for character in value
+    )
 
 
 def _is_textual(value: str) -> bool:

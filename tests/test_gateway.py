@@ -2885,7 +2885,11 @@ class GatewayIntegrationTests(unittest.TestCase):
     def test_encoded_archives_are_denied_for_both_providers_without_content_evidence(self) -> None:
         marker = "encoded-archive-content-never-persist"
         archive = b"PK\x03\x04" + marker.encode("utf-8")
-        encoded = base64.b64encode(archive).decode("ascii")
+        compact = base64.b64encode(archive).decode("ascii")
+        encoded = "\r\n  " + " \t\n".join(
+            compact[index : index + 12]
+            for index in range(0, len(compact), 12)
+        ) + "\n"
         before = len(FakeProviderHandler.requests)
 
         openai_status, _, openai_response = self._post(

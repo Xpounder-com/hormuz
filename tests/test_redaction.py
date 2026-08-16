@@ -301,6 +301,48 @@ class SecretRedactorTests(unittest.TestCase):
         self.assertNotIn(secret, decoded)
         self.assertEqual(decoded, f"credential={REPLACEMENT}")
 
+    def test_ascii_whitespace_wrapped_base64_is_inspected_conservatively(self) -> None:
+        secret = "sk-" + "proj-" + ("W" * 24)
+        encoded = base64.b64encode(
+            f"tool credential={secret}".encode("utf-8")
+        ).decode("ascii")
+        wrapped = "\r\n  " + " \t\n".join(
+            encoded[index : index + 12]
+            for index in range(0, len(encoded), 12)
+        ) + "\n"
+
+        result = SecretRedactor(SecretControls(mode="redact")).inspect(
+            {"input": wrapped},
+            protocol="openai",
+            model="gpt-test",
+        )
+
+        transformed = result.value["input"]
+        decoded = base64.b64decode(
+            transformed + ("=" * (-len(transformed) % 4))
+        ).decode("utf-8")
+        self.assertEqual(result.action, "redact")
+        self.assertEqual(result.rules, ("openai_api_key",))
+        self.assertFalse(any(character in transformed for character in " \t\r\n"))
+        self.assertNotIn(secret, decoded)
+        self.assertEqual(decoded, f"tool credential={REPLACEMENT}")
+
+        benign_compact = base64.b64encode(b"ordinary wrapped output").decode("ascii")
+        benign = "\r\n" + "\n".join(
+            benign_compact[index : index + 8]
+            for index in range(0, len(benign_compact), 8)
+        )
+        benign_result = SecretRedactor(SecretControls()).inspect({"input": benign})
+        self.assertEqual(benign_result.value["input"], benign)
+        self.assertEqual(benign_result.count, 0)
+
+        non_ascii_whitespace = encoded[:12] + "\u00a0" + encoded[12:]
+        unclassified = SecretRedactor(SecretControls()).inspect(
+            {"input": non_ascii_whitespace}
+        )
+        self.assertEqual(unclassified.value["input"], non_ascii_whitespace)
+        self.assertEqual(unclassified.count, 0)
+
     def test_base64_shaped_exact_secret_keeps_direct_match_precedence(self) -> None:
         protected = base64.b64encode(b"test-company-secret").decode("ascii")
         redactor = SecretRedactor(
@@ -318,7 +360,13 @@ class SecretRedactorTests(unittest.TestCase):
 
     def test_text_data_uri_dlp_is_redacted_without_changing_its_media_type(self) -> None:
         ssn = "123-45-6789"
-        payload = base64.b64encode(f'{{"employee":"{ssn}"}}'.encode("utf-8")).decode("ascii")
+        compact_payload = base64.b64encode(
+            f'{{"employee":"{ssn}"}}'.encode("utf-8")
+        ).decode("ascii")
+        payload = "\r\n".join(
+            compact_payload[index : index + 8]
+            for index in range(0, len(compact_payload), 8)
+        )
         prefix = "data:application/json;charset=utf-8;base64,"
         controls = DLPControls(
             policy_version="encoded-dlp-v1",
@@ -392,6 +440,13 @@ class SecretRedactorTests(unittest.TestCase):
                 {"input": "data:text/plain;base64," + oversized}
             )
 
+        encoded_limit = ((MAX_ENCODED_TEXT_BYTES + 2) // 3) * 4
+        whitespace_amplified = "A " * (encoded_limit + 1)
+        with self.assertRaisesRegex(RedactionError, "whitespace-wrapped size"):
+            SecretRedactor(SecretControls()).inspect(
+                {"input": "data:text/plain;base64," + whitespace_amplified}
+            )
+
     def test_recognized_encoded_archives_follow_opaque_media_policy(self) -> None:
         controls = DLPControls(
             policy_version="encoded-container-v1",
@@ -460,6 +515,19 @@ class SecretRedactorTests(unittest.TestCase):
         self.assertEqual(denied.action, "deny")
         self.assertEqual(denied.rules, ("opaque_media",))
         self.assertEqual(denied.value["input"], nested)
+
+        too_deep = archive
+        for _ in range(MAX_ENCODED_TEXT_DEPTH):
+            too_deep = base64.b64encode(too_deep.encode("utf-8")).decode("ascii")
+        with self.assertRaisesRegex(RedactionError, "maximum nesting depth"):
+            SecretRedactor(
+                SecretControls(mode="off"),
+                dlp_controls=deny_controls,
+            ).inspect(
+                {"input": too_deep},
+                protocol="anthropic",
+                model="claude-test",
+            )
 
         ssn = "123-45-6789"
         off_controls = DLPControls(
