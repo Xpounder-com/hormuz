@@ -160,8 +160,10 @@ This is a real explicit tool connection, not automatic prompt injection. Codex a
 Claude Code can discover and invoke `hormuz_get_context`, and the server
 instructions tell them when policy requires governed context. A model may still
 choose not to call a tool. Hormuz also has a separate disabled-by-default gateway
-policy that automatically injects verified non-repository packs into supported
-generation requests before secret-egress inspection. That bounded path does not
+policy that automatically injects verified unscoped or exact administrator-granted
+repository packs into supported generation requests before secret-egress inspection.
+Repository selection travels through consumed official-client headers and remains
+independent of this MCP tool. That bounded path does not
 change this tool contract; see [CONTEXT_INJECTION.md](CONTEXT_INJECTION.md).
 
 The current credential is inherited from an environment variable. Browser

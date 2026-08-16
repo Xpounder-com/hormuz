@@ -21,7 +21,7 @@ from .billing import (
     parse_provider_cost_pages,
 )
 from .billing_client import ProviderBillingClient, ProviderBillingClientError
-from .config import ConfigError, GatewayConfig, Identity
+from .config import ConfigError, GatewayConfig, Identity, is_context_selector
 from .context import (
     CLASSIFICATIONS,
     ContextError,
@@ -225,6 +225,18 @@ def build_parser() -> argparse.ArgumentParser:
     connect.add_argument(
         "--profile",
         help="Secure-store profile for session auth (default: codex or claude)",
+    )
+    connect.add_argument(
+        "--repository",
+        help="Exact administrator-granted repository selector for automatic context",
+    )
+    connect.add_argument(
+        "--branch",
+        help="Exact branch selector; requires --repository",
+    )
+    connect.add_argument(
+        "--revision",
+        help="Exact trusted lifecycle revision; requires --repository and --branch",
     )
 
     login_parser = subparsers.add_parser(
@@ -806,6 +818,9 @@ def main(argv: list[str] | None = None) -> int:
                 auth_mode=args.auth_mode,
                 credential_env=args.credential_env,
                 profile=args.profile,
+                repository=args.repository,
+                branch=args.branch,
+                revision=args.revision,
             )
         if args.command == "audit-export":
             return _audit_export(config, args)
@@ -1184,6 +1199,42 @@ def _policy_check(config: GatewayConfig, args: argparse.Namespace) -> int:
     return 0 if decision.allowed else 3
 
 
+def _client_context_scope_headers(
+    config: GatewayConfig,
+    identity: Identity,
+    *,
+    repository: str | None,
+    branch: str | None,
+    revision: str | None,
+) -> dict[str, str]:
+    if repository is None and branch is None and revision is None:
+        return {}
+    if repository is None:
+        raise ConfigError("--branch and --revision require --repository")
+    if revision is not None and branch is None:
+        raise ConfigError("--revision requires --branch")
+    values = {
+        "X-Hormuz-Repository": repository,
+        **({"X-Hormuz-Branch": branch} if branch is not None else {}),
+        **({"X-Hormuz-Revision": revision} if revision is not None else {}),
+    }
+    for name, value in values.items():
+        if not is_context_selector(value):
+            raise ConfigError(
+                f"{name} must be an exact safe selector up to 512 characters"
+            )
+    allowed = config.resolved_policy(identity).context_injection.allowed_repositories
+    if allowed is None or repository not in allowed:
+        raise ConfigError(
+            f"Repository {repository} is not granted by the effective context policy"
+        )
+    return values
+
+
+def _anthropic_custom_headers(headers: dict[str, str]) -> str:
+    return "\n".join(f"{name}: {value}" for name, value in headers.items())
+
+
 def _client_config(
     config: GatewayConfig,
     client: str,
@@ -1193,6 +1244,9 @@ def _client_config(
     auth_mode: str = "auto",
     credential_env: str | None = None,
     profile: str | None = None,
+    repository: str | None = None,
+    branch: str | None = None,
+    revision: str | None = None,
 ) -> int:
     base_url = _client_base_url(url or f"http://{config.listen.host}:{config.listen.port}")
     if actor_id is None:
@@ -1241,6 +1295,13 @@ def _client_config(
         raise ConfigError(
             f"Identity {selected_identity.actor_id} is not authorized to use {policy_client}"
         )
+    scope_headers = _client_context_scope_headers(
+        config,
+        selected_identity,
+        repository=repository,
+        branch=branch,
+        revision=revision,
+    )
     env_name = credential_env or (
         "HORMUZ_OIDC_ACCESS_TOKEN" if uses_oidc else selected_identity.token_env
     )
@@ -1276,6 +1337,12 @@ def _client_config(
             f"base_url = {json.dumps(base_url + '/v1')}",
             'wire_api = "responses"',
         ]
+        if scope_headers:
+            values = ", ".join(
+                f"{json.dumps(name)} = {json.dumps(value)}"
+                for name, value in scope_headers.items()
+            )
+            lines.append(f"http_headers = {{ {values} }}")
         if uses_session:
             helper_args = [
                 "auth",
@@ -1318,31 +1385,41 @@ def _client_config(
             if base_url.startswith("http://"):
                 helper_parts.append("--allow-insecure-http")
             print("# Put this JSON in the managed or user Claude Code settings file:")
+            managed_env = {
+                "ANTHROPIC_BASE_URL": base_url,
+                "HORMUZ_SESSION_GATEWAY": base_url,
+                "CLAUDE_CODE_API_KEY_HELPER_TTL_MS": "300000",
+                "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY": "1",
+            }
+            if scope_headers:
+                managed_env["ANTHROPIC_CUSTOM_HEADERS"] = _anthropic_custom_headers(
+                    scope_headers
+                )
             print(
                 json.dumps(
                     {
                         "apiKeyHelper": " ".join(helper_parts),
-                        "env": {
-                            "ANTHROPIC_BASE_URL": base_url,
-                            "HORMUZ_SESSION_GATEWAY": base_url,
-                            "CLAUDE_CODE_API_KEY_HELPER_TTL_MS": "300000",
-                            "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY": "1",
-                        },
+                        "env": managed_env,
                     },
                     indent=2,
                 )
             )
         elif uses_oidc:
+            managed_env = {
+                "ANTHROPIC_BASE_URL": base_url,
+                "CLAUDE_CODE_API_KEY_HELPER_TTL_MS": "300000",
+                "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY": "1",
+            }
+            if scope_headers:
+                managed_env["ANTHROPIC_CUSTOM_HEADERS"] = _anthropic_custom_headers(
+                    scope_headers
+                )
             print("# Put this JSON in the managed or user Claude Code settings file:")
             print(
                 json.dumps(
                     {
                         "apiKeyHelper": f"hormuz auth token --env {env_name}",
-                        "env": {
-                            "ANTHROPIC_BASE_URL": base_url,
-                            "CLAUDE_CODE_API_KEY_HELPER_TTL_MS": "300000",
-                            "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY": "1",
-                        },
+                        "env": managed_env,
                     },
                     indent=2,
                 )
@@ -1352,6 +1429,11 @@ def _client_config(
             print(f"export ANTHROPIC_BASE_URL={shlex.quote(base_url)}")
             print(f'export ANTHROPIC_AUTH_TOKEN="${{{env_name}}}"')
             print("export CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1")
+            if scope_headers:
+                print(
+                    "export ANTHROPIC_CUSTOM_HEADERS="
+                    + shlex.quote(_anthropic_custom_headers(scope_headers))
+                )
         print("claude")
     return 0
 

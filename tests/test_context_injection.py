@@ -25,6 +25,8 @@ class ContextInjectionPolicyTests(unittest.TestCase):
                 mode="optional",
                 allowed_clients=("codex", "claude-code"),
                 allowed_models=("gpt-fast", "claude-standard"),
+                allowed_repositories=("acme/api", "acme/web"),
+                max_classification="confidential",
                 token_budget=500,
                 max_items=5,
             )
@@ -34,6 +36,8 @@ class ContextInjectionPolicyTests(unittest.TestCase):
                 mode="required",
                 allowed_clients=("codex", "unapproved-client"),
                 allowed_models=("gpt-fast", "unapproved-model"),
+                allowed_repositories=("acme/api", "other/private"),
+                max_classification="internal",
                 token_budget=300,
                 max_items=3,
             )
@@ -41,6 +45,8 @@ class ContextInjectionPolicyTests(unittest.TestCase):
         actor = Policy(
             context_injection=ContextInjectionPolicy(
                 mode="off",
+                allowed_repositories=("acme/api", "acme/web"),
+                max_classification="restricted",
                 token_budget=400,
                 max_items=4,
             )
@@ -51,6 +57,8 @@ class ContextInjectionPolicyTests(unittest.TestCase):
         self.assertEqual(effective.mode, "required")
         self.assertEqual(effective.allowed_clients, ("codex",))
         self.assertEqual(effective.allowed_models, ("gpt-fast",))
+        self.assertEqual(effective.allowed_repositories, ("acme/api",))
+        self.assertEqual(effective.max_classification, "internal")
         self.assertEqual(effective.token_budget, 300)
         self.assertEqual(effective.max_items, 3)
         disabled = Policy(
@@ -59,6 +67,22 @@ class ContextInjectionPolicyTests(unittest.TestCase):
             Policy(context_injection=ContextInjectionPolicy(mode="required"))
         )
         self.assertEqual(disabled.context_injection.mode, "off")
+        no_organization_grant = Policy(
+            context_injection=ContextInjectionPolicy(
+                mode="optional",
+                allowed_repositories=(),
+            )
+        ).overlaid(
+            Policy(
+                context_injection=ContextInjectionPolicy(
+                    allowed_repositories=("team/cannot-add",),
+                )
+            )
+        )
+        self.assertEqual(
+            no_organization_grant.context_injection.allowed_repositories,
+            (),
+        )
 
 
 class ContextInjectionRenderingTests(unittest.TestCase):

@@ -35,7 +35,7 @@ export HORMUZ_TOKEN="employee-specific-hormuz-token"
 codex
 ```
 
-Codex supports custom model providers using a base URL and credential environment variable. Provider selection belongs in user-level configuration; current Codex builds ignore provider settings found only in project-local configuration. See the official [Codex configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference).
+Codex supports custom model providers using a base URL, credential environment variable, and static custom `http_headers`. Provider selection belongs in user-level configuration; current Codex builds ignore provider settings found only in project-local configuration. See the official [Codex configuration reference](https://developers.openai.com/codex/config-reference).
 
 Hormuz defaults to native OpenAI model IDs in its example configuration. This lets Codex retain its bundled model metadata while Hormuz decides whether that model is allowed, capped, denied, or replaced with the configured fallback. Optional company aliases work at the HTTP layer, but arbitrary aliases may cause Codex to use fallback client metadata.
 
@@ -69,6 +69,40 @@ Claude Code v2.1.129 or later can discover gateway models at startup. The genera
 Discovery returns policy aliases, never upstream model names or provider credentials. It does not call a provider, reserve budget, or create a usage event. Inference still performs the authoritative live policy and budget check. Hormuz accepts the exact published discovery query and fails other `/v1/models` query shapes closed.
 
 See Anthropic's [gateway protocol reference](https://code.claude.com/docs/en/llm-gateway-protocol#model-discovery) for the client request and response contract.
+
+## Exact repository scope for automatic context
+
+Repository context is never inferred from a working directory and a request header is never authorization. First grant the exact repository in the applicable administrator policy:
+
+```json
+{
+  "context_injection": {
+    "mode": "optional",
+    "allowed_repositories": ["Xpounder-com/hormuz"],
+    "max_classification": "internal"
+  }
+}
+```
+
+Then generate the project profile for either existing client:
+
+```bash
+hormuz --config /etc/hormuz/hormuz.json client-config codex \
+  --url https://hormuz.example.com \
+  --repository Xpounder-com/hormuz \
+  --branch main \
+  --revision abc123
+
+hormuz --config /etc/hormuz/hormuz.json client-config claude \
+  --url https://hormuz.example.com \
+  --repository Xpounder-com/hormuz \
+  --branch main \
+  --revision abc123
+```
+
+Codex receives an `http_headers` map in its custom-provider configuration. Claude Code receives newline-separated `ANTHROPIC_CUSTOM_HEADERS` in its managed settings or shell environment, as documented in Anthropic's [environment-variable reference](https://code.claude.com/docs/en/env-vars) and [LLM gateway guide](https://code.claude.com/docs/en/llm-gateway). Endpoint management should install the profile appropriate to that repository. Branch and revision are optional narrowing; revision requires branch. Regenerate or update a pinned revision when trusted repository state changes.
+
+Hormuz accepts only one bounded safe value for each of `X-Hormuz-Repository`, `X-Hormuz-Branch`, and `X-Hormuz-Revision`. It verifies the repository against the effective policy and the optional revision against its trusted repository/branch snapshot, then consumes all three. They never reach the provider. See [CONTEXT_INJECTION.md](CONTEXT_INJECTION.md) for failure and audit behavior.
 
 ## Generic OIDC credentials
 

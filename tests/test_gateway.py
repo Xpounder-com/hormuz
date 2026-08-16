@@ -629,6 +629,398 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertNotIn("Fix retry jitter", repr(usage))
         self.assertNotIn(b"Fix retry jitter", self.config.database_path.read_bytes())
 
+    def test_repository_grant_selectors_and_classification_scope_both_provider_paths(self) -> None:
+        config_value = self._config(self.provider.server_port, _free_port())
+        config_value["policies"]["organization"]["context_injection"] = {
+            "mode": "optional",
+            "allowed_clients": ["codex", "claude-code"],
+            "allowed_models": ["engineering-fast", "claude-standard"],
+            "allowed_repositories": ["acme/api"],
+            "max_classification": "internal",
+            "token_budget": 1000,
+            "max_items": 5,
+        }
+        self._restart_gateway(config_value)
+        identity = self.config.identities_by_actor["alice"]
+        now = datetime.now(timezone.utc)
+
+        def repository_record(
+            record_id: str,
+            content: str,
+            *,
+            repository_id: str,
+            branch: str,
+            classification: str = "internal",
+        ) -> ContextRecord:
+            return ContextRecord(
+                record_id=record_id,
+                record_kind="decision",
+                title=f"Repository retry policy {record_id}",
+                content=content,
+                owner_id="platform",
+                organization_id=identity.organization_id,
+                visibility="organization",
+                scope_id=identity.organization_id,
+                classification=classification,
+                source_uri=f"repo://{repository_id}/{branch}/{record_id}.md",
+                source_revision="git:current-revision",
+                source_sha256=(record_id[0] if record_id[0] in "abcdef" else "f") * 64,
+                source_item_key=record_id,
+                repository_id=repository_id,
+                branch=branch,
+                verification="verified",
+                verification_evidence=("ci:passed",),
+                effective_at=now - timedelta(minutes=1),
+                verified_at=now - timedelta(minutes=1),
+                tags=("repository", "retry", "policy"),
+            )
+
+        self.gateway.context_repository.ingest_many(
+            [
+                repository_record(
+                    "api-main-policy",
+                    "Use the API main bounded retry policy.",
+                    repository_id="acme/api",
+                    branch="main",
+                ),
+                repository_record(
+                    "other-repository-policy",
+                    "OTHER-REPOSITORY-MUST-NOT-LEAK",
+                    repository_id="other/private",
+                    branch="main",
+                ),
+                repository_record(
+                    "api-other-branch-policy",
+                    "OTHER-BRANCH-MUST-NOT-LEAK",
+                    repository_id="acme/api",
+                    branch="release",
+                ),
+                repository_record(
+                    "api-confidential-policy",
+                    "CONFIDENTIAL-MUST-NOT-LEAK",
+                    repository_id="acme/api",
+                    branch="main",
+                    classification="confidential",
+                ),
+            ],
+            actor_id="alice",
+            policy_version="test-context-v1",
+        )
+        snapshot = ContextLifecycleSnapshot(repository_revision="current-revision")
+        self.gateway.context_repository.observe_lifecycle_snapshot(
+            organization_id=identity.organization_id,
+            repository_id="acme/api",
+            branch="main",
+            snapshot=snapshot,
+            expected_version=None,
+            actor_id="alice",
+            policy_version="test-context-v1",
+        )
+        scope_headers = {
+            "X-Hormuz-Repository": "acme/api",
+            "X-Hormuz-Branch": "main",
+            "X-Hormuz-Revision": "current-revision",
+        }
+
+        openai_status, _, _ = self._post(
+            "/v1/responses",
+            {"model": "engineering-fast", "input": "Apply repository retry policy"},
+            extra_headers=scope_headers,
+        )
+        anthropic_status, _, _ = self._post(
+            "/v1/messages",
+            {
+                "model": "claude-standard",
+                "messages": [{"role": "user", "content": "Apply repository retry policy"}],
+                "max_tokens": 20,
+            },
+            extra_headers={**scope_headers, "Anthropic-Version": "2023-06-01"},
+        )
+
+        self.assertEqual(openai_status, 200)
+        self.assertEqual(anthropic_status, 200)
+        for upstream in FakeProviderHandler.requests[-2:]:
+            provider_body = json.dumps(upstream["body"])
+            self.assertIn("Use the API main bounded retry policy", provider_body)
+            self.assertNotIn("OTHER-REPOSITORY-MUST-NOT-LEAK", provider_body)
+            self.assertNotIn("OTHER-BRANCH-MUST-NOT-LEAK", provider_body)
+            self.assertNotIn("CONFIDENTIAL-MUST-NOT-LEAK", provider_body)
+            self.assertNotIn("x-hormuz-repository", upstream["headers"])
+            self.assertNotIn("x-hormuz-branch", upstream["headers"])
+            self.assertNotIn("x-hormuz-revision", upstream["headers"])
+        usage = self.gateway.store.audit_events(
+            since="2000-01-01T00:00:00+00:00",
+            kind="usage",
+        )
+        self.assertEqual({event["context_repository_revision"] for event in usage}, {"current-revision"})
+        self.assertEqual(
+            {tuple(event["context_record_ids"]) for event in usage},
+            {("api-main-policy",)},
+        )
+        self.assertNotIn("Apply repository retry policy", repr(usage))
+        self.assertNotIn(b"Apply repository retry policy", self.config.database_path.read_bytes())
+
+    def test_repository_revision_mismatch_skips_optional_context_without_forwarding_scope(self) -> None:
+        config_value = self._config(self.provider.server_port, _free_port())
+        config_value["policies"]["organization"]["context_injection"] = {
+            "mode": "optional",
+            "allowed_clients": ["codex"],
+            "allowed_models": ["engineering-fast"],
+            "allowed_repositories": ["acme/api"],
+            "token_budget": 500,
+            "max_items": 2,
+        }
+        self._restart_gateway(config_value)
+        identity = self.config.identities_by_actor["alice"]
+        now = datetime.now(timezone.utc)
+        self.gateway.context_repository.ingest(
+            ContextRecord(
+                record_id="revision-bound-policy",
+                record_kind="decision",
+                title="Revision-bound retry policy",
+                content="REVISION-BOUND-CONTEXT-MUST-NOT-LEAK",
+                owner_id="platform",
+                organization_id=identity.organization_id,
+                visibility="organization",
+                scope_id=identity.organization_id,
+                classification="internal",
+                source_uri="repo://acme/api/main/retry.md",
+                source_revision="git:current",
+                source_sha256="a" * 64,
+                source_item_key="revision-bound-policy",
+                repository_id="acme/api",
+                branch="main",
+                verification="verified",
+                verification_evidence=("ci:passed",),
+                effective_at=now - timedelta(minutes=1),
+                verified_at=now - timedelta(minutes=1),
+                tags=("revision", "retry"),
+            ),
+            actor_id="alice",
+            policy_version="test-context-v1",
+        )
+        self.gateway.context_repository.observe_lifecycle_snapshot(
+            organization_id=identity.organization_id,
+            repository_id="acme/api",
+            branch="main",
+            snapshot=ContextLifecycleSnapshot(repository_revision="current"),
+            expected_version=None,
+            actor_id="alice",
+            policy_version="test-context-v1",
+        )
+
+        status, _, _ = self._post(
+            "/v1/responses",
+            {"model": "engineering-fast", "input": "Apply revision retry policy"},
+            extra_headers={
+                "X-Hormuz-Repository": "acme/api",
+                "X-Hormuz-Branch": "main",
+                "X-Hormuz-Revision": "stale-revision",
+            },
+        )
+
+        self.assertEqual(status, 200)
+        upstream = FakeProviderHandler.requests[-1]
+        self.assertNotIn("REVISION-BOUND-CONTEXT-MUST-NOT-LEAK", json.dumps(upstream["body"]))
+        self.assertNotIn("x-hormuz-repository", upstream["headers"])
+        event = self.gateway.store.audit_events(
+            since="2000-01-01T00:00:00+00:00",
+            kind="usage",
+        )[0]
+        self.assertEqual(event["context_injection_outcome"], "not_injected")
+        self.assertEqual(event["context_injection_reason"], "repository_revision_mismatch")
+        self.assertNotIn(b"stale-revision", self.config.database_path.read_bytes())
+
+    def test_required_repository_selector_rejects_ungranted_and_ambiguous_values_content_free(self) -> None:
+        config_value = self._config(self.provider.server_port, _free_port())
+        config_value["policies"]["organization"]["context_injection"] = {
+            "mode": "required",
+            "allowed_clients": ["codex"],
+            "allowed_models": ["engineering-fast"],
+            "allowed_repositories": ["acme/api"],
+            "token_budget": 500,
+            "max_items": 2,
+        }
+        self._restart_gateway(config_value)
+        before = len(FakeProviderHandler.requests)
+
+        ungranted = "UNGRANTED-REPOSITORY-SENTINEL"
+        status, _, response = self._post(
+            "/v1/responses",
+            {"model": "engineering-fast", "input": "Apply repository policy"},
+            extra_headers={"X-Hormuz-Repository": ungranted},
+        )
+        duplicate_status, _, duplicate_response = self._post_with_header_pairs(
+            "/v1/responses",
+            {"model": "engineering-fast", "input": "Apply repository policy"},
+            (
+                ("X-Hormuz-Repository", "acme/api"),
+                ("X-Hormuz-Repository", "other/private"),
+            ),
+        )
+
+        self.assertEqual(status, 403)
+        self.assertEqual(duplicate_status, 403)
+        self.assertEqual(len(FakeProviderHandler.requests), before)
+        self.assertEqual(json.loads(response)["error"]["code"], "hormuz_context_required")
+        self.assertEqual(
+            json.loads(duplicate_response)["error"]["code"],
+            "hormuz_context_required",
+        )
+        usage = self.gateway.store.audit_events(
+            since="2000-01-01T00:00:00+00:00",
+            kind="usage",
+        )
+        self.assertEqual(
+            {event["context_injection_reason"] for event in usage},
+            {"repository_not_granted", "repository_selector_ambiguous"},
+        )
+        self.assertNotIn(ungranted, repr(usage))
+        self.assertNotIn(ungranted.encode("utf-8"), self.config.database_path.read_bytes())
+
+    def test_authorized_repository_selector_is_inspected_by_dlp_but_never_forwarded(self) -> None:
+        protected = "PROJECT-SCOPE-SENSITIVE"
+        os.environ["TEST_SCOPE_TERMS"] = json.dumps([protected])
+        config_value = self._config(self.provider.server_port, _free_port())
+        config_value["policies"]["organization"]["context_injection"] = {
+            "mode": "optional",
+            "allowed_clients": ["codex"],
+            "allowed_models": ["engineering-fast"],
+            "allowed_repositories": [protected],
+            "token_budget": 500,
+            "max_items": 2,
+        }
+        config_value["egress_controls"] = {
+            "secrets": {"mode": "redact", "builtins": True},
+            "dlp": {
+                "policy_version": "scope-dlp-v1",
+                "dictionaries": [
+                    {
+                        "rule_id": "company.repository_scope",
+                        "action": "deny",
+                        "providers": ["openai"],
+                        "values_env": "TEST_SCOPE_TERMS",
+                    }
+                ],
+            },
+        }
+        self._restart_gateway(config_value)
+        os.environ.pop("TEST_SCOPE_TERMS", None)
+        before = len(FakeProviderHandler.requests)
+
+        status, _, response = self._post(
+            "/v1/responses",
+            {"model": "engineering-fast", "input": "Apply repository policy"},
+            extra_headers={"X-Hormuz-Repository": protected},
+        )
+
+        self.assertEqual(status, 403)
+        self.assertEqual(len(FakeProviderHandler.requests), before)
+        self.assertEqual(json.loads(response)["error"]["code"], "hormuz_dlp_denied")
+        usage = self.gateway.store.audit_events(
+            since="2000-01-01T00:00:00+00:00",
+            kind="usage",
+        )[0]
+        self.assertEqual(usage["policy_action"], "dlp_denied")
+        security = self.gateway.store.audit_events(
+            since="2000-01-01T00:00:00+00:00",
+            kind="security",
+        )[0]
+        self.assertEqual(security["action"], "denied")
+        self.assertNotIn(protected, repr(usage) + repr(security))
+        self.assertNotIn(protected.encode("utf-8"), self.config.database_path.read_bytes())
+
+    def test_dlp_approval_binds_consumed_repository_scope_without_storing_it(self) -> None:
+        protected = "PROJECT-SCOPE-APPROVAL"
+        fingerprint_key_source = base64.urlsafe_b64encode(b"s" * 32).decode("ascii")
+        os.environ["TEST_SCOPE_APPROVAL_TERMS"] = json.dumps([protected])
+        os.environ["TEST_SCOPE_APPROVAL_KEY"] = fingerprint_key_source
+        config_value = self._config(self.provider.server_port, _free_port())
+        config_value["identities"][1]["capabilities"] = ["dlp_approver"]
+        config_value["policies"]["organization"]["context_injection"] = {
+            "mode": "optional",
+            "allowed_clients": ["codex"],
+            "allowed_models": ["engineering-fast"],
+            "allowed_repositories": ["acme/api"],
+            "token_budget": 500,
+            "max_items": 2,
+        }
+        config_value["egress_controls"] = {
+            "secrets": {"mode": "redact", "builtins": True},
+            "dlp": {
+                "policy_version": "scope-approval-v1",
+                "approval": {
+                    "enabled": True,
+                    "fingerprint_key_env": "TEST_SCOPE_APPROVAL_KEY",
+                },
+                "dictionaries": [
+                    {
+                        "rule_id": "company.scope_approval",
+                        "action": "require_approval",
+                        "providers": ["openai"],
+                        "values_env": "TEST_SCOPE_APPROVAL_TERMS",
+                    }
+                ],
+            },
+        }
+        self._restart_gateway(config_value)
+        os.environ.pop("TEST_SCOPE_APPROVAL_TERMS", None)
+        os.environ.pop("TEST_SCOPE_APPROVAL_KEY", None)
+        before = len(FakeProviderHandler.requests)
+        body = {"model": "engineering-fast", "input": protected}
+        main_headers = {
+            "X-Hormuz-Repository": "acme/api",
+            "X-Hormuz-Branch": "main",
+        }
+
+        blocked, blocked_headers, _ = self._post(
+            "/v1/responses",
+            body,
+            extra_headers=main_headers,
+        )
+        request_id = blocked_headers["x-hormuz-dlp-approval-request"]
+        approved, _, _ = self._post(
+            f"/v1/dlp/approval-requests/{request_id}/decisions",
+            {"decision": "approve"},
+            token=CLAUDE_ONLY_TOKEN,
+        )
+        changed, changed_headers, _ = self._post(
+            "/v1/responses",
+            body,
+            extra_headers={
+                "X-Hormuz-Repository": "acme/api",
+                "X-Hormuz-Branch": "release",
+            },
+        )
+        allowed, allowed_headers, _ = self._post(
+            "/v1/responses",
+            body,
+            extra_headers=main_headers,
+        )
+
+        self.assertEqual(blocked, 403)
+        self.assertEqual(approved, 200)
+        self.assertEqual(changed, 403)
+        self.assertNotEqual(
+            changed_headers["x-hormuz-dlp-approval-request"],
+            request_id,
+        )
+        self.assertEqual(allowed, 200)
+        self.assertEqual(allowed_headers["x-hormuz-dlp-approval-request"], request_id)
+        self.assertEqual(len(FakeProviderHandler.requests), before + 1)
+        self.assertNotIn(
+            "x-hormuz-repository",
+            FakeProviderHandler.requests[-1]["headers"],
+        )
+        serialized = repr(
+            self.gateway.store.audit_events(
+                since="2000-01-01T00:00:00+00:00",
+                kind="security",
+            )
+        )
+        self.assertNotIn("acme/api", serialized)
+        self.assertNotIn("release", serialized)
+
     def test_required_injection_denies_tool_only_request_before_provider(self) -> None:
         config_value = self._config(self.provider.server_port, _free_port())
         config_value["policies"]["organization"]["context_injection"] = {
@@ -3539,6 +3931,9 @@ class GatewayIntegrationTests(unittest.TestCase):
             "-c",
             'model_providers.company_gateway.wire_api="responses"',
             "-c",
+            'model_providers.company_gateway.http_headers={"X-Hormuz-Repository"="acme/client-proof",'
+            '"X-Hormuz-Branch"="main","X-Hormuz-Revision"="client-proof-revision"}',
+            "-c",
             f"mcp_servers.hormuz.command={json.dumps(sys.executable)}",
             "-c",
             "mcp_servers.hormuz.args="
@@ -3575,12 +3970,17 @@ class GatewayIntegrationTests(unittest.TestCase):
         upstream = FakeProviderHandler.requests[-1]
         self.assertEqual(upstream["body"]["model"], "gpt-test-fast")
         self.assertEqual(upstream["headers"]["authorization"], f"Bearer {OPENAI_KEY}")
+        self.assertNotIn("x-hormuz-repository", upstream["headers"])
         self.assertIn("codex-client-context-proof", json.dumps(upstream["body"]))
         usage = self.gateway.store.audit_events(
             since="2000-01-01T00:00:00+00:00",
             kind="usage",
         )
         self.assertEqual(usage[-1]["context_injection_outcome"], "injected")
+        self.assertEqual(
+            usage[-1]["context_repository_revision"],
+            "client-proof-revision",
+        )
 
     @unittest.skipUnless(
         os.environ.get("HORMUZ_RUN_CLAUDE_CLIENT_TEST") == "1"
@@ -3618,6 +4018,11 @@ class GatewayIntegrationTests(unittest.TestCase):
                         "ANTHROPIC_BASE_URL": f"http://127.0.0.1:{self.gateway.server_port}",
                         "CLAUDE_CODE_API_KEY_HELPER_TTL_MS": "300000",
                         "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY": "1",
+                        "ANTHROPIC_CUSTOM_HEADERS": (
+                            "X-Hormuz-Repository: acme/client-proof\n"
+                            "X-Hormuz-Branch: main\n"
+                            "X-Hormuz-Revision: client-proof-revision"
+                        ),
                     },
                 }
             ),
@@ -3703,12 +4108,17 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertEqual(upstream["body"]["model"], "claude-sonnet-5")
         self.assertEqual(upstream["headers"]["x-api-key"], ANTHROPIC_KEY)
         self.assertNotIn("authorization", upstream["headers"])
+        self.assertNotIn("x-hormuz-repository", upstream["headers"])
         self.assertIn("claude-client-context-proof", json.dumps(upstream["body"]))
         usage = self.gateway.store.audit_events(
             since="2000-01-01T00:00:00+00:00",
             kind="usage",
         )
         self.assertEqual(usage[-1]["context_injection_outcome"], "injected")
+        self.assertEqual(
+            usage[-1]["context_repository_revision"],
+            "client-proof-revision",
+        )
 
     def _post(self, path: str, body: dict, *, extra_headers: dict[str, str] | None = None, token: str = GATEWAY_TOKEN):
         connection = http.client.HTTPConnection("127.0.0.1", self.gateway.server_port, timeout=5)
@@ -3718,6 +4128,33 @@ class GatewayIntegrationTests(unittest.TestCase):
         }
         headers.update(extra_headers or {})
         connection.request("POST", path, body=json.dumps(body), headers=headers)
+        response = connection.getresponse()
+        data = response.read()
+        response_headers = {name.lower(): value for name, value in response.getheaders()}
+        connection.close()
+        return response.status, response_headers, data
+
+    def _post_with_header_pairs(
+        self,
+        path: str,
+        body: dict,
+        header_pairs: tuple[tuple[str, str], ...],
+        *,
+        token: str = GATEWAY_TOKEN,
+    ):
+        connection = http.client.HTTPConnection(
+            "127.0.0.1",
+            self.gateway.server_port,
+            timeout=5,
+        )
+        encoded = json.dumps(body).encode("utf-8")
+        connection.putrequest("POST", path)
+        connection.putheader("Authorization", f"Bearer {token}")
+        connection.putheader("Content-Type", "application/json")
+        connection.putheader("Content-Length", str(len(encoded)))
+        for name, value in header_pairs:
+            connection.putheader(name, value)
+        connection.endheaders(encoded)
         response = connection.getresponse()
         data = response.read()
         response_headers = {name.lower(): value for name, value in response.getheaders()}
@@ -3795,6 +4232,7 @@ class GatewayIntegrationTests(unittest.TestCase):
             "mode": "required",
             "allowed_clients": [client],
             "allowed_models": [model],
+            "allowed_repositories": ["acme/client-proof"],
             "token_budget": 500,
             "max_items": 1,
         }
@@ -3816,12 +4254,23 @@ class GatewayIntegrationTests(unittest.TestCase):
                 source_revision="test:1",
                 source_sha256="e" * 64,
                 source_item_key=record_id,
+                repository_id="acme/client-proof",
+                branch="main",
                 verification="verified",
                 verification_evidence=("test:approved",),
                 effective_at=now - timedelta(minutes=1),
                 verified_at=now - timedelta(minutes=1),
                 tags=("reply", "exactly", "gateway"),
             ),
+            actor_id="alice",
+            policy_version="test-context-v1",
+        )
+        self.gateway.context_repository.observe_lifecycle_snapshot(
+            organization_id=identity.organization_id,
+            repository_id="acme/client-proof",
+            branch="main",
+            snapshot=ContextLifecycleSnapshot(repository_revision="client-proof-revision"),
+            expected_version=None,
             actor_id="alice",
             policy_version="test-context-v1",
         )

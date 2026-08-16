@@ -42,6 +42,7 @@ from hormuz.cli import (
 )
 from hormuz.config import (
     ConfigError,
+    ContextInjectionPolicy,
     GatewayConfig,
     Identity,
     OIDCLoginConfig,
@@ -98,6 +99,67 @@ class ClientConfigTests(unittest.TestCase):
             output.getvalue(),
         )
 
+    def test_client_configuration_emits_exact_granted_repository_scope_headers(self) -> None:
+        configured = replace(
+            self.config,
+            organization_policy=replace(
+                self.config.organization_policy,
+                context_injection=ContextInjectionPolicy(
+                    mode="optional",
+                    allowed_repositories=("Xpounder-com/hormuz",),
+                ),
+            ),
+        )
+
+        codex = io.StringIO()
+        with redirect_stdout(codex):
+            self.assertEqual(
+                _client_config(
+                    configured,
+                    "codex",
+                    "https://hormuz.example",
+                    repository="Xpounder-com/hormuz",
+                    branch="main",
+                    revision="abc123",
+                ),
+                0,
+            )
+        parsed = tomllib.loads(codex.getvalue())
+        self.assertEqual(
+            parsed["model_providers"]["hormuz"]["http_headers"],
+            {
+                "X-Hormuz-Repository": "Xpounder-com/hormuz",
+                "X-Hormuz-Branch": "main",
+                "X-Hormuz-Revision": "abc123",
+            },
+        )
+
+        claude = io.StringIO()
+        with redirect_stdout(claude):
+            self.assertEqual(
+                _client_config(
+                    configured,
+                    "claude",
+                    "https://hormuz.example",
+                    repository="Xpounder-com/hormuz",
+                    branch="main",
+                    revision="abc123",
+                ),
+                0,
+            )
+        self.assertIn("ANTHROPIC_CUSTOM_HEADERS", claude.getvalue())
+        self.assertIn("X-Hormuz-Repository: Xpounder-com/hormuz", claude.getvalue())
+        self.assertIn("X-Hormuz-Branch: main", claude.getvalue())
+        self.assertIn("X-Hormuz-Revision: abc123", claude.getvalue())
+
+        with self.assertRaisesRegex(ConfigError, "not granted"):
+            _client_config(
+                configured,
+                "codex",
+                "https://hormuz.example",
+                repository="other/private",
+            )
+
     def test_oidc_client_config_uses_credential_helpers_for_both_clients(self) -> None:
         issuer = "https://identity.example.com"
         identity = Identity(
@@ -114,6 +176,13 @@ class ClientConfigTests(unittest.TestCase):
         )
         config = replace(
             self.config,
+            organization_policy=replace(
+                self.config.organization_policy,
+                context_injection=ContextInjectionPolicy(
+                    mode="optional",
+                    allowed_repositories=("Xpounder-com/hormuz",),
+                ),
+            ),
             oidc_issuers={issuer: OIDCIssuerConfig(issuer=issuer, audiences=("hormuz-api",))},
             identities_by_subject={(issuer, "subject-alice"): identity},
         )
@@ -126,6 +195,8 @@ class ClientConfigTests(unittest.TestCase):
                 "https://hormuz.example",
                 actor_id="alice",
                 auth_mode="oidc",
+                repository="Xpounder-com/hormuz",
+                branch="main",
             )
         self.assertEqual(result, 0)
         self.assertIn("[model_providers.hormuz.auth]", codex.getvalue())
@@ -137,6 +208,13 @@ class ClientConfigTests(unittest.TestCase):
             parsed_codex["model_providers"]["hormuz"]["auth"]["command"],
             "hormuz",
         )
+        self.assertEqual(
+            parsed_codex["model_providers"]["hormuz"]["http_headers"],
+            {
+                "X-Hormuz-Repository": "Xpounder-com/hormuz",
+                "X-Hormuz-Branch": "main",
+            },
+        )
 
         claude = io.StringIO()
         with redirect_stdout(claude):
@@ -147,6 +225,8 @@ class ClientConfigTests(unittest.TestCase):
                 actor_id="alice",
                 auth_mode="oidc",
                 credential_env="COMPANY_OIDC_TOKEN",
+                repository="Xpounder-com/hormuz",
+                branch="main",
             )
         self.assertEqual(result, 0)
         self.assertIn('"ANTHROPIC_BASE_URL": "https://hormuz.example"', claude.getvalue())
@@ -156,6 +236,8 @@ class ClientConfigTests(unittest.TestCase):
             claude.getvalue(),
         )
         self.assertIn("hormuz auth token --env COMPANY_OIDC_TOKEN", claude.getvalue())
+        self.assertIn("X-Hormuz-Repository: Xpounder-com/hormuz", claude.getvalue())
+        self.assertIn("X-Hormuz-Branch: main", claude.getvalue())
         self.assertNotIn("ANTHROPIC_AUTH_TOKEN", claude.getvalue())
 
     def test_session_client_config_uses_secure_store_helper_for_both_clients(self) -> None:
@@ -174,6 +256,13 @@ class ClientConfigTests(unittest.TestCase):
         )
         config = replace(
             self.config,
+            organization_policy=replace(
+                self.config.organization_policy,
+                context_injection=ContextInjectionPolicy(
+                    mode="optional",
+                    allowed_repositories=("Xpounder-com/hormuz",),
+                ),
+            ),
             oidc_issuers={
                 issuer: OIDCIssuerConfig(
                     issuer=issuer,
@@ -205,6 +294,7 @@ class ClientConfigTests(unittest.TestCase):
                     actor_id="alice",
                     auth_mode="session",
                     profile="engineering-codex",
+                    repository="Xpounder-com/hormuz",
                 ),
                 0,
             )
@@ -220,6 +310,10 @@ class ClientConfigTests(unittest.TestCase):
                 "engineering-codex",
             ],
         )
+        self.assertEqual(
+            parsed["model_providers"]["hormuz"]["http_headers"],
+            {"X-Hormuz-Repository": "Xpounder-com/hormuz"},
+        )
 
         claude = io.StringIO()
         with redirect_stdout(claude):
@@ -231,6 +325,7 @@ class ClientConfigTests(unittest.TestCase):
                     actor_id="alice",
                     auth_mode="session",
                     profile="engineering-claude",
+                    repository="Xpounder-com/hormuz",
                 ),
                 0,
             )
@@ -238,6 +333,7 @@ class ClientConfigTests(unittest.TestCase):
             "hormuz auth token --gateway-env HORMUZ_SESSION_GATEWAY --profile engineering-claude",
             claude.getvalue(),
         )
+        self.assertIn("X-Hormuz-Repository: Xpounder-com/hormuz", claude.getvalue())
         self.assertIn('"HORMUZ_SESSION_GATEWAY": "https://hormuz.example"', claude.getvalue())
         self.assertIn(
             '"CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY": "1"',
@@ -486,6 +582,12 @@ class ClientConfigTests(unittest.TestCase):
             ).context_injection.mode,
             "off",
         )
+        self.assertEqual(
+            self.config.resolved_policy(
+                self.config.identities_by_actor["alice"]
+            ).context_injection.allowed_repositories,
+            (),
+        )
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             raw = json.loads((ROOT / "config.example.json").read_text(encoding="utf-8"))
@@ -510,6 +612,8 @@ class ClientConfigTests(unittest.TestCase):
                 "mode": "optional",
                 "allowed_clients": ["codex", "claude-code"],
                 "allowed_models": ["gpt-5.4-mini", "claude-sonnet-5"],
+                "allowed_repositories": ["Xpounder-com/hormuz", "Xpounder-com/web"],
+                "max_classification": "confidential",
                 "token_budget": 1000,
                 "max_items": 5,
             }
@@ -517,6 +621,8 @@ class ClientConfigTests(unittest.TestCase):
                 "mode": "required",
                 "allowed_clients": ["codex"],
                 "allowed_models": ["gpt-5.4-mini"],
+                "allowed_repositories": ["Xpounder-com/hormuz", "other/private"],
+                "max_classification": "internal",
                 "token_budget": 500,
                 "max_items": 3,
             }
@@ -536,12 +642,38 @@ class ClientConfigTests(unittest.TestCase):
             self.assertEqual(effective.mode, "required")
             self.assertEqual(effective.allowed_clients, ("codex",))
             self.assertEqual(effective.allowed_models, ("gpt-5.4-mini",))
+            self.assertEqual(effective.allowed_repositories, ("Xpounder-com/hormuz",))
+            self.assertEqual(effective.max_classification, "internal")
             self.assertEqual(effective.token_budget, 500)
             self.assertEqual(effective.max_items, 3)
 
             raw["policies"]["actors"]["alice"]["context_injection"]["unknown"] = True
             path.write_text(json.dumps(raw), encoding="utf-8")
             with self.assertRaisesRegex(ConfigError, "Unknown .*context_injection fields"):
+                GatewayConfig.load(
+                    path,
+                    environ={"HORMUZ_TOKEN": "test-identity-token"},
+                )
+
+            raw["policies"]["actors"]["alice"]["context_injection"].pop("unknown")
+            raw["policies"]["organization"]["context_injection"][
+                "allowed_repositories"
+            ] = ["unsafe repository"]
+            path.write_text(json.dumps(raw), encoding="utf-8")
+            with self.assertRaisesRegex(ConfigError, "safe exact selectors"):
+                GatewayConfig.load(
+                    path,
+                    environ={"HORMUZ_TOKEN": "test-identity-token"},
+                )
+
+            raw["policies"]["organization"]["context_injection"][
+                "allowed_repositories"
+            ] = ["Xpounder-com/hormuz"]
+            raw["policies"]["organization"]["context_injection"][
+                "max_classification"
+            ] = "top-secret"
+            path.write_text(json.dumps(raw), encoding="utf-8")
+            with self.assertRaisesRegex(ConfigError, "max_classification must be"):
                 GatewayConfig.load(
                     path,
                     environ={"HORMUZ_TOKEN": "test-identity-token"},

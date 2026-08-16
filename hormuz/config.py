@@ -102,6 +102,8 @@ class ContextInjectionPolicy:
     mode: str | None = None
     allowed_clients: tuple[str, ...] | None = None
     allowed_models: tuple[str, ...] | None = None
+    allowed_repositories: tuple[str, ...] | None = None
+    max_classification: str | None = None
     token_budget: int | None = None
     max_items: int | None = None
 
@@ -120,6 +122,14 @@ class ContextInjectionPolicy:
             allowed_models=_intersection(
                 self.allowed_models,
                 other.allowed_models,
+            ),
+            allowed_repositories=_intersection(
+                self.allowed_repositories,
+                other.allowed_repositories,
+            ),
+            max_classification=_context_classification_overlay(
+                self.max_classification,
+                other.max_classification,
             ),
             token_budget=_minimum(self.token_budget, other.token_budget),
             max_items=_minimum(self.max_items, other.max_items),
@@ -593,6 +603,7 @@ class GatewayConfig:
             policies_raw.get("organization"),
             "policies.organization",
             default_context_injection_mode="off",
+            default_context_allowed_repositories=(),
         )
         team_policies = {
             scope_id: _policy(value, f"policies.teams.{scope_id}")
@@ -818,6 +829,7 @@ def _policy(
     path: str,
     *,
     default_context_injection_mode: str | None = None,
+    default_context_allowed_repositories: tuple[str, ...] | None = None,
 ) -> Policy:
     item = _object(value, path)
     return Policy(
@@ -835,6 +847,7 @@ def _policy(
             item.get("context_injection", {}),
             f"{path}.context_injection",
             default_mode=default_context_injection_mode,
+            default_allowed_repositories=default_context_allowed_repositories,
         ),
     )
 
@@ -844,6 +857,7 @@ def _context_injection_policy(
     path: str,
     *,
     default_mode: str | None = None,
+    default_allowed_repositories: tuple[str, ...] | None = None,
 ) -> ContextInjectionPolicy:
     item = _object(value, path)
     unknown = sorted(
@@ -852,6 +866,8 @@ def _context_injection_policy(
             "mode",
             "allowed_clients",
             "allowed_models",
+            "allowed_repositories",
+            "max_classification",
             "token_budget",
             "max_items",
         }
@@ -878,6 +894,25 @@ def _context_injection_policy(
             minimum=1,
             maximum=100,
         )
+    allowed_repositories = (
+        _optional_string_tuple(
+            item.get("allowed_repositories"),
+            f"{path}.allowed_repositories",
+        )
+        if "allowed_repositories" in item
+        else default_allowed_repositories
+    )
+    for repository_id in allowed_repositories or ():
+        if not is_context_selector(repository_id):
+            raise ConfigError(
+                f"{path}.allowed_repositories values must be safe exact selectors up to 512 characters"
+            )
+    max_classification = item.get("max_classification")
+    if max_classification is not None:
+        max_classification = _classification(
+            max_classification,
+            f"{path}.max_classification",
+        )
     return ContextInjectionPolicy(
         mode=mode,
         allowed_clients=_optional_string_tuple(
@@ -888,6 +923,8 @@ def _context_injection_policy(
             item.get("allowed_models"),
             f"{path}.allowed_models",
         ),
+        allowed_repositories=allowed_repositories,
+        max_classification=max_classification,
         token_budget=token_budget,
         max_items=max_items,
     )
@@ -1072,6 +1109,7 @@ _DLP_BUILTINS = {
     "opaque_media": ("unsupported_media", "high", "deny"),
 }
 _DLP_RULE_ID = re.compile(r"[a-z][a-z0-9_.-]{0,63}\Z")
+_CONTEXT_SELECTOR = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/@:+-]{0,511}\Z")
 
 
 def _dlp_controls(value: Any, env: dict[str, str]) -> DLPControls:
@@ -1444,6 +1482,10 @@ def _dlp_identifier(value: Any, path: str) -> str:
     return result
 
 
+def is_context_selector(value: object) -> bool:
+    return isinstance(value, str) and _CONTEXT_SELECTOR.fullmatch(value) is not None
+
+
 def _context_lifecycle_automation_config(value: Any) -> ContextLifecycleAutomationConfig:
     path = "context_service.lifecycle"
     item = _object(value, path)
@@ -1681,6 +1723,18 @@ def _minimum(parent: int | float | None, child: int | float | None):
     if child is None:
         return parent
     return min(parent, child)
+
+
+def _context_classification_overlay(
+    parent: str | None,
+    child: str | None,
+) -> str | None:
+    if parent is None:
+        return child
+    if child is None:
+        return parent
+    classifications = ("public", "internal", "confidential", "restricted")
+    return classifications[min(classifications.index(parent), classifications.index(child))]
 
 
 def _context_injection_mode_overlay(

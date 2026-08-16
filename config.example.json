@@ -197,7 +197,9 @@
       "monthly_budget_usd": 10000,
       "per_actor_monthly_budget_usd": 500,
       "context_injection": {
-        "mode": "off"
+        "mode": "off",
+        "allowed_repositories": [],
+        "max_classification": "internal"
       }
     },
     "teams": {

@@ -12,6 +12,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from collections import defaultdict, deque
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -20,7 +21,13 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from .auth import AuthenticationError, Authenticator
-from .config import GatewayConfig, Identity, ModelRoute, UpstreamConfig
+from .config import (
+    GatewayConfig,
+    Identity,
+    ModelRoute,
+    UpstreamConfig,
+    is_context_selector,
+)
 from .context import (
     CLASSIFICATIONS,
     CONTEXT_RETRIEVAL_VERSION,
@@ -76,6 +83,41 @@ MAX_CONTEXT_EVIDENCE_REQUEST_BYTES = 64 * 1024
 MAX_CONTEXT_REVALIDATION_REQUEST_BYTES = 8 * 1024
 MAX_AUTH_REQUEST_BYTES = 8 * 1024
 MAX_DLP_APPROVAL_REQUEST_BYTES = 2 * 1024
+_CONTEXT_SCOPE_HEADERS = (
+    ("X-Hormuz-Repository", "repository_id"),
+    ("X-Hormuz-Branch", "branch"),
+    ("X-Hormuz-Revision", "revision"),
+)
+
+
+@dataclass(frozen=True)
+class _AutomaticContextScope:
+    repository_id: str | None = None
+    branch: str | None = None
+    revision: str | None = None
+    error: str | None = None
+
+    @property
+    def headers(self) -> dict[str, str]:
+        if self.error is not None:
+            return {}
+        return {
+            **(
+                {"X-Hormuz-Repository": self.repository_id}
+                if self.repository_id is not None
+                else {}
+            ),
+            **(
+                {"X-Hormuz-Branch": self.branch}
+                if self.branch is not None
+                else {}
+            ),
+            **(
+                {"X-Hormuz-Revision": self.revision}
+                if self.revision is not None
+                else {}
+            ),
+        }
 
 
 def _encode_usage_cursor(
@@ -1756,6 +1798,38 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", "0")
         self.end_headers()
 
+    def _automatic_context_scope(
+        self,
+        allowed_repositories: tuple[str, ...] | None,
+    ) -> _AutomaticContextScope:
+        selected: dict[str, str] = {}
+        for header_name, field_name in _CONTEXT_SCOPE_HEADERS:
+            values = self.headers.get_all(header_name, [])
+            if len(values) > 1:
+                return _AutomaticContextScope(error="repository_selector_ambiguous")
+            if not values:
+                continue
+            value = values[0]
+            if not is_context_selector(value):
+                return _AutomaticContextScope(error="repository_selector_invalid")
+            selected[field_name] = value
+        repository_id = selected.get("repository_id")
+        branch = selected.get("branch")
+        revision = selected.get("revision")
+        if repository_id is None and (branch is not None or revision is not None):
+            return _AutomaticContextScope(error="repository_selector_invalid")
+        if revision is not None and branch is None:
+            return _AutomaticContextScope(error="repository_selector_invalid")
+        if repository_id is not None and (
+            allowed_repositories is None or repository_id not in allowed_repositories
+        ):
+            return _AutomaticContextScope(error="repository_not_granted")
+        return _AutomaticContextScope(
+            repository_id=repository_id,
+            branch=branch,
+            revision=revision,
+        )
+
     def _prepare_automatic_context(
         self,
         *,
@@ -1765,11 +1839,11 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         resolved_alias: str,
         operation: str,
         request_body: dict[str, Any],
-    ) -> tuple[dict[str, Any], ContextLineage]:
+    ) -> tuple[dict[str, Any], ContextLineage, dict[str, str]]:
         injection = self.server.config.resolved_policy(identity).context_injection
         mode = injection.mode or "off"
         if mode == "off":
-            return request_body, ContextLineage()
+            return request_body, ContextLineage(), {}
         base = {
             "mode": mode,
             "policy_version": self.server.config.context_service.policy_version,
@@ -1779,13 +1853,13 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 **base,
                 outcome="not_injected",
                 reason="client_not_enabled",
-            )
+            ), {}
         if injection.allowed_models is not None and resolved_alias not in injection.allowed_models:
             return request_body, ContextLineage(
                 **base,
                 outcome="not_injected",
                 reason="model_not_enabled",
-            )
+            ), {}
         if operation not in {
             "/v1/responses",
             "/v1/messages",
@@ -1795,14 +1869,22 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 **base,
                 outcome="not_injected",
                 reason="unsupported_operation",
-            )
+            ), {}
         query = extract_user_query(protocol, request_body)
         if query is None:
             return request_body, ContextLineage(
                 **base,
                 outcome="denied" if mode == "required" else "not_injected",
                 reason="no_eligible_query",
-            )
+            ), {}
+
+        scope = self._automatic_context_scope(injection.allowed_repositories)
+        if scope.error is not None and mode == "required":
+            return request_body, ContextLineage(
+                **base,
+                outcome="denied",
+                reason=scope.error,
+            ), {}
 
         service = self.server.config.context_service
         token_budget = min(
@@ -1815,12 +1897,51 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         )
         started = time.monotonic()
         as_of = datetime.now(timezone.utc)
+        clearance = identity.clearance
+        if injection.max_classification is not None:
+            clearance = CLASSIFICATIONS[
+                min(
+                    CLASSIFICATIONS.index(clearance),
+                    CLASSIFICATIONS.index(injection.max_classification),
+                )
+            ]
         principal = ContextPrincipal(
             organization_id=identity.organization_id,
             team_id=identity.team_id,
             actor_id=identity.actor_id,
-            clearance=identity.clearance,
+            clearance=clearance,
+            repository_id=scope.repository_id if scope.error is None else None,
+            branch=scope.branch if scope.error is None else None,
         )
+        lifecycle_snapshot = None
+        scope_failure = scope.error
+        if principal.repository_id is not None and principal.branch is not None:
+            stored_snapshot = self.server.context_repository.get_lifecycle_snapshot(
+                organization_id=principal.organization_id,
+                repository_id=principal.repository_id,
+                branch=principal.branch,
+            )
+            if scope.revision is not None:
+                if stored_snapshot is None:
+                    scope_failure = "repository_revision_unverified"
+                elif stored_snapshot.snapshot.repository_revision != scope.revision:
+                    scope_failure = "repository_revision_mismatch"
+            if scope_failure is None and stored_snapshot is not None:
+                lifecycle_snapshot = stored_snapshot.snapshot
+        if scope_failure is not None and principal.repository_id is not None:
+            if mode == "required":
+                return request_body, ContextLineage(
+                    **base,
+                    outcome="denied",
+                    reason=scope_failure,
+                ), scope.headers
+            principal = ContextPrincipal(
+                organization_id=identity.organization_id,
+                team_id=identity.team_id,
+                actor_id=identity.actor_id,
+                clearance=clearance,
+            )
+            lifecycle_snapshot = None
         pack_request = ContextPackRequest(
             query=query,
             principal=principal,
@@ -1834,6 +1955,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         pack = build_context_pack(
             (item.record for item in stored),
             pack_request,
+            lifecycle_snapshot=lifecycle_snapshot,
         )
         # The same authorization-first read boundary applies to automatic
         # injection: no selected content can leave Hormuz unless this audit
@@ -1852,9 +1974,9 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             return request_body, ContextLineage(
                 **pack_lineage,
                 outcome="denied" if mode == "required" else "not_injected",
-                reason="empty_pack",
+                reason=scope_failure or "empty_pack",
                 reuse_status="fresh",
-            )
+            ), scope.headers
         try:
             rendered = inject_context_pack(protocol, request_body, pack)
         except ContextInjectionError as error:
@@ -1863,7 +1985,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 outcome="denied" if mode == "required" else "not_injected",
                 reason=error.code,
                 reuse_status="fresh",
-            )
+            ), scope.headers
         lineage = ContextLineage(
             **pack_lineage,
             outcome="injected",
@@ -1889,7 +2011,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             rendered.estimated_tokens,
             elapsed,
         )
-        return rendered.body, lineage
+        return rendered.body, lineage, scope.headers
 
     def _proxy_generation(
         self,
@@ -1953,7 +2075,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             if current_output is None or current_output > decision.max_output_tokens:
                 request_body[output_field] = decision.max_output_tokens
         try:
-            request_body, context_lineage = self._prepare_automatic_context(
+            request_body, context_lineage, context_scope_headers = self._prepare_automatic_context(
                 identity=identity,
                 protocol=protocol,
                 client=client,
@@ -1972,6 +2094,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 reason="context_store_unavailable",
                 policy_version=self.server.config.context_service.policy_version,
             )
+            context_scope_headers = {}
             if account_usage:
                 self.server.store.record(
                     identity=identity,
@@ -2048,6 +2171,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 model=decision.route.upstream_model,
                 unredactable_strings=(
                     *forwarded_headers.values(),
+                    *context_scope_headers.values(),
                     *query_strings,
                 ),
             )
@@ -2071,6 +2195,8 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                         "payload": redaction.value,
                         "provider_headers": forwarded_headers,
                     }
+                    if context_scope_headers:
+                        approval_material["context_scope_headers"] = context_scope_headers
                     if forwarded_query:
                         approval_material["provider_query"] = forwarded_query
                     fingerprint = payload_fingerprint(
