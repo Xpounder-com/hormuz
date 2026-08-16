@@ -550,6 +550,21 @@ The accepted ADR 0006 first slice, both provider renderers, policy/failure behav
 
 This is executable evidence for verified organization/team/actor context on `POST /v1/responses` and `POST /v1/messages`, not closure of issue #5 or an enterprise release. Repository/branch grants and selectors, tool-only continuation lineage, OpenAI compaction, Anthropic token-count mutation, prompt/context caching, broader client shapes and provider releases, customer-data evaluation, accepted-task cost/quality evidence, hosted tenancy, KMS, HA, and independent review remain open.
 
+### Anthropic token-count context parity
+
+The next accepted-ADR slice was exercised locally on August 16, 2026. No live provider credential was used; deterministic integration tests sent the request to the provider-compatible Anthropic fake through the real Hormuz transport.
+
+- `POST /v1/messages/count_tokens` selected and rendered the same verified organization-visible Context Pack as Anthropic generation, preserved `system` exactly, routed the configured provider model, and returned the content-free pack identifier;
+- a fake provider credential inside the selected record was redacted before egress. The provider received only `[REDACTED:HORMUZ_SECRET]`, the context-read audit committed, and the metadata-only DLP security total increased;
+- required mode denied both tool-result-only and empty-pack token-count requests before provider egress. A context-store outage denied optional mode with the stable content-free `hormuz_context_unavailable` error and did not expose the internal exception;
+- successful, policy-denied, store-failed, and opaque-media-denied token-count cases created no inference-usage rows and reserved no generation budget;
+- all 264 source tests passed with official-client gates enabled and no skips. Installed Codex `0.139.0` and Claude Code `2.1.233` each completed ordinary generation through the gateway with an authorized pack, so the additive token-count path did not regress either client;
+- the frozen 60-task release benchmark passed five iterations with precision `1.00`, recall `1.00`, useful-pack rate `1.00`, mean compression ratio `0.840593`, zero authorization, stale-lifecycle, dependency-stale, malicious, contradiction, token-budget, leakage, or determinism failures, and p95 in-process selection latency `0.161042 ms`. Corpus SHA-256 remained `9822d592868202c7c7539bcdac7d4a5894c01f9e6dba7a434846516b67b32c17`;
+- isolated source and wheel builds succeeded. A clean Python 3.14 environment installed the exact wheel outside the checkout, loaded `hormuz.server` from `site-packages`, verified the token-count operation in the installed implementation, compiled the package, and passed the installed strict 60-task benchmark; and
+- source/test bytecode compilation, deterministic corpus verification, `git diff --check`, and high-confidence runtime-source and extracted-wheel scans for private-key, OpenAI, Anthropic, GitHub, AWS, and Google credential patterns passed. The ignored `.env.local` remained outside the build and was not needed for any provider request.
+
+This establishes token-count parity for a request containing direct current-user text. It does not bind a tool-only count to earlier context lineage, prove live Anthropic billing behavior, add OpenAI compaction, or close issue #5. Those remain explicit compatibility and product-decision gates.
+
 ## Reproduce locally
 
 The default suite uses only loopback fake providers:

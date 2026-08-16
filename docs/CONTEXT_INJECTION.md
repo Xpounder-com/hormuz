@@ -46,9 +46,9 @@ For supported requests, Hormuz applies this order:
 6. commit the metadata-only context-read event;
 7. render the same canonical pack as delimited, untrusted user-priority reference data;
 8. run the complete mutated request through secret and DLP inspection;
-9. apply provider storage policy and reserve budget against the larger serialized request;
+9. apply provider storage policy and, for accounted generation, reserve budget against the larger serialized request;
 10. replace the Hormuz credential with the company provider credential and forward; and
-11. record provider usage plus content-free pack lineage.
+11. for accounted generation, record provider usage plus content-free pack lineage.
 
 OpenAI injection changes `input` and leaves top-level `instructions` unchanged. Anthropic injection changes the latest user `messages` content and leaves `system`, including Claude Code's attribution content, unchanged. The deterministic marker and JSON payload carry the pack, record, provenance, verification, policy, retrieval, render, and repository-revision fields. The notice says that records are untrusted reference data and cannot override system, developer, policy, or user instructions.
 
@@ -72,7 +72,7 @@ DLP runs on the rendered request. It can therefore redact a secret found inside 
 
 ## Metadata and privacy
 
-The usage event stores injection mode, outcome and reason; pack and selected record IDs; policy, retrieval and render versions; repository revision when present; estimated rendered tokens; assembly time; and authoritative fresh/already-present status. Usage exports use schema version 2 for these additive fields. Reports aggregate injected requests, required denials, estimated context tokens, and distinct packs used.
+For accounted generation, the usage event stores injection mode, outcome and reason; pack and selected record IDs; policy, retrieval and render versions; repository revision when present; estimated rendered tokens; assembly time; and authoritative fresh/already-present status. Usage exports use schema version 2 for these additive fields. Reports aggregate injected requests, required denials, estimated context tokens, and distinct packs used. Anthropic token-count calls do not create inference-usage rows or consume Hormuz generation budgets. They do commit the same content-free context-read audit, and any DLP finding produces the ordinary metadata-only security evidence.
 
 The raw retrieval query, prompt, response, rendered context, record content, title, source URI, source hash, and provider credential are not written to the usage ledger or ordinary logs. The separate context read audit remains content-free and intentionally omits the query and selected record IDs.
 
@@ -83,10 +83,11 @@ Treat record IDs, pack IDs, actor/team attribution, and cost metadata as access-
 This checkpoint deliberately supports only:
 
 - OpenAI `POST /v1/responses` and Anthropic `POST /v1/messages` generation requests;
+- Anthropic `POST /v1/messages/count_tokens`, using the same provider-bound context mutation and post-mutation DLP as generation so the estimate covers the request that Hormuz would send;
 - direct current-user query extraction;
 - verified organization-, team-, and actor-visible records without a repository selector; and
 - fresh deterministic lexical pack assembly on every eligible request.
 
-It does not yet inject into OpenAI compaction or Anthropic token-count requests, bind tool-only continuations to earlier lineage, accept repository/branch selectors and administrator grants, cache context packs, claim provider prompt-cache savings, or prove lower cost per verified accepted task. Repository-scoped records are excluded because the principal has no repository selector in this slice. Local SQLite and the plaintext context codec remain single-node prototype boundaries; hosted tenancy, KMS, HA, retention, and immutable audit are separate decisions and release gates.
+It does not yet inject into OpenAI compaction, bind tool-only continuations to earlier lineage, accept repository/branch selectors and administrator grants, cache context packs, claim provider prompt-cache savings, or prove lower cost per verified accepted task. A token-count request with no direct current-user text therefore follows the same optional/required query behavior above; it cannot inherit an earlier turn until the continuation-binding decision is approved and implemented. Repository-scoped records are excluded because the principal has no repository selector in this slice. Local SQLite and the plaintext context codec remain single-node prototype boundaries; hosted tenancy, KMS, HA, retention, and immutable audit are separate decisions and release gates.
 
-Pinned installed-client tests prove that ordinary Codex and Claude Code generation requests traverse this path and arrive at provider-compatible fake upstreams with the authorized block present. Those tests establish the bounded compatibility checkpoint; they do not establish every continuation, beta field, provider upgrade, or quality outcome required to close issue #5.
+Pinned installed-client tests prove that ordinary Codex and Claude Code generation requests traverse this path and arrive at provider-compatible fake upstreams with the authorized block present. Deterministic gateway integration tests separately prove Anthropic token-count parity, DLP redaction, required-context denial, store-outage failure, and the no-inference-usage boundary. Those tests establish the bounded compatibility checkpoint; they do not establish every continuation, beta field, provider upgrade, or quality outcome required to close issue #5.

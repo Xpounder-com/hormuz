@@ -207,7 +207,7 @@ This is a durable local governance kernel, not the final enterprise context serv
 - the token estimate covers the complete serialized item contract and is
   deterministic, but it excludes the response wrapper and is not a provider
   tokenizer guarantee;
-- bounded disabled-by-default automatic injection exists for verified organization/team/actor records on OpenAI Responses and Anthropic Messages requests; repository selectors, continuation bindings, token-count/compaction injection, and complete issue #5 evidence remain open;
+- bounded disabled-by-default automatic injection exists for verified organization/team/actor records on OpenAI Responses, Anthropic Messages generation, and Anthropic token-count requests; repository selectors, continuation bindings, OpenAI compaction injection, and complete issue #5 evidence remain open;
 - there is no context-pack cache, source-specific event collector, or outcome writeback; the current connector API accepts already-validated normalized attestations; and
 - injected packs run before the existing secret-egress boundary, so added content receives the same DLP action as employee request content.
 

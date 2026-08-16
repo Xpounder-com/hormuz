@@ -2426,7 +2426,7 @@ class GatewayIntegrationTests(unittest.TestCase):
 
     def test_token_count_redaction_has_security_audit_without_usage_charge(self) -> None:
         secret = "sk-" + "proj-" + ("E" * 24)
-        status, headers, _ = self._post(
+        status, headers, response = self._post(
             "/v1/messages/count_tokens",
             {
                 "model": "claude-sonnet-5",
@@ -2443,6 +2443,189 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertEqual(secret_totals.detections, 1)
         self.assertEqual(secret_totals.redacted_requests, 1)
         self.assertNotIn(secret, json.dumps(FakeProviderHandler.requests[-1]["body"]))
+
+    def test_token_count_uses_governed_context_and_dlp_without_usage_charge(self) -> None:
+        config_value = self._config(self.provider.server_port, _free_port())
+        config_value["policies"]["organization"]["context_injection"] = {
+            "mode": "required",
+            "allowed_clients": ["claude-code"],
+            "allowed_models": ["claude-standard"],
+            "token_budget": 500,
+            "max_items": 1,
+        }
+        self._restart_gateway(config_value)
+        identity = self.config.identities_by_actor["alice"]
+        now = datetime.now(timezone.utc)
+        self.gateway.context_repository.ingest(
+            ContextRecord(
+                record_id="token-count-context-proof",
+                record_kind="decision",
+                title="Token count compatibility credential",
+                content=(
+                    "Count the governed compatibility context and never expose this "
+                    f"test credential: {ANTHROPIC_KEY}"
+                ),
+                owner_id="platform",
+                organization_id=identity.organization_id,
+                visibility="organization",
+                scope_id=identity.organization_id,
+                classification="internal",
+                source_uri="test://token-count-context-proof",
+                source_revision="test:1",
+                source_sha256="f" * 64,
+                source_item_key="token-count-context-proof",
+                verification="verified",
+                verification_evidence=("test:approved",),
+                effective_at=now - timedelta(minutes=1),
+                verified_at=now - timedelta(minutes=1),
+                tags=("count", "governed", "compatibility"),
+            ),
+            actor_id="alice",
+            policy_version="test-context-v1",
+        )
+        system = [{"type": "text", "text": "Preserve attribution exactly"}]
+
+        status, headers, response = self._post(
+            "/v1/messages/count_tokens",
+            {
+                "model": "claude-standard",
+                "system": system,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": "Count governed compatibility context",
+                    }
+                ],
+            },
+            extra_headers={"Anthropic-Version": "2023-06-01"},
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(response), {"input_tokens": 42})
+        self.assertIn("context-injected", headers["x-hormuz-policy-decision"])
+        self.assertIn("redacted", headers["x-hormuz-policy-decision"])
+        self.assertTrue(headers["x-hormuz-context-pack"].startswith("ctxpack_"))
+        self.assertEqual(headers["x-hormuz-redactions"], "1")
+        upstream = FakeProviderHandler.requests[-1]
+        self.assertEqual(
+            upstream["path"].partition("?")[0],
+            "/v1/messages/count_tokens",
+        )
+        self.assertEqual(upstream["body"]["model"], "claude-test")
+        self.assertEqual(upstream["body"]["system"], system)
+        provider_body = json.dumps(upstream["body"])
+        self.assertIn("token-count-context-proof", provider_body)
+        self.assertIn("[REDACTED:HORMUZ_SECRET]", provider_body)
+        self.assertNotIn(ANTHROPIC_KEY, provider_body)
+        self.assertEqual(
+            self.gateway.store.audit_events(
+                since="2000-01-01T00:00:00+00:00",
+                kind="usage",
+            ),
+            [],
+        )
+        context_audit = [
+            event
+            for event in self.gateway.context_repository.audit_events(
+                organization_id=identity.organization_id,
+            )
+            if event["event_type"] == "context.read"
+        ]
+        self.assertEqual(len(context_audit), 1)
+        self.assertEqual(context_audit[0]["selected_records"], 1)
+        self.assertEqual(context_audit[0]["pack_id"], headers["x-hormuz-context-pack"])
+        secret_totals = self.gateway.store.monthly_secret_totals(actor_id="alice")
+        self.assertEqual(secret_totals.events, 1)
+        self.assertEqual(secret_totals.redacted_requests, 1)
+
+    def test_token_count_context_requirement_and_store_failure_stop_before_provider(self) -> None:
+        config_value = self._config(self.provider.server_port, _free_port())
+        config_value["policies"]["organization"]["context_injection"] = {
+            "mode": "required",
+            "allowed_clients": ["claude-code"],
+            "allowed_models": ["claude-standard"],
+            "token_budget": 500,
+            "max_items": 1,
+        }
+        self._restart_gateway(config_value)
+        before = len(FakeProviderHandler.requests)
+
+        no_query_status, _, no_query_response = self._post(
+            "/v1/messages/count_tokens",
+            {
+                "model": "claude-standard",
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": "tool-token-count",
+                                "content": "untrusted tool output",
+                            }
+                        ],
+                    }
+                ],
+            },
+            extra_headers={"Anthropic-Version": "2023-06-01"},
+        )
+        empty_status, _, empty_response = self._post(
+            "/v1/messages/count_tokens",
+            {
+                "model": "claude-standard",
+                "messages": [{"role": "user", "content": "quasar topology"}],
+            },
+            extra_headers={"Anthropic-Version": "2023-06-01"},
+        )
+
+        self.assertEqual(no_query_status, 403)
+        self.assertEqual(empty_status, 403)
+        self.assertEqual(len(FakeProviderHandler.requests), before)
+        self.assertEqual(json.loads(no_query_response)["error"]["type"], "permission_error")
+        self.assertEqual(json.loads(empty_response)["error"]["type"], "permission_error")
+        self.assertEqual(
+            self.gateway.store.audit_events(
+                since="2000-01-01T00:00:00+00:00",
+                kind="usage",
+            ),
+            [],
+        )
+
+        config_value["policies"]["organization"]["context_injection"]["mode"] = "optional"
+        self._restart_gateway(config_value)
+        with mock.patch.object(
+            self.gateway.context_repository,
+            "list_access_authorized",
+            side_effect=sqlite3.OperationalError("PRIVATE-CONTEXT-COUNT-FAILURE"),
+        ), self.assertLogs("hormuz", level="ERROR") as logs:
+            unavailable_status, _, unavailable_response = self._post(
+                "/v1/messages/count_tokens",
+                {
+                    "model": "claude-standard",
+                    "messages": [
+                        {"role": "user", "content": "Count governed compatibility context"}
+                    ],
+                },
+                extra_headers={"Anthropic-Version": "2023-06-01"},
+            )
+
+        self.assertEqual(unavailable_status, 503)
+        self.assertEqual(len(FakeProviderHandler.requests), before)
+        self.assertEqual(
+            json.loads(unavailable_response)["error"]["type"],
+            "hormuz_context_unavailable",
+        )
+        self.assertNotIn(
+            "PRIVATE-CONTEXT-COUNT-FAILURE",
+            unavailable_response.decode("utf-8") + "\n".join(logs.output),
+        )
+        self.assertEqual(
+            self.gateway.store.audit_events(
+                since="2000-01-01T00:00:00+00:00",
+                kind="usage",
+            ),
+            [],
+        )
 
     def test_low_confidence_dlp_detection_forwards_unchanged_and_audits_metadata_only(self) -> None:
         email = "engineer@example.com"

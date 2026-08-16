@@ -1786,7 +1786,11 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 outcome="not_injected",
                 reason="model_not_enabled",
             )
-        if operation not in {"/v1/responses", "/v1/messages"}:
+        if operation not in {
+            "/v1/responses",
+            "/v1/messages",
+            "/v1/messages/count_tokens",
+        }:
             return request_body, ContextLineage(
                 **base,
                 outcome="not_injected",
