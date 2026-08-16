@@ -19,6 +19,7 @@ An agent, test result, or convenient implementation detail cannot move a decisio
 | [0002](0002-enterprise-tenancy-and-persistence.md) | Proposed | Enterprise tenancy, authorization, and persistence | [#1](https://github.com/Xpounder-com/hormuz/issues/1) |
 | [0003](0003-cache-privacy-tiers.md) | Proposed | Provider and Hormuz cache privacy tiers | [#3](https://github.com/Xpounder-com/hormuz/issues/3) |
 | [0004](0004-structured-dlp-and-approval-boundary.md) | Accepted | Structured DLP and approval boundary | [#10](https://github.com/Xpounder-com/hormuz/issues/10) |
+| [0005](0005-github-lifecycle-event-trust.md) | Proposed | GitHub lifecycle event trust and collection | [#12](https://github.com/Xpounder-com/hormuz/issues/12) |
 
 ## Acceptance record
 
