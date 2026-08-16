@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .config import GatewayConfig, Identity, ModelRoute
+from .config import GatewayConfig, Identity, ModelRoute, Policy
 from .store import MonthlyTotals, ReservationScope, UsageStore
 
 
@@ -15,6 +15,13 @@ class PolicyDecision:
     resolved_alias: str | None
     route: ModelRoute | None
     max_output_tokens: int | None
+
+
+@dataclass(frozen=True)
+class ModelCatalogDecision:
+    allowed: bool
+    reason: str
+    aliases: tuple[str, ...]
 
 
 class PolicyEngine:
@@ -33,10 +40,9 @@ class PolicyEngine:
     ) -> PolicyDecision:
         policy = self.config.resolved_policy(identity)
 
-        if identity.allowed_clients and client not in identity.allowed_clients:
-            return self._deny(requested_model, f"Identity is not authorized to use client {client}.")
-        if policy.allowed_clients is not None and client not in policy.allowed_clients:
-            return self._deny(requested_model, f"Policy does not allow client {client}.")
+        client_denial = self._client_denial_reason(identity, policy, client)
+        if client_denial is not None:
+            return self._deny(requested_model, client_denial)
 
         budget_decision = self._check_limits(identity, requested_model)
         if budget_decision is not None:
@@ -77,6 +83,37 @@ class PolicyEngine:
             resolved_alias=selected_alias,
             route=route,
             max_output_tokens=output_cap,
+        )
+
+    def model_catalog(
+        self,
+        *,
+        identity: Identity,
+        client: str,
+        protocol: str,
+    ) -> ModelCatalogDecision:
+        """Return statically authorized aliases without spending or reserving budget."""
+        policy = self.config.resolved_policy(identity)
+        client_denial = self._client_denial_reason(identity, policy, client)
+        if client_denial is not None:
+            return ModelCatalogDecision(
+                allowed=False,
+                reason=client_denial,
+                aliases=(),
+            )
+        allowed_models = policy.allowed_models
+        aliases = tuple(
+            sorted(
+                alias
+                for alias, route in self.config.model_routes.items()
+                if route.protocol == protocol
+                and (allowed_models is None or alias in allowed_models)
+            )
+        )
+        return ModelCatalogDecision(
+            allowed=True,
+            reason="Authorized model aliases resolved from effective policy.",
+            aliases=aliases,
         )
 
     def reserve_budget(
@@ -168,6 +205,15 @@ class PolicyEngine:
                 and actor_totals.cost_usd >= scope_policy.per_actor_monthly_budget_usd
             ):
                 return self._deny(requested_model, "The employee monthly AI budget has been reached.")
+        return None
+
+    @staticmethod
+    def _client_denial_reason(identity: Identity, policy: Policy, client: str) -> str | None:
+        if identity.allowed_clients and client not in identity.allowed_clients:
+            return f"Identity is not authorized to use client {client}."
+        allowed_clients = policy.allowed_clients
+        if allowed_clients is not None and client not in allowed_clients:
+            return f"Policy does not allow client {client}."
         return None
 
     @staticmethod

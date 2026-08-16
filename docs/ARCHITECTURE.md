@@ -81,6 +81,7 @@ The HTTP path authenticates first, derives organization/team/actor from the stat
 - `hormuz/session_admin_client.py` owns the authenticated, redirect-refusing session-administration CLI transport and validates the metadata-only session and security-event response contracts.
 - `hormuz/config.py` validates configuration, defines identity/route/rate-card policy data, and resolves monotonic organization/team/person DLP actions for the exact provider and routed model.
 - `hormuz/policy.py` evaluates access, fallback, caps, and budgets without transport concerns.
+- The authenticated Claude Code catalog path resolves static organization/team/person model authorization through the policy engine and exposes only compatible policy aliases. It never contacts an upstream, reserves budget, or records usage; generation remains the authoritative budget and routing check.
 - `hormuz/store.py` owns the SQLite schema and monthly aggregations.
 - `hormuz/billing.py` validates complete OpenAI and Anthropic cost-report pages and normalizes exact provider amounts and supported billing dimensions without persistence or credentials.
 - `hormuz/usage.py` parses bounded provider usage and actual-model metadata through provider-specific allowlists without storing response content.

@@ -274,6 +274,9 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         identity = self._authenticate()
         if identity is None:
             return
+        if path == "/v1/models":
+            self._discover_claude_models(identity, request_url.query)
+            return
         if path == "/v1/admin/sessions":
             self._list_human_sessions(identity, request_url.query)
             return
@@ -343,6 +346,70 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             self._get_dlp_approval_request(identity, approval_request_id)
             return
         self._send_error("not_found", "Route not found", HTTPStatus.NOT_FOUND)
+
+    def _discover_claude_models(self, identity: Identity, query: str) -> None:
+        try:
+            values = urllib.parse.parse_qs(
+                query,
+                keep_blank_values=True,
+                strict_parsing=True,
+                encoding="utf-8",
+                errors="strict",
+                max_num_fields=1,
+            )
+        except (UnicodeDecodeError, ValueError):
+            self._send_model_discovery_error()
+            return
+        if values != {"limit": ["1000"]}:
+            self._send_model_discovery_error()
+            return
+
+        decision = self.server.policy_engine.model_catalog(
+            identity=identity,
+            client="claude-code",
+            protocol="anthropic",
+        )
+        if not decision.allowed:
+            LOGGER.info(
+                "model_discovery_denied actor=%s team=%s client=claude-code reason=%s",
+                identity.actor_id,
+                identity.team_id,
+                decision.reason,
+            )
+            self._send_error(
+                "hormuz_model_discovery_denied",
+                decision.reason,
+                HTTPStatus.FORBIDDEN,
+            )
+            return
+
+        aliases = tuple(
+            alias
+            for alias in decision.aliases
+            if "claude" in alias.casefold() or "anthropic" in alias.casefold()
+        )[:1000]
+        LOGGER.info(
+            "model_discovery_complete actor=%s team=%s client=claude-code count=%d",
+            identity.actor_id,
+            identity.team_id,
+            len(aliases),
+        )
+        self._send_json(
+            HTTPStatus.OK,
+            {
+                "data": [
+                    {"id": alias, "display_name": alias}
+                    for alias in aliases
+                ]
+            },
+        )
+
+    def _send_model_discovery_error(self) -> None:
+        self._send_error(
+            "invalid_model_discovery_request",
+            "Claude Code model discovery requires exactly limit=1000",
+            HTTPStatus.BAD_REQUEST,
+        )
 
     def _list_usage_report(self, identity: Identity, query: str) -> None:
         if "usage_viewer" not in identity.capabilities:

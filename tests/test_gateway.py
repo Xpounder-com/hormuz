@@ -458,6 +458,123 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertEqual(json.loads(response)["error"]["code"], "hormuz_policy_denied")
         self.assertEqual(self.gateway.store.monthly_totals(actor_id="bob").denied_requests, 1)
 
+    def test_claude_model_discovery_returns_only_policy_authorized_aliases_without_side_effects(self) -> None:
+        config_value = self._config(self.provider.server_port, _free_port())
+        config_value["model_routes"]["anthropic-internal"] = {
+            "protocol": "anthropic",
+            "upstream_model": "claude-internal-upstream",
+        }
+        config_value["policies"]["organization"]["allowed_models"].append(
+            "anthropic-internal"
+        )
+        config_value["policies"]["teams"]["engineering"]["allowed_models"] = [
+            "engineering-fast",
+            "claude-standard",
+            "claude-sonnet-5",
+            "anthropic-internal",
+        ]
+        self._restart_gateway(config_value)
+        before = len(FakeProviderHandler.requests)
+
+        status, headers, response = self._get(
+            "/v1/models?limit=1000",
+            extra_headers={"X-Api-Key": GATEWAY_TOKEN},
+            include_authorization=False,
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["cache-control"], "no-store")
+        self.assertEqual(
+            json.loads(response),
+            {
+                "data": [
+                    {
+                        "id": "anthropic-internal",
+                        "display_name": "anthropic-internal",
+                    },
+                    {
+                        "id": "claude-sonnet-5",
+                        "display_name": "claude-sonnet-5",
+                    },
+                    {
+                        "id": "claude-standard",
+                        "display_name": "claude-standard",
+                    },
+                ]
+            },
+        )
+        self.assertNotIn("claude-internal-upstream", response.decode("utf-8"))
+        self.assertEqual(len(FakeProviderHandler.requests), before)
+        self.assertEqual(self.gateway.store.monthly_totals(actor_id="alice").requests, 0)
+        self.assertEqual(
+            self.gateway.store.audit_events(
+                since="2000-01-01T00:00:00+00:00",
+                kind="usage",
+            ),
+            [],
+        )
+
+    def test_claude_model_discovery_requires_authentication_and_claude_client_policy(self) -> None:
+        status, _, response = self._get(
+            "/v1/models?limit=1000",
+            include_authorization=False,
+        )
+        self.assertEqual(status, 401)
+        self.assertEqual(json.loads(response)["error"]["code"], "unauthorized")
+
+        config_value = self._config(self.provider.server_port, _free_port())
+        config_value["identities"][0]["allowed_clients"] = ["codex"]
+        self._restart_gateway(config_value)
+
+        status, _, response = self._get("/v1/models?limit=1000")
+        self.assertEqual(status, 403)
+        self.assertEqual(
+            json.loads(response)["error"]["code"],
+            "hormuz_model_discovery_denied",
+        )
+
+    def test_claude_model_discovery_rejects_non_contract_queries(self) -> None:
+        for path in (
+            "/v1/models",
+            "/v1/models?limit=10",
+            "/v1/models?limit=1000&limit=1000",
+            "/v1/models?limit=1000&cursor=next",
+            "/v1/models?limit=%FF",
+        ):
+            with self.subTest(path=path):
+                status, _, response = self._get(path)
+                self.assertEqual(status, 400)
+                self.assertEqual(
+                    json.loads(response)["error"]["code"],
+                    "invalid_model_discovery_request",
+                )
+
+    def test_claude_model_discovery_honors_the_documented_limit(self) -> None:
+        config_value = self._config(self.provider.server_port, _free_port())
+        generated_aliases = [
+            f"claude-company-{index:04d}"
+            for index in range(1001)
+        ]
+        for alias in generated_aliases:
+            config_value["model_routes"][alias] = {
+                "protocol": "anthropic",
+                "upstream_model": "claude-shared-upstream",
+            }
+        config_value["policies"]["organization"]["allowed_models"].extend(
+            generated_aliases
+        )
+        config_value["policies"]["teams"]["engineering"]["allowed_models"].extend(
+            generated_aliases
+        )
+        self._restart_gateway(config_value)
+
+        status, _, response = self._get("/v1/models?limit=1000")
+
+        self.assertEqual(status, 200)
+        ids = [item["id"] for item in json.loads(response)["data"]]
+        self.assertEqual(len(ids), 1000)
+        self.assertEqual(ids, sorted(ids))
+
     def test_nested_policy_can_restrict_but_cannot_relax_organization_policy(self) -> None:
         organization = Policy(
             allowed_clients=("codex",),
@@ -2892,6 +3009,11 @@ class GatewayIntegrationTests(unittest.TestCase):
         environment.pop("ANTHROPIC_AUTH_TOKEN", None)
         environment["DISABLE_AUTOUPDATER"] = "1"
         environment["CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT"] = "1"
+        environment["ANTHROPIC_BASE_URL"] = (
+            f"http://127.0.0.1:{self.gateway.server_port}"
+        )
+        environment["CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY"] = "1"
+        environment["CLAUDE_CONFIG_DIR"] = str(self.root / "claude-config")
         claude = shutil.which("claude")
         settings_path = self.root / "claude-settings.json"
         settings_path.write_text(
@@ -2903,6 +3025,7 @@ class GatewayIntegrationTests(unittest.TestCase):
                     "env": {
                         "ANTHROPIC_BASE_URL": f"http://127.0.0.1:{self.gateway.server_port}",
                         "CLAUDE_CODE_API_KEY_HELPER_TTL_MS": "300000",
+                        "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY": "1",
                     },
                 }
             ),
@@ -2936,7 +3059,6 @@ class GatewayIntegrationTests(unittest.TestCase):
         )
         command = ([claude] if claude else ["npx", "-y", "@anthropic-ai/claude-code"]) + [
             "-p",
-            "--bare",
             "--debug",
             "api",
             "--debug-file",
@@ -2953,14 +3075,19 @@ class GatewayIntegrationTests(unittest.TestCase):
             "claude-sonnet-5",
             "Reply with exactly ok and do not call tools.",
         ]
-        result = subprocess.run(
-            command,
-            cwd=self.root,
-            env=environment,
-            text=True,
-            capture_output=True,
-            timeout=45,
-        )
+        with mock.patch.object(
+            self.gateway.policy_engine,
+            "model_catalog",
+            wraps=self.gateway.policy_engine.model_catalog,
+        ) as model_catalog:
+            result = subprocess.run(
+                command,
+                cwd=self.root,
+                env=environment,
+                text=True,
+                capture_output=True,
+                timeout=45,
+            )
         self.assertEqual(
             result.returncode,
             0,
@@ -2971,6 +3098,7 @@ class GatewayIntegrationTests(unittest.TestCase):
             ),
         )
         self.assertIn("ok", result.stdout.lower())
+        self.assertGreater(model_catalog.call_count, 0)
         debug_output = debug_path.read_text(encoding="utf-8") if debug_path.exists() else ""
         self.assertIn("hormuz", debug_output.lower())
         self.assertGreater(len(FakeProviderHandler.requests), before)
@@ -3031,9 +3159,19 @@ class GatewayIntegrationTests(unittest.TestCase):
         connection.close()
         return response.status, response_headers, data
 
-    def _get(self, path: str, *, token: str = GATEWAY_TOKEN):
+    def _get(
+        self,
+        path: str,
+        *,
+        token: str = GATEWAY_TOKEN,
+        extra_headers: dict[str, str] | None = None,
+        include_authorization: bool = True,
+    ):
         connection = http.client.HTTPConnection("127.0.0.1", self.gateway.server_port, timeout=5)
-        connection.request("GET", path, headers={"Authorization": f"Bearer {token}"})
+        headers = dict(extra_headers or {})
+        if include_authorization:
+            headers["Authorization"] = f"Bearer {token}"
+        connection.request("GET", path, headers=headers)
         response = connection.getresponse()
         data = response.read()
         response_headers = {name.lower(): value for name, value in response.getheaders()}

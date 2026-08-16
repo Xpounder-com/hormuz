@@ -9,7 +9,7 @@ This roadmap is evidence-gated. A milestone is not complete because code exists,
 The private alpha currently has:
 
 - OpenAI Responses and Anthropic Messages proxy compatibility, including streaming;
-- organization/team/actor model policy, fallback, output caps, atomic token/spend reservations, and metadata-only reporting;
+- organization/team/actor model policy, fallback, output caps, atomic token/spend reservations, metadata-only reporting, and authenticated policy-filtered Claude Code model discovery;
 - request-level actual-model, provider-native usage, billable-token, cost-basis, currency, and immutable rate-card-version snapshots, plus a local exact-decimal OpenAI/Anthropic cost-report import and aggregate variance kernel; authenticated polling, provable report scope, final invoice/credit reconciliation, and finance workflows remain open;
 - pre-provider secret controls plus a bounded structured-DLP subset with high-confidence SSN/card redaction, low-confidence email detection, provider/model-scoped company dictionaries, monotonic identity-derived team/person tightening, JSON string-key, provider-query, and allowlisted forwarded-header fail-closed enforcement, bounded recursive UTF-8 base64/base64url and textual-data-URI inspection, provider-format-aware opaque-media denial, and metadata-only non-self, 15-minute, exact single-use approval grants; remaining #10 gates stay open;
 - generic OIDC JWT discovery/JWKS verification with explicit issuer-subject identity mapping;

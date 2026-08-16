@@ -13,6 +13,7 @@ Hormuz is alpha software. The local prototype proves routing and policy behavior
 - OpenAI-compatible `POST /v1/responses` proxying, including streaming.
 - Anthropic-compatible `POST /v1/messages`, `/v1/messages/count_tokens`, and streaming.
 - Provider model IDs by default, preserving native client model behavior; optional company aliases remain supported.
+- Authenticated Claude Code model discovery that exposes only Claude-compatible aliases allowed by the employee's effective policy, without calling a provider or creating usage charges.
 - Organization, team, and person policy overlays that can only become more restrictive.
 - Model fallback, output-token caps, monthly token limits, and USD budget limits.
 - Per-person attribution using unique bootstrap tokens, generic OIDC JWT access tokens, or revocable Hormuz human sessions mapped by issuer and subject.

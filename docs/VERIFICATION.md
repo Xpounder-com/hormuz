@@ -515,6 +515,23 @@ The raw provider-query forwarding boundary, one-pass form decoder, recursive sec
 
 This closes the known ordinary provider-query bypass under accepted ADR 0004, not issue #10 or the enterprise DLP release gate. Provider-specific repeated query decoding, source classification, whitespace-wrapped or other unsupported encodings, compression, archives, media decoding, semantic evaluation, shared approval/KMS/HA operations, future cache invalidation, customer-representative detector quality, and independent security review remain open.
 
+### Policy-filtered Claude Code model discovery
+
+The authenticated model-catalog path, generated client configuration, installed Codex and official Claude Code compatibility, package artifacts, and clean wheel were exercised locally on August 16, 2026. The endpoint follows Anthropic's published [gateway model-discovery contract](https://code.claude.com/docs/en/llm-gateway-protocol#model-discovery); OpenAI's public Codex configuration reference documents custom Responses providers but no equivalent public catalog contract.
+
+- red-first gateway tests proved that the authenticated `GET /v1/models?limit=1000` request returned `404` before implementation;
+- the endpoint now accepts the exact documented query, authenticates either the bearer-token or `x-api-key` helper path, resolves the `claude-code` organization/team/person policy, and returns a deterministic list of at most 1,000 allowed Anthropic-route policy aliases whose IDs contain `claude` or `anthropic`;
+- the response exposes neither upstream model names nor provider credentials, sends `Cache-Control: no-store`, makes no provider call, reserves no budget, and creates no usage event. Inference remains the authoritative current budget and routing check;
+- missing authentication returned `401`; an identity not authorized for Claude Code returned `403`; missing, repeated, non-contract, unknown, and non-UTF-8 query values returned a stable content-free `400`;
+- static-token, workload-OIDC, and rotating-session Claude configuration output now opts into discovery. Claude Code `2.1.233` called the real catalog method and completed generation through the fake Anthropic provider; the test used an isolated configuration directory because `--bare` explicitly suppresses background prefetches, including discovery;
+- installed Codex `0.139.0` still completed its Responses request through Hormuz, proving the Anthropic catalog surface did not break Codex's bundled-model-metadata path;
+- the complete source suite ran 253 tests with both real-client gates enabled; all 253 passed with no skips;
+- the frozen 60-task release benchmark passed five iterations with precision `1.00`, recall `1.00`, useful-pack rate `1.00`, mean compression ratio `0.840593`, zero failed safety thresholds, and p95 in-process selection latency `0.176417 ms`; corpus SHA-256 remained `9822d592868202c7c7539bcdac7d4a5894c01f9e6dba7a434846516b67b32c17`;
+- isolated source and wheel builds succeeded. A clean Python 3.14 environment installed the wheel outside the checkout, loaded `hormuz.server` from `site-packages`, emitted discovery-enabled Claude configuration, compiled the installed package, and passed the installed strict 60-task benchmark;
+- source/test bytecode compilation, `git diff --check`, and high-confidence tracked-source and extracted-wheel scans for private-key, OpenAI, Anthropic, GitHub, AWS, and Google credential patterns passed. The ignored `.env.local` remained outside the build and was not needed for any provider request.
+
+This closes authenticated Claude Code model discovery, not general client catalog compatibility. Claude Code versions before 2.1.129, `--bare`, disabled nonessential traffic, or a failed discovery request use cached or built-in picker entries. Those presentation paths cannot bypass Hormuz's inference-time model, client, cap, budget, DLP, and provider-policy enforcement. Hormuz does not claim the response implements Codex's private model-catalog schema.
+
 ## Reproduce locally
 
 The default suite uses only loopback fake providers:

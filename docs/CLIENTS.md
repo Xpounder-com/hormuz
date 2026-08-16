@@ -39,7 +39,7 @@ Codex supports custom model providers using a base URL and credential environmen
 
 Hormuz defaults to native OpenAI model IDs in its example configuration. This lets Codex retain its bundled model metadata while Hormuz decides whether that model is allowed, capped, denied, or replaced with the configured fallback. Optional company aliases work at the HTTP layer, but arbitrary aliases may cause Codex to use fallback client metadata.
 
-Some Codex versions probe the custom provider's `/v1/models` endpoint. Hormuz does not currently implement the private Codex catalog schema, because that schema includes version-specific agent instruction metadata rather than the public OpenAI Models API. A refresh warning is therefore expected; generation continues with Codex's bundled metadata when a native model ID is used.
+Some Codex versions probe the custom provider's `/v1/models` endpoint. Hormuz does not implement the private Codex catalog schema, because that schema includes version-specific agent instruction metadata rather than the public OpenAI Models API. Hormuz's model-discovery response implements only Anthropic's published Claude Code contract. Codex continues with its bundled metadata when a native model ID is used.
 
 ## Claude Code
 
@@ -56,12 +56,19 @@ The result points the existing Claude Code client to Hormuz and sends the employ
 export HORMUZ_TOKEN="employee-specific-hormuz-token"
 export ANTHROPIC_BASE_URL="https://hormuz.example.com"
 export ANTHROPIC_AUTH_TOKEN="${HORMUZ_TOKEN}"
+export CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1
 claude --model claude-sonnet-5
 ```
 
 Anthropic documents `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN` as the static-token path for an LLM gateway; the auth token is sent in the `Authorization` header. See Anthropic's [Claude Code authentication reference](https://code.claude.com/docs/en/authentication).
 
 Do not set the company's `ANTHROPIC_API_KEY` on employee machines. Hormuz replaces the employee credential with the provider credential only for the upstream request.
+
+Claude Code v2.1.129 or later can discover gateway models at startup. The generated Hormuz configuration enables that opt-in behavior. Claude sends `GET /v1/models?limit=1000` using the same employee bearer token or `x-api-key` helper credential used for inference. Hormuz authenticates the employee, resolves the organization/team/person policy for `claude-code`, and returns up to 1,000 allowed Anthropic-route aliases whose IDs contain `claude` or `anthropic`, which is the client compatibility filter. Use one of those strings in company-facing Claude aliases when picker discovery is required.
+
+Discovery returns policy aliases, never upstream model names or provider credentials. It does not call a provider, reserve budget, or create a usage event. Inference still performs the authoritative live policy and budget check. Hormuz accepts the exact published discovery query and fails other `/v1/models` query shapes closed.
+
+See Anthropic's [gateway protocol reference](https://code.claude.com/docs/en/llm-gateway-protocol#model-discovery) for the client request and response contract.
 
 ## Generic OIDC credentials
 

@@ -92,6 +92,10 @@ class ClientConfigTests(unittest.TestCase):
         self.assertEqual(result, 0)
         self.assertIn("ANTHROPIC_BASE_URL=https://hormuz.example", output.getvalue())
         self.assertIn('ANTHROPIC_AUTH_TOKEN="${HORMUZ_TOKEN}"', output.getvalue())
+        self.assertIn(
+            "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1",
+            output.getvalue(),
+        )
 
     def test_oidc_client_config_uses_credential_helpers_for_both_clients(self) -> None:
         issuer = "https://identity.example.com"
@@ -146,6 +150,10 @@ class ClientConfigTests(unittest.TestCase):
         self.assertEqual(result, 0)
         self.assertIn('"ANTHROPIC_BASE_URL": "https://hormuz.example"', claude.getvalue())
         self.assertIn('"CLAUDE_CODE_API_KEY_HELPER_TTL_MS": "300000"', claude.getvalue())
+        self.assertIn(
+            '"CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY": "1"',
+            claude.getvalue(),
+        )
         self.assertIn("hormuz auth token --env COMPANY_OIDC_TOKEN", claude.getvalue())
         self.assertNotIn("ANTHROPIC_AUTH_TOKEN", claude.getvalue())
 
@@ -230,6 +238,10 @@ class ClientConfigTests(unittest.TestCase):
             claude.getvalue(),
         )
         self.assertIn('"HORMUZ_SESSION_GATEWAY": "https://hormuz.example"', claude.getvalue())
+        self.assertIn(
+            '"CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY": "1"',
+            claude.getvalue(),
+        )
         self.assertNotIn("must-never-appear", codex.getvalue() + claude.getvalue())
 
     def test_remote_lifecycle_cli_dispatches_all_connector_operations_without_local_config(self) -> None:

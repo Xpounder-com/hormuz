@@ -1228,6 +1228,7 @@ def _client_config(
                             "ANTHROPIC_BASE_URL": base_url,
                             "HORMUZ_SESSION_GATEWAY": base_url,
                             "CLAUDE_CODE_API_KEY_HELPER_TTL_MS": "300000",
+                            "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY": "1",
                         },
                     },
                     indent=2,
@@ -1242,6 +1243,7 @@ def _client_config(
                         "env": {
                             "ANTHROPIC_BASE_URL": base_url,
                             "CLAUDE_CODE_API_KEY_HELPER_TTL_MS": "300000",
+                            "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY": "1",
                         },
                     },
                     indent=2,
@@ -1251,6 +1253,7 @@ def _client_config(
         else:
             print(f"export ANTHROPIC_BASE_URL={shlex.quote(base_url)}")
             print(f'export ANTHROPIC_AUTH_TOKEN="${{{env_name}}}"')
+            print("export CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1")
         print("claude")
     return 0
 
