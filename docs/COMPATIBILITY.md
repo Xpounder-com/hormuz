@@ -40,6 +40,13 @@ fail validation if the alpha silently gains such a claim.
 | Python package `0.1.0` | Reproducible wheel/source build and clean Linux installation | Artifact installation does not prove a production deployment. |
 | OCI `linux/amd64` and `linux/arm64` | Exact-source BuildKit `0.32.2` reproducibility; restricted runtime smoke on amd64 | A single-node alpha artifact, not production TLS, HA, backup, disaster recovery, or support evidence. |
 
+Separately from the blocking matrix, an opt-in local test passed on macOS 26.2
+arm64 with the pinned Codex CLI `0.147.0`, Claude Code `2.1.233`, and the real
+macOS Keychain. It proves profile-authenticated inference plus a model-requested
+Hormuz MCP context call through each stock client. This deliberately remains
+non-blocking evidence: it does not widen the matrix to all macOS hosts, other
+client versions, Linux/Windows secure stores, or a production IdP.
+
 The weekly latest-client canary is intentionally dynamic and non-blocking. It
 detects likely drift; it does not automatically expand the release-tested client
 versions. Changing a pinned client or its integrity lock is an explicit

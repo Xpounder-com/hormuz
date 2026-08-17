@@ -192,6 +192,15 @@ refresh failure, secure-store failure, and malformed credential all become the
 fixed `context_auth_unavailable` tool error. The model does not receive the
 profile, secure-store backend, refresh failure, or credential value.
 
+An opt-in macOS integration test exercises the complete installed-client path
+with exact Codex and Claude Code binaries. Each client obtains its inference
+credential through the profile helper, receives a provider-shaped model tool
+call, invokes this MCP process with the same client-bound profile, and returns
+the selected pack to the next provider request. The child client environment
+contains neither a static Hormuz identity credential nor either provider key;
+the temporary session is stored in the real macOS Keychain and deleted after
+the test.
+
 ## Current enforcement boundary
 
 This is a real explicit tool connection, not automatic prompt injection. Codex and
@@ -209,3 +218,5 @@ inherited workload-token mode. It does not enforce that a model calls the tool,
 make the local secure store remotely manageable, or provide shared multi-node
 session revocation. Real-IdP validation, SCIM, KMS-backed shared session storage,
 and the accepted enterprise persistence topology remain separate release gates.
+The macOS installed-client proof is local, opt-in evidence; it is not a blocking
+Linux/Windows secure-store certification or a production identity-provider test.

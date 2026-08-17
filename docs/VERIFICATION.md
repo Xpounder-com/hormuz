@@ -1302,10 +1302,59 @@ without a live provider, identity provider, or credential.
 
 This proves additive adapter wiring, secret-free client configuration, and the
 local session-refresh composition. It does not prove enrollment against a real
-IdP, a production OS-keyring deployment, an official client completing a
-profile-authenticated context call, shared multi-node revocation, SCIM, KMS
-custody, or the pending enterprise persistence topology. Those remain separate
-release gates.
+IdP, a blocking cross-platform OS-keyring deployment, shared multi-node
+revocation, SCIM, KMS custody, or the pending enterprise persistence topology.
+Those remain separate release gates.
+
+### Installed-client Keychain profile and governed-context call
+
+The profile path was then exercised locally on macOS 26.2 arm64 with the exact
+locked Codex CLI `0.147.0`, Claude Code `2.1.233`, and Node.js `24.19.0`.
+
+- each test configured the real single-node session broker, created a bounded
+  client-specific opaque session inside that deterministic local fixture, and
+  stored it through the allowlisted real macOS Keychain backend under a unique
+  transient profile;
+- the child Codex and Claude Code processes inherited no static Hormuz identity
+  credential and no OpenAI or Anthropic provider key. Their native auth helper
+  obtained inference access from the Keychain profile, while the gateway alone
+  authenticated upstream with its provider-owned test credential;
+- the fake OpenAI model emitted the native Codex Responses namespace call for
+  `mcp__hormuz` / `hormuz_get_context`. The fake Anthropic model emitted Claude
+  Code's flat `mcp__hormuz__hormuz_get_context` tool-use block. Each stock client
+  invoked the actual stdio adapter with the same profile and returned the
+  selected `hormuz.context-pack.v1` result to its next provider request;
+- the pack contained only the verified team-authorized fixture record, and the
+  context repository committed exactly one metadata-only `context.read` event
+  under actor `alice` for each run. Provider requests contained the provider
+  credential, never the Hormuz access credential, and neither client printed a
+  Hormuz credential;
+- Claude Code was granted only the read-only Hormuz MCP tool. No shell, file, or
+  other built-in tool was enabled. Automatic context injection stayed disabled
+  in both tests so a tool-only continuation did not imply or preempt the pending
+  continuation-binding decision; and
+- both focused tests passed in `2.980` seconds under the exact Node.js runtime.
+  Their `finally` paths and unittest cleanup each delete the transient Keychain
+  profile, and a postcondition verified that no entry remained.
+
+The complete source suite then passed 442 tests in `130.725` seconds with only
+the three documented opt-in installed-client cases skipped. Source/test bytecode
+compilation, `git diff --check`, and the strict compatibility contract passed.
+The frozen 60-task corpus retained SHA-256
+`9822d592868202c7c7539bcdac7d4a5894c01f9e6dba7a434846516b67b32c17`;
+its release profile passed with governed precision, recall, and useful-pack rate
+`1.00`, p95 assembly latency `0.148708` milliseconds, and zero authorization,
+lifecycle-stale, dependency-stale, malicious, contradiction, token-budget, or
+determinism failures.
+
+This closes the prior local question of whether an installed official client
+can actually complete a profile-authenticated governed-context call. It does
+not prove browser enrollment against a real IdP, a hosted or production
+Keychain deployment, Linux Secret Service, Windows Credential Manager,
+blocking CI coverage for this opt-in macOS case, shared revocation, SCIM, KMS,
+automatic-injection continuation lineage, or any live provider behavior. The
+fixture intentionally creates its short-lived session inside the local broker
+instead of substituting a fake plaintext credential store.
 
 ## Reproduce locally
 
@@ -1314,6 +1363,22 @@ The default suite uses only loopback fake providers:
 ```bash
 python3 -m unittest -v
 ```
+
+After installing the integrity-locked clients under `deploy/clients`, the
+macOS Keychain profile proof is opt in:
+
+```bash
+PATH="$PWD/deploy/clients/node_modules/.bin:$PATH" \
+HORMUZ_RUN_PROFILE_CLIENT_TEST=1 \
+HORMUZ_RUN_CLAUDE_CLIENT_TEST=1 \
+python3 -m unittest -v \
+  tests.test_gateway.GatewayIntegrationTests.test_installed_codex_calls_context_with_keychain_profile \
+  tests.test_gateway.GatewayIntegrationTests.test_official_claude_calls_context_with_keychain_profile
+```
+
+The test refuses to run outside macOS or without the explicit opt-in flags.
+It writes only transient test sessions to Keychain and deletes them on success
+or failure.
 
 The live OpenAI check requires an ignored credential file or secret-manager injection. Start Hormuz with credentials in its environment, configure Codex using [CLIENTS.md](CLIENTS.md), request a fixed marker, then verify metadata with:
 

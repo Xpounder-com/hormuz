@@ -130,6 +130,14 @@ hormuz --config /etc/hormuz/hormuz.json client-config claude \
 
 The generated Codex auth command invokes `hormuz auth token --gateway ... --profile ...`. Claude Code's string-valued `apiKeyHelper` uses the shell-safe `--gateway-env HORMUZ_SESSION_GATEWAY` form, with the non-secret URL supplied in its managed `env` block. Both read the OS secure store and rotate the session when needed. Neither prints the refresh credential.
 
+The repository's opt-in macOS installed-client test exercises this exact helper
+and the profile-based MCP configuration together. A fake model requests
+`hormuz_get_context`; the stock client returns the authorized pack and then
+finishes generation. The test removes static Hormuz tokens and provider keys
+from the child environment, and removes its transient Keychain entries during
+cleanup. This is local compatibility evidence, not real-IdP or production-host
+certification.
+
 ## Image and file boundary
 
 Codex and Claude Code can represent provider image and file inputs, but Hormuz does not yet have a trusted byte decoder/classifier. The secure default therefore denies recognized OpenAI image/file/screenshot blocks and Anthropic image or non-text document/file blocks before provider egress. The employee keeps the same client configuration; the request receives the provider-shaped DLP denial. Inline Anthropic text documents remain inspectable and usable.

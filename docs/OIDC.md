@@ -195,4 +195,11 @@ Authentication logs contain only a stable failure code. Hormuz does not log toke
 
 [Accepted ADR 0001](decisions/0001-oidc-login-and-session-architecture.md) governs the implemented login architecture. The repository includes protocol, persistence, HTTP, and CLI integration tests against a standards-shaped fake IdP. It has not yet been validated against the owner-selected real identity provider, and the local SQLite broker is not a claim of multi-node availability.
 
+An opt-in local macOS test now proves that exact installed Codex and Claude Code
+clients can use client-bound Hormuz sessions from the real Keychain for both
+gateway inference authentication and a model-requested governed-context MCP
+call. The deterministic fixture issues the short-lived session inside the local
+broker and uses loopback provider fakes; it does not claim a browser enrollment
+against a real IdP, Linux/Windows secure-store support, or production custody.
+
 The local `session_admin` API and CLI provide immediate tenant-scoped revocation on this process and inspect cursor-paginated, metadata-only logout, refresh-replay, mapping-removal, and administrative-revocation evidence. This local query path is not an immutable audit sink. SCIM provisioning/deprovisioning, workload identity exchange, KMS-backed shared session storage, signed or externally immutable security-event export, and distributed enrollment throttling remain enterprise gates. Until live configuration reload and SCIM exist, changing a subject mapping takes effect after a service reload/restart; the next request then compares the stored organization/actor/team/clearance binding, revokes on mismatch, and fails closed. `hormuz logout` provides employee-initiated revocation.

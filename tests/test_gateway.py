@@ -4,6 +4,8 @@ import base64
 import http.client
 import json
 import os
+import platform
+import secrets
 import shlex
 import shutil
 import socket
@@ -25,6 +27,7 @@ from hormuz.config import GatewayConfig, Policy
 from hormuz.context import ContextArtifact, ContextLifecycleSnapshot, ContextRecord
 from hormuz.context_lifecycle_client import ContextLifecycleClient
 from hormuz.context_store import ContextStoreError
+from hormuz.credential_store import SecureCredentialStore, StoredSession
 from hormuz.policy import PolicyEngine
 from hormuz.redaction import MAX_ENCODED_TEXT_BYTES
 from hormuz.server import (
@@ -57,6 +60,8 @@ class FakeProviderHandler(BaseHTTPRequestHandler):
     release_response: threading.Event | None = None
     response_chunk_size: int | None = None
     response_chunk_delay_seconds: float = 0.0
+    openai_context_tool_arguments: dict[str, object] | None = None
+    anthropic_context_tool_arguments: dict[str, object] | None = None
 
     def do_POST(self) -> None:  # noqa: N802
         request_path = self.path.partition("?")[0]
@@ -97,6 +102,13 @@ class FakeProviderHandler(BaseHTTPRequestHandler):
                 },
             }
             if body.get("stream") is True:
+                if (
+                    self.__class__.openai_context_tool_arguments is not None
+                    and _openai_has_context_tool(body)
+                    and not _openai_has_function_output(body)
+                ):
+                    self._send_openai_context_tool_stream(payload)
+                    return
                 self._send_openai_stream(payload)
                 return
             self._send_json(payload, request_id="req_openai_test")
@@ -113,6 +125,14 @@ class FakeProviderHandler(BaseHTTPRequestHandler):
                 "cache_read_input_tokens": 20,
                 "output_tokens": 12,
             }
+            if (
+                body.get("stream") is True
+                and self.__class__.anthropic_context_tool_arguments is not None
+                and _anthropic_has_context_tool(body)
+                and not _anthropic_has_tool_result(body)
+            ):
+                self._send_anthropic_context_tool_stream(body)
+                return
             if body.get("stream") is not True:
                 self._send_json(
                     {
@@ -279,6 +299,132 @@ class FakeProviderHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self._write_body(body_bytes)
 
+    def _send_openai_context_tool_stream(self, completed_response: dict) -> None:
+        arguments = json.dumps(
+            self.__class__.openai_context_tool_arguments,
+            separators=(",", ":"),
+        )
+        item = {
+            "id": "fc_hormuz_context",
+            "type": "function_call",
+            "status": "completed",
+            "name": "hormuz_get_context",
+            "namespace": "mcp__hormuz",
+            "arguments": arguments,
+            "call_id": "call_hormuz_context",
+        }
+        in_progress = {
+            **completed_response,
+            "status": "in_progress",
+            "output": [],
+            "usage": None,
+        }
+        completed = {**completed_response, "output": [item]}
+        events = [
+            {
+                "type": "response.created",
+                "response": in_progress,
+                "sequence_number": 0,
+            },
+            {
+                "type": "response.output_item.done",
+                "output_index": 0,
+                "item": item,
+                "sequence_number": 1,
+            },
+            {
+                "type": "response.completed",
+                "response": completed,
+                "sequence_number": 2,
+            },
+        ]
+        body = "".join(
+            f"event: {event['type']}\ndata: {json.dumps(event, separators=(',', ':'))}\n\n"
+            for event in events
+        ).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("x-request-id", "req_codex_context_tool")
+        self.end_headers()
+        self._write_body(body)
+
+    def _send_anthropic_context_tool_stream(self, body: dict[str, object]) -> None:
+        arguments = json.dumps(
+            self.__class__.anthropic_context_tool_arguments,
+            separators=(",", ":"),
+        )
+        events = [
+            (
+                "message_start",
+                {
+                    "type": "message_start",
+                    "message": {
+                        "id": "msg_hormuz_context",
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [],
+                        "model": self.__class__.actual_model_override or body["model"],
+                        "stop_reason": None,
+                        "stop_sequence": None,
+                        "usage": {
+                            "input_tokens": 80,
+                            "cache_creation_input_tokens": 0,
+                            "cache_read_input_tokens": 0,
+                            "output_tokens": 0,
+                        },
+                    },
+                },
+            ),
+            (
+                "content_block_start",
+                {
+                    "type": "content_block_start",
+                    "index": 0,
+                    "content_block": {
+                        "type": "tool_use",
+                        "id": "toolu_hormuz_context",
+                        "name": "mcp__hormuz__hormuz_get_context",
+                        "input": {},
+                    },
+                },
+            ),
+            (
+                "content_block_delta",
+                {
+                    "type": "content_block_delta",
+                    "index": 0,
+                    "delta": {
+                        "type": "input_json_delta",
+                        "partial_json": arguments,
+                    },
+                },
+            ),
+            (
+                "content_block_stop",
+                {"type": "content_block_stop", "index": 0},
+            ),
+            (
+                "message_delta",
+                {
+                    "type": "message_delta",
+                    "delta": {"stop_reason": "tool_use", "stop_sequence": None},
+                    "usage": {"output_tokens": 20},
+                },
+            ),
+            ("message_stop", {"type": "message_stop"}),
+        ]
+        response = "".join(
+            f"event: {name}\ndata: {json.dumps(value, separators=(',', ':'))}\n\n"
+            for name, value in events
+        ).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Content-Length", str(len(response)))
+        self.send_header("request-id", "req_anthropic_context_tool")
+        self.end_headers()
+        self._write_body(response)
+
     def _write_body(self, body: bytes) -> None:
         chunk_size = self.__class__.response_chunk_size
         if chunk_size is None:
@@ -294,6 +440,57 @@ class FakeProviderHandler(BaseHTTPRequestHandler):
 
     def log_message(self, format: str, *args: object) -> None:
         pass
+
+
+def _openai_has_context_tool(body: dict[str, object]) -> bool:
+    tools = body.get("tools")
+    if not isinstance(tools, list):
+        return False
+    return any(
+        isinstance(tool, dict)
+        and tool.get("type") == "namespace"
+        and tool.get("name") == "mcp__hormuz"
+        and isinstance(tool.get("tools"), list)
+        and any(
+            isinstance(nested, dict)
+            and nested.get("type") == "function"
+            and nested.get("name") == "hormuz_get_context"
+            for nested in tool["tools"]
+        )
+        for tool in tools
+    )
+
+
+def _openai_has_function_output(body: dict[str, object]) -> bool:
+    inputs = body.get("input")
+    return isinstance(inputs, list) and any(
+        isinstance(item, dict) and item.get("type") == "function_call_output"
+        for item in inputs
+    )
+
+
+def _anthropic_has_context_tool(body: dict[str, object]) -> bool:
+    tools = body.get("tools")
+    return isinstance(tools, list) and any(
+        isinstance(tool, dict)
+        and tool.get("name") == "mcp__hormuz__hormuz_get_context"
+        for tool in tools
+    )
+
+
+def _anthropic_has_tool_result(body: dict[str, object]) -> bool:
+    messages = body.get("messages")
+    if not isinstance(messages, list):
+        return False
+    return any(
+        isinstance(message, dict)
+        and isinstance(message.get("content"), list)
+        and any(
+            isinstance(block, dict) and block.get("type") == "tool_result"
+            for block in message["content"]
+        )
+        for message in messages
+    )
 
 
 class RedirectSinkHandler(BaseHTTPRequestHandler):
@@ -392,6 +589,8 @@ class GatewayIntegrationTests(unittest.TestCase):
         FakeProviderHandler.release_response = None
         FakeProviderHandler.response_chunk_size = None
         FakeProviderHandler.response_chunk_delay_seconds = 0.0
+        FakeProviderHandler.openai_context_tool_arguments = None
+        FakeProviderHandler.anthropic_context_tool_arguments = None
         self.provider = ThreadingHTTPServer(("127.0.0.1", 0), FakeProviderHandler)
         self.provider_thread = threading.Thread(target=self.provider.serve_forever, daemon=True)
         self.provider_thread.start()
@@ -5358,6 +5557,321 @@ class GatewayIntegrationTests(unittest.TestCase):
             "client-proof-revision",
         )
 
+    @unittest.skipUnless(
+        platform.system() == "Darwin"
+        and os.environ.get("HORMUZ_RUN_PROFILE_CLIENT_TEST") == "1"
+        and shutil.which("codex"),
+        "Set HORMUZ_RUN_PROFILE_CLIENT_TEST=1 on macOS and install Codex",
+    )
+    def test_installed_codex_calls_context_with_keychain_profile(self) -> None:
+        profile, secure_store, record_id = self._enable_profile_context_for_installed_client(
+            client="codex"
+        )
+        self.addCleanup(secure_store.delete, profile)
+        gateway_url = f"http://127.0.0.1:{self.gateway.server_port}"
+        FakeProviderHandler.openai_context_tool_arguments = {
+            "query": "official profile secure context",
+            "token_budget": 500,
+            "repository_id": "Xpounder-com/hormuz",
+            "branch": "main",
+        }
+        before = len(FakeProviderHandler.requests)
+        environment = os.environ.copy()
+        for name in (
+            "TEST_GATEWAY_TOKEN",
+            "TEST_CLAUDE_ONLY_TOKEN",
+            "TEST_OPENAI_KEY",
+            "TEST_ANTHROPIC_KEY",
+            "OPENAI_API_KEY",
+        ):
+            environment.pop(name, None)
+        codex_home = self.root / "codex-home"
+        codex_home.mkdir()
+        environment["CODEX_HOME"] = str(codex_home)
+        auth_args = [
+            "-m",
+            "hormuz",
+            "auth",
+            "token",
+            "--gateway",
+            gateway_url,
+            "--profile",
+            profile,
+            "--allow-insecure-http",
+        ]
+        command = [
+            "codex",
+            "exec",
+            "--ignore-user-config",
+            "--skip-git-repo-check",
+            "--ephemeral",
+            "--sandbox",
+            "read-only",
+            "-C",
+            str(self.root),
+            "-m",
+            "engineering-fast",
+            "-c",
+            'model_provider="company_gateway"',
+            "-c",
+            'model_providers.company_gateway.name="Hormuz"',
+            "-c",
+            f"model_providers.company_gateway.base_url={json.dumps(gateway_url + '/v1')}",
+            "-c",
+            f"model_providers.company_gateway.auth.command={json.dumps(sys.executable)}",
+            "-c",
+            "model_providers.company_gateway.auth.args=" + json.dumps(auth_args),
+            "-c",
+            "model_providers.company_gateway.auth.refresh_interval_ms=1",
+            "-c",
+            'model_providers.company_gateway.wire_api="responses"',
+            "-c",
+            f"mcp_servers.hormuz.command={json.dumps(sys.executable)}",
+            "-c",
+            "mcp_servers.hormuz.args="
+            + json.dumps(
+                [
+                    "-m",
+                    "hormuz",
+                    "mcp",
+                    "--url",
+                    gateway_url,
+                    "--profile",
+                    profile,
+                    "--allow-insecure-http",
+                    "--timeout-seconds",
+                    "5",
+                ]
+            ),
+            "-c",
+            "mcp_servers.hormuz.required=true",
+            "Use Hormuz governed context, then reply exactly GATEWAY_OK.",
+        ]
+        try:
+            result = subprocess.run(
+                command,
+                env=environment,
+                text=True,
+                capture_output=True,
+                timeout=45,
+            )
+            self.assertEqual(
+                result.returncode,
+                0,
+                msg=(
+                    f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}\n"
+                    f"provider_requests:\n{json.dumps(FakeProviderHandler.requests[before:], indent=2)}"
+                ),
+            )
+            self.assertIn("GATEWAY_OK", result.stdout + result.stderr)
+            generation_requests = [
+                request
+                for request in FakeProviderHandler.requests[before:]
+                if str(request["path"]).partition("?")[0].endswith("/responses")
+            ]
+            self.assertGreaterEqual(len(generation_requests), 2)
+            function_outputs = [
+                item
+                for request in generation_requests
+                for item in request["body"].get("input", [])
+                if isinstance(item, dict)
+                and item.get("type") == "function_call_output"
+                and item.get("call_id") == "call_hormuz_context"
+            ]
+            self.assertEqual(len(function_outputs), 1)
+            self.assertIn(record_id, json.dumps(function_outputs[0]))
+            self.assertTrue(
+                all(
+                    request["headers"].get("authorization") == f"Bearer {OPENAI_KEY}"
+                    for request in generation_requests
+                )
+            )
+            access_events = [
+                event
+                for event in self.gateway.context_repository.audit_events(
+                    organization_id="organization"
+                )
+                if event["event_type"] == "context.read"
+            ]
+            self.assertEqual(len(access_events), 1)
+            self.assertEqual(access_events[0]["actor_id"], "alice")
+            self.assertNotIn("hox_", result.stdout + result.stderr)
+        finally:
+            FakeProviderHandler.openai_context_tool_arguments = None
+            secure_store.delete(profile)
+        self.assertIsNone(secure_store.get(profile))
+
+    @unittest.skipUnless(
+        platform.system() == "Darwin"
+        and os.environ.get("HORMUZ_RUN_PROFILE_CLIENT_TEST") == "1"
+        and os.environ.get("HORMUZ_RUN_CLAUDE_CLIENT_TEST") == "1"
+        and shutil.which("claude"),
+        "Set both profile and Claude client test flags on macOS and install Claude Code",
+    )
+    def test_official_claude_calls_context_with_keychain_profile(self) -> None:
+        profile, secure_store, record_id = self._enable_profile_context_for_installed_client(
+            client="claude-code"
+        )
+        self.addCleanup(secure_store.delete, profile)
+        gateway_url = f"http://127.0.0.1:{self.gateway.server_port}"
+        FakeProviderHandler.anthropic_context_tool_arguments = {
+            "query": "official profile secure context",
+            "token_budget": 500,
+            "repository_id": "Xpounder-com/hormuz",
+            "branch": "main",
+        }
+        before = len(FakeProviderHandler.requests)
+        environment = os.environ.copy()
+        for name in (
+            "TEST_GATEWAY_TOKEN",
+            "TEST_CLAUDE_ONLY_TOKEN",
+            "TEST_OPENAI_KEY",
+            "TEST_ANTHROPIC_KEY",
+            "ANTHROPIC_API_KEY",
+            "ANTHROPIC_AUTH_TOKEN",
+        ):
+            environment.pop(name, None)
+        environment["DISABLE_AUTOUPDATER"] = "1"
+        environment["CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT"] = "1"
+        environment["ANTHROPIC_BASE_URL"] = gateway_url
+        environment["HORMUZ_SESSION_GATEWAY"] = gateway_url
+        environment["CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY"] = "1"
+        environment["CLAUDE_CONFIG_DIR"] = str(self.root / "claude-profile-config")
+        settings_path = self.root / "claude-profile-settings.json"
+        settings_path.write_text(
+            json.dumps(
+                {
+                    "apiKeyHelper": shlex.join(
+                        [
+                            sys.executable,
+                            "-m",
+                            "hormuz",
+                            "auth",
+                            "token",
+                            "--gateway-env",
+                            "HORMUZ_SESSION_GATEWAY",
+                            "--profile",
+                            profile,
+                            "--allow-insecure-http",
+                        ]
+                    ),
+                    "env": {
+                        "ANTHROPIC_BASE_URL": gateway_url,
+                        "HORMUZ_SESSION_GATEWAY": gateway_url,
+                        "CLAUDE_CODE_API_KEY_HELPER_TTL_MS": "1",
+                        "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY": "1",
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        mcp_config_path = self.root / "claude-profile-mcp.json"
+        mcp_config_path.write_text(
+            json.dumps(
+                {
+                    "mcpServers": {
+                        "hormuz": {
+                            "type": "stdio",
+                            "command": sys.executable,
+                            "args": [
+                                "-m",
+                                "hormuz",
+                                "mcp",
+                                "--url",
+                                gateway_url,
+                                "--profile",
+                                profile,
+                                "--allow-insecure-http",
+                                "--timeout-seconds",
+                                "5",
+                            ],
+                        }
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        debug_path = self.root / "claude-profile-debug.log"
+        command = [
+            "claude",
+            "-p",
+            "--debug",
+            "api",
+            "--debug-file",
+            str(debug_path),
+            "--no-session-persistence",
+            "--settings",
+            str(settings_path),
+            "--mcp-config",
+            str(mcp_config_path),
+            "--strict-mcp-config",
+            "--tools",
+            "",
+            "--allowedTools",
+            "mcp__hormuz__hormuz_get_context",
+            "--model",
+            "claude-sonnet-5",
+            "Use Hormuz governed context, then reply exactly ok.",
+        ]
+        try:
+            result = subprocess.run(
+                command,
+                cwd=self.root,
+                env=environment,
+                text=True,
+                capture_output=True,
+                timeout=60,
+            )
+            self.assertEqual(
+                result.returncode,
+                0,
+                msg=(
+                    f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}\n"
+                    f"debug:\n{debug_path.read_text(encoding='utf-8') if debug_path.exists() else '<missing>'}\n"
+                    f"provider_requests:\n{json.dumps(FakeProviderHandler.requests[before:], indent=2)}"
+                ),
+            )
+            self.assertIn("ok", result.stdout.lower())
+            generation_requests = [
+                request
+                for request in FakeProviderHandler.requests[before:]
+                if str(request["path"]).partition("?")[0].endswith("/messages")
+            ]
+            self.assertGreaterEqual(len(generation_requests), 2)
+            tool_results = [
+                block
+                for request in generation_requests
+                for message in request["body"].get("messages", [])
+                if isinstance(message, dict) and isinstance(message.get("content"), list)
+                for block in message["content"]
+                if isinstance(block, dict)
+                and block.get("type") == "tool_result"
+                and block.get("tool_use_id") == "toolu_hormuz_context"
+            ]
+            self.assertEqual(len(tool_results), 1)
+            self.assertIn(record_id, json.dumps(tool_results[0]))
+            self.assertTrue(
+                all(
+                    request["headers"].get("x-api-key") == ANTHROPIC_KEY
+                    and "authorization" not in request["headers"]
+                    for request in generation_requests
+                )
+            )
+            access_events = [
+                event
+                for event in self.gateway.context_repository.audit_events(
+                    organization_id="organization"
+                )
+                if event["event_type"] == "context.read"
+            ]
+            self.assertEqual(len(access_events), 1)
+            self.assertEqual(access_events[0]["actor_id"], "alice")
+            self.assertNotIn("hox_", result.stdout + result.stderr)
+        finally:
+            FakeProviderHandler.anthropic_context_tool_arguments = None
+            secure_store.delete(profile)
+        self.assertIsNone(secure_store.get(profile))
+
     def _post(self, path: str, body: dict, *, extra_headers: dict[str, str] | None = None, token: str = GATEWAY_TOKEN):
         connection = http.client.HTTPConnection("127.0.0.1", self.gateway.server_port, timeout=5)
         headers = {
@@ -5457,6 +5971,147 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.config = GatewayConfig.load(self.config_path)
         self.gateway = GatewayServer(self.config)
         self.gateway_thread = serve_in_thread(self.gateway)
+
+    def _enable_profile_context_for_installed_client(
+        self,
+        *,
+        client: str,
+    ) -> tuple[str, SecureCredentialStore, str]:
+        gateway_port = _free_port()
+        gateway_url = f"http://127.0.0.1:{gateway_port}"
+        issuer = f"http://127.0.0.1:{self.provider.server_port}"
+        config_value = self._config(self.provider.server_port, gateway_port)
+        config_value["authentication"] = {
+            "session_broker": {
+                "enabled": True,
+                "database": "./sessions.sqlite3",
+                "public_base_url": gateway_url,
+                "master_key_env": "TEST_SESSION_MASTER_KEY",
+                "allow_insecure_http": True,
+                "access_ttl_seconds": 600,
+                "absolute_ttl_seconds": 43_200,
+                "enrollment_ttl_seconds": 300,
+            },
+            "oidc": {
+                "issuers": [
+                    {
+                        "issuer": issuer,
+                        "audiences": ["hormuz-api"],
+                        "allow_insecure_http": True,
+                        "login": {
+                            "client_id": "profile-client-proof",
+                            "client_secret_env": "TEST_OIDC_CLIENT_SECRET",
+                            "scopes": ["openid"],
+                        },
+                        "subjects": [
+                            {
+                                "subject": "profile-alice",
+                                "actor_id": "alice",
+                                "actor_name": "Alice",
+                                "team_id": "engineering",
+                                "team_name": "Engineering",
+                                "organization_id": "organization",
+                                "clearance": "internal",
+                                "allowed_clients": ["codex", "claude-code"],
+                            }
+                        ],
+                    }
+                ]
+            },
+        }
+        with mock.patch.dict(
+            os.environ,
+            {
+                "TEST_SESSION_MASTER_KEY": base64.urlsafe_b64encode(b"s" * 32)
+                .rstrip(b"=")
+                .decode("ascii"),
+                "TEST_OIDC_CLIENT_SECRET": "profile-client-proof-secret",
+            },
+        ):
+            self._restart_gateway(config_value)
+
+        broker = self.gateway.session_broker
+        if broker is None:
+            self.fail("profile-client test requires the configured session broker")
+        enrollment_secret = "profile_" + secrets.token_urlsafe(32)
+        enrollment = broker.store.create_enrollment(
+            issuer=issuer,
+            client_name=client,
+            enrollment_secret=enrollment_secret,
+        )
+        state = "state_" + secrets.token_urlsafe(32)
+        browser_cookie = "cookie_" + secrets.token_urlsafe(32)
+        broker.store.begin_authorization(
+            enrollment_id=enrollment.enrollment_id,
+            state=state,
+            browser_cookie=browser_cookie,
+            nonce="nonce_" + secrets.token_urlsafe(32),
+            pkce_verifier="verifier_" + secrets.token_urlsafe(64),
+        )
+        broker.store.consume_callback(
+            state=state,
+            browser_cookie=browser_cookie,
+        )
+        broker.store.authorize_enrollment(
+            enrollment_id=enrollment.enrollment_id,
+            subject="profile-alice",
+            organization_id="organization",
+            actor_id="alice",
+            team_id="engineering",
+            clearance="internal",
+        )
+        pair = broker.store.redeem_enrollment(
+            enrollment_id=enrollment.enrollment_id,
+            enrollment_secret=enrollment_secret,
+        )
+
+        profile = f"hormuz-{client}-{secrets.token_hex(6)}"
+        secure_store = SecureCredentialStore()
+        secure_store.set(
+            profile,
+            StoredSession(
+                gateway=gateway_url,
+                client=client,
+                access_token=pair.access_token,
+                refresh_token=pair.refresh_token,
+                access_expires_at=pair.access_expires_at,
+                session_expires_at=pair.session_expires_at,
+            ),
+        )
+
+        record_id = f"{client}-profile-context-proof"
+        now = datetime.now(timezone.utc)
+        try:
+            self.gateway.context_repository.ingest(
+                ContextRecord(
+                    record_id=record_id,
+                    record_kind="decision",
+                    title="Secure profile context proof",
+                    content="Official clients retrieve governed context through a rotating secure profile.",
+                    owner_id="alice",
+                    organization_id="organization",
+                    visibility="team",
+                    scope_id="engineering",
+                    classification="internal",
+                    source_uri=f"test://{record_id}",
+                    source_revision="test:1",
+                    source_sha256="f" * 64,
+                    source_item_key=record_id,
+                    repository_id="Xpounder-com/hormuz",
+                    branch="main",
+                    verification="verified",
+                    verification_evidence=("test:approved",),
+                    effective_at=now - timedelta(minutes=1),
+                    verified_at=now - timedelta(minutes=1),
+                    tags=("official", "profile", "secure"),
+                ),
+                actor_id="alice",
+                policy_version="test-context-v1",
+            )
+        except Exception:
+            secure_store.delete(profile)
+            raise
+        return profile, secure_store, record_id
 
     def _enable_automatic_context_for_installed_client(
         self,
