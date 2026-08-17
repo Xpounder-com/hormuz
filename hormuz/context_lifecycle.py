@@ -146,7 +146,7 @@ class ContextEvidence:
         }
         unknown = sorted(set(value) - allowed)
         if unknown:
-            raise ValueError("unknown context evidence fields: " + ", ".join(unknown))
+            raise ValueError("unknown context evidence fields")
         if value.get("schema_version") != CONTEXT_EVIDENCE_SCHEMA:
             raise ValueError("unsupported context evidence schema_version")
         organization_id = _bounded_string(
@@ -222,7 +222,7 @@ class LifecyclePromotionPath:
             set(value) - {"id", "record_kinds", "required_signals", "required_tags"}
         )
         if unknown:
-            raise ValueError("unknown lifecycle promotion path fields: " + ", ".join(unknown))
+            raise ValueError("unknown lifecycle promotion path fields")
         return cls(
             path_id=_bounded_string(value.get("id"), "id", maximum=64),
             record_kinds=_string_tuple(value.get("record_kinds"), "record_kinds", maximum=2),
@@ -274,7 +274,7 @@ class LifecyclePolicy:
             raise ValueError("lifecycle policy must be an object")
         unknown = sorted(set(value) - {"policy_version", "promotion_paths"})
         if unknown:
-            raise ValueError("unknown lifecycle policy fields: " + ", ".join(unknown))
+            raise ValueError("unknown lifecycle policy fields")
         paths = value.get("promotion_paths")
         if not isinstance(paths, list):
             raise ValueError("lifecycle promotion_paths must be an array")

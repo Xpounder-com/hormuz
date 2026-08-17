@@ -2,6 +2,12 @@
 
 This document defines the current process-level health and shutdown contract. It is a bounded local/runtime foundation, not evidence of a production deployment, high availability, disaster recovery, or dependency-wide health.
 
+## Configuration rollout
+
+Hormuz strictly validates its complete configuration before constructing `GatewayServer`; unknown fields and unresolved or ambiguous policy scopes fail startup. The accepted configuration is immutable for the process lifetime. Hormuz does not implement `SIGHUP` or in-place reload because authenticators, policy engines, redactors, rate limiters, database handles, and secret-derived state must change as one coherent snapshot.
+
+Run `hormuz --config CANDIDATE doctor` with the exact target package and target secret/network environment, start a replacement revision, wait for liveness and readiness, then shift traffic and drain the old revision. Retain the previous image digest and configuration artifact as the rollback pair. `doctor` performs OIDC discovery/JWKS validation when configured, but does not issue provider generation requests. See [CONFIGURATION.md](CONFIGURATION.md) for the strict schema, secret boundary, and full change procedure.
+
 ## Health endpoints
 
 Health endpoints are intentionally unauthenticated so an orchestrator can call them without an employee or provider credential. They return `Cache-Control: no-store`, use the fixed schema `hormuz.health.v1`, and never reflect a request query, header, body, credential, prompt, response, filename, or internal exception.
@@ -23,7 +29,7 @@ curl --fail-with-body http://127.0.0.1:8787/health/ready
 
 ## Single-process resource limits
 
-Hormuz applies six process-local limits:
+Hormuz applies seven process-local limits:
 
 - `max_request_bytes` defaults to 25 MiB and rejects an announced larger generation body before reading it. Narrow administration and context routes use smaller fixed limits.
 - `listen.accept_backlog` defaults to `256` and accepts values from `1` through `65535`. Hormuz applies it as the listening socket's accept-queue hint before activation; the default aligns with the separate application connection ceiling. It bounds the application-requested queue depth for completed connections waiting to be accepted, but the operating system may cap or reinterpret it and manages SYN queues independently.
@@ -56,4 +62,4 @@ Suggested orchestrator settings:
 
 ## Current deployment boundary
 
-This contract does not make the alpha production-ready. The reference server is plain HTTP and is intended for loopback or a separately hardened private TLS boundary. Remote OpenAI and Anthropic upstreams must use HTTPS; plaintext HTTP is accepted only for a literal loopback/`localhost` development provider, and base URLs cannot contain credentials, queries, or fragments. Provider redirects are refused with a fixed content-free gateway error so the server-held credential and request remain bound to the configured origin. Those application invariants do not prove DNS integrity, certificate policy beyond the platform trust store, private endpoint configuration, or workload egress enforcement. A pinned, non-root, scanned single-node container and executable restricted-runtime smoke test are documented in [CONTAINER.md](CONTAINER.md). [RELEASES.md](RELEASES.md) defines tag-driven private GHCR publication, keyless signing, provenance, verification, and digest-based rollback, but no image is claimed as published until a qualifying tag run succeeds. Usage, approval, context, and session stores remain local SQLite implementations; there is no accepted shared persistence topology, HA/failover proof, backup/restore proof, RPO/RTO, deep dependency probe, shared load-balancer drain protocol, release-tag governance, or independent security review. Those gates remain tracked in the enterprise roadmap and production-deployment issue.
+This contract does not make the alpha production-ready. The reference server is plain HTTP and is intended for loopback or a separately hardened private TLS boundary. Remote OpenAI and Anthropic upstreams must use HTTPS; plaintext HTTP is accepted only for a literal loopback/`localhost` development provider, and base URLs cannot contain credentials, queries, or fragments. Provider redirects are refused with a fixed content-free gateway error so the server-held credential and request remain bound to the configured origin. Those application invariants do not prove DNS integrity, certificate policy beyond the platform trust store, private endpoint configuration, or workload egress enforcement. A pinned, non-root, scanned single-node container and executable restricted-runtime smoke test are documented in [CONTAINER.md](CONTAINER.md). [RELEASES.md](RELEASES.md) defines tag-driven private GHCR publication, keyless signing, provenance, verification, and digest-based rollback, but no image is claimed as published until a qualifying tag run succeeds. Usage, approval, context, and session stores remain local SQLite implementations; there is no accepted shared persistence topology, live configuration reload, deployment-coordinated rollback, HA/failover proof, backup/restore proof, RPO/RTO, deep dependency probe, shared load-balancer drain protocol, release-tag governance, or independent security review. Those gates remain tracked in the enterprise roadmap and production-deployment issue.

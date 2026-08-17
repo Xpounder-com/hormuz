@@ -303,8 +303,41 @@ class GatewayConfig:
         if not isinstance(raw, dict):
             raise ConfigError("Gateway configuration must be a JSON object")
 
+        _reject_unknown_fields(
+            raw,
+            {
+                "listen",
+                "database",
+                "context_database",
+                "context_service",
+                "max_request_bytes",
+                "upstream_timeout_seconds",
+                "upstreams",
+                "authentication",
+                "identities",
+                "model_routes",
+                "egress_controls",
+                "policies",
+            },
+            "gateway configuration",
+        )
+
         env = os.environ if environ is None else environ
         listen_raw = _object(raw.get("listen", {}), "listen")
+        _reject_unknown_fields(
+            listen_raw,
+            {
+                "host",
+                "port",
+                "shutdown_grace_seconds",
+                "max_concurrent_requests",
+                "accept_backlog",
+                "max_connections",
+                "request_header_timeout_seconds",
+                "request_body_timeout_seconds",
+            },
+            "listen",
+        )
         host = _string(listen_raw.get("host", "127.0.0.1"), "listen.host")
         port = _integer(listen_raw.get("port", 8787), "listen.port", minimum=1, maximum=65535)
         shutdown_grace_seconds = _integer(
@@ -360,9 +393,20 @@ class GatewayConfig:
             raise ConfigError("context_database must be separate from the usage database")
 
         upstreams_raw = _object(raw.get("upstreams"), "upstreams")
+        _reject_unknown_fields(upstreams_raw, {"openai", "anthropic"}, "upstreams")
         upstreams: dict[str, UpstreamConfig] = {}
         for protocol in ("openai", "anthropic"):
             item = _object(upstreams_raw.get(protocol), f"upstreams.{protocol}")
+            _reject_unknown_fields(
+                item,
+                {
+                    "base_url",
+                    "api_key_env",
+                    "allow_response_storage",
+                    "allow_background",
+                },
+                f"upstreams.{protocol}",
+            )
             upstream_path = f"upstreams.{protocol}.base_url"
             base_url = _url(item.get("base_url"), upstream_path).rstrip("/")
             _validate_upstream_transport(base_url, upstream_path)
@@ -386,6 +430,21 @@ class GatewayConfig:
         for index, value in enumerate(identities_raw):
             item = _object(value, f"identities[{index}]")
             prefix = f"identities[{index}]"
+            _reject_unknown_fields(
+                item,
+                {
+                    "token_env",
+                    "actor_id",
+                    "actor_name",
+                    "team_id",
+                    "team_name",
+                    "allowed_clients",
+                    "capabilities",
+                    "organization_id",
+                    "clearance",
+                },
+                prefix,
+            )
             token_env = _string(item.get("token_env"), f"{prefix}.token_env")
             token = env.get(token_env, "")
             if not token:
@@ -412,7 +471,13 @@ class GatewayConfig:
             identities_by_token[token] = identity
 
         authentication_raw = _object(raw.get("authentication", {}), "authentication")
+        _reject_unknown_fields(
+            authentication_raw,
+            {"oidc", "session_broker"},
+            "authentication",
+        )
         oidc_raw = _object(authentication_raw.get("oidc", {}), "authentication.oidc")
+        _reject_unknown_fields(oidc_raw, {"issuers"}, "authentication.oidc")
         oidc_issuers_raw = oidc_raw.get("issuers", [])
         if not isinstance(oidc_issuers_raw, list):
             raise ConfigError("authentication.oidc.issuers must be an array")
@@ -432,6 +497,21 @@ class GatewayConfig:
         for issuer_index, value in enumerate(oidc_issuers_raw):
             prefix = f"authentication.oidc.issuers[{issuer_index}]"
             item = _object(value, prefix)
+            _reject_unknown_fields(
+                item,
+                {
+                    "issuer",
+                    "audiences",
+                    "jwks_uri",
+                    "algorithms",
+                    "clock_skew_seconds",
+                    "discovery_cache_seconds",
+                    "allow_insecure_http",
+                    "login",
+                    "subjects",
+                },
+                prefix,
+            )
             issuer = _url(item.get("issuer"), f"{prefix}.issuer")
             if issuer in oidc_issuers:
                 raise ConfigError(f"OIDC issuer must be unique: {issuer}")
@@ -493,6 +573,21 @@ class GatewayConfig:
             for subject_index, subject_value in enumerate(subjects_raw):
                 subject_prefix = f"{prefix}.subjects[{subject_index}]"
                 subject_item = _object(subject_value, subject_prefix)
+                _reject_unknown_fields(
+                    subject_item,
+                    {
+                        "subject",
+                        "actor_id",
+                        "actor_name",
+                        "team_id",
+                        "team_name",
+                        "allowed_clients",
+                        "capabilities",
+                        "organization_id",
+                        "clearance",
+                    },
+                    subject_prefix,
+                )
                 subject = _string(subject_item.get("subject"), f"{subject_prefix}.subject")
                 key = (issuer, subject)
                 if key in identities_by_subject:
@@ -551,6 +646,20 @@ class GatewayConfig:
                     "model_routes keys must be safe model identifiers up to 512 characters"
                 )
             item = _object(value, f"model_routes.{alias}")
+            _reject_unknown_fields(
+                item,
+                {
+                    "protocol",
+                    "upstream_model",
+                    "rate_card_version",
+                    "currency",
+                    "input_cost_per_million",
+                    "cache_read_cost_per_million",
+                    "cache_write_cost_per_million",
+                    "output_cost_per_million",
+                },
+                f"model_routes.{alias}",
+            )
             protocol = _string(item.get("protocol"), f"model_routes.{alias}.protocol")
             if protocol not in upstreams:
                 raise ConfigError(f"model_routes.{alias}.protocol must be openai or anthropic")
@@ -588,9 +697,11 @@ class GatewayConfig:
             )
 
         egress_raw = _object(raw.get("egress_controls", {}), "egress_controls")
-        unknown_egress = sorted(set(egress_raw) - {"secrets", "dlp"})
-        if unknown_egress:
-            raise ConfigError("Unknown egress_controls fields: " + ", ".join(unknown_egress))
+        _reject_unknown_fields(
+            egress_raw,
+            {"secrets", "dlp"},
+            "egress_controls",
+        )
         secret_controls = _secret_controls(egress_raw.get("secrets", {}), env)
         dlp_raw = egress_raw.get("dlp", {})
         dlp_controls = _dlp_controls(dlp_raw, env)
@@ -599,21 +710,18 @@ class GatewayConfig:
             dlp_controls,
         )
         context_service_raw = _object(raw.get("context_service", {}), "context_service")
-        unknown_context_service = sorted(
-            set(context_service_raw)
-            - {
+        _reject_unknown_fields(
+            context_service_raw,
+            {
                 "policy_version",
                 "max_token_budget",
                 "max_items",
                 "requests_per_minute",
                 "allow_provisional",
                 "lifecycle",
-            }
+            },
+            "context_service",
         )
-        if unknown_context_service:
-            raise ConfigError(
-                "Unknown context_service fields: " + ", ".join(unknown_context_service)
-            )
         context_service = ContextServiceConfig(
             policy_version=_string(
                 context_service_raw.get("policy_version", "local-v1"),
@@ -646,6 +754,11 @@ class GatewayConfig:
             ),
         )
         policies_raw = _object(raw.get("policies"), "policies")
+        _reject_unknown_fields(
+            policies_raw,
+            {"organization", "teams", "actors"},
+            "policies",
+        )
         organization_policy = _policy(
             policies_raw.get("organization"),
             "policies.organization",
@@ -732,6 +845,17 @@ class GatewayConfig:
             team_organizations.setdefault(identity.team_id, set()).add(
                 identity.organization_id
             )
+        if set(self.team_policies) - set(team_organizations):
+            raise ConfigError("Policies reference unknown teams")
+        if any(
+            len(team_organizations[team_id]) != 1
+            for team_id in self.team_policies
+        ):
+            raise ConfigError(
+                "Policy team IDs must identify exactly one organization"
+            )
+        if set(self.actor_policies) - set(self.identities_by_actor):
+            raise ConfigError("Policies reference unknown actors")
         unknown_dlp_teams = sorted(
             set(self.team_dlp_overlays) - set(team_organizations)
         )
@@ -888,6 +1012,21 @@ def _policy(
     default_context_allowed_repositories: tuple[str, ...] | None = None,
 ) -> Policy:
     item = _object(value, path)
+    _reject_unknown_fields(
+        item,
+        {
+            "allowed_clients",
+            "allowed_models",
+            "fallback_model",
+            "fallback_models",
+            "max_output_tokens",
+            "monthly_token_limit",
+            "monthly_budget_usd",
+            "per_actor_monthly_budget_usd",
+            "context_injection",
+        },
+        path,
+    )
     return Policy(
         allowed_clients=_optional_string_tuple(item.get("allowed_clients"), f"{path}.allowed_clients"),
         allowed_models=_optional_string_tuple(item.get("allowed_models"), f"{path}.allowed_models"),
@@ -916,9 +1055,9 @@ def _context_injection_policy(
     default_allowed_repositories: tuple[str, ...] | None = None,
 ) -> ContextInjectionPolicy:
     item = _object(value, path)
-    unknown = sorted(
-        set(item)
-        - {
+    _reject_unknown_fields(
+        item,
+        {
             "mode",
             "allowed_clients",
             "allowed_models",
@@ -926,10 +1065,9 @@ def _context_injection_policy(
             "max_classification",
             "token_budget",
             "max_items",
-        }
+        },
+        path,
     )
-    if unknown:
-        raise ConfigError(f"Unknown {path} fields: " + ", ".join(unknown))
     mode_value = item.get("mode", default_mode)
     mode = _optional_string(mode_value, f"{path}.mode")
     if mode not in {None, "off", "optional", "required"}:
@@ -995,12 +1133,11 @@ def _oidc_login_config(
         return None
     path = f"{issuer_path}.login"
     item = _object(value, path)
-    unknown = sorted(
-        set(item)
-        - {"client_id", "client_secret_env", "scopes", "token_endpoint_auth_method"}
+    _reject_unknown_fields(
+        item,
+        {"client_id", "client_secret_env", "scopes", "token_endpoint_auth_method"},
+        path,
     )
-    if unknown:
-        raise ConfigError(f"Unknown {path} fields: " + ", ".join(unknown))
     client_secret_env = _string(item.get("client_secret_env"), f"{path}.client_secret_env")
     client_secret = env.get(client_secret_env, "")
     if not client_secret:
@@ -1037,9 +1174,9 @@ def _session_broker_config(
 ) -> SessionBrokerConfig:
     path = "authentication.session_broker"
     item = _object(value, path)
-    unknown = sorted(
-        set(item)
-        - {
+    _reject_unknown_fields(
+        item,
+        {
             "enabled",
             "database",
             "public_base_url",
@@ -1048,10 +1185,9 @@ def _session_broker_config(
             "absolute_ttl_seconds",
             "enrollment_ttl_seconds",
             "allow_insecure_http",
-        }
+        },
+        path,
     )
-    if unknown:
-        raise ConfigError(f"Unknown {path} fields: " + ", ".join(unknown))
     enabled = _boolean(item.get("enabled", False), f"{path}.enabled")
     if not enabled:
         return SessionBrokerConfig()
@@ -1123,9 +1259,11 @@ def _session_broker_config(
 
 def _secret_controls(value: Any, env: dict[str, str]) -> SecretControls:
     item = _object(value, "egress_controls.secrets")
-    unknown = sorted(set(item) - {"mode", "builtins", "custom_secret_envs"})
-    if unknown:
-        raise ConfigError("Unknown egress_controls.secrets fields: " + ", ".join(unknown))
+    _reject_unknown_fields(
+        item,
+        {"mode", "builtins", "custom_secret_envs"},
+        "egress_controls.secrets",
+    )
     mode = _string(item.get("mode", "redact"), "egress_controls.secrets.mode")
     if mode not in {"off", "redact", "deny"}:
         raise ConfigError("egress_controls.secrets.mode must be off, redact, or deny")
@@ -1172,11 +1310,11 @@ _MODEL_IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,511}\Z")
 def _dlp_controls(value: Any, env: dict[str, str]) -> DLPControls:
     path = "egress_controls.dlp"
     item = _object(value, path)
-    unknown = sorted(
-        set(item) - {"policy_version", "rules", "dictionaries", "approval", "overlays"}
+    _reject_unknown_fields(
+        item,
+        {"policy_version", "rules", "dictionaries", "approval", "overlays"},
+        path,
     )
-    if unknown:
-        raise ConfigError(f"Unknown {path} fields: " + ", ".join(unknown))
     policy_version = _bounded_policy_version(
         item.get("policy_version", "local-dlp-v1"),
         f"{path}.policy_version",
@@ -1184,7 +1322,7 @@ def _dlp_controls(value: Any, env: dict[str, str]) -> DLPControls:
     configured_rules = _object(item.get("rules", {}), f"{path}.rules")
     unknown_rules = sorted(set(configured_rules) - set(_DLP_BUILTINS))
     if unknown_rules:
-        raise ConfigError(f"Unknown {path}.rules: " + ", ".join(unknown_rules))
+        raise ConfigError(f"Unknown {path}.rules")
 
     rules: list[DLPRuleConfig] = []
     for rule_id, (category, confidence, default_action) in _DLP_BUILTINS.items():
@@ -1220,9 +1358,9 @@ def _dlp_controls(value: Any, env: dict[str, str]) -> DLPControls:
     for index, value in enumerate(dictionaries):
         rule_path = f"{path}.dictionaries[{index}]"
         rule = _object(value, rule_path)
-        unknown_rule_fields = sorted(
-            set(rule)
-            - {
+        _reject_unknown_fields(
+            rule,
+            {
                 "rule_id",
                 "category",
                 "confidence",
@@ -1230,10 +1368,9 @@ def _dlp_controls(value: Any, env: dict[str, str]) -> DLPControls:
                 "providers",
                 "models",
                 "values_env",
-            }
+            },
+            rule_path,
         )
-        if unknown_rule_fields:
-            raise ConfigError(f"Unknown {rule_path} fields: " + ", ".join(unknown_rule_fields))
         rule_id = _dlp_identifier(rule.get("rule_id"), f"{rule_path}.rule_id")
         if rule_id in known_ids:
             raise ConfigError(f"Duplicate DLP rule_id: {rule_id}")
@@ -1290,9 +1427,7 @@ def _dlp_overlays(
     path = "egress_controls.dlp.overlays"
     dlp_item = _object(value, "egress_controls.dlp")
     item = _object(dlp_item.get("overlays", {}), path)
-    unknown = sorted(set(item) - {"teams", "actors"})
-    if unknown:
-        raise ConfigError(f"Unknown {path} fields: " + ", ".join(unknown))
+    _reject_unknown_fields(item, {"teams", "actors"}, path)
     teams = _dlp_overlay_map(item.get("teams", {}), f"{path}.teams", organization)
     actors = _dlp_overlay_map(item.get("actors", {}), f"{path}.actors", organization)
     return teams, actors
@@ -1323,9 +1458,7 @@ def _dlp_overlay(
     organization: DLPControls,
 ) -> DLPPolicyOverlay:
     item = _object(value, path)
-    unknown = sorted(set(item) - {"policy_version", "rules"})
-    if unknown:
-        raise ConfigError(f"Unknown {path} fields: " + ", ".join(unknown))
+    _reject_unknown_fields(item, {"policy_version", "rules"}, path)
     policy_version = _bounded_policy_version(
         item.get("policy_version"),
         f"{path}.policy_version",
@@ -1346,11 +1479,7 @@ def _dlp_overlay(
             )
         rule_path = f"{path}.rules.{rule_id}"
         rule = _object(raw_rule, rule_path)
-        unknown_rule_fields = sorted(set(rule) - {"action", "providers", "models"})
-        if unknown_rule_fields:
-            raise ConfigError(
-                f"Unknown {rule_path} fields: " + ", ".join(unknown_rule_fields)
-            )
+        _reject_unknown_fields(rule, {"action", "providers", "models"}, rule_path)
         action = _string(rule.get("action"), f"{rule_path}.action")
         if action not in _DLP_ACTIONS - {"off"}:
             raise ConfigError(
@@ -1443,9 +1572,7 @@ def _effective_dlp_policy_version(
 def _dlp_approval_config(value: Any, env: dict[str, str]) -> DLPApprovalConfig:
     path = "egress_controls.dlp.approval"
     item = _object(value, path)
-    unknown = sorted(set(item) - {"enabled", "fingerprint_key_env"})
-    if unknown:
-        raise ConfigError(f"Unknown {path} fields: " + ", ".join(unknown))
+    _reject_unknown_fields(item, {"enabled", "fingerprint_key_env"}, path)
     enabled = _boolean(item.get("enabled", False), f"{path}.enabled")
     if not enabled:
         return DLPApprovalConfig()
@@ -1490,9 +1617,7 @@ def _dlp_rule_scope(
     allowed_fields: set[str] | None = None,
 ) -> tuple[str, tuple[str, ...], tuple[str, ...]]:
     allowed = {"action", "providers", "models"} if allowed_fields is None else allowed_fields
-    unknown = sorted(set(value) - allowed)
-    if unknown:
-        raise ConfigError(f"Unknown {path} fields: " + ", ".join(unknown))
+    _reject_unknown_fields(value, allowed, path)
     action = _string(value.get("action", default_action), f"{path}.action")
     if action not in _DLP_ACTIONS:
         raise ConfigError(
@@ -1552,18 +1677,17 @@ def is_model_identifier(value: object) -> bool:
 def _context_lifecycle_automation_config(value: Any) -> ContextLifecycleAutomationConfig:
     path = "context_service.lifecycle"
     item = _object(value, path)
-    unknown = sorted(
-        set(item)
-        - {
+    _reject_unknown_fields(
+        item,
+        {
             "enabled",
             "policy_version",
             "promotion_paths",
             "job_batch_size",
             "lease_seconds",
-        }
+        },
+        path,
     )
-    if unknown:
-        raise ConfigError(f"Unknown {path} fields: " + ", ".join(unknown))
     enabled = _boolean(item.get("enabled", False), f"{path}.enabled")
     promotion_paths = item.get("promotion_paths", [])
     if not isinstance(promotion_paths, list):
@@ -1609,7 +1733,7 @@ def _identity_capabilities(value: Any, path: str) -> tuple[str, ...]:
     supported = {"context_promoter", "dlp_approver", "session_admin", "usage_viewer"}
     unknown = sorted(set(capabilities) - supported)
     if unknown:
-        raise ConfigError(f"Unknown {path}: " + ", ".join(unknown))
+        raise ConfigError(f"Unknown {path}")
     return capabilities
 
 
@@ -1633,6 +1757,17 @@ def _object(value: Any, path: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ConfigError(f"{path} must be an object")
     return value
+
+
+def _reject_unknown_fields(
+    value: dict[str, Any],
+    allowed: set[str],
+    path: str,
+) -> None:
+    """Reject misspelled configuration without reflecting attacker-chosen keys."""
+
+    if set(value) - allowed:
+        raise ConfigError(f"Unknown {path} fields")
 
 
 def _string(value: Any, path: str) -> str:

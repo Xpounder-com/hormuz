@@ -266,6 +266,135 @@ class ClientConfigTests(unittest.TestCase):
                     "request_body_timeout_seconds": 45,
                 }[field]
 
+    def test_unknown_configuration_fields_fail_closed(self) -> None:
+        def add_root_field(raw: dict[str, object]) -> None:
+            raw["lissten"] = {}
+
+        def add_listen_field(raw: dict[str, object]) -> None:
+            raw["listen"]["max_conections"] = 64  # type: ignore[index]
+
+        def add_upstreams_field(raw: dict[str, object]) -> None:
+            raw["upstreams"]["other"] = {}  # type: ignore[index]
+
+        def add_upstream_field(raw: dict[str, object]) -> None:
+            raw["upstreams"]["openai"]["api_kee_env"] = "OTHER"  # type: ignore[index]
+
+        def add_identity_field(raw: dict[str, object]) -> None:
+            raw["identities"][0]["actor"] = "alice"  # type: ignore[index]
+
+        def add_authentication_field(raw: dict[str, object]) -> None:
+            raw["authentication"]["oidcc"] = {}  # type: ignore[index]
+
+        def add_oidc_field(raw: dict[str, object]) -> None:
+            raw["authentication"]["oidc"]["providers"] = []  # type: ignore[index]
+
+        def add_model_route_field(raw: dict[str, object]) -> None:
+            raw["model_routes"]["gpt-5.4-mini"][  # type: ignore[index]
+                "output_cost_per_token"
+            ] = 1
+
+        def add_policies_field(raw: dict[str, object]) -> None:
+            raw["policies"]["departments"] = {}  # type: ignore[index]
+
+        def add_policy_field(raw: dict[str, object]) -> None:
+            raw["policies"]["organization"]["monthly_buget_usd"] = 1  # type: ignore[index]
+
+        cases = (
+            ("root", add_root_field, "gateway configuration"),
+            ("listen", add_listen_field, "listen"),
+            ("upstreams", add_upstreams_field, "upstreams"),
+            ("upstream", add_upstream_field, "upstreams.openai"),
+            ("identity", add_identity_field, "identities[0]"),
+            ("authentication", add_authentication_field, "authentication"),
+            ("oidc", add_oidc_field, "authentication.oidc"),
+            ("model route", add_model_route_field, "model_routes.gpt-5.4-mini"),
+            ("policies", add_policies_field, "policies"),
+            ("policy", add_policy_field, "policies.organization"),
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "hormuz.json"
+            for name, mutate, expected_path in cases:
+                with self.subTest(name=name):
+                    raw = json.loads(
+                        (ROOT / "config.example.json").read_text(encoding="utf-8")
+                    )
+                    mutate(raw)
+                    path.write_text(json.dumps(raw), encoding="utf-8")
+                    with self.assertRaises(ConfigError) as captured:
+                        GatewayConfig.load(
+                            path,
+                            environ={"HORMUZ_TOKEN": "test-identity-token"},
+                        )
+                    self.assertIn(
+                        f"Unknown {expected_path} fields",
+                        str(captured.exception),
+                    )
+
+    def test_unknown_configuration_field_is_not_reflected_by_cli(self) -> None:
+        sentinel = "company_secret_do_not_log_49f168ce"
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "hormuz.json"
+            raw = json.loads(
+                (ROOT / "config.example.json").read_text(encoding="utf-8")
+            )
+            raw[sentinel] = True
+            path.write_text(json.dumps(raw), encoding="utf-8")
+            error = io.StringIO()
+            with (
+                mock.patch.dict(
+                    os.environ,
+                    {"HORMUZ_TOKEN": "test-identity-token"},
+                    clear=True,
+                ),
+                redirect_stderr(error),
+            ):
+                self.assertEqual(main(["--config", str(path), "doctor"]), 2)
+            self.assertIn("Unknown gateway configuration fields", error.getvalue())
+            self.assertNotIn(sentinel, error.getvalue())
+
+    def test_policy_scope_references_fail_closed_without_reflection(self) -> None:
+        sentinel = "company_secret_scope_467c8f17"
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "hormuz.json"
+            baseline = json.loads(
+                (ROOT / "config.example.json").read_text(encoding="utf-8")
+            )
+            cases = ("team", "actor", "ambiguous_team")
+            for case in cases:
+                with self.subTest(case=case):
+                    raw = json.loads(json.dumps(baseline))
+                    environment = {"HORMUZ_TOKEN": "test-identity-token"}
+                    if case == "team":
+                        raw["policies"]["teams"][sentinel] = {
+                            "max_output_tokens": 10
+                        }
+                        expected = "Policies reference unknown teams"
+                    elif case == "actor":
+                        raw["policies"]["actors"][sentinel] = {
+                            "max_output_tokens": 10
+                        }
+                        expected = "Policies reference unknown actors"
+                    else:
+                        second_identity = json.loads(json.dumps(raw["identities"][0]))
+                        second_identity.update(
+                            {
+                                "token_env": "HORMUZ_SECOND_TOKEN",
+                                "actor_id": "bob",
+                                "actor_name": "Bob Example",
+                                "organization_id": "second-organization",
+                            }
+                        )
+                        raw["identities"].append(second_identity)
+                        environment["HORMUZ_SECOND_TOKEN"] = "second-identity-token"
+                        expected = (
+                            "Policy team IDs must identify exactly one organization"
+                        )
+                    path.write_text(json.dumps(raw), encoding="utf-8")
+                    with self.assertRaises(ConfigError) as captured:
+                        GatewayConfig.load(path, environ=environment)
+                    self.assertIn(expected, str(captured.exception))
+                    self.assertNotIn(sentinel, str(captured.exception))
+
     def test_doctor_reports_effective_request_resource_limits(self) -> None:
         output = io.StringIO()
         with (

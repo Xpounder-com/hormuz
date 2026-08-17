@@ -113,6 +113,26 @@ class SessionConfigurationTests(unittest.TestCase):
                 with self.assertRaisesRegex(ConfigError, message):
                     GatewayConfig.load(self.path, environ=environ)
 
+    def test_oidc_issuer_and_subject_unknown_fields_fail_closed(self) -> None:
+        sentinel = "company_secret_do_not_log_40d41b98"
+        for target, expected_path in (
+            ("issuer", "authentication.oidc.issuers[0]"),
+            ("subject", "authentication.oidc.issuers[0].subjects[0]"),
+        ):
+            with self.subTest(target=target):
+                raw = json.loads(json.dumps(self.raw))
+                issuer = raw["authentication"]["oidc"]["issuers"][0]
+                container = issuer if target == "issuer" else issuer["subjects"][0]
+                container[sentinel] = True
+                self.path.write_text(json.dumps(raw), encoding="utf-8")
+                with self.assertRaises(ConfigError) as captured:
+                    GatewayConfig.load(self.path, environ=self.environ)
+                self.assertIn(
+                    f"Unknown {expected_path} fields",
+                    str(captured.exception),
+                )
+                self.assertNotIn(sentinel, str(captured.exception))
+
     def test_authorization_endpoint_query_is_preserved_without_reserved_override(self) -> None:
         url = _build_authorization_url(
             "https://identity.example/authorize?tenant=company",

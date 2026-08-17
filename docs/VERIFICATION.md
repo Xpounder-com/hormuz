@@ -867,6 +867,22 @@ Per-source and trusted-proxy controls, TLS ingress, cross-replica coordination,
 shared persistence, HA, backup/restore, RPO/RTO, KMS, and independent security
 review remain open.
 
+### Fail-closed configuration schema and policy references
+
+A failure-first configuration-boundary review was exercised locally on August 16, 2026 without a provider request or live credential.
+
+- sixteen red cases proved that the root, listener, upstream map/provider, static identity, authentication/OIDC, OIDC issuer/subject, model route, policy map/body, team/actor policy reference, and cross-organization team-scope paths previously accepted unknown or ineffective configuration;
+- every Hormuz-owned configuration object now rejects unknown fields. One shared validator reports only the fixed schema path and never reflects the rejected key; lifecycle, DLP-rule, and capability unknowns follow the same non-reflective diagnostic rule;
+- model/fallback references retain their existing route validation. Team and actor policy scopes must now resolve to configured identities, and a team policy is rejected if that team ID occurs in more than one configured organization, preventing a typo from silently removing a restriction or a shared name from crossing an organization boundary;
+- the accepted configuration is explicitly immutable for one process. `doctor` is a full candidate preflight, and the documented safe change path is a readiness-gated replacement revision with the previous image/configuration pair retained for rollback. Hormuz does not claim `SIGHUP`, in-place live reload, signed configuration, or deployment-coordinated rollback;
+- four focused regression methods covering all sixteen cases passed. The complete 362-test source suite passed in `124.594` seconds; the environment-gated official Claude Code executable case was the sole local skip;
+- source/test bytecode compilation and `git diff --check` passed. Isolated source and wheel builds succeeded with the CI-pinned `build==1.3.0`; the exact clean-install-tested wheel SHA-256 was `6e3d1943dcc2dfc00adf13ea160a4d07efdcb012d9c69d26bfe3508b525e9d1a`;
+- a clean Python 3.13 environment outside the checkout imported Hormuz from `site-packages`, passed installed `doctor`, rejected a synthetic unknown root key with exact non-reflective output, and compiled the installed package;
+- the installed strict 60-task release benchmark passed with precision, recall, and useful-pack rate `1.00`, zero authorization, lifecycle, dependency, contradiction, malicious-context, determinism, leakage-review, or token-budget failures, mean compression `0.840593`, and governed p95 selection latency `0.175625 ms`; and
+- deterministic corpus verification retained SHA-256 `9822d592868202c7c7539bcdac7d4a5894c01f9e6dba7a434846516b67b32c17`. High-confidence tracked-source, extracted-wheel, and extracted-source-archive scans found no private-key, OpenAI, Anthropic, GitHub, AWS, Google, Slack, or Hormuz-session credential pattern. Remote CI evidence follows after publication.
+
+This closes application-owned unknown-field and policy-reference validation at startup, not production deployment issue #11. Published schema versioning, configuration signing and approval, live secret rotation, orchestrated rollout/rollback, shared persistence, HA, backup/restore, KMS/BYOK, and independent security review remain open.
+
 ### Remote provider HTTPS enforcement
 
 The provider-upstream configuration boundary was exercised locally on August 16, 2026 without a live provider credential or remote provider request.
