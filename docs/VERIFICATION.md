@@ -1347,6 +1347,18 @@ its release profile passed with governed precision, recall, and useful-pack rate
 lifecycle-stale, dependency-stale, malicious, contradiction, token-budget, or
 determinism failures.
 
+Two independent distributions built byte-identically from implementation
+commit `94865405efb66fd7f3637aa881d60a4b7d16cf0c` under the exact locked build
+closure. The wheel was 340,596 bytes with SHA-256
+`4365b4dd6fcacfd357f8c6770eeeec7860a268129e56533f68fdf1eea2075896`;
+the source archive was 673,314 bytes with SHA-256
+`4f2d7dc3afb5ca2afde0e7722831e5c7919be8b4e43830a804e60f60f7693d1a`.
+A fresh Python 3.12.12 environment outside the checkout installed the exact
+wheel and hash-locked runtime closure, loaded Hormuz from `site-packages`,
+reported no broken requirements, compiled the installed package, generated
+both secret-free profile MCP configurations, and completed MCP initialize plus
+`tools/list` through the installed executable.
+
 This closes the prior local question of whether an installed official client
 can actually complete a profile-authenticated governed-context call. It does
 not prove browser enrollment against a real IdP, a hosted or production
