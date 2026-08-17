@@ -65,6 +65,12 @@ jobs:
           --model security/threat-model.json
           --project-root .
           --output "$RUNNER_TEMP/hormuz-threat-model-evidence.json"
+      - name: Validate versioned compatibility matrix
+        run: >-
+          python scripts/compatibility_contract.py
+          --matrix compatibility/compatibility-matrix.json
+          --project-root .
+          --output "$RUNNER_TEMP/hormuz-compatibility-evidence.json"
       - name: Verify complete source suite
         run: python -m unittest -v
       - name: Verify frozen governed-context release benchmark
@@ -138,6 +144,7 @@ jobs:
             ${{ runner.temp }}/hormuz-reproducible-oci/
             ${{ runner.temp }}/hormuz-release-contract.json
             ${{ runner.temp }}/hormuz-threat-model-evidence.json
+            ${{ runner.temp }}/hormuz-compatibility-evidence.json
             ${{ runner.temp }}/context-benchmark-release.json
             ${{ runner.temp }}/hormuz-release.sbom.cdx.json
             ${{ runner.temp }}/hormuz-release-vulnerabilities.json

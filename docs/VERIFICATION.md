@@ -1106,14 +1106,15 @@ Never add real provider or employee credentials to this record.
 
 ## Automated publication gate
 
-Ordinary GitHub CI runs six independent gate families without provider credentials:
+Ordinary GitHub CI runs seven independent gate families without provider credentials:
 
 - the complete unit, context-governance, and loopback gateway suite on Python 3.11, 3.12, 3.13, and 3.14;
 - deterministic corpus regeneration plus the 60-task governed-context release profile, with machine-readable evidence retained as an artifact;
 - two independent exact-commit source-distribution and wheel builds under pinned packaging inputs, raw-byte equality with a content-free digest manifest, and installation of the verified wheel in a clean virtual environment;
 - installed-client routing through local fake providers using pinned official Codex and Claude Code package versions; and
 - pinned-base/hash-locked container build, restricted-runtime smoke, CycloneDX SBOM, and a fail-on-any-high-or-critical vulnerability gate; and
-- strict versioned threat-model validation covering all STRIDE categories and the issue #9 incident scenarios, with content-free evidence retained for audit.
+- strict versioned threat-model validation covering all STRIDE categories and the issue #9 incident scenarios, with content-free evidence retained for audit; and
+- strict versioned compatibility validation binding exact client, Python, provider-protocol, identity, persistence, package, and OCI claims to repository evidence while preserving unsupported and owner-pending boundaries.
 
 Ordinary CI grants only read access to repository contents, disables persisted checkout credentials, pins every GitHub Action to a reviewed commit SHA, and retains build artifacts for seven days. The separate release workflow re-runs the applicable gates on an annotated version tag, splits source, package/signing, and GitHub-release permissions, and retains its verification and signed-release evidence longer. It remains blocked before publication until the owner-approved Sigstore transparency repository variable is present. Dependabot is configured to propose updates to action and Python build dependencies; a client-version bump remains an intentional compatibility change because it can alter the provider protocol.
 

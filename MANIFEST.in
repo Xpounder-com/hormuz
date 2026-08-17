@@ -1,6 +1,8 @@
 include SECURITY.md
 include config.example.json
+include scripts/compatibility_contract.py
 include scripts/threat_model_contract.py
+include compatibility/compatibility-matrix.json
 include security/threat-model.json
 recursive-include docs *.md
 recursive-include examples *.json *.jsonl *.md

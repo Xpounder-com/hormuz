@@ -68,6 +68,8 @@ Ordinary CI and tag verification use `deploy/clients/package-lock.json` as the s
 
 Workflows run `npm ci` with lifecycle scripts disabled. They then invoke only `@anthropic-ai/claude-code/install.cjs`, whose reviewed purpose is to link or copy the already integrity-verified platform binary into the wrapper path; it does not resolve another package. The tag workflow runs official-client compatibility in a separate read-only job from the job that builds release artifacts, and publication requires both jobs. The emitted `hormuz.pinned-client-lock.v1` evidence contains only tool versions, package count, direct package versions/integrities, registry, lock digest, and the explicit script path.
 
+Release verification also validates the versioned compatibility matrix and retains its content-free hash, category and support-level counts, exact client versions, and Python versions. Unsupported live-provider conformance, real-IdP profiles, PostgreSQL, and production-deployment surfaces remain zero rather than being promoted by a green package build.
+
 Regeneration is an intentional compatibility and supply-chain review:
 
 ```bash

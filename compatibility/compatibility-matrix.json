@@ -1,0 +1,368 @@
+{
+  "schema": "hormuz.compatibility-matrix.v1",
+  "version": "2026-08-17",
+  "product_stage": "alpha",
+  "enterprise_release_ready": false,
+  "support_levels": {
+    "release_tested": "An exact version or artifact is exercised by a blocking repository release gate within the stated environment only.",
+    "protocol_tested": "The implemented protocol subset is exercised against a bounded local standards-shaped fake, not a live vendor service.",
+    "development_only": "The surface is supported only for local single-node development and deterministic testing.",
+    "unsupported": "Hormuz makes no current compatibility or production-support commitment for this surface.",
+    "pending_owner_decision": "Implementation is intentionally blocked on an explicit owner-controlled architecture decision."
+  },
+  "categories": {
+    "employee_clients": [
+      {
+        "id": "client.codex",
+        "name": "OpenAI Codex CLI",
+        "version": "0.147.0",
+        "support_level": "release_tested",
+        "production_supported": false,
+        "tested_environments": [
+          "ubuntu-latest linux-x64 with Node.js 24.19.0 and npm 11.17.0"
+        ],
+        "interfaces": [
+          "OpenAI Responses-compatible gateway"
+        ],
+        "evidence": [
+          "deploy/clients/package.json",
+          "tests/test_gateway.py#test_installed_codex_routes_through_gateway",
+          ".github/workflows/ci.yml#Codex and Claude Code compatibility"
+        ],
+        "limitations": [
+          "The blocking gate certifies only this exact client version in the stated CI environment.",
+          "Other versions and macOS or Windows runtime behavior are not release-blocking compatibility claims."
+        ]
+      },
+      {
+        "id": "client.claude-code",
+        "name": "Anthropic Claude Code",
+        "version": "2.1.233",
+        "support_level": "release_tested",
+        "production_supported": false,
+        "tested_environments": [
+          "ubuntu-latest linux-x64 with Node.js 24.19.0 and npm 11.17.0"
+        ],
+        "interfaces": [
+          "Anthropic Messages-compatible gateway"
+        ],
+        "evidence": [
+          "deploy/clients/package.json",
+          "tests/test_gateway.py#test_official_claude_code_routes_through_gateway",
+          ".github/workflows/ci.yml#Codex and Claude Code compatibility"
+        ],
+        "limitations": [
+          "The blocking gate certifies only this exact client version in the stated CI environment.",
+          "Other versions and macOS or Windows runtime behavior are not release-blocking compatibility claims."
+        ]
+      }
+    ],
+    "python_runtimes": [
+      {
+        "id": "python.3.11",
+        "name": "CPython",
+        "version": "3.11",
+        "support_level": "release_tested",
+        "production_supported": false,
+        "tested_environments": [
+          "ubuntu-latest source suite"
+        ],
+        "interfaces": [
+          "Hormuz Python package and CLI"
+        ],
+        "evidence": [
+          "pyproject.toml#requires-python = \"\u003e=3.11\"",
+          ".github/workflows/ci.yml#python-version: [\"3.11\", \"3.12\", \"3.13\", \"3.14\"]"
+        ],
+        "limitations": [
+          "The source-suite gate is Linux CI evidence, not certification of every operating system or Python distribution."
+        ]
+      },
+      {
+        "id": "python.3.12",
+        "name": "CPython",
+        "version": "3.12",
+        "support_level": "release_tested",
+        "production_supported": false,
+        "tested_environments": [
+          "ubuntu-latest source suite and clean wheel installation"
+        ],
+        "interfaces": [
+          "Hormuz Python package and CLI"
+        ],
+        "evidence": [
+          "pyproject.toml#requires-python = \"\u003e=3.11\"",
+          ".github/workflows/ci.yml#python-version: [\"3.11\", \"3.12\", \"3.13\", \"3.14\"]"
+        ],
+        "limitations": [
+          "The release gate is Linux CI evidence, not certification of every operating system or Python distribution."
+        ]
+      },
+      {
+        "id": "python.3.13",
+        "name": "CPython",
+        "version": "3.13",
+        "support_level": "release_tested",
+        "production_supported": false,
+        "tested_environments": [
+          "ubuntu-latest source suite"
+        ],
+        "interfaces": [
+          "Hormuz Python package and CLI"
+        ],
+        "evidence": [
+          "pyproject.toml#requires-python = \"\u003e=3.11\"",
+          ".github/workflows/ci.yml#python-version: [\"3.11\", \"3.12\", \"3.13\", \"3.14\"]"
+        ],
+        "limitations": [
+          "The source-suite gate is Linux CI evidence, not certification of every operating system or Python distribution."
+        ]
+      },
+      {
+        "id": "python.3.14",
+        "name": "CPython",
+        "version": "3.14",
+        "support_level": "release_tested",
+        "production_supported": false,
+        "tested_environments": [
+          "ubuntu-latest source suite"
+        ],
+        "interfaces": [
+          "Hormuz Python package and CLI"
+        ],
+        "evidence": [
+          "pyproject.toml#requires-python = \"\u003e=3.11\"",
+          ".github/workflows/ci.yml#python-version: [\"3.11\", \"3.12\", \"3.13\", \"3.14\"]"
+        ],
+        "limitations": [
+          "The source-suite gate is Linux CI evidence, not certification of every operating system or Python distribution."
+        ]
+      }
+    ],
+    "provider_protocols": [
+      {
+        "id": "provider.openai-responses",
+        "name": "OpenAI Responses-compatible protocol subset",
+        "version": "unversioned provider-compatible subset",
+        "support_level": "protocol_tested",
+        "production_supported": false,
+        "tested_environments": [
+          "loopback protocol-shaped fake OpenAI provider"
+        ],
+        "interfaces": [
+          "POST /v1/responses"
+        ],
+        "evidence": [
+          "hormuz/server.py#/v1/responses",
+          "tests/test_gateway.py#test_openai_request_falls_back_caps_and_never_forwards_employee_token"
+        ],
+        "limitations": [
+          "No live OpenAI endpoint conformance or provider-SLA evidence is included.",
+          "The implemented /v1/responses/compact route is not part of this release-tested compatibility claim."
+        ]
+      },
+      {
+        "id": "provider.anthropic-messages",
+        "name": "Anthropic Messages-compatible protocol subset",
+        "version": "unversioned provider-compatible subset",
+        "support_level": "protocol_tested",
+        "production_supported": false,
+        "tested_environments": [
+          "loopback protocol-shaped fake Anthropic provider"
+        ],
+        "interfaces": [
+          "POST /v1/messages",
+          "POST /v1/messages/count_tokens",
+          "GET /v1/models"
+        ],
+        "evidence": [
+          "hormuz/server.py#/v1/messages/count_tokens",
+          "tests/test_gateway.py#test_anthropic_stream_is_relayed_and_usage_is_recorded",
+          "tests/test_gateway.py#test_claude_model_discovery_returns_only_policy_authorized_aliases_without_side_effects"
+        ],
+        "limitations": [
+          "No live Anthropic endpoint conformance or provider-SLA evidence is included.",
+          "Model discovery is a policy-filtered Hormuz client endpoint and does not call Anthropic."
+        ]
+      },
+      {
+        "id": "provider.live-vendor-conformance",
+        "name": "Live OpenAI and Anthropic production conformance",
+        "version": "none",
+        "support_level": "unsupported",
+        "production_supported": false,
+        "tested_environments": [],
+        "interfaces": [
+          "api.openai.com",
+          "api.anthropic.com"
+        ],
+        "evidence": [
+          "docs/VERIFICATION.md#Reproduce locally"
+        ],
+        "limitations": [
+          "Repository CI uses no live provider credential and proves no live vendor behavior, quota, retention, residency, or availability commitment."
+        ]
+      }
+    ],
+    "identity": [
+      {
+        "id": "identity.generic-oidc",
+        "name": "Generic OIDC discovery, JWT verification, and browser PKCE login",
+        "version": "OIDC and OAuth 2.0 protocol subset",
+        "support_level": "protocol_tested",
+        "production_supported": false,
+        "tested_environments": [
+          "standards-shaped loopback fake identity provider"
+        ],
+        "interfaces": [
+          "OIDC discovery and JWKS",
+          "OAuth 2.0 authorization code with PKCE",
+          "mapped JWT bearer access tokens"
+        ],
+        "evidence": [
+          "tests/test_session_broker.py#test_browser_pkce_login_refresh_replay_and_client_binding",
+          "tests/test_auth.py#test_gateway_whoami_accepts_oidc_and_exposes_no_token",
+          "docs/OIDC.md#Current boundary"
+        ],
+        "limitations": [
+          "No owner-selected real identity provider has been validated.",
+          "SCIM, shared multi-node revocation, and KMS-backed session custody remain unimplemented."
+        ]
+      },
+      {
+        "id": "identity.real-idp-profile",
+        "name": "Vendor-specific production identity-provider profile",
+        "version": "none",
+        "support_level": "unsupported",
+        "production_supported": false,
+        "tested_environments": [],
+        "interfaces": [
+          "owner-selected enterprise IdP"
+        ],
+        "evidence": [
+          "docs/OIDC.md#Current boundary"
+        ],
+        "limitations": [
+          "No Okta, Microsoft Entra ID, Auth0, Google Workspace, or other real IdP is currently certified."
+        ]
+      }
+    ],
+    "persistence": [
+      {
+        "id": "persistence.sqlite",
+        "name": "Local SQLite stores",
+        "version": "Python standard-library SQLite",
+        "support_level": "development_only",
+        "production_supported": false,
+        "tested_environments": [
+          "single-process local and CI tests"
+        ],
+        "interfaces": [
+          "usage and billing metadata",
+          "sessions and approvals",
+          "governed context"
+        ],
+        "evidence": [
+          "docs/ARCHITECTURE.md#SQLite usage ledger",
+          "docs/OPERATIONS.md#Current deployment boundary"
+        ],
+        "limitations": [
+          "SQLite is not evidence for hosted multi-tenancy, HA, shared budgets, backup, or restore."
+        ]
+      },
+      {
+        "id": "persistence.postgresql",
+        "name": "Hosted PostgreSQL tenancy",
+        "version": "not selected",
+        "support_level": "pending_owner_decision",
+        "production_supported": false,
+        "tested_environments": [],
+        "interfaces": [
+          "shared-schema PostgreSQL with forced row-level security",
+          "dedicated database option"
+        ],
+        "evidence": [
+          "docs/decisions/0002-enterprise-tenancy-and-persistence.md#Owner approval record"
+        ],
+        "limitations": [
+          "ADR 0002 is proposed and no PostgreSQL schema, migration, isolation, backup, or restore proof exists."
+        ]
+      }
+    ],
+    "deployment": [
+      {
+        "id": "deployment.python-package",
+        "name": "Python wheel and source distribution",
+        "version": "0.1.0",
+        "support_level": "release_tested",
+        "production_supported": false,
+        "tested_environments": [
+          "ubuntu-latest clean Python 3.12 wheel installation"
+        ],
+        "interfaces": [
+          "hormuz CLI",
+          "single-process HTTP gateway"
+        ],
+        "evidence": [
+          "pyproject.toml#version = \"0.1.0\"",
+          ".github/workflows/ci.yml#Build and install package"
+        ],
+        "limitations": [
+          "Artifact installation is verified, but production TLS, shared persistence, HA, backup, and rollback drills are not."
+        ]
+      },
+      {
+        "id": "deployment.oci",
+        "name": "Restricted single-node OCI image",
+        "version": "python:3.14.6-alpine3.23",
+        "support_level": "release_tested",
+        "production_supported": false,
+        "tested_environments": [
+          "BuildKit 0.32.2 linux/amd64 exact-source build",
+          "BuildKit 0.32.2 linux/arm64 exact-source build",
+          "restricted-runtime smoke on linux/amd64"
+        ],
+        "interfaces": [
+          "linux/amd64",
+          "linux/arm64"
+        ],
+        "evidence": [
+          "Dockerfile#ARG PYTHON_IMAGE=python:3.14.6-alpine3.23",
+          "scripts/reproducible_image.py",
+          ".github/workflows/ci.yml#Restricted container, SBOM, and vulnerability gate"
+        ],
+        "limitations": [
+          "This is reproducibility and restricted-runtime evidence for a single-node alpha image, not an observed production deployment or support commitment."
+        ]
+      },
+      {
+        "id": "deployment.production-multinode",
+        "name": "Production TLS, multi-node HA, backup, and disaster recovery",
+        "version": "none",
+        "support_level": "unsupported",
+        "production_supported": false,
+        "tested_environments": [],
+        "interfaces": [
+          "TLS ingress",
+          "multi-node availability",
+          "backup and restore",
+          "disaster recovery"
+        ],
+        "evidence": [
+          "docs/OPERATIONS.md#Current deployment boundary",
+          "docs/CONTAINER.md#Current boundary"
+        ],
+        "limitations": [
+          "No reference production deployment, HA test, failover drill, backup restore, RPO, or RTO is verified."
+        ]
+      }
+    ]
+  },
+  "invariants": {
+    "latest_client_canary_release_blocking": false,
+    "live_provider_conformance_verified": false,
+    "real_idp_profile_verified": false,
+    "production_postgresql_verified": false,
+    "production_deployment_verified": false
+  }
+}
