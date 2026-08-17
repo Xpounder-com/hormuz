@@ -1,0 +1,14 @@
+{
+  "name": "hormuz-pinned-official-clients",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Integrity-locked official client fixture for Hormuz compatibility verification.",
+  "packageManager": "npm@11.17.0",
+  "engines": {
+    "node": "24.19.0"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-code": "2.1.233",
+    "@openai/codex": "0.147.0"
+  }
+}

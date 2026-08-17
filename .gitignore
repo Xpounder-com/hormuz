@@ -10,6 +10,7 @@ build/
 !deploy/build/
 !deploy/build/requirements.lock
 dist/
+deploy/clients/node_modules/
 *.egg-info/
 hormuz.json
 .env

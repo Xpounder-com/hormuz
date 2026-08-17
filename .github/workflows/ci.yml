@@ -167,9 +167,6 @@ jobs:
     name: Codex and Claude Code compatibility
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    env:
-      CODEX_VERSION: "0.147.0"
-      CLAUDE_CODE_VERSION: "2.1.233"
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -191,18 +188,29 @@ jobs:
         run: python -m pip install --no-build-isolation --no-deps --editable .
       - name: Verify runtime dependency closure
         run: python -m pip check
+      - name: Validate pinned official-client closure
+        run: >-
+          python scripts/client_lock_contract.py
+          --output "$RUNNER_TEMP/hormuz-client-lock-contract.json"
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: "24"
-      - name: Install pinned official clients
+          node-version: "24.19.0"
+          cache: npm
+          cache-dependency-path: deploy/clients/package-lock.json
+      - name: Verify exact client toolchain
         run: |
-          npm install --prefix "$RUNNER_TEMP/hormuz-clients" --no-package-lock --no-save \
-            "@openai/codex@$CODEX_VERSION" \
-            "@anthropic-ai/claude-code@$CLAUDE_CODE_VERSION"
-          echo "$RUNNER_TEMP/hormuz-clients/node_modules/.bin" >> "$GITHUB_PATH"
+          test "$(node --version)" = "v24.19.0"
+          test "$(npm --version)" = "11.17.0"
+      - name: Install integrity-locked official clients
+        run: |
+          npm ci --prefix deploy/clients --ignore-scripts --no-audit --no-fund
+          node deploy/clients/node_modules/@anthropic-ai/claude-code/install.cjs
+          echo "$GITHUB_WORKSPACE/deploy/clients/node_modules/.bin" >> "$GITHUB_PATH"
       - name: Record client versions
         run: |
+          node --version
+          npm --version
           codex --version
           claude --version
       - name: Verify both clients through Hormuz
@@ -212,6 +220,13 @@ jobs:
           python -m unittest -v \
             tests.test_gateway.GatewayIntegrationTests.test_installed_codex_routes_through_gateway \
             tests.test_gateway.GatewayIntegrationTests.test_official_claude_code_routes_through_gateway
+      - name: Preserve pinned-client lock evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hormuz-pinned-client-lock
+          path: ${{ runner.temp }}/hormuz-client-lock-contract.json
+          if-no-files-found: error
+          retention-days: 7
 
   container:
     name: Restricted container, SBOM, and vulnerability gate

@@ -41,7 +41,7 @@ Ordinary and tag-release workflows do not invoke the package backend directly. T
 5. rewrites the source archive with sorted paths, fixed owner/group, stable file modes, the commit timestamp, and a filename-free deterministic gzip header; and
 6. builds twice with isolation disabled, so the backend cannot create a second network-resolved environment, and compares the raw bytes of both wheels and both source archives before publishing either result.
 
-Every Python workflow installs the build lock with pip `--require-hashes --only-binary=:all:` before any editable or distribution build. Every repository-owned source/test workflow also installs the canonical multi-platform runtime closure from `deploy/container/requirements.lock` with the same hash and binary requirements before Hormuz itself. Editable installs use `--no-build-isolation --no-deps`; the isolated wheel smoke uses `--no-deps`; and every such environment runs `pip check`. This prevents the Hormuz install step from authorizing an incidental runtime resolver. `colorama` is installed on all build hosts so the same strict build lock is complete on Windows without environment-marker ambiguity; it is inert outside Windows. The reviewed wheel hashes match the official PyPI release metadata for [build 1.3.0](https://pypi.org/project/build/1.3.0/), [colorama 0.4.6](https://pypi.org/project/colorama/0.4.6/), [packaging 26.3](https://pypi.org/project/packaging/26.3/), [pyproject-hooks 1.2.0](https://pypi.org/project/pyproject-hooks/1.2.0/), [setuptools 84.0.0](https://pypi.org/project/setuptools/84.0.0/), and [wheel 0.48.0](https://pypi.org/project/wheel/0.48.0/). A version or hash change is a reviewed supply-chain update, not an incidental resolver outcome. The pinned official Codex and Claude Code versions still obtain their npm transitive closure from the registry, the latest-client canary is intentionally dynamic, and neither path is part of this Python lock claim.
+Every Python workflow installs the build lock with pip `--require-hashes --only-binary=:all:` before any editable or distribution build. Every repository-owned source/test workflow also installs the canonical multi-platform runtime closure from `deploy/container/requirements.lock` with the same hash and binary requirements before Hormuz itself. Editable installs use `--no-build-isolation --no-deps`; the isolated wheel smoke uses `--no-deps`; and every such environment runs `pip check`. This prevents the Hormuz install step from authorizing an incidental runtime resolver. `colorama` is installed on all build hosts so the same strict build lock is complete on Windows without environment-marker ambiguity; it is inert outside Windows. The reviewed wheel hashes match the official PyPI release metadata for [build 1.3.0](https://pypi.org/project/build/1.3.0/), [colorama 0.4.6](https://pypi.org/project/colorama/0.4.6/), [packaging 26.3](https://pypi.org/project/packaging/26.3/), [pyproject-hooks 1.2.0](https://pypi.org/project/pyproject-hooks/1.2.0/), [setuptools 84.0.0](https://pypi.org/project/setuptools/84.0.0/), and [wheel 0.48.0](https://pypi.org/project/wheel/0.48.0/). A version or hash change is a reviewed supply-chain update, not an incidental resolver outcome. The official-client npm lock described below is a separate executable-test supply-chain contract; the latest-client canary remains intentionally dynamic.
 
 The runtime lock also carries `backports-tarfile==1.2.0`, `importlib-metadata==9.0.0`, and `zipp==4.1.0` behind `python_full_version < '3.12'`, with reviewed wheel and source-archive hashes, to close the conditional dependencies required by `jaraco.context==6.1.2` and `keyring==25.7.0` on the oldest supported Python release.
 
@@ -61,6 +61,27 @@ python3 scripts/reproducible_build.py \
 ```
 
 This proves byte equality across two independent package builds of one exact source revision under the hash-custodied Python build contract. It does not prove that the Python artifacts reproduce across every operating system, that build inputs are available offline, or that a remote package has been published.
+
+## Integrity-locked official clients
+
+Ordinary CI and tag verification use `deploy/clients/package-lock.json` as the sole dependency source for Codex `0.147.0`, Claude Code `2.1.233`, and all 14 supported platform-native optional packages. The fixture pins Node `24.19.0` and npm `11.17.0`; npm lockfile v3 records the exact version, official registry tarball URL, and SHA-512 integrity for all 16 packages. `scripts/client_lock_contract.py` rejects a changed direct version or integrity, an added package, a non-official registry URL, a linked/bundled package, an unexpected transitive edge, a platform-marker mismatch, or any lifecycle-script set other than the reviewed Claude Code installer.
+
+Workflows run `npm ci` with lifecycle scripts disabled. They then invoke only `@anthropic-ai/claude-code/install.cjs`, whose reviewed purpose is to link or copy the already integrity-verified platform binary into the wrapper path; it does not resolve another package. The tag workflow runs official-client compatibility in a separate read-only job from the job that builds release artifacts, and publication requires both jobs. The emitted `hormuz.pinned-client-lock.v1` evidence contains only tool versions, package count, direct package versions/integrities, registry, lock digest, and the explicit script path.
+
+Regeneration is an intentional compatibility and supply-chain review:
+
+```bash
+cd deploy/clients
+npx --yes npm@11.17.0 install \
+  --package-lock-only \
+  --ignore-scripts \
+  --no-audit \
+  --no-fund
+cd ../..
+python3 scripts/client_lock_contract.py
+```
+
+Review every changed tarball URL, version, integrity, platform constraint, optional edge, and script flag before accepting the lock. Dependabot may propose this diff, but the hard-coded client contract intentionally keeps CI red until the approved versions, direct integrities, and whole-lock digest are updated together. This proves the exact pinned client closure exercised on GitHub-hosted Linux and the locally exercised host; it does not provide an offline npm mirror, authenticate a package beyond npm integrity and review, cover every operating system at runtime, or make the separate latest-version canary deterministic.
 
 ## Exact-source OCI image reproducibility
 

@@ -13,9 +13,7 @@ concurrency:
 
 env:
   PYTHON_VERSION: "3.12"
-  NODE_VERSION: "24"
-  CODEX_VERSION: "0.147.0"
-  CLAUDE_CODE_VERSION: "2.1.233"
+  NODE_VERSION: "24.19.0"
   COSIGN_VERSION: "v3.0.6"
 
 jobs:
@@ -61,19 +59,7 @@ jobs:
         run: python -m pip install --no-build-isolation --no-deps --editable .
       - name: Verify runtime dependency closure
         run: python -m pip check
-      - name: Set up Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-      - name: Install pinned official clients
-        run: |
-          npm install --prefix "$RUNNER_TEMP/hormuz-clients" --no-package-lock --no-save \
-            "@openai/codex@$CODEX_VERSION" \
-            "@anthropic-ai/claude-code@$CLAUDE_CODE_VERSION"
-          echo "$RUNNER_TEMP/hormuz-clients/node_modules/.bin" >> "$GITHUB_PATH"
-      - name: Verify complete source suite and official clients
-        env:
-          HORMUZ_RUN_CLAUDE_CLIENT_TEST: "1"
+      - name: Verify complete source suite
         run: python -m unittest -v
       - name: Verify frozen governed-context release benchmark
         run: |
@@ -145,9 +131,76 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  client-compatibility:
+    name: Verify integrity-locked Codex and Claude Code
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Check out exact tagged source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Install hash-locked build toolchain
+        run: >-
+          python -m pip install --require-hashes --only-binary=:all:
+          --requirement deploy/build/requirements.lock
+      - name: Install hash-locked runtime dependencies
+        run: >-
+          python -m pip install --require-hashes --only-binary=:all:
+          --requirement deploy/container/requirements.lock
+      - name: Install Hormuz runtime
+        run: python -m pip install --no-build-isolation --no-deps --editable .
+      - name: Verify runtime dependency closure
+        run: python -m pip check
+      - name: Validate pinned official-client closure
+        run: >-
+          python scripts/client_lock_contract.py
+          --output "$RUNNER_TEMP/hormuz-client-lock-contract.json"
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: deploy/clients/package-lock.json
+      - name: Verify exact client toolchain
+        run: |
+          test "$(node --version)" = "v24.19.0"
+          test "$(npm --version)" = "11.17.0"
+      - name: Install integrity-locked official clients
+        run: |
+          npm ci --prefix deploy/clients --ignore-scripts --no-audit --no-fund
+          node deploy/clients/node_modules/@anthropic-ai/claude-code/install.cjs
+          echo "$GITHUB_WORKSPACE/deploy/clients/node_modules/.bin" >> "$GITHUB_PATH"
+      - name: Record client versions
+        run: |
+          node --version
+          npm --version
+          codex --version
+          claude --version
+      - name: Verify both clients through Hormuz
+        env:
+          HORMUZ_RUN_CLAUDE_CLIENT_TEST: "1"
+        run: |
+          python -m unittest -v \
+            tests.test_gateway.GatewayIntegrationTests.test_installed_codex_routes_through_gateway \
+            tests.test_gateway.GatewayIntegrationTests.test_official_claude_code_routes_through_gateway
+      - name: Preserve pinned-client lock evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hormuz-release-pinned-client-lock-${{ github.ref_name }}
+          path: ${{ runner.temp }}/hormuz-client-lock-contract.json
+          if-no-files-found: error
+          retention-days: 30
+
   publish:
     name: Publish, sign, attest, and verify private image
-    needs: verify
+    needs: [verify, client-compatibility]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:

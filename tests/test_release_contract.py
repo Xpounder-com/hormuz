@@ -451,21 +451,22 @@ class ReleaseContractTests(unittest.TestCase):
         self.assertIn('"$RUNNER_TEMP/hormuz-wheel/bin/pip" check', workflow)
 
     def test_release_and_canary_use_the_hash_locked_runtime_closure(self) -> None:
-        for path in (
-            ROOT / ".github/workflows/release.yml",
-            ROOT / ".github/workflows/upstream-canary.yml",
-        ):
+        paths = {
+            ROOT / ".github/workflows/release.yml": 2,
+            ROOT / ".github/workflows/upstream-canary.yml": 1,
+        }
+        for path, expected_count in paths.items():
             with self.subTest(path=path.name):
                 workflow = path.read_text()
                 self.assertEqual(
                     workflow.count("Install hash-locked runtime dependencies"),
-                    1,
+                    expected_count,
                 )
                 self.assertEqual(
                     workflow.count(
                         "--requirement deploy/container/requirements.lock"
                     ),
-                    1,
+                    expected_count,
                 )
                 self.assertIn(
                     "--no-build-isolation --no-deps --editable .",
@@ -473,6 +474,90 @@ class ReleaseContractTests(unittest.TestCase):
                 )
                 self.assertNotIn("--no-build-isolation --editable .", workflow)
                 self.assertIn("python -m pip check", workflow)
+
+    def test_pinned_official_clients_have_an_integrity_locked_closure(self) -> None:
+        package_file = ROOT / "deploy/clients/package.json"
+        lock_file = ROOT / "deploy/clients/package-lock.json"
+        self.assertTrue(package_file.is_file(), "pinned client package manifest is missing")
+        self.assertTrue(lock_file.is_file(), "pinned client lockfile is missing")
+
+        package = json.loads(package_file.read_text())
+        lock = json.loads(lock_file.read_text())
+        expected = {
+            "@anthropic-ai/claude-code": "2.1.233",
+            "@openai/codex": "0.147.0",
+        }
+        self.assertIs(package.get("private"), True)
+        self.assertEqual(package.get("packageManager"), "npm@11.17.0")
+        self.assertEqual(package.get("engines"), {"node": "24.19.0"})
+        self.assertEqual(package.get("dependencies"), expected)
+        self.assertEqual(lock.get("lockfileVersion"), 3)
+        self.assertEqual(lock["packages"][""]["dependencies"], expected)
+        self.assertIn("node_modules/@openai/codex-linux-x64", lock["packages"])
+        self.assertIn(
+            "node_modules/@anthropic-ai/claude-code-linux-x64",
+            lock["packages"],
+        )
+        for path, record in lock["packages"].items():
+            if not path:
+                continue
+            with self.subTest(path=path):
+                self.assertRegex(record["integrity"], r"^sha512-[A-Za-z0-9+/]+={0,2}$")
+                self.assertRegex(
+                    record["resolved"],
+                    r"^https://registry\.npmjs\.org/.+\.tgz$",
+                )
+        self.assertEqual(
+            (ROOT / "deploy/clients/.npmrc").read_text().splitlines(),
+            [
+                "audit=false",
+                "engine-strict=true",
+                "fund=false",
+                "ignore-scripts=true",
+                "package-lock=true",
+            ],
+        )
+        dependabot = (ROOT / ".github/dependabot.yml").read_text()
+        self.assertIn("package-ecosystem: npm", dependabot)
+        self.assertIn('directory: "/deploy/clients"', dependabot)
+
+    def test_ci_and_release_use_the_pinned_client_lock(self) -> None:
+        for path in (
+            ROOT / ".github/workflows/ci.yml",
+            ROOT / ".github/workflows/release.yml",
+        ):
+            with self.subTest(path=path.name):
+                workflow = path.read_text()
+                self.assertIn("npm ci --prefix deploy/clients", workflow)
+                self.assertIn("--ignore-scripts --no-audit --no-fund", workflow)
+                self.assertIn("deploy/clients/package-lock.json", workflow)
+                self.assertIn("deploy/clients/node_modules/.bin", workflow)
+                self.assertIn("python scripts/client_lock_contract.py", workflow)
+                self.assertIn(
+                    "node deploy/clients/node_modules/"
+                    "@anthropic-ai/claude-code/install.cjs",
+                    workflow,
+                )
+                self.assertIn("cache: npm", workflow)
+                self.assertIn("24.19.0", workflow)
+                self.assertIn('test "$(node --version)" = "v24.19.0"', workflow)
+                self.assertIn('test "$(npm --version)" = "11.17.0"', workflow)
+                self.assertNotIn("--no-package-lock", workflow)
+                self.assertNotIn("@openai/codex@$CODEX_VERSION", workflow)
+                self.assertNotIn(
+                    "@anthropic-ai/claude-code@$CLAUDE_CODE_VERSION",
+                    workflow,
+                )
+        release = (ROOT / ".github/workflows/release.yml").read_text()
+        self.assertIn("client-compatibility:", release)
+        self.assertIn("needs: [verify, client-compatibility]", release)
+
+    def test_latest_upstream_client_canary_remains_explicitly_dynamic(self) -> None:
+        workflow = (ROOT / ".github/workflows/upstream-canary.yml").read_text()
+        self.assertIn("@openai/codex@latest", workflow)
+        self.assertIn("@anthropic-ai/claude-code@latest", workflow)
+        self.assertIn("--no-package-lock --no-save", workflow)
+        self.assertNotIn("npm ci --prefix deploy/clients", workflow)
 
     def test_upstream_canary_uses_the_hash_locked_build_toolchain(self) -> None:
         workflow = (ROOT / ".github/workflows/upstream-canary.yml").read_text()
