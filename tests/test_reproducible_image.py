@@ -31,6 +31,7 @@ SHA = "7" * 40
 EPOCH = 1_786_934_370
 VERSION = "0.1.0"
 PLATFORM = "linux/amd64"
+PLATFORMS = ("linux/amd64", "linux/arm64")
 
 
 def _canonical(value: object) -> bytes:
@@ -51,15 +52,17 @@ def _write_layout(
     revision: str = SHA,
     version: str = VERSION,
     layer: bytes = b"deterministic-layer",
+    platform: str = PLATFORM,
 ) -> OCILayoutSummary:
     root.mkdir(parents=True, exist_ok=True)
+    architecture = platform.split("/", 1)[1]
     created = datetime.fromtimestamp(EPOCH, timezone.utc).isoformat().replace(
         "+00:00", "Z"
     )
     layer_digest = _write_blob(root, layer)
     config = _canonical(
         {
-            "architecture": "amd64",
+            "architecture": architecture,
             "config": {
                 "Labels": {
                     "org.opencontainers.image.revision": revision,
@@ -98,7 +101,7 @@ def _write_layout(
                 {
                     "digest": "sha256:" + manifest_digest,
                     "mediaType": "application/vnd.oci.image.manifest.v1+json",
-                    "platform": {"architecture": "amd64", "os": "linux"},
+                    "platform": {"architecture": architecture, "os": "linux"},
                     "size": len(manifest),
                 }
             ],
@@ -113,7 +116,7 @@ def _write_layout(
         source_sha=revision,
         source_date_epoch=EPOCH,
         version=version,
-        platform=PLATFORM,
+        platform=platform,
     )
 
 
@@ -180,21 +183,35 @@ class ReproducibleImageTests(unittest.TestCase):
                 validate_builder()
 
     def test_layout_validation_binds_every_blob_and_image_identity(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary) / "layout"
-            expected = _write_layout(root)
-            actual = validate_oci_layout(
-                root,
+        for platform in PLATFORMS:
+            with (
+                self.subTest(platform=platform),
+                tempfile.TemporaryDirectory() as temporary,
+            ):
+                root = Path(temporary) / "layout"
+                expected = _write_layout(root, platform=platform)
+                actual = validate_oci_layout(
+                    root,
+                    source_sha=SHA,
+                    source_date_epoch=EPOCH,
+                    version=VERSION,
+                    platform=platform,
+                )
+                self.assertEqual(actual, expected)
+                self.assertRegex(actual.index_sha256, r"^[0-9a-f]{64}$")
+                self.assertRegex(actual.manifest_digest, r"^sha256:[0-9a-f]{64}$")
+                self.assertRegex(actual.config_digest, r"^sha256:[0-9a-f]{64}$")
+                self.assertEqual(len(actual.layer_digests), 1)
+
+        with self.assertRaises(OCIReproducibilityError):
+            build_command(
+                context=Path("/tmp/exact-source"),
+                destination=Path("/tmp/image-layout"),
                 source_sha=SHA,
                 source_date_epoch=EPOCH,
                 version=VERSION,
-                platform=PLATFORM,
+                platform="linux/s390x",
             )
-            self.assertEqual(actual, expected)
-            self.assertRegex(actual.index_sha256, r"^[0-9a-f]{64}$")
-            self.assertRegex(actual.manifest_digest, r"^sha256:[0-9a-f]{64}$")
-            self.assertRegex(actual.config_digest, r"^sha256:[0-9a-f]{64}$")
-            self.assertEqual(len(actual.layer_digests), 1)
 
     def test_layout_validation_rejects_mutation_ambiguity_and_unsafe_files(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -333,11 +350,21 @@ class ReproducibleImageTests(unittest.TestCase):
         self.assertIn("python scripts/reproducible_image.py", workflow)
         self.assertIn('--source-sha "$GITHUB_SHA"', workflow)
         self.assertIn("hormuz-reproducible-oci", workflow)
+        self.assertEqual(workflow.count("python scripts/reproducible_image.py"), 2)
+        self.assertIn("--platform linux/amd64", workflow)
+        self.assertIn("--platform linux/arm64", workflow)
+        self.assertIn("hormuz-reproducible-oci/linux-amd64", workflow)
+        self.assertIn("hormuz-reproducible-oci/linux-arm64", workflow)
         self.assertIn("moby/buildkit:v0.32.2@sha256:", workflow)
         self.assertIn('SOURCE_DATE_EPOCH=$HORMUZ_SOURCE_DATE_EPOCH', workflow)
         self.assertIn("python scripts/reproducible_image.py", release)
         self.assertIn('--source-sha "$GITHUB_SHA"', release)
         self.assertIn("hormuz-reproducible-oci", release)
+        self.assertEqual(release.count("python scripts/reproducible_image.py"), 2)
+        self.assertIn("--platform linux/amd64", release)
+        self.assertIn("--platform linux/arm64", release)
+        self.assertIn("hormuz-reproducible-oci/linux-amd64", release)
+        self.assertIn("hormuz-reproducible-oci/linux-arm64", release)
         self.assertGreaterEqual(release.count("moby/buildkit:v0.32.2@sha256:"), 2)
         self.assertIn("SOURCE_DATE_EPOCH=${{ steps.source_epoch.outputs.value }}", release)
         self.assertIn("provenance: mode=max", release)

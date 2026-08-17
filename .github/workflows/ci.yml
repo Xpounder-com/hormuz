@@ -231,7 +231,7 @@ jobs:
   container:
     name: Restricted container, SBOM, and vulnerability gate
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     env:
       HORMUZ_IMAGE: hormuz:ci-${{ github.sha }}
     steps:
@@ -243,16 +243,23 @@ jobs:
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
         with:
           driver-opts: image=moby/buildkit:v0.32.2@sha256:28a898719c18a33f4e8000685287fa36fd0dd9560c6440227d3a732d79bb41d8
-      - name: Build and compare independent exact-source OCI layouts
+      - name: Build and compare independent exact-source amd64 OCI layouts
         run: |
           python scripts/reproducible_image.py \
             --source-sha "$GITHUB_SHA" \
-            --outdir "$RUNNER_TEMP/hormuz-reproducible-oci"
+            --platform linux/amd64 \
+            --outdir "$RUNNER_TEMP/hormuz-reproducible-oci/linux-amd64"
+      - name: Build and compare independent exact-source arm64 OCI layouts
+        run: |
+          python scripts/reproducible_image.py \
+            --source-sha "$GITHUB_SHA" \
+            --platform linux/arm64 \
+            --outdir "$RUNNER_TEMP/hormuz-reproducible-oci/linux-arm64"
       - name: Preserve OCI reproducibility evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: hormuz-reproducible-oci
-          path: ${{ runner.temp }}/hormuz-reproducible-oci/*
+          path: ${{ runner.temp }}/hormuz-reproducible-oci/
           if-no-files-found: error
           retention-days: 7
       - name: Build pinned Hormuz image

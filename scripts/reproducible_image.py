@@ -21,7 +21,8 @@ from typing import Any
 
 
 SCHEMA = "hormuz.reproducible-oci.v1"
-SUPPORTED_PLATFORM = "linux/amd64"
+DEFAULT_PLATFORM = "linux/amd64"
+SUPPORTED_PLATFORMS = (DEFAULT_PLATFORM, "linux/arm64")
 BUILDKIT_VERSION = "v0.32.2"
 BUILDKIT_IMAGE = (
     "moby/buildkit:v0.32.2@sha256:"
@@ -90,7 +91,7 @@ def _validate_version(value: str) -> str:
 
 
 def _validate_platform(value: str) -> str:
-    if value != SUPPORTED_PLATFORM:
+    if value not in SUPPORTED_PLATFORMS:
         raise OCIReproducibilityError("OCI reproducibility platform is unsupported")
     return value
 
@@ -762,7 +763,7 @@ def build_reproducible_image(
     project_root: Path,
     source_sha: str,
     output_dir: Path,
-    platform: str = SUPPORTED_PLATFORM,
+    platform: str = DEFAULT_PLATFORM,
 ) -> dict[str, Any]:
     project_root = project_root.resolve()
     output_dir = output_dir.expanduser().absolute()
@@ -895,7 +896,9 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--source-sha", required=True)
     parser.add_argument("--outdir", type=Path, required=True)
     parser.add_argument("--project-root", type=Path, default=Path.cwd())
-    parser.add_argument("--platform", default=SUPPORTED_PLATFORM)
+    parser.add_argument(
+        "--platform", choices=SUPPORTED_PLATFORMS, default=DEFAULT_PLATFORM
+    )
     return parser
 
 

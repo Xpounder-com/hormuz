@@ -89,15 +89,15 @@ Ordinary CI and tag verification also run `scripts/reproducible_image.py` agains
 
 1. requires that source SHA to equal `HEAD`, derives the build epoch from the commit, and exports tracked files through `git archive` into two isolated contexts;
 2. fails closed unless the active `docker-container` builder reports reviewed BuildKit `v0.32.2`; workflow setup binds that implementation to the official multi-platform image digest `sha256:28a898719c18a33f4e8000685287fa36fd0dd9560c6440227d3a732d79bb41d8`;
-3. builds `linux/amd64` twice with no cache, no pull, no tag, no push, the pinned base digest, the hash-locked runtime closure, and source/version/revision labels bound to the commit;
+3. builds `linux/amd64` twice and `linux/arm64` twice with no cache, no pull, no tag, no push, the pinned base digest, the hash-locked runtime closure, and source/version/revision labels bound to the commit;
 4. supplies `SOURCE_DATE_EPOCH` while pip installs the runtime closure so explicitly compiled Python bytecode uses deterministic hash-based invalidation rather than build-time timestamps, and removes emulator-created root-cache state from the process-boundary layer;
 5. disables provenance and SBOM attestations only in the equality builds because those envelopes contain run-specific evidence;
 6. rejects unsafe or excessive OCI layouts, ambiguous JSON, unexpected or unreferenced blobs, descriptor digest/size mismatches, wrong platform/source/version/user configuration, and layer/diff-ID inconsistencies with fixed diagnostics; and
-7. requires the two complete OCI file sets, sizes, and SHA-256 digests to match before publishing one canonical image tar and schema `hormuz.reproducible-oci.v1` evidence manifest.
+7. requires each platform's two complete OCI file sets, sizes, and SHA-256 digests to match before publishing one canonical image tar and schema `hormuz.reproducible-oci.v1` evidence manifest per platform.
 
 The manifest binds the exact source SHA and epoch, target platform, reviewed builder driver/image/version, Dockerfile/base/lock digests, OCI index/manifest/config/layer digests, artifact digest, and artifact size. It contains no generated time, local path, source content, prompt, response, employee identity, or credential. The output directory must be empty and cannot be a symlink.
 
-The release image remains a separate multi-platform build with provenance and SBOM generation enabled, followed by exact-digest signing and verification. The reproducibility gate proves the bounded unsigned `linux/amd64` image payload; it does not claim byte-identical `linux/arm64` output, universal cross-builder equality, offline base/dependency availability, deterministic signature or attestation envelopes, an external independent rebuild service, or an observed registry release.
+The release image remains a separate multi-platform build with provenance and SBOM generation enabled, followed by exact-digest signing and verification. The reproducibility gate proves bounded unsigned `linux/amd64` and `linux/arm64` image payloads independently; it does not claim equality between architectures, universal cross-builder or cross-host equality, offline base/dependency availability, deterministic signature or attestation envelopes, an external independent rebuild service, or an observed registry release.
 
 ## Cut a release
 

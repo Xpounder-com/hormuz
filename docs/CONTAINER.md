@@ -15,7 +15,7 @@ The root `Dockerfile`:
 - exposes port `8787` and probes `GET /health/ready`; and
 - runs `python -m hormuz --config /etc/hormuz/hormuz.json serve` by default.
 
-CI first exports the exact checked-out commit twice and requires two clean `linux/amd64` BuildKit OCI layouts to be byte-identical. It then builds the runtime image, runs `scripts/container_smoke.py`, generates a CycloneDX SBOM, and fails on any Trivy high or critical OS or Python-package finding, including findings without a current fix. The reproducibility manifest, deterministic OCI tar, SBOM, vulnerability JSON, and image inspection are retained as workflow artifacts for seven days. Scanner actions and releases are explicitly pinned CI inputs.
+CI first exports the exact checked-out commit twice per platform and requires clean `linux/amd64` layouts to match each other and clean `linux/arm64` layouts to match each other byte for byte. It then builds the runtime image, runs `scripts/container_smoke.py`, generates a CycloneDX SBOM, and fails on any Trivy high or critical OS or Python-package finding, including findings without a current fix. Both reproducibility manifests and deterministic OCI tars, plus the SBOM, vulnerability JSON, and image inspection, are retained as workflow artifacts for seven days. Scanner actions and releases are explicitly pinned CI inputs.
 
 Tag-driven private GHCR publication, multi-architecture promotion, GitHub OIDC keyless signing, exact-identity verification, and a signed SLSA provenance predicate are implemented as a release contract, but no image is claimed as published until an eligible tag run succeeds. See [RELEASES.md](RELEASES.md). Tag governance, identity-based pull authorization, retention, customer-registry/KMS custody, and an observed release remain release work.
 
@@ -50,14 +50,19 @@ docker buildx inspect --bootstrap
 HORMUZ_SOURCE_SHA="$(git rev-parse HEAD)"
 python3 scripts/reproducible_image.py \
   --source-sha "$HORMUZ_SOURCE_SHA" \
-  --outdir oci-reproducibility
+  --platform linux/amd64 \
+  --outdir oci-reproducibility/linux-amd64
+python3 scripts/reproducible_image.py \
+  --source-sha "$HORMUZ_SOURCE_SHA" \
+  --platform linux/arm64 \
+  --outdir oci-reproducibility/linux-arm64
 ```
 
-The command supports only `linux/amd64` in this first bounded contract. It fails closed unless the active builder uses the `docker-container` driver and reviewed BuildKit version `v0.32.2`; CI and the command above additionally bind that version to the reviewed multi-platform image digest. It verifies that the supplied full SHA is checked-out `HEAD`, obtains the epoch from that commit, exports tracked files rather than the working tree, and builds twice with no cache, no pull, and no publishing. It disables provenance and SBOM attestations for this byte-comparison build because their run-specific envelopes are not image-layer reproducibility inputs.
+Each command accepts only `linux/amd64` or `linux/arm64` and retains `linux/amd64` as the backwards-compatible default. It fails closed unless the active builder uses the `docker-container` driver and reviewed BuildKit version `v0.32.2`; CI and the commands above additionally bind that version to the reviewed multi-platform image digest. It verifies that the supplied full SHA is checked-out `HEAD`, obtains the epoch from that commit, exports tracked files rather than the working tree, and builds the selected platform twice with no cache, no pull, and no publishing. It disables provenance and SBOM attestations for these byte-comparison builds because their run-specific envelopes are not image-layer reproducibility inputs.
 
-Both OCI layouts must contain one `linux/amd64` manifest and pass bounded validation of every referenced digest, byte size, config, root-filesystem diff ID, and layer count. File sets, sizes, and SHA-256 digests must then match exactly. Only after that comparison succeeds does Hormuz publish a canonical versioned `hormuz-X.Y.Z-linux-amd64.oci.tar` and content-free `hormuz-oci-reproducibility.json` into an initially empty, non-symlink output directory.
+Each pair of OCI layouts must contain one manifest for its selected platform and pass bounded validation of every referenced digest, byte size, config, root-filesystem diff ID, and layer count. The same-platform file sets, sizes, and SHA-256 digests must then match exactly. Only after a comparison succeeds does Hormuz publish a canonical versioned `hormuz-X.Y.Z-linux-ARCH.oci.tar` and content-free `hormuz-oci-reproducibility.json` into that platform's initially empty, non-symlink output directory.
 
-This proves same-source byte equality under the exercised BuildKit contract. It does not prove `linux/arm64` equality, equality across every builder or operating system, offline availability of the pinned base and PyPI inputs, reproducibility of run-specific signatures/attestations, or that any registry artifact was published. The signed release path separately generates and verifies provenance and SBOM evidence.
+This proves same-source byte equality for both supported platforms under the exercised BuildKit contract. It does not prove equality across every builder, host, or operating system, offline availability of the pinned base and PyPI inputs, reproducibility of run-specific signatures/attestations, or that any registry artifact was published. The signed release path separately generates and verifies provenance and SBOM evidence.
 
 Regenerate the lock only when the declared runtime dependencies change, then review the complete diff and rerun all container and Python gates:
 
