@@ -902,6 +902,44 @@ A failure-first package-release review was exercised locally on August 16, 2026 
 
 This proves a fail-closed exact-source package-reproducibility contract under a reviewed, hash-custodied Python build toolchain. It does not prove offline or internally mirrored build-wheel availability, hash locking for runtime/test dependencies installed outside the container, byte-identical OCI layers across builders, or an observed signed registry release. Those and the remaining TLS, shared persistence, HA, backup/restore, KMS/BYOK, and independent-review requirements keep issues #11 and #9 open.
 
+### Anchored audit-chain export
+
+A failure-first audit-evidence review was exercised locally on August 17, 2026.
+The focused tests initially failed because the chain module and verification
+command did not exist.
+
+- usage/security and governed-context audit exports can now select canonical
+  schema `hormuz.audit-chain.v1` without changing the existing raw JSONL
+  compatibility default;
+- every wrapper binds the original metadata-only event, one-based sequence,
+  predecessor, domain-separated event digest, and resulting chain digest. The
+  export reports an external anchor consisting of schema, count, final chain
+  SHA-256, and exact-file SHA-256;
+- file output uses owner-only permissions and a synchronized same-directory
+  temporary file before no-clobber or explicit replacement publication, so a
+  failed writer does not publish partial evidence;
+- `hormuz audit-verify` runs without gateway configuration and requires an
+  externally retained lowercase chain head and event count. An exact-file
+  SHA-256 can additionally bind serialization;
+- the strict bounded verifier rejects altered events, prefix/suffix deletion,
+  reordering, duplication, wrong external anchors, noncanonical or ambiguous
+  JSON, missing terminal newlines, unsafe symlinks, oversized records/files,
+  and excessive counts with fixed non-reflective failures; and
+- focused pure-format, usage CLI, and non-empty governed-context CLI tests pass,
+  including checks that governed content and retrieval queries remain absent
+  from the chained evidence; the 50 focused tests passed in `0.208` seconds;
+  and
+- the complete 377-test source suite passed in `124.363` seconds. The
+  environment-gated official Claude Code executable case was the sole local
+  skip.
+
+This proves integrity and gap detection for an exported sequence only when the
+anchor is retained independently. It does not hash-chain events at database
+commit time, reveal records deleted before export, authenticate an attacker-
+replaceable adjacent anchor, create one continuous sequence across stores or
+exports, sign with KMS/BYOK, stream to immutable retention, or prove restore and
+legal-hold operations. Issue #17 remains open for those enterprise controls.
+
 ### Remote provider HTTPS enforcement
 
 The provider-upstream configuration boundary was exercised locally on August 16, 2026 without a live provider credential or remote provider request.

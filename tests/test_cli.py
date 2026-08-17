@@ -20,6 +20,7 @@ from pathlib import Path
 
 from hormuz.cli import (
     _audit_export,
+    _audit_verify,
     _audit_since,
     _auth_token,
     _budget_for_scope,
@@ -42,6 +43,11 @@ from hormuz.cli import (
     _serve,
     build_parser,
     main,
+)
+from hormuz.audit_chain import (
+    AUDIT_CHAIN_GENESIS_SHA256,
+    AUDIT_CHAIN_SCHEMA_VERSION,
+    AuditChainError,
 )
 from hormuz.config import (
     ConfigError,
@@ -1404,6 +1410,107 @@ class ClientConfigTests(unittest.TestCase):
                     self.assertEqual(_audit_export(config, args), 2)
                 self.assertEqual(symlink_target.read_text(encoding="utf-8"), "preserve me")
 
+    def test_audit_chain_export_and_anchored_verification_are_content_free(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config = replace(self.config, database_path=root / "usage.sqlite3")
+            output_path = root / "audit-chain.jsonl"
+            export_args = argparse.Namespace(
+                kind="all",
+                since="2026-08-01T00:00:00Z",
+                output=str(output_path),
+                force=False,
+                chain=True,
+            )
+            with redirect_stderr(export_error := io.StringIO()):
+                self.assertEqual(_audit_export(config, export_args), 0)
+            self.assertEqual(output_path.read_bytes(), b"")
+            self.assertEqual(os.stat(output_path).st_mode & 0o777, 0o600)
+            self.assertIn(
+                "chain_sha256=" + AUDIT_CHAIN_GENESIS_SHA256,
+                export_error.getvalue(),
+            )
+            self.assertIn("chain_count=0", export_error.getvalue())
+
+            verify_args = argparse.Namespace(
+                input=str(output_path),
+                expected_head=AUDIT_CHAIN_GENESIS_SHA256,
+                expected_count=0,
+                expected_sha256=hashlib.sha256(b"").hexdigest(),
+            )
+            with redirect_stdout(verify_output := io.StringIO()):
+                self.assertEqual(_audit_verify(verify_args), 0)
+            result = json.loads(verify_output.getvalue())
+            self.assertEqual(result["status"], "verified")
+            self.assertEqual(result["event_count"], 0)
+
+            parser = build_parser()
+            parsed_export = parser.parse_args(["audit-export", "--chain"])
+            self.assertTrue(parsed_export.chain)
+            parsed_context = parser.parse_args(
+                ["context-audit-export", "--actor", "alice", "--chain"]
+            )
+            self.assertTrue(parsed_context.chain)
+            parsed_verify = parser.parse_args(
+                [
+                    "audit-verify",
+                    "--input",
+                    str(output_path),
+                    "--expected-head",
+                    AUDIT_CHAIN_GENESIS_SHA256,
+                    "--expected-count",
+                    "0",
+                ]
+            )
+            self.assertEqual(parsed_verify.command, "audit-verify")
+            with redirect_stdout(main_output := io.StringIO()):
+                self.assertEqual(
+                    main(
+                        [
+                            "audit-verify",
+                            "--input",
+                            str(output_path),
+                            "--expected-head",
+                            AUDIT_CHAIN_GENESIS_SHA256,
+                            "--expected-count",
+                            "0",
+                        ]
+                    ),
+                    0,
+                )
+            self.assertEqual(json.loads(main_output.getvalue())["status"], "verified")
+            with redirect_stderr(io.StringIO()):
+                self.assertEqual(_audit_export(config, export_args), 2)
+
+            failed_path = root / "failed-chain.jsonl"
+            export_args.output = str(failed_path)
+            with mock.patch(
+                "hormuz.cli.write_audit_chain",
+                side_effect=AuditChainError("fixed writer failure"),
+            ), redirect_stderr(io.StringIO()):
+                self.assertEqual(_audit_export(config, export_args), 2)
+            self.assertFalse(failed_path.exists())
+            failed_path.write_text("preserve me", encoding="utf-8")
+            export_args.force = True
+            with mock.patch(
+                "hormuz.cli.write_audit_chain",
+                side_effect=AuditChainError("fixed writer failure"),
+            ), redirect_stderr(io.StringIO()):
+                self.assertEqual(_audit_export(config, export_args), 2)
+            self.assertEqual(failed_path.read_text(encoding="utf-8"), "preserve me")
+
+            tampered_path = root / "tampered.jsonl"
+            tampered_path.write_bytes(b"hormuz-sentinel\n")
+            tampered_args = argparse.Namespace(
+                input=str(tampered_path),
+                expected_head=AUDIT_CHAIN_GENESIS_SHA256,
+                expected_count=0,
+                expected_sha256=None,
+            )
+            with redirect_stderr(tampered_error := io.StringIO()):
+                self.assertEqual(_audit_verify(tampered_args), 1)
+            self.assertNotIn("hormuz-sentinel", tampered_error.getvalue())
+
     def test_audit_since_normalizes_to_utc(self) -> None:
         self.assertEqual(_audit_since("2026-08-01"), "2026-08-01T00:00:00+00:00")
         self.assertEqual(
@@ -1674,6 +1781,55 @@ class ClientConfigTests(unittest.TestCase):
             self.assertNotIn("Retry policy", audit_text)
             self.assertNotIn("example.test/adr", audit_text)
             self.assertNotIn("retry jitter", audit_text)
+
+            context_chain_path = root / "context-audit-chain.jsonl"
+            context_chain_args = build_parser().parse_args(
+                [
+                    "context-audit-export",
+                    "--actor",
+                    "alice",
+                    "--since",
+                    "2026-08-01T00:00:00Z",
+                    "--output",
+                    str(context_chain_path),
+                    "--chain",
+                ]
+            )
+            with redirect_stderr(context_chain_error := io.StringIO()):
+                self.assertEqual(
+                    _context_audit_export(config, context_chain_args),
+                    0,
+                )
+            context_chain_bytes = context_chain_path.read_bytes()
+            chained_events = [
+                json.loads(line) for line in context_chain_bytes.splitlines()
+            ]
+            self.assertEqual(len(chained_events), 3)
+            self.assertTrue(
+                all(
+                    item["schema_version"] == AUDIT_CHAIN_SCHEMA_VERSION
+                    for item in chained_events
+                )
+            )
+            self.assertEqual(
+                [item["event"]["event_type"] for item in chained_events],
+                ["context.mutation", "context.mutation", "context.read"],
+            )
+            self.assertIn("chain_count=3", context_chain_error.getvalue())
+            self.assertNotIn("Use one retry", context_chain_bytes.decode("utf-8"))
+            self.assertNotIn("retry jitter", context_chain_bytes.decode("utf-8"))
+            verify_context_args = argparse.Namespace(
+                input=str(context_chain_path),
+                expected_head=chained_events[-1]["chain_sha256"],
+                expected_count=3,
+                expected_sha256=hashlib.sha256(context_chain_bytes).hexdigest(),
+            )
+            with redirect_stdout(context_verify_output := io.StringIO()):
+                self.assertEqual(_audit_verify(verify_context_args), 0)
+            self.assertEqual(
+                json.loads(context_verify_output.getvalue())["status"],
+                "verified",
+            )
 
             delete_args = build_parser().parse_args(
                 [

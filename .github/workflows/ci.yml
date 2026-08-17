@@ -78,6 +78,8 @@ jobs:
           "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" context-list --help
           "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" context-export --help
           "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" context-audit-export --help
+          "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" audit-export --help
+          "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" audit-verify --help
           "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" billing import --help
           "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" billing fetch --help
           "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" billing reconcile --help

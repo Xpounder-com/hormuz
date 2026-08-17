@@ -31,6 +31,65 @@ Hormuz writes the event count and the SHA-256 checksum of the exact JSONL bytes 
 shasum -a 256 hormuz-audit.jsonl
 ```
 
+## Chained export and anchored verification
+
+Raw JSONL remains the compatibility default. For evidence that must expose an
+altered, deleted, inserted, reordered, or duplicated exported record, select the
+versioned chain format:
+
+```bash
+python3 -m hormuz --config hormuz.json audit-export \
+  --kind all \
+  --chain \
+  --output hormuz-audit-chain.jsonl
+```
+
+Each line is a canonical `hormuz.audit-chain.v1` wrapper containing the original
+metadata-only event, a one-based sequence, the preceding chain digest, a
+domain-separated event digest, and the resulting chain digest. Sequence one
+starts from the all-zero SHA-256 genesis value. The command writes four anchor
+values to standard error: the schema, event count, final chain SHA-256, and
+SHA-256 of the exact JSONL bytes.
+
+Retain at least the event count and final chain digest in a different trusted
+system, such as an access-controlled deployment log, SIEM, signed release
+record, or immutable archive. Retaining the file digest as well binds the exact
+serialization. Verify a later copy without loading the gateway configuration:
+
+```bash
+python3 -m hormuz audit-verify \
+  --input hormuz-audit-chain.jsonl \
+  --expected-head LOWERCASE_CHAIN_SHA256 \
+  --expected-count EVENT_COUNT \
+  --expected-sha256 LOWERCASE_FILE_SHA256
+```
+
+Successful verification emits only schema, status, event count, chain head, and
+file digest. The verifier requires canonical strict UTF-8 JSONL, rejects
+duplicate or unknown wrapper members, non-standard constants, missing terminal
+newlines, sequence/predecessor/hash mismatches, symlink inputs, records over 2
+MiB, more than 1,000,000 records, and files over 256 MiB. File exports are
+assembled in a private same-directory temporary file, synchronized, and then
+published without exposing partial bytes; replacement requires `--force`.
+
+Governed-context audit supports the identical format:
+
+```bash
+python3 -m hormuz --config hormuz.json context-audit-export \
+  --actor alice \
+  --since 2026-08-01T00:00:00Z \
+  --chain \
+  --output hormuz-context-audit-chain.jsonl
+```
+
+The chain is not a signature or MAC. Anyone who can replace both the export and
+its external anchor can recompute a valid chain. It is built at export time, so
+it cannot detect a database record deleted before the export, prove gateway
+coverage, create one continuous sequence across separate exports/stores, or
+make local SQLite append-only. KMS-backed signing, durable sequence allocation,
+externally immutable streaming/retention, legal hold, and restore verification
+remain production work under issue #17.
+
 Governed context uses a deliberately separate database and export command:
 
 ```bash
@@ -70,6 +129,6 @@ Events are ordered by occurrence time and ID, and object keys are serialized det
 
 ## Security boundary
 
-The checksum detects accidental or deliberate changes only when a trusted copy of the checksum is retained elsewhere. Hormuz does not yet sign exports, make the local SQLite database append-only, send the export to WORM storage, record who ran an export, or enforce audit-reader RBAC. Production deployments should ship events to an organization-controlled append-only destination and apply retention, legal-hold, access-review, and deletion policies there.
+The raw checksum and the optional chain detect changes only when a trusted copy of the applicable external anchor is retained elsewhere. Hormuz does not yet sign exports, make the local SQLite database append-only, send events to WORM storage, record who ran an export, or enforce audit-reader RBAC. Production deployments should ship events to an organization-controlled append-only destination and apply retention, legal-hold, access-review, and deletion policies there.
 
 The export covers only requests that passed through Hormuz. The separate offline provider-cost reconciliation kernel can expose aggregate unexplained variance, but it cannot prove report scope or gateway bypass and does not convert this audit file into complete organization-wide usage. Authenticated provider polling, final invoice reconciliation, and externally immutable audit remain enterprise milestones.

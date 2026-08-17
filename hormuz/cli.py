@@ -8,10 +8,18 @@ import os
 import shlex
 import signal
 import sys
+import tempfile
 from datetime import date, datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
+from .audit_chain import (
+    AUDIT_CHAIN_SCHEMA_VERSION,
+    AuditChainError,
+    AuditChainSummary,
+    verify_audit_chain,
+    write_audit_chain,
+)
 from .auth import AuthenticationError, Authenticator
 from .billing import (
     MAX_REPORT_PAGE_BYTES,
@@ -516,6 +524,32 @@ def build_parser() -> argparse.ArgumentParser:
     audit.add_argument("--since", help="UTC ISO-8601 lower bound (default: start of current month)")
     audit.add_argument("--output", default="-", help="Output path or - for stdout (default: -)")
     audit.add_argument("--force", action="store_true", help="Allow replacing an existing output file")
+    audit.add_argument(
+        "--chain",
+        action="store_true",
+        help="Wrap events in the versioned tamper-evident chain format",
+    )
+
+    audit_verify = subparsers.add_parser(
+        "audit-verify",
+        help="Verify a chained audit export against an externally retained anchor",
+    )
+    audit_verify.add_argument("--input", required=True, help="Chained audit JSONL path")
+    audit_verify.add_argument(
+        "--expected-head",
+        required=True,
+        help="Externally retained lowercase SHA-256 chain head",
+    )
+    audit_verify.add_argument(
+        "--expected-count",
+        required=True,
+        type=int,
+        help="Externally retained event count",
+    )
+    audit_verify.add_argument(
+        "--expected-sha256",
+        help="Optional externally retained SHA-256 of the exact JSONL bytes",
+    )
 
     context = subparsers.add_parser(
         "context-pack",
@@ -663,6 +697,11 @@ def build_parser() -> argparse.ArgumentParser:
     context_audit.add_argument("--since", help="UTC ISO-8601 lower bound (default: start of current month)")
     context_audit.add_argument("--output", default="-", help="Output path or - for stdout (default: -)")
     context_audit.add_argument("--force", action="store_true", help="Allow replacing an existing output file")
+    context_audit.add_argument(
+        "--chain",
+        action="store_true",
+        help="Wrap events in the versioned tamper-evident chain format",
+    )
 
     benchmark = subparsers.add_parser(
         "context-benchmark",
@@ -778,6 +817,8 @@ def main(argv: list[str] | None = None) -> int:
         except ContextBenchmarkError as error:
             print(f"context benchmark error: {error}", file=sys.stderr)
             return 1
+    if args.command == "audit-verify":
+        return _audit_verify(args)
     if args.command in {"mcp", "mcp-config"}:
         try:
             if args.command == "mcp":
@@ -1888,6 +1929,25 @@ def _audit_export(config: GatewayConfig, args: argparse.Namespace) -> int:
         print(f"invalid --since: {error}", file=sys.stderr)
         return 2
     events = UsageStore(config.database_path).audit_events(since=since, kind=args.kind)
+    if getattr(args, "chain", False):
+        result = _write_private_audit_chain(
+            events,
+            output=args.output,
+            force=args.force,
+            label="audit export",
+        )
+        if result is None:
+            return 2
+        summary, destination = result
+        print(
+            f"exported {summary.count} events to {destination}; "
+            f"sha256={summary.file_sha256}; "
+            f"chain_sha256={summary.head_sha256}; "
+            f"chain_count={summary.count}; "
+            f"chain_schema={AUDIT_CHAIN_SCHEMA_VERSION}",
+            file=sys.stderr,
+        )
+        return 0
     stream = sys.stdout
     should_close = False
     output_path: Path | None = None
@@ -1931,6 +1991,34 @@ def _audit_export(config: GatewayConfig, args: argparse.Namespace) -> int:
     print(
         f"exported {len(events)} events to {destination}; sha256={digest.hexdigest()}",
         file=sys.stderr,
+    )
+    return 0
+
+
+def _audit_verify(args: argparse.Namespace) -> int:
+    path = Path(args.input).expanduser().absolute()
+    try:
+        summary = verify_audit_chain(
+            path,
+            expected_head_sha256=args.expected_head,
+            expected_count=args.expected_count,
+            expected_file_sha256=args.expected_sha256,
+        )
+    except AuditChainError as error:
+        print(f"audit verification failed: {error}", file=sys.stderr)
+        return 1
+    print(
+        json.dumps(
+            {
+                "schema_version": "hormuz.audit-chain-verification.v1",
+                "status": "verified",
+                "event_count": summary.count,
+                "head_sha256": summary.head_sha256,
+                "file_sha256": summary.file_sha256,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
     )
     return 0
 
@@ -2278,6 +2366,25 @@ def _context_audit_export(config: GatewayConfig, args: argparse.Namespace) -> in
     except (ContextError, ContextStoreError) as error:
         print(f"context audit export failed: {error}", file=sys.stderr)
         return 2
+    if getattr(args, "chain", False):
+        chained = _write_private_audit_chain(
+            values,
+            output=args.output,
+            force=args.force,
+            label="context audit export",
+        )
+        if chained is None:
+            return 2
+        summary, destination = chained
+        print(
+            f"exported {summary.count} context audit events to {destination}; "
+            f"sha256={summary.file_sha256}; "
+            f"chain_sha256={summary.head_sha256}; "
+            f"chain_count={summary.count}; "
+            f"chain_schema={AUDIT_CHAIN_SCHEMA_VERSION}",
+            file=sys.stderr,
+        )
+        return 0
     result = _write_private_jsonl(
         values,
         output=args.output,
@@ -2382,6 +2489,102 @@ def _stored_context_dict(
     if not include_content:
         value.pop("content", None)
     return value
+
+
+class _UTF8BinaryWriter:
+    def __init__(self, stream: object) -> None:
+        self.stream = stream
+
+    def write(self, value: bytes) -> int:
+        text = value.decode("utf-8")
+        written = self.stream.write(text)  # type: ignore[union-attr]
+        if written is not None and written != len(text):
+            return 0
+        return len(value)
+
+    def flush(self) -> None:
+        self.stream.flush()  # type: ignore[union-attr]
+
+
+def _write_private_audit_chain(
+    values: list[dict[str, object]],
+    *,
+    output: str,
+    force: bool,
+    label: str,
+) -> tuple[AuditChainSummary, str] | None:
+    if output == "-":
+        try:
+            stream = getattr(sys.stdout, "buffer", _UTF8BinaryWriter(sys.stdout))
+            summary = write_audit_chain(values, stream)  # type: ignore[arg-type]
+            stream.flush()
+            return summary, "stdout"
+        except (AuditChainError, OSError, ValueError) as error:
+            print(f"cannot write {label}: {error}", file=sys.stderr)
+            return None
+
+    output_path = Path(output).expanduser().absolute()
+    if not force and os.path.lexists(output_path):
+        print(
+            f"{label} already exists: {output_path} (use --force to replace it)",
+            file=sys.stderr,
+        )
+        return None
+    temporary_path: Path | None = None
+    stream = None
+    try:
+        descriptor, temporary_name = tempfile.mkstemp(
+            prefix=f".{output_path.name}.",
+            suffix=".tmp",
+            dir=output_path.parent,
+        )
+        temporary_path = Path(temporary_name)
+        if hasattr(os, "fchmod"):
+            os.fchmod(descriptor, 0o600)
+        stream = os.fdopen(descriptor, "wb")
+        summary = write_audit_chain(values, stream)
+        stream.flush()
+        os.fsync(stream.fileno())
+        stream.close()
+        stream = None
+        if force:
+            os.replace(temporary_path, output_path)
+        else:
+            os.link(temporary_path, output_path, follow_symlinks=False)
+            temporary_path.unlink()
+        temporary_path = None
+        _fsync_parent_directory(output_path.parent)
+        return summary, str(output_path)
+    except FileExistsError:
+        print(
+            f"{label} already exists: {output_path} (use --force to replace it)",
+            file=sys.stderr,
+        )
+        return None
+    except (AuditChainError, OSError, ValueError) as error:
+        print(f"cannot write {label}: {error}", file=sys.stderr)
+        return None
+    finally:
+        if stream is not None:
+            stream.close()
+        if temporary_path is not None:
+            try:
+                temporary_path.unlink()
+            except FileNotFoundError:
+                pass
+
+
+def _fsync_parent_directory(path: Path) -> None:
+    if not hasattr(os, "O_DIRECTORY"):
+        return
+    descriptor = os.open(
+        path,
+        os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_CLOEXEC", 0),
+    )
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
 
 
 def _write_private_jsonl(
