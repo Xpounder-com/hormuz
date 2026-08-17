@@ -30,8 +30,14 @@ jobs:
         run: >-
           python -m pip install --require-hashes --only-binary=:all:
           --requirement deploy/build/requirements.lock
+      - name: Install hash-locked runtime dependencies
+        run: >-
+          python -m pip install --require-hashes --only-binary=:all:
+          --requirement deploy/container/requirements.lock
       - name: Install Hormuz runtime
-        run: python -m pip install --no-build-isolation --editable .
+        run: python -m pip install --no-build-isolation --no-deps --editable .
+      - name: Verify runtime dependency closure
+        run: python -m pip check
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:

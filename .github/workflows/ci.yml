@@ -34,8 +34,14 @@ jobs:
         run: >-
           python -m pip install --require-hashes --only-binary=:all:
           --requirement deploy/build/requirements.lock
+      - name: Install hash-locked runtime dependencies
+        run: >-
+          python -m pip install --require-hashes --only-binary=:all:
+          --requirement deploy/container/requirements.lock
       - name: Install Hormuz in editable mode
-        run: python -m pip install --no-build-isolation --editable .
+        run: python -m pip install --no-build-isolation --no-deps --editable .
+      - name: Verify runtime dependency closure
+        run: python -m pip check
       - name: Run unit and gateway integration tests
         run: python -m unittest -v
 
@@ -64,7 +70,10 @@ jobs:
       - name: Install and run the wheel
         run: |
           python -m venv "$RUNNER_TEMP/hormuz-wheel"
-          "$RUNNER_TEMP/hormuz-wheel/bin/pip" install dist/hormuz-*.whl
+          "$RUNNER_TEMP/hormuz-wheel/bin/pip" install --require-hashes --only-binary=:all: \
+            --requirement deploy/container/requirements.lock
+          "$RUNNER_TEMP/hormuz-wheel/bin/pip" install --no-deps dist/hormuz-*.whl
+          "$RUNNER_TEMP/hormuz-wheel/bin/pip" check
           "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" --help
           "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" context-pack --help
           "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" context-import --help
@@ -130,8 +139,14 @@ jobs:
         run: >-
           python -m pip install --require-hashes --only-binary=:all:
           --requirement deploy/build/requirements.lock
+      - name: Install hash-locked runtime dependencies
+        run: >-
+          python -m pip install --require-hashes --only-binary=:all:
+          --requirement deploy/container/requirements.lock
       - name: Install Hormuz in editable mode
-        run: python -m pip install --no-build-isolation --editable .
+        run: python -m pip install --no-build-isolation --no-deps --editable .
+      - name: Verify runtime dependency closure
+        run: python -m pip check
       - name: Verify frozen benchmark artifacts
         run: python benchmarks/context/generate_corpus.py --check
       - name: Run strict lifecycle release profile
@@ -168,8 +183,14 @@ jobs:
         run: >-
           python -m pip install --require-hashes --only-binary=:all:
           --requirement deploy/build/requirements.lock
+      - name: Install hash-locked runtime dependencies
+        run: >-
+          python -m pip install --require-hashes --only-binary=:all:
+          --requirement deploy/container/requirements.lock
       - name: Install Hormuz runtime
-        run: python -m pip install --no-build-isolation --editable .
+        run: python -m pip install --no-build-isolation --no-deps --editable .
+      - name: Verify runtime dependency closure
+        run: python -m pip check
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:

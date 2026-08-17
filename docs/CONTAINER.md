@@ -7,7 +7,7 @@ The reference image is a repeatable single-node deployment artifact for the curr
 The root `Dockerfile`:
 
 - pins the official Python 3.14.6 Alpine 3.23 multi-platform image by registry digest;
-- installs only exact, hash-verified binary Python dependencies from `deploy/container/requirements.lock`;
+- installs only exact, hash-verified binary Python dependencies from `deploy/container/requirements.lock`, the canonical multi-platform runtime closure also exercised by source/test, wheel-smoke, release-verification, and upstream-canary jobs;
 - copies only the Hormuz package and the dependency lock through a default-deny `.dockerignore`;
 - runs as numeric UID and GID `65532:65532` with no login shell or home directory;
 - writes application data only beneath `/var/lib/hormuz`;

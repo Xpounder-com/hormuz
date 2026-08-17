@@ -388,7 +388,7 @@ class ReleaseContractTests(unittest.TestCase):
             workflow,
             r"(?m)^\s*run:\s+.*--only-binary=:all:",
         )
-        self.assertIn("--no-build-isolation --editable .", workflow)
+        self.assertIn("--no-build-isolation --no-deps --editable .", workflow)
         self.assertNotIn("build==1.3.0", workflow)
         self.assertNotIn("run: python -m build", workflow)
         self.assertNotIn(f"{EXPECTED_IMAGE}:latest", workflow)
@@ -411,7 +411,7 @@ class ReleaseContractTests(unittest.TestCase):
             r"(?m)^\s*run:\s+.*--only-binary=:all:",
         )
         self.assertEqual(
-            workflow.count("--no-build-isolation --editable ."),
+            workflow.count("--no-build-isolation --no-deps --editable ."),
             3,
         )
         self.assertNotIn("pip install build==", workflow)
@@ -422,6 +422,58 @@ class ReleaseContractTests(unittest.TestCase):
         self.assertNotIn('add_argument("--python"', builder)
         self.assertIn("source revision is not the checked-out commit", builder)
 
+    def test_ci_uses_the_hash_locked_runtime_closure_without_resolution(self) -> None:
+        workflow = (ROOT / ".github/workflows/ci.yml").read_text()
+        self.assertEqual(
+            workflow.count("Install hash-locked runtime dependencies"),
+            3,
+        )
+        self.assertEqual(
+            workflow.count("--requirement deploy/container/requirements.lock"),
+            4,
+        )
+        self.assertEqual(
+            workflow.count("--no-build-isolation --no-deps --editable ."),
+            3,
+        )
+        self.assertNotIn("--no-build-isolation --editable .", workflow)
+        self.assertIn(
+            '"$RUNNER_TEMP/hormuz-wheel/bin/pip" install '
+            "--require-hashes --only-binary=:all: \\",
+            workflow,
+        )
+        self.assertIn(
+            '"$RUNNER_TEMP/hormuz-wheel/bin/pip" install --no-deps '
+            "dist/hormuz-*.whl",
+            workflow,
+        )
+        self.assertEqual(workflow.count("python -m pip check"), 3)
+        self.assertIn('"$RUNNER_TEMP/hormuz-wheel/bin/pip" check', workflow)
+
+    def test_release_and_canary_use_the_hash_locked_runtime_closure(self) -> None:
+        for path in (
+            ROOT / ".github/workflows/release.yml",
+            ROOT / ".github/workflows/upstream-canary.yml",
+        ):
+            with self.subTest(path=path.name):
+                workflow = path.read_text()
+                self.assertEqual(
+                    workflow.count("Install hash-locked runtime dependencies"),
+                    1,
+                )
+                self.assertEqual(
+                    workflow.count(
+                        "--requirement deploy/container/requirements.lock"
+                    ),
+                    1,
+                )
+                self.assertIn(
+                    "--no-build-isolation --no-deps --editable .",
+                    workflow,
+                )
+                self.assertNotIn("--no-build-isolation --editable .", workflow)
+                self.assertIn("python -m pip check", workflow)
+
     def test_upstream_canary_uses_the_hash_locked_build_toolchain(self) -> None:
         workflow = (ROOT / ".github/workflows/upstream-canary.yml").read_text()
         self.assertIn("deploy/build/requirements.lock", workflow)
@@ -431,7 +483,7 @@ class ReleaseContractTests(unittest.TestCase):
             workflow,
             r"(?m)^\s*run:\s+.*--only-binary=:all:",
         )
-        self.assertIn("--no-build-isolation --editable .", workflow)
+        self.assertIn("--no-build-isolation --no-deps --editable .", workflow)
 
 
 if __name__ == "__main__":

@@ -916,7 +916,21 @@ A failure-first package-release review was exercised locally on August 16, 2026 
 - the 18 focused canonicalization, lock, installed-toolchain, and release-contract tests passed, including metadata normalization, traversal/link/duplicate/multiple-root refusal, lock completeness and hash syntax, wrong/missing installed-version refusal, deterministic manifest structure, no-isolation enforcement, and all workflow bindings; and
 - the complete 370-test source suite passed in `124.676` seconds. The environment-gated official Claude Code executable case was the sole local skip; source and test bytecode compilation, dependency integrity, and `git diff --check` also passed.
 
-This proves a fail-closed exact-source package-reproducibility contract under a reviewed, hash-custodied Python build toolchain. It does not prove offline or internally mirrored build-wheel availability, hash locking for runtime/test dependencies installed outside the container, byte-identical OCI layers across builders, or an observed signed registry release. Those and the remaining TLS, shared persistence, HA, backup/restore, KMS/BYOK, and independent-review requirements keep issues #11 and #9 open.
+This proves a fail-closed exact-source package-reproducibility contract under a reviewed, hash-custodied Python build toolchain. It does not prove offline or internally mirrored build-wheel availability, runtime locking for arbitrary downstream environments outside the repository workflows and reference container, byte-identical OCI layers across builders, or an observed signed registry release. Those and the remaining TLS, shared persistence, HA, backup/restore, KMS/BYOK, and independent-review requirements keep issues #11 and #9 open.
+
+### Hash-locked workflow runtime and test resolution
+
+A failure-first runtime-resolution review was exercised locally on August 17, 2026 without a provider request or credential.
+
+- before this checkpoint, ordinary matrix, context-benchmark, client-compatibility, release-verification, and latest-client-canary jobs installed the exact build frontend but then ran editable Hormuz installation with dependency resolution enabled. The isolated wheel smoke likewise installed the wheel with dependency resolution enabled. Those paths could therefore select newer runtime or transitive packages than the reviewed container closure;
+- two new workflow-contract methods, including separate release and canary subtests, were red because none of those jobs installed the runtime lock or prohibited dependency resolution;
+- ordinary source/test, context-benchmark, client-compatibility, tag-verification, and latest-client-canary jobs now install `deploy/container/requirements.lock` with `--require-hashes --only-binary=:all:` before installing Hormuz with `--no-build-isolation --no-deps --editable .`, then require `python -m pip check` to pass;
+- the package job's fresh wheel environment independently installs the same lock, installs the exact built wheel with `--no-deps`, and runs that environment's `pip check` before any CLI smoke command;
+- contract tests require all of those bindings and forbid the earlier resolver-enabled editable command. The complete 14-test release-contract module passed, and Ruby's YAML parser accepted all three changed workflows;
+- a fresh Python 3.12 environment installed the exact build lock and exact multi-platform runtime lock, built the editable package without isolation or dependency resolution, and reported `No broken requirements found` from `pip check`; and
+- the complete local source suite passed 393 tests in `124.333` seconds under that exact build/runtime environment. The environment-gated official Claude Code executable case was the sole expected local skip, and `git diff --check` passed.
+
+This proves that repository-owned Python CI, tag verification, scheduled client compatibility, and isolated wheel-smoke paths do not authorize runtime dependency resolution during Hormuz installation. It does not provide an offline/internal wheel mirror, lock arbitrary downstream `pip install hormuz` environments, lock official-client npm transitive dependencies, or make the intentionally latest-version canary deterministic. Those remain explicit supply-chain and deployment boundaries.
 
 ### Exact-source reproducible OCI image
 
