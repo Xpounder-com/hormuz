@@ -1213,16 +1213,24 @@ live provider request or credential.
   buckets, count mismatches, non-finite averages, and values outside the SQLite
   integer range. A synthetic maximum 100-row v3 response was 218,592 bytes,
   41.7 percent of the client's 512 KiB limit;
+- the first remote Python 3.14 run exposed a brittle pre-existing assertion
+  that expected exactly one injected-context redaction even though the contract
+  permits multiple occurrences and requires each to be redacted. The failed job
+  observed four reported redactions; its later non-disclosure assertion did not
+  execute because the exact-count assertion stopped the test first. The
+  regression now requires at least one redaction, exact agreement between the
+  response header and the replacement count sent upstream, and complete absence
+  of the original credential; it passed 20 repeated Python 3.14 loopback runs;
 - CLI JSON exposes complete histograms, while its tabular form labels p95
   histogram-bucket upper bounds rather than presenting exact percentiles or SLO
   targets. The timing columns contain no prompt, response, query, credential,
   filename, source text, network address, or caller-controlled label and remain
   outside the stable audit-export v2 shape;
 - the focused store, usage-client, and CLI suite passed 68 tests in `0.280`
-  seconds. The complete source suite passed 433 tests in `129.534` seconds; the
-  environment-gated official Claude Code executable case was the sole expected
-  local skip. Source/test/script bytecode compilation and `git diff --check`
-  passed;
+  seconds. The final complete source suite passed 433 tests in `128.242`
+  seconds; the environment-gated official Claude Code executable case was the
+  sole expected local skip. Source/test/script bytecode compilation and
+  `git diff --check` passed;
 - the frozen 60-task release benchmark passed with precision, recall, and
   useful-pack rate `1.00`, mean compression `0.840593`, and zero authorization,
   stale, dependency-stale, malicious, contradiction, budget, determinism, or

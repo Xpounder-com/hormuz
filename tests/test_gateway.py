@@ -4130,7 +4130,6 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertIn("context-injected", headers["x-hormuz-policy-decision"])
         self.assertIn("redacted", headers["x-hormuz-policy-decision"])
         self.assertTrue(headers["x-hormuz-context-pack"].startswith("ctxpack_"))
-        self.assertEqual(headers["x-hormuz-redactions"], "1")
         upstream = FakeProviderHandler.requests[-1]
         self.assertEqual(
             upstream["path"].partition("?")[0],
@@ -4139,6 +4138,12 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertEqual(upstream["body"]["model"], "claude-test")
         self.assertEqual(upstream["body"]["system"], system)
         provider_body = json.dumps(upstream["body"])
+        redaction_count = int(headers["x-hormuz-redactions"])
+        self.assertGreaterEqual(redaction_count, 1)
+        self.assertEqual(
+            provider_body.count("[REDACTED:HORMUZ_SECRET]"),
+            redaction_count,
+        )
         self.assertIn("token-count-context-proof", provider_body)
         self.assertIn("[REDACTED:HORMUZ_SECRET]", provider_body)
         self.assertNotIn(ANTHROPIC_KEY, provider_body)
