@@ -1088,6 +1088,58 @@ an independent security review, penetration test, external risk acceptance, or
 proof that the controls marked partial or open are complete. Issue #9 remains
 open, and this checkpoint does not authorize enterprise release.
 
+### Versioned compatibility support gate
+
+The compatibility contract was exercised locally on August 17, 2026 from exact
+implementation commit `6259000d9423cd8bd4b132f8ab05a374e9e58d27`.
+
+- the red-first test failed because no compatibility-contract module existed;
+- the committed `hormuz.compatibility-matrix.v1` matrix has 16 entries across
+  clients, Python runtimes, provider protocols, identity, persistence, and
+  deployment: 8 are exact release-tested surfaces, 3 are locally protocol-
+  tested, 1 is development-only, 3 are unsupported, and PostgreSQL is pending
+  an owner decision;
+- the canonical matrix SHA-256 is
+  `8051eb171a5fbd26d54e80dd1eaaf305f6ab9500dc2df7faa0f198b9fea3a926`;
+- validation binds Codex `0.147.0`, Claude Code `2.1.233`, Node.js `24.19.0`,
+  npm `11.17.0`, CPython `3.11` through `3.14`, project version `0.1.0`, the
+  implemented provider routes, and container base
+  `python:3.14.6-alpine3.23` to their repository sources and evidence;
+- all evidence references must resolve inside the repository, optional
+  selectors must exist in the referenced UTF-8 file, and duplicate members,
+  non-standard JSON numbers, unknown fields, invented support levels, changed
+  locked versions, missing test scope/evidence/limitations, and alpha production
+  claims fail closed;
+- the emitted `hormuz.compatibility-evidence.v1` schema contains only versions,
+  hashes, counts, and support-level metadata. It is created privately with mode
+  `0600`, refuses overwrite, and reports zero verified real-IdP, production-
+  persistence, and production-deployment profiles;
+- all 12 focused compatibility tests passed, and the combined 39-test
+  compatibility, threat-model, and release-contract suite passed in `0.243`
+  seconds;
+- the complete 422-test source suite passed in `124.387` seconds. The
+  environment-gated official Claude Code executable case was the sole local
+  skip;
+- two independent exact-source builds produced byte-identical artifacts: wheel
+  SHA-256 `2eac74f2f130c4d43e65c5eec2bf08ad5e23fdad8b291656f74434c1093a2c6d`
+  (336,629 bytes), source-distribution SHA-256
+  `d5dda304e2f6f75626127b0641f720ccc54e5ebef68202eb210a6cc68412d6df`
+  (646,465 bytes), and reproducibility-manifest SHA-256
+  `d214b3d0c55b68d6501ec30c04dfad544aa9a1e15516889dc2eb7675de55b34b`;
+- the source distribution contains the matrix, validator, operator document,
+  and tests. A clean isolated environment installed the exact wheel after the
+  hash-locked runtime closure, passed `pip check`, and ran the installed CLI;
+  and
+- workflow YAML parsing, source/test bytecode compilation, and
+  `git diff --check` passed.
+
+Ordinary CI and tag verification enforce the same matrix and retain content-free
+evidence. `release_tested` means only the exact version and environment named in
+the matrix. It does not certify other client versions or operating systems, live
+provider behavior, a real IdP, PostgreSQL, TLS/HA, backup/restore, disaster
+recovery, or enterprise release readiness. Issue #9 remains open and no
+acceptance checkbox is satisfied by this internal contract alone.
+
 ## Reproduce locally
 
 The default suite uses only loopback fake providers:
