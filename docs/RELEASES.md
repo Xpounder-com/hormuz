@@ -101,6 +101,12 @@ The manifest binds the exact source SHA and epoch, target platform, reviewed bui
 
 The release image remains a separate multi-platform build with provenance and SBOM generation enabled, followed by exact-digest signing and verification. The reproducibility gate proves bounded unsigned `linux/amd64` and `linux/arm64` image payloads independently; it does not claim equality between architectures, universal cross-builder or cross-host equality, offline base/dependency availability, deterministic signature or attestation envelopes, an external independent rebuild service, or an observed registry release.
 
+## Repository-local incident gate
+
+Ordinary package CI and exact-tag verification run `scripts/incident_drill.py` against `operations/incident-drills.json`. The gate resolves and executes one exact regression for each of the seven incident scenarios required by issue #9, then writes `hormuz-incident-drill-evidence.json` only if every test passes. Ordinary CI retains the artifact for seven days; tag verification retains it for thirty days with the release-verification bundle.
+
+The artifact is content-free and private by construction: it contains the catalog schema, version, SHA-256, scope, aggregate counts, and explicit false production-readiness flags. It does not contain scenario prose, test identifiers, runbook text, prompts, responses, identities, or credentials. The catalog and runbook explicitly leave live provider and IdP exercises, shared persistence and multi-region failure, complete deletion and legal-hold behavior, named on-call ownership, response/recovery targets, external communications, and independent review open.
+
 ## Cut a release
 
 Do this only after the intended commit is merged to and verified on `main`. The current `0.x` line is marked as a prerelease automatically.

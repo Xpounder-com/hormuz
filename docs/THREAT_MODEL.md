@@ -17,6 +17,8 @@ The evidence file is created with mode `0600`, refuses symlinks where the platfo
 
 Ordinary CI retains the evidence for seven days. Tag verification runs the same contract again and retains it with the other release-verification artifacts for thirty days. A later publish job cannot turn an internally pending review into a completed one because tag verification must succeed first.
 
+The separate [`operations/incident-drills.json`](../operations/incident-drills.json) catalog turns each required scenario into an exact repository-local regression and links it to the role-based procedures in [INCIDENT_RESPONSE.md](INCIDENT_RESPONSE.md). `scripts/incident_drill.py` executes those tests and emits only a catalog digest, aggregate counts, scope, and explicit false readiness flags. It does not convert an internal control regression into production incident-response, disaster-recovery, privacy-compliance, or external-communications evidence.
+
 ## Review boundary
 
 This is an internal engineering threat model, not an independent security assessment. The register must remain `independent_review.status=pending` until an identified independent reviewer completes the work and repository evidence records either resolved findings or explicit product-owner risk acceptance. The validator refuses a completed-review claim without that evidence.

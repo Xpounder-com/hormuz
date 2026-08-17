@@ -126,6 +126,12 @@ jobs:
           --matrix compatibility/compatibility-matrix.json
           --project-root .
           --output "$RUNNER_TEMP/hormuz-compatibility-evidence.json"
+      - name: Run repository-local incident drills
+        run: >-
+          python scripts/incident_drill.py
+          --catalog operations/incident-drills.json
+          --project-root .
+          --output "$RUNNER_TEMP/hormuz-incident-drill-evidence.json"
       - name: Preserve threat-model evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -138,6 +144,13 @@ jobs:
         with:
           name: hormuz-compatibility
           path: ${{ runner.temp }}/hormuz-compatibility-evidence.json
+          if-no-files-found: error
+          retention-days: 7
+      - name: Preserve incident-drill evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hormuz-incident-drills
+          path: ${{ runner.temp }}/hormuz-incident-drill-evidence.json
           if-no-files-found: error
           retention-days: 7
       - name: Preserve distribution evidence

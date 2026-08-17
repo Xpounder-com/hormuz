@@ -118,6 +118,8 @@ The reference command, data-volume contract, secret boundary, exact-source OCI r
 
 The versioned [threat model](docs/THREAT_MODEL.md) binds current gateway trust boundaries to concrete controls and explicit open release gates. CI validates its STRIDE and incident-scenario coverage and emits content-free aggregate evidence. This internal model is not an independent penetration test, and it cannot make the alpha enterprise-ready while open or partially mitigated threats remain.
 
+The [incident-response contract](docs/INCIDENT_RESPONSE.md) binds those seven scenarios to exact repository-local regressions and emits a private content-free evidence file only after all pass. The catalog explicitly keeps production exercises, named on-call assignments, external communications, and enterprise readiness false. These checks prove bounded control behavior; they are not live provider, IdP, multi-tenant, disaster-recovery, privacy, or customer-communications exercises.
+
 ## Policies and usage
 
 Evaluate a request without calling a model:

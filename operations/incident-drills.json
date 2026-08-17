@@ -1,0 +1,95 @@
+{
+  "schema": "hormuz.incident-drills.v1",
+  "version": "2026-08-17",
+  "exercise_scope": "repository_local_simulation",
+  "production_exercise_complete": false,
+  "owner_assignments_complete": false,
+  "external_communications_exercised": false,
+  "enterprise_release_ready": false,
+  "scenarios": [
+    {
+      "id": "provider_outage",
+      "name": "Provider outage or degradation",
+      "lead_role": "platform_response",
+      "coordination_role": "incident_commander",
+      "objective": "Fail closed within the bounded upstream deadline, return content-free diagnostics, and preserve usage evidence without forwarding employee credentials.",
+      "test_ids": [
+        "tests.test_gateway.GatewayIntegrationTests.test_upstream_deadline_before_headers_returns_content_free_timeout"
+      ],
+      "runbook": "docs/INCIDENT_RESPONSE.md#provider-outage",
+      "production_gap": "This local fake-provider timeout does not exercise live vendor status, production network controls, regional failover, or customer communications."
+    },
+    {
+      "id": "idp_outage",
+      "name": "Identity provider outage or signing-key failure",
+      "lead_role": "identity_response",
+      "coordination_role": "incident_commander",
+      "objective": "Reject an unavailable token exchange without issuing Hormuz credentials or leaving the enrollment redeemable.",
+      "test_ids": [
+        "tests.test_session_broker.SessionBrokerIntegrationTests.test_issuer_mixup_and_token_endpoint_outage_fail_closed"
+      ],
+      "runbook": "docs/INCIDENT_RESPONSE.md#identity-provider-outage",
+      "production_gap": "This local OIDC simulation does not exercise a real identity provider, hosted discovery or key-cache behavior, emergency access, or workforce communications."
+    },
+    {
+      "id": "credential_compromise",
+      "name": "Employee, provider, or signing credential compromise",
+      "lead_role": "security_response",
+      "coordination_role": "incident_commander",
+      "objective": "Detect refresh-credential replay, revoke the entire session family, and retain tenant-scoped metadata without retaining raw credentials.",
+      "test_ids": [
+        "tests.test_session_store.SessionStoreTests.test_refresh_rotates_both_credentials_and_replay_revokes_family"
+      ],
+      "runbook": "docs/INCIDENT_RESPONSE.md#credential-compromise",
+      "production_gap": "This local session-family exercise does not rotate provider or signing credentials in a shared KMS, revoke across replicas, or exercise external breach notification."
+    },
+    {
+      "id": "tenant_isolation_incident",
+      "name": "Cross-tenant authorization or persistence disclosure",
+      "lead_role": "security_response",
+      "coordination_role": "incident_commander",
+      "objective": "Keep session discovery and revocation scoped to the authenticated organization and retain only bounded metadata.",
+      "test_ids": [
+        "tests.test_session_store.SessionStoreTests.test_admin_listing_and_revocation_are_tenant_scoped_and_metadata_only"
+      ],
+      "runbook": "docs/INCIDENT_RESPONSE.md#tenant-isolation-incident",
+      "production_gap": "This SQLite application-scope regression is not production PostgreSQL RLS, cache-key isolation, multi-replica containment, or independent penetration evidence."
+    },
+    {
+      "id": "stale_context_incident",
+      "name": "Stale, poisoned, or contradictory context reaches a model",
+      "lead_role": "context_response",
+      "coordination_role": "incident_commander",
+      "objective": "Invalidate verified context when its source or dependency changes while deferring rather than guessing when trusted observation is missing.",
+      "test_ids": [
+        "tests.test_context_lifecycle.ContextLifecycleDomainTests.test_source_and_dependency_changes_invalidate_but_missing_observation_defers"
+      ],
+      "runbook": "docs/INCIDENT_RESPONSE.md#stale-context-incident",
+      "production_gap": "This deterministic lifecycle regression does not exercise automatic source collectors, semantic poisoning detection, continuation binding, or customer-specific retrieval quality."
+    },
+    {
+      "id": "cost_spike",
+      "name": "Unexpected token spend, budget bypass, or accounting drift",
+      "lead_role": "cost_response",
+      "coordination_role": "incident_commander",
+      "objective": "Deny a request before provider work when conservative reservation would exceed the organization budget and release no reservation leak.",
+      "test_ids": [
+        "tests.test_gateway.GatewayIntegrationTests.test_request_is_denied_when_conservative_reservation_would_exceed_budget"
+      ],
+      "runbook": "docs/INCIDENT_RESPONSE.md#cost-spike",
+      "production_gap": "This local budget gate does not exercise live provider billing lag, shared atomic reservations, invoice reconciliation, alert delivery, or finance escalation."
+    },
+    {
+      "id": "data_deletion_request",
+      "name": "Customer export, deletion, residency, or legal-hold request",
+      "lead_role": "privacy_response",
+      "coordination_role": "incident_commander",
+      "objective": "Reject deletion that would break a supersession reference, then physically remove an eligible governed-context record and its plaintext from local storage.",
+      "test_ids": [
+        "tests.test_context_store.ContextStoreTests.test_supersession_cycle_reference_and_physical_delete_guards"
+      ],
+      "runbook": "docs/INCIDENT_RESPONSE.md#data-deletion-request",
+      "production_gap": "This local governed-context deletion does not cover complete tenant erasure, usage and audit retention, backups, legal holds, provider-side data, residency, or deletion attestations."
+    }
+  ]
+}
