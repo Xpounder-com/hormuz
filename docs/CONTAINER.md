@@ -53,7 +53,8 @@ Start from `config.example.json` and make these container-specific changes:
 - set `context_database` to `/var/lib/hormuz/context.sqlite3`; and
 - keep `listen.shutdown_grace_seconds` below the deployment platform's termination grace;
 - size `listen.max_connections` above `listen.max_concurrent_requests` so probes and ordinary header parsing retain headroom; and
-- keep the absolute `listen.request_header_timeout_seconds` aligned with the outer proxy's stricter header deadline.
+- keep the absolute `listen.request_header_timeout_seconds` aligned with the outer proxy's stricter header deadline; and
+- keep `listen.request_body_timeout_seconds` and `max_request_bytes` within the outer proxy's independently enforced body-time and body-size limits.
 
 Mount that file read-only at `/etc/hormuz/hormuz.json`. Do not bake provider keys, identity credentials, OIDC secrets, approval keys, or customer configuration into the image.
 

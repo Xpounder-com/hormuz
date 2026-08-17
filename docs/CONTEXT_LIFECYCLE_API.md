@@ -100,12 +100,14 @@ Organization is deliberately absent and comes from the authenticated identity. T
 | HTTP | Code | Meaning |
 | --- | --- | --- |
 | `400` | `invalid_json` | The body is not strict JSON. |
+| `400` | `incomplete_request_body` | The connection ended before the announced `Content-Length` was received. |
 | `400` | `context_lifecycle_invalid_request` | The versioned schema or a field is invalid. |
 | `401` | existing authentication code | The credential is absent, invalid, expired, or revoked. |
 | `403` | `context_promotion_forbidden` | The identity lacks `context_promoter`. |
 | `403` | `context_lifecycle_disabled` | Lifecycle automation is not enabled. |
 | `403` | `context_lifecycle_scope_denied` | The envelope organization differs from authenticated scope. |
 | `403` | `context_lifecycle_policy_denied` | A requested batch exceeds organization policy. |
+| `408` | `request_body_timeout` | The complete announced body was not received within the configured absolute request-body deadline. |
 | `409` | `context_lifecycle_conflict` | Record version, snapshot version, lease, or frozen state conflicts. |
 | `413` | `request_too_large` | The request exceeds its endpoint limit. |
 | `429` | `context_rate_limited` | The actor exceeded the server-owned context limit; honor `Retry-After`. |

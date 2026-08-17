@@ -92,6 +92,8 @@ MAX_DLP_APPROVAL_REQUEST_BYTES = 2 * 1024
 MAX_PROVIDER_QUERY_DECODE_DEPTH = 3
 MAX_PROVIDER_REQUEST_HEADER_BYTES = 1024
 CONNECTION_CAPACITY_LOG_INTERVAL_SECONDS = 5.0
+REQUEST_BODY_DEADLINE_LOG_INTERVAL_SECONDS = 5.0
+REQUEST_BODY_READ_CHUNK_BYTES = 64 * 1024
 _CONTEXT_SCOPE_HEADERS = (
     ("X-Hormuz-Repository", "repository_id"),
     ("X-Hormuz-Branch", "branch"),
@@ -278,6 +280,8 @@ class GatewayServer(ThreadingHTTPServer):
         self._header_watchdog_stopped = False
         self._last_connection_capacity_log: float | None = None
         self._suppressed_connection_capacity_logs = 0
+        self._last_body_deadline_log: float | None = None
+        self._suppressed_body_deadline_logs = 0
         self._shutdown_lock = threading.Lock()
         self._shutdown_started = False
         self.config = config
@@ -432,6 +436,27 @@ class GatewayServer(ThreadingHTTPServer):
         LOGGER.warning(
             "connection_capacity_exhausted limit=%d suppressed=%d",
             self.config.listen.max_connections,
+            suppressed,
+        )
+
+    def _log_request_body_deadline_exceeded(self) -> None:
+        """Rate-limit a content-free diagnostic for slow request bodies."""
+
+        now = time.monotonic()
+        with self._request_condition:
+            last_log = self._last_body_deadline_log
+            if (
+                last_log is not None
+                and now - last_log < REQUEST_BODY_DEADLINE_LOG_INTERVAL_SECONDS
+            ):
+                self._suppressed_body_deadline_logs += 1
+                return
+            suppressed = self._suppressed_body_deadline_logs
+            self._suppressed_body_deadline_logs = 0
+            self._last_body_deadline_log = now
+        LOGGER.warning(
+            "request_body_deadline_exceeded timeout_seconds=%d suppressed=%d",
+            self.config.listen.request_body_timeout_seconds,
             suppressed,
         )
 
@@ -591,6 +616,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
 
     def handle_one_request(self) -> None:
         self._hormuz_request_admission = _REQUEST_DRAINING
+        self._hormuz_request_body_deadline: float | None = None
         self.server.arm_request_header_deadline(self.connection)
         try:
             super().handle_one_request()
@@ -605,6 +631,11 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         finally:
             self.server.request_header_finished(self.connection)
         if parsed:
+            if self.command in {"POST", "PUT"}:
+                self._hormuz_request_body_deadline = (
+                    time.monotonic()
+                    + self.server.config.listen.request_body_timeout_seconds
+                )
             path = urlsplit(self.path).path
             if path in {"/health", "/health/live", "/health/ready"}:
                 self._hormuz_request_admission = _REQUEST_PROBE
@@ -3270,7 +3301,9 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 close_connection=True,
             )
             return None
-        data = self.rfile.read(content_length)
+        data = self._read_request_body(content_length)
+        if data is None:
+            return None
         try:
             value = json.loads(
                 data,
@@ -3284,6 +3317,62 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             self._send_error("invalid_request", "Request body must be a JSON object", HTTPStatus.BAD_REQUEST)
             return None
         return value
+
+    def _read_request_body(self, content_length: int) -> bytes | None:
+        deadline = self._hormuz_request_body_deadline
+        if deadline is None:
+            deadline = (
+                time.monotonic()
+                + self.server.config.listen.request_body_timeout_seconds
+            )
+        previous_timeout = self.connection.gettimeout()
+        remaining_bytes = content_length
+        chunks: list[bytes] = []
+        timed_out = False
+        try:
+            while remaining_bytes:
+                remaining_seconds = deadline - time.monotonic()
+                if remaining_seconds <= 0:
+                    timed_out = True
+                    break
+                try:
+                    self.connection.settimeout(remaining_seconds)
+                    chunk = self.rfile.read1(
+                        min(REQUEST_BODY_READ_CHUNK_BYTES, remaining_bytes)
+                    )
+                except socket.timeout:
+                    timed_out = True
+                    break
+                except OSError:
+                    break
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                remaining_bytes -= len(chunk)
+        finally:
+            try:
+                self.connection.settimeout(previous_timeout)
+            except OSError:
+                pass
+
+        if timed_out:
+            self.server._log_request_body_deadline_exceeded()
+            self._send_error(
+                "request_body_timeout",
+                "Request body deadline exceeded",
+                HTTPStatus.REQUEST_TIMEOUT,
+                close_connection=True,
+            )
+            return None
+        if remaining_bytes:
+            self._send_error(
+                "incomplete_request_body",
+                "Request body ended before Content-Length bytes were received",
+                HTTPStatus.BAD_REQUEST,
+                close_connection=True,
+            )
+            return None
+        return b"".join(chunks)
 
     def _upstream_url(self, upstream: UpstreamConfig, forwarded_query: str) -> str:
         request_parts = urlsplit(self.path)

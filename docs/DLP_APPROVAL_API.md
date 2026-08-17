@@ -73,11 +73,13 @@ Errors use the standard Hormuz envelope:
 
 | HTTP | Code | Meaning |
 | --- | --- | --- |
+| `400` | `incomplete_request_body` | The connection ended before the announced `Content-Length` was received. |
 | `400` | `invalid_dlp_approval_decision` | Body is not the exact version-1 approve contract. |
 | `401` | `unauthorized` | Credential is missing or invalid. |
 | `403` | `dlp_approval_forbidden` | Capability is absent or the decision is self-approval. |
 | `404` | `dlp_approval_disabled` | Approval workflow is disabled. |
 | `404` | `dlp_approval_not_found` | ID is absent or belongs to another organization. |
+| `408` | `request_body_timeout` | The complete announced body was not received within the configured absolute request-body deadline. |
 | `409` | `dlp_approval_conflict` | Request is expired, consumed, replayed, or already decided by someone else. |
 | `503` | `dlp_approval_unavailable` | Durable approval state cannot be read or committed. |
 

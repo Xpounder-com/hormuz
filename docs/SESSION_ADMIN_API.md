@@ -118,6 +118,22 @@ A saved administrator human-session profile can replace the environment credenti
 
 Organization scope omits `target`. The response includes the same scope, target, reason code, and `revoked_sessions` count. Unknown, repeated, malformed, cross-tenant, and unsupported fields fail closed with stable JSON errors.
 
+## Stable errors
+
+All routes use the standard Hormuz JSON error envelope. The mutation route can
+also fail at the shared HTTP body-ingress boundary before JSON parsing:
+
+| HTTP | Code | Meaning |
+| --- | --- | --- |
+| `400` | `incomplete_request_body` | The connection ended before the announced `Content-Length` was received. |
+| `400` | `invalid_session_list_request` | Session-list query fields are invalid. |
+| `400` | `invalid_session_event_request` | Session-event query fields are invalid. |
+| `400` | `invalid_session_revocation` | The revocation body is malformed or violates its scope contract. |
+| `401` | `unauthorized` | The credential is missing or invalid. |
+| `403` | `session_admin_capability_required` | The authenticated identity lacks the explicit administrator capability. |
+| `408` | `request_body_timeout` | The complete announced body was not received within the configured absolute request-body deadline. |
+| `503` | `session_admin_unavailable` | Durable session administration state cannot be read or committed. |
+
 ## Persistence and security boundary
 
 Session-store schema version 2 binds each newly issued session to the event-time organization, actor, team, clearance, and AI client. On every use, Hormuz compares that binding with the current authoritative issuer-subject mapping. Changing the organization, actor, team, clearance, or allowed client revokes the session before policy or provider work.

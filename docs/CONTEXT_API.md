@@ -128,7 +128,15 @@ Context Pack v1 is deliberately not paginated. One response is bounded by the or
 
 ## Compatibility
 
-This change is additive within `hormuz.context-pack.v1`: the route, required request fields, field types, authentication, status codes, and error envelope are unchanged. Clients must ignore unknown response fields and already had to handle the existing `complete`, `partial`, and `requires_resolution` outcomes. The new version fields make the active retrieval and rendering behavior explicit; no route or request migration is required.
+The context-pack response additions are additive within
+`hormuz.context-pack.v1`: the route, required request fields, field types, and
+authentication are unchanged. Clients must ignore unknown response fields and
+already had to handle the existing `complete`, `partial`, and
+`requires_resolution` outcomes. The shared HTTP ingress boundary additionally
+returns `400 incomplete_request_body` or `408 request_body_timeout` when it
+cannot receive the complete announced body; both use the existing error
+envelope and close the connection. The version fields make the active retrieval
+and rendering behavior explicit; no route or request migration is required.
 
 ## Errors
 
@@ -145,17 +153,19 @@ Errors have a stable envelope:
 
 | Status | Code | Meaning |
 | --- | --- | --- |
+| `400` | `incomplete_request_body` | The connection ended before the announced `Content-Length` was received. |
 | `400` | `context_invalid_request` | Invalid type, value, scope combination, query, or unknown field. |
 | `401` | `unauthorized` | Missing or invalid Hormuz credential. |
 | `403` | `context_policy_denied` | Requested budget, item cap, clearance, or provisional access exceeds policy. |
+| `408` | `request_body_timeout` | The complete announced body was not received within the configured absolute request-body deadline. |
 | `413` | `request_too_large` | JSON body exceeds the context route's `64 KiB` ceiling or the lower configured global limit. |
 | `429` | `context_rate_limited` | Per-actor local request limit exceeded; inspect `Retry-After`. |
 | `503` | `context_store_unavailable` | The governed-context repository failed closed. |
 
 Internal storage errors are logged without query or record content and are not returned to the caller.
-Authentication, rate-limit, unknown-route, and oversized-body rejections close
-the HTTP/1.1 connection when a request body may remain unread, preventing the
-body from being interpreted as a subsequent request.
+Authentication, rate-limit, unknown-route, oversized-body, incomplete-body, and
+body-deadline rejections close the HTTP/1.1 connection when a request body may
+remain unread, preventing it from being interpreted as a subsequent request.
 
 ## Security and side-effect boundary
 

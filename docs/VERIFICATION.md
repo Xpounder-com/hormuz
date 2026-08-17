@@ -824,6 +824,25 @@ A failure-first transport-boundary review was exercised locally on August 16, 20
 
 This closes unbounded accepted connection workers and complete request-header duration for one Hormuz process, not production deployment issue #11. A total ingress-body deadline, kernel accept-backlog policy, per-source limits, cross-replica coordination, reverse-proxy/WAF controls, TLS ingress, shared persistence, HA, backup/restore, RPO/RTO, KMS, and independent security review remain open.
 
+### Total request-body deadline and exact-length ingestion
+
+A failure-first ingress-body review was exercised locally on August 16, 2026 through real TCP sockets against the Hormuz HTTP server. No live provider credential or endpoint was used.
+
+- source inspection found one blocking `rfile.read(Content-Length)` with no application-owned total deadline. The failure-first configuration, diagnostic, and real-socket tests were red because no body-deadline setting or enforcement path existed; the completed test now sends body bytes every 100 milliseconds and proves they cannot extend the one-second test deadline;
+- a second red test announced seven bytes, sent the complete valid JSON object `{}`, and half-closed the client write side. Before the change, Hormuz accepted the short body as valid JSON and reached application validation despite the unmet `Content-Length` contract;
+- `listen.request_body_timeout_seconds` now defaults to `30`, accepts only `1` through `600`, and defaults safely for existing configuration files. Its absolute deadline starts when `POST` or `PUT` headers finish and is recomputed as the maximum wait for every bounded body-read step, so continuous trickle cannot extend it;
+- deadline expiry returns fixed `408 request_body_timeout` with `Connection: close`. Its rate-limited `request_body_deadline_exceeded` diagnostic contains only the configured numeric timeout and suppressed-event count. The adversarial body marker was absent from logs and the response, and no provider request or usage row was created;
+- early EOF now returns fixed `400 incomplete_request_body` with `Connection: close` before JSON expansion, policy, provider work, or usage accounting;
+- focused configuration/default/bounds, installed-operator diagnostics, continuous-trickle, keep-alive re-arm, early-EOF, capacity-release, recovery, content-free logging, provider non-invocation, and usage non-accounting tests pass; and
+- the deadline ends after exact body receipt and the prior socket mode is restored, preserving normal OpenAI, Anthropic, context, lifecycle, approval, and session request handling. Provider response streaming remains governed by its separate total response deadline;
+- the complete 357-test source suite passed in `123.470` seconds. The environment-gated official Claude Code executable case was the sole local skip;
+- isolated source and wheel builds succeeded. The exact clean-install-tested wheel SHA-256 was `07937679afe655689f92a52f99a2ff78a64b57739052ed381c2b653e81f836f0`; the source archive is not self-hashed inside this embedded record because changing the record changes that archive;
+- a clean Python 3.12 environment outside the checkout imported Hormuz from `site-packages`, displayed the effective `256`-connection ceiling, `15`-second header deadline, `30`-second body deadline, `128`-request capacity, and `600`-second provider-response deadline through installed `doctor`, displayed CLI help, and compiled the installed package;
+- the installed strict 60-task release benchmark passed with precision, recall, and useful-pack rate `1.00`, zero authorization, lifecycle, dependency, contradiction, malicious-context, determinism, or token-budget failures, mean compression `0.840593`, and governed p95 selection latency `0.271708 ms`; and
+- deterministic corpus verification retained SHA-256 `9822d592868202c7c7539bcdac7d4a5894c01f9e6dba7a434846516b67b32c17`. Source/test bytecode compilation, `git diff --check`, and high-confidence tracked-source plus extracted-wheel and extracted-source-archive credential scans passed. Remote CI evidence follows after publication.
+
+This closes total application-owned request-body duration and exact announced-length ingestion for one Hormuz process, not production deployment issue #11. Kernel accept-backlog policy, per-source limits, cross-replica coordination, reverse-proxy/WAF enforcement, operating-system DNS behavior, TLS ingress, shared persistence, HA, backup/restore, RPO/RTO, KMS, and independent security review remain open.
+
 ### Remote provider HTTPS enforcement
 
 The provider-upstream configuration boundary was exercised locally on August 16, 2026 without a live provider credential or remote provider request.

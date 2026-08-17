@@ -216,6 +216,7 @@ class ClientConfigTests(unittest.TestCase):
             raw = json.loads((ROOT / "config.example.json").read_text(encoding="utf-8"))
             raw["listen"].pop("max_connections")
             raw["listen"].pop("request_header_timeout_seconds")
+            raw["listen"].pop("request_body_timeout_seconds", None)
             path.write_text(json.dumps(raw), encoding="utf-8")
             defaulted = GatewayConfig.load(
                 path,
@@ -223,9 +224,11 @@ class ClientConfigTests(unittest.TestCase):
             )
             self.assertEqual(defaulted.listen.max_connections, 256)
             self.assertEqual(defaulted.listen.request_header_timeout_seconds, 15)
+            self.assertEqual(defaulted.listen.request_body_timeout_seconds, 30)
 
             raw["listen"]["max_connections"] = 64
             raw["listen"]["request_header_timeout_seconds"] = 20
+            raw["listen"]["request_body_timeout_seconds"] = 45
             path.write_text(json.dumps(raw), encoding="utf-8")
             config = GatewayConfig.load(
                 path,
@@ -233,10 +236,12 @@ class ClientConfigTests(unittest.TestCase):
             )
             self.assertEqual(config.listen.max_connections, 64)
             self.assertEqual(config.listen.request_header_timeout_seconds, 20)
+            self.assertEqual(config.listen.request_body_timeout_seconds, 45)
 
             for field, invalid_values in (
                 ("max_connections", (0, 10_001)),
                 ("request_header_timeout_seconds", (0, 121)),
+                ("request_body_timeout_seconds", (0, 601)),
             ):
                 for invalid in invalid_values:
                     raw["listen"][field] = invalid
@@ -249,7 +254,11 @@ class ClientConfigTests(unittest.TestCase):
                             path,
                             environ={"HORMUZ_TOKEN": "test-identity-token"},
                         )
-                raw["listen"][field] = 64 if field == "max_connections" else 20
+                raw["listen"][field] = {
+                    "max_connections": 64,
+                    "request_header_timeout_seconds": 20,
+                    "request_body_timeout_seconds": 45,
+                }[field]
 
     def test_doctor_reports_effective_request_resource_limits(self) -> None:
         output = io.StringIO()
@@ -269,6 +278,7 @@ class ClientConfigTests(unittest.TestCase):
         self.assertIn("max concurrent requests: 128", output.getvalue())
         self.assertIn("max concurrent connections: 256", output.getvalue())
         self.assertIn("request-header deadline: 15 seconds", output.getvalue())
+        self.assertIn("request-body deadline: 30 seconds", output.getvalue())
         self.assertIn("upstream response deadline: 600 seconds", output.getvalue())
 
     def test_provider_upstreams_require_https_outside_loopback(self) -> None:

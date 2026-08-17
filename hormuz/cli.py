@@ -906,6 +906,10 @@ def _doctor(config: GatewayConfig) -> int:
         "request-header deadline: "
         f"{config.listen.request_header_timeout_seconds} seconds"
     )
+    print(
+        "request-body deadline: "
+        f"{config.listen.request_body_timeout_seconds} seconds"
+    )
     print(f"upstream response deadline: {config.upstream_timeout_seconds} seconds")
     print(f"actors: {len(config.identities_by_actor)}")
     print(f"static identities: {len(config.identities_by_token)}")
