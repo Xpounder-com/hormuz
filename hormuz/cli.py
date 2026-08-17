@@ -94,6 +94,14 @@ def build_parser() -> argparse.ArgumentParser:
         default=os.environ.get("HORMUZ_CONFIG", "hormuz.json"),
         help="Path to Hormuz JSON configuration (default: hormuz.json or HORMUZ_CONFIG)",
     )
+    parser.add_argument(
+        "--expected-config-sha256",
+        default=os.environ.get("HORMUZ_CONFIG_SHA256"),
+        help=(
+            "Require the exact configuration-file SHA-256 "
+            "(default: HORMUZ_CONFIG_SHA256 when set)"
+        ),
+    )
     parser.add_argument("--verbose", action="store_true", help="Enable request-boundary logs")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -837,7 +845,10 @@ def main(argv: list[str] | None = None) -> int:
             print(f"MCP configuration error: {error}", file=sys.stderr)
             return 2
     try:
-        config = GatewayConfig.load(args.config)
+        config = GatewayConfig.load(
+            args.config,
+            expected_sha256=args.expected_config_sha256,
+        )
         if args.command == "serve":
             return _serve(config)
         if args.command == "doctor":
@@ -939,6 +950,7 @@ def _serve(config: GatewayConfig) -> int:
 
 def _doctor(config: GatewayConfig) -> int:
     print(f"configuration: {config.source_path}")
+    print(f"configuration SHA-256: {config.source_sha256}")
     print(f"listener: http://{config.listen.host}:{config.listen.port}")
     print(f"shutdown grace: {config.listen.shutdown_grace_seconds} seconds")
     print(f"max concurrent requests: {config.listen.max_concurrent_requests}")

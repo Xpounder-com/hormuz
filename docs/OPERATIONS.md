@@ -6,7 +6,7 @@ This document defines the current process-level health and shutdown contract. It
 
 Hormuz strictly validates its complete configuration before constructing `GatewayServer`; unknown fields and unresolved or ambiguous policy scopes fail startup. The accepted configuration is immutable for the process lifetime. Hormuz does not implement `SIGHUP` or in-place reload because authenticators, policy engines, redactors, rate limiters, database handles, and secret-derived state must change as one coherent snapshot.
 
-Run `hormuz --config CANDIDATE doctor` with the exact target package and target secret/network environment, start a replacement revision, wait for liveness and readiness, then shift traffic and drain the old revision. Retain the previous image digest and configuration artifact as the rollback pair. `doctor` performs OIDC discovery/JWKS validation when configured, but does not issue provider generation requests. See [CONFIGURATION.md](CONFIGURATION.md) for the strict schema, secret boundary, and full change procedure.
+Run `hormuz --config CANDIDATE doctor` with the exact target package and target secret/network environment, record its printed configuration SHA-256 in the separately controlled deployment definition, and require that digest when starting the replacement revision. Wait for liveness and readiness, then shift traffic and drain the old revision. Retain the previous image digest, configuration artifact, and expected configuration digest as the rollback set. `doctor` performs OIDC discovery/JWKS validation when configured, but does not issue provider generation requests. See [CONFIGURATION.md](CONFIGURATION.md) for the strict schema, exact-file binding, secret boundary, and full change procedure.
 
 ## Health endpoints
 

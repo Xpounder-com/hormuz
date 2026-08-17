@@ -358,6 +358,201 @@ class ClientConfigTests(unittest.TestCase):
             self.assertIn("Unknown gateway configuration fields", error.getvalue())
             self.assertNotIn(sentinel, error.getvalue())
 
+    def test_configuration_json_rejects_duplicate_members_without_reflection(self) -> None:
+        sentinel = "company_secret_duplicate_key_3f2b91"
+        cases = (
+            '{"listen":{},"listen":{"port":8788}}',
+            '{"listen":{},"\\u006cisten":{"port":8788}}',
+            '{"listen":{"port":8787,"port":8788}}',
+            '{"policies":{"organization":{},"organization":{"max_output_tokens":1}}}',
+            '{"listen":{},"' + sentinel + '":1,"' + sentinel + '":2}',
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "hormuz.json"
+            for raw in cases:
+                with self.subTest(raw=raw[:48]):
+                    path.write_text(raw, encoding="utf-8")
+                    with self.assertRaisesRegex(
+                        ConfigError,
+                        "Configuration JSON contains duplicate object members",
+                    ) as captured:
+                        GatewayConfig.load(
+                            path,
+                            environ={"HORMUZ_TOKEN": "test-identity-token"},
+                        )
+                    self.assertNotIn(sentinel, str(captured.exception))
+
+    def test_configuration_json_rejects_nonstandard_numbers_and_invalid_utf8(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "hormuz.json"
+            for constant in ("NaN", "Infinity", "-Infinity"):
+                with self.subTest(constant=constant):
+                    path.write_text(
+                        '{"max_request_bytes":' + constant + "}",
+                        encoding="utf-8",
+                    )
+                    with self.assertRaisesRegex(
+                        ConfigError,
+                        "Configuration JSON contains a non-standard number",
+                    ):
+                        GatewayConfig.load(
+                            path,
+                            environ={"HORMUZ_TOKEN": "test-identity-token"},
+                        )
+
+            path.write_bytes(b'{"listen":"\xff"}')
+            with self.assertRaisesRegex(
+                ConfigError,
+                "Configuration file must be valid UTF-8 JSON",
+            ):
+                GatewayConfig.load(
+                    path,
+                    environ={"HORMUZ_TOKEN": "test-identity-token"},
+                )
+
+            baseline = (ROOT / "config.example.json").read_text(encoding="utf-8")
+            path.write_text(
+                baseline.replace(
+                    '"input_cost_per_million": 0.75',
+                    '"input_cost_per_million": 1e9999',
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ConfigError, "must be a non-negative finite number"):
+                GatewayConfig.load(
+                    path,
+                    environ={"HORMUZ_TOKEN": "test-identity-token"},
+                )
+
+    def test_configuration_json_complexity_failures_have_fixed_diagnostics(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "hormuz.json"
+            cases = (
+                (
+                    '{"max_request_bytes":' + ("9" * 5_000) + "}",
+                    "Configuration file must be valid UTF-8 JSON",
+                ),
+                (
+                    '{"listen":' + ("[" * 2_000) + "0" + ("]" * 2_000) + "}",
+                    "Configuration JSON exceeds structural limits",
+                ),
+                (
+                    '{"listen":[' + ("0," * 100_000) + "0]}",
+                    "Configuration JSON exceeds structural limits",
+                ),
+            )
+            for raw, expected in cases:
+                with self.subTest(length=len(raw)):
+                    path.write_text(raw, encoding="utf-8")
+                    with self.assertRaisesRegex(
+                        ConfigError,
+                        expected,
+                    ):
+                        GatewayConfig.load(
+                            path,
+                            environ={"HORMUZ_TOKEN": "test-identity-token"},
+                        )
+
+    def test_configuration_file_size_is_bounded_before_json_decode(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "hormuz.json"
+            path.write_bytes(b'{"padding":"' + (b"x" * 1_048_576) + b'"}')
+            with self.assertRaisesRegex(
+                ConfigError,
+                "Configuration file exceeds 1048576 bytes",
+            ):
+                GatewayConfig.load(
+                    path,
+                    environ={"HORMUZ_TOKEN": "test-identity-token"},
+                )
+
+    def test_exact_configuration_digest_is_enforced_and_reported(self) -> None:
+        expected = hashlib.sha256(
+            (ROOT / "config.example.json").read_bytes()
+        ).hexdigest()
+        config = GatewayConfig.load(
+            ROOT / "config.example.json",
+            environ={"HORMUZ_TOKEN": "test-identity-token"},
+            expected_sha256=expected,
+        )
+        self.assertEqual(config.source_sha256, expected)
+
+        with self.assertRaisesRegex(ConfigError, "Configuration digest mismatch"):
+            GatewayConfig.load(
+                ROOT / "config.example.json",
+                environ={"HORMUZ_TOKEN": "test-identity-token"},
+                expected_sha256="0" * 64,
+            )
+        with tempfile.TemporaryDirectory() as temporary:
+            changed_path = Path(temporary) / "hormuz.json"
+            changed_path.write_bytes(
+                (ROOT / "config.example.json").read_bytes() + b"\n"
+            )
+            with self.assertRaisesRegex(ConfigError, "Configuration digest mismatch"):
+                GatewayConfig.load(
+                    changed_path,
+                    environ={"HORMUZ_TOKEN": "test-identity-token"},
+                    expected_sha256=expected,
+                )
+        for invalid in ("", "A" * 64, "g" * 64, "0" * 63, "0" * 65):
+            with self.subTest(invalid=invalid[:16]), self.assertRaisesRegex(
+                ConfigError,
+                "Expected configuration SHA-256 must be 64 lowercase hexadecimal characters",
+            ):
+                GatewayConfig.load(
+                    ROOT / "config.example.json",
+                    environ={"HORMUZ_TOKEN": "test-identity-token"},
+                    expected_sha256=invalid,
+                )
+
+    def test_cli_enforces_environment_or_argument_configuration_digest(self) -> None:
+        expected = hashlib.sha256(
+            (ROOT / "config.example.json").read_bytes()
+        ).hexdigest()
+        environment = {
+            "HORMUZ_TOKEN": "test-identity-token",
+            "OPENAI_API_KEY": "synthetic-openai-provider-key",
+            "ANTHROPIC_API_KEY": "synthetic-anthropic-provider-key",
+        }
+        with (
+            mock.patch.dict(
+                os.environ,
+                {**environment, "HORMUZ_CONFIG_SHA256": "0" * 64},
+                clear=True,
+            ),
+            redirect_stdout(io.StringIO()),
+            redirect_stderr(io.StringIO()) as error,
+        ):
+            self.assertEqual(
+                main(["--config", str(ROOT / "config.example.json"), "doctor"]),
+                2,
+            )
+        self.assertIn("Configuration digest mismatch", error.getvalue())
+
+        with (
+            mock.patch.dict(
+                os.environ,
+                {**environment, "HORMUZ_CONFIG_SHA256": "0" * 64},
+                clear=True,
+            ),
+            redirect_stdout(io.StringIO()) as output,
+            redirect_stderr(io.StringIO()),
+        ):
+            self.assertEqual(
+                main(
+                    [
+                        "--config",
+                        str(ROOT / "config.example.json"),
+                        "--expected-config-sha256",
+                        expected,
+                        "doctor",
+                    ]
+                ),
+                0,
+            )
+        self.assertIn(f"configuration SHA-256: {expected}", output.getvalue())
+
     def test_policy_scope_references_fail_closed_without_reflection(self) -> None:
         sentinel = "company_secret_scope_467c8f17"
         with tempfile.TemporaryDirectory() as temporary:

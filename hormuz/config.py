@@ -3,8 +3,10 @@ from __future__ import annotations
 import base64
 import binascii
 import hashlib
+import hmac
 import ipaddress
 import json
+import math
 import os
 import re
 from dataclasses import dataclass, field
@@ -17,6 +19,75 @@ from .context_lifecycle import LifecyclePolicy
 
 class ConfigError(ValueError):
     pass
+
+
+MAX_CONFIG_BYTES = 1_048_576
+MAX_CONFIG_DEPTH = 64
+MAX_CONFIG_NODES = 100_000
+_SHA256_PATTERN = re.compile(r"[0-9a-f]{64}\Z")
+
+
+def _load_configuration_json(source_path: Path) -> tuple[Any, str]:
+    try:
+        encoded = source_path.read_bytes()
+    except FileNotFoundError as error:
+        raise ConfigError(f"Configuration file does not exist: {source_path}") from error
+    except OSError as error:
+        raise ConfigError(f"Configuration file could not be read: {source_path}") from error
+    if len(encoded) > MAX_CONFIG_BYTES:
+        raise ConfigError(f"Configuration file exceeds {MAX_CONFIG_BYTES} bytes")
+    source_sha256 = hashlib.sha256(encoded).hexdigest()
+    try:
+        text = encoded.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise ConfigError("Configuration file must be valid UTF-8 JSON") from error
+    try:
+        value = json.loads(
+            text,
+            object_pairs_hook=_configuration_object,
+            parse_constant=_reject_configuration_constant,
+        )
+    except ConfigError:
+        raise
+    except (json.JSONDecodeError, RecursionError, ValueError) as error:
+        raise ConfigError("Configuration file must be valid UTF-8 JSON") from error
+    _validate_configuration_structure(value)
+    return value, source_sha256
+
+
+def _configuration_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    value: dict[str, Any] = {}
+    for key, item in pairs:
+        if key in value:
+            raise ConfigError("Configuration JSON contains duplicate object members")
+        value[key] = item
+    return value
+
+
+def _reject_configuration_constant(_: str) -> None:
+    raise ConfigError("Configuration JSON contains a non-standard number")
+
+
+def _validate_configuration_structure(value: Any) -> None:
+    pending: list[tuple[Any, int]] = [(value, 1)]
+    nodes = 0
+    while pending:
+        current, depth = pending.pop()
+        nodes += 1
+        if depth > MAX_CONFIG_DEPTH or nodes > MAX_CONFIG_NODES:
+            raise ConfigError("Configuration JSON exceeds structural limits")
+        if isinstance(current, dict):
+            children = current.values()
+        elif isinstance(current, list):
+            children = current
+        else:
+            continue
+        if (
+            (depth >= MAX_CONFIG_DEPTH and len(children) > 0)
+            or nodes + len(pending) + len(children) > MAX_CONFIG_NODES
+        ):
+            raise ConfigError("Configuration JSON exceeds structural limits")
+        pending.extend((item, depth + 1) for item in children)
 
 
 @dataclass(frozen=True)
@@ -278,6 +349,7 @@ class GatewayConfig:
     identities_by_token: dict[str, Identity]
     model_routes: dict[str, ModelRoute]
     organization_policy: Policy
+    source_sha256: str
     context_service: ContextServiceConfig = field(default_factory=ContextServiceConfig)
     session_broker: SessionBrokerConfig = field(default_factory=SessionBrokerConfig)
     oidc_issuers: dict[str, OIDCIssuerConfig] = field(default_factory=dict)
@@ -292,14 +364,24 @@ class GatewayConfig:
     upstream_timeout_seconds: int = 600
 
     @classmethod
-    def load(cls, path: str | Path, *, environ: dict[str, str] | None = None) -> "GatewayConfig":
+    def load(
+        cls,
+        path: str | Path,
+        *,
+        environ: dict[str, str] | None = None,
+        expected_sha256: str | None = None,
+    ) -> "GatewayConfig":
         source_path = Path(path).expanduser().resolve()
-        try:
-            raw = json.loads(source_path.read_text(encoding="utf-8"))
-        except FileNotFoundError as error:
-            raise ConfigError(f"Configuration file does not exist: {source_path}") from error
-        except json.JSONDecodeError as error:
-            raise ConfigError(f"Invalid JSON in {source_path}: {error}") from error
+        if expected_sha256 is not None and _SHA256_PATTERN.fullmatch(expected_sha256) is None:
+            raise ConfigError(
+                "Expected configuration SHA-256 must be 64 lowercase hexadecimal characters"
+            )
+        raw, source_sha256 = _load_configuration_json(source_path)
+        if expected_sha256 is not None and not hmac.compare_digest(
+            source_sha256,
+            expected_sha256,
+        ):
+            raise ConfigError("Configuration digest mismatch")
         if not isinstance(raw, dict):
             raise ConfigError("Gateway configuration must be a JSON object")
 
@@ -792,6 +874,7 @@ class GatewayConfig:
             identities_by_token=identities_by_token,
             model_routes=model_routes,
             organization_policy=organization_policy,
+            source_sha256=source_sha256,
             context_service=context_service,
             session_broker=session_broker,
             oidc_issuers=oidc_issuers,
@@ -1922,9 +2005,12 @@ def _optional_integer(value: Any, path: str, *, minimum: int) -> int | None:
 
 
 def _number(value: Any, path: str) -> float:
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
-        raise ConfigError(f"{path} must be a non-negative number")
-    return float(value)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ConfigError(f"{path} must be a non-negative finite number")
+    result = float(value)
+    if not math.isfinite(result) or result < 0:
+        raise ConfigError(f"{path} must be a non-negative finite number")
+    return result
 
 
 def _optional_number(value: Any, path: str) -> float | None:

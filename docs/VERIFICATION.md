@@ -883,6 +883,22 @@ A failure-first configuration-boundary review was exercised locally on August 16
 
 This closes application-owned unknown-field and policy-reference validation at startup, not production deployment issue #11. Published schema versioning, configuration signing and approval, live secret rotation, orchestrated rollout/rollback, shared persistence, HA, backup/restore, KMS/BYOK, and independent security review remain open.
 
+### Bounded configuration artifact integrity
+
+A failure-first configuration-artifact review was exercised locally on August 16, 2026 without a provider request or live credential.
+
+- red tests proved that duplicate root and nested members used Python's last-value-wins behavior, `NaN`/positive or negative `Infinity` reached the ordinary schema, invalid UTF-8 escaped as an unhandled decoder exception, oversized files were fully decoded, and no deployment-supplied exact digest could be enforced;
+- `GatewayConfig.load` now reads at most 1 MiB, decodes one strict UTF-8 JSON document, rejects duplicate members at every nesting level, rejects non-standard numeric constants, and permits at most 64 structural levels and 100,000 decoded nodes. Huge integer conversion, excessive nesting, malformed JSON, and invalid encoding use fixed non-reflective failures;
+- allowed numeric policy fields additionally reject finite-looking JSON exponents that overflow the runtime float representation, so a rate or budget cannot become infinity;
+- every accepted file receives the SHA-256 of its exact bytes. `--expected-config-sha256` or `HORMUZ_CONFIG_SHA256` can require an independently retained 64-character lowercase digest on every config-backed CLI path, including `serve` and `doctor`;
+- an invalid expected value fails before file access, while a mismatch fails before environment-secret resolution, policy construction, database initialization, OIDC discovery, or listener creation. `doctor` reports the accepted exact digest for an authorized operator without returning configuration content;
+- the final six focused failure/integrity methods passed in `0.012` seconds. The broader configuration, CLI, OIDC, and gateway-health set passed 63 tests in `5.840` seconds;
+- the final complete 390-test source suite passed in `124.322` seconds. The environment-gated official Claude Code executable case was the sole local skip; source/test bytecode compilation and `git diff --check` passed; and
+- the frozen 60-task strict release benchmark retained corpus SHA-256 `9822d592868202c7c7539bcdac7d4a5894c01f9e6dba7a434846516b67b32c17`, precision/recall/useful-pack rate `1.00`, mean compression `0.840593`, zero authorization/lifecycle/dependency/malicious/contradiction/budget/determinism/leakage failures, and governed p95 in-process selection latency `0.157417` ms; and
+- an isolated source archive and wheel build from the working tree succeeded with the reviewed local build toolchain. Exact-commit reproducibility and installed-package evidence follow after the implementation is committed.
+
+This closes a bounded parser and artifact-identity gap, not configuration approval. A SHA-256 is neither a signature nor proof of who approved the file; an actor that can replace both file and expected digest bypasses it. Signer identity, protected approval, configuration retention, cross-replica rollout, live secret rotation, shared persistence, HA, backup/restore, KMS/BYOK, and independent security review remain open under issues #11, #17, and #9.
+
 ### Exact-source reproducible Python distributions
 
 A failure-first package-release review was exercised locally on August 16, 2026 without a provider request or credential.

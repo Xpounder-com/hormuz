@@ -84,6 +84,8 @@ Start from `config.example.json` and make these container-specific changes:
 
 Mount that file read-only at `/etc/hormuz/hormuz.json`. Do not bake provider keys, identity credentials, OIDC secrets, approval keys, or customer configuration into the image.
 
+Run the candidate image's `doctor` command first and place the printed exact-file digest in the separately controlled workload environment as `HORMUZ_CONFIG_SHA256`. The ordinary container entrypoint then refuses to start if the mounted bytes differ, including a whitespace-only replacement. The digest is not a secret or signature; do not store it only beside the file it is meant to constrain.
+
 Hormuz currently reads server credentials from configured environment-variable names. In a shared environment, use the platform's secret injector and restrict who can inspect the workload definition or process environment. A local `--env-file` is suitable only for a controlled test, must be mode `0600`, must stay outside the repository, and remains visible to administrators with Docker-inspection access. File-mounted and KMS-backed secret sources are still an open production gate.
 
 ## Run the restricted reference process
