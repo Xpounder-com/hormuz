@@ -810,6 +810,19 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertEqual(recovered_status, 200)
         self.assertEqual(json.loads(recovered_body)["status"], "ready")
 
+    def test_server_activation_applies_the_configured_accept_backlog(self) -> None:
+        server = object.__new__(GatewayServer)
+        server.config = replace(
+            self.config,
+            listen=replace(self.config.listen, accept_backlog=37),
+        )
+        server.socket = mock.Mock()
+
+        server.server_activate()
+
+        self.assertEqual(server.request_queue_size, 37)
+        server.socket.listen.assert_called_once_with(37)
+
     def test_connection_capacity_diagnostics_are_content_free_and_rate_limited(self) -> None:
         with (
             mock.patch("hormuz.server.time.monotonic", side_effect=(100.0, 101.0, 106.0)),

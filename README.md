@@ -37,7 +37,7 @@ Hormuz is alpha software. The local prototype proves routing and policy behavior
 - Generic OIDC authorization-code + PKCE browser login with opaque 10-minute Hormuz access credentials, atomic refresh rotation, replay-family revocation, and fail-closed OS secure-store custody.
 - Capability-gated, tenant-scoped `hormuz sessions` listing, metadata-only security-event inspection, and immediate session, employee, team, or organization revocation.
 - Capability-gated, tenant-scoped `hormuz usage report` administration over the authenticated gateway, with frozen-window pagination, team/person/model/client/provider drill-downs, and mandatory metadata-only read audit.
-- A pre-thread connection ceiling, absolute request-header and request-body deadlines, exact `Content-Length` body ingestion, versioned content-free liveness/readiness endpoints, atomic parsed-request capacity with saturation-aware readiness, a total provider-response relay deadline, and idempotent `SIGTERM` draining with a bounded in-flight request grace period.
+- An explicit kernel accept-backlog hint, pre-thread connection ceiling, absolute request-header and request-body deadlines, exact `Content-Length` body ingestion, versioned content-free liveness/readiness endpoints, atomic parsed-request capacity with saturation-aware readiness, a total provider-response relay deadline, and idempotent `SIGTERM` draining with a bounded in-flight request grace period.
 
 ## Quick start
 
@@ -99,7 +99,7 @@ hormuz --config /etc/hormuz/hormuz.json client-config codex \
 
 The same flags work with `client-config claude`. The effective context policy must independently grant the repository; Hormuz consumes the generated scope headers and never forwards them to a model provider.
 
-For process probes, use `GET /health/live` and `GET /health/ready`. Readiness returns `503 busy` while parsed-request capacity is full and `503 draining` after shutdown begins. Health probes do not consume application capacity, but they require one of the bounded accepted-connection slots. See [docs/OPERATIONS.md](docs/OPERATIONS.md) for the exact connection, header, body, parsed-request, provider-response, and shutdown limits plus the current deployment boundary.
+For process probes, use `GET /health/live` and `GET /health/ready`. Readiness returns `503 busy` while parsed-request capacity is full and `503 draining` after shutdown begins. Health probes do not consume application capacity, but they require one of the bounded accepted-connection slots. See [docs/OPERATIONS.md](docs/OPERATIONS.md) for the exact backlog, connection, header, body, parsed-request, provider-response, and shutdown limits plus the current deployment boundary.
 
 For a repeatable single-node container checkpoint, build the pinned non-root image and run its executable restricted-runtime smoke test:
 

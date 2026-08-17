@@ -344,6 +344,12 @@ class GatewayServer(ThreadingHTTPServer):
         )
         self._header_watchdog.start()
 
+    def server_activate(self) -> None:
+        """Apply the configured kernel accept backlog at socket activation."""
+
+        self.request_queue_size = self.config.listen.accept_backlog
+        super().server_activate()
+
     def process_request(
         self,
         request: socket.socket,

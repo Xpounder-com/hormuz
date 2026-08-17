@@ -4,6 +4,7 @@
     "port": 8787,
     "shutdown_grace_seconds": 30,
     "max_concurrent_requests": 128,
+    "accept_backlog": 256,
     "max_connections": 256,
     "request_header_timeout_seconds": 15,
     "request_body_timeout_seconds": 30

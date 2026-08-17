@@ -843,6 +843,30 @@ A failure-first ingress-body review was exercised locally on August 16, 2026 thr
 
 This closes total application-owned request-body duration and exact announced-length ingestion for one Hormuz process, not production deployment issue #11. Kernel accept-backlog policy, per-source limits, cross-replica coordination, reverse-proxy/WAF enforcement, operating-system DNS behavior, TLS ingress, shared persistence, HA, backup/restore, RPO/RTO, KMS, and independent security review remain open.
 
+### Explicit kernel accept-backlog hint
+
+A failure-first listener-activation review was exercised locally on August 16,
+2026 without a provider request or credential.
+
+- source and runtime inspection confirmed that Hormuz inherited the standard library's fixed backlog value `5` and exposed no configuration or operator diagnostic. The failure-first tests were red because `ListenConfig` had no `accept_backlog` field and activation could not apply an owner-selected value;
+- `listen.accept_backlog` now defaults to `256`, accepts only `1` through `65535`, and defaults safely for existing configuration files. The default aligns with the separate default accepted-connection ceiling but remains independently configurable;
+- `GatewayServer.server_activate` assigns the resolved value before delegating to the standard socket activation path. The activation-level regression test uses an isolated socket double and proves the exact configured value reaches `listen()` rather than being assigned after activation;
+- installed-operator diagnostics expose the effective accept backlog next to the connection, request, header, body, and provider-response controls;
+- the final focused configuration, diagnostic, and activation set passed 3 tests in `1.009` seconds; and
+- the complete 358-test source suite passed in `125.575` seconds. The environment-gated official Claude Code executable case was the sole local skip;
+- isolated source and wheel builds succeeded. The exact clean-install-tested wheel SHA-256 was `f5e18e8a0f3f2d34f2d40935898ef84f19fa0ea14d47dd0f4bf95d8e329e8902`; the source archive is not self-hashed inside this embedded record because changing the record changes that archive;
+- a clean Python 3.12 environment outside the checkout imported Hormuz from `site-packages`, displayed the effective accept backlog of `256` alongside the existing connection and deadline controls through installed `doctor`, displayed CLI help, and compiled the installed package;
+- the installed strict 60-task release benchmark passed with precision, recall, and useful-pack rate `1.00`, zero authorization, lifecycle, dependency, contradiction, malicious-context, determinism, or token-budget failures, mean compression `0.840593`, and governed p95 selection latency `0.163208 ms`; and
+- deterministic corpus verification retained SHA-256 `9822d592868202c7c7539bcdac7d4a5894c01f9e6dba7a434846516b67b32c17`. Source/test bytecode compilation, `git diff --check`, and high-confidence tracked-source plus extracted-wheel and extracted-source-archive credential scans passed. Remote CI evidence follows after publication.
+
+This closes application ownership of the listening socket's accept-backlog hint,
+not production deployment issue #11 or a portable kernel-queue guarantee. The
+operating system may cap or reinterpret the hint, manages SYN queues and global
+network limits independently, and still requires an outer ingress policy.
+Per-source and trusted-proxy controls, TLS ingress, cross-replica coordination,
+shared persistence, HA, backup/restore, RPO/RTO, KMS, and independent security
+review remain open.
+
 ### Remote provider HTTPS enforcement
 
 The provider-upstream configuration boundary was exercised locally on August 16, 2026 without a live provider credential or remote provider request.

@@ -901,6 +901,7 @@ def _doctor(config: GatewayConfig) -> int:
     print(f"listener: http://{config.listen.host}:{config.listen.port}")
     print(f"shutdown grace: {config.listen.shutdown_grace_seconds} seconds")
     print(f"max concurrent requests: {config.listen.max_concurrent_requests}")
+    print(f"accept backlog: {config.listen.accept_backlog}")
     print(f"max concurrent connections: {config.listen.max_connections}")
     print(
         "request-header deadline: "

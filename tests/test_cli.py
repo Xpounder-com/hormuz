@@ -214,6 +214,7 @@ class ClientConfigTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "hormuz.json"
             raw = json.loads((ROOT / "config.example.json").read_text(encoding="utf-8"))
+            raw["listen"].pop("accept_backlog", None)
             raw["listen"].pop("max_connections")
             raw["listen"].pop("request_header_timeout_seconds")
             raw["listen"].pop("request_body_timeout_seconds", None)
@@ -222,10 +223,12 @@ class ClientConfigTests(unittest.TestCase):
                 path,
                 environ={"HORMUZ_TOKEN": "test-identity-token"},
             )
+            self.assertEqual(defaulted.listen.accept_backlog, 256)
             self.assertEqual(defaulted.listen.max_connections, 256)
             self.assertEqual(defaulted.listen.request_header_timeout_seconds, 15)
             self.assertEqual(defaulted.listen.request_body_timeout_seconds, 30)
 
+            raw["listen"]["accept_backlog"] = 32
             raw["listen"]["max_connections"] = 64
             raw["listen"]["request_header_timeout_seconds"] = 20
             raw["listen"]["request_body_timeout_seconds"] = 45
@@ -234,11 +237,13 @@ class ClientConfigTests(unittest.TestCase):
                 path,
                 environ={"HORMUZ_TOKEN": "test-identity-token"},
             )
+            self.assertEqual(config.listen.accept_backlog, 32)
             self.assertEqual(config.listen.max_connections, 64)
             self.assertEqual(config.listen.request_header_timeout_seconds, 20)
             self.assertEqual(config.listen.request_body_timeout_seconds, 45)
 
             for field, invalid_values in (
+                ("accept_backlog", (0, 65_536)),
                 ("max_connections", (0, 10_001)),
                 ("request_header_timeout_seconds", (0, 121)),
                 ("request_body_timeout_seconds", (0, 601)),
@@ -255,6 +260,7 @@ class ClientConfigTests(unittest.TestCase):
                             environ={"HORMUZ_TOKEN": "test-identity-token"},
                         )
                 raw["listen"][field] = {
+                    "accept_backlog": 32,
                     "max_connections": 64,
                     "request_header_timeout_seconds": 20,
                     "request_body_timeout_seconds": 45,
@@ -276,6 +282,7 @@ class ClientConfigTests(unittest.TestCase):
 
         self.assertEqual(result, 0)
         self.assertIn("max concurrent requests: 128", output.getvalue())
+        self.assertIn("accept backlog: 256", output.getvalue())
         self.assertIn("max concurrent connections: 256", output.getvalue())
         self.assertIn("request-header deadline: 15 seconds", output.getvalue())
         self.assertIn("request-body deadline: 30 seconds", output.getvalue())

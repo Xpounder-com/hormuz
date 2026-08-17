@@ -25,6 +25,7 @@ class ListenConfig:
     port: int = 8787
     shutdown_grace_seconds: int = 30
     max_concurrent_requests: int = 128
+    accept_backlog: int = 256
     max_connections: int = 256
     request_header_timeout_seconds: int = 15
     request_body_timeout_seconds: int = 30
@@ -317,6 +318,12 @@ class GatewayConfig:
             "listen.max_concurrent_requests",
             minimum=1,
             maximum=10_000,
+        )
+        accept_backlog = _integer(
+            listen_raw.get("accept_backlog", 256),
+            "listen.accept_backlog",
+            minimum=1,
+            maximum=65_535,
         )
         max_connections = _integer(
             listen_raw.get("max_connections", 256),
@@ -661,6 +668,7 @@ class GatewayConfig:
                 port=port,
                 shutdown_grace_seconds=shutdown_grace_seconds,
                 max_concurrent_requests=max_concurrent_requests,
+                accept_backlog=accept_backlog,
                 max_connections=max_connections,
                 request_header_timeout_seconds=request_header_timeout_seconds,
                 request_body_timeout_seconds=request_body_timeout_seconds,
