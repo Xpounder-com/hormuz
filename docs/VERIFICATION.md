@@ -1048,6 +1048,46 @@ The provider-generation redirect boundary was exercised locally on August 16, 20
 
 This closes automatic application-level provider redirect following, not production egress governance. DNS integrity, platform certificate trust, forward-proxy and service-mesh behavior, workload egress allowlists, TLS ingress, shared persistence, HA, KMS, disaster recovery, and independent security review remain open gates.
 
+### Versioned threat-model release gate
+
+The internal threat-model contract was exercised locally on August 17, 2026
+from exact commit `32aa07bb227b76ec209cf17b4dcfb332ea4843d2`.
+
+- the red-first test failed because no threat-model contract module existed;
+- the committed `hormuz.threat-model.v1` model records 9 assets, 7 trust
+  boundaries, and 18 threats covering all six STRIDE categories and all seven
+  incident scenarios named in issue #9;
+- the model explicitly reports 1 mitigated, 12 partially mitigated, and 5 open
+  threats, `independent_review.status = "pending"`, and
+  `enterprise_release_ready = false`;
+- strict validation rejects duplicate or unknown fields, non-standard JSON
+  numbers, invalid and broken identifiers, missing STRIDE or incident coverage,
+  unsupported status values, path-escaping or missing evidence references, and
+  a falsely completed independent review;
+- the canonical model SHA-256 is
+  `e54c7893d8400c43b221d9207e1f4e4b8fb7da511964622b44322a0917c8c05e`;
+- the 10 focused threat-model tests passed, and the combined 27-test threat-
+  model and release-contract suite passed in `0.212` seconds;
+- the complete 410-test source suite passed in `124.514` seconds. The
+  environment-gated official Claude Code executable case was the sole local
+  skip;
+- two independent exact-source builds produced byte-identical artifacts: wheel
+  SHA-256 `0cf33632a33e8558c7d84707d1f26ffecb0e4767aaa950b30ab4fa5f508724cf`
+  (336,504 bytes), source-distribution SHA-256
+  `d71aca7d36ed324fabe54f85b643555adc6c352c4380aae46e3f40cfedd40210`
+  (634,335 bytes), and reproducibility-manifest SHA-256
+  `c1113992faa3c4558ee2f5584886b94b0ba1b032f8e6c40499f8b4a5405ec11d`;
+  the source distribution contains the model, validator, and threat-model
+  documentation; and
+- clean-package dependency checking, workflow YAML parsing, and
+  `git diff --check` passed.
+
+CI and the tag-release workflow validate this model and retain content-free
+evidence. This is a machine-verifiable internal engineering threat model, not
+an independent security review, penetration test, external risk acceptance, or
+proof that the controls marked partial or open are complete. Issue #9 remains
+open, and this checkpoint does not authorize enterprise release.
+
 ## Reproduce locally
 
 The default suite uses only loopback fake providers:
@@ -1066,13 +1106,14 @@ Never add real provider or employee credentials to this record.
 
 ## Automated publication gate
 
-Ordinary GitHub CI runs five independent gate families without provider credentials:
+Ordinary GitHub CI runs six independent gate families without provider credentials:
 
 - the complete unit, context-governance, and loopback gateway suite on Python 3.11, 3.12, 3.13, and 3.14;
 - deterministic corpus regeneration plus the 60-task governed-context release profile, with machine-readable evidence retained as an artifact;
 - two independent exact-commit source-distribution and wheel builds under pinned packaging inputs, raw-byte equality with a content-free digest manifest, and installation of the verified wheel in a clean virtual environment;
 - installed-client routing through local fake providers using pinned official Codex and Claude Code package versions; and
-- pinned-base/hash-locked container build, restricted-runtime smoke, CycloneDX SBOM, and a fail-on-any-high-or-critical vulnerability gate.
+- pinned-base/hash-locked container build, restricted-runtime smoke, CycloneDX SBOM, and a fail-on-any-high-or-critical vulnerability gate; and
+- strict versioned threat-model validation covering all STRIDE categories and the issue #9 incident scenarios, with content-free evidence retained for audit.
 
 Ordinary CI grants only read access to repository contents, disables persisted checkout credentials, pins every GitHub Action to a reviewed commit SHA, and retains build artifacts for seven days. The separate release workflow re-runs the applicable gates on an annotated version tag, splits source, package/signing, and GitHub-release permissions, and retains its verification and signed-release evidence longer. It remains blocked before publication until the owner-approved Sigstore transparency repository variable is present. Dependabot is configured to propose updates to action and Python build dependencies; a client-version bump remains an intentional compatibility change because it can alter the provider protocol.
 
