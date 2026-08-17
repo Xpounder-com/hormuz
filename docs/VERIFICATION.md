@@ -1140,6 +1140,56 @@ provider behavior, a real IdP, PostgreSQL, TLS/HA, backup/restore, disaster
 recovery, or enterprise release readiness. Issue #9 remains open and no
 acceptance checkbox is satisfied by this internal contract alone.
 
+### Repository-local incident-drill gate
+
+The incident-drill contract was exercised locally on August 17, 2026 from exact
+implementation commit `434a9acc32ac69efc8a854d853dc797dafb4c481`.
+
+- the red-first test failed because no incident-drill contract module existed;
+- the strict `hormuz.incident-drills.v1` catalog binds all seven issue #9
+  scenarios to one exact repository test each: provider timeout, IdP token-
+  endpoint outage, refresh-credential replay and family revocation, tenant-
+  scoped session administration, source/dependency invalidation, pre-provider
+  budget denial, and governed-context physical deletion guards;
+- validation rejects duplicate or unknown fields, non-standard JSON numbers,
+  missing or duplicate scenarios, broad, missing, or duplicate test bindings,
+  unsafe runbook references, unresolved headings, invalid role identifiers,
+  and any claim that a local simulation completed production exercises;
+- the actual runner executed 7 tests and passed all 7. Its private mode-`0600`,
+  545-byte `hormuz.incident-drill-evidence.v1` artifact has SHA-256
+  `9f321eb414f54b3252de06a7ea154dd8eed3f98cb93ffae883fd20b27fc6188a`;
+  the artifact contains the catalog digest and aggregate counts, not scenario
+  prose, test identifiers, prompts, responses, identities, or credentials;
+- the canonical catalog SHA-256 is
+  `069c88b872e6dba22ee6b6b9f84ba864255647bc2afdc2806a847701b18f2c54`;
+- all 8 focused incident-contract tests passed, and the combined 47-test
+  incident, compatibility, threat-model, and release-contract suite passed in
+  `5.119` seconds;
+- the complete 430-test source suite passed in `129.525` seconds. The
+  environment-gated official Claude Code executable case was the sole local
+  skip;
+- two independent exact-source builds produced byte-identical artifacts: wheel
+  SHA-256 `554fd6b6fcad2fbc6006ffd81d9e6b58cabf3ab8e74f502211fcafe1d1c40cbc`
+  (336,810 bytes), source-distribution SHA-256
+  `4dc9244f6d76fb3abc7fc76bb1ec48122ecf0ff361a89fdcf4af1b00defa5590`
+  (655,641 bytes), and reproducibility-manifest SHA-256
+  `463cf70c1d33e8ae0489717e992bf01a12d21b644b2a0922f7e362c41df3111d`;
+- the source distribution contains the catalog, validator/runner, role-based
+  runbook, and tests. A clean Python 3.14 environment installed the exact wheel
+  after the hash-locked runtime closure, passed `pip check`, and ran the
+  installed CLI; and
+- workflow YAML parsing, source/test bytecode compilation, and
+  `git diff --check` passed.
+
+Ordinary package CI and tag verification now execute the same seven regressions
+and retain content-free aggregate evidence for seven and thirty days,
+respectively. This proves repository-local control behavior only. Live provider
+and IdP exercises, shared persistence and multi-region failure, complete tenant
+deletion and legal holds, named on-call assignments, incident severities,
+response/recovery targets, external communications, and independent review
+remain open. Issue #9 remains open and this checkpoint does not authorize an
+enterprise release.
+
 ## Reproduce locally
 
 The default suite uses only loopback fake providers:
