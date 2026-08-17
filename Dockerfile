@@ -31,7 +31,8 @@ RUN SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH}" python -m pip install \
         --require-hashes \
         --only-binary=:all: \
         --requirement /tmp/hormuz-requirements.lock \
-    && rm /tmp/hormuz-requirements.lock
+    && rm /tmp/hormuz-requirements.lock \
+    && rm -rf /root/.cache
 
 COPY --chown=65532:65532 hormuz/ ./hormuz/
 

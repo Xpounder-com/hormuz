@@ -329,7 +329,7 @@ class ReproducibleImageTests(unittest.TestCase):
         release = (ROOT / ".github/workflows/release.yml").read_text()
         self.assertIn("ARG SOURCE_DATE_EPOCH", dockerfile)
         self.assertIn('SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH}"', dockerfile)
-        self.assertIn("rm -rf /root/.cache", dockerfile)
+        self.assertEqual(dockerfile.count("rm -rf /root/.cache"), 2)
         self.assertIn("python scripts/reproducible_image.py", workflow)
         self.assertIn('--source-sha "$GITHUB_SHA"', workflow)
         self.assertIn("hormuz-reproducible-oci", workflow)
