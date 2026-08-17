@@ -128,7 +128,7 @@ jobs:
           --output "$RUNNER_TEMP/hormuz-compatibility-evidence.json"
       - name: Run repository-local incident drills
         run: >-
-          python scripts/incident_drill.py
+          "$RUNNER_TEMP/hormuz-wheel/bin/python" scripts/incident_drill.py
           --catalog operations/incident-drills.json
           --project-root .
           --output "$RUNNER_TEMP/hormuz-incident-drill-evidence.json"

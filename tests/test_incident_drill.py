@@ -141,8 +141,12 @@ class IncidentDrillContractTests(unittest.TestCase):
         release = (ROOT / ".github" / "workflows" / "release.yml").read_text(
             encoding="utf-8"
         )
+        self.assertIn(
+            '"$RUNNER_TEMP/hormuz-wheel/bin/python" scripts/incident_drill.py',
+            ci,
+        )
+        self.assertIn("python scripts/incident_drill.py", release)
         for workflow in (ci, release):
-            self.assertIn("python scripts/incident_drill.py", workflow)
             self.assertIn("hormuz-incident-drill-evidence.json", workflow)
         self.assertIn("name: hormuz-incident-drills", ci)
 
