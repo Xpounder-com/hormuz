@@ -1251,6 +1251,62 @@ or prove end-to-end client latency. Shared persistence, HA, externally retained
 telemetry, numeric SLOs, named ownership, real infrastructure load, and
 independent review remain open under issues #11 and #9.
 
+### Secure session-backed MCP authentication
+
+The MCP session-profile boundary was exercised locally on August 17, 2026 from
+exact implementation commit `c3da3b3e1b8fb42bd35a4b8ad1bb5c81d5def115`
+without a live provider, identity provider, or credential.
+
+- six failure-first expectations demonstrated that the adapter did not accept a
+  profile, generate profile-based Codex or Claude configuration, or resolve a
+  credential provider before the change. The implemented focused client and
+  configuration set then passed all 15 tests;
+- `--profile` and `--credential-env` are mutually exclusive. Human profile mode
+  requires HTTPS except for an explicitly permitted loopback development URL;
+  the original inherited `HORMUZ_TOKEN` mode and custom safe environment names
+  retain their generated configuration and request behavior;
+- every context request invokes the existing secure-session resolver instead of
+  capturing one access credential at MCP process startup. A two-request
+  regression observed two different bearer values, while the session layer's
+  existing tests cover unexpired reuse, near-expiry rotation under a
+  cross-process profile lock, expiry, replay-family revocation, gateway binding,
+  and secure-store failure;
+- missing, expired, revoked, malformed, non-UTF-8, secure-store, and refresh
+  failures collapse to the fixed model-visible `context_auth_unavailable`
+  boundary. Internal exception text, profile names, refresh state, and
+  credential values are not returned;
+- generated Codex TOML and Claude Code JSON contain only the gateway URL,
+  profile label, timeout, and ordinary MCP process settings in profile mode.
+  They contain no access credential, refresh credential, inherited credential
+  variable, or provider key;
+- the broader MCP, session broker, session store/configuration, credential-store,
+  and CLI set passed 104 tests in `17.792` seconds. The complete source suite
+  passed 440 tests in `129.987` seconds; the environment-gated official Claude
+  Code executable case was the sole expected local skip. Source/test bytecode
+  compilation and `git diff --check` passed;
+- the source distribution and wheel built successfully. An isolated Python
+  3.14 environment installed the exact wheel from `site-packages`, passed
+  `pip check`, generated both profile configurations, and completed MCP
+  initialize plus `tools/list` through the installed executable. The wheel was
+  340,504 bytes with SHA-256
+  `3cdc6861acc4c998e0f50023c67f3d1cb3761b2a5e4e67b3db8857f6d8101fd1`;
+  the source archive was 676,328 bytes with SHA-256
+  `00577401d1c7768d80ef0733a8778cbc584c12bf2aa3f41518dcecf8108d17cf`;
+  and
+- frozen corpus verification retained SHA-256
+  `9822d592868202c7c7539bcdac7d4a5894c01f9e6dba7a434846516b67b32c17`.
+  The 60-task release profile passed with governed precision, recall, and
+  useful-pack rate `1.00`, p95 retrieval latency `0.145334` milliseconds, and
+  zero authorization, lifecycle-stale, dependency-stale, malicious,
+  contradiction, token-budget, or determinism failures.
+
+This proves additive adapter wiring, secret-free client configuration, and the
+local session-refresh composition. It does not prove enrollment against a real
+IdP, a production OS-keyring deployment, an official client completing a
+profile-authenticated context call, shared multi-node revocation, SCIM, KMS
+custody, or the pending enterprise persistence topology. Those remain separate
+release gates.
+
 ## Reproduce locally
 
 The default suite uses only loopback fake providers:
