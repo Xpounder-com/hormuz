@@ -454,6 +454,20 @@ class ClientConfigTests(unittest.TestCase):
                             environ={"HORMUZ_TOKEN": "test-identity-token"},
                         )
 
+    def test_configuration_decoder_recursion_has_fixed_structural_diagnostic(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "hormuz.json"
+            path.write_text("{}", encoding="utf-8")
+            with mock.patch("hormuz.config.json.loads", side_effect=RecursionError):
+                with self.assertRaisesRegex(
+                    ConfigError,
+                    "Configuration JSON exceeds structural limits",
+                ):
+                    GatewayConfig.load(
+                        path,
+                        environ={"HORMUZ_TOKEN": "test-identity-token"},
+                    )
+
     def test_configuration_file_size_is_bounded_before_json_decode(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "hormuz.json"

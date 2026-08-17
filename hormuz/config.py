@@ -49,7 +49,9 @@ def _load_configuration_json(source_path: Path) -> tuple[Any, str]:
         )
     except ConfigError:
         raise
-    except (json.JSONDecodeError, RecursionError, ValueError) as error:
+    except RecursionError as error:
+        raise ConfigError("Configuration JSON exceeds structural limits") from error
+    except (json.JSONDecodeError, ValueError) as error:
         raise ConfigError("Configuration file must be valid UTF-8 JSON") from error
     _validate_configuration_structure(value)
     return value, source_sha256
