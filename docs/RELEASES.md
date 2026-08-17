@@ -30,6 +30,30 @@ Xpounder currently uses GitHub Team, while GitHub's first-party artifact attesta
 
 Public-good Sigstore keyless signing and attestation can place the workflow identity, release tag, image digest, certificate, predicate, and timestamp metadata in a publicly inspectable transparency service even when the repository and package are private. The predicate includes the repository URL, commit, release workflow and run URL, pinned base digest, dependency-lock hash, and target platforms. It does not publish the image, prompts, responses, credentials, or source content, but the existence and timing of a private release may become discoverable. Publication therefore fails closed unless the repository variable `HORMUZ_SIGSTORE_RELEASE_APPROVAL` is exactly `sigstore-public-transparency-v1`. Set that value only after the product owner accepts this disclosure. Otherwise select a private Sigstore deployment, customer/KMS signing, or GitHub Enterprise private-attestation design before cutting a tag.
 
+## Reproducible Python distributions
+
+Ordinary and tag-release workflows do not invoke the package backend directly. They run `scripts/reproducible_build.py` with the exact checked-out 40-character commit SHA. The gate:
+
+1. requires the reviewed `build==1.3.0` frontend and exact `setuptools==84.0.0` and `wheel==0.48.0` backend inputs;
+2. derives `SOURCE_DATE_EPOCH` from the selected commit rather than wall-clock time;
+3. exports that commit through `git archive`, excluding untracked workspace state, and builds it twice in independent source and output directories;
+4. rejects source-distribution traversal, duplicate paths, multiple roots, links, devices, and other non-file members before canonicalization;
+5. rewrites the source archive with sorted paths, fixed owner/group, stable file modes, the commit timestamp, and a filename-free deterministic gzip header; and
+6. compares the raw bytes of both wheels and both source archives before publishing either result.
+
+The output directory also contains `hormuz-distribution-reproducibility.json`. It binds the two SHA-256 digests, byte sizes, commit, commit timestamp, build frontend, and backend versions without recording a workspace path, employee identity, prompt, response, credential, or build time. The output directory must be empty so stale artifacts cannot be mixed into the result.
+
+From a committed local checkout with the reviewed frontend installed:
+
+```bash
+HORMUZ_RELEASE_SHA="$(git rev-parse HEAD)"
+python3 scripts/reproducible_build.py \
+  --source-sha "$HORMUZ_RELEASE_SHA" \
+  --outdir dist
+```
+
+This proves byte equality across two independent package builds of one exact source revision under the reviewed Python build contract. It does not yet prove that OCI image layers are byte-identical across builders, that the Python artifacts reproduce across every operating system, or that a remote registry package has been published. Container rebuild reproducibility, an observed signed tag release, build-dependency hash custody, and external rebuilder comparison remain open release work.
+
 ## Cut a release
 
 Do this only after the intended commit is merged to and verified on `main`. The current `0.x` line is marked as a prerelease automatically.

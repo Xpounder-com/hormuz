@@ -72,8 +72,11 @@ jobs:
             --profile release \
             --iterations 5 \
             --output "$RUNNER_TEMP/context-benchmark-release.json"
-      - name: Build source and wheel distributions
-        run: python -m build
+      - name: Build and compare independent exact-source distributions
+        run: |
+          python scripts/reproducible_build.py \
+            --source-sha "$GITHUB_SHA" \
+            --outdir dist
       - name: Build restricted release-candidate image
         env:
           HORMUZ_IMAGE: hormuz:release-${{ github.sha }}

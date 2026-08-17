@@ -883,6 +883,23 @@ A failure-first configuration-boundary review was exercised locally on August 16
 
 This closes application-owned unknown-field and policy-reference validation at startup, not production deployment issue #11. Published schema versioning, configuration signing and approval, live secret rotation, orchestrated rollout/rollback, shared persistence, HA, backup/restore, KMS/BYOK, and independent security review remain open.
 
+### Exact-source reproducible Python distributions
+
+A failure-first package-release review was exercised locally on August 16, 2026 without a provider request or credential.
+
+- two ordinary isolated builds of the same source produced different wheel and source-archive hashes because archive timestamps and generated member metadata followed build time;
+- supplying the commit timestamp through `SOURCE_DATE_EPOCH` made the two wheels byte-identical, while the two source archives still differed at both the gzip and uncompressed-tar layers. Their path sets and generated package metadata content matched, isolating the remaining difference to archive metadata;
+- `pyproject.toml` now pins the complete reviewed backend pair, `setuptools==84.0.0` and `wheel==0.48.0`, while CI continues to pin `build==1.3.0` as its frontend;
+- `scripts/reproducible_build.py` accepts only a full commit SHA available in the checkout, derives the build epoch from that commit, exports tracked source through `git archive`, and creates two independent source and output trees;
+- canonicalization accepts only one-root regular-file/directory source archives within bounded member and byte limits. It rejects absolute/traversal paths, duplicate paths, multiple roots, links, and device-like members with fixed diagnostics before creating output;
+- safe members receive sorted order, numeric owner/group zero, empty owner names, the commit timestamp, stable executable/non-executable modes, cleared PAX metadata, and a deterministic filename-free gzip wrapper. The raw wheel and source-archive hashes from both builds must match before one pair is published;
+- `hormuz-distribution-reproducibility.json` deterministically records the exact source SHA, commit epoch, pinned toolchain, artifact filenames, byte sizes, and SHA-256 digests. It has no generated time or local path; and
+- ordinary CI and the tag verification workflow both use this gate, while contract tests prohibit a direct one-pass `python -m build` regression;
+- the 15 focused canonicalization and release-contract tests passed, including metadata normalization, traversal/link/duplicate/multiple-root refusal, exact pin enforcement, deterministic manifest structure, and both workflow bindings; and
+- the complete 367-test source suite passed in `124.710` seconds. The environment-gated official Claude Code executable case was the sole local skip; source and test bytecode compilation and `git diff --check` also passed.
+
+This proves a fail-closed exact-source package-reproducibility contract under the reviewed Python build toolchain. It does not prove cross-operating-system reproduction, hash-locked custody of the build frontend/backend downloads, byte-identical OCI layers across builders, or an observed signed registry release. Those and the remaining TLS, shared persistence, HA, backup/restore, KMS/BYOK, and independent-review requirements keep issues #11 and #9 open.
+
 ### Remote provider HTTPS enforcement
 
 The provider-upstream configuration boundary was exercised locally on August 16, 2026 without a live provider credential or remote provider request.
@@ -932,7 +949,7 @@ Ordinary GitHub CI runs five independent gate families without provider credenti
 
 - the complete unit, context-governance, and loopback gateway suite on Python 3.11, 3.12, 3.13, and 3.14;
 - deterministic corpus regeneration plus the 60-task governed-context release profile, with machine-readable evidence retained as an artifact;
-- source-distribution and wheel builds followed by installation of the wheel in a clean virtual environment;
+- two independent exact-commit source-distribution and wheel builds under pinned packaging inputs, raw-byte equality with a content-free digest manifest, and installation of the verified wheel in a clean virtual environment;
 - installed-client routing through local fake providers using pinned official Codex and Claude Code package versions; and
 - pinned-base/hash-locked container build, restricted-runtime smoke, CycloneDX SBOM, and a fail-on-any-high-or-critical vulnerability gate.
 

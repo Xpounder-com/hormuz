@@ -379,11 +379,22 @@ class ReleaseContractTests(unittest.TestCase):
         )
         self.assertIn("HORMUZ_SIGSTORE_RELEASE_APPROVAL", workflow)
         self.assertIn("sigstore-public-transparency-v1", workflow)
+        self.assertIn("python scripts/reproducible_build.py", workflow)
+        self.assertIn('--source-sha "$GITHUB_SHA"', workflow)
+        self.assertNotIn("run: python -m build", workflow)
         self.assertNotIn(f"{EXPECTED_IMAGE}:latest", workflow)
         action_uses = re.findall(r"(?m)^\s+uses:\s+([^\s#]+)", workflow)
         self.assertTrue(action_uses)
         for action in action_uses:
             self.assertRegex(action, r"@[0-9a-f]{40}$")
+
+    def test_ci_package_job_uses_the_exact_source_reproducibility_gate(self) -> None:
+        workflow = (ROOT / ".github/workflows/ci.yml").read_text()
+        self.assertIn("python scripts/reproducible_build.py", workflow)
+        self.assertIn('--source-sha "$GITHUB_SHA"', workflow)
+        self.assertIn("--outdir dist", workflow)
+        self.assertNotIn("run: python -m build", workflow)
+        self.assertIn("path: dist/*", workflow)
 
 
 if __name__ == "__main__":
