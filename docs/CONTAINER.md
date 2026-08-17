@@ -14,7 +14,7 @@ The root `Dockerfile`:
 - exposes port `8787` and probes `GET /health/ready`; and
 - runs `python -m hormuz --config /etc/hormuz/hormuz.json serve` by default.
 
-CI builds the image, runs `scripts/container_smoke.py`, generates a CycloneDX SBOM, and fails on any Trivy high or critical OS or Python-package finding, including findings without a current fix. The scanner action commit and scanner release are explicitly pinned CI inputs. The SBOM, vulnerability JSON, and image inspection are retained as workflow artifacts for seven days.
+CI first exports the exact checked-out commit twice and requires two clean `linux/amd64` BuildKit OCI layouts to be byte-identical. It then builds the runtime image, runs `scripts/container_smoke.py`, generates a CycloneDX SBOM, and fails on any Trivy high or critical OS or Python-package finding, including findings without a current fix. The reproducibility manifest, deterministic OCI tar, SBOM, vulnerability JSON, and image inspection are retained as workflow artifacts for seven days. Scanner actions and releases are explicitly pinned CI inputs.
 
 Tag-driven private GHCR publication, multi-architecture promotion, GitHub OIDC keyless signing, exact-identity verification, and a signed SLSA provenance predicate are implemented as a release contract, but no image is claimed as published until an eligible tag run succeeds. See [RELEASES.md](RELEASES.md). Tag governance, identity-based pull authorization, retention, customer-registry/KMS custody, and an observed release remain release work.
 
@@ -25,6 +25,7 @@ From a clean checkout:
 ```bash
 docker build \
   --pull=false \
+  --build-arg "SOURCE_DATE_EPOCH=$(git show -s --format=%ct HEAD)" \
   --build-arg "HORMUZ_REVISION=$(git rev-parse HEAD)" \
   --tag hormuz:local \
   .
@@ -32,6 +33,23 @@ python3 scripts/container_smoke.py --image hormuz:local
 ```
 
 `--pull=false` is intentional: the Dockerfile already selects the reviewed base image by digest. Updating that digest or `deploy/container/requirements.lock` is a dependency-review change, not an incidental build action.
+
+## Exact-source reproducibility gate
+
+Run the same gate used by ordinary and tag verification from a committed checkout:
+
+```bash
+HORMUZ_SOURCE_SHA="$(git rev-parse HEAD)"
+python3 scripts/reproducible_image.py \
+  --source-sha "$HORMUZ_SOURCE_SHA" \
+  --outdir oci-reproducibility
+```
+
+The command requires Docker Buildx and supports only `linux/amd64` in this first bounded contract. It verifies that the supplied full SHA is checked-out `HEAD`, obtains the epoch from that commit, exports tracked files rather than the working tree, and builds twice with no cache, no pull, and no publishing. It disables provenance and SBOM attestations for this byte-comparison build because their run-specific envelopes are not image-layer reproducibility inputs.
+
+Both OCI layouts must contain one `linux/amd64` manifest and pass bounded validation of every referenced digest, byte size, config, root-filesystem diff ID, and layer count. File sets, sizes, and SHA-256 digests must then match exactly. Only after that comparison succeeds does Hormuz publish a canonical versioned `hormuz-X.Y.Z-linux-amd64.oci.tar` and content-free `hormuz-oci-reproducibility.json` into an initially empty, non-symlink output directory.
+
+This proves same-source byte equality under the exercised BuildKit contract. It does not prove `linux/arm64` equality, equality across every builder or operating system, offline availability of the pinned base and PyPI inputs, reproducibility of run-specific signatures/attestations, or that any registry artifact was published. The signed release path separately generates and verifies provenance and SBOM evidence.
 
 Regenerate the lock only when the declared runtime dependencies change, then review the complete diff and rerun all container and Python gates:
 

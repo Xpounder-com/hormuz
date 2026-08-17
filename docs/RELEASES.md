@@ -58,7 +58,22 @@ python3 scripts/reproducible_build.py \
   --outdir dist
 ```
 
-This proves byte equality across two independent package builds of one exact source revision under the hash-custodied Python build contract. It does not yet prove that OCI image layers are byte-identical across builders, that the Python artifacts reproduce across every operating system, or that a remote registry package has been published. Container rebuild reproducibility, an observed signed tag release, a controlled internal wheel mirror or offline availability, hash locks for non-build runtime/test resolution, and an external rebuilder remain open release work.
+This proves byte equality across two independent package builds of one exact source revision under the hash-custodied Python build contract. It does not prove that the Python artifacts reproduce across every operating system, that build inputs are available offline, or that a remote package has been published.
+
+## Exact-source OCI image reproducibility
+
+Ordinary CI and tag verification also run `scripts/reproducible_image.py` against the exact checked-out 40-character commit. The gate:
+
+1. requires that source SHA to equal `HEAD`, derives the build epoch from the commit, and exports tracked files through `git archive` into two isolated contexts;
+2. builds `linux/amd64` twice through BuildKit with no cache, no pull, no tag, no push, the pinned base digest, the hash-locked runtime closure, and source/version/revision labels bound to the commit;
+3. supplies `SOURCE_DATE_EPOCH` while pip installs the runtime closure so explicitly compiled Python bytecode uses deterministic hash-based invalidation rather than build-time timestamps;
+4. disables provenance and SBOM attestations only in the equality builds because those envelopes contain run-specific evidence;
+5. rejects unsafe or excessive OCI layouts, ambiguous JSON, unexpected or unreferenced blobs, descriptor digest/size mismatches, wrong platform/source/version/user configuration, and layer/diff-ID inconsistencies with fixed diagnostics; and
+6. requires the two complete OCI file sets, sizes, and SHA-256 digests to match before publishing one canonical image tar and schema `hormuz.reproducible-oci.v1` evidence manifest.
+
+The manifest binds the exact source SHA and epoch, target platform, Dockerfile/base/lock digests, OCI index/manifest/config/layer digests, artifact digest, and artifact size. It contains no generated time, local path, source content, prompt, response, employee identity, or credential. The output directory must be empty and cannot be a symlink.
+
+The release image remains a separate multi-platform build with provenance and SBOM generation enabled, followed by exact-digest signing and verification. The reproducibility gate proves the bounded unsigned `linux/amd64` image payload; it does not claim byte-identical `linux/arm64` output, universal cross-builder equality, offline base/dependency availability, deterministic signature or attestation envelopes, an external independent rebuild service, or an observed registry release.
 
 ## Cut a release
 

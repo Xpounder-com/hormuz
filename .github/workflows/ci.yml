@@ -203,11 +203,27 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+      - name: Build and compare independent exact-source OCI layouts
+        run: |
+          python scripts/reproducible_image.py \
+            --source-sha "$GITHUB_SHA" \
+            --outdir "$RUNNER_TEMP/hormuz-reproducible-oci"
+      - name: Preserve OCI reproducibility evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hormuz-reproducible-oci
+          path: ${{ runner.temp }}/hormuz-reproducible-oci/*
+          if-no-files-found: error
+          retention-days: 7
       - name: Build pinned Hormuz image
         run: |
+          HORMUZ_SOURCE_DATE_EPOCH="$(git show -s --format=%ct "$GITHUB_SHA")"
           docker build \
             --pull=false \
             --build-arg "HORMUZ_REVISION=$GITHUB_SHA" \
+            --build-arg "SOURCE_DATE_EPOCH=$HORMUZ_SOURCE_DATE_EPOCH" \
             --tag "$HORMUZ_IMAGE" \
             .
       - name: Verify restricted runtime and graceful shutdown

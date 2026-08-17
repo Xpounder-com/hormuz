@@ -3,6 +3,7 @@ FROM ${PYTHON_IMAGE}
 
 ARG HORMUZ_REVISION=unknown
 ARG HORMUZ_VERSION=unknown
+ARG SOURCE_DATE_EPOCH=0
 
 LABEL org.opencontainers.image.title="Hormuz" \
       org.opencontainers.image.description="Enterprise AI policy, usage, and governed-context control plane" \
@@ -25,7 +26,7 @@ RUN addgroup --system --gid 65532 hormuz \
 WORKDIR /opt/hormuz
 
 COPY deploy/container/requirements.lock /tmp/hormuz-requirements.lock
-RUN python -m pip install \
+RUN SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH}" python -m pip install \
         --require-hashes \
         --only-binary=:all: \
         --requirement /tmp/hormuz-requirements.lock \

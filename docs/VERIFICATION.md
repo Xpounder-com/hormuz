@@ -902,6 +902,23 @@ A failure-first package-release review was exercised locally on August 16, 2026 
 
 This proves a fail-closed exact-source package-reproducibility contract under a reviewed, hash-custodied Python build toolchain. It does not prove offline or internally mirrored build-wheel availability, hash locking for runtime/test dependencies installed outside the container, byte-identical OCI layers across builders, or an observed signed registry release. Those and the remaining TLS, shared persistence, HA, backup/restore, KMS/BYOK, and independent-review requirements keep issues #11 and #9 open.
 
+### Exact-source reproducible OCI image
+
+A failure-first container-reproducibility review was exercised locally on August 17, 2026 without a provider request or credential.
+
+- the focused test first failed because no exact-source OCI rebuilding module existed;
+- two ordinary clean `linux/amd64` BuildKit OCI exports of the same source, same commit epoch, pinned base, and hash-locked dependency set then produced different manifest and config digests. Layer comparison isolated the difference to pip-generated `.pyc` files: the Dockerfile's runtime `PYTHONDONTWRITEBYTECODE` setting did not prevent pip from explicitly compiling bytecode during installation;
+- the Dockerfile now exposes `SOURCE_DATE_EPOCH` to that installation step, causing deterministic hash-based bytecode compilation. A second pair of clean local builds then had identical manifests, configs, layers, and complete validated OCI layouts;
+- `scripts/reproducible_image.py` requires the selected full SHA to equal checked-out `HEAD`, derives the epoch from that commit, safely exports tracked source into two isolated contexts, and invokes BuildKit with no cache, no pull, no publication, and run-specific provenance/SBOM attestations disabled;
+- the bounded validator accepts only the expected OCI layout, one `linux/amd64` manifest, regular safe files, strict unambiguous JSON, verified descriptor digests/sizes, matching source/version/runtime-user configuration, and consistent layers/root-filesystem diff IDs. Unexpected, unreferenced, unsafe, oversized, or excessive inputs fail with fixed diagnostics that do not reflect input content;
+- the complete file sets, sizes, and SHA-256 hashes of both layouts must match before the gate atomically publishes a sorted deterministic OCI tar and schema `hormuz.reproducible-oci.v1` manifest into an initially empty non-symlink directory;
+- the content-free manifest binds the source SHA and epoch, platform, Dockerfile/base/lock digests, OCI index/manifest/config/layer digests, and final artifact name/hash/size without a workspace path, source content, prompt, response, identity, credential, or generated time;
+- six focused failure, layout, equality, archive, evidence, Dockerfile, and workflow contract tests pass. The broader package/release subset contains 24 passing tests. The complete 383-test source suite passed in `125.158` seconds; the environment-gated official Claude Code executable case was the sole local skip;
+- deterministic corpus verification retained SHA-256 `9822d592868202c7c7539bcdac7d4a5894c01f9e6dba7a434846516b67b32c17`. The strict 60-task release benchmark passed with governed precision, recall, and useful-pack rate `1.00`, zero authorization, lifecycle, dependency, malicious-context, contradiction, budget, determinism, or leakage failures, mean compression `0.840593`, and governed p95 selection latency `0.156` ms; and
+- ordinary CI and tag verification run the two-build gate and retain its image tar plus evidence. The signed release build remains separate and keeps its provenance and SBOM generation enabled.
+
+This proves same-source byte equality for the exercised unsigned `linux/amd64` BuildKit payload. It does not yet prove `linux/arm64` equality, equality across every BuildKit implementation or host, offline availability of the pinned base and PyPI inputs, reproducibility of run-specific signatures or attestations, an independent rebuild service, or an observed signed registry release. Issues #11 and #9 remain open with TLS, shared persistence, HA, backup/restore, KMS/BYOK, tag governance, and independent review still unproven.
+
 ### Anchored audit-chain export
 
 A failure-first audit-evidence review was exercised locally on August 17, 2026.
