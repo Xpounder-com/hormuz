@@ -2,6 +2,8 @@
 
 Hormuz is alpha software and has not received a third-party security review. Do not expose the current development server directly to the public internet.
 
+The repository's versioned [threat model](docs/THREAT_MODEL.md) is validated in CI and maps known trust-boundary risks to current controls and open release gates. It is internal engineering evidence, not the independent penetration/security review required by issue #9.
+
 ## Current guarantees
 
 - Employee bootstrap or OIDC credentials are never forwarded to OpenAI or Anthropic.

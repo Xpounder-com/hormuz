@@ -114,6 +114,19 @@ jobs:
             --model gpt-5.4-mini \
             --input examples/dlp-evaluation-email.jsonl \
             --output "$RUNNER_TEMP/dlp-evaluation-package.json"
+      - name: Validate versioned threat model
+        run: >-
+          python scripts/threat_model_contract.py
+          --model security/threat-model.json
+          --project-root .
+          --output "$RUNNER_TEMP/hormuz-threat-model-evidence.json"
+      - name: Preserve threat-model evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hormuz-threat-model
+          path: ${{ runner.temp }}/hormuz-threat-model-evidence.json
+          if-no-files-found: error
+          retention-days: 7
       - name: Preserve distribution evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

@@ -116,6 +116,8 @@ python3 scripts/container_smoke.py --image hormuz:local
 
 The reference command, data-volume contract, secret boundary, exact-source OCI reproducibility gate, SBOM/vulnerability gate, and remaining production limitations are documented in [docs/CONTAINER.md](docs/CONTAINER.md). Tag-driven private GHCR publication, exact-digest keyless signing, signed SLSA provenance, evidence assets, and digest-based rollback are specified in [docs/RELEASES.md](docs/RELEASES.md); the workflow is not evidence that an image has already been published.
 
+The versioned [threat model](docs/THREAT_MODEL.md) binds current gateway trust boundaries to concrete controls and explicit open release gates. CI validates its STRIDE and incident-scenario coverage and emits content-free aggregate evidence. This internal model is not an independent penetration test, and it cannot make the alpha enterprise-ready while open or partially mitigated threats remain.
+
 ## Policies and usage
 
 Evaluate a request without calling a model:

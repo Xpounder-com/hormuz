@@ -59,6 +59,12 @@ jobs:
         run: python -m pip install --no-build-isolation --no-deps --editable .
       - name: Verify runtime dependency closure
         run: python -m pip check
+      - name: Validate versioned threat model
+        run: >-
+          python scripts/threat_model_contract.py
+          --model security/threat-model.json
+          --project-root .
+          --output "$RUNNER_TEMP/hormuz-threat-model-evidence.json"
       - name: Verify complete source suite
         run: python -m unittest -v
       - name: Verify frozen governed-context release benchmark
@@ -131,6 +137,7 @@ jobs:
             dist/*
             ${{ runner.temp }}/hormuz-reproducible-oci/
             ${{ runner.temp }}/hormuz-release-contract.json
+            ${{ runner.temp }}/hormuz-threat-model-evidence.json
             ${{ runner.temp }}/context-benchmark-release.json
             ${{ runner.temp }}/hormuz-release.sbom.cdx.json
             ${{ runner.temp }}/hormuz-release-vulnerabilities.json
