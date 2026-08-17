@@ -6,6 +6,7 @@ from .config import GatewayConfig
 
 
 REPORT_DIMENSIONS = {"organization", "team", "person", "model", "client", "provider"}
+LATENCY_BUCKETS_MS = (1, 5, 10, 25, 50, 100, 250, 500, 1_000, 10_000, 60_000, 600_000)
 
 
 def enrich_usage_rows(

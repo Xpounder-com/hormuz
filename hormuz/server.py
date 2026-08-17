@@ -165,16 +165,21 @@ def _encode_usage_cursor(
     team_id: str | None,
     window_end: str,
     offset: int,
+    include: str | None = None,
 ) -> str:
-    payload = json.dumps(
-        {
+    value: dict[str, object] = {
             "v": 1,
             "group_by": group_by,
             "actor_id": actor_id,
             "team_id": team_id,
             "window_end": window_end,
             "offset": offset,
-        },
+    }
+    if include is not None:
+        value["v"] = 2
+        value["include"] = include
+    payload = json.dumps(
+        value,
         sort_keys=True,
         separators=(",", ":"),
     ).encode("utf-8")
@@ -194,16 +199,24 @@ def _decode_usage_cursor(cursor: str) -> dict[str, object]:
         value = json.loads(payload)
     except (ValueError, UnicodeError, binascii.Error, json.JSONDecodeError) as error:
         raise ValueError("invalid cursor") from error
-    if not isinstance(value, dict) or set(value) != {
+    if not isinstance(value, dict):
+        raise ValueError("invalid cursor")
+    legacy_fields = {
         "v",
         "group_by",
         "actor_id",
         "team_id",
         "window_end",
         "offset",
-    }:
-        raise ValueError("invalid cursor")
-    if value["v"] != 1 or value["group_by"] not in REPORT_DIMENSIONS:
+    }
+    latency_fields = legacy_fields | {"include"}
+    if (
+        (value.get("v") == 1 and set(value) != legacy_fields)
+        or (value.get("v") == 2 and set(value) != latency_fields)
+        or value.get("v") not in {1, 2}
+        or value.get("group_by") not in REPORT_DIMENSIONS
+        or (value.get("v") == 2 and value.get("include") != "latency")
+    ):
         raise ValueError("invalid cursor")
     if not isinstance(value["window_end"], str):
         raise ValueError("invalid cursor")
@@ -621,6 +634,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
     def handle_one_request(self) -> None:
+        self._hormuz_request_started_at = time.monotonic()
         self._hormuz_request_admission = _REQUEST_DRAINING
         self._hormuz_request_body_deadline: float | None = None
         self.server.arm_request_header_deadline(self.connection)
@@ -853,12 +867,12 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 query,
                 keep_blank_values=True,
                 strict_parsing=True,
-                max_num_fields=5,
+                max_num_fields=6,
             )
         except ValueError:
             self._send_usage_report_error()
             return
-        allowed = {"group_by", "actor_id", "team_id", "cursor", "limit"}
+        allowed = {"group_by", "actor_id", "team_id", "cursor", "limit", "include"}
         if set(values) - allowed or any(
             len(items) != 1 or not items[0] for items in values.values()
         ):
@@ -868,9 +882,14 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         actor_id = values.get("actor_id", [None])[0]
         team_id = values.get("team_id", [None])[0]
         cursor = values.get("cursor", [None])[0]
+        include = values.get("include", [None])[0]
         try:
             limit = int(values.get("limit", ["50"])[0])
-            if group_by not in REPORT_DIMENSIONS or not 1 <= limit <= 100:
+            if (
+                group_by not in REPORT_DIMENSIONS
+                or not 1 <= limit <= 100
+                or include not in {None, "latency"}
+            ):
                 raise ValueError
             for scope_filter in (actor_id, team_id):
                 if scope_filter is not None and (
@@ -887,6 +906,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                     cursor_value["group_by"] != group_by
                     or cursor_value["actor_id"] != actor_id
                     or cursor_value["team_id"] != team_id
+                    or cursor_value.get("include") != include
                 ):
                     raise ValueError
                 window_end = datetime.fromisoformat(str(cursor_value["window_end"]))
@@ -916,6 +936,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 end=window_end.isoformat(),
                 limit=limit + 1,
                 offset=offset,
+                include_latency=include == "latency",
             )
             has_more = len(raw_rows) > limit
             rows = enrich_usage_rows(
@@ -949,6 +970,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 team_id=team_id,
                 window_end=window_end.isoformat(),
                 offset=offset + len(rows),
+                include=include,
             )
         LOGGER.info(
             "usage_admin_read organization=%s decision_actor=%s group_by=%s rows=%d",
@@ -957,10 +979,23 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             group_by,
             len(rows),
         )
+        coverage: dict[str, object] = {
+            "scope": "gateway_captured_requests_only",
+            "legacy_unattributed_rows_excluded": True,
+            "provider_invoice_reconciled": False,
+        }
+        if include == "latency":
+            coverage.update(
+                {
+                    "latency_scope": "accounted_gateway_requests_only",
+                    "latency_historical_rows_excluded": True,
+                    "latency_targets_configured": False,
+                }
+            )
         self._send_json(
             HTTPStatus.OK,
             {
-                "schema_version": 2,
+                "schema_version": 3 if include == "latency" else 2,
                 "organization_id": identity.organization_id,
                 "group_by": group_by,
                 "filters": {"actor_id": actor_id, "team_id": team_id},
@@ -969,11 +1004,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                     "end": window_end.isoformat(),
                     "timezone": "UTC",
                 },
-                "coverage": {
-                    "scope": "gateway_captured_requests_only",
-                    "legacy_unattributed_rows_excluded": True,
-                    "provider_invoice_reconciled": False,
-                },
+                "coverage": coverage,
                 "rows": rows,
                 "next_cursor": next_cursor,
             },
@@ -2424,6 +2455,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             self._send_protocol_error(protocol, f"Request field {output_field} must be a positive integer", HTTPStatus.BAD_REQUEST)
             return
 
+        policy_started_at = time.monotonic()
         decision = self.server.policy_engine.evaluate(
             identity=identity,
             client=client,
@@ -2431,9 +2463,11 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             requested_model=requested_model,
             requested_output_tokens=requested_output,
         )
+        policy_latency_milliseconds = _elapsed_milliseconds(policy_started_at)
         if not decision.allowed or decision.route is None:
             if account_usage:
-                self.server.store.record(
+                self._record_timed_usage(
+                    policy_latency_milliseconds=policy_latency_milliseconds,
                     identity=identity,
                     client=client,
                     protocol=protocol,
@@ -2483,7 +2517,8 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             )
             context_scope_headers = {}
             if account_usage:
-                self.server.store.record(
+                self._record_timed_usage(
+                    policy_latency_milliseconds=policy_latency_milliseconds,
                     identity=identity,
                     client=client,
                     protocol=protocol,
@@ -2514,7 +2549,8 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             return
         if context_lineage.outcome == "denied":
             if account_usage:
-                self.server.store.record(
+                self._record_timed_usage(
+                    policy_latency_milliseconds=policy_latency_milliseconds,
                     identity=identity,
                     client=client,
                     protocol=protocol,
@@ -2696,7 +2732,8 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         if redaction.action == "deny":
             is_dlp_denial = bool(dlp_findings)
             if account_usage:
-                self.server.store.record(
+                self._record_timed_usage(
+                    policy_latency_milliseconds=policy_latency_milliseconds,
                     identity=identity,
                     client=client,
                     protocol=protocol,
@@ -2738,7 +2775,8 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
 
         if redaction.action == "require_approval" and not approval_authorized:
             if account_usage:
-                self.server.store.record(
+                self._record_timed_usage(
+                    policy_latency_milliseconds=policy_latency_milliseconds,
                     identity=identity,
                     client=client,
                     protocol=protocol,
@@ -2792,7 +2830,8 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             and not upstream.allow_background
         ):
             if account_usage:
-                self.server.store.record(
+                self._record_timed_usage(
+                    policy_latency_milliseconds=policy_latency_milliseconds,
                     identity=identity,
                     client=client,
                     protocol=protocol,
@@ -2854,7 +2893,8 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                     ttl_seconds=self.server.config.upstream_timeout_seconds + 60,
                 )
             except ReservationDenied as error:
-                self.server.store.record(
+                self._record_timed_usage(
+                    policy_latency_milliseconds=policy_latency_milliseconds,
                     identity=identity,
                     client=client,
                     protocol=protocol,
@@ -2904,6 +2944,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 reservation_ttl_seconds=self.server.config.upstream_timeout_seconds + 60,
                 approval_request_id=(approval_request_id if approval_authorized else None),
                 context_lineage=context_lineage,
+                policy_latency_milliseconds=policy_latency_milliseconds,
             )
         finally:
             self.server.store.release_budget_reservation(reservation_id)
@@ -2927,6 +2968,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         reservation_ttl_seconds: int,
         approval_request_id: str | None,
         context_lineage: ContextLineage,
+        policy_latency_milliseconds: int,
     ) -> None:
         route = decision.route
         assert route is not None
@@ -2934,7 +2976,8 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         upstream_key = os.environ.get(upstream.api_key_env, "")
         if not upstream_key:
             if account_usage:
-                self.server.store.record(
+                self._record_timed_usage(
+                    policy_latency_milliseconds=policy_latency_milliseconds,
                     identity=identity,
                     client=client,
                     protocol=protocol,
@@ -2964,7 +3007,8 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             forwarded_headers,
         )
         request = urllib.request.Request(request_url, data=body, headers=headers, method="POST")
-        upstream_deadline = time.monotonic() + self.server.config.upstream_timeout_seconds
+        provider_started_at = time.monotonic()
+        upstream_deadline = provider_started_at + self.server.config.upstream_timeout_seconds
 
         try:
             response = self.server.upstream_opener.open(
@@ -2975,7 +3019,9 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             response = error
         except (urllib.error.URLError, TimeoutError, OSError):
             if account_usage:
-                self.server.store.record(
+                self._record_timed_usage(
+                    policy_latency_milliseconds=policy_latency_milliseconds,
+                    provider_started_at=provider_started_at,
                     identity=identity,
                     client=client,
                     protocol=protocol,
@@ -3002,7 +3048,9 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         if time.monotonic() >= upstream_deadline:
             response.close()
             if account_usage:
-                self.server.store.record(
+                self._record_timed_usage(
+                    policy_latency_milliseconds=policy_latency_milliseconds,
+                    provider_started_at=provider_started_at,
                     identity=identity,
                     client=client,
                     protocol=protocol,
@@ -3038,7 +3086,9 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         if 300 <= status < 400:
             response.close()
             if account_usage:
-                self.server.store.record(
+                self._record_timed_usage(
+                    policy_latency_milliseconds=policy_latency_milliseconds,
+                    provider_started_at=provider_started_at,
                     identity=identity,
                     client=client,
                     protocol=protocol,
@@ -3202,7 +3252,9 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 if usage.usage_reported
                 else 0
             )
-            self.server.store.record(
+            self._record_timed_usage(
+                policy_latency_milliseconds=policy_latency_milliseconds,
+                provider_started_at=provider_started_at,
                 identity=identity,
                 client=client,
                 protocol=protocol,
@@ -3243,6 +3295,29 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 cost,
                 redaction_count,
             )
+
+    def _record_timed_usage(
+        self,
+        *,
+        policy_latency_milliseconds: int,
+        provider_started_at: float | None = None,
+        **fields: Any,
+    ) -> None:
+        request_started_at = getattr(
+            self,
+            "_hormuz_request_started_at",
+            time.monotonic(),
+        )
+        self.server.store.record(
+            **fields,
+            gateway_latency_milliseconds=_elapsed_milliseconds(request_started_at),
+            policy_latency_milliseconds=policy_latency_milliseconds,
+            provider_latency_milliseconds=(
+                _elapsed_milliseconds(provider_started_at)
+                if provider_started_at is not None
+                else None
+            ),
+        )
 
     def _authenticate(self) -> Identity | None:
         candidates: list[str] = []
@@ -3532,6 +3607,10 @@ def serve_in_thread(server: GatewayServer) -> threading.Thread:
     thread = threading.Thread(target=server.serve_forever, name="hormuz", daemon=True)
     thread.start()
     return thread
+
+
+def _elapsed_milliseconds(started_at: float) -> int:
+    return max(0, min(round((time.monotonic() - started_at) * 1000), 2**63 - 1))
 
 
 class _ProviderResponseDeadlineExceeded(TimeoutError):

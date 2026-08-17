@@ -133,6 +133,120 @@ class UsageStoreMigrationTests(unittest.TestCase):
             self.assertEqual(report["context_estimated_tokens"], 123)
             self.assertEqual(report["context_packs_used"], 1)
 
+    def test_latency_metadata_is_bounded_opt_in_and_content_free(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            store = UsageStore(Path(temporary) / "usage.sqlite3")
+            identity = Identity(
+                token_env="ALICE_TOKEN",
+                token="alice-employee-token",
+                actor_id="alice",
+                actor_name="Alice",
+                team_id="engineering",
+                team_name="Engineering",
+                organization_id="org-a",
+            )
+            for gateway, policy, provider, context in (
+                (10, 1, 8, 3),
+                (30, 4, 25, 7),
+            ):
+                store.record(
+                    identity=identity,
+                    client="codex",
+                    protocol="openai",
+                    requested_model="gpt-fast",
+                    resolved_alias="gpt-fast",
+                    upstream_model="gpt-upstream",
+                    policy_action="allowed+context-injected",
+                    status="succeeded",
+                    gateway_latency_milliseconds=gateway,
+                    policy_latency_milliseconds=policy,
+                    provider_latency_milliseconds=provider,
+                    context_lineage=ContextLineage(
+                        mode="optional",
+                        outcome="injected",
+                        reason="pack_injected",
+                        pack_id="ctxpack_0123456789abcdef01234567",
+                        record_ids=("record-a",),
+                        policy_version="context-v1",
+                        retrieval_version="lexical-v1",
+                        render_version="user-reference-json-v1",
+                        estimated_tokens=20,
+                        assembly_milliseconds=context,
+                        reuse_status="fresh",
+                    ),
+                )
+            store.record(
+                identity=identity,
+                client="codex",
+                protocol="openai",
+                requested_model="gpt-denied",
+                resolved_alias=None,
+                upstream_model=None,
+                policy_action="denied",
+                status="denied",
+                gateway_latency_milliseconds=2,
+                policy_latency_milliseconds=1,
+            )
+
+            legacy_shape = store.report_rows(group_by="team")[0]
+            self.assertNotIn("latency", legacy_shape)
+            observed = store.report_rows(group_by="team", include_latency=True)[0]
+            self.assertEqual(
+                observed["latency"]["gateway"],
+                {
+                    "count": 3,
+                    "average_ms": 14.0,
+                    "max_ms": 30,
+                    "buckets": [
+                        {"le_ms": 1, "count": 0},
+                        {"le_ms": 5, "count": 1},
+                        {"le_ms": 10, "count": 2},
+                        {"le_ms": 25, "count": 2},
+                        {"le_ms": 50, "count": 3},
+                        {"le_ms": 100, "count": 3},
+                        {"le_ms": 250, "count": 3},
+                        {"le_ms": 500, "count": 3},
+                        {"le_ms": 1000, "count": 3},
+                        {"le_ms": 10000, "count": 3},
+                        {"le_ms": 60000, "count": 3},
+                        {"le_ms": 600000, "count": 3},
+                        {"le_ms": None, "count": 3},
+                    ],
+                },
+            )
+            self.assertEqual(observed["latency"]["policy"]["average_ms"], 2.0)
+            self.assertEqual(observed["latency"]["provider"]["count"], 2)
+            self.assertEqual(observed["latency"]["context"]["count"], 2)
+
+            audit = store.audit_events(
+                since="2000-01-01T00:00:00+00:00",
+                kind="usage",
+            )
+            self.assertNotIn("gateway_latency_milliseconds", audit[0])
+            self.assertNotIn("policy_latency_milliseconds", audit[0])
+            self.assertNotIn("provider_latency_milliseconds", audit[0])
+
+            for invalid in (-1, True, 2**63):
+                with self.subTest(invalid=invalid):
+                    with self.assertRaisesRegex(ValueError, "latency"):
+                        store.record(
+                            identity=identity,
+                            client="codex",
+                            protocol="openai",
+                            requested_model="gpt-fast",
+                            resolved_alias="gpt-fast",
+                            upstream_model="gpt-upstream",
+                            policy_action="allowed",
+                            status="succeeded",
+                            gateway_latency_milliseconds=invalid,
+                        )
+            with sqlite3.connect(store.path) as connection:
+                with self.assertRaises(sqlite3.IntegrityError):
+                    connection.execute(
+                        "UPDATE gateway_usage_events "
+                        "SET gateway_latency_milliseconds = -1"
+                    )
+
     def test_dlp_approval_is_metadata_only_non_self_exact_and_single_use(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             store = UsageStore(Path(temporary) / "usage.sqlite3")

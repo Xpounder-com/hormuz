@@ -113,7 +113,7 @@ The manifest is a structural backstop, not a claim that every Hormuz table is co
 
 Every line is one JSON object containing:
 
-- `schema_version`: usage events are `2`; security and administrative events remain `1`.
+- `schema_version`: usage events are `2`; security and administrative events remain `1`. Nullable gateway/policy/provider latency columns are not added to this stable export shape; they are available only through the explicit usage-report schema-v3 aggregation.
 - `event_type`: `usage`, `security.secret`, `security.dlp`, `security.dlp.approval`, or `security.admin.usage_read`.
 - `id` and `occurred_at`: the event identifier and UTC occurrence time.
 - event-time organization, actor, team, client, protocol, requested/resolved/routed/actual model, policy, status, normalized token, cost-basis, currency, rate-card-version, provider-request, and redaction metadata when applicable. Pre-organization usage rows retain a null organization rather than receiving a guessed tenant.

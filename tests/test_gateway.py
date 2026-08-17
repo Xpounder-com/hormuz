@@ -455,6 +455,15 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertEqual(event["provider_usage"]["total_tokens"], 150)
         self.assertEqual(event["provider_request_id"], "req_openai_test")
         self.assertEqual(headers["x-request-id"], "req_openai_test")
+        latency = self.gateway.store.report_rows(
+            group_by="person",
+            actor_id="alice",
+            include_latency=True,
+        )[0]["latency"]
+        self.assertEqual(latency["gateway"]["count"], 1)
+        self.assertEqual(latency["policy"]["count"], 1)
+        self.assertEqual(latency["provider"]["count"], 1)
+        self.assertEqual(latency["context"]["count"], 0)
 
     def test_provider_response_metadata_is_bounded_before_headers_and_usage_storage(self) -> None:
         marker = "provider-metadata-must-not-propagate"

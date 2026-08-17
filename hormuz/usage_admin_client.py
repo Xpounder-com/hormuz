@@ -1,15 +1,18 @@
 from __future__ import annotations
 
 import json
+import math
 import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime
 
 from .session_client import validate_session_gateway
+from .usage_reporting import LATENCY_BUCKETS_MS
 
 
 _MAX_RESPONSE_BYTES = 512 * 1024
+_MAX_SQLITE_INTEGER = 2**63 - 1
 _DIMENSIONS = {"organization", "team", "person", "model", "client", "provider"}
 
 
@@ -50,12 +53,17 @@ class UsageAdminClient:
         team_id: str | None = None,
         limit: int = 50,
         cursor: str | None = None,
+        include_latency: bool = False,
     ) -> dict[str, object]:
         if group_by not in _DIMENSIONS:
             raise UsageAdminClientError("invalid_usage_report_request")
         if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 100:
             raise UsageAdminClientError("invalid_usage_report_request")
+        if not isinstance(include_latency, bool):
+            raise UsageAdminClientError("invalid_usage_report_request")
         query: dict[str, str] = {"group_by": group_by, "limit": str(limit)}
+        if include_latency:
+            query["include"] = "latency"
         for key, value in (("actor_id", actor_id), ("team_id", team_id)):
             if value is not None:
                 _bounded_value(value, max_bytes=256)
@@ -76,7 +84,8 @@ class UsageAdminClient:
             "rows",
             "next_cursor",
         }
-        if set(response) != required or response.get("schema_version") != 2:
+        expected_schema = 3 if include_latency else 2
+        if set(response) != required or response.get("schema_version") != expected_schema:
             raise UsageAdminClientError("invalid_gateway_response")
         if response.get("group_by") != group_by:
             raise UsageAdminClientError("invalid_gateway_response")
@@ -96,14 +105,27 @@ class UsageAdminClient:
         filters = response.get("filters")
         if filters != {"actor_id": actor_id, "team_id": team_id}:
             raise UsageAdminClientError("invalid_gateway_response")
-        if not _valid_window(response.get("window")) or response.get("coverage") != {
+        expected_coverage = {
             "scope": "gateway_captured_requests_only",
             "legacy_unattributed_rows_excluded": True,
             "provider_invoice_reconciled": False,
-        }:
+        }
+        if include_latency:
+            expected_coverage.update(
+                {
+                    "latency_scope": "accounted_gateway_requests_only",
+                    "latency_historical_rows_excluded": True,
+                    "latency_targets_configured": False,
+                }
+            )
+        if not _valid_window(response.get("window")) or response.get("coverage") != expected_coverage:
             raise UsageAdminClientError("invalid_gateway_response")
         for row in rows:
-            if not _valid_row(row, group_by=group_by):
+            if not _valid_row(
+                row,
+                group_by=group_by,
+                include_latency=include_latency,
+            ):
                 raise UsageAdminClientError("invalid_gateway_response")
         return response
 
@@ -180,7 +202,12 @@ def _valid_window(value: object) -> bool:
     )
 
 
-def _valid_row(value: object, *, group_by: str) -> bool:
+def _valid_row(
+    value: object,
+    *,
+    group_by: str,
+    include_latency: bool = False,
+) -> bool:
     if not isinstance(value, dict):
         return False
     required = {
@@ -221,11 +248,13 @@ def _valid_row(value: object, *, group_by: str) -> bool:
         "client": {"client"},
         "provider": {"protocol"},
     }.get(group_by, set())
+    if include_latency:
+        extras = extras | {"latency"}
     if set(value) != required | extras:
         return False
     if not all(
         isinstance(value.get(key), str) and bool(value[key])
-        for key in {"scope_id", "scope_name"} | extras
+        for key in {"scope_id", "scope_name"} | (extras - {"latency"})
     ):
         return False
     integer_fields = required - {
@@ -264,6 +293,71 @@ def _valid_row(value: object, *, group_by: str) -> bool:
         if item is not None and (
             isinstance(item, bool) or not isinstance(item, (int, float)) or item < 0
         ):
+            return False
+    if include_latency and not _valid_latency(value.get("latency")):
+        return False
+    return True
+
+
+def _valid_latency(value: object) -> bool:
+    if not isinstance(value, dict) or set(value) != {
+        "gateway",
+        "policy",
+        "provider",
+        "context",
+    }:
+        return False
+    expected_limits = [*LATENCY_BUCKETS_MS, None]
+    for histogram in value.values():
+        if not isinstance(histogram, dict) or set(histogram) != {
+            "count",
+            "average_ms",
+            "max_ms",
+            "buckets",
+        }:
+            return False
+        count = histogram.get("count")
+        if (
+            isinstance(count, bool)
+            or not isinstance(count, int)
+            or not 0 <= count <= _MAX_SQLITE_INTEGER
+        ):
+            return False
+        average = histogram.get("average_ms")
+        maximum = histogram.get("max_ms")
+        if count == 0:
+            if average is not None or maximum is not None:
+                return False
+        elif (
+            isinstance(average, bool)
+            or not isinstance(average, (int, float))
+            or not math.isfinite(average)
+            or average < 0
+            or isinstance(maximum, bool)
+            or not isinstance(maximum, int)
+            or not 0 <= maximum <= _MAX_SQLITE_INTEGER
+            or average > maximum
+        ):
+            return False
+        buckets = histogram.get("buckets")
+        if not isinstance(buckets, list) or len(buckets) != len(expected_limits):
+            return False
+        previous = -1
+        for bucket, expected_limit in zip(buckets, expected_limits, strict=True):
+            if not isinstance(bucket, dict) or set(bucket) != {"le_ms", "count"}:
+                return False
+            if bucket.get("le_ms") != expected_limit:
+                return False
+            bucket_count = bucket.get("count")
+            if (
+                isinstance(bucket_count, bool)
+                or not isinstance(bucket_count, int)
+                or bucket_count > _MAX_SQLITE_INTEGER
+                or not previous <= bucket_count <= count
+            ):
+                return False
+            previous = bucket_count
+        if previous != count:
             return False
     return True
 

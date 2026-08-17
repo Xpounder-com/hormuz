@@ -25,6 +25,9 @@ hormuz usage report \
   --group-by team
 ```
 
+Add `--include-latency` when an operator needs the versioned content-free
+gateway, policy, provider, and automatic-context latency histograms.
+
 The report can group by `organization`, `team`, `person`, `model`, `client`, or `provider`. Exact event-time `--actor` and `--team` filters are optional. `--limit` accepts 1–100 rows. When `next_cursor` is present, pass it with the same grouping and filters:
 
 ```bash
@@ -46,6 +49,8 @@ For a workload credential, replace `--profile` with `--credential-env HORMUZ_TOK
 - `actor_id` and `team_id` are optional exact filters;
 - `limit` defaults to 50 and accepts 1–100;
 - `cursor` is the opaque value from the previous page.
+- `include=latency` opts into response schema version 3. Omitting it preserves
+  the exact version-2 response and cursor contract.
 
 A successful response has schema version 2. Version 2 adds the content-free automatic-context aggregates documented in [USAGE.md](USAGE.md):
 
@@ -70,6 +75,28 @@ A successful response has schema version 2. Version 2 adds the content-free auto
 }
 ```
 
+Schema version 3 is returned only for `include=latency`. Each row then adds a
+`latency` object with `gateway`, `policy`, `provider`, and `context` cumulative
+histograms. Every histogram contains an observed count, arithmetic average,
+maximum, and fixed millisecond buckets ending in `le_ms=null` for positive
+infinity. A zero-count histogram has null average and maximum. The coverage
+object also states that only accounted gateway requests are included,
+historical rows without timings are excluded, and no SLO target is configured.
+
+Latency cursors bind `include=latency`; using one against the version-2 view, or
+using a version-2 cursor against the latency view, fails with
+`400 invalid_usage_report_request`. This prevents a page sequence from silently
+changing its response contract.
+
+## Compatibility and migration
+
+Existing administrators and clients require no change: requests without
+`include=latency` continue to receive the exact schema-version-2 envelope and
+row shape. To consume timings, upgrade the Hormuz CLI/client and add
+`--include-latency` or `include=latency`; require schema version 3 and validate
+the nested histogram shape. Do not treat v3 as a replacement for v2 or send the
+new query to an older gateway that does not advertise this contract.
+
 The first request freezes an exclusive `window.end`; every cursor page reuses that window. Rows have the token, request-status, cost-basis, rate-card, model/provider/client, redaction, automatic-context, active-actor, and applicable budget fields documented in [USAGE.md](USAGE.md). Cursor state is never an authorization source: the gateway validates it and re-derives organization from the current credential on every page.
 
 Unknown, repeated, blank, over-limit, malformed, cursor/filter-mismatched, and unsupported fields return `400 invalid_usage_report_request`. A storage or mandatory audit-write failure returns `503 usage_admin_unavailable` without returning report rows.
@@ -79,5 +106,19 @@ Unknown, repeated, blank, over-limit, malformed, cursor/filter-mismatched, and u
 Every successful page writes `security.admin.usage_read` before its rows are returned. The event records the organization, viewing actor, grouping, frozen window, row count, and SHA-256 digests of optional actor/team filters. It contains no request content. The event appears in local `audit-export --kind security` output.
 
 The report covers only generation attempts recorded through this Hormuz gateway. Legacy rows without an organization are excluded rather than guessed, and request-time costs remain estimates until separately reconciled. Tokens and spend measure consumption, not employee productivity or work quality. Treat person-level output as access-controlled employee metadata and never as a performance ranking.
+
+Timing fields are also consumption and operations metadata, not employee
+performance evidence. `gateway` measures from the start of Hormuz request
+handling until immediately before its mandatory usage write; it does not
+include the database commit itself. Successful provider streams therefore
+include downstream relay, while a denied request stops when its usage snapshot
+is ready to persist. `policy` measures the synchronous policy decision only.
+`provider` starts immediately before the upstream open and runs through
+response relay, so it includes downstream backpressure; it is absent when no
+provider was attempted. `context` uses the existing automatic-injection
+assembly timing and is observed only when a pack was injected.
+Pre-authentication failures, unaccounted administration routes, proxy/TLS time,
+traffic bypassing Hormuz, and provider-side work after the connection closes
+are not included.
 
 This is a verified single-node SQLite boundary. It does not accept ADR 0002 or claim shared hosted storage, PostgreSQL row security, SIEM delivery, externally immutable audit, SCIM, or complete provider-account coverage.

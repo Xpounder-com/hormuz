@@ -884,6 +884,9 @@ class SessionBrokerIntegrationTests(unittest.TestCase):
                 billable_tokens=12,
                 cost_microusd=cost,
                 cost_basis="estimated",
+                gateway_latency_milliseconds=20 if identity is employee else 40,
+                policy_latency_milliseconds=2,
+                provider_latency_milliseconds=15,
             )
 
         employee_token = "employee-token-" + "e" * 32
@@ -911,6 +914,8 @@ class SessionBrokerIntegrationTests(unittest.TestCase):
         self.assertIsInstance(first["next_cursor"], str)
         self.assertNotIn("Other Employee", repr(first))
         self.assertNotIn("9000", repr(first))
+        self.assertEqual(first["schema_version"], 2)
+        self.assertNotIn("latency", first["rows"][0])
 
         status, second = self._admin_request(
             "GET",
@@ -944,6 +949,42 @@ class SessionBrokerIntegrationTests(unittest.TestCase):
         self.assertEqual(status, 400)
         self.assertEqual(invalid["error"]["code"], "invalid_usage_report_request")
 
+        status, latency_first = self._admin_request(
+            "GET",
+            "/v1/admin/usage?group_by=person&limit=1&include=latency",
+            token=admin_token,
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(latency_first["schema_version"], 3)
+        self.assertEqual(
+            latency_first["coverage"]["latency_scope"],
+            "accounted_gateway_requests_only",
+        )
+        self.assertIn("latency", latency_first["rows"][0])
+        self.assertIsInstance(latency_first["next_cursor"], str)
+
+        status, cursor_mismatch = self._admin_request(
+            "GET",
+            "/v1/admin/usage?group_by=person&limit=1&cursor="
+            + urllib.parse.quote(str(latency_first["next_cursor"]), safe=""),
+            token=admin_token,
+        )
+        self.assertEqual(status, 400)
+        self.assertEqual(
+            cursor_mismatch["error"]["code"],
+            "invalid_usage_report_request",
+        )
+
+        status, latency_second = self._admin_request(
+            "GET",
+            "/v1/admin/usage?group_by=person&limit=1&include=latency&cursor="
+            + urllib.parse.quote(str(latency_first["next_cursor"]), safe=""),
+            token=admin_token,
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(latency_second["schema_version"], 3)
+        self.assertIsNone(latency_second["next_cursor"])
+
         audit = self.gateway.store.audit_events(
             since="2000-01-01T00:00:00+00:00",
             kind="security",
@@ -953,7 +994,7 @@ class SessionBrokerIntegrationTests(unittest.TestCase):
             for event in audit
             if event["event_type"] == "security.admin.usage_read"
         ]
-        self.assertEqual(len(reads), 2)
+        self.assertEqual(len(reads), 4)
         self.assertTrue(
             all(event["organization_id"] == "xpounder" for event in reads)
         )
@@ -977,6 +1018,9 @@ class SessionBrokerIntegrationTests(unittest.TestCase):
             billable_tokens=24,
             cost_microusd=1_500,
             cost_basis="estimated",
+            gateway_latency_milliseconds=18,
+            policy_latency_milliseconds=2,
+            provider_latency_milliseconds=14,
         )
         output = io.StringIO()
         with mock.patch.dict(
@@ -993,6 +1037,7 @@ class SessionBrokerIntegrationTests(unittest.TestCase):
                     "HORMUZ_ADMIN_TOKEN",
                     "--group-by",
                     "team",
+                    "--include-latency",
                     "--allow-insecure-http",
                 ]
             )
@@ -1001,6 +1046,8 @@ class SessionBrokerIntegrationTests(unittest.TestCase):
         self.assertEqual(report["organization_id"], "xpounder")
         self.assertEqual(report["rows"][0]["scope_id"], "engineering")
         self.assertEqual(report["rows"][0]["billable_tokens"], 24)
+        self.assertEqual(report["schema_version"], 3)
+        self.assertEqual(report["rows"][0]["latency"]["gateway"]["count"], 1)
 
     def test_usage_admin_returns_no_rows_when_read_audit_cannot_commit(self) -> None:
         admin_token = "admin-token-" + "a" * 32

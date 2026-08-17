@@ -50,6 +50,9 @@ _USAGE_TABLE_COLUMNS = {
         "context_estimated_tokens",
         "context_assembly_milliseconds",
         "context_reuse_status",
+        "gateway_latency_milliseconds",
+        "policy_latency_milliseconds",
+        "provider_latency_milliseconds",
     ),
     "gateway_secret_events": (
         "id",

@@ -1091,13 +1091,14 @@ class ClientConfigTests(unittest.TestCase):
 
     def test_status_accepts_dimension_and_scope_filters(self) -> None:
         args = build_parser().parse_args(
-            ["status", "--group-by", "model", "--team", "engineering", "--actor", "alice", "--json"]
+            ["status", "--group-by", "model", "--team", "engineering", "--actor", "alice", "--json", "--include-latency"]
         )
 
         self.assertEqual(args.group_by, "model")
         self.assertEqual(args.team, "engineering")
         self.assertEqual(args.actor, "alice")
         self.assertTrue(args.json)
+        self.assertTrue(args.include_latency)
 
     def test_status_json_labels_versioned_estimates_and_unpriced_requests(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -1155,6 +1156,50 @@ class ClientConfigTests(unittest.TestCase):
             self.assertEqual(report["unpriced_requests"], 1)
             self.assertEqual(report["cost_bases"], ["estimated", "not_available"])
             self.assertEqual(report["rate_card_versions"], ["rates-v1"])
+
+    def test_status_latency_view_is_opt_in_and_prints_p95_bucket_bounds(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            config = replace(
+                self.config,
+                database_path=Path(temporary) / "usage.sqlite3",
+            )
+            UsageStore(config.database_path).record(
+                identity=config.identities_by_actor["alice"],
+                client="codex",
+                protocol="openai",
+                requested_model="gpt-5.4-mini",
+                resolved_alias="gpt-5.4-mini",
+                upstream_model="gpt-5.4-mini",
+                policy_action="allowed",
+                status="succeeded",
+                gateway_latency_milliseconds=18,
+                policy_latency_milliseconds=2,
+                provider_latency_milliseconds=14,
+            )
+            common = {
+                "group_by": "person",
+                "actor": None,
+                "team": None,
+                "organization": None,
+                "include_latency": True,
+            }
+            with redirect_stdout(json_output := io.StringIO()):
+                self.assertEqual(
+                    _status(config, argparse.Namespace(**common, json=True)),
+                    0,
+                )
+            latency = json.loads(json_output.getvalue())[0]["latency"]
+            self.assertEqual(latency["gateway"]["count"], 1)
+            self.assertEqual(latency["provider"]["average_ms"], 14.0)
+
+            with redirect_stdout(table_output := io.StringIO()):
+                self.assertEqual(
+                    _status(config, argparse.Namespace(**common, json=False)),
+                    0,
+                )
+            lines = table_output.getvalue().splitlines()
+            self.assertIn("GATEWAY_P95_BUCKET_MS", lines[0])
+            self.assertTrue(lines[1].endswith("\t25\t5\t25\t-"))
 
     def test_context_database_is_separate_and_cannot_alias_usage(self) -> None:
         self.assertNotEqual(self.config.context_database_path, self.config.database_path)

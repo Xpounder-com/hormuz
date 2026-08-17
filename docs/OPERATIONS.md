@@ -41,6 +41,24 @@ Hormuz applies seven process-local limits:
 
 The connection ceiling is deliberately higher than the parsed-request default so ordinary clients and probes have header/keep-alive headroom. Both ceilings are hard process-local maxima, not workload-sizing recommendations. The accept backlog is only a kernel hint, not another active-connection allowance or a portable guarantee. The header deadline ends when parsing completes and the body deadline begins at that boundary for body-bearing methods. These controls do not provide per-source rate limits, control platform SYN queues, guarantee an operating-system DNS lookup deadline, coordinate capacity across replicas, or replace reverse-proxy/WAF TLS, connection, header, request-rate, and independently configured slow-body controls. Those remain required deployment work under issue #11.
 
+## Content-free latency telemetry
+
+Every newly accounted generation attempt snapshots bounded integer timing
+metadata for gateway handling and policy evaluation, plus provider timing only
+when an upstream attempt begins. Existing automatic-context assembly timing is
+aggregated only for injected packs. An authorized `usage_viewer` can request
+tenant-scoped cumulative histograms through `hormuz usage report
+--include-latency`; the ordinary report remains schema v2 and unchanged. See
+[USAGE_ADMIN_API.md](USAGE_ADMIN_API.md) for the exact v3 contract and coverage.
+
+This is an SLI input, not an SLO. Hormuz does not yet select availability,
+latency, error-rate, authentication-failure, budget-correctness, or audit-delivery
+targets; it does not alert, page an owner, or claim end-to-end client latency.
+Pre-authentication failures and work outside accounted generation routes are not
+represented in the tenant report. Numeric SLO targets, severities, owners,
+escalation paths, external collector topology, and retention remain release and
+operator decisions under issue #9.
+
 ## Graceful shutdown
 
 `SIGTERM` starts one idempotent shutdown sequence:

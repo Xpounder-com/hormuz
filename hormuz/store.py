@@ -19,6 +19,18 @@ from .usage import (
     sanitize_provider_request_id,
     sanitize_provider_usage,
 )
+from .usage_reporting import LATENCY_BUCKETS_MS
+
+
+_LATENCY_SOURCES = {
+    "gateway": ("gateway_latency_milliseconds", None),
+    "policy": ("policy_latency_milliseconds", None),
+    "provider": ("provider_latency_milliseconds", None),
+    "context": (
+        "context_assembly_milliseconds",
+        "context_injection_outcome = 'injected'",
+    ),
+}
 
 
 @dataclass(frozen=True)
@@ -276,7 +288,22 @@ class UsageStore:
                     context_repository_revision TEXT,
                     context_estimated_tokens INTEGER NOT NULL DEFAULT 0,
                     context_assembly_milliseconds INTEGER NOT NULL DEFAULT 0,
-                    context_reuse_status TEXT NOT NULL DEFAULT 'not_applicable'
+                    context_reuse_status TEXT NOT NULL DEFAULT 'not_applicable',
+                    gateway_latency_milliseconds INTEGER CHECK (
+                        gateway_latency_milliseconds IS NULL OR
+                        (typeof(gateway_latency_milliseconds) = 'integer'
+                         AND gateway_latency_milliseconds >= 0)
+                    ),
+                    policy_latency_milliseconds INTEGER CHECK (
+                        policy_latency_milliseconds IS NULL OR
+                        (typeof(policy_latency_milliseconds) = 'integer'
+                         AND policy_latency_milliseconds >= 0)
+                    ),
+                    provider_latency_milliseconds INTEGER CHECK (
+                        provider_latency_milliseconds IS NULL OR
+                        (typeof(provider_latency_milliseconds) = 'integer'
+                         AND provider_latency_milliseconds >= 0)
+                    )
                 );
                 CREATE INDEX IF NOT EXISTS idx_gateway_usage_occurred_at
                     ON gateway_usage_events(occurred_at);
@@ -555,6 +582,17 @@ class UsageStore:
                     connection.execute(
                         f"ALTER TABLE gateway_usage_events ADD COLUMN {name} {declaration}"
                     )
+            for name in (
+                "gateway_latency_milliseconds",
+                "policy_latency_milliseconds",
+                "provider_latency_milliseconds",
+            ):
+                if name not in columns:
+                    connection.execute(
+                        f"ALTER TABLE gateway_usage_events ADD COLUMN {name} INTEGER "
+                        f"CHECK ({name} IS NULL OR "
+                        f"(typeof({name}) = 'integer' AND {name} >= 0))"
+                    )
             security_columns = {
                 row["name"]
                 for row in connection.execute("PRAGMA table_info(gateway_secret_events)").fetchall()
@@ -651,6 +689,9 @@ class UsageStore:
         redaction_count: int = 0,
         redaction_rules: tuple[str, ...] = (),
         context_lineage: ContextLineage | None = None,
+        gateway_latency_milliseconds: int | None = None,
+        policy_latency_milliseconds: int | None = None,
+        provider_latency_milliseconds: int | None = None,
     ) -> str:
         if cost_basis not in {"estimated", "estimated_legacy", "not_available", "not_applicable"}:
             raise ValueError("Unsupported usage cost basis")
@@ -690,6 +731,15 @@ class UsageStore:
                 )
             )
         )
+        normalized_gateway_latency = _validated_optional_latency(
+            gateway_latency_milliseconds
+        )
+        normalized_policy_latency = _validated_optional_latency(
+            policy_latency_milliseconds
+        )
+        normalized_provider_latency = _validated_optional_latency(
+            provider_latency_milliseconds
+        )
         lineage = _validated_context_lineage(context_lineage or ContextLineage())
         event_id = str(uuid.uuid4())
         with self._lock, self._connection() as connection:
@@ -708,10 +758,13 @@ class UsageStore:
                     context_record_ids_json, context_policy_version,
                     context_retrieval_version, context_render_version,
                     context_repository_revision, context_estimated_tokens,
-                    context_assembly_milliseconds, context_reuse_status
+                    context_assembly_milliseconds, context_reuse_status,
+                    gateway_latency_milliseconds, policy_latency_milliseconds,
+                    provider_latency_milliseconds
                 ) VALUES (
                     ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                    ?, ?, ?
                 )
                 """,
                 (
@@ -756,6 +809,9 @@ class UsageStore:
                     lineage.estimated_tokens,
                     lineage.assembly_milliseconds,
                     lineage.reuse_status,
+                    normalized_gateway_latency,
+                    normalized_policy_latency,
+                    normalized_provider_latency,
                 ),
             )
         return event_id
@@ -1739,6 +1795,7 @@ class UsageStore:
         end: str | None = None,
         limit: int | None = None,
         offset: int = 0,
+        include_latency: bool = False,
     ) -> list[dict[str, object]]:
         dimensions: dict[str, tuple[list[str], list[str]]] = {
             "organization": (
@@ -1785,6 +1842,8 @@ class UsageStore:
 
         if isinstance(offset, bool) or not isinstance(offset, int) or offset < 0:
             raise ValueError("Usage report offset must be a non-negative integer")
+        if not isinstance(include_latency, bool):
+            raise ValueError("Usage report latency selection must be boolean")
         if limit is not None and (
             isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 101
         ):
@@ -1816,6 +1875,7 @@ class UsageStore:
         if limit is not None:
             page = "LIMIT ? OFFSET ?"
             parameters.extend((limit, offset))
+        latency_select = _latency_select_sql() if include_latency else ""
         query = f"""
             SELECT
                 {', '.join(select_dimensions)},
@@ -1847,6 +1907,7 @@ class UsageStore:
                     THEN 1 ELSE 0 END), 0) AS context_required_denials,
                 COALESCE(SUM(context_estimated_tokens), 0) AS context_estimated_tokens,
                 COUNT(DISTINCT context_pack_id) AS context_packs_used
+                {latency_select}
             FROM gateway_usage_events
             WHERE {' AND '.join(clauses)}
             {grouping}
@@ -1862,6 +1923,8 @@ class UsageStore:
             item["cost_bases"] = _sorted_csv(item.pop("cost_bases_csv"))
             item["currencies"] = _sorted_csv(item.pop("currencies_csv"))
             item["rate_card_versions"] = _sorted_csv(item.pop("rate_card_versions_csv"))
+            if include_latency:
+                item["latency"] = _extract_latency_histograms(item)
             result.append(item)
         return result
 
@@ -2124,6 +2187,62 @@ def _sqlite_nonnegative(value: object) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
         return 0
     return min(max(value, 0), 2**63 - 1)
+
+
+def _validated_optional_latency(value: object) -> int | None:
+    if value is None:
+        return None
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or not 0 <= value <= 2**63 - 1
+    ):
+        raise ValueError("Usage latency must be a non-negative SQLite integer or null")
+    return value
+
+
+def _latency_select_sql() -> str:
+    expressions: list[str] = []
+    for name, (column, extra_condition) in _LATENCY_SOURCES.items():
+        condition = f"{column} IS NOT NULL"
+        if extra_condition is not None:
+            condition = f"({extra_condition}) AND {condition}"
+        expressions.extend(
+            (
+                f"COUNT(CASE WHEN {condition} THEN 1 END) AS latency_{name}_count",
+                f"ROUND(AVG(CASE WHEN {condition} THEN {column} END), 3) "
+                f"AS latency_{name}_average_ms",
+                f"MAX(CASE WHEN {condition} THEN {column} END) AS latency_{name}_max_ms",
+            )
+        )
+        for bucket in LATENCY_BUCKETS_MS:
+            expressions.append(
+                f"COUNT(CASE WHEN {condition} AND {column} <= {bucket} THEN 1 END) "
+                f"AS latency_{name}_le_{bucket}"
+            )
+    return ",\n                " + ",\n                ".join(expressions)
+
+
+def _extract_latency_histograms(item: dict[str, object]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for name in _LATENCY_SOURCES:
+        count = int(item.pop(f"latency_{name}_count"))
+        average = item.pop(f"latency_{name}_average_ms")
+        maximum = item.pop(f"latency_{name}_max_ms")
+        result[name] = {
+            "count": count,
+            "average_ms": float(average) if average is not None else None,
+            "max_ms": int(maximum) if maximum is not None else None,
+            "buckets": [
+                {
+                    "le_ms": bucket,
+                    "count": int(item.pop(f"latency_{name}_le_{bucket}")),
+                }
+                for bucket in LATENCY_BUCKETS_MS
+            ]
+            + [{"le_ms": None, "count": count}],
+        }
+    return result
 
 
 def _validated_context_lineage(value: ContextLineage) -> ContextLineage:

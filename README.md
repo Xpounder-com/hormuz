@@ -38,7 +38,7 @@ Hormuz is alpha software. The local prototype proves routing and policy behavior
 - Generic OIDC discovery/JWKS verification with strict issuer, audience, expiry, asymmetric-algorithm, subject-mapping, and signing-key-rotation enforcement.
 - Generic OIDC authorization-code + PKCE browser login with opaque 10-minute Hormuz access credentials, atomic refresh rotation, replay-family revocation, and fail-closed OS secure-store custody.
 - Capability-gated, tenant-scoped `hormuz sessions` listing, metadata-only security-event inspection, and immediate session, employee, team, or organization revocation.
-- Capability-gated, tenant-scoped `hormuz usage report` administration over the authenticated gateway, with frozen-window pagination, team/person/model/client/provider drill-downs, and mandatory metadata-only read audit.
+- Capability-gated, tenant-scoped `hormuz usage report` administration over the authenticated gateway, with frozen-window pagination, team/person/model/client/provider drill-downs, mandatory metadata-only read audit, and an opt-in version-3 content-free latency histogram view that leaves the exact version-2 contract unchanged.
 - An explicit kernel accept-backlog hint, pre-thread connection ceiling, absolute request-header and request-body deadlines, exact `Content-Length` body ingestion, versioned content-free liveness/readiness endpoints, atomic parsed-request capacity with saturation-aware readiness, a total provider-response relay deadline, and idempotent `SIGTERM` draining with a bounded in-flight request grace period.
 
 ## Quick start
@@ -150,6 +150,10 @@ hormuz usage report \
   --profile ai-operations \
   --group-by team
 ```
+
+Add `--include-latency` to opt into tenant-scoped gateway, policy, provider,
+and injected-context latency histograms. The flag reports measurement inputs;
+it does not configure or claim SLO targets.
 
 The server derives organization scope from the credential. See [docs/USAGE_ADMIN_API.md](docs/USAGE_ADMIN_API.md) for pagination, RBAC, audit, and coverage semantics.
 

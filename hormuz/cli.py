@@ -110,6 +110,11 @@ def build_parser() -> argparse.ArgumentParser:
     status = subparsers.add_parser("status", help="Print a current-month usage and cost report")
     status.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
     status.add_argument(
+        "--include-latency",
+        action="store_true",
+        help="Include content-free gateway, policy, provider, and context latency histograms",
+    )
+    status.add_argument(
         "--group-by",
         choices=["organization", "team", "person", "model", "client", "provider"],
         default="person",
@@ -140,6 +145,11 @@ def build_parser() -> argparse.ArgumentParser:
     usage_report.add_argument("--team", help="Filter by exact event-time team ID")
     usage_report.add_argument("--limit", type=int, default=50, help="Page size from 1 to 100")
     usage_report.add_argument("--cursor", help="Opaque cursor returned by the previous page")
+    usage_report.add_argument(
+        "--include-latency",
+        action="store_true",
+        help="Request versioned content-free latency histograms",
+    )
     usage_report.add_argument("--gateway", required=True, help="Hormuz gateway base URL")
     usage_credential = usage_report.add_mutually_exclusive_group()
     usage_credential.add_argument(
@@ -1039,6 +1049,7 @@ def _status(config: GatewayConfig, args: argparse.Namespace) -> int:
         organization_id=organization_id,
         actor_id=args.actor,
         team_id=args.team,
+        include_latency=getattr(args, "include_latency", False),
     )
     report = enrich_usage_rows(
         config,
@@ -1053,14 +1064,21 @@ def _status(config: GatewayConfig, args: argparse.Namespace) -> int:
     if not report:
         print("No Hormuz requests recorded this month.")
         return 0
-    print(
+    include_latency = getattr(args, "include_latency", False)
+    header = (
         "SCOPE_ID\tSCOPE_NAME\tTEAM\tPROVIDER\tCLIENT\tREQUESTS\tSUCCEEDED\tFAILED\tDENIED\t"
         "INPUT\tOUTPUT\tCACHE_READ\tCACHE_WRITE\tREASONING\tTOTAL\tCOST_USD\tBUDGET_USD\t"
         "REMAINING_USD\tBUDGET_USED_PCT\tACTORS\tREDACTIONS\tBILLABLE\tESTIMATED_COST_USD\t"
         "UNPRICED\tCOST_BASES\tRATE_CARD_VERSIONS"
     )
+    if include_latency:
+        header += (
+            "\tGATEWAY_P95_BUCKET_MS\tPOLICY_P95_BUCKET_MS\t"
+            "PROVIDER_P95_BUCKET_MS\tCONTEXT_P95_BUCKET_MS"
+        )
+    print(header)
     for row in report:
-        print(
+        line = (
             f"{row['scope_id']}\t{row['scope_name']}\t{row.get('team_name', '-')}\t"
             f"{row.get('protocol', '-')}\t{row.get('client', '-')}\t{row['requests']}\t"
             f"{row['succeeded']}\t{row['failed']}\t{row['denied']}\t{row['input_tokens']}\t"
@@ -1071,6 +1089,13 @@ def _status(config: GatewayConfig, args: argparse.Namespace) -> int:
             f"{row['billable_tokens']}\t{row['estimated_cost_usd']:.6f}\t{row['unpriced_requests']}\t"
             f"{','.join(row['cost_bases'])}\t{','.join(row['rate_card_versions'])}"
         )
+        if include_latency:
+            latency = row["latency"]
+            line += "\t" + "\t".join(
+                _latency_p95_bucket(latency[name])
+                for name in ("gateway", "policy", "provider", "context")
+            )
+        print(line)
     return 0
 
 
@@ -1220,6 +1245,33 @@ def _budget_for_scope(
 
 def _display_number(value: object) -> str:
     return "-" if value is None else f"{float(value):.2f}"
+
+
+def _latency_p95_bucket(value: object) -> str:
+    if not isinstance(value, dict):
+        return "-"
+    count = value.get("count")
+    buckets = value.get("buckets")
+    if (
+        isinstance(count, bool)
+        or not isinstance(count, int)
+        or count <= 0
+        or not isinstance(buckets, list)
+    ):
+        return "-"
+    rank = (count * 95 + 99) // 100
+    for bucket in buckets:
+        if not isinstance(bucket, dict):
+            return "-"
+        bucket_count = bucket.get("count")
+        if (
+            isinstance(bucket_count, int)
+            and not isinstance(bucket_count, bool)
+            and bucket_count >= rank
+        ):
+            limit = bucket.get("le_ms")
+            return "+Inf" if limit is None else str(limit)
+    return "-"
 
 
 def _policy_check(config: GatewayConfig, args: argparse.Namespace) -> int:
@@ -1824,6 +1876,7 @@ def _usage_admin_command(args: argparse.Namespace) -> int:
             team_id=args.team,
             limit=args.limit,
             cursor=args.cursor,
+            include_latency=args.include_latency,
         )
     except (
         UsageAdminClientError,
