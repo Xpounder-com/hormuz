@@ -1190,6 +1190,59 @@ response/recovery targets, external communications, and independent review
 remain open. Issue #9 remains open and this checkpoint does not authorize an
 enterprise release.
 
+### Content-free latency SLI instrumentation
+
+The usage-timing contract was exercised locally on August 17, 2026 from exact
+implementation commit `dc848ec9d65ec96d1e30ff84090c0dab0acfb5b2` without a
+live provider request or credential.
+
+- the first system-Python attempt stopped before product code because PyJWT was
+  unavailable. Re-running in the hash-locked project environment made the new
+  client and store tests red because neither the latency opt-in nor bounded
+  timing fields existed;
+- newly accounted requests now persist nullable non-negative SQLite integers
+  for gateway, synchronous-policy, and attempted-provider timings. Historical
+  rows remain null, requests without an upstream attempt have no provider
+  observation, and injected-context histograms reuse the existing assembly
+  timing only when context was actually injected;
+- the ordinary tenant-scoped usage response remains the exact schema-v2
+  envelope and row shape. `include=latency` explicitly selects schema v3,
+  adds four cumulative fixed-bucket histograms, and binds that selection into
+  the cursor so page sequences cannot silently change contracts;
+- strict client validation rejects unknown histogram fields, non-monotonic
+  buckets, count mismatches, non-finite averages, and values outside the SQLite
+  integer range. A synthetic maximum 100-row v3 response was 218,592 bytes,
+  41.7 percent of the client's 512 KiB limit;
+- CLI JSON exposes complete histograms, while its tabular form labels p95
+  histogram-bucket upper bounds rather than presenting exact percentiles or SLO
+  targets. The timing columns contain no prompt, response, query, credential,
+  filename, source text, network address, or caller-controlled label and remain
+  outside the stable audit-export v2 shape;
+- the focused store, usage-client, and CLI suite passed 68 tests in `0.280`
+  seconds. The complete source suite passed 433 tests in `129.534` seconds; the
+  environment-gated official Claude Code executable case was the sole expected
+  local skip. Source/test/script bytecode compilation and `git diff --check`
+  passed;
+- the frozen 60-task release benchmark passed with precision, recall, and
+  useful-pack rate `1.00`, mean compression `0.840593`, and zero authorization,
+  stale, dependency-stale, malicious, contradiction, budget, determinism, or
+  leakage-review failures; and
+- two independent exact-source builds produced byte-identical artifacts: wheel
+  SHA-256 `f380aded0d08f31b5b73a26beae664246c48acab0a57493f5262b49b4c1e161d`
+  (339,596 bytes), source-distribution SHA-256
+  `3112e68a8e42debc80857f26affc878e37e169fe85ea5631391b21e2ad2f9977`
+  (662,640 bytes), and reproducibility-manifest SHA-256
+  `6fa83cbd2abd88802af9541ba4bce8b2a077097b33cb854bfd1311d99f7397f6`.
+  A fresh Python 3.14 environment installed the hash-locked runtime closure and
+  exact wheel, passed `pip check`, and exposed both latency CLI flags.
+
+This supplies content-free SLI inputs for accounted generation routes only. It
+does not set availability or latency targets, alert or page an owner, measure
+pre-authentication failures or bypass traffic, export to an external collector,
+or prove end-to-end client latency. Shared persistence, HA, externally retained
+telemetry, numeric SLOs, named ownership, real infrastructure load, and
+independent review remain open under issues #11 and #9.
+
 ## Reproduce locally
 
 The default suite uses only loopback fake providers:
