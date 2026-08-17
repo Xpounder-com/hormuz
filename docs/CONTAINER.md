@@ -8,6 +8,7 @@ The root `Dockerfile`:
 
 - pins the official Python 3.14.6 Alpine 3.23 multi-platform image by registry digest;
 - installs only exact, hash-verified binary Python dependencies from `deploy/container/requirements.lock`, the canonical multi-platform runtime closure also exercised by source/test, wheel-smoke, release-verification, and upstream-canary jobs;
+- carries the exact, hash-reviewed `backports-tarfile==1.2.0`, `importlib-metadata==9.0.0`, and `zipp==4.1.0` closure only when `python_full_version < '3.12'`, closing the conditional `jaraco.context==6.1.2` and `keyring==25.7.0` requirements on the oldest supported Python release while remaining inert in the Python 3.14 reference image;
 - copies only the Hormuz package and the dependency lock through a default-deny `.dockerignore`;
 - runs as numeric UID and GID `65532:65532` with no login shell or home directory;
 - writes application data only beneath `/var/lib/hormuz`;
@@ -63,11 +64,14 @@ Regenerate the lock only when the declared runtime dependencies change, then rev
 ```bash
 uv pip compile pyproject.toml \
   --universal \
+  --python-version 3.11 \
   --generate-hashes \
   --no-annotate \
   --no-header \
   --output-file deploy/container/requirements.lock
 ```
+
+The explicit oldest-supported `--python-version 3.11` is part of the lock contract. Omitting it can hide dependencies that exist only below Python 3.12 even when universal platform resolution is enabled.
 
 ## Configure
 

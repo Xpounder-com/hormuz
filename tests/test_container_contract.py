@@ -31,6 +31,33 @@ class ContainerContractTests(unittest.TestCase):
                 requirement + "\n", 1
             )[1].split("\n", 3)[0])
 
+    def test_runtime_lock_closes_python_311_conditional_dependency(self) -> None:
+        lock = (ROOT / "deploy/container/requirements.lock").read_text()
+
+        self.assertIn(
+            "backports-tarfile==1.2.0 ; python_full_version < '3.12' \\",
+            lock,
+        )
+        self.assertIn(
+            "--hash=sha256:77e284d754527b01fb1e6fa8a1afe577858ebe4e9dad8919e34c862cb399bc34",
+            lock,
+        )
+        self.assertIn(
+            "--hash=sha256:d75e02c268746e1b8144c278978b6e98e85de6ad16f8e4b0844a154557eca991",
+            lock,
+        )
+        self.assertIn(
+            "importlib-metadata==9.0.0 ; python_full_version < '3.12' \\",
+            lock,
+        )
+        self.assertIn(
+            "zipp==4.1.0 ; python_full_version < '3.12' \\",
+            lock,
+        )
+        container_doc = (ROOT / "docs/CONTAINER.md").read_text()
+        self.assertIn("--universal", container_doc)
+        self.assertIn("--python-version 3.11", container_doc)
+
     def test_image_declares_non_root_health_and_data_contract(self) -> None:
         dockerfile = (ROOT / "Dockerfile").read_text()
         self.assertIn("USER 65532:65532", dockerfile)
