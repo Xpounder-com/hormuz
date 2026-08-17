@@ -19,7 +19,7 @@ import sys
 import tarfile
 import tempfile
 import tomllib
-from typing import Any
+from typing import Any, Callable
 
 
 EXPECTED_BUILD_FRONTEND = "1.3.0"
@@ -27,8 +27,20 @@ EXPECTED_BUILD_REQUIREMENTS = (
     "setuptools==84.0.0",
     "wheel==0.48.0",
 )
+EXPECTED_LOCKED_DISTRIBUTIONS = (
+    ("build", "1.3.0"),
+    ("colorama", "0.4.6"),
+    ("packaging", "26.3"),
+    ("pyproject-hooks", "1.2.0"),
+    ("setuptools", "84.0.0"),
+    ("wheel", "0.48.0"),
+)
 COMMIT_SHA = re.compile(r"^[0-9a-f]{40}$")
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
+LOCK_LINE = re.compile(
+    r"^([a-z0-9][a-z0-9-]*)==([0-9][A-Za-z0-9.]*) "
+    r"--hash=sha256:([0-9a-f]{64})$"
+)
 MIN_SOURCE_DATE_EPOCH = 315_532_800  # 1980-01-01, the ZIP timestamp floor.
 MAX_SOURCE_DATE_EPOCH = 4_294_967_295  # Maximum unsigned gzip timestamp.
 MAX_ARCHIVE_MEMBERS = 10_000
@@ -37,6 +49,13 @@ MAX_ARCHIVE_BYTES = 128 * 1024 * 1024
 
 class ReproducibleBuildError(RuntimeError):
     """Raised when a distribution build cannot prove byte reproducibility."""
+
+
+@dataclass(frozen=True)
+class LockedDistribution:
+    name: str
+    version: str
+    sha256: str
 
 
 @dataclass(frozen=True)
@@ -197,6 +216,46 @@ def validate_build_toolchain(
     return normalized
 
 
+def parse_build_lock(value: str) -> tuple[LockedDistribution, ...]:
+    if not isinstance(value, str):
+        raise ReproducibleBuildError("build lock is not valid text")
+    lines = value.splitlines()
+    if len(lines) != len(EXPECTED_LOCKED_DISTRIBUTIONS):
+        raise ReproducibleBuildError("build lock does not match reviewed closure")
+    locked: list[LockedDistribution] = []
+    for index, line in enumerate(lines):
+        match = LOCK_LINE.fullmatch(line)
+        if match is None:
+            raise ReproducibleBuildError("build lock contains an invalid requirement")
+        name, version, digest = match.groups()
+        if (name, version) != EXPECTED_LOCKED_DISTRIBUTIONS[index]:
+            raise ReproducibleBuildError("build lock does not match reviewed closure")
+        locked.append(LockedDistribution(name, version, digest))
+    return tuple(locked)
+
+
+def validate_installed_build_toolchain(
+    locked: tuple[LockedDistribution, ...],
+    *,
+    version_lookup: Callable[[str], str] = importlib.metadata.version,
+) -> None:
+    if tuple((item.name, item.version) for item in locked) != (
+        EXPECTED_LOCKED_DISTRIBUTIONS
+    ):
+        raise ReproducibleBuildError("installed build closure is not reviewed")
+    for item in locked:
+        try:
+            installed = version_lookup(item.name)
+        except (importlib.metadata.PackageNotFoundError, LookupError) as error:
+            raise ReproducibleBuildError(
+                "locked build distribution is not installed"
+            ) from error
+        if installed != item.version:
+            raise ReproducibleBuildError(
+                "installed build distribution version does not match lock"
+            )
+
+
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
     try:
@@ -213,6 +272,8 @@ def render_manifest(
     source_sha: str,
     source_date_epoch: int,
     build_requirements: tuple[str, ...],
+    locked_distributions: tuple[LockedDistribution, ...],
+    build_lock_sha256: str,
     artifacts: dict[str, tuple[str, int]],
 ) -> dict[str, Any]:
     if not COMMIT_SHA.fullmatch(source_sha):
@@ -222,6 +283,12 @@ def render_manifest(
         build_requirements,
         build_frontend_version=EXPECTED_BUILD_FRONTEND,
     )
+    if tuple((item.name, item.version) for item in locked_distributions) != (
+        EXPECTED_LOCKED_DISTRIBUTIONS
+    ) or any(not SHA256.fullmatch(item.sha256) for item in locked_distributions):
+        raise ReproducibleBuildError("manifest build closure is invalid")
+    if not SHA256.fullmatch(build_lock_sha256):
+        raise ReproducibleBuildError("manifest build lock digest is invalid")
     if len(artifacts) != 2:
         raise ReproducibleBuildError("distribution artifact set is incomplete")
     rendered: list[dict[str, Any]] = []
@@ -249,11 +316,15 @@ def render_manifest(
     if sum(item["filename"].endswith(".tar.gz") for item in rendered) != 1:
         raise ReproducibleBuildError("source distribution set is invalid")
     return {
-        "schema": "hormuz.reproducible-distributions.v1",
+        "schema": "hormuz.reproducible-distributions.v2",
         "source_sha": source_sha,
         "source_date_epoch": epoch,
         "build_frontend": f"build=={EXPECTED_BUILD_FRONTEND}",
         "build_requirements": list(requirements),
+        "build_lock_sha256": build_lock_sha256,
+        "locked_distributions": [
+            f"{item.name}=={item.version}" for item in locked_distributions
+        ],
         "independent_builds": 2,
         "artifacts": rendered,
     }
@@ -287,6 +358,9 @@ def _commit_epoch(project_root: Path, source_sha: str) -> int:
     )
     if resolved.returncode != 0 or resolved.stdout.strip() != source_sha:
         raise ReproducibleBuildError("source revision is not available as a commit")
+    checked_out = _run_git(["rev-parse", "HEAD"], project_root=project_root)
+    if checked_out.returncode != 0 or checked_out.stdout.strip() != source_sha:
+        raise ReproducibleBuildError("source revision is not the checked-out commit")
     timestamp = _run_git(
         ["show", "-s", "--format=%ct", source_sha],
         project_root=project_root,
@@ -300,7 +374,9 @@ def _commit_epoch(project_root: Path, source_sha: str) -> int:
     return _validate_source_date_epoch(epoch)
 
 
-def _read_build_requirements(project_root: Path) -> tuple[str, ...]:
+def _read_build_toolchain(
+    project_root: Path,
+) -> tuple[tuple[str, ...], tuple[LockedDistribution, ...], str]:
     try:
         project = tomllib.loads((project_root / "pyproject.toml").read_text())
         requirements = project["build-system"]["requires"]
@@ -311,13 +387,23 @@ def _read_build_requirements(project_root: Path) -> tuple[str, ...]:
     ):
         raise ReproducibleBuildError("project build requirements are invalid")
     try:
-        frontend = importlib.metadata.version("build")
+        frontend_version = importlib.metadata.version("build")
     except importlib.metadata.PackageNotFoundError as error:
-        raise ReproducibleBuildError("reviewed build frontend is not installed") from error
-    return validate_build_toolchain(
+        raise ReproducibleBuildError(
+            "reviewed build frontend is not installed"
+        ) from error
+    validated_requirements = validate_build_toolchain(
         requirements,
-        build_frontend_version=frontend,
+        build_frontend_version=frontend_version,
     )
+    lock_path = project_root / "deploy/build/requirements.lock"
+    try:
+        lock_text = lock_path.read_text()
+    except (OSError, UnicodeDecodeError) as error:
+        raise ReproducibleBuildError("reviewed build lock cannot be read") from error
+    locked = parse_build_lock(lock_text)
+    validate_installed_build_toolchain(locked)
+    return validated_requirements, locked, _sha256(lock_path)
 
 
 def _export_source(
@@ -371,7 +457,6 @@ def _extract_source(archive_path: Path, destination: Path) -> None:
 
 def _run_build(
     *,
-    python_executable: str,
     source_root: Path,
     output_dir: Path,
     source_date_epoch: int,
@@ -380,7 +465,14 @@ def _run_build(
     environment["SOURCE_DATE_EPOCH"] = str(source_date_epoch)
     try:
         built = subprocess.run(
-            [python_executable, "-m", "build", "--outdir", str(output_dir)],
+            [
+                sys.executable,
+                "-m",
+                "build",
+                "--no-isolation",
+                "--outdir",
+                str(output_dir),
+            ],
             cwd=source_root,
             env=environment,
             check=False,
@@ -421,11 +513,9 @@ def build_reproducible_distributions(
     project_root: Path,
     source_sha: str,
     output_dir: Path,
-    python_executable: str,
 ) -> dict[str, Any]:
     project_root = project_root.resolve()
     output_dir = output_dir.resolve()
-    requirements = _read_build_requirements(project_root)
     epoch = _commit_epoch(project_root, source_sha)
     output_dir.parent.mkdir(parents=True, exist_ok=True)
     if output_dir.exists() and any(output_dir.iterdir()):
@@ -439,13 +529,30 @@ def build_reproducible_distributions(
         source_archive = root / "source.tar"
         _export_source(project_root, source_sha, source_archive)
         builds: list[dict[str, Path]] = []
+        requirements: tuple[str, ...] | None = None
+        locked: tuple[LockedDistribution, ...] | None = None
+        build_lock_digest: str | None = None
         for label in ("a", "b"):
             source_root = root / f"source-{label}"
             build_output = root / f"build-{label}"
             build_output.mkdir()
             _extract_source(source_archive, source_root)
+            source_requirements, source_locked, source_lock_digest = (
+                _read_build_toolchain(source_root)
+            )
+            if requirements is None:
+                requirements = source_requirements
+                locked = source_locked
+                build_lock_digest = source_lock_digest
+            elif (
+                source_requirements != requirements
+                or source_locked != locked
+                or source_lock_digest != build_lock_digest
+            ):
+                raise ReproducibleBuildError(
+                    "independent source exports have different build inputs"
+                )
             _run_build(
-                python_executable=python_executable,
                 source_root=source_root,
                 output_dir=build_output,
                 source_date_epoch=epoch,
@@ -467,10 +574,14 @@ def build_reproducible_distributions(
                 )
             first_metadata[filename] = (first_digest, first.stat().st_size)
 
+        if requirements is None or locked is None or build_lock_digest is None:
+            raise ReproducibleBuildError("reproducible build inputs are unavailable")
         manifest = render_manifest(
             source_sha=source_sha,
             source_date_epoch=epoch,
             build_requirements=requirements,
+            locked_distributions=locked,
+            build_lock_sha256=build_lock_digest,
             artifacts=first_metadata,
         )
         publish = root / "publish"
@@ -499,7 +610,6 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--source-sha", required=True)
     parser.add_argument("--outdir", type=Path, required=True)
     parser.add_argument("--project-root", type=Path, default=Path.cwd())
-    parser.add_argument("--python", default=sys.executable)
     return parser
 
 
@@ -510,7 +620,6 @@ def main() -> int:
             project_root=arguments.project_root,
             source_sha=arguments.source_sha,
             output_dir=arguments.outdir,
-            python_executable=arguments.python,
         )
     except ReproducibleBuildError as error:
         print(f"reproducible build failed: {error}", file=sys.stderr)

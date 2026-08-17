@@ -302,7 +302,7 @@ The suite uses local fake OpenAI and Anthropic endpoints and does not need real 
 HORMUZ_RUN_CLAUDE_CLIENT_TEST=1 python3 -m unittest -v
 ```
 
-The GitHub publication gate also tests Python 3.11 through 3.14, validates the frozen benchmark and preserves CI evidence, builds each exact-commit Python distribution twice under pinned frontend/backend inputs, requires byte-identical wheels and canonical source archives, installs the verified wheel, verifies pinned official Codex and Claude Code releases, and scans the restricted container. A separate tag-only workflow re-runs the release gates before it can publish, sign, attest, and verify a private image. The weekly latest-client canary remains non-blocking. See [docs/RELEASES.md](docs/RELEASES.md) and [docs/VERIFICATION.md](docs/VERIFICATION.md) for the exact boundary.
+The GitHub publication gate also tests Python 3.11 through 3.14, validates the frozen benchmark and preserves CI evidence, hash-verifies the complete six-wheel cross-platform Python build toolchain, disables backend re-resolution, builds each exact commit twice, requires byte-identical wheels and canonical source archives, installs the verified wheel, verifies pinned official Codex and Claude Code releases, and scans the restricted container. A separate tag-only workflow re-runs the release gates before it can publish, sign, attest, and verify a private image. The weekly latest-client canary remains non-blocking. See [docs/RELEASES.md](docs/RELEASES.md) and [docs/VERIFICATION.md](docs/VERIFICATION.md) for the exact boundary.
 
 ## Roadmap boundary
 

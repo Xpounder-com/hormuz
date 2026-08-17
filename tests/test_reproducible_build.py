@@ -7,15 +7,26 @@ import tempfile
 import unittest
 
 from scripts.reproducible_build import (
+    LockedDistribution,
     ReproducibleBuildError,
     canonicalize_sdist,
+    parse_build_lock,
     render_manifest,
     validate_build_toolchain,
+    validate_installed_build_toolchain,
 )
 
 
 SHA = "7" * 40
 EPOCH = 1_786_930_600
+LOCKED = (
+    LockedDistribution("build", "1.3.0", "a" * 64),
+    LockedDistribution("colorama", "0.4.6", "b" * 64),
+    LockedDistribution("packaging", "26.3", "c" * 64),
+    LockedDistribution("pyproject-hooks", "1.2.0", "d" * 64),
+    LockedDistribution("setuptools", "84.0.0", "e" * 64),
+    LockedDistribution("wheel", "0.48.0", "f" * 64),
+)
 
 
 def _write_sdist(
@@ -178,6 +189,83 @@ class ReproducibleBuildTests(unittest.TestCase):
                         build_frontend_version=frontend,
                     )
 
+    def test_build_lock_requires_the_exact_complete_hashed_closure(self) -> None:
+        text = "\n".join(
+            f"{item.name}=={item.version} --hash=sha256:{item.sha256}"
+            for item in LOCKED
+        ) + "\n"
+        self.assertEqual(parse_build_lock(text), LOCKED)
+        self.assertEqual(
+            parse_build_lock(
+                (Path(__file__).resolve().parents[1]
+                 / "deploy/build/requirements.lock").read_text()
+            ),
+            (
+                LockedDistribution(
+                    "build",
+                    "1.3.0",
+                    "7145f0b5061ba90a1500d60bd1b13ca0a8a4cebdd0cc16ed8adf1c0e739f43b4",
+                ),
+                LockedDistribution(
+                    "colorama",
+                    "0.4.6",
+                    "4f1d9991f5acc0ca119f9d443620b77f9d6b33703e51011c16baf57afb285fc6",
+                ),
+                LockedDistribution(
+                    "packaging",
+                    "26.3",
+                    "d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c",
+                ),
+                LockedDistribution(
+                    "pyproject-hooks",
+                    "1.2.0",
+                    "9e5c6bfa8dcc30091c74b0cf803c81fdd29d94f01992a7707bc97babb1141913",
+                ),
+                LockedDistribution(
+                    "setuptools",
+                    "84.0.0",
+                    "51a52592b3b99e102b609654876bd65f19f999935166d1352678931132b0c670",
+                ),
+                LockedDistribution(
+                    "wheel",
+                    "0.48.0",
+                    "3217dcc807155e45db462d7ef2431f5ddda0d7273b700d05a67b271ceb1287ab",
+                ),
+            ),
+        )
+
+        invalid = {
+            "missing": "\n".join(text.splitlines()[:-1]),
+            "duplicate": text + text.splitlines()[0] + "\n",
+            "range": text.replace("build==1.3.0", "build>=1.3.0"),
+            "bad hash": text.replace("a" * 64, "hormuz-sentinel"),
+            "unknown": text.replace("build==1.3.0", "hormuz-sentinel==1.3.0"),
+            "option": text + "--index-url https://hormuz-sentinel.invalid\n",
+        }
+        for name, value in invalid.items():
+            with self.subTest(name=name), self.assertRaises(
+                ReproducibleBuildError
+            ) as raised:
+                parse_build_lock(value)
+            self.assertNotIn("hormuz-sentinel", str(raised.exception))
+
+    def test_installed_build_toolchain_must_match_every_locked_version(self) -> None:
+        versions = {item.name: item.version for item in LOCKED}
+        validate_installed_build_toolchain(
+            LOCKED,
+            version_lookup=versions.__getitem__,
+        )
+        with self.assertRaises(ReproducibleBuildError):
+            validate_installed_build_toolchain(
+                LOCKED,
+                version_lookup=lambda name: "9.9.9" if name == "packaging" else versions[name],
+            )
+        with self.assertRaises(ReproducibleBuildError):
+            validate_installed_build_toolchain(
+                LOCKED,
+                version_lookup=lambda name: (_ for _ in ()).throw(KeyError(name)),
+            )
+
     def test_manifest_is_deterministic_content_free_and_hash_bound(self) -> None:
         artifacts = {
             "hormuz-0.1.0-py3-none-any.whl": ("a" * 64, 1234),
@@ -187,10 +275,17 @@ class ReproducibleBuildTests(unittest.TestCase):
             source_sha=SHA,
             source_date_epoch=EPOCH,
             build_requirements=("setuptools==84.0.0", "wheel==0.48.0"),
+            locked_distributions=LOCKED,
+            build_lock_sha256="9" * 64,
             artifacts=artifacts,
         )
-        self.assertEqual(manifest["schema"], "hormuz.reproducible-distributions.v1")
+        self.assertEqual(manifest["schema"], "hormuz.reproducible-distributions.v2")
         self.assertEqual(manifest["source_sha"], SHA)
+        self.assertEqual(manifest["build_lock_sha256"], "9" * 64)
+        self.assertEqual(
+            manifest["locked_distributions"],
+            [f"{item.name}=={item.version}" for item in LOCKED],
+        )
         self.assertEqual(
             [item["filename"] for item in manifest["artifacts"]],
             sorted(artifacts),

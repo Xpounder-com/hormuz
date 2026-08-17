@@ -34,25 +34,31 @@ Public-good Sigstore keyless signing and attestation can place the workflow iden
 
 Ordinary and tag-release workflows do not invoke the package backend directly. They run `scripts/reproducible_build.py` with the exact checked-out 40-character commit SHA. The gate:
 
-1. requires the reviewed `build==1.3.0` frontend and exact `setuptools==84.0.0` and `wheel==0.48.0` backend inputs;
+1. requires the six-wheel Python 3.11+ cross-platform closure in `deploy/build/requirements.lock`: `build==1.3.0`, Windows-conditional `colorama==0.4.6`, `packaging==26.3`, `pyproject-hooks==1.2.0`, `setuptools==84.0.0`, and `wheel==0.48.0`, each with its reviewed PyPI wheel SHA-256;
 2. derives `SOURCE_DATE_EPOCH` from the selected commit rather than wall-clock time;
-3. exports that commit through `git archive`, excluding untracked workspace state, and builds it twice in independent source and output directories;
+3. requires the selected SHA to equal checked-out `HEAD`, exports that commit through `git archive`, and validates the backend declarations plus lock from the exported tree rather than untracked workspace state;
 4. rejects source-distribution traversal, duplicate paths, multiple roots, links, devices, and other non-file members before canonicalization;
 5. rewrites the source archive with sorted paths, fixed owner/group, stable file modes, the commit timestamp, and a filename-free deterministic gzip header; and
-6. compares the raw bytes of both wheels and both source archives before publishing either result.
+6. builds twice with isolation disabled, so the backend cannot create a second network-resolved environment, and compares the raw bytes of both wheels and both source archives before publishing either result.
 
-The output directory also contains `hormuz-distribution-reproducibility.json`. It binds the two SHA-256 digests, byte sizes, commit, commit timestamp, build frontend, and backend versions without recording a workspace path, employee identity, prompt, response, credential, or build time. The output directory must be empty so stale artifacts cannot be mixed into the result.
+Every Python workflow installs the lock with pip `--require-hashes --only-binary=:all:` before any editable or distribution build. Editable installs use `--no-build-isolation`. `colorama` is installed on all build hosts so the same strict lock is complete on Windows without environment-marker ambiguity; it is inert outside Windows. The reviewed wheel hashes match the official PyPI release metadata for [build 1.3.0](https://pypi.org/project/build/1.3.0/), [colorama 0.4.6](https://pypi.org/project/colorama/0.4.6/), [packaging 26.3](https://pypi.org/project/packaging/26.3/), [pyproject-hooks 1.2.0](https://pypi.org/project/pyproject-hooks/1.2.0/), [setuptools 84.0.0](https://pypi.org/project/setuptools/84.0.0/), and [wheel 0.48.0](https://pypi.org/project/wheel/0.48.0/). A version or hash change is a reviewed supply-chain update, not an incidental resolver outcome.
+
+The output directory also contains schema `hormuz.reproducible-distributions.v2` in `hormuz-distribution-reproducibility.json`. It binds the two artifact SHA-256 digests, byte sizes, commit, commit timestamp, build-lock digest, and exact distribution versions without recording a workspace path, employee identity, prompt, response, credential, or build time. The output directory must be empty so stale artifacts cannot be mixed into the result.
 
 From a committed local checkout with the reviewed frontend installed:
 
 ```bash
+python3 -m pip install \
+  --require-hashes \
+  --only-binary=:all: \
+  --requirement deploy/build/requirements.lock
 HORMUZ_RELEASE_SHA="$(git rev-parse HEAD)"
 python3 scripts/reproducible_build.py \
   --source-sha "$HORMUZ_RELEASE_SHA" \
   --outdir dist
 ```
 
-This proves byte equality across two independent package builds of one exact source revision under the reviewed Python build contract. It does not yet prove that OCI image layers are byte-identical across builders, that the Python artifacts reproduce across every operating system, or that a remote registry package has been published. Container rebuild reproducibility, an observed signed tag release, build-dependency hash custody, and external rebuilder comparison remain open release work.
+This proves byte equality across two independent package builds of one exact source revision under the hash-custodied Python build contract. It does not yet prove that OCI image layers are byte-identical across builders, that the Python artifacts reproduce across every operating system, or that a remote registry package has been published. Container rebuild reproducibility, an observed signed tag release, a controlled internal wheel mirror or offline availability, hash locks for non-build runtime/test resolution, and an external rebuilder remain open release work.
 
 ## Cut a release
 

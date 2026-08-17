@@ -381,6 +381,15 @@ class ReleaseContractTests(unittest.TestCase):
         self.assertIn("sigstore-public-transparency-v1", workflow)
         self.assertIn("python scripts/reproducible_build.py", workflow)
         self.assertIn('--source-sha "$GITHUB_SHA"', workflow)
+        self.assertIn("deploy/build/requirements.lock", workflow)
+        self.assertIn("--require-hashes", workflow)
+        self.assertIn("--only-binary=:all:", workflow)
+        self.assertNotRegex(
+            workflow,
+            r"(?m)^\s*run:\s+.*--only-binary=:all:",
+        )
+        self.assertIn("--no-build-isolation --editable .", workflow)
+        self.assertNotIn("build==1.3.0", workflow)
         self.assertNotIn("run: python -m build", workflow)
         self.assertNotIn(f"{EXPECTED_IMAGE}:latest", workflow)
         action_uses = re.findall(r"(?m)^\s+uses:\s+([^\s#]+)", workflow)
@@ -390,11 +399,39 @@ class ReleaseContractTests(unittest.TestCase):
 
     def test_ci_package_job_uses_the_exact_source_reproducibility_gate(self) -> None:
         workflow = (ROOT / ".github/workflows/ci.yml").read_text()
+        builder = (ROOT / "scripts/reproducible_build.py").read_text()
         self.assertIn("python scripts/reproducible_build.py", workflow)
         self.assertIn('--source-sha "$GITHUB_SHA"', workflow)
         self.assertIn("--outdir dist", workflow)
+        self.assertGreaterEqual(workflow.count("deploy/build/requirements.lock"), 4)
+        self.assertGreaterEqual(workflow.count("--require-hashes"), 4)
+        self.assertGreaterEqual(workflow.count("--only-binary=:all:"), 4)
+        self.assertNotRegex(
+            workflow,
+            r"(?m)^\s*run:\s+.*--only-binary=:all:",
+        )
+        self.assertEqual(
+            workflow.count("--no-build-isolation --editable ."),
+            3,
+        )
+        self.assertNotIn("pip install build==", workflow)
         self.assertNotIn("run: python -m build", workflow)
         self.assertIn("path: dist/*", workflow)
+        self.assertIn('"--no-isolation"', builder)
+        self.assertIn("sys.executable", builder)
+        self.assertNotIn('add_argument("--python"', builder)
+        self.assertIn("source revision is not the checked-out commit", builder)
+
+    def test_upstream_canary_uses_the_hash_locked_build_toolchain(self) -> None:
+        workflow = (ROOT / ".github/workflows/upstream-canary.yml").read_text()
+        self.assertIn("deploy/build/requirements.lock", workflow)
+        self.assertIn("--require-hashes", workflow)
+        self.assertIn("--only-binary=:all:", workflow)
+        self.assertNotRegex(
+            workflow,
+            r"(?m)^\s*run:\s+.*--only-binary=:all:",
+        )
+        self.assertIn("--no-build-isolation --editable .", workflow)
 
 
 if __name__ == "__main__":

@@ -7,6 +7,8 @@ __pycache__/
 .pytest_cache/
 .venv/
 build/
+!deploy/build/
+!deploy/build/requirements.lock
 dist/
 *.egg-info/
 hormuz.json
