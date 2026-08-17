@@ -39,13 +39,20 @@ python3 scripts/container_smoke.py --image hormuz:local
 Run the same gate used by ordinary and tag verification from a committed checkout:
 
 ```bash
+docker buildx create \
+  --name hormuz-reproducer \
+  --driver docker-container \
+  --driver-opt image=moby/buildkit:v0.32.2@sha256:28a898719c18a33f4e8000685287fa36fd0dd9560c6440227d3a732d79bb41d8 \
+  --use
+docker buildx inspect --bootstrap
+
 HORMUZ_SOURCE_SHA="$(git rev-parse HEAD)"
 python3 scripts/reproducible_image.py \
   --source-sha "$HORMUZ_SOURCE_SHA" \
   --outdir oci-reproducibility
 ```
 
-The command requires Docker Buildx and supports only `linux/amd64` in this first bounded contract. It verifies that the supplied full SHA is checked-out `HEAD`, obtains the epoch from that commit, exports tracked files rather than the working tree, and builds twice with no cache, no pull, and no publishing. It disables provenance and SBOM attestations for this byte-comparison build because their run-specific envelopes are not image-layer reproducibility inputs.
+The command supports only `linux/amd64` in this first bounded contract. It fails closed unless the active builder uses the `docker-container` driver and reviewed BuildKit version `v0.32.2`; CI and the command above additionally bind that version to the reviewed multi-platform image digest. It verifies that the supplied full SHA is checked-out `HEAD`, obtains the epoch from that commit, exports tracked files rather than the working tree, and builds twice with no cache, no pull, and no publishing. It disables provenance and SBOM attestations for this byte-comparison build because their run-specific envelopes are not image-layer reproducibility inputs.
 
 Both OCI layouts must contain one `linux/amd64` manifest and pass bounded validation of every referenced digest, byte size, config, root-filesystem diff ID, and layer count. File sets, sizes, and SHA-256 digests must then match exactly. Only after that comparison succeeds does Hormuz publish a canonical versioned `hormuz-X.Y.Z-linux-amd64.oci.tar` and content-free `hormuz-oci-reproducibility.json` into an initially empty, non-symlink output directory.
 

@@ -22,6 +22,12 @@ from typing import Any
 
 SCHEMA = "hormuz.reproducible-oci.v1"
 SUPPORTED_PLATFORM = "linux/amd64"
+BUILDKIT_VERSION = "v0.32.2"
+BUILDKIT_IMAGE = (
+    "moby/buildkit:v0.32.2@sha256:"
+    "28a898719c18a33f4e8000685287fa36fd0dd9560c6440227d3a732d79bb41d8"
+)
+BUILDER_DRIVER = "docker-container"
 OCI_LAYOUT_VERSION = "1.0.0"
 OCI_INDEX_MEDIA_TYPE = "application/vnd.oci.image.index.v1+json"
 OCI_MANIFEST_MEDIA_TYPE = "application/vnd.oci.image.manifest.v1+json"
@@ -492,6 +498,31 @@ def build_command(
     ]
 
 
+def validate_builder() -> None:
+    """Require the active builder to use the reviewed driver and BuildKit release."""
+
+    try:
+        result = subprocess.run(
+            ["docker", "buildx", "inspect", "--bootstrap"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise OCIReproducibilityError("OCI builder inspection failed") from error
+    if result.returncode != 0:
+        raise OCIReproducibilityError("OCI builder inspection returned failure")
+    drivers = re.findall(r"(?m)^Driver:\s+(\S+)\s*$", result.stdout)
+    versions = re.findall(
+        r"(?m)^BuildKit(?: version)?:\s+(\S+)\s*$", result.stdout
+    )
+    if drivers != [BUILDER_DRIVER] or not versions or any(
+        version != BUILDKIT_VERSION for version in versions
+    ):
+        raise OCIReproducibilityError("OCI builder does not match the pinned contract")
+
+
 def _run_git(arguments: list[str], *, project_root: Path) -> str:
     try:
         result = subprocess.run(
@@ -700,6 +731,11 @@ def render_manifest(
             "provenance": "disabled_for_byte_comparison",
             "sbom": "disabled_for_byte_comparison",
         },
+        "builder": {
+            "driver": BUILDER_DRIVER,
+            "image": BUILDKIT_IMAGE,
+            "version": BUILDKIT_VERSION,
+        },
         "inputs": {
             "base_image_digest": base_image_digest,
             "dockerfile_sha256": dockerfile_sha256,
@@ -733,6 +769,7 @@ def build_reproducible_image(
     sha = validate_source_sha(source_sha)
     selected_platform = _validate_platform(platform)
     epoch = _source_epoch(project_root, sha)
+    validate_builder()
     output_dir.parent.mkdir(parents=True, exist_ok=True)
     if os.path.lexists(output_dir) and output_dir.is_symlink():
         raise OCIReproducibilityError("OCI output directory is unsafe")

@@ -21,7 +21,8 @@ RUN addgroup --system --gid 65532 hormuz \
         --uid 65532 --ingroup hormuz --shell /sbin/nologin hormuz \
     && mkdir --parents /var/lib/hormuz /opt/hormuz \
     && chown 65532:65532 /var/lib/hormuz /opt/hormuz \
-    && chmod 0700 /var/lib/hormuz /opt/hormuz
+    && chmod 0700 /var/lib/hormuz /opt/hormuz \
+    && rm -rf /root/.cache
 
 WORKDIR /opt/hormuz
 

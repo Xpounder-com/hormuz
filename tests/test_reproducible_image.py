@@ -5,17 +5,22 @@ import hashlib
 import io
 import json
 from pathlib import Path
+import subprocess
 import tarfile
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from scripts.reproducible_image import (
+    BUILDKIT_IMAGE,
+    BUILDKIT_VERSION,
     OCILayoutSummary,
     OCIReproducibilityError,
     build_command,
     canonicalize_oci_layout,
     compare_oci_layouts,
     render_manifest,
+    validate_builder,
     validate_oci_layout,
     validate_source_sha,
 )
@@ -141,6 +146,38 @@ class ReproducibleImageTests(unittest.TestCase):
         self.assertIn("tar=false,rewrite-timestamp=true", rendered)
         self.assertNotIn("--push", command)
         self.assertNotIn("--tag", command)
+
+    def test_builder_is_pinned_and_fail_closed(self) -> None:
+        self.assertEqual(BUILDKIT_VERSION, "v0.32.2")
+        self.assertEqual(
+            BUILDKIT_IMAGE,
+            "moby/buildkit:v0.32.2@sha256:"
+            "28a898719c18a33f4e8000685287fa36fd0dd9560c6440227d3a732d79bb41d8",
+        )
+        valid = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout=(
+                "Name: hormuz-reproducer\n"
+                "Driver: docker-container\n"
+                "BuildKit version: v0.32.2\n"
+            ),
+            stderr="",
+        )
+        with patch("scripts.reproducible_image.subprocess.run", return_value=valid):
+            validate_builder()
+
+        for output in (
+            "Driver: docker\nBuildKit version: v0.32.2\n",
+            "Driver: docker-container\nBuildKit version: v0.29.0\n",
+        ):
+            with self.subTest(output=output), patch(
+                "scripts.reproducible_image.subprocess.run",
+                return_value=subprocess.CompletedProcess(
+                    args=[], returncode=0, stdout=output, stderr=""
+                ),
+            ), self.assertRaises(OCIReproducibilityError):
+                validate_builder()
 
     def test_layout_validation_binds_every_blob_and_image_identity(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -280,6 +317,8 @@ class ReproducibleImageTests(unittest.TestCase):
         self.assertEqual(first["schema"], "hormuz.reproducible-oci.v1")
         self.assertEqual(first["independent_builds"], 2)
         self.assertEqual(first["source_sha"], SHA)
+        self.assertEqual(first["builder"]["version"], "v0.32.2")
+        self.assertEqual(first["builder"]["driver"], "docker-container")
         self.assertNotIn("/tmp", encoded)
         self.assertNotIn("builder_host", encoded)
         self.assertNotIn("username", encoded)
@@ -290,13 +329,16 @@ class ReproducibleImageTests(unittest.TestCase):
         release = (ROOT / ".github/workflows/release.yml").read_text()
         self.assertIn("ARG SOURCE_DATE_EPOCH", dockerfile)
         self.assertIn('SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH}"', dockerfile)
+        self.assertIn("rm -rf /root/.cache", dockerfile)
         self.assertIn("python scripts/reproducible_image.py", workflow)
         self.assertIn('--source-sha "$GITHUB_SHA"', workflow)
         self.assertIn("hormuz-reproducible-oci", workflow)
+        self.assertIn("moby/buildkit:v0.32.2@sha256:", workflow)
         self.assertIn('SOURCE_DATE_EPOCH=$HORMUZ_SOURCE_DATE_EPOCH', workflow)
         self.assertIn("python scripts/reproducible_image.py", release)
         self.assertIn('--source-sha "$GITHUB_SHA"', release)
         self.assertIn("hormuz-reproducible-oci", release)
+        self.assertGreaterEqual(release.count("moby/buildkit:v0.32.2@sha256:"), 2)
         self.assertIn("SOURCE_DATE_EPOCH=${{ steps.source_epoch.outputs.value }}", release)
         self.assertIn("provenance: mode=max", release)
         self.assertIn("sbom: true", release)
