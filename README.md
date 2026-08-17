@@ -85,11 +85,15 @@ The login page opens in the operating system's external browser. The CLI stores 
 Connect governed context to either existing client without placing a provider key on the employee machine:
 
 ```bash
-python3 -m hormuz mcp-config codex --url http://127.0.0.1:8787
-python3 -m hormuz mcp-config claude --url http://127.0.0.1:8787
+python3 -m hormuz mcp-config codex \
+  --url https://hormuz.example.com \
+  --profile codex
+python3 -m hormuz mcp-config claude \
+  --url https://hormuz.example.com \
+  --profile claude
 ```
 
-Install the generated Codex TOML or Claude Code `.mcp.json` entry, then verify it with `codex mcp get hormuz --json` or `claude mcp get hormuz`. See [docs/MCP.md](docs/MCP.md) for the complete, secret-free callable-tool setup. Automatic gateway injection is a separate, disabled-by-default policy described in [docs/CONTEXT_INJECTION.md](docs/CONTEXT_INJECTION.md); it does not require the model to call MCP.
+Install the generated Codex TOML or Claude Code `.mcp.json` entry, then verify it with `codex mcp get hormuz --json` or `claude mcp get hormuz`. The generated entries contain no access or refresh credential; the long-running adapter obtains a current short-lived credential from the OS secure store for each tool call. Workload-token environment mode remains available for CI and compatibility. See [docs/MCP.md](docs/MCP.md) for the complete setup. Automatic gateway injection is a separate, disabled-by-default policy described in [docs/CONTEXT_INJECTION.md](docs/CONTEXT_INJECTION.md); it does not require the model to call MCP.
 
 When an administrator enables repository-specific automatic context, generate an exact project profile rather than trusting a working-directory string:
 

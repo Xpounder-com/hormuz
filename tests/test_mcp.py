@@ -9,7 +9,7 @@ import threading
 import time
 import tomllib
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest import mock
@@ -356,6 +356,42 @@ class ContextPackClientTests(unittest.TestCase):
         for forbidden in ("organization_id", "team_id", "actor_id", "policy_version", "as_of"):
             self.assertNotIn(forbidden, request["body"])
 
+    def test_resolves_a_fresh_session_credential_for_every_context_request(self) -> None:
+        credentials = iter(("first-session-token", "second-session-token"))
+        provider = mock.Mock(side_effect=lambda: next(credentials))
+        client = ContextPackClient(
+            self.base_url,
+            credential_provider=provider,
+            timeout_seconds=2,
+        )
+
+        client.create_pack({"query": "first", "token_budget": 100})
+        client.create_pack({"query": "second", "token_budget": 100})
+
+        self.assertEqual(provider.call_count, 2)
+        self.assertEqual(
+            [request["authorization"] for request in _GatewayHandler.requests],
+            ["Bearer first-session-token", "Bearer second-session-token"],
+        )
+
+    def test_sanitizes_session_provider_failures_and_invalid_credentials(self) -> None:
+        for provider in (
+            mock.Mock(side_effect=RuntimeError("INTERNAL-REFRESH-SECRET")),
+            mock.Mock(return_value="invalid\ncredential"),
+            mock.Mock(return_value="invalid-\udcff-credential"),
+        ):
+            with self.subTest(provider=provider):
+                client = ContextPackClient(
+                    self.base_url,
+                    credential_provider=provider,
+                    timeout_seconds=2,
+                )
+                with self.assertRaises(ContextGatewayError) as raised:
+                    client.create_pack({"query": "retry", "token_budget": 100})
+                self.assertEqual(raised.exception.code, "context_auth_unavailable")
+                self.assertNotIn("INTERNAL-REFRESH-SECRET", raised.exception.message)
+                self.assertNotIn("invalid", raised.exception.message.lower())
+
     def test_maps_gateway_policy_error_without_exposing_credential(self) -> None:
         _GatewayHandler.response_status = 403
         _GatewayHandler.response_body = {
@@ -479,6 +515,150 @@ class MCPConfigurationTests(unittest.TestCase):
             )
         self.assertEqual(result, 0)
         self.assertIn("[mcp_servers.hormuz]", output.getvalue())
+
+    def test_profile_configs_are_secret_free_for_codex_and_claude(self) -> None:
+        codex = io.StringIO()
+        with redirect_stdout(codex):
+            self.assertEqual(
+                _mcp_config(
+                    "codex",
+                    "https://hormuz.example",
+                    profile="engineering",
+                ),
+                0,
+            )
+        codex_server = tomllib.loads(codex.getvalue())["mcp_servers"]["hormuz"]
+        self.assertEqual(
+            codex_server["args"],
+            [
+                "mcp",
+                "--url",
+                "https://hormuz.example",
+                "--profile",
+                "engineering",
+                "--timeout-seconds",
+                "30",
+            ],
+        )
+        self.assertNotIn("env_vars", codex_server)
+
+        claude = io.StringIO()
+        with redirect_stdout(claude):
+            self.assertEqual(
+                _mcp_config(
+                    "claude",
+                    "https://hormuz.example",
+                    profile="engineering",
+                ),
+                0,
+            )
+        claude_server = json.loads(claude.getvalue())["mcpServers"]["hormuz"]
+        self.assertEqual(claude_server["args"], codex_server["args"])
+        self.assertNotIn("env", claude_server)
+
+    def test_profile_cli_resolves_the_secure_session_per_request(self) -> None:
+        captured: dict[str, object] = {}
+
+        def fake_server(**kwargs: object) -> int:
+            captured.update(kwargs)
+            provider = kwargs["credential_provider"]
+            self.assertTrue(callable(provider))
+            self.assertEqual(provider(), "session-token-one")  # type: ignore[operator]
+            self.assertEqual(provider(), "session-token-two")  # type: ignore[operator]
+            return 0
+
+        with mock.patch("hormuz.cli.run_mcp_server", side_effect=fake_server):
+            with mock.patch(
+                "hormuz.cli.session_access_token",
+                side_effect=("session-token-one", "session-token-two"),
+            ) as access:
+                self.assertEqual(
+                    main(
+                        [
+                            "mcp",
+                            "--url",
+                            "https://hormuz.example",
+                            "--profile",
+                            "engineering",
+                        ]
+                    ),
+                    0,
+                )
+        self.assertIsNone(captured["credential_env"])
+        self.assertEqual(access.call_count, 2)
+        access.assert_called_with(
+            gateway="https://hormuz.example",
+            profile="engineering",
+            allow_insecure_http=False,
+        )
+
+    def test_profile_and_environment_modes_are_mutually_exclusive(self) -> None:
+        with redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit) as raised:
+                main(
+                    [
+                        "mcp",
+                        "--url",
+                        "https://hormuz.example",
+                        "--profile",
+                        "engineering",
+                        "--credential-env",
+                        "COMPANY_TOKEN",
+                    ]
+                )
+        self.assertEqual(raised.exception.code, 2)
+
+    def test_explicit_empty_environment_name_remains_invalid(self) -> None:
+        with redirect_stderr(error := io.StringIO()):
+            self.assertEqual(
+                main(
+                    [
+                        "mcp-config",
+                        "codex",
+                        "--url",
+                        "https://hormuz.example",
+                        "--credential-env",
+                        "",
+                    ]
+                ),
+                2,
+            )
+        self.assertIn("MCP configuration error", error.getvalue())
+
+    def test_profile_config_requires_https_unless_loopback_is_explicitly_allowed(self) -> None:
+        with redirect_stderr(error := io.StringIO()):
+            self.assertEqual(
+                main(
+                    [
+                        "mcp-config",
+                        "codex",
+                        "--url",
+                        "http://127.0.0.1:8787",
+                        "--profile",
+                        "engineering",
+                    ]
+                ),
+                2,
+            )
+        self.assertIn("MCP configuration error", error.getvalue())
+
+        output = io.StringIO()
+        with redirect_stdout(output):
+            self.assertEqual(
+                main(
+                    [
+                        "mcp-config",
+                        "codex",
+                        "--url",
+                        "http://127.0.0.1:8787",
+                        "--profile",
+                        "engineering",
+                        "--allow-insecure-http",
+                    ]
+                ),
+                0,
+            )
+        self.assertIn('"--allow-insecure-http"', output.getvalue())
 
     def test_actual_module_entrypoint_completes_a_legacy_handshake(self) -> None:
         messages = "\n".join(

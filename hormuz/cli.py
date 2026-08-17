@@ -11,6 +11,7 @@ import sys
 import tempfile
 from datetime import date, datetime, timezone
 from pathlib import Path
+from typing import Callable
 from urllib.parse import urlparse
 
 from .audit_chain import (
@@ -77,6 +78,7 @@ from .session_client import (
     access_token as session_access_token,
     login as session_login,
     logout as session_logout,
+    validate_session_gateway,
 )
 from .session_admin_client import SessionAdminClient, SessionAdminClientError
 from .store import UsageStore
@@ -305,10 +307,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="Run the governed-context MCP stdio adapter for Codex and Claude Code",
     )
     mcp.add_argument("--url", required=True, help="Hormuz gateway base URL")
-    mcp.add_argument(
+    mcp_credentials = mcp.add_mutually_exclusive_group()
+    mcp_credentials.add_argument(
         "--credential-env",
-        default="HORMUZ_TOKEN",
         help="Environment variable containing the Hormuz credential (default: HORMUZ_TOKEN)",
+    )
+    mcp_credentials.add_argument(
+        "--profile",
+        help="OS secure-store session profile created by hormuz login",
+    )
+    mcp.add_argument(
+        "--allow-insecure-http",
+        action="store_true",
+        help="Allow loopback HTTP for a saved session during local development only",
     )
     mcp.add_argument(
         "--timeout-seconds",
@@ -323,10 +334,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     mcp_config.add_argument("client", choices=["codex", "claude"])
     mcp_config.add_argument("--url", required=True, help="Hormuz gateway base URL")
-    mcp_config.add_argument(
+    mcp_config_credentials = mcp_config.add_mutually_exclusive_group()
+    mcp_config_credentials.add_argument(
         "--credential-env",
-        default="HORMUZ_TOKEN",
         help="Environment variable inherited by the MCP process (default: HORMUZ_TOKEN)",
+    )
+    mcp_config_credentials.add_argument(
+        "--profile",
+        help="OS secure-store session profile created by hormuz login",
+    )
+    mcp_config.add_argument(
+        "--allow-insecure-http",
+        action="store_true",
+        help="Allow loopback HTTP for a saved session during local development only",
     )
     mcp_config.add_argument(
         "--timeout-seconds",
@@ -840,15 +860,44 @@ def main(argv: list[str] | None = None) -> int:
     if args.command in {"mcp", "mcp-config"}:
         try:
             if args.command == "mcp":
+                credential_provider = None
+                if args.profile is not None:
+                    base_url, profile = _validate_mcp_session_options(
+                        args.url,
+                        args.profile,
+                        allow_insecure_http=args.allow_insecure_http,
+                    )
+                    credential_provider = _mcp_session_credential_provider(
+                        base_url,
+                        profile,
+                        allow_insecure_http=args.allow_insecure_http,
+                    )
+                else:
+                    if args.allow_insecure_http:
+                        raise MCPConfigurationError(
+                            "--allow-insecure-http requires --profile"
+                        )
+                    base_url = args.url
                 return run_mcp_server(
-                    base_url=args.url,
-                    credential_env=args.credential_env,
+                    base_url=base_url,
+                    credential_env=(
+                        None
+                        if credential_provider is not None
+                        else (
+                            "HORMUZ_TOKEN"
+                            if args.credential_env is None
+                            else args.credential_env
+                        )
+                    ),
+                    credential_provider=credential_provider,
                     timeout_seconds=args.timeout_seconds,
                 )
             return _mcp_config(
                 args.client,
                 args.url,
                 credential_env=args.credential_env,
+                profile=args.profile,
+                allow_insecure_http=args.allow_insecure_http,
                 timeout_seconds=args.timeout_seconds,
             )
         except MCPConfigurationError as error:
@@ -1928,27 +1977,49 @@ def _mcp_config(
     client: str,
     url: str,
     *,
-    credential_env: str = "HORMUZ_TOKEN",
+    credential_env: str | None = None,
+    profile: str | None = None,
+    allow_insecure_http: bool = False,
     timeout_seconds: int = 30,
 ) -> int:
-    base_url = validate_gateway_url(url)
-    env_name = validate_credential_env(credential_env)
+    if profile is not None and credential_env is not None:
+        raise MCPConfigurationError(
+            "MCP credential environment and session profile are mutually exclusive"
+        )
+    if profile is not None:
+        base_url, profile = _validate_mcp_session_options(
+            url,
+            profile,
+            allow_insecure_http=allow_insecure_http,
+        )
+        env_name = None
+    else:
+        if allow_insecure_http:
+            raise MCPConfigurationError("--allow-insecure-http requires --profile")
+        base_url = validate_gateway_url(url)
+        env_name = validate_credential_env(
+            "HORMUZ_TOKEN" if credential_env is None else credential_env
+        )
     if isinstance(timeout_seconds, bool) or not isinstance(timeout_seconds, int) or not 1 <= timeout_seconds <= 60:
         raise MCPConfigurationError("MCP timeout must be between 1 and 60 seconds")
     args = [
         "mcp",
         "--url",
         base_url,
-        "--credential-env",
-        env_name,
-        "--timeout-seconds",
-        str(timeout_seconds),
     ]
+    if profile is not None:
+        args.extend(["--profile", profile])
+        if allow_insecure_http:
+            args.append("--allow-insecure-http")
+    else:
+        args.extend(["--credential-env", env_name or "HORMUZ_TOKEN"])
+    args.extend(["--timeout-seconds", str(timeout_seconds)])
     if client == "codex":
         print("[mcp_servers.hormuz]")
         print('command = "hormuz"')
         print("args = " + json.dumps(args))
-        print("env_vars = " + json.dumps([env_name]))
+        if env_name is not None:
+            print("env_vars = " + json.dumps([env_name]))
         print("startup_timeout_sec = 10")
         print(f"tool_timeout_sec = {timeout_seconds + 5}")
         print("required = true")
@@ -1961,7 +2032,11 @@ def _mcp_config(
                             "type": "stdio",
                             "command": "hormuz",
                             "args": args,
-                            "env": {env_name: "${" + env_name + "}"},
+                            **(
+                                {"env": {env_name: "${" + env_name + "}"}}
+                                if env_name is not None
+                                else {}
+                            ),
                         }
                     }
                 },
@@ -1969,6 +2044,42 @@ def _mcp_config(
             )
         )
     return 0
+
+
+def _validate_mcp_session_options(
+    url: str,
+    profile: str,
+    *,
+    allow_insecure_http: bool,
+) -> tuple[str, str]:
+    try:
+        return (
+            validate_session_gateway(
+                url,
+                allow_insecure_http=allow_insecure_http,
+            ),
+            validate_profile(profile),
+        )
+    except (SessionClientError, CredentialStoreError):
+        raise MCPConfigurationError(
+            "MCP session profile and gateway must be valid; HTTPS is required outside loopback development"
+        ) from None
+
+
+def _mcp_session_credential_provider(
+    gateway: str,
+    profile: str,
+    *,
+    allow_insecure_http: bool,
+) -> Callable[[], str]:
+    def resolve() -> str:
+        return session_access_token(
+            gateway=gateway,
+            profile=profile,
+            allow_insecure_http=allow_insecure_http,
+        )
+
+    return resolve
 
 
 def _client_base_url(value: str) -> str:

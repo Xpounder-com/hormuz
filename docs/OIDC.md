@@ -75,9 +75,14 @@ hormuz --config /etc/hormuz/hormuz.json client-config codex \
 hormuz --config /etc/hormuz/hormuz.json client-config claude \
   --url https://hormuz.example.com --actor alice \
   --auth-mode session --profile claude
+
+hormuz mcp-config codex \
+  --url https://hormuz.example.com --profile codex
+hormuz mcp-config claude \
+  --url https://hormuz.example.com --profile claude
 ```
 
-`hormuz login` opens the one-time URL in the operating system's external browser. Use `--no-open` to print it for a headless terminal. The browser receives no Hormuz access or refresh credential. The terminal redeems its independent enrollment secret once and stores the session through the OS secure store. `hormuz auth token` is then invoked by Codex or Claude Code, reuses an unexpired access credential, or atomically rotates the access/refresh pair near expiry.
+`hormuz login` opens the one-time URL in the operating system's external browser. Use `--no-open` to print it for a headless terminal. The browser receives no Hormuz access or refresh credential. The terminal redeems its independent enrollment secret once and stores the session through the OS secure store. Provider-gateway helpers invoke `hormuz auth token`; the MCP adapter resolves the same profile for every context-tool call. Both reuse an unexpired access credential or atomically rotate the access/refresh pair near expiry.
 
 Hormuz supports macOS Keychain, Windows Credential Manager, and Linux Secret Service/KWallet through an allowlisted `keyring` backend. Persistent login fails when none is available; it does not silently write a refresh credential to a dotfile. `hormuz logout --gateway ... --profile ...` revokes the server-side family before deleting the local entry.
 

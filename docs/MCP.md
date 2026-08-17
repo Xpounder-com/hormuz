@@ -10,9 +10,9 @@ Codex or Claude Code
         |
         | MCP stdio: hormuz_get_context(query, budget, optional narrower scope)
         v
-hormuz mcp
+hormuz mcp --profile CLIENT_PROFILE
         |
-        | HTTPS + employee Hormuz credential
+        | HTTPS + current short-lived Hormuz session credential
         v
 POST /v1/context/packs
         |
@@ -30,27 +30,42 @@ clients and the MCP `2026-07-28` per-request discovery protocol. It emits only
 newline-delimited JSON-RPC on stdout. Context and credentials are never logged
 by the adapter.
 
-## Before configuring a client
+## Recommended human-session setup
 
-The Hormuz HTTP service must be reachable and the employee must have a unique
-Hormuz credential. For local development:
+The Hormuz HTTP service must be reachable and its browser session broker must
+be configured. Create a separate client-bound secure-store profile for each
+employee client:
 
 ```bash
-export HORMUZ_TOKEN="employee-specific-hormuz-token"
-hormuz --config hormuz.json serve
+hormuz login \
+  --gateway https://hormuz.example.com \
+  --profile codex \
+  --client codex
+
+hormuz login \
+  --gateway https://hormuz.example.com \
+  --profile claude \
+  --client claude-code
 ```
 
-Use HTTPS for every non-loopback deployment. `hormuz mcp` rejects plaintext
-HTTP to a non-loopback host, URLs containing credentials, and URLs containing a
-query or fragment. Company OpenAI and Anthropic keys remain only on the Hormuz
-service and are not needed by the MCP process.
+The terminal redeems the browser enrollment into the operating system's secure
+store. Access credentials are short-lived and refresh credentials never appear
+in the generated MCP configuration, process arguments, stdout, or model-visible
+tool errors. Company OpenAI and Anthropic keys remain only on the Hormuz service.
+
+Use HTTPS for every non-loopback deployment. Session-profile commands require
+HTTPS unless `--allow-insecure-http` is explicitly set for `127.0.0.1`, `::1`,
+or `localhost` development. All modes reject URL credentials, queries, and
+fragments.
 
 ## Codex
 
 Generate a secret-free configuration:
 
 ```bash
-hormuz mcp-config codex --url https://hormuz.example.com
+hormuz mcp-config codex \
+  --url https://hormuz.example.com \
+  --profile codex
 ```
 
 Add the result to the employee's `~/.codex/config.toml`:
@@ -58,8 +73,7 @@ Add the result to the employee's `~/.codex/config.toml`:
 ```toml
 [mcp_servers.hormuz]
 command = "hormuz"
-args = ["mcp", "--url", "https://hormuz.example.com", "--credential-env", "HORMUZ_TOKEN", "--timeout-seconds", "30"]
-env_vars = ["HORMUZ_TOKEN"]
+args = ["mcp", "--url", "https://hormuz.example.com", "--profile", "codex", "--timeout-seconds", "30"]
 startup_timeout_sec = 10
 tool_timeout_sec = 35
 required = true
@@ -81,7 +95,9 @@ also documents `codex mcp add` and the equivalent TOML fields.
 Generate a secret-free project configuration:
 
 ```bash
-hormuz mcp-config claude --url https://hormuz.example.com
+hormuz mcp-config claude \
+  --url https://hormuz.example.com \
+  --profile claude
 ```
 
 Merge the resulting `mcpServers.hormuz` object into a project `.mcp.json`, a
@@ -97,14 +113,11 @@ user-scoped configuration, or an organization-managed MCP configuration:
         "mcp",
         "--url",
         "https://hormuz.example.com",
-        "--credential-env",
-        "HORMUZ_TOKEN",
+        "--profile",
+        "claude",
         "--timeout-seconds",
         "30"
-      ],
-      "env": {
-        "HORMUZ_TOKEN": "${HORMUZ_TOKEN}"
-      }
+      ]
     }
   }
 }
@@ -120,6 +133,22 @@ claude mcp get hormuz
 The official [Claude Code MCP documentation](https://code.claude.com/docs/en/mcp)
 documents local stdio servers, environment expansion, project/user scopes, and
 managed organization configuration.
+
+## Workload-token compatibility mode
+
+CI, service accounts, and existing managed installations may continue to use an
+inherited Hormuz workload credential. If `--profile` is omitted, the adapter
+defaults to `HORMUZ_TOKEN`; a different safe variable name may be selected with
+`--credential-env`:
+
+```bash
+export HORMUZ_TOKEN="workload-specific-hormuz-token"
+hormuz mcp-config codex --url https://hormuz.example.com
+hormuz mcp-config claude --url https://hormuz.example.com
+```
+
+`--profile` and `--credential-env` are mutually exclusive. Environment mode
+preserves the original generated configuration and request behavior.
 
 ## Tool contract
 
@@ -154,6 +183,15 @@ API code, such as `context_policy_denied`, `unauthorized`, or
 is bounded, and explicit client cancellation suppresses the result even when a
 blocking HTTP request must finish in the worker before its timeout.
 
+In profile mode, the adapter resolves the secure-store session for every tool
+request rather than capturing one access credential when the stdio process
+starts. The existing session client reuses an access credential while it has
+more than 60 seconds remaining and otherwise rotates the access/refresh pair
+under a cross-process profile lock. Missing login, revoked/expired session,
+refresh failure, secure-store failure, and malformed credential all become the
+fixed `context_auth_unavailable` tool error. The model does not receive the
+profile, secure-store backend, refresh failure, or credential value.
+
 ## Current enforcement boundary
 
 This is a real explicit tool connection, not automatic prompt injection. Codex and
@@ -166,8 +204,8 @@ Repository selection travels through consumed official-client headers and remain
 independent of this MCP tool. That bounded path does not
 change this tool contract; see [CONTEXT_INJECTION.md](CONTEXT_INJECTION.md).
 
-The current credential is inherited from an environment variable. Browser
-OIDC login, short-lived session refresh, and OS secure-store custody now exist
-for provider-gateway helpers. This MCP adapter still reads its credential from
-an inherited environment variable; it does not yet invoke a saved session profile.
-That additive adapter change remains separate from the provider-gateway session path.
+The MCP adapter supports both a saved human-session profile and the original
+inherited workload-token mode. It does not enforce that a model calls the tool,
+make the local secure store remotely manageable, or provide shared multi-node
+session revocation. Real-IdP validation, SCIM, KMS-backed shared session storage,
+and the accepted enterprise persistence topology remain separate release gates.

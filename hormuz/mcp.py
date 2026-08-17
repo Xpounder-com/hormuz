@@ -10,7 +10,7 @@ import urllib.error
 import urllib.request
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
-from typing import Any, TextIO
+from typing import Any, Callable, TextIO
 from urllib.parse import urlsplit
 
 from . import __version__
@@ -126,12 +126,24 @@ class ContextPackClient:
     def __init__(
         self,
         base_url: str,
-        credential_env: str = "HORMUZ_TOKEN",
+        credential_env: str | None = None,
         *,
+        credential_provider: Callable[[], str] | None = None,
         timeout_seconds: float = 30,
     ) -> None:
         self.base_url = validate_gateway_url(base_url)
-        self.credential_env = validate_credential_env(credential_env)
+        if credential_provider is not None and credential_env is not None:
+            raise MCPConfigurationError(
+                "MCP credential environment and session provider are mutually exclusive"
+            )
+        self.credential_provider = credential_provider
+        self.credential_env = (
+            None
+            if credential_provider is not None
+            else validate_credential_env(
+                "HORMUZ_TOKEN" if credential_env is None else credential_env
+            )
+        )
         if isinstance(timeout_seconds, bool) or not isinstance(timeout_seconds, (int, float)):
             raise MCPConfigurationError("MCP timeout must be a number")
         if not 1 <= timeout_seconds <= 60:
@@ -145,19 +157,25 @@ class ContextPackClient:
 
     def create_pack(self, arguments: object) -> dict[str, Any]:
         request_body = validate_tool_arguments(arguments)
-        credential = os.environ.get(self.credential_env, "")
-        if (
-            not credential
-            or credential != credential.strip()
-            or len(credential.encode("utf-8")) > MAX_REQUEST_BYTES
-            or "\n" in credential
-            or "\r" in credential
-            or "\x00" in credential
-            or not all(character.isprintable() for character in credential)
-        ):
+        if self.credential_provider is None:
+            credential = os.environ.get(self.credential_env or "", "")
+            invalid_message = (
+                "Hormuz credential environment variable is unavailable or invalid: "
+                f"{self.credential_env}"
+            )
+        else:
+            try:
+                credential = self.credential_provider()
+            except Exception:
+                raise ContextGatewayError(
+                    "context_auth_unavailable",
+                    "Hormuz session credential is unavailable",
+                ) from None
+            invalid_message = "Hormuz session credential is unavailable"
+        if not _valid_credential(credential):
             raise ContextGatewayError(
                 "context_auth_unavailable",
-                f"Hormuz credential environment variable is unavailable or invalid: {self.credential_env}",
+                invalid_message,
             )
         body = json.dumps(request_body, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
         if len(body) > MAX_REQUEST_BYTES:
@@ -202,6 +220,22 @@ class ContextPackClient:
                 "Hormuz context gateway returned an invalid context pack",
             )
         return payload
+
+
+def _valid_credential(value: object) -> bool:
+    if not isinstance(value, str) or not value or value != value.strip():
+        return False
+    try:
+        encoded = value.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return (
+        len(encoded) <= MAX_REQUEST_BYTES
+        and "\n" not in value
+        and "\r" not in value
+        and "\x00" not in value
+        and all(character.isprintable() for character in value)
+    )
 
 
 def validate_gateway_url(value: str) -> str:
@@ -585,7 +619,8 @@ class StdioMCPServer:
 def run_mcp_server(
     *,
     base_url: str,
-    credential_env: str = "HORMUZ_TOKEN",
+    credential_env: str | None = None,
+    credential_provider: Callable[[], str] | None = None,
     timeout_seconds: float = 30,
     input_stream: TextIO | None = None,
     output_stream: TextIO | None = None,
@@ -593,6 +628,7 @@ def run_mcp_server(
     client = ContextPackClient(
         base_url,
         credential_env,
+        credential_provider=credential_provider,
         timeout_seconds=timeout_seconds,
     )
     return StdioMCPServer(client, input_stream=input_stream, output_stream=output_stream).serve_forever()
