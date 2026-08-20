@@ -1,7 +1,7 @@
 # PostgreSQL tenancy foundation
 
 Hormuz has an accepted shared-schema PostgreSQL tenancy contract and an
-executable schema-version-5 accounting, identity-projection, policy-projection,
+executable schema-version-6 accounting, identity-projection, policy-projection,
 policy-version, human-session, and DLP/security backend. A deployment can opt into PostgreSQL
 for usage, cost evidence, usage-read audit, atomic budget reservations,
 multi-instance human sessions, one-time DLP approvals, and security evidence.
@@ -17,7 +17,9 @@ enrollment, session, consumed-refresh, and session-security-event tables.
 Schema version 4 adds a secret-free canonical policy projection plus DLP
 approval-request, approval-event, and security-event tables. Schema version 5
 adds immutable policy snapshots, an atomic per-tenant active-version pointer,
-and append-only policy administration events.
+and append-only policy administration events. Schema version 6 binds every
+usage event to the exact immutable governance policy version evaluated for its
+request.
 Every tenant-owned table has:
 
 - a non-null tenant key in its primary and foreign-key relationships;
@@ -109,6 +111,13 @@ projection tables are read-only, while the previously accepted tenant-scoped
 workspace/project DML and the gateway-owned accounting, session, security, and
 approval DML remain available to the runtime role.
 
+After the owner synchronizes the deployment projection, an authenticated
+`policy_admin` uses the runtime gateway to stage, activate, inspect, and roll
+back immutable versions. Every provider request reads the active tenant pointer
+before evaluation; all gateway instances using the same PostgreSQL database
+therefore observe the committed pointer without restart. See
+[POLICY_ADMIN_API.md](POLICY_ADMIN_API.md).
+
 After migration plus identity and policy synchronization, inject the distinct
 runtime-role DSN under the environment name selected in configuration:
 
@@ -148,14 +157,13 @@ approved SQLite grants do not authorize a PostgreSQL retry and must be requested
 again after cutover. Perform a separately verified backfill before using a
 mid-month cutover for enforceable monthly limits or complete-period reporting.
 
-Schema version 5 proves the repository foundation for tenant-scoped staging,
-compare-and-swap activation, and rollback to a previously active version. The
-public authenticated administration API/CLI is not wired yet, and provider
-requests still evaluate the immutable process configuration. Until those next
-issue #21 slices pass, the supported rollout remains coordinated replacement:
-migrate, sync identities, sync the candidate policy, start the candidate
-configuration, and readiness-check it. Rollback still requires syncing and
-starting the retained prior binary/configuration pair.
+Schema version 6 and the authenticated policy API/CLI provide tenant-scoped
+staging, compare-and-swap activation, and rollback to a previously active
+version. Provider requests read and validate the active pointer at request
+time, and usage events retain the exact evaluated version. Initial deployment
+still requires migrate, identity sync, and policy sync before starting the
+runtime. Production rollout coordination, notification, two-person approval,
+emergency access, and multi-replica operational drills remain separate gates.
 
 ## Reproduce the bounded integration proof
 
@@ -209,11 +217,11 @@ observation is
 
 ## Gates that remain open
 
-Schema v5 is a real accounting, human-session, DLP/security, and policy-version persistence
+Schema v6 is a real accounting, human-session, DLP/security, and policy-version persistence
 slice, not the completed hosted product. The repository currently opens a fresh
 PostgreSQL connection per operation. Configuration remains the desired-state
-identity and request-evaluation source; SCIM and public administrative
-identity/policy APIs are not implemented. Removing a person
+identity source and deployment provisioning boundary; SCIM and public
+administrative identity APIs are not implemented. Removing a person
 or mapping while retaining its configured organization increments the affected
 authorization version and revokes active sessions. Removing the entire
 organization from configuration is not a deprovisioning operation: the sync
@@ -223,9 +231,8 @@ not consider tenant deletion complete until a separately verified explicit
 deprovision/SCIM workflow exists. A keyed routing
 tag lets an opaque credential select one RLS tenant without exposing the raw
 organization ID or querying a global credential index, but production custody
-and rotation of that key remain open. Dynamic request evaluation from the
-active policy pointer, authenticated policy administration, policy
-notification/queue UX,
+and rotation of that key remain open. Policy notification/queue UX,
+two-person activation approval,
 representative DLP evaluation, usage/security backfill, export/delete,
 backup/restore, pooling, KMS, HA, operations, and independent security review
 remain separate gates. Do not describe this checkpoint as the completed

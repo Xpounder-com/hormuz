@@ -1,13 +1,13 @@
 # Usage, cost, and budget reporting
 
-Hormuz records one metadata-only usage event for each accounted generation attempt. The event snapshots the organization, actor, and team at request time, the client, provider protocol, requested, routed, and provider-returned actual model, policy outcome, provider-reported token categories, calculated billable-token units, configured-rate-card cost estimate and version, currency, status, provider request ID, and secret-redaction count. When automatic context policy is evaluated, the event also stores its mode, outcome, safe reason, pack/record lineage, version identifiers, estimated rendered tokens, assembly time, and authoritative fresh/already-present state. A strict provider-specific allowlist preserves native usage metadata needed for later reconciliation. Provider-returned model and request IDs are retained only when they match bounded opaque ASCII identifier grammars; arbitrary provider header or body text cannot become those fields. Prompt, response, retrieval query, and rendered context bodies are not stored. Legacy rows created before the organization field existed remain unbound rather than being assigned a guessed tenant.
+Hormuz records one metadata-only usage event for each accounted generation attempt. The event snapshots the organization, actor, and team at request time, the client, provider protocol, requested, routed, and provider-returned actual model, policy outcome, exact immutable governance-policy version, provider-reported token categories, calculated billable-token units, configured-rate-card cost estimate and version, currency, status, provider request ID, and secret-redaction count. When automatic context policy is evaluated, the event also stores its mode, outcome, safe reason, pack/record lineage, version identifiers, estimated rendered tokens, assembly time, and authoritative fresh/already-present state. A strict provider-specific allowlist preserves native usage metadata needed for later reconciliation. Provider-returned model and request IDs are retained only when they match bounded opaque ASCII identifier grammars; arbitrary provider header or body text cannot become those fields. Prompt, response, retrieval query, and rendered context bodies are not stored. Legacy rows created before the organization field existed remain unbound rather than being assigned a guessed tenant.
 
 Newly accounted generation attempts also store nullable, non-negative integer
 timings for gateway handling, synchronous policy evaluation, and attempted
 provider work. They contain no route query, prompt, response, credential,
 filename, source text, network address, or arbitrary label. Historical events
 remain null rather than being presented as zero-latency observations. These
-columns are deliberately excluded from the stable usage audit-export v2 shape;
+columns are deliberately excluded from the stable usage audit-export v3 shape;
 administrative aggregation is opt-in through usage-report schema v3.
 
 ## CLI reports

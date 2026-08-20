@@ -41,6 +41,7 @@ from .store import (
     _optional_sha256,
     _sqlite_nonnegative,
     _validated_context_lineage,
+    _validated_governance_policy_version,
     _validated_optional_latency,
     _validate_provider_cost_report_storage,
     _validate_provider_cost_source,
@@ -163,6 +164,7 @@ class PostgresUsageStore:
         gateway_latency_milliseconds: int | None = None,
         policy_latency_milliseconds: int | None = None,
         provider_latency_milliseconds: int | None = None,
+        governance_policy_version: str = "bootstrap-legacy-v1",
     ) -> str:
         organization_id = self._organization(identity.organization_id)
         if cost_basis not in {"estimated", "estimated_legacy", "not_available", "not_applicable"}:
@@ -185,6 +187,9 @@ class PostgresUsageStore:
         normalized_provider_request_id = sanitize_provider_request_id(provider_request_id)
         if provider_request_id is not None and normalized_provider_request_id is None:
             raise ValueError("Usage provider request ID must be a safe bounded identifier")
+        normalized_governance_policy_version = _validated_governance_policy_version(
+            governance_policy_version
+        )
         input_count = _sqlite_nonnegative(input_tokens)
         output_count = _sqlite_nonnegative(output_tokens)
         cache_read_count = _sqlite_nonnegative(cache_read_tokens)
@@ -246,6 +251,7 @@ class PostgresUsageStore:
             _validated_optional_latency(gateway_latency_milliseconds),
             _validated_optional_latency(policy_latency_milliseconds),
             _validated_optional_latency(provider_latency_milliseconds),
+            normalized_governance_policy_version,
         )
         with self._transaction(
             organization_id,
@@ -268,13 +274,13 @@ class PostgresUsageStore:
                       context_repository_revision, context_estimated_tokens,
                       context_assembly_milliseconds, context_reuse_status,
                       gateway_latency_milliseconds, policy_latency_milliseconds,
-                      provider_latency_milliseconds
+                      provider_latency_milliseconds, governance_policy_version
                     ) VALUES (
                       %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                       %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                       %s, %s, %s, %s::jsonb, %s, %s, %s::jsonb, %s, %s,
                       %s, %s, %s::jsonb, %s, %s, %s, %s, %s, %s, %s,
-                      %s, %s, %s
+                      %s, %s, %s, %s
                     )
                     """,
                     values,
@@ -996,7 +1002,7 @@ class PostgresUsageStore:
                               context_policy_version, context_retrieval_version,
                               context_render_version, context_repository_revision,
                               context_estimated_tokens, context_assembly_milliseconds,
-                              context_reuse_status
+                              context_reuse_status, governance_policy_version
                             FROM gateway_usage_events
                             WHERE tenant_id = %s AND occurred_at >= %s
                             ORDER BY occurred_at, id
@@ -1008,7 +1014,7 @@ class PostgresUsageStore:
                             event["occurred_at"] = _iso(event["occurred_at"])
                             event["provider_usage"] = event.pop("provider_usage_json")
                             event["context_record_ids"] = event.pop("context_record_ids_json")
-                            events.append({"schema_version": 2, "event_type": "usage", **event})
+                            events.append({"schema_version": 3, "event_type": "usage", **event})
                     if kind in {"all", "security"}:
                         cursor.execute(
                             """

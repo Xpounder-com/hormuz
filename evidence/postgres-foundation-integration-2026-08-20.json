@@ -3,6 +3,7 @@
     "atomic_budget_allowed": 1,
     "atomic_budget_competitors": 2,
     "atomic_budget_denied": 1,
+    "exact_governance_policy_version_verified": true,
     "provider_cost_idempotency_verified": true,
     "provider_reconciliation_verified": true,
     "reservation_release_verified": true,
@@ -12,7 +13,7 @@
     "usage_rows_per_tenant": 1
   },
   "content_free": true,
-  "generated_at": "2026-08-20T18:54:55.621092Z",
+  "generated_at": "2026-08-20T22:02:57.871650Z",
   "identity_sessions": {
     "atomic_refresh_competitors": 2,
     "atomic_refresh_replay_denied": 1,
@@ -42,7 +43,8 @@
       2,
       3,
       4,
-      5
+      5,
+      6
     ],
     "checksums_verified": true,
     "forced_rls_verified": true,
@@ -50,7 +52,7 @@
     "policy_definitions_verified": true,
     "privileges_verified": true,
     "runtime_role_verified": true,
-    "target_version": 5,
+    "target_version": 6,
     "trigger_definition_verified": true
   },
   "policy_administration": {
@@ -80,7 +82,7 @@
     "postgres_image": "postgres@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777",
     "postgres_server_version_num": "160014"
   },
-  "schema": "hormuz.postgres-policy-administration-integration.v5",
+  "schema": "hormuz.postgres-policy-administration-integration.v6",
   "tamper_detection": {
     "permissive_policy_rejected": true,
     "runtime_owner_membership_rejected": true,

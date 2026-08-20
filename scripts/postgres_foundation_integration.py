@@ -53,7 +53,7 @@ from hormuz.store import (
 )
 
 
-EVIDENCE_SCHEMA = "hormuz.postgres-policy-administration-integration.v5"
+EVIDENCE_SCHEMA = "hormuz.postgres-policy-administration-integration.v6"
 DEFAULT_IMAGE = (
     "postgres@sha256:"
     "57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777"
@@ -358,6 +358,7 @@ def _prove_accounting_store(runtime_dsn: str) -> dict[str, object]:
     )
     identity_a = _synthetic_identity("tenant-a", "actor-a")
     identity_b = _synthetic_identity("tenant-b", "actor-b")
+    governance_policy_version = "hpv_v1_" + "a" * 64
     try:
         for store, identity in ((stores[0], identity_a), (stores[1], identity_b)):
             store.record(
@@ -376,6 +377,7 @@ def _prove_accounting_store(runtime_dsn: str) -> dict[str, object]:
                 cost_microusd=125_000,
                 cost_basis="estimated",
                 rate_card_version="integration-v1",
+                governance_policy_version=governance_policy_version,
             )
     except PostgresStorageError:
         raise PostgresFoundationIntegrationError("accounting_usage_record_failed") from None
@@ -422,6 +424,12 @@ def _prove_accounting_store(runtime_dsn: str) -> dict[str, object]:
         len(report_rows) != 1
         or int(report_rows[0]["requests"]) != 1
         or not any(event["event_type"] == "usage" for event in audit_events)
+        or not any(
+            event["event_type"] == "usage"
+            and event.get("governance_policy_version") == governance_policy_version
+            and event.get("schema_version") == 3
+            for event in audit_events
+        )
         or not any(
             event["event_type"] == "security.admin.usage_read"
             for event in audit_events
@@ -521,6 +529,7 @@ def _prove_accounting_store(runtime_dsn: str) -> dict[str, object]:
         "usage_rows_per_tenant": 1,
         "usage_reporting_verified": True,
         "usage_read_audit_verified": True,
+        "exact_governance_policy_version_verified": True,
         "atomic_budget_competitors": 2,
         "atomic_budget_allowed": 1,
         "atomic_budget_denied": 1,

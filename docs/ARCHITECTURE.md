@@ -12,6 +12,7 @@ Codex / Claude Code
 Hormuz HTTP transport
         |
         +--> verify static/OIDC/session identity and resolve explicit actor/team metadata
+        +--> read and validate exact active tenant policy version
         +--> resolve organization -> team -> person model, budget, and DLP policy
         +--> allow, deny, reroute, or cap the request
         +--> when enabled, retrieve an authorized verified Context Pack and render it at user priority
@@ -94,8 +95,11 @@ The HTTP path authenticates first, derives organization/team/actor from the stat
 - `hormuz/postgres_policy_store.py` stores immutable SHA-256-addressed tenant
   policy versions, structural content-free change summaries, an append-only
   administration event stream, and one compare-and-swap active-version pointer.
-  The repository foundation is multi-instance; the authenticated API/CLI and
-  request-time use of the active snapshot remain issue #21 work.
+  `hormuz/policy_runtime.py` reads the pointer on every request, validates and
+  caches only immutable materializations, supplies the exact version to usage
+  evidence, and fails closed before provider egress on unavailable or corrupt
+  active state. `hormuz/policy_admin_client.py` and the authenticated HTTP/CLI
+  contract expose tenant-scoped staging, inspection, activation, and rollback.
 - `hormuz/credential_store.py` and `hormuz/session_client.py` own fail-closed OS secure-store custody and the CLI login/refresh/logout path.
 - `hormuz/session_admin_client.py` owns the authenticated, redirect-refusing session-administration CLI transport and validates the metadata-only session and security-event response contracts.
 - `hormuz/config.py` fail-closes unknown configuration fields without reflecting rejected keys, validates identity/model/policy references and cross-organization team-scope ambiguity, defines identity/route/rate-card policy data, and resolves monotonic organization/team/person model, DLP, and budget policy. It continues to parse deprecated context-injection configuration for compatibility, but policy projection v2 excludes it from the supported shared contract. The resulting snapshot is immutable for one process; safe change is a readiness-gated replacement rollout, not live reload.

@@ -4,7 +4,7 @@ import sqlite3
 from types import MappingProxyType
 
 
-CONTENT_FREE_SCHEMA_VERSION = "hormuz.content-free-schema.v2"
+CONTENT_FREE_SCHEMA_VERSION = "hormuz.content-free-schema.v3"
 
 
 _USAGE_TABLE_COLUMNS = {
@@ -53,6 +53,7 @@ _USAGE_TABLE_COLUMNS = {
         "gateway_latency_milliseconds",
         "policy_latency_milliseconds",
         "provider_latency_milliseconds",
+        "governance_policy_version",
     ),
     "gateway_secret_events": (
         "id",

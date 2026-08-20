@@ -23,10 +23,12 @@ from urllib.parse import urlsplit
 
 from .auth import AuthenticationError, Authenticator
 from .config import (
+    ConfigError,
     GatewayConfig,
     Identity,
     ModelRoute,
     UpstreamConfig,
+    configuration_from_policy_projection,
     is_context_selector,
     is_model_identifier,
 )
@@ -62,7 +64,10 @@ from .dlp_approval import DLPApprovalError, payload_fingerprint
 from .policy import PolicyDecision, PolicyEngine
 from .identity_projection import configured_organization_ids, verify_runtime_identity_projection
 from .postgres import PostgresStorageError, postgres_dsn_from_env
+from .postgres_policy_store import PolicyAdminError, PostgresPolicyStore
 from .postgres_session_store import PostgresSessionStore
+from .policy_projection import policy_projection
+from .policy_runtime import PolicyRuntime, ResolvedPolicy
 from .redaction import RedactionError, SecretRedactor
 from .session import SessionBroker, SessionBrokerError
 from .session_store import (
@@ -92,6 +97,7 @@ MAX_CONTEXT_EVIDENCE_REQUEST_BYTES = 64 * 1024
 MAX_CONTEXT_REVALIDATION_REQUEST_BYTES = 8 * 1024
 MAX_AUTH_REQUEST_BYTES = 8 * 1024
 MAX_DLP_APPROVAL_REQUEST_BYTES = 2 * 1024
+MAX_POLICY_ADMIN_REQUEST_BYTES = 1_048_576
 MAX_PROVIDER_QUERY_DECODE_DEPTH = 3
 MAX_PROVIDER_REQUEST_HEADER_BYTES = 1024
 CONNECTION_CAPACITY_LOG_INTERVAL_SECONDS = 5.0
@@ -111,6 +117,10 @@ _CONTENT_FREE_HTTP_ROUTES = frozenset(
         "/v1/admin/session-revocations",
         "/v1/admin/sessions",
         "/v1/admin/usage",
+        "/v1/admin/policy-active",
+        "/v1/admin/policy-activations",
+        "/v1/admin/policy-rollbacks",
+        "/v1/admin/policy-versions",
         "/v1/auth/callback",
         "/v1/auth/enrollments",
         "/v1/auth/login",
@@ -349,6 +359,21 @@ class GatewayServer(ThreadingHTTPServer):
                 )
             self.session_broker = SessionBroker(config, self.authenticator, session_store)
         self.store = gateway_store(config)
+        self.policy_store: PostgresPolicyStore | None = None
+        if config.usage_storage.backend == "postgresql":
+            try:
+                dsn = postgres_dsn_from_env(
+                    dsn_env=config.usage_storage.postgres_dsn_env
+                )
+                self.policy_store = PostgresPolicyStore(
+                    dsn,
+                    organization_ids=configured_organization_ids(config),
+                    schema=config.usage_storage.postgres_schema,
+                    runtime_role=config.usage_storage.postgres_runtime_role,
+                )
+            except PostgresStorageError as error:
+                raise PolicyAdminError(error.code) from None
+        self.policy_runtime = PolicyRuntime(config, self.policy_store)
         # The built-in context repository is a deprecated experimental surface,
         # not a dependency of the supported gateway path. Keep it lazy so an
         # ordinary OpenAI or Anthropic deployment neither opens nor creates a
@@ -388,7 +413,7 @@ class GatewayServer(ThreadingHTTPServer):
                 )
             )
         self.protected_values = tuple(protected_values)
-        self._redactor_cache: dict[tuple[str, str, str, str, str], SecretRedactor] = {}
+        self._redactor_cache: dict[tuple[str, str, str, str, str, str], SecretRedactor] = {}
         self._redactor_cache_lock = threading.Lock()
         super().__init__((config.listen.host, config.listen.port), GatewayRequestHandler)
         self._header_watchdog = threading.Thread(
@@ -661,6 +686,8 @@ class GatewayServer(ThreadingHTTPServer):
         *,
         protocol: str,
         model: str,
+        runtime_config: GatewayConfig,
+        governance_policy_version: str,
     ) -> SecretRedactor:
         cache_key = (
             identity.organization_id,
@@ -668,14 +695,15 @@ class GatewayServer(ThreadingHTTPServer):
             identity.actor_id,
             protocol,
             model,
+            governance_policy_version,
         )
         with self._redactor_cache_lock:
             redactor = self._redactor_cache.get(cache_key)
             if redactor is None:
                 redactor = SecretRedactor(
-                    self.config.secret_controls,
+                    runtime_config.secret_controls,
                     self.protected_values,
-                    self.config.resolved_dlp_controls(
+                    runtime_config.resolved_dlp_controls(
                         identity,
                         protocol=protocol,
                         model=model,
@@ -785,6 +813,9 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         if path == "/v1/admin/usage":
             self._list_usage_report(identity, request_url.query)
             return
+        if path == "/v1/admin/policy-active":
+            self._get_active_policy(identity)
+            return
         if path == "/v1/gateway/whoami":
             self._send_json(
                 HTTPStatus.OK,
@@ -863,7 +894,15 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             self._send_model_discovery_error()
             return
 
-        decision = self.server.policy_engine.model_catalog(
+        resolved = self._resolve_runtime_policy(identity)
+        if resolved is None:
+            return
+        engine = (
+            self.server.policy_engine
+            if resolved.config is self.server.config
+            else PolicyEngine(resolved.config, self.server.store)
+        )
+        decision = engine.model_catalog(
             identity=identity,
             client="claude-code",
             protocol="anthropic",
@@ -1073,6 +1112,190 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             HTTPStatus.BAD_REQUEST,
         )
 
+    def _policy_admin_store(self, identity: Identity) -> PostgresPolicyStore | None:
+        if "policy_admin" not in identity.capabilities:
+            self._send_error(
+                "policy_admin_forbidden",
+                "Policy administrator capability is required",
+                HTTPStatus.FORBIDDEN,
+            )
+            return None
+        if self.server.policy_store is None:
+            self._send_error(
+                "policy_admin_unavailable",
+                "Versioned policy administration requires PostgreSQL persistence",
+                HTTPStatus.SERVICE_UNAVAILABLE,
+            )
+            return None
+        return self.server.policy_store
+
+    def _get_active_policy(self, identity: Identity) -> None:
+        store = self._policy_admin_store(identity)
+        if store is None:
+            return
+        try:
+            active = store.active(identity=identity)
+        except PolicyAdminError as error:
+            self._send_policy_admin_error(error)
+            return
+        if active is None:
+            self._send_error(
+                "policy_active_not_found",
+                "No staged policy version is active",
+                HTTPStatus.NOT_FOUND,
+            )
+            return
+        self._send_json(HTTPStatus.OK, active.to_dict())
+
+    def _stage_policy(self, identity: Identity) -> None:
+        store = self._policy_admin_store(identity)
+        if store is None:
+            return
+        body = self._read_json_body(
+            max_bytes=MAX_POLICY_ADMIN_REQUEST_BYTES,
+            strict=True,
+        )
+        if body is None:
+            return
+        if set(body) != {"projection"} or not isinstance(body.get("projection"), dict):
+            self._send_error(
+                "invalid_policy_projection",
+                "Request body must contain only a policy projection",
+                HTTPStatus.BAD_REQUEST,
+            )
+            return
+        try:
+            candidate = configuration_from_policy_projection(
+                self.server.config,
+                body["projection"],
+                organization_id=identity.organization_id,
+            )
+            if policy_projection(candidate, identity.organization_id) != body["projection"]:
+                raise ConfigError("Policy projection is not canonical")
+            version = store.stage(identity=identity, config=candidate)
+        except ConfigError:
+            self._send_error(
+                "invalid_policy_projection",
+                "Policy projection is invalid or references unprovisioned deployment state",
+                HTTPStatus.BAD_REQUEST,
+            )
+            return
+        except PolicyAdminError as error:
+            self._send_policy_admin_error(error)
+            return
+        LOGGER.info(
+            "policy_version_staged organization=%s actor=%s version=%s changed=%s",
+            identity.organization_id,
+            identity.actor_id,
+            version.version_id,
+            version.staged,
+        )
+        self._send_json(
+            HTTPStatus.CREATED if version.staged else HTTPStatus.OK,
+            version.to_dict(),
+        )
+
+    def _change_active_policy(self, identity: Identity, *, rollback: bool) -> None:
+        store = self._policy_admin_store(identity)
+        if store is None:
+            return
+        body = self._read_json_body(
+            max_bytes=MAX_POLICY_ADMIN_REQUEST_BYTES,
+            strict=True,
+        )
+        if body is None:
+            return
+        if set(body) != {"version_id", "expected_active_version_id"}:
+            self._send_error(
+                "invalid_policy_activation",
+                "Activation request fields are invalid",
+                HTTPStatus.BAD_REQUEST,
+            )
+            return
+        version_id = body.get("version_id")
+        expected = body.get("expected_active_version_id")
+        if not isinstance(version_id, str) or (
+            expected is not None and not isinstance(expected, str)
+        ) or (rollback and expected is None):
+            self._send_error(
+                "invalid_policy_activation",
+                "Activation version identifiers are invalid",
+                HTTPStatus.BAD_REQUEST,
+            )
+            return
+        try:
+            activation = store.activate(
+                identity=identity,
+                version_id=version_id,
+                expected_active_version_id=expected,
+                rollback=rollback,
+            )
+        except PolicyAdminError as error:
+            self._send_policy_admin_error(error)
+            return
+        self.server.policy_runtime.invalidate(identity.organization_id)
+        LOGGER.info(
+            "policy_version_%s organization=%s actor=%s version=%s prior=%s sequence=%d changed=%s",
+            "rolled_back" if rollback else "activated",
+            identity.organization_id,
+            identity.actor_id,
+            activation.version_id,
+            activation.prior_version_id,
+            activation.activation_sequence,
+            activation.changed,
+        )
+        self._send_json(HTTPStatus.OK, activation.to_dict())
+
+    def _send_policy_admin_error(self, error: PolicyAdminError) -> None:
+        if error.code in {
+            "policy_version_id_invalid",
+            "policy_expected_version_id_invalid",
+        }:
+            self._send_error(
+                "invalid_policy_activation",
+                "Policy activation identifiers are invalid",
+                HTTPStatus.BAD_REQUEST,
+            )
+            return
+        if error.code == "policy_version_not_found":
+            self._send_error(
+                "policy_version_not_found",
+                "Policy version was not found",
+                HTTPStatus.NOT_FOUND,
+            )
+            return
+        if error.code in {
+            "policy_activation_conflict",
+            "policy_rollback_target_not_previously_active",
+        }:
+            self._send_error(
+                error.code,
+                "Policy activation state changed or rollback target is ineligible",
+                HTTPStatus.CONFLICT,
+            )
+            return
+        self._send_error(
+            "policy_admin_unavailable",
+            "Policy administration state is unavailable",
+            HTTPStatus.SERVICE_UNAVAILABLE,
+        )
+
+    def _resolve_runtime_policy(self, identity: Identity) -> ResolvedPolicy | None:
+        try:
+            return self.server.policy_runtime.resolve(identity)
+        except (PolicyAdminError, PostgresStorageError, ConfigError):
+            LOGGER.error(
+                "active_policy_resolution_failed organization=%s actor=%s",
+                identity.organization_id,
+                identity.actor_id,
+            )
+            self._send_error(
+                "hormuz_policy_unavailable",
+                "Active organization policy is unavailable",
+                HTTPStatus.SERVICE_UNAVAILABLE,
+            )
+            return None
+
     def do_POST(self) -> None:  # noqa: N802
         path = urlsplit(self.path).path
         if self._reject_if_unavailable():
@@ -1094,6 +1317,22 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             if identity is None:
                 return
             self._revoke_human_sessions(identity)
+            return
+        if path in {
+            "/v1/admin/policy-versions",
+            "/v1/admin/policy-activations",
+            "/v1/admin/policy-rollbacks",
+        }:
+            identity = self._authenticate()
+            if identity is None:
+                return
+            if path == "/v1/admin/policy-versions":
+                self._stage_policy(identity)
+            else:
+                self._change_active_policy(
+                    identity,
+                    rollback=path.endswith("policy-rollbacks"),
+                )
             return
         if path == "/v1/context/packs":
             identity = self._authenticate()
@@ -1744,7 +1983,10 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         identity: Identity,
         request_id: str,
     ) -> None:
-        if not self.server.config.dlp_controls.approval.enabled:
+        resolved = self._resolve_runtime_policy(identity)
+        if resolved is None:
+            return
+        if not resolved.config.dlp_controls.approval.enabled:
             self._send_error(
                 "dlp_approval_disabled",
                 "DLP approval is not enabled",
@@ -1773,7 +2015,10 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         identity: Identity,
         request_id: str,
     ) -> None:
-        approval_config = self.server.config.dlp_controls.approval
+        resolved = self._resolve_runtime_policy(identity)
+        if resolved is None:
+            return
+        approval_config = resolved.config.dlp_controls.approval
         if not approval_config.enabled:
             self._send_error(
                 "dlp_approval_disabled",
@@ -2532,7 +2777,17 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             return
 
         policy_started_at = time.monotonic()
-        decision = self.server.policy_engine.evaluate(
+        resolved_policy = self._resolve_runtime_policy(identity)
+        if resolved_policy is None:
+            return
+        runtime_config = resolved_policy.config
+        policy_engine = (
+            self.server.policy_engine
+            if runtime_config is self.server.config
+            else PolicyEngine(runtime_config, self.server.store)
+        )
+        self._hormuz_governance_policy_version = resolved_policy.version_id
+        decision = policy_engine.evaluate(
             identity=identity,
             client=client,
             protocol=protocol,
@@ -2677,6 +2932,8 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 identity,
                 protocol=protocol,
                 model=decision.route.upstream_model,
+                runtime_config=runtime_config,
+                governance_policy_version=resolved_policy.version_id,
             ).inspect(
                 request_body,
                 protocol=protocol,
@@ -2696,7 +2953,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         approval_request_id: str | None = None
         approval_authorized = False
         if redaction.action == "require_approval":
-            approval_config = self.server.config.dlp_controls.approval
+            approval_config = runtime_config.dlp_controls.approval
             if approval_config.enabled:
                 approval_findings = tuple(
                     finding for finding in dlp_findings if finding.action == "require_approval"
@@ -2974,7 +3231,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 cache_write_tokens=0,
             )
             try:
-                reservation_id = self.server.policy_engine.reserve_budget(
+                reservation_id = policy_engine.reserve_budget(
                     identity=identity,
                     model_alias=decision.resolved_alias,
                     reserved_tokens=reserved_input_tokens + max(0, reserved_output_tokens),
@@ -3403,6 +3660,11 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         )
         self.server.store.record(
             **fields,
+            governance_policy_version=getattr(
+                self,
+                "_hormuz_governance_policy_version",
+                "bootstrap-legacy-v1",
+            ),
             gateway_latency_milliseconds=_elapsed_milliseconds(request_started_at),
             policy_latency_milliseconds=policy_latency_milliseconds,
             provider_latency_milliseconds=(

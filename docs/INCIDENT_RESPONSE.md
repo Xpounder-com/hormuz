@@ -56,9 +56,9 @@ For every incident, the functional lead and incident commander should preserve m
 - Contain: fail closed before serving provider traffic and preserve metadata-only policy version and actor evidence.
 - Recover: reconcile the desired and projected policy, require authorized activation, and restore replicas to one approved version.
 - Verify: run both the stale-policy startup regression and the digest-pinned
-  schema-v5 PostgreSQL activation/rollback integration. Public authenticated
-  policy administration, request-time active-policy evaluation, and production
-  replica rollout remain open in issue #21.
+  schema-v6 PostgreSQL activation/rollback and exact-usage-version integration.
+  Authenticated administration and request-time fail-closed evaluation are
+  repository-verified; production replica rollout and operations remain open.
 
 ## Cost spike
 

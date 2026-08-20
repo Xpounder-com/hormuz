@@ -72,10 +72,10 @@
       "controls": [
         {"kind": "test", "ref": "tests/test_gateway.py", "claim": "Current single-node APIs exercise identity-derived organization scope and cross-organization denials."},
         {"kind": "documentation", "ref": "docs/decisions/0002-enterprise-tenancy-and-persistence.md", "claim": "The accepted production contract requires mandatory tenant keys, application predicates, forced PostgreSQL RLS, and reused-connection isolation tests."},
-        {"kind": "code", "ref": "hormuz/postgres.py", "claim": "Schema-v5 migration and verification enforce separate roles, forced RLS, immutable tenant keys and policy history, least-privilege policy-version/pointer access, exact columns, and transaction-local tenant context."},
+        {"kind": "code", "ref": "hormuz/postgres.py", "claim": "Schema-v6 migration and verification enforce separate roles, forced RLS, immutable tenant keys and policy history, least-privilege policy-version/pointer access, exact usage-version columns, and transaction-local tenant context."},
         {"kind": "test", "ref": "scripts/postgres_foundation_integration.py", "claim": "The digest-pinned two-tenant integration exercises migration idempotency, missing/cleared tenant context, reused-connection switching, cross-tenant denial, composite tenant foreign keys, accounting, desired-state identities and policies, immutable policy staging, cross-instance activation and rollback, multi-instance sessions, security evidence, and atomic one-time approvals."}
       ],
-      "residual_risk": "PostgreSQL is connected to accounting, human sessions, policy projections and version state, DLP approvals, and security evidence; request-time active-policy evaluation, pooled load, backup/restore, deletion, HA, KMS, SCIM, and independent review remain unproved.",
+      "residual_risk": "PostgreSQL is connected to accounting, request-time active policy, human sessions, DLP approvals, and security evidence; pooled load, backup/restore, deletion, HA, KMS, SCIM, production rollout, and independent review remain unproved.",
       "release_gate": "Issue #6"
     },
     {
@@ -213,9 +213,11 @@
         {"kind": "code", "ref": "hormuz/config.py", "claim": "Configuration parsing is strict, reference-validated, immutable per process, and can bind exact file bytes to a deployment digest."},
         {"kind": "test", "ref": "tests/test_cli.py", "claim": "Unknown and duplicate fields, invalid references, unsafe URLs, digest mismatch, and immutable startup behavior are tested."},
         {"kind": "code", "ref": "hormuz/postgres_policy_store.py", "claim": "Policy snapshots use deterministic immutable IDs, activation uses an explicit compare value, rollback targets a previously active version, and administrative mutations require policy_admin."},
-        {"kind": "test", "ref": "scripts/postgres_foundation_integration.py", "claim": "The PostgreSQL integration proves idempotent staging, exact capability denial, atomic cross-instance activation, rollback, and hidden cross-tenant versions."}
+        {"kind": "code", "ref": "hormuz/policy_runtime.py", "claim": "Every provider request resolves the current tenant pointer, validates immutable materialization, records the exact version, and fails before provider egress when state is unavailable or corrupt."},
+        {"kind": "test", "ref": "scripts/postgres_foundation_integration.py", "claim": "The PostgreSQL integration proves idempotent staging, exact capability denial, atomic cross-instance activation, rollback, hidden cross-tenant versions, and usage-version evidence."},
+        {"kind": "test", "ref": "tests/test_gateway.py", "claim": "Authenticated administration, active policy enforcement, exact version accounting, and dependency-outage fail-closed behavior are exercised through the gateway boundary."}
       ],
-      "residual_risk": "The public authenticated administration API/CLI, request-time use of the active snapshot, usage lineage, approval separation of duties, signer identity, and production rollout coordination remain absent.",
+      "residual_risk": "The v0.2 workflow authorizes one policy_admin for staging and activation; two-person approval, signer identity, production rollout coordination, notification, and emergency access remain absent.",
       "release_gate": "Issues #9 and #21"
     },
     {

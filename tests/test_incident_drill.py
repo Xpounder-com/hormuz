@@ -36,7 +36,7 @@ class IncidentDrillContractTests(unittest.TestCase):
         self.assertEqual(evidence["schema"], "hormuz.incident-drill-evidence.v1")
         self.assertEqual(evidence["catalog_schema"], "hormuz.incident-drills.v1")
         self.assertEqual(evidence["scenario_count"], 7)
-        self.assertEqual(evidence["test_count"], 7)
+        self.assertEqual(evidence["test_count"], 8)
         self.assertEqual(evidence["executed_count"], 0)
         self.assertEqual(evidence["passed_count"], 0)
         self.assertFalse(evidence["production_exercise_complete"])
@@ -114,8 +114,8 @@ class IncidentDrillContractTests(unittest.TestCase):
             stream=io.StringIO(),
         )
 
-        self.assertEqual(evidence["executed_count"], 7)
-        self.assertEqual(evidence["passed_count"], 7)
+        self.assertEqual(evidence["executed_count"], 8)
+        self.assertEqual(evidence["passed_count"], 8)
         self.assertEqual(evidence["failed_count"], 0)
         serialized = json.dumps(evidence, sort_keys=True)
         catalog = self._catalog()

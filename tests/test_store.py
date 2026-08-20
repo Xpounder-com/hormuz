@@ -171,7 +171,7 @@ class UsageStoreMigrationTests(unittest.TestCase):
                 kind="usage",
             )[0]
 
-            self.assertEqual(event["schema_version"], 2)
+            self.assertEqual(event["schema_version"], 3)
             self.assertEqual(event["context_injection_mode"], "optional")
             self.assertEqual(event["context_injection_outcome"], "injected")
             self.assertEqual(event["context_pack_id"], "ctxpack_0123456789abcdef01234567")
@@ -735,7 +735,7 @@ class UsageStoreMigrationTests(unittest.TestCase):
                 audit[0]["provider_usage"],
                 {"input_tokens": 100, "output_tokens": 20},
             )
-            self.assertEqual(audit[0]["schema_version"], 2)
+            self.assertEqual(audit[0]["schema_version"], 3)
             self.assertEqual(audit[0]["context_injection_mode"], "off")
             self.assertEqual(audit[0]["context_injection_outcome"], "not_evaluated")
             self.assertEqual(audit[0]["context_record_ids"], [])

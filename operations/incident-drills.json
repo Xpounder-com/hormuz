@@ -60,12 +60,13 @@
       "name": "Stale or unauthorized policy version reaches a gateway",
       "lead_role": "platform_response",
       "coordination_role": "incident_commander",
-      "objective": "Fail gateway construction before opening a socket or repository when the shared policy projection is stale.",
+      "objective": "Fail before provider egress when desired or active policy state is stale, unavailable, or corrupt.",
       "test_ids": [
-        "tests.test_postgres.PostgresFoundationTests.test_postgres_gateway_store_fails_closed_before_building_on_stale_policy"
+        "tests.test_postgres.PostgresFoundationTests.test_postgres_gateway_store_fails_closed_before_building_on_stale_policy",
+        "tests.test_gateway.GatewayIntegrationTests.test_active_policy_store_failure_blocks_before_provider_egress"
       ],
       "runbook": "docs/INCIDENT_RESPONSE.md#policy-rollout-incident",
-      "production_gap": "This startup fail-closed regression does not provide live versioned activation, approval, rollback, replica rollout, or operator reconciliation; issue #21 remains open."
+      "production_gap": "The repository proves live versioned activation, rollback, and request-time fail-closed behavior; multi-replica production rollout, two-person approval, notification, and operator reconciliation exercises remain open."
     },
     {
       "id": "cost_spike",

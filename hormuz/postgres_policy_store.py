@@ -106,7 +106,21 @@ class ActivePolicy:
     projection_sha256: str
     projection: dict[str, object]
     activated_at: str
+    activated_by_actor_id: str
+    activated_by_actor_name: str
     activation_sequence: int
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "schema": "hormuz.active-policy.v1",
+            "version_id": self.version_id,
+            "projection_sha256": self.projection_sha256,
+            "projection": self.projection,
+            "activated_at": self.activated_at,
+            "activated_by_actor_id": self.activated_by_actor_id,
+            "activated_by_actor_name": self.activated_by_actor_name,
+            "activation_sequence": self.activation_sequence,
+        }
 
 
 def _iso(value: object) -> str:
@@ -463,7 +477,8 @@ class PostgresPolicyStore:
             with connection.cursor() as cursor:  # type: ignore[attr-defined]
                 cursor.execute(
                     "SELECT a.version_id, v.projection_sha256, v.projection_json, "
-                    "a.activated_at, a.activation_sequence "
+                    "a.activated_at, a.activated_by_actor_id, "
+                    "a.activated_by_actor_name, a.activation_sequence "
                     "FROM gateway_active_policies a "
                     "JOIN gateway_policy_versions v "
                     "ON v.tenant_id = a.tenant_id AND v.version_id = a.version_id "
@@ -486,7 +501,9 @@ class PostgresPolicyStore:
             projection_sha256=str(row[1]),
             projection=projection,
             activated_at=_iso(row[3]),
-            activation_sequence=int(row[4]),
+            activated_by_actor_id=str(row[4]),
+            activated_by_actor_name=str(row[5]),
+            activation_sequence=int(row[6]),
         )
 
 

@@ -2013,6 +2013,49 @@ staging, activation, rollback, request-time exact-version evaluation, usage
 lineage, concurrent-reader tests at the gateway boundary, and the operator
 runbook.
 
+### Authenticated request-time policy administration slice
+
+The second issue #21 implementation slice was exercised locally on August 20,
+2026:
+
+- a caller with `policy_admin` can export a canonical secret-free projection,
+  stage it through the CLI or authenticated HTTP API, inspect the active
+  version, activate with compare-and-swap semantics, and roll back with an
+  explicit expected-current version. Invalid, cross-tenant, oversized, and
+  non-canonical documents fail before activation;
+- materialization reconstructs only the gateway's supported policy surface.
+  Custom secret environment names, DLP dictionaries, approval keys, and
+  deployment upstreams must already be provisioned in the target gateway;
+  resolved secret values and request or response content never enter a policy
+  version;
+- every provider request reads the tenant's active pointer, reuses only the
+  immutable materialized version, and evaluates routing, limits, secret/DLP
+  controls, approval policy, and budgets against that exact version. Failure to
+  read or materialize an active version fails closed before a provider call;
+- each usage record and content-free accounting audit carries the exact
+  `governance_policy_version`. The content-free manifest is version 3 and the
+  accounting audit event schema is version 3;
+- packaged PostgreSQL migration 6 adds the non-null usage lineage column. The
+  digest-pinned PostgreSQL `16.14` integration applied migrations 1 through 6,
+  exercised staged and active versions across independent repositories, and
+  emitted schema
+  `hormuz.postgres-policy-administration-integration.v6` with exact-version
+  accounting proof;
+- policy-store outage, active-version enforcement, exact usage lineage,
+  administration authorization, CLI transport, rollback input, configuration
+  reconstruction, incident-drill, compatibility, persistence, and
+  content-free-contract tests passed; and
+- the complete source suite passed 531 tests in `140.356` seconds with the same
+  three documented opt-in installed-client/profile skips.
+
+This proves the first usable governed rollout path on the PostgreSQL backend.
+Version 0.2 deliberately uses one `policy_admin` capability for staging,
+activation, and rollback; two-person change approval and administrator
+notifications remain later hardening. Production deployment, independent
+security review, connection pooling, KMS custody/rotation, backup/PITR and
+restore, HA/failover, and a tested multi-process rollout under real load remain
+open and must not be inferred from this bounded checkpoint.
+
 ## Automated publication gate
 
 Ordinary GitHub CI runs seven independent gate families without provider credentials:

@@ -304,7 +304,8 @@ class UsageStore:
                         provider_latency_milliseconds IS NULL OR
                         (typeof(provider_latency_milliseconds) = 'integer'
                          AND provider_latency_milliseconds >= 0)
-                    )
+                    ),
+                    governance_policy_version TEXT NOT NULL DEFAULT 'bootstrap-legacy-v1'
                 );
                 CREATE INDEX IF NOT EXISTS idx_gateway_usage_occurred_at
                     ON gateway_usage_events(occurred_at);
@@ -565,6 +566,11 @@ class UsageStore:
                 connection.execute(
                     "ALTER TABLE gateway_usage_events ADD COLUMN provider_usage_json TEXT NOT NULL DEFAULT '{}'"
                 )
+            if "governance_policy_version" not in columns:
+                connection.execute(
+                    "ALTER TABLE gateway_usage_events ADD COLUMN "
+                    "governance_policy_version TEXT NOT NULL DEFAULT 'bootstrap-legacy-v1'"
+                )
             context_columns = {
                 "context_injection_mode": "TEXT NOT NULL DEFAULT 'off'",
                 "context_injection_outcome": "TEXT NOT NULL DEFAULT 'not_evaluated'",
@@ -722,6 +728,7 @@ class UsageStore:
         gateway_latency_milliseconds: int | None = None,
         policy_latency_milliseconds: int | None = None,
         provider_latency_milliseconds: int | None = None,
+        governance_policy_version: str = "bootstrap-legacy-v1",
     ) -> str:
         if cost_basis not in {"estimated", "estimated_legacy", "not_available", "not_applicable"}:
             raise ValueError("Unsupported usage cost basis")
@@ -743,6 +750,9 @@ class UsageStore:
         normalized_provider_request_id = sanitize_provider_request_id(provider_request_id)
         if provider_request_id is not None and normalized_provider_request_id is None:
             raise ValueError("Usage provider request ID must be a safe bounded identifier")
+        normalized_governance_policy_version = _validated_governance_policy_version(
+            governance_policy_version
+        )
         normalized_input_tokens = _sqlite_nonnegative(input_tokens)
         normalized_output_tokens = _sqlite_nonnegative(output_tokens)
         normalized_cache_read_tokens = _sqlite_nonnegative(cache_read_tokens)
@@ -790,11 +800,11 @@ class UsageStore:
                     context_repository_revision, context_estimated_tokens,
                     context_assembly_milliseconds, context_reuse_status,
                     gateway_latency_milliseconds, policy_latency_milliseconds,
-                    provider_latency_milliseconds
+                    provider_latency_milliseconds, governance_policy_version
                 ) VALUES (
                     ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                     ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                    ?, ?, ?
+                    ?, ?, ?, ?
                 )
                 """,
                 (
@@ -842,6 +852,7 @@ class UsageStore:
                     normalized_gateway_latency,
                     normalized_policy_latency,
                     normalized_provider_latency,
+                    normalized_governance_policy_version,
                 ),
             )
         return event_id
@@ -2164,7 +2175,7 @@ class UsageStore:
                         context_policy_version, context_retrieval_version,
                         context_render_version, context_repository_revision,
                         context_estimated_tokens, context_assembly_milliseconds,
-                        context_reuse_status
+                        context_reuse_status, governance_policy_version
                     FROM gateway_usage_events
                     WHERE occurred_at >= ?
                     ORDER BY occurred_at, id
@@ -2180,7 +2191,7 @@ class UsageStore:
                     )
                     events.append(
                         {
-                            "schema_version": 2,
+                            "schema_version": 3,
                             "event_type": "usage",
                             **event,
                         }
@@ -2285,6 +2296,19 @@ def _validated_optional_latency(value: object) -> int | None:
         or not 0 <= value <= 2**63 - 1
     ):
         raise ValueError("Usage latency must be a non-negative SQLite integer or null")
+    return value
+
+
+def _validated_governance_policy_version(value: object) -> str:
+    if (
+        not isinstance(value, str)
+        or not value
+        or len(value.encode("utf-8")) > 128
+        or any(character in value for character in ("\n", "\r", "\x00"))
+    ):
+        raise ValueError(
+            "Governance policy version must be a bounded single-line string"
+        )
     return value
 
 

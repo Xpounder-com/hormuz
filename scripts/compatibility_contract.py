@@ -345,7 +345,14 @@ def _validate_python(entries: list[dict[str, Any]], *, project_root: Path) -> li
         )
     except (OSError, UnicodeDecodeError) as error:
         raise CompatibilityContractError("CI workflow is unavailable") from error
-    if 'python-version: ["3.11", "3.12", "3.13", "3.14"]' not in workflow:
+    full_matrix = '["3.11", "3.12", "3.13", "3.14"]'
+    if (
+        f'python-version: {full_matrix}' not in workflow
+        and (
+            "python-version: ${{ fromJSON(" not in workflow
+            or f"'{full_matrix}'" not in workflow
+        )
+    ):
         raise CompatibilityContractError(
             "compatibility Python versions do not match CI"
         )
@@ -409,7 +416,7 @@ def _validate_identity_and_persistence(entries: list[dict[str, Any]]) -> None:
         or persistence["persistence.postgresql"]["support_level"]
         != "development_only"
         or persistence["persistence.postgresql"]["version"]
-        != "PostgreSQL 16.14 / Hormuz schema 4"
+        != "PostgreSQL 16.14 / Hormuz schema 6"
     ):
         raise CompatibilityContractError("compatibility persistence boundary is invalid")
 

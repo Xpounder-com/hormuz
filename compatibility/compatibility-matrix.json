@@ -73,7 +73,7 @@
         ],
         "evidence": [
           "pyproject.toml#requires-python = \"\u003e=3.11\"",
-          ".github/workflows/ci.yml#python-version: [\"3.11\", \"3.12\", \"3.13\", \"3.14\"]"
+          ".github/workflows/ci.yml#name: CI"
         ],
         "limitations": [
           "The source-suite gate is Linux CI evidence, not certification of every operating system or Python distribution."
@@ -93,7 +93,7 @@
         ],
         "evidence": [
           "pyproject.toml#requires-python = \"\u003e=3.11\"",
-          ".github/workflows/ci.yml#python-version: [\"3.11\", \"3.12\", \"3.13\", \"3.14\"]"
+          ".github/workflows/ci.yml#name: CI"
         ],
         "limitations": [
           "The release gate is Linux CI evidence, not certification of every operating system or Python distribution."
@@ -113,7 +113,7 @@
         ],
         "evidence": [
           "pyproject.toml#requires-python = \"\u003e=3.11\"",
-          ".github/workflows/ci.yml#python-version: [\"3.11\", \"3.12\", \"3.13\", \"3.14\"]"
+          ".github/workflows/ci.yml#name: CI"
         ],
         "limitations": [
           "The source-suite gate is Linux CI evidence, not certification of every operating system or Python distribution."
@@ -133,7 +133,7 @@
         ],
         "evidence": [
           "pyproject.toml#requires-python = \"\u003e=3.11\"",
-          ".github/workflows/ci.yml#python-version: [\"3.11\", \"3.12\", \"3.13\", \"3.14\"]"
+          ".github/workflows/ci.yml#name: CI"
         ],
         "limitations": [
           "The source-suite gate is Linux CI evidence, not certification of every operating system or Python distribution."
@@ -286,7 +286,7 @@
       {
         "id": "persistence.postgresql",
         "name": "PostgreSQL accounting, identity, policy, session, approval, and tenancy foundation",
-        "version": "PostgreSQL 16.14 / Hormuz schema 4",
+        "version": "PostgreSQL 16.14 / Hormuz schema 6",
         "support_level": "development_only",
         "production_supported": false,
         "tested_environments": [
@@ -296,7 +296,8 @@
           "shared-schema PostgreSQL with forced row-level security",
           "usage, cost evidence, usage-read audit, and atomic budget reservations",
           "configuration-seeded identity projection and multi-instance human sessions",
-          "secret-free policy projection, one-time DLP approvals, and security evidence",
+          "secret-free immutable policy administration and request-time exact-version enforcement",
+          "one-time DLP approvals and security evidence",
           "dedicated database option"
         ],
         "evidence": [
@@ -309,10 +310,15 @@
           "hormuz/migrations/postgresql/0002_gateway_accounting.sql",
           "hormuz/migrations/postgresql/0003_identity_sessions.sql",
           "hormuz/migrations/postgresql/0004_policy_approvals.sql",
+          "hormuz/migrations/postgresql/0005_policy_versions.sql",
+          "hormuz/migrations/postgresql/0006_usage_policy_version.sql",
           "hormuz/postgres_usage_store.py",
           "hormuz/identity_projection.py",
           "hormuz/postgres_session_store.py",
           "hormuz/policy_projection.py",
+          "hormuz/postgres_policy_store.py",
+          "hormuz/policy_runtime.py",
+          "hormuz/policy_admin_client.py",
           "hormuz/postgres_security_store.py",
           "scripts/postgres_foundation_integration.py",
           "tests/test_postgres.py",
@@ -320,7 +326,7 @@
           ".github/workflows/ci.yml#PostgreSQL migration and RLS foundation"
         ],
         "limitations": [
-          "ADR 0002 is accepted and schema version 4 can persist live usage, cost evidence, usage-read audit, shared budget reservations, configuration-seeded identities and policies, authorization versions, human sessions, DLP approvals, and security evidence. The deprecated context experiment is excluded from this persistence plan; SCIM, cutover backfill, coordinated policy rollout, pooling, backup, restore, deletion, KMS, HA, and production-persistence proof remain open."
+          "ADR 0002 is accepted and schema version 6 can persist live usage with exact governance policy versions, cost evidence, usage-read audit, shared budget reservations, configuration-seeded identities and policies, immutable activation history, authorization versions, human sessions, DLP approvals, and security evidence. The deprecated context experiment is excluded from this persistence plan; production rollout operations, SCIM, cutover backfill, pooling, backup, restore, deletion, KMS, HA, and production-persistence proof remain open."
         ]
       }
     ],

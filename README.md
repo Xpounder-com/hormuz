@@ -51,7 +51,8 @@ The following behavior is retained temporarily for compatibility and historical 
 - Generic OIDC authorization-code + PKCE browser login with opaque 10-minute Hormuz access credentials, atomic refresh rotation, replay-family revocation, and fail-closed OS secure-store custody.
 - Capability-gated, tenant-scoped `hormuz sessions` listing, metadata-only security-event inspection, and immediate session, employee, team, or organization revocation.
 - Capability-gated, tenant-scoped `hormuz usage report` administration over the authenticated gateway, with frozen-window pagination, team/person/model/client/provider drill-downs, mandatory metadata-only read audit, and an opt-in version-3 content-free latency histogram view that leaves the exact version-2 contract unchanged.
-- An opt-in PostgreSQL backend for usage, cost evidence, usage-read audit, cross-replica atomic budget reservations, configuration-seeded identity and secret-free policy projections, multi-instance human sessions, one-time DLP approvals, and security evidence. It uses checksummed migrations, separate owner/runtime roles, mandatory tenant keys, forced row-level security, transaction-local tenant binding, keyed opaque tenant routing tags, authorization-version invalidation, and a digest-pinned two-tenant integration gate. Governed context remains on its separately identified SQLite store in this transition; see [docs/POSTGRESQL.md](docs/POSTGRESQL.md).
+- Capability-gated `hormuz policy` administration for canonical secret-free tenant projections, immutable staging, compare-and-swap activation, exact active-version reads, rollback to a previously active version, request-time enforcement, and exact policy-version usage evidence.
+- An opt-in PostgreSQL backend for usage, cost evidence, usage-read audit, cross-replica atomic budget reservations, configuration-seeded identity and secret-free policy projections, immutable live policy versions, multi-instance human sessions, one-time DLP approvals, and security evidence. It uses checksummed migrations, separate owner/runtime roles, mandatory tenant keys, forced row-level security, transaction-local tenant binding, keyed opaque tenant routing tags, authorization-version invalidation, and a digest-pinned two-tenant integration gate. Governed context remains on its separately identified SQLite store in this transition; see [docs/POSTGRESQL.md](docs/POSTGRESQL.md).
 - An explicit kernel accept-backlog hint, pre-thread connection ceiling, absolute request-header and request-body deadlines, exact `Content-Length` body ingestion, versioned content-free liveness/readiness endpoints, atomic parsed-request capacity with saturation-aware readiness, a total provider-response relay deadline, and idempotent `SIGTERM` draining with a bounded in-flight request grace period.
 
 ## Quick start
@@ -138,6 +139,23 @@ The versioned [threat model](docs/THREAT_MODEL.md) binds current gateway trust b
 The [incident-response contract](docs/INCIDENT_RESPONSE.md) binds those seven scenarios to exact repository-local regressions and emits a private content-free evidence file only after all pass. The catalog explicitly keeps production exercises, named on-call assignments, external communications, and enterprise readiness false. These checks prove bounded control behavior; they are not live provider, IdP, multi-tenant, disaster-recovery, privacy, or customer-communications exercises.
 
 ## Policies and usage
+
+For a PostgreSQL deployment, export, stage, and atomically activate a reviewed
+tenant policy without restarting gateway instances:
+
+```bash
+hormuz --config /etc/hormuz/hormuz.json policy export \
+  --organization xpounder > policy.json
+hormuz policy stage --input policy.json \
+  --gateway https://hormuz.example.com --profile ai-policy-admin
+hormuz policy activate hpv_v1_<sha256> \
+  --expected-current hpv_v1_<current-sha256> \
+  --gateway https://hormuz.example.com --profile ai-policy-admin
+```
+
+See [docs/POLICY_ADMIN_API.md](docs/POLICY_ADMIN_API.md) for the exact API,
+rollback, single-administrator v0.2 decision, deployment-owned secret boundary,
+and fail-closed behavior.
 
 Evaluate a request without calling a model:
 

@@ -29,6 +29,14 @@ from hormuz.context_lifecycle_client import ContextLifecycleClient
 from hormuz.context_store import ContextStoreError
 from hormuz.credential_store import SecureCredentialStore, StoredSession
 from hormuz.policy import PolicyEngine
+from hormuz.policy_admin_client import PolicyAdminClient
+from hormuz.policy_projection import policy_projection, policy_projection_sha256
+from hormuz.postgres_policy_store import (
+    ActivePolicy,
+    PolicyActivation,
+    PolicyAdminError,
+    PolicyVersion,
+)
 from hormuz.redaction import MAX_ENCODED_TEXT_BYTES
 from hormuz.server import (
     GatewayServer,
@@ -760,6 +768,147 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertEqual(latency["policy"]["count"], 1)
         self.assertEqual(latency["provider"]["count"], 1)
         self.assertEqual(latency["context"]["count"], 0)
+
+    def test_policy_admin_routes_are_capability_gated_and_use_cas_contracts(self) -> None:
+        config_value = self._config(self.provider.server_port, _free_port())
+        config_value["identities"][0]["capabilities"] = ["policy_admin"]
+        self._restart_gateway(config_value)
+        projection = policy_projection(self.config, "organization")
+        fingerprint = policy_projection_sha256(projection)
+        version_id = "hpv_v1_" + fingerprint
+        version = PolicyVersion(
+            version_id=version_id,
+            projection_sha256=fingerprint,
+            projection_schema="hormuz.policy-projection.v2",
+            created_at="2026-08-20T00:00:00+00:00",
+            created_by_actor_id="alice",
+            created_by_actor_name="Alice",
+            changed_sections=("model_routes",),
+            staged=True,
+        )
+        active = ActivePolicy(
+            version_id=version_id,
+            projection_sha256=fingerprint,
+            projection=projection,
+            activated_at="2026-08-20T00:00:01+00:00",
+            activated_by_actor_id="alice",
+            activated_by_actor_name="Alice",
+            activation_sequence=1,
+        )
+        activation = PolicyActivation(
+            version_id=version_id,
+            prior_version_id=None,
+            activated_at="2026-08-20T00:00:01+00:00",
+            activated_by_actor_id="alice",
+            activated_by_actor_name="Alice",
+            activation_sequence=1,
+            action="activated",
+            changed=True,
+        )
+        store = mock.Mock()
+        store.stage.return_value = version
+        store.active.return_value = active
+        store.activate.return_value = activation
+        self.gateway.policy_store = store
+
+        forbidden, _, forbidden_body = self._get(
+            "/v1/admin/policy-active",
+            token=CLAUDE_ONLY_TOKEN,
+        )
+        self.assertEqual(forbidden, 403)
+        self.assertEqual(
+            json.loads(forbidden_body)["error"]["code"],
+            "policy_admin_forbidden",
+        )
+        staged, _, staged_body = self._post(
+            "/v1/admin/policy-versions",
+            {"projection": projection},
+        )
+        self.assertEqual(staged, 201)
+        self.assertEqual(json.loads(staged_body)["version_id"], version_id)
+        store.stage.assert_called_once()
+        shown, _, shown_body = self._get("/v1/admin/policy-active")
+        self.assertEqual(shown, 200)
+        self.assertEqual(json.loads(shown_body)["projection"], projection)
+        client = PolicyAdminClient(
+            f"http://127.0.0.1:{self.gateway.server_port}",
+            credential=GATEWAY_TOKEN,
+            allow_insecure_http=True,
+        )
+        self.assertEqual(client.active()["version_id"], version_id)
+        self.assertEqual(client.stage(projection)["version_id"], version_id)
+        self.assertEqual(store.stage.call_count, 2)
+        activated, _, activated_body = self._post(
+            "/v1/admin/policy-activations",
+            {"version_id": version_id, "expected_active_version_id": None},
+        )
+        self.assertEqual(activated, 200)
+        self.assertEqual(json.loads(activated_body)["action"], "activated")
+        store.activate.assert_called_once_with(
+            identity=mock.ANY,
+            version_id=version_id,
+            expected_active_version_id=None,
+            rollback=False,
+        )
+        invalid, _, invalid_body = self._post(
+            "/v1/admin/policy-rollbacks",
+            {"version_id": version_id, "expected_active_version_id": None},
+        )
+        self.assertEqual(invalid, 400)
+        self.assertEqual(
+            json.loads(invalid_body)["error"]["code"],
+            "invalid_policy_activation",
+        )
+
+    def test_active_policy_is_enforced_and_versioned_usage_is_exact(self) -> None:
+        projection = policy_projection(self.config, "organization")
+        projection["organization_policy"]["max_output_tokens"] = 7
+        fingerprint = policy_projection_sha256(projection)
+        active = ActivePolicy(
+            version_id="hpv_v1_" + fingerprint,
+            projection_sha256=fingerprint,
+            projection=projection,
+            activated_at="2026-08-20T00:00:00+00:00",
+            activated_by_actor_id="admin",
+            activated_by_actor_name="Admin",
+            activation_sequence=1,
+        )
+        self.gateway.policy_runtime.store = mock.Mock(active=mock.Mock(return_value=active))
+
+        status, _, _ = self._post(
+            "/v1/responses",
+            {
+                "model": "engineering-fast",
+                "input": "ordinary request",
+                "max_output_tokens": 99,
+            },
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(FakeProviderHandler.requests[-1]["body"]["max_output_tokens"], 7)
+        event = self.gateway.store.audit_events(
+            since="2000-01-01T00:00:00+00:00",
+            kind="usage",
+        )[-1]
+        self.assertEqual(event["governance_policy_version"], active.version_id)
+
+    def test_active_policy_store_failure_blocks_before_provider_egress(self) -> None:
+        before = len(FakeProviderHandler.requests)
+        self.gateway.policy_runtime.store = mock.Mock(
+            active=mock.Mock(side_effect=PolicyAdminError("policy_admin_store_unavailable"))
+        )
+
+        status, _, body = self._post(
+            "/v1/responses",
+            {"model": "engineering-fast", "input": "ordinary request"},
+        )
+
+        self.assertEqual(status, 503)
+        self.assertEqual(
+            json.loads(body)["error"]["code"],
+            "hormuz_policy_unavailable",
+        )
+        self.assertEqual(len(FakeProviderHandler.requests), before)
 
     def test_provider_response_metadata_is_bounded_before_headers_and_usage_storage(self) -> None:
         marker = "provider-metadata-must-not-propagate"

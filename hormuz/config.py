@@ -9,7 +9,7 @@ import json
 import math
 import os
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
@@ -1203,6 +1203,356 @@ class GatewayConfig:
             rules=tuple(effective_rules),
             approval=self.dlp_controls.approval,
         )
+
+
+def configuration_from_policy_projection(
+    base: GatewayConfig,
+    value: object,
+    *,
+    organization_id: str,
+) -> GatewayConfig:
+    """Validate one secret-free tenant projection and materialize runtime policy.
+
+    Deployment-owned identity, upstream, and secret material stays on ``base``.
+    The projection may reference only secret dictionaries and an approval key
+    that the running deployment already provisioned.
+    """
+
+    _validate_configuration_structure(value)
+    item = _object(value, "policy projection")
+    expected_fields = {
+        "schema",
+        "organization_id",
+        "model_routes",
+        "organization_policy",
+        "team_policies",
+        "actor_policies",
+        "secret_controls",
+        "dlp_controls",
+        "team_dlp_overlays",
+        "actor_dlp_overlays",
+    }
+    if set(item) != expected_fields:
+        raise ConfigError("Policy projection fields are invalid")
+    if item.get("schema") != "hormuz.policy-projection.v2":
+        raise ConfigError("Policy projection schema is unsupported")
+    if item.get("organization_id") != organization_id:
+        raise ConfigError("Policy projection organization does not match the administrator")
+
+    tenant_identities = tuple(
+        identity
+        for identity in base.identities_by_actor.values()
+        if identity.organization_id == organization_id
+    )
+    if not tenant_identities:
+        raise ConfigError("Policy projection organization is not configured")
+    tenant_actor_ids = {identity.actor_id for identity in tenant_identities}
+    tenant_team_ids = {identity.team_id for identity in tenant_identities}
+
+    routes_raw = _object(item["model_routes"], "policy projection model_routes")
+    if not routes_raw or len(routes_raw) > 10_000:
+        raise ConfigError("Policy projection model_routes must contain 1 to 10000 routes")
+    route_fields = {
+        "protocol",
+        "upstream_model",
+        "rate_card_version",
+        "currency",
+        "input_cost_per_million",
+        "cache_read_cost_per_million",
+        "cache_write_cost_per_million",
+        "output_cost_per_million",
+    }
+    model_routes: dict[str, ModelRoute] = {}
+    for raw_alias, raw_route in routes_raw.items():
+        alias = _model_identifier(raw_alias, "policy projection model route alias")
+        route = _object(raw_route, "policy projection model route")
+        if set(route) != route_fields:
+            raise ConfigError("Policy projection model route fields are invalid")
+        protocol = _string(route["protocol"], "policy projection model route protocol")
+        if protocol not in base.upstreams:
+            raise ConfigError("Policy projection model route protocol is unsupported")
+        rate_card_version = _bounded_policy_version(
+            route["rate_card_version"],
+            "policy projection rate-card version",
+        )
+        currency = _string(route["currency"], "policy projection currency").upper()
+        if currency != "USD":
+            raise ConfigError("Policy projection currency must be USD")
+        model_routes[alias] = ModelRoute(
+            alias=alias,
+            protocol=protocol,
+            upstream_model=_model_identifier(
+                route["upstream_model"],
+                "policy projection upstream model",
+            ),
+            rate_card_version=rate_card_version,
+            currency=currency,
+            input_cost_per_million=_number(
+                route["input_cost_per_million"],
+                "policy projection input cost",
+            ),
+            cache_read_cost_per_million=_number(
+                route["cache_read_cost_per_million"],
+                "policy projection cache-read cost",
+            ),
+            cache_write_cost_per_million=_number(
+                route["cache_write_cost_per_million"],
+                "policy projection cache-write cost",
+            ),
+            output_cost_per_million=_number(
+                route["output_cost_per_million"],
+                "policy projection output cost",
+            ),
+        )
+
+    organization_policy = _policy(
+        item["organization_policy"],
+        "policy projection organization_policy",
+        default_context_injection_mode="off",
+        default_context_allowed_repositories=(),
+    )
+    team_policies = _projected_policy_map(
+        item["team_policies"],
+        path="policy projection team_policies",
+        allowed_scope_ids=tenant_team_ids,
+    )
+    actor_policies = _projected_policy_map(
+        item["actor_policies"],
+        path="policy projection actor_policies",
+        allowed_scope_ids=tenant_actor_ids,
+    )
+
+    secret_raw = _object(item["secret_controls"], "policy projection secret_controls")
+    if set(secret_raw) != {"mode", "builtins", "custom_secret_envs"}:
+        raise ConfigError("Policy projection secret-control fields are invalid")
+    requested_secret_envs = _string_tuple(
+        secret_raw["custom_secret_envs"],
+        "policy projection custom_secret_envs",
+    )
+    configured_secret_values = dict(base.secret_controls.custom_secret_values)
+    configured_secret_envs = set(base.secret_controls.custom_secret_envs)
+    if set(requested_secret_envs) - configured_secret_envs:
+        raise ConfigError("Policy projection references an unprovisioned secret environment")
+    secret_environment = {
+        env_name: configured_secret_values[f"custom:{env_name}"]
+        for env_name in requested_secret_envs
+    }
+    secret_controls = _secret_controls(secret_raw, secret_environment)
+
+    dlp_raw = _projected_dlp_raw(base, item["dlp_controls"])
+    dlp_environment = {
+        rule.values_env: json.dumps(list(rule.exact_values), separators=(",", ":"))
+        for rule in base.dlp_controls.rules
+        if rule.values_env is not None
+    }
+    if base.dlp_controls.approval.fingerprint_key_env is not None:
+        dlp_environment[base.dlp_controls.approval.fingerprint_key_env] = (
+            base.dlp_controls.approval.fingerprint_key_source
+        )
+    dlp_controls = _dlp_controls(dlp_raw, dlp_environment)
+    dlp_raw["overlays"] = {
+        "teams": _projected_dlp_overlay_raw(
+            item["team_dlp_overlays"],
+            path="policy projection team_dlp_overlays",
+            allowed_scope_ids=tenant_team_ids,
+        ),
+        "actors": _projected_dlp_overlay_raw(
+            item["actor_dlp_overlays"],
+            path="policy projection actor_dlp_overlays",
+            allowed_scope_ids=tenant_actor_ids,
+        ),
+    }
+    team_dlp_overlays, actor_dlp_overlays = _dlp_overlays(dlp_raw, dlp_controls)
+
+    tenant_tokens = {
+        token: identity
+        for token, identity in base.identities_by_token.items()
+        if identity.organization_id == organization_id
+    }
+    tenant_subjects = {
+        subject: identity
+        for subject, identity in base.identities_by_subject.items()
+        if identity.organization_id == organization_id
+    }
+    candidate = replace(
+        base,
+        identities_by_token=tenant_tokens,
+        identities_by_subject=tenant_subjects,
+        model_routes=model_routes,
+        organization_policy=organization_policy,
+        team_policies=team_policies,
+        actor_policies=actor_policies,
+        secret_controls=secret_controls,
+        dlp_controls=dlp_controls,
+        team_dlp_overlays=team_dlp_overlays,
+        actor_dlp_overlays=actor_dlp_overlays,
+    )
+    candidate.validate_references()
+    return candidate
+
+
+def _projected_policy_map(
+    value: object,
+    *,
+    path: str,
+    allowed_scope_ids: set[str],
+) -> dict[str, Policy]:
+    item = _object(value, path)
+    if len(item) > 10_000 or set(item) - allowed_scope_ids:
+        raise ConfigError("Policy projection contains an invalid policy scope")
+    return {
+        _bounded_scope_id(scope_id, f"{path} scope"): _policy(policy, f"{path} policy")
+        for scope_id, policy in item.items()
+    }
+
+
+def _projected_dlp_raw(base: GatewayConfig, value: object) -> dict[str, Any]:
+    item = _object(value, "policy projection dlp_controls")
+    if set(item) != {"policy_version", "rules", "approval"}:
+        raise ConfigError("Policy projection DLP-control fields are invalid")
+    rules = item["rules"]
+    if not isinstance(rules, list) or len(rules) > 104:
+        raise ConfigError("Policy projection DLP rules are invalid")
+    rule_fields = {
+        "rule_id",
+        "category",
+        "confidence",
+        "action",
+        "providers",
+        "models",
+        "values_env",
+    }
+    builtin_rules: dict[str, dict[str, object]] = {
+        rule_id: {"action": "off"} for rule_id in _DLP_BUILTINS
+    }
+    dictionaries: list[dict[str, object]] = []
+    configured_dictionaries = {
+        rule.rule_id: rule
+        for rule in base.dlp_controls.rules
+        if rule.values_env is not None
+    }
+    seen: set[str] = set()
+    for raw_rule in rules:
+        rule = _object(raw_rule, "policy projection DLP rule")
+        if set(rule) != rule_fields:
+            raise ConfigError("Policy projection DLP-rule fields are invalid")
+        rule_id = _dlp_identifier(rule["rule_id"], "policy projection DLP rule_id")
+        if rule_id in seen:
+            raise ConfigError("Policy projection contains duplicate DLP rules")
+        seen.add(rule_id)
+        action = _string(rule["action"], "policy projection DLP action")
+        if action not in _DLP_ACTIONS - {"off"}:
+            raise ConfigError("Policy projection DLP action is invalid")
+        providers = _string_tuple(rule["providers"], "policy projection DLP providers")
+        models = _string_tuple(rule["models"], "policy projection DLP models")
+        scope: dict[str, object] = {"action": action}
+        if providers:
+            scope["providers"] = list(providers)
+        if models:
+            scope["models"] = list(models)
+        if rule_id in _DLP_BUILTINS:
+            category, confidence, _ = _DLP_BUILTINS[rule_id]
+            if (
+                rule.get("category") != category
+                or rule.get("confidence") != confidence
+                or rule.get("values_env") is not None
+            ):
+                raise ConfigError("Policy projection changes fixed built-in DLP metadata")
+            builtin_rules[rule_id] = scope
+            continue
+        configured = configured_dictionaries.get(rule_id)
+        if (
+            configured is None
+            or rule.get("category") != configured.category
+            or rule.get("confidence") != configured.confidence
+            or rule.get("values_env") != configured.values_env
+        ):
+            raise ConfigError("Policy projection references an unprovisioned DLP dictionary")
+        dictionaries.append(
+            {
+                "rule_id": rule_id,
+                "category": configured.category,
+                "confidence": configured.confidence,
+                "values_env": configured.values_env,
+                **scope,
+            }
+        )
+
+    approval = _object(item["approval"], "policy projection DLP approval")
+    if set(approval) != {"enabled", "fingerprint_key_env", "ttl_seconds"}:
+        raise ConfigError("Policy projection DLP-approval fields are invalid")
+    enabled = _boolean(approval["enabled"], "policy projection DLP approval enabled")
+    if approval["ttl_seconds"] != base.dlp_controls.approval.ttl_seconds:
+        raise ConfigError("Policy projection DLP approval TTL is not deployment-supported")
+    approval_raw: dict[str, object] = {"enabled": enabled}
+    if enabled:
+        configured_approval = base.dlp_controls.approval
+        if (
+            not configured_approval.enabled
+            or approval.get("fingerprint_key_env")
+            != configured_approval.fingerprint_key_env
+        ):
+            raise ConfigError("Policy projection references an unprovisioned approval key")
+        approval_raw["fingerprint_key_env"] = configured_approval.fingerprint_key_env
+    elif approval.get("fingerprint_key_env") is not None:
+        raise ConfigError("Disabled policy projection approval must not name a key")
+    return {
+        "policy_version": _bounded_policy_version(
+            item["policy_version"],
+            "policy projection DLP policy_version",
+        ),
+        "rules": builtin_rules,
+        "dictionaries": dictionaries,
+        "approval": approval_raw,
+    }
+
+
+def _projected_dlp_overlay_raw(
+    value: object,
+    *,
+    path: str,
+    allowed_scope_ids: set[str],
+) -> dict[str, object]:
+    item = _object(value, path)
+    if len(item) > 10_000 or set(item) - allowed_scope_ids:
+        raise ConfigError("Policy projection contains an invalid DLP overlay scope")
+    result: dict[str, object] = {}
+    for raw_scope_id, raw_overlay in item.items():
+        scope_id = _bounded_scope_id(raw_scope_id, f"{path} scope")
+        overlay = _object(raw_overlay, f"{path} overlay")
+        if set(overlay) != {"policy_version", "rules"}:
+            raise ConfigError("Policy projection DLP-overlay fields are invalid")
+        rules = overlay["rules"]
+        if not isinstance(rules, list):
+            raise ConfigError("Policy projection DLP-overlay rules are invalid")
+        mapped_rules: dict[str, object] = {}
+        for raw_rule in rules:
+            rule = _object(raw_rule, f"{path} rule")
+            expected = {
+                "rule_id",
+                "category",
+                "confidence",
+                "action",
+                "providers",
+                "models",
+                "values_env",
+            }
+            if set(rule) != expected:
+                raise ConfigError("Policy projection DLP-overlay rule fields are invalid")
+            rule_id = _dlp_identifier(rule["rule_id"], f"{path} rule_id")
+            if rule_id in mapped_rules:
+                raise ConfigError("Policy projection contains duplicate DLP-overlay rules")
+            mapped_rule: dict[str, object] = {"action": rule["action"]}
+            if rule["providers"]:
+                mapped_rule["providers"] = rule["providers"]
+            if rule["models"]:
+                mapped_rule["models"] = rule["models"]
+            mapped_rules[rule_id] = mapped_rule
+        result[scope_id] = {
+            "policy_version": overlay["policy_version"],
+            "rules": mapped_rules,
+        }
+    return result
 
 
 def _policy(

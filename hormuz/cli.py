@@ -74,8 +74,13 @@ from .mcp import (
     validate_gateway_url,
 )
 from .policy import PolicyEngine
+from .policy_admin_client import (
+    MAX_POLICY_PROJECTION_BYTES,
+    PolicyAdminClient,
+    PolicyAdminClientError,
+)
 from .identity_projection import sync_identity_projection
-from .policy_projection import sync_policy_projection
+from .policy_projection import policy_projection, sync_policy_projection
 from .postgres import (
     DEFAULT_POSTGRES_DSN_ENV,
     DEFAULT_POSTGRES_RUNTIME_ROLE,
@@ -195,6 +200,59 @@ def build_parser() -> argparse.ArgumentParser:
         "--dsn-env",
         help="Owner PostgreSQL DSN environment (default: configured PostgreSQL DSN environment)",
     )
+    policy_admin = subparsers.add_parser(
+        "policy",
+        help="Stage and activate immutable tenant policy versions",
+    )
+    policy_admin_subparsers = policy_admin.add_subparsers(
+        dest="policy_command",
+        required=True,
+    )
+    policy_export = policy_admin_subparsers.add_parser(
+        "export",
+        help="Print one canonical secret-free tenant policy projection",
+    )
+    policy_export.add_argument("--organization", required=True)
+    policy_stage = policy_admin_subparsers.add_parser(
+        "stage",
+        help="Validate and stage a policy projection without activating it",
+    )
+    policy_stage.add_argument("--input", required=True, help="Projection JSON file")
+    policy_active = policy_admin_subparsers.add_parser(
+        "active",
+        help="Show the exact active policy version and projection",
+    )
+    policy_activate = policy_admin_subparsers.add_parser(
+        "activate",
+        help="Atomically activate one staged version",
+    )
+    policy_activate.add_argument("version_id")
+    policy_activate.add_argument(
+        "--expected-current",
+        help="Required compare value when replacing an active version",
+    )
+    policy_rollback = policy_admin_subparsers.add_parser(
+        "rollback",
+        help="Roll back to one previously active immutable version",
+    )
+    policy_rollback.add_argument("version_id")
+    policy_rollback.add_argument("--expected-current", required=True)
+    for command in (policy_stage, policy_active, policy_activate, policy_rollback):
+        command.add_argument("--gateway", required=True, help="Hormuz gateway base URL")
+        credential = command.add_mutually_exclusive_group()
+        credential.add_argument(
+            "--credential-env",
+            help="Policy administrator credential environment (default: HORMUZ_TOKEN)",
+        )
+        credential.add_argument(
+            "--profile",
+            help="Saved human-session profile instead of an environment credential",
+        )
+        command.add_argument(
+            "--allow-insecure-http",
+            action="store_true",
+            help="Allow loopback HTTP for local development only",
+        )
     status = subparsers.add_parser("status", help="Print a current-month usage and cost report")
     status.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
     status.add_argument(
@@ -1042,6 +1100,8 @@ def main(argv: list[str] | None = None) -> int:
         return _session_admin_command(args)
     if args.command == "usage":
         return _usage_admin_command(args)
+    if args.command == "policy" and args.policy_command != "export":
+        return _policy_admin_command(args)
     if args.command == "lifecycle":
         return _lifecycle_remote_command(args)
     if args.command == "context-benchmark":
@@ -1136,6 +1196,15 @@ def main(argv: list[str] | None = None) -> int:
                 schema=config.usage_storage.postgres_schema,
             )
             print(json.dumps(result.to_dict(), sort_keys=True, separators=(",", ":")))
+            return 0
+        if args.command == "policy" and args.policy_command == "export":
+            print(
+                json.dumps(
+                    policy_projection(config, args.organization),
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+            )
             return 0
         if args.command == "doctor":
             return _doctor(config)
@@ -2246,6 +2315,74 @@ def _usage_admin_command(args: argparse.Namespace) -> int:
         CredentialStoreError,
     ) as error:
         print(f"usage administration failed: {error.code}", file=sys.stderr)
+        return 1
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0
+
+
+def _policy_admin_command(args: argparse.Namespace) -> int:
+    try:
+        if args.profile is not None:
+            credential = session_access_token(
+                gateway=args.gateway,
+                profile=args.profile,
+                allow_insecure_http=args.allow_insecure_http,
+            )
+        else:
+            env_name = args.credential_env or "HORMUZ_TOKEN"
+            if (
+                not env_name
+                or not env_name.replace("_", "A").isalnum()
+                or env_name[0].isdigit()
+            ):
+                print("credential environment variable name is invalid", file=sys.stderr)
+                return 2
+            credential = os.environ.get(env_name, "")
+            if not credential:
+                print(f"credential environment variable is not set: {env_name}", file=sys.stderr)
+                return 1
+        client = PolicyAdminClient(
+            args.gateway,
+            credential=credential,
+            allow_insecure_http=args.allow_insecure_http,
+        )
+        if args.policy_command == "stage":
+            input_path = Path(args.input)
+            if input_path.stat().st_size > MAX_POLICY_PROJECTION_BYTES:
+                print("policy input exceeds the supported size", file=sys.stderr)
+                return 2
+            value = json.loads(
+                input_path.read_text(encoding="utf-8"),
+                parse_constant=_invalid_context_json_constant,
+                object_pairs_hook=_unique_context_json_object,
+            )
+            if not isinstance(value, dict):
+                print("policy input must be a JSON object", file=sys.stderr)
+                return 2
+            result = client.stage(value)
+        elif args.policy_command == "active":
+            result = client.active()
+        elif args.policy_command == "activate":
+            result = client.activate(
+                args.version_id,
+                expected_active_version_id=args.expected_current,
+            )
+        elif args.policy_command == "rollback":
+            result = client.rollback(
+                args.version_id,
+                expected_active_version_id=args.expected_current,
+            )
+        else:
+            return 2
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as error:
+        print(f"policy input failed: {error}", file=sys.stderr)
+        return 2
+    except (
+        PolicyAdminClientError,
+        SessionClientError,
+        CredentialStoreError,
+    ) as error:
+        print(f"policy administration failed: {error.code}", file=sys.stderr)
         return 1
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
