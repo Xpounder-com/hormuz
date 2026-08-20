@@ -25,7 +25,8 @@ import jwt
 from cryptography.hazmat.primitives.asymmetric import rsa
 
 from hormuz.config import GatewayConfig, Identity, ListenConfig
-from hormuz.cli import main as cli_main
+from hormuz.auth import AuthenticationError, Authenticator
+from hormuz.cli import _doctor, main as cli_main
 from hormuz.credential_store import CredentialStoreError, SecureCredentialStore
 from hormuz.server import GatewayServer, serve_in_thread
 from hormuz.session_client import access_token, login, logout
@@ -36,15 +37,21 @@ class FakeLoginIdPHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802
         parsed = urllib.parse.urlsplit(self.path)
         if parsed.path == "/.well-known/openid-configuration":
-            self._json(
-                200,
-                {
-                    "issuer": self.server.issuer,  # type: ignore[attr-defined]
-                    "jwks_uri": self.server.issuer + "/jwks",  # type: ignore[attr-defined]
-                    "authorization_endpoint": self.server.issuer + "/authorize",  # type: ignore[attr-defined]
-                    "token_endpoint": self.server.issuer + "/token",  # type: ignore[attr-defined]
-                },
-            )
+            value = {
+                "issuer": self.server.issuer,  # type: ignore[attr-defined]
+                "jwks_uri": self.server.issuer + "/jwks",  # type: ignore[attr-defined]
+                "authorization_endpoint": self.server.issuer + "/authorize",  # type: ignore[attr-defined]
+                "token_endpoint": self.server.issuer + "/token",  # type: ignore[attr-defined]
+                "response_types_supported": ["code"],
+                "grant_types_supported": ["authorization_code"],
+                "code_challenge_methods_supported": ["S256"],
+                "id_token_signing_alg_values_supported": ["RS256"],
+                "token_endpoint_auth_methods_supported": ["client_secret_basic"],
+            }
+            for key in self.server.discovery_omissions:  # type: ignore[attr-defined]
+                value.pop(key, None)
+            value.update(self.server.discovery_overrides)  # type: ignore[attr-defined]
+            self._json(200, value)
             return
         if parsed.path == "/jwks":
             self._json(200, {"keys": [self.server.public_jwk]})  # type: ignore[attr-defined]
@@ -181,6 +188,8 @@ class SessionBrokerIntegrationTests(unittest.TestCase):
         self.idp.token_unavailable = False  # type: ignore[attr-defined]
         self.idp.authorization_response_issuer = None  # type: ignore[attr-defined]
         self.idp.multiple_audiences_without_azp = False  # type: ignore[attr-defined]
+        self.idp.discovery_omissions = set()  # type: ignore[attr-defined]
+        self.idp.discovery_overrides = {}  # type: ignore[attr-defined]
         self.idp_thread = threading.Thread(target=self.idp.serve_forever, daemon=True)
         self.idp_thread.start()
 
@@ -450,6 +459,46 @@ class SessionBrokerIntegrationTests(unittest.TestCase):
         client_response.read()
         connection.close()
         self.assertEqual(client_response.status, 403)
+
+    def test_doctor_preflight_rejects_unsupported_login_capabilities(self) -> None:
+        cases = (
+            ("response_types_supported", ["id_token"], "oidc_authorization_code_unsupported"),
+            ("grant_types_supported", ["implicit"], "oidc_authorization_code_unsupported"),
+            ("code_challenge_methods_supported", ["plain"], "oidc_pkce_s256_unsupported"),
+            (
+                "id_token_signing_alg_values_supported",
+                ["ES256"],
+                "oidc_id_token_signing_unsupported",
+            ),
+            (
+                "token_endpoint_auth_methods_supported",
+                ["client_secret_post"],
+                "oidc_token_endpoint_auth_unsupported",
+            ),
+        )
+        for key, value, expected_code in cases:
+            with self.subTest(key=key):
+                self.idp.discovery_overrides = {key: value}  # type: ignore[attr-defined]
+                authenticator = Authenticator(self.config)
+                with self.assertRaises(AuthenticationError) as raised:
+                    authenticator.validate_metadata()
+                self.assertEqual(raised.exception.code, expected_code)
+        self.idp.discovery_overrides = {}  # type: ignore[attr-defined]
+        self.idp.discovery_omissions = {"token_endpoint_auth_methods_supported"}  # type: ignore[attr-defined]
+        self.assertEqual(len(Authenticator(self.config).validate_metadata()), 1)
+        output = io.StringIO()
+        with (
+            mock.patch.dict(
+                os.environ,
+                {
+                    "OPENAI_API_KEY": "synthetic-openai-provider-key",
+                    "ANTHROPIC_API_KEY": "synthetic-anthropic-provider-key",
+                },
+            ),
+            redirect_stdout(output),
+        ):
+            self.assertEqual(_doctor(self.config), 0)
+        self.assertIn("OIDC browser-login preflight: 1 issuer(s)", output.getvalue())
 
     def test_bad_nonce_fails_without_issuing_hormuz_credentials(self) -> None:
         self.idp.bad_nonce = True  # type: ignore[attr-defined]

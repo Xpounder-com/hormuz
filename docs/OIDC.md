@@ -212,6 +212,19 @@ Authentication logs contain only a stable failure code. Hormuz does not log toke
 
 `hormuz doctor` fetches and validates every configured discovery/JWKS path and reports the number of usable signing keys. Run it from the same network boundary as the service before deployment.
 
+For an issuer configured with `login`, the same command is an explicit browser-login
+preflight: it requires the discovery document to advertise authorization-code flow,
+PKCE `S256`, at least one configured ID-token signing algorithm, and the configured
+token-endpoint client-authentication method. It validates the authorization and token
+endpoint URLs without sending an authorization request, exchanging a code, or printing
+any secret. A passing preflight proves that the running deployment can begin a safe
+OIDC flow; it does not prove that the IdP application has the correct redirect URI or
+that a mapped employee can sign in.
+
+```bash
+hormuz --config /etc/hormuz/hormuz.json doctor
+```
+
 ## Current boundary
 
 [Accepted ADR 0001](decisions/0001-oidc-login-and-session-architecture.md) governs the implemented login architecture. The repository includes protocol, persistence, HTTP, and CLI integration tests against a standards-shaped fake IdP. It has not yet been validated against the owner-selected real identity provider.

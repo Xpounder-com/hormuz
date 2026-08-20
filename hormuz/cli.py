@@ -1414,6 +1414,15 @@ def _doctor(config: GatewayConfig) -> int:
             print(f"OIDC metadata: unavailable ({error.code})")
             return 1
         print(f"OIDC signing keys: {sum(metadata.values())} usable across {len(metadata)} issuer(s)")
+        login_issuers = sum(
+            issuer.login is not None for issuer in config.oidc_issuers.values()
+        )
+        if login_issuers:
+            print(
+                "OIDC browser-login preflight: "
+                f"{login_issuers} issuer(s) support authorization code, PKCE S256, "
+                "ID-token signing, and configured token-endpoint authentication"
+            )
     missing = _missing_upstream_credentials(config)
     if missing:
         print("missing upstream credentials:")

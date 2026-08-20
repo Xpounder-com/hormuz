@@ -70,6 +70,8 @@ class Authenticator:
         result: dict[str, int] = {}
         for issuer in self._config.oidc_issuers.values():
             result[issuer.issuer] = len(self._key_set(issuer, force_refresh=False).keys_by_id)
+            if issuer.login is not None:
+                self._validate_login_capabilities(issuer)
         return result
 
     def login_metadata(self, issuer_name: str) -> OIDCProviderMetadata:
@@ -90,6 +92,43 @@ class Authenticator:
             authorization_endpoint=authorization_endpoint,
             token_endpoint=token_endpoint,
         )
+
+    def _validate_login_capabilities(self, issuer: OIDCIssuerConfig) -> None:
+        """Fail deployment preflight when discovery cannot support the login flow."""
+        if issuer.login is None:
+            return
+        document = self._discovery_document(issuer, force_refresh=False)
+        self.login_metadata(issuer.issuer)
+        response_types = _metadata_string_set(document, "response_types_supported")
+        if "code" not in response_types:
+            raise AuthenticationError("oidc_authorization_code_unsupported")
+        grant_types = document.get("grant_types_supported")
+        if grant_types is not None and "authorization_code" not in _metadata_string_set(
+            document,
+            "grant_types_supported",
+        ):
+            raise AuthenticationError("oidc_authorization_code_unsupported")
+        if "S256" not in _metadata_string_set(
+            document,
+            "code_challenge_methods_supported",
+        ):
+            raise AuthenticationError("oidc_pkce_s256_unsupported")
+        signing_algorithms = _metadata_string_set(
+            document,
+            "id_token_signing_alg_values_supported",
+        )
+        if not signing_algorithms.intersection(issuer.algorithms):
+            raise AuthenticationError("oidc_id_token_signing_unsupported")
+        auth_methods = document.get("token_endpoint_auth_methods_supported")
+        if auth_methods is None:
+            supported_auth_methods = {"client_secret_basic"}
+        else:
+            supported_auth_methods = _metadata_string_set(
+                document,
+                "token_endpoint_auth_methods_supported",
+            )
+        if issuer.login.token_endpoint_auth_method not in supported_auth_methods:
+            raise AuthenticationError("oidc_token_endpoint_auth_unsupported")
 
     def validate_login_id_token(
         self,
@@ -349,6 +388,15 @@ def _fetch_json(url: str, *, allow_insecure_http: bool, maximum_bytes: int) -> d
     if not isinstance(document, dict):
         raise AuthenticationError("invalid_oidc_metadata")
     return document
+
+
+def _metadata_string_set(document: dict[str, Any], key: str) -> set[str]:
+    value = document.get(key)
+    if not isinstance(value, list) or not value or not all(
+        isinstance(item, str) and item for item in value
+    ):
+        raise AuthenticationError("invalid_discovery_document")
+    return set(value)
 
 
 def _validate_remote_url(url: str, *, allow_insecure_http: bool) -> None:

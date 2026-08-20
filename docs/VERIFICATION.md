@@ -187,6 +187,19 @@ Observed result on August 15, 2026:
 
 This verifies the local, single-node protocol kernel and real macOS secure-store adapter. It is not a real enterprise IdP result, Windows/Linux secure-store runner evidence, SCIM or administrator revocation, KMS-backed/HA session persistence, immutable security-audit export, or a hosted deployment claim. Issue #13 remains open until those applicable acceptance gates are satisfied.
 
+### OIDC browser-login discovery preflight
+
+The browser-login deployment check was tightened on August 20, 2026. `hormuz doctor` now validates the selected issuer's discovery document before a browser-login deployment is considered ready: it requires authorization-code support, PKCE `S256`, an ID-token signing algorithm configured by Hormuz, and the configured token-endpoint client-authentication method. It continues to reject unsafe discovery endpoints and missing signing keys.
+
+Observed local result:
+
+- the standards-shaped loopback issuer passed the preflight and the doctor output identifies the number of issuers whose browser-login capabilities were checked;
+- negative fake-IdP cases for unsupported authorization-code flow, grant type, PKCE method, ID-token signing algorithm, and token-endpoint authentication method all failed closed with explicit non-secret errors;
+- an omitted `token_endpoint_auth_methods_supported` field followed the OIDC default for `client_secret_basic` and passed only for that configured method;
+- the complete local source suite passed 532 tests in 141.955 seconds, with three separately gated tests skipped.
+
+This is a local discovery-contract checkpoint, not validation of an owner-selected external IdP. It does not register a real client, prove its redirect URI or employee login, or replace the remaining #13 gates for real IdP, durable multi-node session infrastructure, SCIM/administrator controls, and audited operations.
+
 ### Trusted context lifecycle and benchmark-v2 path
 
 The additive context-pack lifecycle contract, SQLite schema version 3, CLI snapshot flow, authenticated REST route, deterministic benchmark generator, source package, and installed wheel were exercised on August 15, 2026.
