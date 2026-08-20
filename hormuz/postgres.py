@@ -1,9 +1,9 @@
 """Versioned PostgreSQL tenancy foundation and fail-closed RLS helpers.
 
 The opt-in gateway path uses PostgreSQL for usage/accounting, human sessions,
-and DLP approval/security state. Governed context remains SQLite-backed, so
-this module is a bounded persistence slice rather than a completed hosted
-storage plane.
+policy versions, and DLP approval/security state. The deprecated built-in
+context experiment remains SQLite-backed, so this module is a bounded
+persistence slice rather than a completed hosted storage plane.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ import re
 from typing import Any, Callable, Iterator, Protocol
 
 
-POSTGRES_SCHEMA_VERSION = 4
+POSTGRES_SCHEMA_VERSION = 5
 DEFAULT_POSTGRES_DSN_ENV = "HORMUZ_POSTGRES_DSN"
 DEFAULT_POSTGRES_SCHEMA = "hormuz"
 DEFAULT_POSTGRES_RUNTIME_ROLE = "hormuz_runtime"
@@ -32,6 +32,9 @@ _EXPECTED_TRIGGER_SOURCE = (
     "BEGIN IF NEW.tenant_id IS DISTINCT FROM OLD.tenant_id THEN "
     "RAISE EXCEPTION 'tenant_id is immutable' USING ERRCODE = '23514'; "
     "END IF; RETURN NEW; END;"
+)
+_EXPECTED_POLICY_HISTORY_TRIGGER_SOURCE = (
+    "BEGIN RAISE EXCEPTION 'policy history is immutable' USING ERRCODE = '23514'; END;"
 )
 
 TENANT_TABLES = (
@@ -57,6 +60,9 @@ TENANT_TABLES = (
     "gateway_consumed_refresh_credentials",
     "gateway_session_security_events",
     "gateway_policy_projections",
+    "gateway_policy_versions",
+    "gateway_active_policies",
+    "gateway_policy_events",
     "gateway_secret_events",
     "gateway_dlp_approval_requests",
     "gateway_dlp_approval_events",
@@ -74,8 +80,22 @@ RUNTIME_READ_ONLY_TABLES = (
     "gateway_principal_projections",
     "gateway_policy_projections",
 )
+RUNTIME_APPEND_ONLY_TABLES = (
+    "gateway_policy_versions",
+    "gateway_policy_events",
+)
+RUNTIME_POINTER_TABLES = (
+    "gateway_active_policies",
+)
 RUNTIME_MUTABLE_TABLES = tuple(
-    table for table in TENANT_TABLES if table not in RUNTIME_READ_ONLY_TABLES
+    table
+    for table in TENANT_TABLES
+    if table
+    not in (
+        *RUNTIME_READ_ONLY_TABLES,
+        *RUNTIME_APPEND_ONLY_TABLES,
+        *RUNTIME_POINTER_TABLES,
+    )
 )
 
 ACCOUNTING_TABLE_COLUMNS = {
@@ -155,6 +175,20 @@ IDENTITY_SESSION_TABLE_COLUMNS = {
 POLICY_APPROVAL_TABLE_COLUMNS = {
     "gateway_policy_projections": (
         "tenant_id", "projection_sha256", "projection_json", "applied_at",
+    ),
+    "gateway_policy_versions": (
+        "tenant_id", "version_id", "projection_sha256", "projection_schema",
+        "projection_json", "created_at", "created_by_actor_id",
+        "created_by_actor_name", "change_summary_json",
+    ),
+    "gateway_active_policies": (
+        "tenant_id", "version_id", "activated_at", "activated_by_actor_id",
+        "activated_by_actor_name", "activation_sequence",
+    ),
+    "gateway_policy_events": (
+        "tenant_id", "id", "occurred_at", "decision_actor_id",
+        "decision_actor_name", "action", "version_id", "prior_version_id",
+        "change_summary_json", "activation_sequence",
     ),
     "gateway_secret_events": (
         "tenant_id", "id", "occurred_at", "actor_id", "actor_name", "team_id",
@@ -450,6 +484,16 @@ def _grant_runtime_access(cursor: _Cursor, schema: str, runtime_role: str) -> No
         f"{quoted_schema}.{_quote_identifier(table)}" for table in RUNTIME_READ_ONLY_TABLES
     )
     cursor.execute(f"GRANT SELECT ON TABLE {read_only} TO {quoted_role}")
+    append_only = ", ".join(
+        f"{quoted_schema}.{_quote_identifier(table)}"
+        for table in RUNTIME_APPEND_ONLY_TABLES
+    )
+    cursor.execute(f"GRANT SELECT, INSERT ON TABLE {append_only} TO {quoted_role}")
+    pointers = ", ".join(
+        f"{quoted_schema}.{_quote_identifier(table)}"
+        for table in RUNTIME_POINTER_TABLES
+    )
+    cursor.execute(f"GRANT SELECT, INSERT, UPDATE ON TABLE {pointers} TO {quoted_role}")
     mutable = ", ".join(
         f"{quoted_schema}.{_quote_identifier(table)}" for table in RUNTIME_MUTABLE_TABLES
     )
@@ -566,6 +610,43 @@ def _verify_foundation(cursor: _Cursor, schema: str, runtime_role: str) -> None:
         raise PostgresStorageError("tenant_immutability_trigger_invalid")
 
     cursor.execute(
+        "SELECT p.prosrc, p.prosecdef, p.proconfig, pg_get_userbyid(p.proowner), p.oid "
+        "FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace "
+        "WHERE n.nspname = %s AND p.proname = 'reject_policy_history_mutation'",
+        (schema,),
+    )
+    history_function_rows = cursor.fetchall()
+    if len(history_function_rows) != 1:
+        raise PostgresStorageError("policy_history_immutability_function_invalid")
+    history_function = history_function_rows[0]
+    if (
+        re.sub(r"\s+", " ", str(history_function[0]).strip())
+        != _EXPECTED_POLICY_HISTORY_TRIGGER_SOURCE
+        or bool(history_function[1])
+        or list(history_function[2] or ()) != ["search_path=pg_catalog"]
+        or history_function[3] != migration_role
+    ):
+        raise PostgresStorageError("policy_history_immutability_function_invalid")
+    history_function_oid = int(history_function[4])
+    cursor.execute(
+        "SELECT c.relname, t.tgname, t.tgfoid FROM pg_trigger t "
+        "JOIN pg_class c ON c.oid = t.tgrelid "
+        "JOIN pg_namespace n ON n.oid = c.relnamespace "
+        "WHERE n.nspname = %s AND t.tgname IN "
+        "('policy_version_immutable', 'policy_event_immutable') "
+        "AND NOT t.tgisinternal AND t.tgenabled <> 'D'",
+        (schema,),
+    )
+    history_triggers = {
+        (str(row[0]), str(row[1])): int(row[2]) for row in cursor.fetchall()
+    }
+    if history_triggers != {
+        ("gateway_policy_versions", "policy_version_immutable"): history_function_oid,
+        ("gateway_policy_events", "policy_event_immutable"): history_function_oid,
+    }:
+        raise PostgresStorageError("policy_history_immutability_trigger_invalid")
+
+    cursor.execute(
         "SELECT has_schema_privilege(%s, %s, 'USAGE'), "
         "has_schema_privilege(%s, %s, 'CREATE')",
         (runtime_role, schema, runtime_role, schema),
@@ -601,11 +682,14 @@ def _verify_foundation(cursor: _Cursor, schema: str, runtime_role: str) -> None:
     if set(privileges) != set(TENANT_TABLES):
         raise PostgresStorageError("runtime_table_privileges_invalid")
     for table, values in privileges.items():
-        expected_dml = (
-            (True, False, False, False)
-            if table in RUNTIME_READ_ONLY_TABLES
-            else (True, True, True, True)
-        )
+        if table in RUNTIME_READ_ONLY_TABLES:
+            expected_dml = (True, False, False, False)
+        elif table in RUNTIME_APPEND_ONLY_TABLES:
+            expected_dml = (True, True, False, False)
+        elif table in RUNTIME_POINTER_TABLES:
+            expected_dml = (True, True, True, False)
+        else:
+            expected_dml = (True, True, True, True)
         if values[:4] != expected_dml or values[4:] != (False, False, False):
             raise PostgresStorageError("runtime_table_privileges_invalid")
 

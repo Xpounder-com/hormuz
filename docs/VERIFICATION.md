@@ -1977,6 +1977,42 @@ replica rollout, or rollback; those remain issue #21. The deprecated context
 configuration, commands, routes, schema columns, and tests remain readable and
 executable until a separately versioned removal and sunset decision.
 
+### Immutable policy-version and activation-store slice
+
+The first issue #21 implementation slice was exercised locally on August 20,
+2026:
+
+- packaged PostgreSQL migration 5 adds tenant-scoped immutable policy versions,
+  an atomic active-version pointer, and append-only policy events. Version IDs
+  are the `hpv_v1_` prefix plus the canonical projection SHA-256;
+- version rows retain the validated secret-free projection, author, timestamp,
+  and a structural summary containing only changed section names and a count.
+  Free-form comments, prompts, responses, resolved secret values, and matched
+  DLP values are not part of the history schema;
+- runtime grants are exact: policy versions and events allow only `SELECT` and
+  `INSERT`; the active pointer allows `SELECT`, `INSERT`, and `UPDATE` but not
+  deletion. Additional database triggers reject policy-version and event
+  mutation even by the schema owner;
+- two independent runtime repositories staged one policy idempotently,
+  activated two versions with compare-and-swap semantics, observed the same
+  active snapshot, and rolled back to the previously active version at
+  activation sequence 3;
+- a caller without `policy_admin` was rejected before database work, and a
+  tenant-B administrator could not discover or activate tenant A's version;
+- the digest-pinned PostgreSQL `16.14` integration applied and verified
+  migrations 1 through 5 and emitted the exact checked-in content-free artifact
+  at `evidence/postgres-foundation-integration-2026-08-20.json`; and
+- 24 focused PostgreSQL/configuration tests passed. The complete local suite
+  passed 520 tests in `137.917` seconds with 3 documented opt-in client skips;
+  source/test/script bytecode compilation and `git diff --check` also passed.
+
+This closes only the durable policy-version and atomic-pointer foundation.
+There is no public policy administration API/CLI yet, and provider requests do
+not yet read the active pointer. Issue #21 remains open for authenticated
+staging, activation, rollback, request-time exact-version evaluation, usage
+lineage, concurrent-reader tests at the gateway boundary, and the operator
+runbook.
+
 ## Automated publication gate
 
 Ordinary GitHub CI runs seven independent gate families without provider credentials:

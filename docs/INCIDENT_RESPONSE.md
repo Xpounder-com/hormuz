@@ -55,7 +55,10 @@ For every incident, the functional lead and incident commander should preserve m
 - Detect: a desired policy fingerprint differs from the shared projection, an unauthorized version is staged or activated, or replicas report different active versions.
 - Contain: fail closed before serving provider traffic and preserve metadata-only policy version and actor evidence.
 - Recover: reconcile the desired and projected policy, require authorized activation, and restore replicas to one approved version.
-- Verify: run the stale-policy startup regression. Live versioned activation, approval, rollback, and replica rollout remain open in issue #21.
+- Verify: run both the stale-policy startup regression and the digest-pinned
+  schema-v5 PostgreSQL activation/rollback integration. Public authenticated
+  policy administration, request-time active-policy evaluation, and production
+  replica rollout remain open in issue #21.
 
 ## Cost spike
 

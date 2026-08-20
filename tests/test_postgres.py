@@ -33,6 +33,11 @@ from hormuz.policy_projection import (
     policy_projection,
     policy_projection_sha256,
 )
+from hormuz.postgres_policy_store import (
+    PolicyAdminError,
+    PostgresPolicyStore,
+    version_id_from_sha256,
+)
 from hormuz.postgres import (
     POSTGRES_SCHEMA_VERSION,
     TENANT_TABLES,
@@ -255,6 +260,49 @@ class PostgresFoundationTests(unittest.TestCase):
             store.monthly_secret_totals()
         with self.assertRaisesRegex(PostgresStorageError, "tenant_not_configured"):
             store.monthly_secret_totals(organization_id="tenant-c")
+
+    def test_policy_administration_rejects_unauthorized_or_malformed_inputs_before_io(self) -> None:
+        store = PostgresPolicyStore(
+            "postgresql://runtime:not-used@127.0.0.1/hormuz",
+            organization_ids=("tenant-a", "tenant-b"),
+        )
+        unauthorized = Identity(
+            token_env="",
+            token="",
+            actor_id="alice",
+            actor_name="Alice",
+            team_id="engineering",
+            team_name="Engineering",
+            organization_id="tenant-a",
+        )
+        with self.assertRaisesRegex(
+            PolicyAdminError,
+            "policy_admin_capability_required",
+        ):
+            store.stage(identity=unauthorized, config=SimpleNamespace())  # type: ignore[arg-type]
+
+        administrator = Identity(
+            token_env="",
+            token="",
+            actor_id="admin",
+            actor_name="Policy Admin",
+            team_id="security",
+            team_name="Security",
+            organization_id="tenant-a",
+            capabilities=("policy_admin",),
+        )
+        with self.assertRaisesRegex(PolicyAdminError, "policy_version_id_invalid"):
+            store.activate(
+                identity=administrator,
+                version_id="not-a-version",
+                expected_active_version_id=None,
+            )
+        self.assertEqual(version_id_from_sha256("a" * 64), "hpv_v1_" + "a" * 64)
+        with self.assertRaisesRegex(
+            PolicyAdminError,
+            "policy_projection_sha256_invalid",
+        ):
+            version_id_from_sha256("A" * 64)
 
     def test_split_store_routes_accounting_and_security_and_combines_audit(self) -> None:
         accounting = mock.Mock()
@@ -665,20 +713,38 @@ class PostgresFoundationTests(unittest.TestCase):
         self.assertEqual(value["identity_sessions"]["atomic_refresh_replay_denied"], 1)
         self.assertTrue(value["identity_sessions"]["refresh_replay_family_revoked"])
         self.assertTrue(value["identity_sessions"]["identity_change_revocation_verified"])
-        self.assertTrue(value["policy_approvals"]["configuration_projection_verified"])
-        self.assertTrue(value["policy_approvals"]["idempotent_sync_verified"])
-        self.assertTrue(value["policy_approvals"]["stale_projection_rejected"])
-        self.assertTrue(value["policy_approvals"]["cross_instance_request_verified"])
-        self.assertTrue(value["policy_approvals"]["cross_tenant_request_hidden"])
-        self.assertTrue(value["policy_approvals"]["self_approval_denied"])
-        self.assertEqual(value["policy_approvals"]["atomic_retry_competitors"], 2)
-        self.assertEqual(value["policy_approvals"]["atomic_retry_consumed"], 1)
-        self.assertEqual(value["policy_approvals"]["atomic_retry_blocked_pending"], 1)
+        policy_administration = value["policy_administration"]
+        self.assertTrue(policy_administration["configuration_projection_verified"])
+        self.assertTrue(policy_administration["idempotent_sync_verified"])
+        self.assertTrue(policy_administration["stale_projection_rejected"])
+        self.assertTrue(policy_administration["cross_instance_request_verified"])
+        self.assertTrue(policy_administration["cross_tenant_request_hidden"])
+        self.assertTrue(policy_administration["self_approval_denied"])
+        self.assertEqual(policy_administration["atomic_retry_competitors"], 2)
+        self.assertEqual(policy_administration["atomic_retry_consumed"], 1)
+        self.assertEqual(policy_administration["atomic_retry_blocked_pending"], 1)
         self.assertTrue(
-            value["policy_approvals"]["exact_payload_model_policy_binding_verified"]
+            policy_administration["exact_payload_model_policy_binding_verified"]
         )
-        self.assertTrue(value["policy_approvals"]["model_mismatch_audited"])
-        self.assertTrue(value["policy_approvals"]["security_events_shared"])
+        self.assertTrue(policy_administration["model_mismatch_audited"])
+        self.assertTrue(policy_administration["security_events_shared"])
+        self.assertTrue(
+            policy_administration["immutable_policy_versions_verified"]
+        )
+        self.assertTrue(policy_administration["policy_stage_idempotent"])
+        self.assertTrue(policy_administration["atomic_activation_verified"])
+        self.assertTrue(
+            policy_administration["cross_instance_active_version_verified"]
+        )
+        self.assertTrue(policy_administration["rollback_verified"])
+        self.assertTrue(policy_administration["policy_admin_capability_verified"])
+        self.assertTrue(
+            policy_administration["policy_version_cross_tenant_hidden"]
+        )
+        self.assertEqual(
+            policy_administration["active_policy_activation_sequence"],
+            3,
+        )
         self.assertEqual(value["isolation"]["missing_context_rows"], 0)
         self.assertEqual(value["isolation"]["cleared_context_rows"], 0)
         self.assertTrue(value["isolation"]["tenant_context_fields_bound"])

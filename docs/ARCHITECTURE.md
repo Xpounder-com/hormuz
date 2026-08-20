@@ -91,6 +91,11 @@ The HTTP path authenticates first, derives organization/team/actor from the stat
 - `hormuz/session_store.py` owns the separate local SQLite session database. `hormuz/postgres_session_store.py` implements the equivalent multi-instance transaction boundary with keyed tenant-routing tags, forced RLS, authorization versions, atomic rotation, replay detection, tenant-scoped administration, revocation, and metadata-only security events.
 - `hormuz/identity_projection.py` computes a secret-free desired-state projection from configuration, applies it only through the schema-owner deployment path, increments affected principal authorization versions, and verifies the exact fingerprint through the read-only runtime identity directory.
 - `hormuz/policy_projection.py` computes the tenant-specific secret-free policy projection, applies it only through the schema-owner deployment path, and makes PostgreSQL runtime startup fail closed on a missing or stale fingerprint.
+- `hormuz/postgres_policy_store.py` stores immutable SHA-256-addressed tenant
+  policy versions, structural content-free change summaries, an append-only
+  administration event stream, and one compare-and-swap active-version pointer.
+  The repository foundation is multi-instance; the authenticated API/CLI and
+  request-time use of the active snapshot remain issue #21 work.
 - `hormuz/credential_store.py` and `hormuz/session_client.py` own fail-closed OS secure-store custody and the CLI login/refresh/logout path.
 - `hormuz/session_admin_client.py` owns the authenticated, redirect-refusing session-administration CLI transport and validates the metadata-only session and security-event response contracts.
 - `hormuz/config.py` fail-closes unknown configuration fields without reflecting rejected keys, validates identity/model/policy references and cross-organization team-scope ambiguity, defines identity/route/rate-card policy data, and resolves monotonic organization/team/person model, DLP, and budget policy. It continues to parse deprecated context-injection configuration for compatibility, but policy projection v2 excludes it from the supported shared contract. The resulting snapshot is immutable for one process; safe change is a readiness-gated replacement rollout, not live reload.
@@ -102,7 +107,7 @@ The HTTP path authenticates first, derives organization/team/actor from the stat
   checks, and the runtime-role-only transaction-local `TenantContext` binding.
   Packaged SQL under `hormuz/migrations/postgresql/` establishes the tenant and
   authorization directory plus accounting, human-session, policy-projection,
-  DLP-approval, and security-event tables. The gateway instantiates PostgreSQL
+  policy-version, DLP-approval, and security-event tables. The gateway instantiates PostgreSQL
   accounting, session, and security repositories when configured; governed
   context remains SQLite-backed.
 - `hormuz/postgres_security_store.py` owns tenant-scoped metadata-only security

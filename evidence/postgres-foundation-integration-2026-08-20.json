@@ -12,7 +12,7 @@
     "usage_rows_per_tenant": 1
   },
   "content_free": true,
-  "generated_at": "2026-08-20T16:17:26.451912Z",
+  "generated_at": "2026-08-20T18:54:55.621092Z",
   "identity_sessions": {
     "atomic_refresh_competitors": 2,
     "atomic_refresh_replay_denied": 1,
@@ -41,7 +41,8 @@
       1,
       2,
       3,
-      4
+      4,
+      5
     ],
     "checksums_verified": true,
     "forced_rls_verified": true,
@@ -49,20 +50,28 @@
     "policy_definitions_verified": true,
     "privileges_verified": true,
     "runtime_role_verified": true,
-    "target_version": 4,
+    "target_version": 5,
     "trigger_definition_verified": true
   },
-  "policy_approvals": {
+  "policy_administration": {
+    "active_policy_activation_sequence": 3,
+    "atomic_activation_verified": true,
     "atomic_retry_blocked_pending": 1,
     "atomic_retry_competitors": 2,
     "atomic_retry_consumed": 1,
     "configuration_projection_verified": true,
     "content_free": true,
+    "cross_instance_active_version_verified": true,
     "cross_instance_request_verified": true,
     "cross_tenant_request_hidden": true,
     "exact_payload_model_policy_binding_verified": true,
     "idempotent_sync_verified": true,
+    "immutable_policy_versions_verified": true,
     "model_mismatch_audited": true,
+    "policy_admin_capability_verified": true,
+    "policy_stage_idempotent": true,
+    "policy_version_cross_tenant_hidden": true,
+    "rollback_verified": true,
     "security_events_shared": true,
     "self_approval_denied": true,
     "stale_projection_rejected": true
@@ -71,7 +80,7 @@
     "postgres_image": "postgres@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777",
     "postgres_server_version_num": "160014"
   },
-  "schema": "hormuz.postgres-policy-approval-integration.v4",
+  "schema": "hormuz.postgres-policy-administration-integration.v5",
   "tamper_detection": {
     "permissive_policy_rejected": true,
     "runtime_owner_membership_rejected": true,

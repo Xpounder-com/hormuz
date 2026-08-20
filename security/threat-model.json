@@ -72,10 +72,10 @@
       "controls": [
         {"kind": "test", "ref": "tests/test_gateway.py", "claim": "Current single-node APIs exercise identity-derived organization scope and cross-organization denials."},
         {"kind": "documentation", "ref": "docs/decisions/0002-enterprise-tenancy-and-persistence.md", "claim": "The accepted production contract requires mandatory tenant keys, application predicates, forced PostgreSQL RLS, and reused-connection isolation tests."},
-        {"kind": "code", "ref": "hormuz/postgres.py", "claim": "Schema-v4 migration and verification enforce separate roles, forced RLS, immutable tenant keys, read-only identity/policy projection privileges, exact columns, and transaction-local tenant context."},
-        {"kind": "test", "ref": "scripts/postgres_foundation_integration.py", "claim": "The digest-pinned two-tenant integration exercises migration idempotency, missing/cleared tenant context, reused-connection switching, cross-tenant denial, composite tenant foreign keys, accounting, desired-state identities and policies, multi-instance sessions, security evidence, and atomic one-time approvals."}
+        {"kind": "code", "ref": "hormuz/postgres.py", "claim": "Schema-v5 migration and verification enforce separate roles, forced RLS, immutable tenant keys and policy history, least-privilege policy-version/pointer access, exact columns, and transaction-local tenant context."},
+        {"kind": "test", "ref": "scripts/postgres_foundation_integration.py", "claim": "The digest-pinned two-tenant integration exercises migration idempotency, missing/cleared tenant context, reused-connection switching, cross-tenant denial, composite tenant foreign keys, accounting, desired-state identities and policies, immutable policy staging, cross-instance activation and rollback, multi-instance sessions, security evidence, and atomic one-time approvals."}
       ],
-      "residual_risk": "PostgreSQL is connected to accounting, human sessions, policy projections, DLP approvals, and security evidence; pooled load, backup/restore, deletion, coordinated policy rollout, HA, KMS, SCIM, and independent review remain unproved.",
+      "residual_risk": "PostgreSQL is connected to accounting, human sessions, policy projections and version state, DLP approvals, and security evidence; request-time active-policy evaluation, pooled load, backup/restore, deletion, HA, KMS, SCIM, and independent review remain unproved.",
       "release_gate": "Issue #6"
     },
     {
@@ -211,9 +211,11 @@
       "scenario": "A modified config reroutes models, raises budgets, disables DLP, changes identities, or rolls policy back without authorized review.",
       "controls": [
         {"kind": "code", "ref": "hormuz/config.py", "claim": "Configuration parsing is strict, reference-validated, immutable per process, and can bind exact file bytes to a deployment digest."},
-        {"kind": "test", "ref": "tests/test_cli.py", "claim": "Unknown and duplicate fields, invalid references, unsafe URLs, digest mismatch, and immutable startup behavior are tested."}
+        {"kind": "test", "ref": "tests/test_cli.py", "claim": "Unknown and duplicate fields, invalid references, unsafe URLs, digest mismatch, and immutable startup behavior are tested."},
+        {"kind": "code", "ref": "hormuz/postgres_policy_store.py", "claim": "Policy snapshots use deterministic immutable IDs, activation uses an explicit compare value, rollback targets a previously active version, and administrative mutations require policy_admin."},
+        {"kind": "test", "ref": "scripts/postgres_foundation_integration.py", "claim": "The PostgreSQL integration proves idempotent staging, exact capability denial, atomic cross-instance activation, rollback, and hidden cross-tenant versions."}
       ],
-      "residual_risk": "A digest is not a signature; signer identity, approval authority, live rotation, and deployment-coordinated rollback remain absent.",
+      "residual_risk": "The public authenticated administration API/CLI, request-time use of the active snapshot, usage lineage, approval separation of duties, signer identity, and production rollout coordination remain absent.",
       "release_gate": "Issues #9 and #21"
     },
     {

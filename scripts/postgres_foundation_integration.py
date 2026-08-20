@@ -42,6 +42,7 @@ from hormuz.policy_projection import (
     sync_policy_projection,
     verify_runtime_policy_projection,
 )
+from hormuz.postgres_policy_store import PolicyAdminError, PostgresPolicyStore
 from hormuz.postgres_security_store import PostgresSecurityStore
 from hormuz.postgres_session_store import PostgresSessionStore
 from hormuz.session_store import SessionStoreError
@@ -52,7 +53,7 @@ from hormuz.store import (
 )
 
 
-EVIDENCE_SCHEMA = "hormuz.postgres-policy-approval-integration.v4"
+EVIDENCE_SCHEMA = "hormuz.postgres-policy-administration-integration.v5"
 DEFAULT_IMAGE = (
     "postgres@sha256:"
     "57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777"
@@ -755,7 +756,10 @@ def _policy_config(*, changed: bool = False) -> object:
     )
 
 
-def _prove_policy_approvals(owner_dsn: str, runtime_dsn: str) -> dict[str, object]:
+def _prove_policy_administration_and_approvals(
+    owner_dsn: str,
+    runtime_dsn: str,
+) -> dict[str, object]:
     config = _policy_config()
     synced = sync_policy_projection(config, owner_dsn)  # type: ignore[arg-type]
     repeated = sync_policy_projection(config, owner_dsn)  # type: ignore[arg-type]
@@ -774,6 +778,108 @@ def _prove_policy_approvals(owner_dsn: str, runtime_dsn: str) -> dict[str, objec
     if changed.changed_organizations != 2:
         raise PostgresFoundationIntegrationError("policy_change_not_applied")
     verify_runtime_policy_projection(changed_config, runtime_dsn)  # type: ignore[arg-type]
+
+    policy_stores = (
+        PostgresPolicyStore(
+            runtime_dsn,
+            organization_ids=("tenant-a", "tenant-b"),
+        ),
+        PostgresPolicyStore(
+            runtime_dsn,
+            organization_ids=("tenant-a", "tenant-b"),
+        ),
+    )
+    policy_admin = _synthetic_identity(
+        "tenant-a",
+        "policy-admin-a",
+        capabilities=("policy_admin",),
+    )
+    initial_version = policy_stores[0].stage(  # type: ignore[arg-type]
+        identity=policy_admin,
+        config=config,
+    )
+    repeated_version = policy_stores[1].stage(  # type: ignore[arg-type]
+        identity=policy_admin,
+        config=config,
+    )
+    if (
+        not initial_version.staged
+        or repeated_version.staged
+        or initial_version.version_id != repeated_version.version_id
+        or initial_version.projection_sha256 != repeated_version.projection_sha256
+    ):
+        raise PostgresFoundationIntegrationError("policy_version_stage_not_idempotent")
+    first_activation = policy_stores[0].activate(
+        identity=policy_admin,
+        version_id=initial_version.version_id,
+        expected_active_version_id=None,
+    )
+    changed_version = policy_stores[1].stage(  # type: ignore[arg-type]
+        identity=policy_admin,
+        config=changed_config,
+    )
+    second_activation = policy_stores[1].activate(
+        identity=policy_admin,
+        version_id=changed_version.version_id,
+        expected_active_version_id=initial_version.version_id,
+    )
+    observed = policy_stores[0].active(identity=policy_admin)
+    if (
+        not first_activation.changed
+        or first_activation.activation_sequence != 1
+        or not changed_version.staged
+        or not second_activation.changed
+        or second_activation.activation_sequence != 2
+        or observed is None
+        or observed.version_id != changed_version.version_id
+        or observed.activation_sequence != 2
+    ):
+        raise PostgresFoundationIntegrationError("policy_activation_not_converged")
+    rolled_back = policy_stores[0].activate(
+        identity=policy_admin,
+        version_id=initial_version.version_id,
+        expected_active_version_id=changed_version.version_id,
+        rollback=True,
+    )
+    rollback_observed = policy_stores[1].active(identity=policy_admin)
+    if (
+        not rolled_back.changed
+        or rolled_back.action != "rolled_back"
+        or rolled_back.activation_sequence != 3
+        or rollback_observed is None
+        or rollback_observed.version_id != initial_version.version_id
+        or rollback_observed.activation_sequence != 3
+    ):
+        raise PostgresFoundationIntegrationError("policy_rollback_not_converged")
+    try:
+        policy_stores[0].stage(  # type: ignore[arg-type]
+            identity=_synthetic_identity("tenant-a", "not-an-admin"),
+            config=config,
+        )
+    except PolicyAdminError as error:
+        if error.code != "policy_admin_capability_required":
+            raise PostgresFoundationIntegrationError(
+                "policy_admin_capability_error_invalid"
+            ) from None
+    else:
+        raise PostgresFoundationIntegrationError("policy_admin_capability_not_enforced")
+    try:
+        policy_stores[1].activate(
+            identity=_synthetic_identity(
+                "tenant-b",
+                "policy-admin-b",
+                capabilities=("policy_admin",),
+            ),
+            version_id=initial_version.version_id,
+            expected_active_version_id=None,
+        )
+    except PolicyAdminError as error:
+        if error.code != "policy_version_not_found":
+            raise PostgresFoundationIntegrationError(
+                "policy_version_cross_tenant_error_invalid"
+            ) from None
+    else:
+        raise PostgresFoundationIntegrationError("policy_version_cross_tenant_visible")
 
     organizations = ("tenant-a", "tenant-b")
     stores = (
@@ -930,6 +1036,14 @@ def _prove_policy_approvals(owner_dsn: str, runtime_dsn: str) -> dict[str, objec
         "exact_payload_model_policy_binding_verified": True,
         "model_mismatch_audited": True,
         "security_events_shared": True,
+        "immutable_policy_versions_verified": True,
+        "policy_stage_idempotent": True,
+        "atomic_activation_verified": True,
+        "cross_instance_active_version_verified": True,
+        "rollback_verified": True,
+        "policy_admin_capability_verified": True,
+        "policy_version_cross_tenant_hidden": True,
+        "active_policy_activation_sequence": 3,
         "content_free": True,
     }
 
@@ -1092,7 +1206,10 @@ def run_integration(*, image: str = DEFAULT_IMAGE) -> dict[str, object]:
         isolation = _prove_runtime_isolation(runtime_dsn, owner_dsn)
         accounting = _prove_accounting_store(runtime_dsn)
         identity_sessions = _prove_identity_sessions(owner_dsn, runtime_dsn)
-        policy_approvals = _prove_policy_approvals(owner_dsn, runtime_dsn)
+        policy_administration = _prove_policy_administration_and_approvals(
+            owner_dsn,
+            runtime_dsn,
+        )
         tamper_detection = _prove_verifier_tamper_detection(admin_dsn, owner_dsn)
         evidence = {
             "schema": EVIDENCE_SCHEMA,
@@ -1115,7 +1232,7 @@ def run_integration(*, image: str = DEFAULT_IMAGE) -> dict[str, object]:
             "isolation": isolation,
             "accounting": accounting,
             "identity_sessions": identity_sessions,
-            "policy_approvals": policy_approvals,
+            "policy_administration": policy_administration,
             "tamper_detection": tamper_detection,
             "content_free": True,
         }
