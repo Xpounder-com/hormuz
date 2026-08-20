@@ -1,0 +1,106 @@
+{
+  "listen": {
+    "host": "127.0.0.1",
+    "port": 8792,
+    "shutdown_grace_seconds": 5,
+    "max_concurrent_requests": 4,
+    "accept_backlog": 16,
+    "max_connections": 16,
+    "request_header_timeout_seconds": 10,
+    "request_body_timeout_seconds": 10
+  },
+  "database": "./.hormuz-provider-redaction-conformance.sqlite3",
+  "context_database": "./.hormuz-provider-redaction-conformance-context.sqlite3",
+  "max_request_bytes": 1048576,
+  "upstream_timeout_seconds": 60,
+  "upstreams": {
+    "openai": {
+      "base_url": "https://api.openai.com",
+      "api_key_env": "OPENAI_API_KEY",
+      "allow_response_storage": false,
+      "allow_background": false
+    },
+    "anthropic": {
+      "base_url": "https://api.anthropic.com",
+      "api_key_env": "HORMUZ_UNUSED_ANTHROPIC_KEY"
+    }
+  },
+  "authentication": {
+    "session_broker": {
+      "enabled": false
+    },
+    "oidc": {
+      "issuers": []
+    }
+  },
+  "identities": [
+    {
+      "token_env": "HORMUZ_CONFORMANCE_TOKEN",
+      "actor_id": "provider-redaction-conformance",
+      "actor_name": "Provider Redaction Conformance",
+      "team_id": "verification",
+      "team_name": "Verification",
+      "organization_id": "local-verification",
+      "allowed_clients": ["codex"],
+      "capabilities": []
+    }
+  ],
+  "model_routes": {
+    "openai-live-luna": {
+      "protocol": "openai",
+      "upstream_model": "gpt-5.6-luna",
+      "rate_card_version": "openai-public-2026-08-19-v1",
+      "currency": "USD",
+      "input_cost_per_million": 0.2,
+      "cache_read_cost_per_million": 0.02,
+      "cache_write_cost_per_million": 0.2,
+      "output_cost_per_million": 1.2
+    }
+  },
+  "egress_controls": {
+    "secrets": {
+      "mode": "redact",
+      "builtins": true,
+      "custom_secret_envs": []
+    },
+    "dlp": {
+      "policy_version": "provider-redaction-conformance-dlp-v1",
+      "approval": {
+        "enabled": false
+      },
+      "rules": {
+        "opaque_media": {
+          "action": "deny",
+          "providers": ["openai"]
+        }
+      },
+      "dictionaries": [],
+      "overlays": {
+        "teams": {},
+        "actors": {}
+      }
+    }
+  },
+  "policies": {
+    "organization": {
+      "allowed_clients": ["codex"],
+      "allowed_models": ["openai-live-luna"],
+      "max_output_tokens": 64,
+      "monthly_budget_usd": 1,
+      "per_actor_monthly_budget_usd": 1,
+      "context_injection": {
+        "mode": "off",
+        "allowed_repositories": [],
+        "max_classification": "internal"
+      }
+    },
+    "teams": {
+      "verification": {
+        "allowed_models": ["openai-live-luna"],
+        "max_output_tokens": 64,
+        "monthly_budget_usd": 1
+      }
+    },
+    "actors": {}
+  }
+}

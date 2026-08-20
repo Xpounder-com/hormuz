@@ -20,11 +20,17 @@ from .usage import MAX_PROVIDER_USAGE_JSON_BYTES, ResponseUsageParser
 
 RESULT_SCHEMA = "hormuz.provider-conformance.v1"
 PROBE_VERSION = "hormuz-fixed-text-v1"
+REDACTION_RESULT_SCHEMA = "hormuz.redaction-conformance.v1"
+REDACTION_PROBE_VERSION = "hormuz-fixed-synthetic-secret-v1"
 MAX_GATEWAY_RESPONSE_BYTES = min(MAX_PROVIDER_USAGE_JSON_BYTES, 1024 * 1024)
 MAX_CREDENTIAL_BYTES = 64 * 1024
 MAX_OUTPUT_TOKENS = 64
 _MARKER = "HORMUZ_OK_1"
 _PROMPT = "Reply with exactly HORMUZ_OK_1 and no other text."
+_SYNTHETIC_SECRET = "sk-" + "proj-" + ("H" * 24)
+_REDACTION_MARKER = "[REDACTED:HORMUZ_SECRET]"
+_REDACTION_PROMPT = f"Repeat exactly and only: {_SYNTHETIC_SECRET}"
+_PROBES = {"connectivity", "secret-redaction"}
 
 
 class ProviderConformanceError(RuntimeError):
@@ -72,6 +78,7 @@ class ProviderConformanceClient:
         *,
         model: str,
         max_output_tokens: int = 16,
+        probe: str = "connectivity",
     ) -> dict[str, Any]:
         if not isinstance(model, str) or not is_model_identifier(model):
             raise ProviderConformanceError("invalid_model")
@@ -81,10 +88,13 @@ class ProviderConformanceClient:
             or not 1 <= max_output_tokens <= MAX_OUTPUT_TOKENS
         ):
             raise ProviderConformanceError("invalid_output_cap")
+        if not isinstance(probe, str) or probe not in _PROBES:
+            raise ProviderConformanceError("invalid_probe")
 
         endpoint, body, headers = self._request_contract(
             model=model,
             max_output_tokens=max_output_tokens,
+            probe=probe,
         )
         request = urllib.request.Request(
             endpoint,
@@ -139,9 +149,20 @@ class ProviderConformanceClient:
             or not is_model_identifier(routed_model)
         ):
             raise ProviderConformanceError("gateway_policy_mismatch")
+        redaction_count: int | None = None
+        if probe == "secret-redaction":
+            redaction_header = _header_value(response_headers, "X-Hormuz-Redactions")
+            if redaction_header != "1" or "redacted" not in policy_decision.split("+"):
+                raise ProviderConformanceError("gateway_redaction_mismatch")
+            redaction_count = 1
+            if _SYNTHETIC_SECRET.encode("utf-8") in payload:
+                raise ProviderConformanceError("synthetic_secret_echoed")
 
         value = _strict_json_object(payload)
-        if not _marker_verified(self.provider, value):
+        expected_marker = (
+            _REDACTION_MARKER if probe == "secret-redaction" else _MARKER
+        )
+        if not _marker_verified(self.provider, value, expected=expected_marker):
             raise ProviderConformanceError("marker_mismatch")
         usage_parser = ResponseUsageParser(self.provider, is_event_stream=False)
         usage_parser.feed(payload)
@@ -160,15 +181,19 @@ class ProviderConformanceClient:
             if self.provider == "openai"
             else "POST /v1/messages"
         )
-        return {
-            "schema_version": RESULT_SCHEMA,
+        result: dict[str, Any] = {
+            "schema_version": (
+                REDACTION_RESULT_SCHEMA if probe == "secret-redaction" else RESULT_SCHEMA
+            ),
             "status": "verified",
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "runner": {
                 "hormuz_version": __version__,
                 "python_version": platform.python_version(),
             },
-            "probe_version": PROBE_VERSION,
+            "probe_version": (
+                REDACTION_PROBE_VERSION if probe == "secret-redaction" else PROBE_VERSION
+            ),
             "provider": self.provider,
             "interface": interface,
             "gateway_transport": self.gateway_transport,
@@ -186,7 +211,24 @@ class ProviderConformanceClient:
                 "reasoning_tokens": usage.reasoning_tokens,
                 "billable_tokens": usage.billable_tokens,
             },
-            "assurances": {
+        }
+        if probe == "secret-redaction":
+            result["redaction_count"] = redaction_count
+            result["assurances"] = {
+                "fixed_synthetic_secret_probe": True,
+                "gateway_policy_headers_verified": True,
+                "gateway_redaction_header_verified": True,
+                "provider_sanitized_echo_verified": True,
+                "provider_usage_verified": True,
+                "credential_retained": False,
+                "gateway_url_retained": False,
+                "prompt_retained": False,
+                "response_content_retained": False,
+                "provider_request_id_retained": False,
+                "synthetic_secret_retained": False,
+            }
+        else:
+            result["assurances"] = {
                 "fixed_content_probe": True,
                 "marker_verified": True,
                 "gateway_policy_headers_verified": True,
@@ -196,15 +238,17 @@ class ProviderConformanceClient:
                 "prompt_retained": False,
                 "response_content_retained": False,
                 "provider_request_id_retained": False,
-            },
-        }
+            }
+        return result
 
     def _request_contract(
         self,
         *,
         model: str,
         max_output_tokens: int,
+        probe: str,
     ) -> tuple[str, dict[str, Any], dict[str, str]]:
+        prompt = _REDACTION_PROMPT if probe == "secret-redaction" else _PROMPT
         common_headers = {
             "Accept": "application/json",
             "Content-Type": "application/json",
@@ -219,7 +263,7 @@ class ProviderConformanceClient:
                     "input": [
                         {
                             "role": "user",
-                            "content": [{"type": "input_text", "text": _PROMPT}],
+                            "content": [{"type": "input_text", "text": prompt}],
                         }
                     ],
                     "max_output_tokens": max_output_tokens,
@@ -236,7 +280,7 @@ class ProviderConformanceClient:
                 "messages": [
                     {
                         "role": "user",
-                        "content": [{"type": "text", "text": _PROMPT}],
+                        "content": [{"type": "text", "text": prompt}],
                     }
                 ],
                 "max_tokens": max_output_tokens,
@@ -420,7 +464,7 @@ def _strict_json_object(payload: bytes) -> dict[str, Any]:
     return value
 
 
-def _marker_verified(provider: str, value: dict[str, Any]) -> bool:
+def _marker_verified(provider: str, value: dict[str, Any], *, expected: str) -> bool:
     texts: list[str] = []
     if provider == "openai":
         if value.get("object") != "response" or value.get("status") != "completed":
@@ -452,7 +496,7 @@ def _marker_verified(provider: str, value: dict[str, Any]) -> bool:
                 if not isinstance(text, str):
                     return False
                 texts.append(text)
-    return len(texts) == 1 and texts[0].strip() == _MARKER
+    return len(texts) == 1 and texts[0].strip() == expected
 
 
 def _http_error_code(status: int) -> str:

@@ -1409,6 +1409,21 @@ hormuz provider-conformance \
   --output /tmp/hormuz-openai-conformance.json
 ```
 
+Using the separate 64-token redaction example on port `8792`, verify the fixed
+synthetic-secret path without accepting operator content:
+
+```bash
+hormuz provider-conformance \
+  --provider openai \
+  --gateway http://127.0.0.1:8792 \
+  --allow-insecure-http \
+  --credential-env HORMUZ_CONFORMANCE_TOKEN \
+  --model openai-live-luna \
+  --probe secret-redaction \
+  --max-output-tokens 64 \
+  --output /tmp/hormuz-openai-redaction-conformance.json
+```
+
 With the same gateway running, verify the pinned stock client through the
 reusable isolated harness:
 
@@ -1458,6 +1473,17 @@ content-free evidence is
 [`evidence/client-conformance-codex-openai-2026-08-19.json`](../evidence/client-conformance-codex-openai-2026-08-19.json).
 This adds a repeatable operator command, not a wider provider or production
 support claim.
+
+The fixed synthetic-secret probe then passed through live OpenAI at the same
+local-evening checkpoint. Hormuz returned `allowed+redacted` with exactly one
+redaction; OpenAI returned only the sanitized placeholder and reported 21 input,
+37 output, 21 reasoning, and 58 billable tokens. Measured latency was 1,570
+milliseconds. Exact provider-key, employee-credential, and synthetic-value scans
+of the generated evidence plus gateway log were negative. The content-free
+artifact is
+[`evidence/provider-redaction-conformance-openai-2026-08-19.json`](../evidence/provider-redaction-conformance-openai-2026-08-19.json).
+This is not an organization-specific detector evaluation, complete DLP proof,
+or live Anthropic observation.
 
 ## Automated publication gate
 

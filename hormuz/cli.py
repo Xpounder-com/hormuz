@@ -805,6 +805,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Probe output cap from 1 to 64 (default: 16)",
     )
     conformance.add_argument(
+        "--probe",
+        choices=["connectivity", "secret-redaction"],
+        default="connectivity",
+        help="Fixed probe contract to execute (default: connectivity)",
+    )
+    conformance.add_argument(
         "--timeout-seconds",
         type=int,
         default=30,
@@ -2074,6 +2080,7 @@ def _provider_conformance_command(args: argparse.Namespace) -> int:
         ).run(
             model=args.model,
             max_output_tokens=args.max_output_tokens,
+            probe=args.probe,
         )
         write_conformance_result(result, args.output, force=args.force)
     except ProviderConformanceError as error:

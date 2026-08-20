@@ -21,6 +21,8 @@ from hormuz.cli import build_parser, main
 
 
 MARKER = "HORMUZ_OK_1"
+REDACTION_MARKER = "[REDACTED:HORMUZ_SECRET]"
+SYNTHETIC_SECRET = "sk-" + "proj-" + ("H" * 24)
 
 
 def _openai_body(*, marker: str = MARKER) -> bytes:
@@ -111,14 +113,23 @@ class QueueOpener:
         return response
 
 
-def _headers(*, requested: str, routed: str) -> dict[str, str]:
-    return {
+def _headers(
+    *,
+    requested: str,
+    routed: str,
+    policy_decision: str = "allowed+capped",
+    redactions: str | None = None,
+) -> dict[str, str]:
+    headers = {
         "Content-Type": "application/json",
-        "X-Hormuz-Policy-Decision": "allowed+capped",
+        "X-Hormuz-Policy-Decision": policy_decision,
         "X-Hormuz-Requested-Model": requested,
         "X-Hormuz-Routed-Model": routed,
         "X-Request-Id": "provider-request-id-must-not-be-retained",
     }
+    if redactions is not None:
+        headers["X-Hormuz-Redactions"] = redactions
+    return headers
 
 
 class ProviderConformanceClientTests(unittest.TestCase):
@@ -212,6 +223,114 @@ class ProviderConformanceClientTests(unittest.TestCase):
         self.assertEqual(result["usage"]["output_tokens"], 5)
         self.assertEqual(result["usage"]["cache_read_tokens"], 3)
         self.assertEqual(result["usage"]["cache_write_tokens"], 2)
+
+    def test_synthetic_secret_probe_requires_gateway_redaction_and_sanitized_echo(self) -> None:
+        for provider, body_factory, endpoint in (
+            ("openai", _openai_body, "https://hormuz.example/v1/responses"),
+            ("anthropic", _anthropic_body, "https://hormuz.example/v1/messages"),
+        ):
+            with self.subTest(provider=provider):
+                opener = QueueOpener(
+                    [
+                        FakeResponse(
+                            body_factory(marker=REDACTION_MARKER),
+                            url=endpoint,
+                            headers=_headers(
+                                requested="live",
+                                routed="provider-model",
+                                policy_decision="allowed+redacted",
+                                redactions="1",
+                            ),
+                        )
+                    ]
+                )
+                result = ProviderConformanceClient(
+                    provider,
+                    gateway="https://hormuz.example",
+                    credential="employee-token",
+                    opener=opener,
+                    clock=lambda: 40.0,
+                ).run(model="live", probe="secret-redaction")
+
+                request, _timeout = opener.requests[0]
+                self.assertIn(SYNTHETIC_SECRET, request.data.decode("utf-8"))
+                self.assertEqual(result["schema_version"], "hormuz.redaction-conformance.v1")
+                self.assertEqual(result["probe_version"], "hormuz-fixed-synthetic-secret-v1")
+                self.assertEqual(result["policy_decision"], "allowed+redacted")
+                self.assertEqual(result["redaction_count"], 1)
+                self.assertTrue(
+                    result["assurances"]["gateway_redaction_header_verified"]
+                )
+                self.assertTrue(
+                    result["assurances"]["provider_sanitized_echo_verified"]
+                )
+                serialized = json.dumps(result, sort_keys=True)
+                self.assertNotIn(SYNTHETIC_SECRET, serialized)
+                self.assertNotIn(REDACTION_MARKER, serialized)
+
+    def test_synthetic_secret_probe_fails_closed_on_incomplete_or_unsafe_proof(self) -> None:
+        endpoint = "https://hormuz.example/v1/responses"
+        cases = (
+            (
+                _openai_body(marker=REDACTION_MARKER),
+                _headers(requested="live", routed="provider-model"),
+                "gateway_redaction_mismatch",
+            ),
+            (
+                _openai_body(marker=REDACTION_MARKER),
+                _headers(
+                    requested="live",
+                    routed="provider-model",
+                    policy_decision="allowed+redacted",
+                    redactions="2",
+                ),
+                "gateway_redaction_mismatch",
+            ),
+            (
+                _openai_body(marker=REDACTION_MARKER),
+                _headers(
+                    requested="live",
+                    routed="provider-model",
+                    policy_decision="allowed",
+                    redactions="1",
+                ),
+                "gateway_redaction_mismatch",
+            ),
+            (
+                _openai_body(marker=SYNTHETIC_SECRET),
+                _headers(
+                    requested="live",
+                    routed="provider-model",
+                    policy_decision="allowed+redacted",
+                    redactions="1",
+                ),
+                "synthetic_secret_echoed",
+            ),
+            (
+                _openai_body(marker="WRONG"),
+                _headers(
+                    requested="live",
+                    routed="provider-model",
+                    policy_decision="allowed+redacted",
+                    redactions="1",
+                ),
+                "marker_mismatch",
+            ),
+        )
+        for body, headers, code in cases:
+            with self.subTest(code=code):
+                client = ProviderConformanceClient(
+                    "openai",
+                    gateway="https://hormuz.example",
+                    credential="employee-token",
+                    opener=QueueOpener(
+                        [FakeResponse(body, url=endpoint, headers=headers)]
+                    ),
+                )
+                with self.assertRaises(ProviderConformanceError) as caught:
+                    client.run(model="live", probe="secret-redaction")
+                self.assertEqual(caught.exception.code, code)
+                self.assertNotIn(SYNTHETIC_SECRET, str(caught.exception))
 
     def test_bad_marker_invalid_usage_and_unsafe_gateway_response_fail_closed(self) -> None:
         cases = (
@@ -315,10 +434,20 @@ class ProviderConformanceClientTests(unittest.TestCase):
             credential="employee-token",
             opener=opener,
         )
-        for model, maximum in (("bad\nmodel", 16), ("live", 0), ("live", 65)):
-            with self.subTest(model=model, maximum=maximum):
+        for model, maximum, probe in (
+            ("bad\nmodel", 16, "connectivity"),
+            ("live", 0, "connectivity"),
+            ("live", 65, "connectivity"),
+            ("live", 16, "unknown"),
+            ("live", 16, None),
+        ):
+            with self.subTest(model=model, maximum=maximum, probe=probe):
                 with self.assertRaises(ProviderConformanceError):
-                    client.run(model=model, max_output_tokens=maximum)
+                    client.run(
+                        model=model,
+                        max_output_tokens=maximum,
+                        probe=probe,
+                    )
         self.assertEqual(opener.requests, [])
 
     def test_evidence_file_is_private_exclusive_and_removed_after_write_failure(self) -> None:
@@ -436,6 +565,61 @@ class ProviderConformanceClientTests(unittest.TestCase):
         self.assertEqual(client_value["status"], "verified")
         self.assertNotIn("CODEX_GATEWAY_OK", json.dumps(client_value))
 
+        redaction_value = json.loads(
+            (
+                root
+                / "evidence/provider-redaction-conformance-openai-2026-08-19.json"
+            ).read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            set(redaction_value),
+            {
+                "actual_model",
+                "assurances",
+                "gateway_transport",
+                "generated_at",
+                "http_status",
+                "interface",
+                "latency_milliseconds",
+                "policy_decision",
+                "probe_version",
+                "provider",
+                "redaction_count",
+                "requested_model",
+                "routed_model",
+                "runner",
+                "schema_version",
+                "status",
+                "usage",
+            },
+        )
+        self.assertEqual(
+            set(redaction_value["assurances"]),
+            {
+                "credential_retained",
+                "fixed_synthetic_secret_probe",
+                "gateway_policy_headers_verified",
+                "gateway_redaction_header_verified",
+                "gateway_url_retained",
+                "prompt_retained",
+                "provider_request_id_retained",
+                "provider_sanitized_echo_verified",
+                "provider_usage_verified",
+                "response_content_retained",
+                "synthetic_secret_retained",
+            },
+        )
+        self.assertEqual(
+            redaction_value["schema_version"],
+            "hormuz.redaction-conformance.v1",
+        )
+        self.assertEqual(redaction_value["policy_decision"], "allowed+redacted")
+        self.assertEqual(redaction_value["redaction_count"], 1)
+        self.assertEqual(redaction_value["status"], "verified")
+        serialized_redaction = json.dumps(redaction_value, sort_keys=True)
+        self.assertNotIn(REDACTION_MARKER, serialized_redaction)
+        self.assertNotIn(SYNTHETIC_SECRET, serialized_redaction)
+
 
 class ProviderConformanceCLITests(unittest.TestCase):
     def test_parser_exposes_bounded_opt_in_command(self) -> None:
@@ -454,6 +638,7 @@ class ProviderConformanceCLITests(unittest.TestCase):
         self.assertEqual(args.command, "provider-conformance")
         self.assertEqual(args.max_output_tokens, 16)
         self.assertEqual(args.credential_env, "HORMUZ_TOKEN")
+        self.assertEqual(args.probe, "connectivity")
 
     def test_cli_uses_named_gateway_credential_and_writes_verified_result(self) -> None:
         verified = {
@@ -478,6 +663,8 @@ class ProviderConformanceCLITests(unittest.TestCase):
                     "anthropic-live",
                     "--credential-env",
                     "TEST_HORMUZ_TOKEN",
+                    "--probe",
+                    "secret-redaction",
                     "--output",
                     "evidence.json",
                 ]
@@ -490,7 +677,11 @@ class ProviderConformanceCLITests(unittest.TestCase):
             timeout_seconds=30,
             allow_insecure_http=False,
         )
-        client.run.assert_called_once_with(model="anthropic-live", max_output_tokens=16)
+        client.run.assert_called_once_with(
+            model="anthropic-live",
+            max_output_tokens=16,
+            probe="secret-redaction",
+        )
         writer.assert_called_once_with(verified, "evidence.json", force=False)
 
     def test_cli_missing_credential_is_content_free_and_does_not_load_config(self) -> None:

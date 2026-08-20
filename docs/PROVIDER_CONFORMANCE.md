@@ -47,6 +47,47 @@ remain disabled by the example configuration. The strict two-protocol
 configuration schema requires an Anthropic upstream object; its example-only
 credential is random, has no model route, and is never sent.
 
+## Synthetic-secret redaction proof
+
+The optional `secret-redaction` probe sends one package-owned synthetic value
+that matches the built-in OpenAI-key detector. It cannot accept an operator,
+customer, employee, repository, or ticket value. Hormuz must return an
+`allowed+redacted` policy decision and exactly one redaction, the provider must
+return the fixed sanitized placeholder, provider usage must be present, and the
+synthetic value must be absent from the complete response. Every condition fails
+closed with a content-free error code.
+
+Start the separate loopback example, whose 64-token ceiling accommodates
+provider-reported reasoning tokens while keeping the probe bounded:
+
+```bash
+export HORMUZ_CONFORMANCE_TOKEN="$(openssl rand -hex 32)"
+export HORMUZ_UNUSED_ANTHROPIC_KEY="$(openssl rand -hex 32)"
+set -a
+source .env.local
+set +a
+hormuz --config examples/provider-redaction-conformance-openai.json serve
+```
+
+Then run:
+
+```bash
+hormuz provider-conformance \
+  --provider openai \
+  --gateway http://127.0.0.1:8792 \
+  --allow-insecure-http \
+  --credential-env HORMUZ_CONFORMANCE_TOKEN \
+  --model openai-live-luna \
+  --probe secret-redaction \
+  --max-output-tokens 64 \
+  --output /tmp/hormuz-openai-redaction-conformance.json
+```
+
+This proves only the exact built-in synthetic-secret path at one observed
+endpoint. It does not evaluate customer-specific dictionaries, PII detectors,
+encoded or opaque content, every request position, every model, or an
+organization-representative corpus.
+
 ## Stock Codex and Claude Code proof
 
 `hormuz client-conformance` exercises an installed official client against the
@@ -110,7 +151,9 @@ writing keeps the same exclusive mode-`0600` contract as provider conformance.
 The provider JSON result contains the provider and protocol,
 requested/routed/actual model identifiers, Hormuz policy decision, normalized
 token categories, HTTP status, latency, version metadata, and boolean
-assurances. The client JSON result contains the client name, exact version,
+assurances. The redaction result additionally retains the redaction count and
+boolean proof of the gateway header plus sanitized provider echo, without the
+synthetic value or placeholder. The client JSON result contains the client name, exact version,
 resolved-launcher digest, protocol, gateway interface, requested policy alias,
 exit code, latency, and boolean assurances. Both omit:
 
@@ -180,3 +223,14 @@ final-message file, used an isolated empty workspace and sanitized child
 environment with shell, multi-agent, and web-search tools disabled, and retained
 none of the prompt, response, client output, gateway address, or employee
 credential. This repeat does not broaden the earlier OpenAI-only claim.
+
+The separate fixed synthetic-secret probe then traversed the same OpenAI route.
+Hormuz returned `allowed+redacted` with exactly one redaction, and the provider
+returned only the sanitized placeholder. The request recorded 21 input, 37
+output, 21 reasoning, and 58 billable tokens with 1,570 milliseconds measured
+latency. Exact-value scans found no provider credential, employee credential, or
+synthetic value in the evidence or gateway log. The result retains neither the
+fixed prompt nor provider response and is recorded at
+[`evidence/provider-redaction-conformance-openai-2026-08-19.json`](../evidence/provider-redaction-conformance-openai-2026-08-19.json).
+This is one synthetic built-in detector observation, not complete DLP or
+Anthropic evidence.
