@@ -2,6 +2,7 @@ include SECURITY.md
 include config.example.json
 include scripts/compatibility_contract.py
 include scripts/incident_drill.py
+include scripts/postgres_rls_feasibility.py
 include scripts/threat_model_contract.py
 include compatibility/compatibility-matrix.json
 include operations/incident-drills.json

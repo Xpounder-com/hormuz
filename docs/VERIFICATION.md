@@ -1637,6 +1637,59 @@ still uses a provider-compatible loopback fake; the one fixed live OpenAI
 compaction observation does not establish installed Codex compaction, live
 Anthropic, cache policy, provider SLA, or enterprise readiness.
 
+### PostgreSQL tenant-isolation feasibility
+
+A standalone, opt-in PostgreSQL feasibility verifier was exercised locally on
+August 20, 2026. It accepts only an immutable `postgres@sha256:...` reference,
+requires that exact image to exist locally, forbids image pulling, launches a
+disposable container without networking, ports, or host mounts, and removes the
+container before producing verified evidence.
+
+Observed result:
+
+- the exact digest resolved to PostgreSQL server version `16.14`;
+- the synthetic runtime role was a non-owner, non-superuser without
+  `BYPASSRLS`;
+- both synthetic tables had RLS enabled and forced;
+- missing tenant context, the forced table owner without context, and a reused
+  session after transaction-local context cleared each returned zero rows;
+- each of two synthetic tenants saw only its own record, and an explicit
+  cross-tenant read returned zero rows;
+- a cross-tenant insert was denied by RLS and a composite tenant foreign key
+  denied a cross-tenant reference;
+- eight verifier/evidence unit tests passed, including unknown launch cleanup,
+  final-startup readiness,
+  invalid mutable image,
+  mismatched proof, unexpectedly allowed write, failed cleanup, Docker Desktop
+  immutable-ID fallback, private output, and overwrite-refusal paths;
+- the generated evidence was mode `0600`, retained no SQL output or ephemeral
+  credential, and a final Docker inspection found no matching container;
+- the complete source suite passed 479 tests with three documented opt-in
+  installed-client/profile tests skipped; all seven repository-local incident
+  drills passed; the strict threat contract retained five open threats and
+  independent review pending; and the strict compatibility contract retained
+  `pending_owner_decision`, zero verified production-persistence profiles, and
+  `enterprise_release_ready: false`;
+- the frozen 60-task governed-context release profile retained precision,
+  recall, and useful-pack rate `1.00`, zero safety-threshold failures, and
+  governed p95 selection latency `0.151` ms.
+
+The checked-in content-free observation is
+[`evidence/postgres-rls-feasibility-2026-08-20.json`](../evidence/postgres-rls-feasibility-2026-08-20.json).
+Reproduce it only when the exact digest is already cached:
+
+```bash
+python scripts/postgres_rls_feasibility.py \
+  --output /tmp/hormuz-postgres-rls-feasibility.json
+```
+
+This is evidence that the central RLS invariants in proposed ADR 0002 are
+feasible. It is not product-owner acceptance and does not prove an accepted
+schema, repository implementation, migrations, connection-pool behavior,
+production concurrency, backup/PITR, restore, deletion, residency, KMS, HA, or
+independent security review. The compatibility entry therefore remains
+`pending_owner_decision` and `production_supported: false`.
+
 ## Automated publication gate
 
 Ordinary GitHub CI runs eight independent gate families without provider credentials:

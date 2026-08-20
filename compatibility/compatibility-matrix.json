@@ -294,10 +294,13 @@
           "dedicated database option"
         ],
         "evidence": [
-          "docs/decisions/0002-enterprise-tenancy-and-persistence.md#Owner approval record"
+          "docs/decisions/0002-enterprise-tenancy-and-persistence.md#Owner approval record",
+          "scripts/postgres_rls_feasibility.py",
+          "tests/test_postgres_rls_feasibility.py",
+          "evidence/postgres-rls-feasibility-2026-08-20.json"
         ],
         "limitations": [
-          "ADR 0002 is proposed and no PostgreSQL schema, migration, isolation, backup, or restore proof exists."
+          "ADR 0002 remains proposed. One disposable local PostgreSQL 16.14 exercise proves only bounded synthetic RLS feasibility; no production schema, repository integration, migration, pooled-concurrency, backup, restore, HA, or production-persistence proof exists."
         ]
       }
     ],

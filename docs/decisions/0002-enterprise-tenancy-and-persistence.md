@@ -25,6 +25,31 @@ PostgreSQL row security can restrict selected and mutated rows and defaults to d
 
 Row security is defense in depth, not permission to omit tenant scope from application APIs, keys, indexes, foreign keys, caches, jobs, or object storage.
 
+### Feasibility evidence, not acceptance
+
+On August 20, 2026, the opt-in
+[`scripts/postgres_rls_feasibility.py`](../../scripts/postgres_rls_feasibility.py)
+verifier exercised two synthetic tenants against a locally cached, immutable
+PostgreSQL image digest with container networking disabled and image pulling
+forbidden. PostgreSQL `16.14` observed all of the following:
+
+- the runtime role was neither superuser nor `BYPASSRLS`;
+- row security and `FORCE ROW LEVEL SECURITY` were enabled;
+- a missing tenant context, the forced table owner without context, and a reused
+  session after transaction commit each saw zero rows;
+- each tenant saw only its own synthetic record;
+- a cross-tenant write was denied by RLS; and
+- a composite tenant foreign key denied a cross-tenant reference.
+
+The content-free observation is recorded in
+[`evidence/postgres-rls-feasibility-2026-08-20.json`](../../evidence/postgres-rls-feasibility-2026-08-20.json).
+It contains no SQL output, row identifiers, credentials, or customer content.
+This proves that the core RLS invariants proposed below are feasible in one
+disposable local exercise. It does **not** accept this ADR or prove a production
+schema, repository implementation, migrations, connection-pool behavior,
+concurrency, backup/PITR, restore, deletion, residency, KMS, HA, or independent
+security review.
+
 ## Proposed decision
 
 ### Security and ownership hierarchy

@@ -1,0 +1,40 @@
+{
+  "assurances": {
+    "composite_foreign_key_denied": true,
+    "container_has_no_host_mounts": true,
+    "container_has_no_published_ports": true,
+    "container_network_disabled": true,
+    "container_removed": true,
+    "cross_tenant_write_denied": true,
+    "ephemeral_credential_absent_from_evidence": true,
+    "final_postgres_startup_confirmed": true,
+    "force_row_security_enabled_on_both_tables": true,
+    "forced_owner_denied_without_context": true,
+    "image_digest_verified": true,
+    "missing_context_denied": true,
+    "row_security_enabled_on_both_tables": true,
+    "runtime_role_no_bypassrls": true,
+    "runtime_role_non_owner": true,
+    "runtime_role_non_superuser": true,
+    "sql_output_absent_from_evidence": true,
+    "tenant_a_read_isolated": true,
+    "tenant_b_read_isolated": true,
+    "transaction_local_context_cleared": true
+  },
+  "generated_at": "2026-08-20T07:07:50.296859+00:00",
+  "runner": {
+    "docker_runtime_reference": "sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777",
+    "postgres_image": "postgres@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777",
+    "postgres_server_version_num": "160014",
+    "python_version": "3.12.12"
+  },
+  "schema_version": "hormuz.postgres-rls-feasibility.v1",
+  "scope": {
+    "production_persistence_verified": false,
+    "production_schema_accepted": false,
+    "synthetic_data_only": true,
+    "table_count": 2,
+    "tenant_count": 2
+  },
+  "status": "verified"
+}
