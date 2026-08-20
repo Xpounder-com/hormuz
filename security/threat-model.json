@@ -101,8 +101,8 @@
       "status": "partially_mitigated",
       "scenario": "Secrets, regulated identifiers, or company-specific values are hidden in unsupported encodings, media, archives, source paths, semantic paraphrases, or application-specific parsing.",
       "controls": [
-        {"kind": "code", "ref": "hormuz/redaction.py", "claim": "The accepted deterministic subset covers credentials, selected regulated identifiers, bounded dictionaries, encoded text, queries, headers, and recognized opaque media."},
-        {"kind": "test", "ref": "tests/test_redaction.py", "claim": "Provider-aware DLP transformations and fail-closed shapes have focused regression coverage."},
+        {"kind": "code", "ref": "hormuz/redaction.py", "claim": "The accepted deterministic-v2 subset covers credentials, selected regulated identifiers, bounded dictionaries, base64/percent/hex encoded text, queries, headers, and recognized opaque media."},
+        {"kind": "test", "ref": "tests/test_redaction.py", "claim": "Provider-aware DLP transformations, mixed-view precedence, encoded-text bounds, and fail-closed shapes have focused regression coverage."},
         {"kind": "documentation", "ref": "docs/DLP_EVALUATION.md", "claim": "Organization-specific evaluation remains explicit and content-free evidence is separated from the private corpus."}
       ],
       "residual_risk": "Unknown encodings, archive contents, referenced files, semantic company information, and organization-specific quality thresholds remain open.",

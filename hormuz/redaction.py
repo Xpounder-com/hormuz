@@ -5,6 +5,7 @@ import binascii
 import re
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import unquote_to_bytes
 
 from .config import DLPControls, DLPRuleConfig, SecretControls
 
@@ -12,13 +13,17 @@ from .config import DLPControls, DLPRuleConfig, SecretControls
 REPLACEMENT = "[REDACTED:HORMUZ_SECRET]"
 DLP_REPLACEMENT = "[REDACTED:HORMUZ_DLP]"
 MAX_JSON_DEPTH = 100
-DLP_DETECTOR_VERSION = "hormuz-deterministic-v1"
+DLP_DETECTOR_VERSION = "hormuz-deterministic-v2"
 MAX_ENCODED_TEXT_BYTES = 1024 * 1024
 MAX_ENCODED_TEXT_DEPTH = 3
 _MAX_ENCODED_PAYLOAD_CHARS = ((MAX_ENCODED_TEXT_BYTES + 2) // 3) * 4
 _MAX_WHITESPACE_WRAPPED_PAYLOAD_CHARS = _MAX_ENCODED_PAYLOAD_CHARS * 2
+_MAX_PERCENT_ENCODED_CHARS = MAX_ENCODED_TEXT_BYTES * 3
+_MAX_HEX_ENCODED_CHARS = MAX_ENCODED_TEXT_BYTES * 2
 _ASCII_BASE64_WHITESPACE = " \t\r\n"
 _ASCII_BASE64_WHITESPACE_TABLE = str.maketrans("", "", _ASCII_BASE64_WHITESPACE)
+_PERCENT_ESCAPE = re.compile(r"%[0-9A-Fa-f]{2}")
+_HEX_TEXT = re.compile(r"[0-9A-Fa-f]+\Z")
 
 
 class RedactionError(ValueError):
@@ -362,6 +367,28 @@ class SecretRedactor:
             protocol=protocol,
             model=model,
         )
+        unredactable_text = _decode_unredactable_text(value)
+        if unredactable_text is not None:
+            if encoded_depth >= MAX_ENCODED_TEXT_DEPTH:
+                raise RedactionError(
+                    "Encoded text exceeds the maximum nesting depth of "
+                    f"{MAX_ENCODED_TEXT_DEPTH}"
+                )
+            _, findings, _ = self._transform_string(
+                unredactable_text,
+                protocol=protocol,
+                model=model,
+                encoded_depth=encoded_depth + 1,
+            )
+            hidden_findings = _subtract_findings(findings, plain_result[1])
+            if hidden_findings:
+                combined_findings = dict(plain_result[1])
+                _merge_findings(
+                    combined_findings,
+                    _fail_closed_unredactable_redactions(hidden_findings),
+                )
+                return plain_result[0], combined_findings, plain_result[2]
+
         if plain_result[1]:
             return plain_result
 
@@ -516,6 +543,55 @@ def _decode_encoded_payload(value: str) -> _EncodedPayload | None:
         urlsafe=urlsafe,
         padded=padded,
     )
+
+
+def _decode_unredactable_text(value: str) -> str | None:
+    percent_decoded = _decode_percent_text(value)
+    if percent_decoded is not None:
+        return percent_decoded
+    return _decode_hex_text(value)
+
+
+def _decode_percent_text(value: str) -> str | None:
+    if _PERCENT_ESCAPE.search(value) is None:
+        return None
+    if len(value) > _MAX_PERCENT_ENCODED_CHARS:
+        raise RedactionError(
+            "Encoded text exceeds the maximum percent-encoded size of "
+            f"{_MAX_PERCENT_ENCODED_CHARS} characters"
+        )
+    raw = unquote_to_bytes(value)
+    if len(raw) > MAX_ENCODED_TEXT_BYTES:
+        raise RedactionError(
+            "Encoded text exceeds the maximum decoded size of "
+            f"{MAX_ENCODED_TEXT_BYTES} bytes"
+        )
+    try:
+        decoded = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+    return decoded if _is_textual(decoded) else None
+
+
+def _decode_hex_text(value: str) -> str | None:
+    payload = value[2:] if value[:2].lower() == "0x" else value
+    if (
+        not payload
+        or len(payload) % 2
+        or _HEX_TEXT.fullmatch(payload) is None
+    ):
+        return None
+    if len(payload) > _MAX_HEX_ENCODED_CHARS:
+        raise RedactionError(
+            "Encoded text exceeds the maximum hexadecimal size of "
+            f"{_MAX_HEX_ENCODED_CHARS} characters"
+        )
+    try:
+        raw = bytes.fromhex(payload)
+        decoded = raw.decode("utf-8")
+    except (UnicodeDecodeError, ValueError):
+        return None
+    return decoded if _is_textual(decoded) else None
 
 
 def _base64_data_uri(value: str) -> tuple[str, str, str] | None:
@@ -794,6 +870,18 @@ def _merge_findings(
 ) -> None:
     for key, count in source.items():
         target[key] = target.get(key, 0) + count
+
+
+def _subtract_findings(
+    source: dict[tuple[str, str, str, str, str], int],
+    visible: dict[tuple[str, str, str, str, str], int],
+) -> dict[tuple[str, str, str, str, str], int]:
+    result: dict[tuple[str, str, str, str, str], int] = {}
+    for key, count in source.items():
+        remaining = count - visible.get(key, 0)
+        if remaining > 0:
+            result[key] = remaining
+    return result
 
 
 def _fail_closed_unredactable_redactions(

@@ -314,6 +314,163 @@ class SecretRedactorTests(unittest.TestCase):
         self.assertNotIn(secret, decoded)
         self.assertEqual(decoded, f"credential={REPLACEMENT}")
 
+    def test_percent_and_hex_encoded_sensitive_text_fail_closed_without_rewriting(self) -> None:
+        openai_secret = "sk-" + "proj-" + ("P" * 24)
+        anthropic_secret = "sk-ant-" + ("H" * 24)
+        email = "encoded-owner@example.com"
+        percent_secret = "".join(
+            f"%{byte:02X}" for byte in openai_secret.encode("utf-8")
+        )
+        hex_secret = anthropic_secret.encode("utf-8").hex()
+        hex_email = email.encode("utf-8").hex()
+
+        secret_redactor = SecretRedactor(SecretControls(mode="redact"))
+        for encoded, rule_id in (
+            (percent_secret, "openai_api_key"),
+            (hex_secret, "anthropic_api_key"),
+        ):
+            with self.subTest(rule_id=rule_id):
+                value = {"input": encoded}
+                result = secret_redactor.inspect(
+                    value,
+                    protocol="openai",
+                    model="gpt-test",
+                )
+
+                self.assertEqual(result.value, value)
+                self.assertEqual(result.action, "deny")
+                self.assertEqual(result.rules, (rule_id,))
+                self.assertEqual(result.count, 1)
+                self.assertEqual(result.redaction_count, 0)
+                self.assertEqual(result.findings[0].action, "deny")
+                self.assertNotIn(openai_secret, repr(result.findings))
+                self.assertNotIn(anthropic_secret, repr(result.findings))
+
+        detect_only = SecretRedactor(
+            SecretControls(mode="off"),
+            dlp_controls=DLPControls(
+                rules=(
+                    DLPRuleConfig(
+                        rule_id="email_address",
+                        category="pii",
+                        confidence="low",
+                        action="detect",
+                    ),
+                ),
+            ),
+        ).inspect(
+            {"input": hex_email},
+            protocol="openai",
+            model="gpt-test",
+        )
+        self.assertEqual(detect_only.action, "detect")
+        self.assertEqual(detect_only.value["input"], hex_email)
+        self.assertEqual(detect_only.rules, ("email_address",))
+        self.assertEqual(detect_only.redaction_count, 0)
+
+        short_dictionary_value = "MARS"
+        short_hex = short_dictionary_value.encode("utf-8").hex()
+        short_dictionary = SecretRedactor(
+            SecretControls(mode="off"),
+            dlp_controls=DLPControls(
+                rules=(
+                    DLPRuleConfig(
+                        rule_id="company.short_code",
+                        category="company_dictionary",
+                        confidence="high",
+                        action="redact",
+                        exact_values=(short_dictionary_value,),
+                    ),
+                ),
+            ),
+        ).inspect(
+            {"input": short_hex},
+            protocol="openai",
+            model="gpt-test",
+        )
+        self.assertEqual(short_dictionary.action, "deny")
+        self.assertEqual(short_dictionary.rules, ("company.short_code",))
+        self.assertEqual(short_dictionary.value["input"], short_hex)
+
+        mixed_result = SecretRedactor(
+            SecretControls(mode="redact"),
+            dlp_controls=DLPControls(
+                rules=(
+                    DLPRuleConfig(
+                        rule_id="email_address",
+                        category="pii",
+                        confidence="low",
+                        action="detect",
+                    ),
+                ),
+            ),
+        ).inspect(
+            {"input": f"{email} {percent_secret}"},
+            protocol="openai",
+            model="gpt-test",
+        )
+        self.assertEqual(mixed_result.action, "deny")
+        self.assertEqual(mixed_result.rules, ("email_address", "openai_api_key"))
+        self.assertEqual(mixed_result.count, 2)
+        self.assertEqual(mixed_result.redaction_count, 0)
+
+        ssn = "123-45-6789"
+        visible_only = SecretRedactor(
+            SecretControls(mode="off"),
+            dlp_controls=DLPControls(
+                rules=(
+                    DLPRuleConfig(
+                        rule_id="us_ssn",
+                        category="regulated_identifier",
+                        confidence="high",
+                        action="redact",
+                    ),
+                ),
+            ),
+        ).inspect(
+            {"input": f"visible={ssn}&literal=%2F"},
+            protocol="openai",
+            model="gpt-test",
+        )
+        self.assertEqual(visible_only.action, "redact")
+        self.assertEqual(visible_only.redaction_count, 1)
+        self.assertNotIn(ssn, visible_only.value["input"])
+
+    def test_percent_and_hex_encoded_text_is_bounded_and_safe_values_are_preserved(self) -> None:
+        redactor = SecretRedactor(SecretControls(mode="redact"))
+        safe_values = (
+            "ordinary%20tool%20output",
+            "ordinary tool output".encode("utf-8").hex(),
+            "0x" + "ordinary tool output".encode("utf-8").hex().upper(),
+        )
+        for safe in safe_values:
+            with self.subTest(safe=safe[:16]):
+                result = redactor.inspect({"input": safe}, protocol="openai")
+                self.assertEqual(result.action, "allow")
+                self.assertEqual(result.value["input"], safe)
+
+        secret = "sk-" + "proj-" + ("N" * 24)
+        nested = secret
+        for _ in range(MAX_ENCODED_TEXT_DEPTH):
+            nested = "".join(f"%{byte:02X}" for byte in nested.encode("utf-8"))
+        nested_result = redactor.inspect({"input": nested}, protocol="openai")
+        self.assertEqual(nested_result.action, "deny")
+        self.assertEqual(nested_result.rules, ("openai_api_key",))
+
+        too_deep = "".join(
+            f"%{byte:02X}" for byte in nested.encode("utf-8")
+        )
+        with self.assertRaisesRegex(RedactionError, "maximum nesting depth"):
+            redactor.inspect({"input": too_deep}, protocol="openai")
+
+        oversized_percent = "%41" * (MAX_ENCODED_TEXT_BYTES + 1)
+        with self.assertRaisesRegex(RedactionError, "maximum percent-encoded size"):
+            redactor.inspect({"input": oversized_percent}, protocol="openai")
+
+        oversized_hex = "41" * (MAX_ENCODED_TEXT_BYTES + 1)
+        with self.assertRaisesRegex(RedactionError, "maximum hexadecimal size"):
+            redactor.inspect({"input": oversized_hex}, protocol="openai")
+
     def test_ascii_whitespace_wrapped_base64_is_inspected_conservatively(self) -> None:
         secret = "sk-" + "proj-" + ("W" * 24)
         encoded = base64.b64encode(

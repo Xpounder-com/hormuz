@@ -14,6 +14,7 @@ The input is UTF-8 JSONL. Blank lines are ignored. Every nonblank line is one ca
 ```
 
 - `payload` is the complete provider-shaped JSON object to inspect. It may contain OpenAI or Anthropic messages, tool results, inline text documents, encoded text, or other JSON fields used by the selected rule.
+- The current `hormuz-deterministic-v2` kernel adds bounded printable UTF-8 percent/hex inspection to the existing base64 and provider-aware shapes. Freeze the detector version with every report because results from different versions are not interchangeable.
 - `expected_match` is the human-reviewed ground truth for whether the selected rule should match at least once in that payload.
 - Duplicate JSON members, unknown case members, non-standard JSON constants, invalid UTF-8, non-object payloads, and non-boolean labels fail closed.
 - A corpus is capped at 25 MiB and 10,000 cases. The ordinary detector nesting and encoded-payload limits still apply.

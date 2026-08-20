@@ -3604,6 +3604,83 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertNotIn(openai_secret.encode("utf-8"), self.config.database_path.read_bytes())
         self.assertNotIn(anthropic_secret.encode("utf-8"), self.config.database_path.read_bytes())
 
+    def test_percent_and_hex_tool_payload_secrets_are_denied_for_both_providers(self) -> None:
+        openai_secret = "sk-" + "proj-" + ("X" * 24)
+        anthropic_secret = "sk-ant-" + ("Y" * 24)
+        openai_encoded = "".join(
+            f"%{byte:02X}" for byte in openai_secret.encode("utf-8")
+        )
+        anthropic_encoded = anthropic_secret.encode("utf-8").hex()
+        before = len(FakeProviderHandler.requests)
+
+        openai_status, _, openai_response = self._post(
+            "/v1/responses",
+            {
+                "model": "engineering-fast",
+                "input": [
+                    {
+                        "type": "function_call_output",
+                        "call_id": "call_percent_secret",
+                        "output": openai_encoded,
+                    }
+                ],
+            },
+        )
+        anthropic_status, _, anthropic_response = self._post(
+            "/v1/messages",
+            {
+                "model": "claude-standard",
+                "max_tokens": 20,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": "tool_hex_secret",
+                                "content": anthropic_encoded,
+                            }
+                        ],
+                    }
+                ],
+            },
+            extra_headers={"Anthropic-Version": "2023-06-01"},
+        )
+
+        self.assertEqual(openai_status, 403)
+        self.assertEqual(anthropic_status, 403)
+        self.assertEqual(
+            json.loads(openai_response)["error"]["code"],
+            "hormuz_secret_detected",
+        )
+        self.assertEqual(
+            json.loads(anthropic_response)["error"]["type"],
+            "permission_error",
+        )
+        self.assertEqual(len(FakeProviderHandler.requests), before)
+
+        events = self.gateway.store.audit_events(
+            since="2000-01-01T00:00:00+00:00",
+            kind="security",
+        )
+        self.assertEqual(len(events), 2)
+        self.assertEqual({event["protocol"] for event in events}, {"openai", "anthropic"})
+        self.assertTrue(all(event["event_type"] == "security.secret" for event in events))
+        self.assertTrue(all(event["action"] == "denied" for event in events))
+        self.assertTrue(all(event["detection_count"] == 1 for event in events))
+        serialized_events = repr(events)
+        database = self.config.database_path.read_bytes()
+        for protected in (
+            openai_secret,
+            anthropic_secret,
+            openai_encoded,
+            anthropic_encoded,
+        ):
+            self.assertNotIn(protected, serialized_events)
+            self.assertNotIn(protected.encode("utf-8"), database)
+            self.assertNotIn(protected.encode("utf-8"), openai_response)
+            self.assertNotIn(protected.encode("utf-8"), anthropic_response)
+
     def test_protected_data_in_json_key_is_denied_without_provider_or_persistence(self) -> None:
         openai_secret = "sk-" + "proj-" + ("J" * 24)
         anthropic_secret = "sk-ant-" + ("Q" * 24)

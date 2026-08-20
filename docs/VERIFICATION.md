@@ -639,7 +639,7 @@ The next accepted-ADR-0004 slice was exercised locally on August 16, 2026. No pr
 - red-first checks established that neither the `hormuz.dlp_evaluation` domain module nor `hormuz dlp evaluate` command existed before this slice;
 - the new offline command loads one enabled organization rule and one exact configured upstream protocol/model scope, then runs that detector through the same bounded provider-aware `SecretRedactor` kernel in detect mode. It does not call a provider or gateway, change policy, create an approval, or open the usage, security, context, or session stores;
 - strict UTF-8 JSONL validation rejects duplicate members, unknown case fields, non-standard constants, invalid labels, empty corpora, excessive detector nesting, more than 10,000 cases, and inputs over 25 MiB. Content-bearing payloads are hidden from object representations and bounded validation/detector errors;
-- schema `hormuz.dlp-evaluation.v1` records deterministic detector version `hormuz-deterministic-v1`, package/runtime versions, safe rule and scope metadata, an administrator-controlled corpus version, aggregate finding/case counts, confusion matrix, and derived metrics. It explicitly records that payloads, matched values, case IDs, and corpus hashes are absent and that policy promotion is manual;
+- schema `hormuz.dlp-evaluation.v1` recorded deterministic detector version `hormuz-deterministic-v1` at this checkpoint, package/runtime versions, safe rule and scope metadata, an administrator-controlled corpus version, aggregate finding/case counts, confusion matrix, and derived metrics. It explicitly recorded that payloads, matched values, case IDs, and corpus hashes were absent and that policy promotion was manual;
 - direct and CLI tests proved one true positive, true negative, false positive, and false negative; null-safe metric calculation; encoded organization-dictionary detection; provider/model-scope rejection; no dictionary value or environment-name disclosure; content-free invalid-corpus and detector-failure errors; no partial evidence on failure; overwrite refusal; and private `0600` output;
 - the checked-in synthetic installation fixture produced one true positive and one true negative. That is format/package evidence only and is not represented as an organization-representative evaluation or evidence that the low-confidence email rule should move beyond detect-only;
 - all 277 source tests passed with installed-client gates enabled and no skips. Codex `0.139.0` and the cached official Claude Code `2.1.233` package each completed ordinary generation through Hormuz and provider-compatible loopback fakes;
@@ -1484,6 +1484,66 @@ artifact is
 [`evidence/provider-redaction-conformance-openai-2026-08-19.json`](../evidence/provider-redaction-conformance-openai-2026-08-19.json).
 This is not an organization-specific detector evaluation, complete DLP proof,
 or live Anthropic observation.
+
+### Percent and hexadecimal JSON-string DLP inspection
+
+The ordinary JSON/tool-output decoder, evaluation kernel, both provider paths,
+package artifacts, threat contract, and bounded residual-risk documentation
+were exercised locally on August 20, 2026.
+
+- red-first regressions proved a fully percent-encoded OpenAI-shaped credential
+  and a hexadecimal Anthropic-shaped credential were classified as `allow`; the
+  corresponding gateway requests reached both fake providers with HTTP `200`;
+- detector version `hormuz-deterministic-v2` now recursively inspects printable
+  UTF-8 revealed by `%HH` or hexadecimal text, including optional `0x`, under
+  the existing 1 MiB decoded-value and three-layer limits. Percent decoding
+  deliberately preserves `+` as a literal character;
+- safe and detect-only encoded values remain byte-for-byte unchanged. Hidden
+  findings configured for redaction deny rather than rewriting ambiguous
+  syntax; deny and approval semantics remain unchanged;
+- mixed-view tests prove a direct detect-only email cannot hide a stronger
+  encoded credential, visible findings are subtracted from decoded views rather
+  than double-counted, and a visible redaction remains transformable when the
+  percent escape reveals no additional protected content;
+- unit coverage includes the shortest valid four-byte organization dictionary
+  value, optional upper-case `0x` input, three successful nested layers, a
+  denied fourth layer, separate percent/hex size limits, and unchanged safe
+  forwarding;
+- OpenAI function output and Anthropic tool-result requests carrying the two
+  encoded fake credentials returned provider-shaped HTTP `403`, made zero
+  provider calls, recorded one content-free denied security event each, and
+  left raw plus encoded values absent from responses, event representations,
+  and SQLite;
+- the offline DLP evaluator detected the same organization dictionary value in
+  base64, percent, and hexadecimal cases while retaining only aggregate counts
+  and the new detector version;
+- the complete suite ran 466 tests successfully with three documented opt-in
+  installed-client/profile tests skipped. The focused redaction, evaluator,
+  and gateway slice ran 141 tests successfully with the same three skips;
+- all seven repository-local incident drills passed. The strict threat and
+  compatibility contracts passed while retaining `enterprise_release_ready:
+  false`, five open threats, no verified production persistence/deployment,
+  and independent review pending;
+- the frozen 60-task release benchmark retained corpus SHA-256
+  `9822d592868202c7c7539bcdac7d4a5894c01f9e6dba7a434846516b67b32c17`,
+  precision, recall, and useful-pack rate `1.00`, mean compression `0.840593`,
+  zero safety-threshold failures, and governed p95 selection latency
+  `0.152791` ms; and
+- isolated source and wheel builds succeeded. The exact install-tested wheel
+  SHA-256 was
+  `3b77c2b4ebb4482c59b7d43aeb8e8ab6f56f80310960f6a4cac8208af146d9a3`.
+  The source archive is not self-hashed inside this embedded record because
+  changing the record changes that archive. It contained the implementation,
+  tests, and security docs;
+  an external exact-wheel target loaded `hormuz.redaction`, asserted detector
+  v2, denied the percent-encoded synthetic credential, and compiled.
+
+This closes two ordinary JSON-string encoding bypasses under accepted ADR 0004,
+not issue #10 or the enterprise DLP gate. Non-UTF-8/unknown transfer encodings,
+application-specific decoding, archive contents, provider-referenced file
+contents, source classification, semantic detection, organization-specific
+threshold approval, shared approval/KMS/HA, immutable retention, future cache
+invalidation, and independent review remain open.
 
 ## Automated publication gate
 

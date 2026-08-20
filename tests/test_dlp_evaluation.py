@@ -90,7 +90,7 @@ class DLPEvaluationTests(unittest.TestCase):
         self.assertEqual(result["rule"]["configured_action"], "detect")
         self.assertEqual(
             result["detector"]["version"],
-            "hormuz-deterministic-v1",
+            "hormuz-deterministic-v2",
         )
         self.assertFalse(result["privacy"]["payloads_retained"])
         self.assertFalse(result["promotion"]["automatic"])
@@ -116,14 +116,21 @@ class DLPEvaluationTests(unittest.TestCase):
         encoded = base64.b64encode(
             f"codename={protected}".encode("utf-8")
         ).decode("ascii")
+        percent_encoded = "".join(
+            f"%{byte:02X}" for byte in protected.encode("utf-8")
+        )
+        hex_encoded = protected.encode("utf-8").hex()
         with tempfile.TemporaryDirectory() as temporary:
             corpus = Path(temporary) / "corpus.jsonl"
             corpus.write_text(
-                json.dumps(
-                    {
-                        "payload": {"messages": [{"content": encoded}]},
-                        "expected_match": True,
-                    }
+                "\n".join(
+                    json.dumps(
+                        {
+                            "payload": {"messages": [{"content": item}]},
+                            "expected_match": True,
+                        }
+                    )
+                    for item in (encoded, percent_encoded, hex_encoded)
                 )
                 + "\n",
                 encoding="utf-8",
@@ -138,10 +145,12 @@ class DLPEvaluationTests(unittest.TestCase):
             protocol="anthropic",
             model="claude-company",
         )
-        self.assertEqual(result["confusion_matrix"]["true_positive"], 1)
-        self.assertEqual(result["finding_count"], 1)
+        self.assertEqual(result["confusion_matrix"]["true_positive"], 3)
+        self.assertEqual(result["finding_count"], 3)
         self.assertNotIn(protected, repr(result))
         self.assertNotIn(encoded, repr(result))
+        self.assertNotIn(percent_encoded, repr(result))
+        self.assertNotIn(hex_encoded, repr(result))
         self.assertNotIn("COMPANY_DLP_VALUES", repr(result))
 
         with self.assertRaisesRegex(DLPEvaluationError, "outside the configured scope"):
