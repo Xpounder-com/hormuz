@@ -1,6 +1,6 @@
 # Governed context benchmark
 
-Hormuz ships a deterministic synthetic benchmark for the retrieval, freshness, authorization, compression, and latency contract of governed context packs. It is a product regression and release gate, not evidence that AI improves employee productivity or software quality.
+Hormuz retains a deterministic synthetic benchmark for the deprecated built-in context experiment. It is historical compatibility and research evidence, not a supported Hormuz product regression or release gate, and not evidence that AI improves employee productivity or software quality. See [ADR 0008](decisions/0008-gateway-product-boundary.md).
 
 ## Frozen corpus
 

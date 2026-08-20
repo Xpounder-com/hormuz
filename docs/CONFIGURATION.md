@@ -8,7 +8,7 @@ Hormuz treats configuration as an enforcement input, not a best-effort preferenc
 
 - the root, listener, provider, authentication, OIDC issuer/login/subject, session, context-service, billing-reconciliation, DLP, and policy objects;
 - each static identity and model route;
-- lifecycle promotion paths and context-injection policy;
+- deprecated context-service, lifecycle-promotion, and context-injection compatibility objects;
 - organization, team, and actor policy bodies.
 
 The loader reads at most 1 MiB and decodes exactly one UTF-8 JSON document before it resolves an identity, credential, path, or policy. It then permits at most 64 nesting levels and 100,000 decoded nodes. Duplicate object members are rejected at every depth, including duplicates whose spellings become equal after JSON escape decoding. `NaN`, positive or negative `Infinity`, invalid UTF-8, excessive structure, and ordinary malformed JSON fail with fixed diagnostics that do not reflect the offending member or value. A later duplicate can therefore never silently replace an earlier restriction.

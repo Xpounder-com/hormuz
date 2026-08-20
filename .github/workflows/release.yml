@@ -83,13 +83,6 @@ jobs:
           --output "$RUNNER_TEMP/hormuz-incident-drill-evidence.json"
       - name: Verify complete source suite
         run: python -m unittest -v
-      - name: Verify frozen governed-context release benchmark
-        run: |
-          python benchmarks/context/generate_corpus.py --check
-          hormuz context-benchmark \
-            --profile release \
-            --iterations 5 \
-            --output "$RUNNER_TEMP/context-benchmark-release.json"
       - name: Pull exact PostgreSQL integration image
         run: >-
           docker pull
@@ -165,7 +158,6 @@ jobs:
             ${{ runner.temp }}/hormuz-compatibility-evidence.json
             ${{ runner.temp }}/hormuz-incident-drill-evidence.json
             ${{ runner.temp }}/hormuz-postgres-foundation.json
-            ${{ runner.temp }}/context-benchmark-release.json
             ${{ runner.temp }}/hormuz-release.sbom.cdx.json
             ${{ runner.temp }}/hormuz-release-vulnerabilities.json
             ${{ runner.temp }}/hormuz-release-image-inspect.json

@@ -1,6 +1,6 @@
 # Hormuz threat model
 
-Hormuz keeps its versioned threat register in [`security/threat-model.json`](../security/threat-model.json). The register covers the current CLI-first gateway, OIDC/session, governed-context, local persistence, build, and release boundaries. It deliberately records unimplemented PostgreSQL, KMS, cache, reverse-proxy, and multi-region systems as out of the current implementation scope while retaining the threats they must resolve before enterprise release.
+Hormuz keeps its versioned threat register in [`security/threat-model.json`](../security/threat-model.json). The register covers the current CLI-first gateway, OIDC/session, policy, DLP, provider relay, accounting, persistence, build, and release boundaries. It deliberately records incomplete PostgreSQL, KMS, provider-cache, reverse-proxy, and multi-region systems while retaining the threats they must resolve before enterprise release. The deprecated built-in context experiment is outside the supported product threat model; its compatibility surface remains subject to the general controls in [SECURITY.md](../SECURITY.md) and [ADR 0008](decisions/0008-gateway-product-boundary.md).
 
 Run the same fail-closed contract used by CI:
 

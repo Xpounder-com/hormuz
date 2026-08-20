@@ -12,6 +12,7 @@ from types import SimpleNamespace
 
 from hormuz.cli import build_parser, main
 from hormuz.config import (
+    ContextInjectionPolicy,
     DLPApprovalConfig,
     DLPControls,
     DLPRuleConfig,
@@ -118,6 +119,8 @@ class PostgresFoundationTests(unittest.TestCase):
 
         value = policy_projection(config, "tenant-a")
         serialized = json.dumps(value, sort_keys=True)
+        self.assertEqual(value["schema"], "hormuz.policy-projection.v2")
+        self.assertNotIn("context_injection", serialized)
         self.assertEqual(
             policy_projection_sha256(value),
             policy_projection_sha256(policy_projection(config, "tenant-a")),
@@ -132,6 +135,20 @@ class PostgresFoundationTests(unittest.TestCase):
             "resolved-secret-source",
         ):
             self.assertNotIn(secret, serialized)
+
+        fingerprint = policy_projection_sha256(value)
+        config.organization_policy = Policy(
+            allowed_models=("reasoning",),
+            context_injection=ContextInjectionPolicy(
+                mode="required",
+                allowed_repositories=("deprecated/repository",),
+                token_budget=999,
+            ),
+        )
+        self.assertEqual(
+            policy_projection_sha256(policy_projection(config, "tenant-a")),
+            fingerprint,
+        )
 
     def test_identity_projection_is_secret_free_deterministic_and_tenant_partitioned(self) -> None:
         first = Identity(

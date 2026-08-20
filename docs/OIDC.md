@@ -15,7 +15,7 @@ Register Hormuz as a confidential web OIDC client with the identity provider:
 - a server-held client secret; never install it on employee machines.
 - a login client ID distinct from every workload API audience, so an ID token can never satisfy the resource-server audience check.
 
-Generate a separate 32-byte session-store master key and place the base64url value and OIDC client secret in the Hormuz service environment. The PostgreSQL deployment uses the shared RLS schema for accounting, identity and policy projection, sessions, DLP approvals, and security evidence while keeping governed context in its explicitly identified store. SQLite development deployments keep usage, context, and session databases separate.
+Generate a separate 32-byte session-store master key and place the base64url value and OIDC client secret in the Hormuz service environment. The PostgreSQL deployment uses the shared RLS schema for accounting, identity and policy projection, sessions, DLP approvals, and security evidence. SQLite development deployments keep usage and session databases separate; the deprecated context experiment retains its own optional SQLite store only when explicitly invoked.
 
 ```json
 {
@@ -218,7 +218,7 @@ Authentication logs contain only a stable failure code. Hormuz does not log toke
 
 An opt-in local macOS test now proves that exact installed Codex and Claude Code
 clients can use client-bound Hormuz sessions from the real Keychain for both
-gateway inference authentication and a model-requested governed-context MCP
+gateway inference authentication and a deprecated experimental context MCP
 call. The deterministic fixture issues the short-lived session inside the local
 broker and uses loopback provider fakes; it does not claim a browser enrollment
 against a real IdP, Linux/Windows secure-store support, or production custody.

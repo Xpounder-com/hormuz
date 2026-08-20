@@ -10,7 +10,6 @@ import json
 from typing import Iterator
 
 from .config import (
-    ContextInjectionPolicy,
     DLPPolicyOverlay,
     DLPRuleConfig,
     GatewayConfig,
@@ -46,18 +45,6 @@ def _sorted_optional(values: tuple[str, ...] | None) -> list[str] | None:
     return None if values is None else sorted(set(values))
 
 
-def _context_policy(value: ContextInjectionPolicy) -> dict[str, object]:
-    return {
-        "mode": value.mode,
-        "allowed_clients": _sorted_optional(value.allowed_clients),
-        "allowed_models": _sorted_optional(value.allowed_models),
-        "allowed_repositories": _sorted_optional(value.allowed_repositories),
-        "max_classification": value.max_classification,
-        "token_budget": value.token_budget,
-        "max_items": value.max_items,
-    }
-
-
 def _model_limit(value: ModelUsageLimit) -> dict[str, object]:
     return {
         "monthly_token_limit": value.monthly_token_limit,
@@ -81,7 +68,6 @@ def _policy(value: Policy) -> dict[str, object]:
             alias: _model_limit(limit)
             for alias, limit in sorted(value.model_limits.items())
         },
-        "context_injection": _context_policy(value.context_injection),
     }
 
 
@@ -117,7 +103,7 @@ def policy_projection(config: GatewayConfig, organization_id: str) -> dict[str, 
     actor_ids = {identity.actor_id for identity in identities}
     team_ids = {identity.team_id for identity in identities}
     return {
-        "schema": "hormuz.policy-projection.v1",
+        "schema": "hormuz.policy-projection.v2",
         "organization_id": organization_id,
         "model_routes": {
             alias: {

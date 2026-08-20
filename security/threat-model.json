@@ -3,46 +3,45 @@
   "version": "2026-08-20",
   "product": "Hormuz",
   "scope": {
-    "statement": "The CLI-first Hormuz alpha that authenticates Codex and Claude Code requests, enforces model, budget, DLP, and governed-context policy, relays OpenAI and Anthropic protocols, and records content-free control-plane evidence.",
+    "statement": "The CLI-first Hormuz alpha that authenticates Codex and Claude Code requests, enforces identity, model, budget, DLP, routing, and accounting policy, relays OpenAI and Anthropic protocols, and records content-free control-plane evidence.",
     "in_scope": [
       "HTTP ingress, authentication, policy, DLP, provider relay, and usage accounting",
       "OIDC discovery, browser login, rotating SQLite or PostgreSQL sessions, and secure client credential custody",
-      "governed-context retrieval, lifecycle evidence, injection, and local persistence",
+      "policy administration, deterministic projection, activation, and rollback boundaries",
       "configuration, build, CI, container, and release evidence boundaries"
     ],
     "out_of_scope": [
       "provider-side systems beyond the documented HTTPS API contract",
       "employee endpoints before requests enter Hormuz",
       "a production PostgreSQL topology beyond the bounded accounting/identity/policy/session/approval slices, KMS, cache, reverse proxy, or multi-region deployment that has not been fully implemented or verified",
-      "an independent penetration test, which remains a separate release gate"
+      "an independent penetration test, which remains a separate release gate",
+      "the deprecated built-in context experiment and any separate metadata, memory, retrieval, or knowledge-quality product"
     ]
   },
   "assets": [
     {"id": "AST-001", "name": "Provider API and billing administrator credentials", "security_properties": ["confidentiality", "integrity"]},
     {"id": "AST-002", "name": "Employee, workload, and Hormuz session credentials", "security_properties": ["confidentiality", "integrity", "availability"]},
-    {"id": "AST-003", "name": "Organization model, budget, DLP, and context policy", "security_properties": ["integrity", "availability"]},
+    {"id": "AST-003", "name": "Organization model, budget, DLP, routing, and cache policy", "security_properties": ["integrity", "availability"]},
     {"id": "AST-004", "name": "Usage, token, cost, reservation, and billing metadata", "security_properties": ["confidentiality", "integrity", "availability"]},
-    {"id": "AST-005", "name": "Governed organizational context and provenance", "security_properties": ["confidentiality", "integrity", "availability"]},
-    {"id": "AST-006", "name": "Lifecycle evidence, snapshots, and verification state", "security_properties": ["integrity", "availability"]},
+    {"id": "AST-005", "name": "Provider-bound customer content during transient inspection and relay", "security_properties": ["confidentiality", "integrity"]},
     {"id": "AST-007", "name": "Audit and security evidence", "security_properties": ["confidentiality", "integrity", "availability"]},
     {"id": "AST-008", "name": "Gateway availability and budget enforcement capacity", "security_properties": ["integrity", "availability"]},
     {"id": "AST-009", "name": "Tenant, actor, team, membership, and capability bindings", "security_properties": ["confidentiality", "integrity", "availability"]}
   ],
   "trust_boundaries": [
-    {"id": "TB-001", "name": "Employee client ingress", "from": "Codex, Claude Code, and administrative CLIs", "to": "Hormuz HTTP and MCP boundaries", "data": "identity credentials, provider-compatible requests, administration inputs, and context queries"},
+    {"id": "TB-001", "name": "Employee client ingress", "from": "Codex, Claude Code, and administrative CLIs", "to": "Hormuz HTTP boundary", "data": "identity credentials, provider-compatible requests, and administration inputs"},
     {"id": "TB-002", "name": "Provider egress", "from": "Hormuz", "to": "OpenAI and Anthropic HTTPS endpoints", "data": "inspected provider requests, server-held provider credentials, streamed responses, and provider usage metadata"},
     {"id": "TB-003", "name": "Identity provider", "from": "Hormuz and employee browser", "to": "configured OIDC discovery, authorization, token, and JWKS endpoints", "data": "OIDC metadata, authorization codes, PKCE material, ID tokens, and access-token verification keys"},
-    {"id": "TB-004", "name": "Local durable state", "from": "Hormuz runtime", "to": "default SQLite usage/session/approval stores plus governed-context SQLite store", "data": "content-free telemetry, keyed request fingerprints, session state, and intentionally content-bearing governed context"},
-    {"id": "TB-005", "name": "Lifecycle connector ingress", "from": "trusted CI and source connectors", "to": "Hormuz lifecycle API", "data": "normalized evidence envelopes, repository snapshots, and revalidation requests"},
+    {"id": "TB-004", "name": "Local durable state", "from": "Hormuz runtime", "to": "default SQLite usage, session, and approval stores", "data": "content-free telemetry, keyed request fingerprints, and session state"},
     {"id": "TB-006", "name": "Build and release", "from": "source repository and GitHub Actions", "to": "Python distributions and private GHCR images", "data": "source, locked dependencies, build inputs, SBOM, provenance, signatures, and release metadata"},
-    {"id": "TB-007", "name": "Shared control plane", "from": "Hormuz replicas and operators", "to": "current PostgreSQL accounting/identity/policy/session/approval stores and future KMS, caches, queues, object storage, and observability systems", "data": "tenant-scoped identity, authorization versions, usage, sessions, policy metadata, keyed approval fingerprints, context, secrets, jobs, and operational evidence"}
+    {"id": "TB-007", "name": "Shared control plane", "from": "Hormuz replicas and operators", "to": "current PostgreSQL accounting, identity, policy, session, and approval stores plus future KMS, caches, queues, object storage, and observability systems", "data": "tenant-scoped identity, authorization versions, staged and active policy versions, usage, sessions, policy metadata, keyed approval fingerprints, secrets, and operational evidence"}
   ],
   "incident_scenarios": [
     {"id": "provider_outage", "name": "Provider outage or degradation", "threat_ids": ["TM-011", "TM-012"]},
     {"id": "idp_outage", "name": "Identity provider outage or signing-key failure", "threat_ids": ["TM-001", "TM-012"]},
     {"id": "credential_compromise", "name": "Employee, provider, or signing credential compromise", "threat_ids": ["TM-001", "TM-003", "TM-007", "TM-014"]},
     {"id": "tenant_isolation_incident", "name": "Cross-tenant authorization or persistence disclosure", "threat_ids": ["TM-002", "TM-017"]},
-    {"id": "stale_context_incident", "name": "Stale, poisoned, or contradictory context reaches a model", "threat_ids": ["TM-005", "TM-006"]},
+    {"id": "policy_rollout_incident", "name": "Stale or unauthorized policy version reaches a gateway", "threat_ids": ["TM-013"]},
     {"id": "cost_spike", "name": "Unexpected token spend, budget bypass, or accounting drift", "threat_ids": ["TM-008", "TM-009", "TM-011"]},
     {"id": "data_deletion_request", "name": "Customer export, deletion, residency, or legal-hold request", "threat_ids": ["TM-010", "TM-016", "TM-018"]}
   ],
@@ -67,7 +66,7 @@
       "title": "Cross-tenant data access through missing scope enforcement",
       "category": "elevation_of_privilege",
       "boundary_ids": ["TB-001", "TB-004", "TB-007"],
-      "asset_ids": ["AST-004", "AST-005", "AST-006", "AST-007", "AST-009"],
+      "asset_ids": ["AST-004", "AST-005", "AST-007", "AST-009"],
       "status": "open",
       "scenario": "A missing application predicate, cache key, job binding, foreign key, or database policy exposes one tenant's data to another.",
       "controls": [
@@ -76,7 +75,7 @@
         {"kind": "code", "ref": "hormuz/postgres.py", "claim": "Schema-v4 migration and verification enforce separate roles, forced RLS, immutable tenant keys, read-only identity/policy projection privileges, exact columns, and transaction-local tenant context."},
         {"kind": "test", "ref": "scripts/postgres_foundation_integration.py", "claim": "The digest-pinned two-tenant integration exercises migration idempotency, missing/cleared tenant context, reused-connection switching, cross-tenant denial, composite tenant foreign keys, accounting, desired-state identities and policies, multi-instance sessions, security evidence, and atomic one-time approvals."}
       ],
-      "residual_risk": "PostgreSQL is connected to accounting, human sessions, policy projections, DLP approvals, and security evidence, but governed context remains SQLite; pooled load, backup/restore, deletion, coordinated policy rollout, HA, KMS, SCIM, and independent review remain unproved.",
+      "residual_risk": "PostgreSQL is connected to accounting, human sessions, policy projections, DLP approvals, and security evidence; pooled load, backup/restore, deletion, coordinated policy rollout, HA, KMS, SCIM, and independent review remain unproved.",
       "release_gate": "Issue #6"
     },
     {
@@ -109,37 +108,6 @@
       ],
       "residual_risk": "Unknown encodings, archive contents, referenced files, semantic company information, and organization-specific quality thresholds remain open.",
       "release_gate": "Issue #10"
-    },
-    {
-      "id": "TM-005",
-      "title": "Poisoned or stale governed context changes model behavior",
-      "category": "tampering",
-      "boundary_ids": ["TB-004", "TB-005"],
-      "asset_ids": ["AST-005", "AST-006"],
-      "status": "partially_mitigated",
-      "scenario": "An obsolete, contradictory, or instruction-bearing record is retrieved and injected as trusted organizational knowledge.",
-      "controls": [
-        {"kind": "code", "ref": "hormuz/context.py", "claim": "Authorization, source/dependency freshness, bounded quarantine, contradiction handling, ranking, and token budgets precede rendering."},
-        {"kind": "test", "ref": "tests/test_context.py", "claim": "Retrieval tests cover scope, freshness, quarantine, contradictions, determinism, and budgeting."},
-        {"kind": "test", "ref": "tests/test_context_benchmark.py", "claim": "The frozen release profile measures leakage, freshness, lifecycle, quality, and latency on a synthetic corpus."}
-      ],
-      "residual_risk": "Detection is deterministic rather than semantic, source connectors are not automatic, customer data has not established quality, and continuation binding remains undecided.",
-      "release_gate": "Issues #5, #10, #12, and #15"
-    },
-    {
-      "id": "TM-006",
-      "title": "Forged lifecycle evidence promotes unverified memory",
-      "category": "spoofing",
-      "boundary_ids": ["TB-005"],
-      "asset_ids": ["AST-005", "AST-006"],
-      "status": "open",
-      "scenario": "An authenticated connector submits a syntactically valid but false merge, CI, review, ADR, incident, or human-confirmation event.",
-      "controls": [
-        {"kind": "code", "ref": "hormuz/context_lifecycle.py", "claim": "Evidence is immutable, subject-bound, versioned, conflict-aware, and promoter-gated."},
-        {"kind": "documentation", "ref": "docs/decisions/0005-github-lifecycle-event-trust.md", "claim": "The proposed first source collector separates signed GitHub App events from delegated workflow attestations."}
-      ],
-      "residual_risk": "Authentication proves connector identity, not event truth; no owner-approved source protocol or signed collector is implemented.",
-      "release_gate": "ADR 0005 owner approval and issue #12"
     },
     {
       "id": "TM-007",
@@ -246,7 +214,7 @@
         {"kind": "test", "ref": "tests/test_cli.py", "claim": "Unknown and duplicate fields, invalid references, unsafe URLs, digest mismatch, and immutable startup behavior are tested."}
       ],
       "residual_risk": "A digest is not a signature; signer identity, approval authority, live rotation, and deployment-coordinated rollback remain absent.",
-      "release_gate": "Issues #9, #11, and #17"
+      "release_gate": "Issues #9 and #21"
     },
     {
       "id": "TM-014",
@@ -275,9 +243,9 @@
       "controls": [
         {"kind": "code", "ref": "hormuz/content_free.py", "claim": "Routine telemetry tables are bound to reviewed exact-column manifests and content-bearing fields are excluded."},
         {"kind": "test", "ref": "tests/test_content_free_schema.py", "claim": "Schema drift and prohibited telemetry columns fail closed."},
-        {"kind": "documentation", "ref": "docs/SECRET_CONTROLS.md", "claim": "The provider-content, usage, approval, context, log, and deployment-component boundaries are explicit."}
+        {"kind": "documentation", "ref": "docs/SECRET_CONTROLS.md", "claim": "The provider-content, usage, approval, log, and deployment-component boundaries are explicit."}
       ],
-      "residual_risk": "Reverse proxies, shippers, crash reporters, process dumps, providers, and the intentionally content-bearing context store require separate controls.",
+      "residual_risk": "Reverse proxies, shippers, crash reporters, process dumps, and provider-side retention require separate controls.",
       "release_gate": "Issues #10, #11, and #17"
     },
     {
@@ -285,7 +253,7 @@
       "title": "Deletion, retention, legal hold, restore, or residency is incomplete",
       "category": "repudiation",
       "boundary_ids": ["TB-004", "TB-007"],
-      "asset_ids": ["AST-004", "AST-005", "AST-006", "AST-007", "AST-009"],
+      "asset_ids": ["AST-004", "AST-005", "AST-007", "AST-009"],
       "status": "open",
       "scenario": "A customer request is reported complete while data remains in a store, backup, replica, cache, export, or unapproved region, or required evidence is deleted.",
       "controls": [
@@ -311,17 +279,18 @@
     },
     {
       "id": "TM-018",
-      "title": "Reusable cache leaks context across identities or survives invalidation",
+      "title": "Provider-native cache violates organization privacy policy or accounting",
       "category": "information_disclosure",
       "boundary_ids": ["TB-004", "TB-007"],
-      "asset_ids": ["AST-003", "AST-005", "AST-009"],
+      "asset_ids": ["AST-003", "AST-004", "AST-009"],
       "status": "open",
-      "scenario": "A future context-pack cache omits tenant or authorization scope from its key, serves content after source or policy change, or conflicts with provider cache privacy policy.",
+      "scenario": "Provider-native prompt caching remains enabled outside an authorized scope, retains content contrary to policy, or reports cache usage in a way Hormuz misattributes or misprices.",
       "controls": [
-        {"kind": "documentation", "ref": "docs/decisions/0003-cache-privacy-tiers.md", "claim": "The proposed cache boundary binds tenant, access scope, policy, source revisions, provider behavior, retention, and invalidation."}
+        {"kind": "documentation", "ref": "docs/decisions/0003-cache-privacy-tiers.md", "claim": "The accepted provider-cache boundary requires explicit privacy tiers, provider semantics, retention disclosure, enforcement evidence, and separate cache token accounting."},
+        {"kind": "test", "ref": "tests/test_usage.py", "claim": "Provider-native cache read and write token fields are parsed separately from ordinary input and output usage."}
       ],
-      "residual_risk": "Cache privacy tiers are unapproved and the reusable context-pack cache is intentionally not implemented.",
-      "release_gate": "ADR 0003 owner approval and issue #14"
+      "residual_risk": "Provider cache semantics, retention, regional behavior, pricing, and enforcement differ by provider and model and are not yet governed end to end.",
+      "release_gate": "Issue #22"
     }
   ],
   "independent_review": {

@@ -5,8 +5,8 @@ executable schema-version-4 accounting, identity-projection, policy-projection,
 human-session, and DLP/security backend. A deployment can opt into PostgreSQL
 for usage, cost evidence, usage-read audit, atomic budget reservations,
 multi-instance human sessions, one-time DLP approvals, and security evidence.
-Governed context remains in its explicitly identified SQLite store during this
-transition.
+The deprecated built-in context experiment is deliberately excluded from the
+PostgreSQL production-persistence plan under ADR 0008.
 
 ## Boundary proved by this checkpoint
 
@@ -86,13 +86,20 @@ principal authorization versions, revokes their active sessions, and is
 idempotent when desired state is unchanged.
 
 Run `policies sync` with the owner DSN after every approved model, budget,
-redaction, DLP, or context-injection policy change. It writes a tenant-scoped,
+redaction, or DLP policy change. It writes a tenant-scoped,
 canonical projection containing policy metadata and a fingerprint. The
 projection excludes identity and provider credentials, resolved custom-secret
 values, DLP dictionary values, the approval fingerprint key, prompts,
 responses, matched values, filenames, and source content. Runtime access is
 read-only, and a PostgreSQL-backed gateway fails startup with
 `policy_projection_stale` when any configured tenant does not match.
+
+ADR 0008 changes the canonical document from
+`hormuz.policy-projection.v1` to `hormuz.policy-projection.v2`. Version 2 omits
+deprecated built-in context-injection configuration. Deployments upgrading
+from version 1 must run `hormuz policies sync` through the schema-owner path
+before starting the replacement runtime; the expected startup failure before
+that sync is `policy_projection_stale`. The database schema does not change.
 
 The live gateway never receives schema-owner credentials. Identity and policy
 projection tables are read-only, while the previously accepted tenant-scoped

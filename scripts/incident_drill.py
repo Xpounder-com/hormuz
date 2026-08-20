@@ -25,7 +25,7 @@ REQUIRED_INCIDENT_SCENARIOS = {
     "idp_outage",
     "credential_compromise",
     "tenant_isolation_incident",
-    "stale_context_incident",
+    "policy_rollout_incident",
     "cost_spike",
     "data_deletion_request",
 }

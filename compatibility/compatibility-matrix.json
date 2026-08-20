@@ -149,7 +149,7 @@
         "production_supported": false,
         "tested_environments": [
           "loopback protocol-shaped fake OpenAI provider",
-          "opt-in macOS 26.2 arm64 live OpenAI observations on 2026-08-19 and governed-context compaction on 2026-08-20"
+          "opt-in macOS 26.2 arm64 live OpenAI observations on 2026-08-19 and deprecated experimental context compaction on 2026-08-20"
         ],
         "interfaces": [
           "POST /v1/responses",
@@ -168,7 +168,8 @@
           "evidence/client-conformance-codex-openai-2026-08-19.json"
         ],
         "limitations": [
-          "The blocking release gate remains a local fake; the content-free artifacts record opt-in live connectivity, one fixed synthetic-secret redaction path, one fixed governed-context compaction path, and pinned Codex observations, not complete DLP, a provider SLA, retention, residency, availability, or every-model claim.",
+          "The blocking release gate remains a local fake; the content-free artifacts record opt-in live connectivity, one fixed synthetic-secret redaction path, one deprecated experimental context-compaction path, and pinned Codex observations, not complete DLP, a provider SLA, retention, residency, availability, or every-model claim.",
+          "Context-specific compaction evidence is retained as historical compatibility evidence under ADR 0008 and is not a supported product or release criterion.",
           "Compaction coverage is limited to direct current-user input plus required-mode denial without it; no authorized continuation-binding observation exists."
         ]
       },
@@ -272,7 +273,7 @@
         "interfaces": [
           "usage and billing metadata",
           "sessions and approvals",
-          "governed context"
+          "deprecated experimental context store when explicitly invoked"
         ],
         "evidence": [
           "docs/ARCHITECTURE.md#SQLite ledgers (default)",
@@ -319,7 +320,7 @@
           ".github/workflows/ci.yml#PostgreSQL migration and RLS foundation"
         ],
         "limitations": [
-          "ADR 0002 is accepted and schema version 4 can persist live usage, cost evidence, usage-read audit, shared budget reservations, configuration-seeded identities and policies, authorization versions, human sessions, DLP approvals, and security evidence. Governed context remains SQLite-backed; SCIM, cutover backfill, coordinated policy rollout, pooling, backup, restore, deletion, KMS, HA, and production-persistence proof remain open."
+          "ADR 0002 is accepted and schema version 4 can persist live usage, cost evidence, usage-read audit, shared budget reservations, configuration-seeded identities and policies, authorization versions, human sessions, DLP approvals, and security evidence. The deprecated context experiment is excluded from this persistence plan; SCIM, cutover backfill, coordinated policy rollout, pooling, backup, restore, deletion, KMS, HA, and production-persistence proof remain open."
         ]
       }
     ],

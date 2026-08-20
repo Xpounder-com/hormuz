@@ -17,9 +17,9 @@ These are executable control regressions, not live disaster-recovery exercises. 
 
 For every incident, the functional lead and incident commander should preserve metadata-only evidence and follow four phases:
 
-1. Detect and classify from authenticated health, policy, usage, security, billing, or lifecycle signals. Do not copy prompts, responses, secrets, or governed-context content into the incident ledger.
+1. Detect and classify from authenticated health, policy, usage, security, or billing signals. Do not copy prompts, responses, secrets, or provider-bound customer content into the incident ledger.
 2. Contain with the narrowest fail-closed control that prevents new harm while preserving auditability. Never relax tenant, DLP, identity, or budget policy to restore availability.
-3. Recover only after the affected credential, provider path, tenant boundary, context source, reservation, or record set is verified against its source of truth.
+3. Recover only after the affected credential, provider path, tenant boundary, policy version, reservation, or record set is verified against its source of truth.
 4. Verify the relevant exact regression, reconcile retained metadata, record the unresolved production gaps, and obtain authorized approval before closing or relaxing containment.
 
 ## Provider outage
@@ -50,12 +50,12 @@ For every incident, the functional lead and incident commander should preserve m
 - Recover: verify every application predicate, database policy, cache key, worker binding, and reused connection before restoring the path.
 - Verify: run the tenant-scoped session administration regression. Production PostgreSQL RLS and independent adversarial evidence remain open.
 
-## Stale context incident
+## Policy rollout incident
 
-- Detect: source or dependency revision mismatch, negative lifecycle evidence, contradiction, or retrieval of a superseded record.
-- Contain: invalidate or quarantine the affected record or pack; fail closed when context is required and trusted state cannot be established.
-- Recover: revalidate against source-linked evidence and create a new version rather than silently mutating provenance.
-- Verify: run the source and dependency invalidation regression. Automatic trusted collectors, semantic poisoning detection, and customer evaluation remain open.
+- Detect: a desired policy fingerprint differs from the shared projection, an unauthorized version is staged or activated, or replicas report different active versions.
+- Contain: fail closed before serving provider traffic and preserve metadata-only policy version and actor evidence.
+- Recover: reconcile the desired and projected policy, require authorized activation, and restore replicas to one approved version.
+- Verify: run the stale-policy startup regression. Live versioned activation, approval, rollback, and replica rollout remain open in issue #21.
 
 ## Cost spike
 
@@ -66,7 +66,7 @@ For every incident, the functional lead and incident commander should preserve m
 
 ## Data deletion request
 
-- Detect: an authenticated request with verified tenant scope and an explicit inventory of governed context, usage, audit, session, backup, and provider-side data.
+- Detect: an authenticated request with verified tenant scope and an explicit inventory of usage, audit, session, policy, approval, backup, and provider-side data.
 - Contain: prevent new writes in the approved deletion scope while preserving records subject to an authorized legal hold.
 - Recover: delete or anonymize only according to the approved retention contract, verify referential integrity, and create metadata-only attestation evidence.
-- Verify: run the governed-context physical-deletion regression. Complete tenant erasure, backups, legal holds, provider systems, residency, and attestation remain open.
+- Verify: run the tenant isolation regression before any deletion workflow. Complete tenant erasure, backups, legal holds, provider systems, residency, and attestation remain open.

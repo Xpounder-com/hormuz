@@ -12,7 +12,7 @@ Hormuz has a tag-driven release contract for a private, signed reference image i
 - the annotated tag resolves to the event commit;
 - that commit is reachable from `origin/main`; and
 - source verification and publication run only on GitHub-hosted runners; and
-- the complete source, installed official-client, frozen benchmark, distribution, restricted-container smoke, SBOM, and high/critical vulnerability gates pass.
+- the complete source, installed official-client, distribution, restricted-container smoke, SBOM, and high/critical vulnerability gates pass. The deprecated built-in context benchmark is historical experimental evidence and is not a release criterion.
 
 The workflow then builds `linux/amd64` and `linux/arm64`, pushes an untagged candidate by digest, validates the pulled `linux/amd64` source/version/revision labels and numeric non-root user, signs the exact multi-platform digest with GitHub Actions OIDC, renders and signs a content-free SLSA provenance v1 predicate, and independently verifies both the signature and exact predicate. It also proves that the package is private and linked to `Xpounder-com/hormuz` before creating either the version or revision alias.
 

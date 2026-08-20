@@ -56,16 +56,16 @@
       "production_gap": "This SQLite application-scope regression is not production PostgreSQL RLS, cache-key isolation, multi-replica containment, or independent penetration evidence."
     },
     {
-      "id": "stale_context_incident",
-      "name": "Stale, poisoned, or contradictory context reaches a model",
-      "lead_role": "context_response",
+      "id": "policy_rollout_incident",
+      "name": "Stale or unauthorized policy version reaches a gateway",
+      "lead_role": "platform_response",
       "coordination_role": "incident_commander",
-      "objective": "Invalidate verified context when its source or dependency changes while deferring rather than guessing when trusted observation is missing.",
+      "objective": "Fail gateway construction before opening a socket or repository when the shared policy projection is stale.",
       "test_ids": [
-        "tests.test_context_lifecycle.ContextLifecycleDomainTests.test_source_and_dependency_changes_invalidate_but_missing_observation_defers"
+        "tests.test_postgres.PostgresFoundationTests.test_postgres_gateway_store_fails_closed_before_building_on_stale_policy"
       ],
-      "runbook": "docs/INCIDENT_RESPONSE.md#stale-context-incident",
-      "production_gap": "This deterministic lifecycle regression does not exercise automatic source collectors, semantic poisoning detection, continuation binding, or customer-specific retrieval quality."
+      "runbook": "docs/INCIDENT_RESPONSE.md#policy-rollout-incident",
+      "production_gap": "This startup fail-closed regression does not provide live versioned activation, approval, rollback, replica rollout, or operator reconciliation; issue #21 remains open."
     },
     {
       "id": "cost_spike",
@@ -84,12 +84,12 @@
       "name": "Customer export, deletion, residency, or legal-hold request",
       "lead_role": "privacy_response",
       "coordination_role": "incident_commander",
-      "objective": "Reject deletion that would break a supersession reference, then physically remove an eligible governed-context record and its plaintext from local storage.",
+      "objective": "Keep security and reservation records isolated to their owning organization before any tenant-scoped retention or deletion workflow is attempted.",
       "test_ids": [
-        "tests.test_context_store.ContextStoreTests.test_supersession_cycle_reference_and_physical_delete_guards"
+        "tests.test_store.UsageStoreMigrationTests.test_usage_security_and_reservations_are_isolated_by_organization"
       ],
       "runbook": "docs/INCIDENT_RESPONSE.md#data-deletion-request",
-      "production_gap": "This local governed-context deletion does not cover complete tenant erasure, usage and audit retention, backups, legal holds, provider-side data, residency, or deletion attestations."
+      "production_gap": "This local isolation regression does not implement complete tenant erasure, usage and audit retention, backups, legal holds, provider-side data handling, residency, or deletion attestations."
     }
   ]
 }

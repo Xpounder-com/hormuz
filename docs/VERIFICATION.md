@@ -1943,12 +1943,45 @@ connection pooling, KMS custody/rotation, backup/PITR and restore, HA/failover,
 retention/export/delete operations, and independent security review remain
 open. Issue #6, issue #10, and draft PR #19 therefore remain open.
 
+### Gateway-only policy projection and release-contract slice
+
+The second issue #20 boundary slice was exercised locally on August 20, 2026:
+
+- `hormuz.policy-projection.v2` retains model routes, model and budget limits,
+  fallback behavior, secret controls, and DLP/approval policy while excluding
+  deprecated context-injection configuration. Changing only that legacy
+  configuration leaves the projection fingerprint unchanged;
+- an existing version-1 projection fails replacement-runtime startup with the
+  established `policy_projection_stale` error until an owner runs
+  `hormuz policies sync`. This is a document migration only; PostgreSQL schema
+  version 4 is unchanged;
+- the machine-readable threat register now covers gateway identity, policy,
+  DLP, routing, provider relay, accounting, and provider-native cache risk. Its
+  required policy-rollout drill binds to the stale-projection startup test;
+- the data-deletion drill now proves tenant isolation of usage, security, and
+  reservation records without claiming that a deprecated context-record test
+  establishes an organization deletion workflow;
+- ordinary and tag release workflows no longer run or retain the deprecated
+  context benchmark. Context tests remain in the complete source suite as
+  compatibility evidence, and the public compatibility matrix labels the live
+  context-compaction observation historical and experimental;
+- focused policy-projection, threat-model, incident-drill, compatibility, and
+  release-contract tests passed; and
+- the complete source suite passed 519 tests in `137.068` seconds with the same
+  three documented opt-in installed-client/profile skips. `git diff --check`
+  also passed.
+
+This is a source-level product-boundary and upgrade-contract checkpoint. It is
+not versioned live policy administration, authorized activation, coordinated
+replica rollout, or rollback; those remain issue #21. The deprecated context
+configuration, commands, routes, schema columns, and tests remain readable and
+executable until a separately versioned removal and sunset decision.
+
 ## Automated publication gate
 
-Ordinary GitHub CI runs eight independent gate families without provider credentials:
+Ordinary GitHub CI runs seven independent gate families without provider credentials:
 
-- the complete unit, context-governance, and loopback gateway suite on Python 3.11, 3.12, 3.13, and 3.14;
-- deterministic corpus regeneration plus the 60-task governed-context release profile, with machine-readable evidence retained as an artifact;
+- the complete unit, compatibility, and loopback gateway suite on Python 3.11, 3.12, 3.13, and 3.14;
 - two independent exact-commit source-distribution and wheel builds under pinned packaging inputs, raw-byte equality with a content-free digest manifest, and installation of the verified wheel in a clean virtual environment;
 - installed-client routing through local fake providers using pinned official Codex and Claude Code package versions;
 - pinned-base/hash-locked container build, restricted-runtime smoke, CycloneDX SBOM, and a fail-on-any-high-or-critical vulnerability gate;
