@@ -1,6 +1,6 @@
 {
   "schema": "hormuz.threat-model.v1",
-  "version": "2026-08-17",
+  "version": "2026-08-20",
   "product": "Hormuz",
   "scope": {
     "statement": "The CLI-first Hormuz alpha that authenticates Codex and Claude Code requests, enforces model, budget, DLP, and governed-context policy, relays OpenAI and Anthropic protocols, and records content-free control-plane evidence.",
@@ -13,7 +13,7 @@
     "out_of_scope": [
       "provider-side systems beyond the documented HTTPS API contract",
       "employee endpoints before requests enter Hormuz",
-      "a production PostgreSQL, KMS, cache, reverse proxy, or multi-region topology that has not been approved or implemented",
+      "a production PostgreSQL-backed gateway, KMS, cache, reverse proxy, or multi-region topology that has not been fully implemented or verified",
       "an independent penetration test, which remains a separate release gate"
     ]
   },
@@ -72,10 +72,12 @@
       "scenario": "A missing application predicate, cache key, job binding, foreign key, or database policy exposes one tenant's data to another.",
       "controls": [
         {"kind": "test", "ref": "tests/test_gateway.py", "claim": "Current single-node APIs exercise identity-derived organization scope and cross-organization denials."},
-        {"kind": "documentation", "ref": "docs/decisions/0002-enterprise-tenancy-and-persistence.md", "claim": "The proposed production contract requires mandatory tenant keys, application predicates, forced PostgreSQL RLS, and reused-connection isolation tests."}
+        {"kind": "documentation", "ref": "docs/decisions/0002-enterprise-tenancy-and-persistence.md", "claim": "The accepted production contract requires mandatory tenant keys, application predicates, forced PostgreSQL RLS, and reused-connection isolation tests."},
+        {"kind": "code", "ref": "hormuz/postgres.py", "claim": "Schema-v1 migration and verification enforce separate roles, forced RLS, immutable tenant keys, bounded runtime privileges, and transaction-local tenant context."},
+        {"kind": "test", "ref": "scripts/postgres_foundation_integration.py", "claim": "The digest-pinned two-tenant integration exercises migration idempotency, missing/cleared tenant context, reused-connection switching, cross-tenant denial, and composite tenant foreign keys."}
       ],
-      "residual_risk": "The accepted hosted tenancy and persistence implementation does not exist; SQLite tests are not production tenant-isolation evidence.",
-      "release_gate": "ADR 0002 owner approval and issue #6"
+      "residual_risk": "The PostgreSQL foundation is not connected to the gateway usage, context, session, or policy repositories; repository parity, pooled multi-instance concurrency, backup/restore, deletion, HA, KMS, and independent review remain unproved.",
+      "release_gate": "Issue #6"
     },
     {
       "id": "TM-003",
@@ -286,10 +288,10 @@
       "status": "open",
       "scenario": "A customer request is reported complete while data remains in a store, backup, replica, cache, export, or unapproved region, or required evidence is deleted.",
       "controls": [
-        {"kind": "documentation", "ref": "docs/decisions/0002-enterprise-tenancy-and-persistence.md", "claim": "The proposal requires a tenant data-class registry, isolated restore, auditable deletion, regional pinning, and legal-hold treatment."}
+        {"kind": "documentation", "ref": "docs/decisions/0002-enterprise-tenancy-and-persistence.md", "claim": "The accepted decision requires a tenant data-class registry, isolated restore, auditable deletion, regional pinning, and legal-hold treatment."}
       ],
-      "residual_risk": "No accepted hosted topology, durable-store registry, retention policy, backup/PITR, tenant restore, deletion workflow, or residency enforcement exists.",
-      "release_gate": "ADR 0002 owner approval and issues #11 and #17"
+      "residual_risk": "The accepted topology and schema foundation do not yet supply a durable-store registry, retention policy, backup/PITR, tenant restore, deletion workflow, or residency enforcement.",
+      "release_gate": "Issues #6, #11, and #17"
     },
     {
       "id": "TM-017",
@@ -301,10 +303,10 @@
       "scenario": "A tenant administrator, Hormuz operator, support engineer, migration role, or compromised admin session reads content or changes policy outside a bounded approved capability.",
       "controls": [
         {"kind": "code", "ref": "hormuz/server.py", "claim": "Current local administrative APIs require explicit configured capabilities and derive organization from the authenticated identity."},
-        {"kind": "documentation", "ref": "docs/decisions/0002-enterprise-tenancy-and-persistence.md", "claim": "The proposal separates tenant actors, runtime, owner, migration, operations, and time-bounded audited break-glass roles."}
+        {"kind": "documentation", "ref": "docs/decisions/0002-enterprise-tenancy-and-persistence.md", "claim": "The accepted decision separates tenant actors, runtime, owner, migration, operations, and time-bounded audited break-glass roles."}
       ],
       "residual_risk": "Dynamic RBAC, support approval, break-glass, privileged-access management, role separation, and immutable admin audit are not implemented.",
-      "release_gate": "ADR 0002 owner approval and issues #6, #7, and #17"
+      "release_gate": "Issues #6, #7, and #17"
     },
     {
       "id": "TM-018",

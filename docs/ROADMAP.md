@@ -30,23 +30,39 @@ The private alpha currently has:
 - a versioned, machine-validated internal threat register covering 9 assets, 7 trust boundaries, 18 threats, all six STRIDE categories, and all seven incident scenarios named by issue #9, with repository-resolved control evidence and explicit residual release gates; it reports 1 mitigated, 12 partially mitigated, and 5 open threats and keeps enterprise readiness false while independent review is pending;
 - a strict repository-local incident-drill catalog that binds those seven scenarios to exact executable regressions and retains private content-free aggregate evidence in ordinary and tag CI, while explicitly leaving real infrastructure exercises, named on-call ownership, external communications, response/recovery targets, and enterprise readiness incomplete;
 - nullable content-free gateway, policy, and provider timing snapshots plus opt-in tenant-scoped cumulative histograms that preserve the exact usage-report v2 contract and bind the v3 latency view into pagination; this is SLI instrumentation, not approved SLO targets, alerting, end-to-end coverage, or production observability;
-- a versioned, machine-validated compatibility matrix that binds exact Codex, Claude Code, Python, provider-protocol, OIDC, persistence, package, and OCI claims to repository evidence while keeping live-provider conformance, real IdPs, PostgreSQL, and production deployment explicitly unsupported or owner-pending;
-- a digest-pinned, no-pull, network-disabled PostgreSQL `16.14` feasibility proof with two synthetic tenants, a non-owner/non-superuser runtime role, forced RLS, fail-closed missing and transaction-cleared tenant context, isolated reads, denied cross-tenant writes, and composite tenant foreign keys; ADR 0002, a production schema, repository/migration integration, pooled concurrency, backup/restore, and production persistence remain unapproved or unverified;
+- a versioned, machine-validated compatibility matrix that binds exact Codex, Claude Code, Python, provider-protocol, OIDC, persistence, package, and OCI claims to repository evidence while keeping live-provider conformance, real IdPs, PostgreSQL-backed gateway repositories, and production deployment explicitly non-production or owner-pending;
+- accepted PostgreSQL schema version 1 with packaged checksummed migrations, separate owner/runtime roles, mandatory immutable tenant keys, composite tenant foreign keys, forced RLS, transaction-local tenant context, and a digest-pinned PostgreSQL `16.14` two-tenant integration proof covering empty/idempotent migration and reused-connection isolation; live gateway repository integration, multi-instance concurrency, backup/restore, KMS, HA, and production persistence remain unverified;
 - optional canonical usage/security and governed-context audit chains with strict config-free verification against an externally retained count/head and exact-file digest; this is export-time tamper/gap evidence, not database append-only storage, a signed anchor, KMS custody, continuous cross-store sequencing, or immutable retention;
 - an explicit bounded accept-backlog hint, a pre-thread accepted-connection ceiling, absolute total request-header deadlines for initial and keep-alive requests, an absolute exact-length request-body deadline, shallow versioned liveness/readiness probes, atomic parsed-request capacity with saturation-aware readiness, a total provider-response relay deadline, and bounded `SIGTERM` request draining, with activation, capacity recovery, idle keep-alive, in-flight, continuous-trickle, early-EOF, and content-free failure regression coverage;
 - fail-closed, size-bounded startup configuration parsing with duplicate-member/non-standard-number rejection across Hormuz-owned root and nested objects, non-reflective diagnostics, strict model/team/actor policy reference integrity, optional exact-file SHA-256 deployment binding, and an explicit immutable-snapshot replacement/rollback contract;
 - a tag-only, least-privilege private GHCR release contract with multi-platform build, keyless exact-digest and SLSA-predicate signing, private-package validation, immutable alias checks, content-free evidence, and digest-based rollback documentation. It is release automation, not evidence of an observed package or production deployment; public-transparency approval, tag governance, TLS, HA, backup/restore, RPO/RTO, and the rest of #11 remain open.
 
-The foundation is not an enterprise release. The local usage/approval, context, and session databases are single-node, and the local context codec is plaintext; none is an accepted hosted persistence design. Real-IdP validation, shared tenancy and multi-node revocation, SCIM, source-specific lifecycle collectors and signed-event verification, hosted scheduling, remaining time/confidence decay policy, automatic trusted repository discovery, continuation binding and complete automatic-injection quality evidence, remaining structured-DLP coverage, cache policy, scheduled billing ingestion with secure hosted credential custody, final invoice reconciliation, configuration signing/change approval, live secret rotation, deployment-coordinated rollback, HA deployment, KMS, and independent security review remain open gates.
+The foundation is not an enterprise release. The accepted PostgreSQL schema and
+tenant-isolation migration gate are not yet wired into the live gateway usage,
+context, or session repositories. Those repositories remain single-node
+SQLite, and the local context codec is plaintext. Real-IdP validation, shared
+multi-node revocation, SCIM, source-specific lifecycle collectors and
+signed-event verification, hosted scheduling, remaining time/confidence decay
+policy, automatic trusted repository discovery, continuation binding and
+complete automatic-injection quality evidence, remaining structured-DLP
+coverage, effective cache enforcement, scheduled billing ingestion with secure
+hosted credential custody, final invoice reconciliation, configuration
+signing/change approval, live secret rotation, deployment-coordinated rollback,
+backup/restore, HA deployment, KMS, and independent security review remain open
+gates.
 
 ## Material decisions awaiting owner approval
 
 These issues record product decisions and block dependent implementation. They must not be closed by implementation convenience.
 
-1. [#1 — Approve the enterprise tenancy, authorization, and persistence topology](https://github.com/Xpounder-com/hormuz/issues/1) — [Proposed ADR 0002](decisions/0002-enterprise-tenancy-and-persistence.md)
-2. [#3 — Define provider and Hormuz cache privacy tiers](https://github.com/Xpounder-com/hormuz/issues/3) — [Proposed ADR 0003](decisions/0003-cache-privacy-tiers.md)
-3. [#12 — Choose GitHub lifecycle event trust and collection](https://github.com/Xpounder-com/hormuz/issues/12) — [Proposed ADR 0005](decisions/0005-github-lifecycle-event-trust.md)
-4. [#15 — Choose the accepted-task economics evaluation rule](https://github.com/Xpounder-com/hormuz/issues/15) — [Proposed ADR 0007](decisions/0007-accepted-task-evaluation.md)
+1. [#12 — Choose GitHub lifecycle event trust and collection](https://github.com/Xpounder-com/hormuz/issues/12) — [Proposed ADR 0005](decisions/0005-github-lifecycle-event-trust.md)
+2. [#15 — Choose the accepted-task economics evaluation rule](https://github.com/Xpounder-com/hormuz/issues/15) — [Proposed ADR 0007](decisions/0007-accepted-task-evaluation.md)
+
+[ADR 0002](decisions/0002-enterprise-tenancy-and-persistence.md) and
+[ADR 0003](decisions/0003-cache-privacy-tiers.md) were accepted by the product
+owner on 2026-08-20. They authorize implementation of the hybrid PostgreSQL
+tenancy contract and the conservative cache privacy tiers; they do not claim
+that either implementation or its release evidence is complete.
 
 [ADR 0001](decisions/0001-oidc-login-and-session-architecture.md) was accepted by the product owner on 2026-08-15. Its implementation evidence is tracked under #13; acceptance of the decision does not close the remaining real-IdP, SCIM, shared-revocation, and HA gates.
 

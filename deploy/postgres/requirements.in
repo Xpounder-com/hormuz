@@ -1,0 +1,2 @@
+# PostgreSQL integration/runtime driver. Keep aligned with pyproject.toml.
+psycopg[binary]==3.3.4

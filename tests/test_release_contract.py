@@ -412,7 +412,7 @@ class ReleaseContractTests(unittest.TestCase):
         )
         self.assertEqual(
             workflow.count("--no-build-isolation --no-deps --editable ."),
-            3,
+            4,
         )
         self.assertNotIn("pip install build==", workflow)
         self.assertNotIn("run: python -m build", workflow)
@@ -430,11 +430,15 @@ class ReleaseContractTests(unittest.TestCase):
         )
         self.assertEqual(
             workflow.count("--requirement deploy/container/requirements.lock"),
-            4,
+            5,
         )
         self.assertEqual(
             workflow.count("--no-build-isolation --no-deps --editable ."),
-            3,
+            4,
+        )
+        self.assertEqual(
+            workflow.count("--requirement deploy/postgres/requirements.lock"),
+            1,
         )
         self.assertNotIn("--no-build-isolation --editable .", workflow)
         self.assertIn(

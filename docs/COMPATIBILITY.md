@@ -36,7 +36,7 @@ fail validation if the alpha silently gains such a claim.
 | Anthropic Messages subset | `POST /v1/messages`, `POST /v1/messages/count_tokens`, and policy-filtered `GET /v1/models` through local tests | Token-count tests prove the gateway does not add the generation-only `max_tokens` field. No live Anthropic conformance, quota, retention, residency, or availability proof. Model discovery does not call Anthropic. |
 | Generic OIDC | Discovery/JWKS, mapped JWTs, authorization code plus PKCE, refresh rotation, and replay revocation against a standards-shaped fake IdP | No real vendor-specific IdP is certified. SCIM, shared revocation, and production key custody remain open. |
 | SQLite | Single-process local and CI behavior | Development only; not hosted tenancy, concurrency, HA, backup, or restore evidence. |
-| PostgreSQL | Proposed hybrid shared-schema RLS plus dedicated option; one local PostgreSQL `16.14` two-tenant synthetic RLS feasibility observation | Still `pending_owner_decision`: ADR 0002 is unapproved and there is no accepted production schema, repository/migration integration, pooled-concurrency, backup/PITR, restore, HA, or production-persistence proof. |
+| PostgreSQL | Accepted shared-schema RLS plus dedicated option; schema version 1, packaged checksummed migrations, and a digest-pinned PostgreSQL `16.14` two-tenant migration/RLS integration observation | `development_only`: the live usage, context, session, and policy repositories are still SQLite-backed. Shared repository contracts, pooled multi-instance concurrency, backup/PITR, restore, deletion, KMS, HA, and production-persistence proof remain open. |
 | Python package `0.1.0` | Reproducible wheel/source build and clean Linux installation | Artifact installation does not prove a production deployment. |
 | OCI `linux/amd64` and `linux/arm64` | Exact-source BuildKit `0.32.2` reproducibility; restricted runtime smoke on amd64 | A single-node alpha artifact, not production TLS, HA, backup, disaster recovery, or support evidence. |
 
@@ -62,6 +62,8 @@ The fixed governed-context compaction observation is recorded in
 [`evidence/provider-compaction-conformance-openai-2026-08-20.json`](../evidence/provider-compaction-conformance-openai-2026-08-20.json).
 The bounded synthetic PostgreSQL RLS observation is recorded in
 [`evidence/postgres-rls-feasibility-2026-08-20.json`](../evidence/postgres-rls-feasibility-2026-08-20.json).
+The accepted schema-v1 migration and runtime-isolation observation is recorded
+in [`evidence/postgres-foundation-integration-2026-08-20.json`](../evidence/postgres-foundation-integration-2026-08-20.json).
 The reusable stock-client observation is separately recorded in
 [`evidence/client-conformance-codex-openai-2026-08-19.json`](../evidence/client-conformance-codex-openai-2026-08-19.json).
 They do not change `live_provider_conformance_verified`: that combined flag stays

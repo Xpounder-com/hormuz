@@ -74,6 +74,14 @@ from .mcp import (
     validate_gateway_url,
 )
 from .policy import PolicyEngine
+from .postgres import (
+    DEFAULT_POSTGRES_DSN_ENV,
+    DEFAULT_POSTGRES_RUNTIME_ROLE,
+    DEFAULT_POSTGRES_SCHEMA,
+    PostgresStorageError,
+    migrate_postgres_from_env,
+    verify_postgres_from_env,
+)
 from .provider_conformance import (
     ProviderConformanceClient,
     ProviderConformanceError,
@@ -116,6 +124,40 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers.add_parser("serve", help="Run the OpenAI Responses and Anthropic Messages gateway")
     subparsers.add_parser("doctor", help="Validate configuration and required credentials")
+    storage = subparsers.add_parser(
+        "storage",
+        help="Manage the hosted PostgreSQL tenancy foundation",
+    )
+    storage_subparsers = storage.add_subparsers(
+        dest="storage_command",
+        required=True,
+    )
+    for command, help_text in (
+        ("migrate", "Apply ordered, checksummed PostgreSQL migrations"),
+        ("verify", "Verify migration, role, privilege, and forced-RLS invariants"),
+    ):
+        storage_command = storage_subparsers.add_parser(command, help=help_text)
+        storage_command.add_argument(
+            "--dsn-env",
+            default=DEFAULT_POSTGRES_DSN_ENV,
+            help=(
+                "Environment variable containing the PostgreSQL DSN "
+                f"(default: {DEFAULT_POSTGRES_DSN_ENV})"
+            ),
+        )
+        storage_command.add_argument(
+            "--schema",
+            default=DEFAULT_POSTGRES_SCHEMA,
+            help=f"PostgreSQL schema (default: {DEFAULT_POSTGRES_SCHEMA})",
+        )
+        storage_command.add_argument(
+            "--runtime-role",
+            default=DEFAULT_POSTGRES_RUNTIME_ROLE,
+            help=(
+                "Non-owner, non-BYPASSRLS runtime role "
+                f"(default: {DEFAULT_POSTGRES_RUNTIME_ROLE})"
+            ),
+        )
     status = subparsers.add_parser("status", help="Print a current-month usage and cost report")
     status.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
     status.add_argument(
@@ -981,6 +1023,8 @@ def main(argv: list[str] | None = None) -> int:
         return _client_conformance_command(args)
     if args.command == "audit-verify":
         return _audit_verify(args)
+    if args.command == "storage":
+        return _storage_command(args)
     if args.command in {"mcp", "mcp-config"}:
         try:
             if args.command == "mcp":
@@ -1091,6 +1135,25 @@ def main(argv: list[str] | None = None) -> int:
     except KeyboardInterrupt:
         return 130
     return 2
+
+
+def _storage_command(args: argparse.Namespace) -> int:
+    try:
+        operation = (
+            migrate_postgres_from_env
+            if args.storage_command == "migrate"
+            else verify_postgres_from_env
+        )
+        status = operation(
+            dsn_env=args.dsn_env,
+            schema=args.schema,
+            runtime_role=args.runtime_role,
+        )
+    except PostgresStorageError as error:
+        print(f"PostgreSQL storage error: {error.code}", file=sys.stderr)
+        return 2
+    print(json.dumps(status.to_dict(), sort_keys=True, separators=(",", ":")))
+    return 0
 
 
 def _serve(config: GatewayConfig) -> int:

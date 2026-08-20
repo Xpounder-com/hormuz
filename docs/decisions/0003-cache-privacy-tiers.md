@@ -1,7 +1,8 @@
 # ADR 0003: Provider and Hormuz cache privacy tiers
 
-- Status: **Proposed — owner approval required**
+- Status: **Accepted**
 - Date proposed: 2026-08-15
+- Date accepted: 2026-08-20
 - Provider documentation verified: 2026-08-15
 - Decision owner: Product owner
 - Tracking issue: [#3](https://github.com/Xpounder-com/hormuz/issues/3)
@@ -15,7 +16,11 @@ Approve the default relationship between data classification and three different
 2. **Hormuz context-pack cache:** customer-controlled reuse of an already authorized, source-linked context pack.
 3. **Final-answer cache:** returning a previous model answer without fresh inference.
 
-This ADR recommends provider-specific fail-closed controls, an encrypted customer-controlled context-pack cache, and no final-answer caching. It is not accepted and does not authorize automatic content caching until the product owner approves it.
+The product owner accepted the recommended provider-specific fail-closed
+controls, encrypted customer-controlled context-pack cache boundary, and no
+final-answer caching on 2026-08-20. Acceptance authorizes implementation but
+does not activate caching before its storage, authorization, encryption, and
+invalidation gates pass.
 
 ## Why the distinction matters
 
@@ -53,7 +58,7 @@ The current [Anthropic prompt-caching guide](https://platform.claude.com/docs/en
 
 Hormuz can suppress ordinary Anthropic prompt caching by removing or denying `cache_control` before forwarding. Provider tools and thinking behavior can have additional cache semantics, so the capability catalog must account for the actual endpoint/features in use rather than only the top-level marker.
 
-## Proposed decision
+## Accepted decision
 
 ### Policy modes
 
@@ -178,7 +183,7 @@ This ignores classification, contract, residency, and model-specific opt-out bou
 
 This is safest operationally but abandons a primary economic mechanism even for public/internal data and does not eliminate provider behavior that is automatic. Rejected as the universal default; strict disable remains a supported policy.
 
-## Consequences if accepted
+## Consequences
 
 - Hormuz needs a maintained provider capability catalog and fail-closed request compiler, not just pass-through request parameters.
 - Some OpenAI model/classification combinations will be denied or rerouted when strict no-cache guarantees cannot be established.
@@ -201,7 +206,11 @@ Acceptance of this ADR does not prove implementation. Issues #14 and #8 require:
 
 ## Owner approval record
 
-Pending. To accept, the product owner must approve either:
+The product owner approved **A — conservative classification defaults and no
+final-answer cache** on 2026-08-20. The canonical approval is recorded in
+[issue #3](https://github.com/Xpounder-com/hormuz/issues/3#issuecomment-5355712148).
 
-- **A — conservative classification defaults and no final-answer cache (recommended)**, or
-- **B — different defaults**, stated explicitly for `public`, `internal`, `confidential`, and `restricted` data.
+Acceptance authorizes the privacy-tier and invalidation contract. It does not
+claim that provider capability enforcement, encrypted pack storage,
+cross-tenant isolation, deletion, key rotation, or accepted-task economics are
+implemented or verified.

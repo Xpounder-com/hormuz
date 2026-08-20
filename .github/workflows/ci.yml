@@ -45,6 +45,47 @@ jobs:
       - name: Run unit and gateway integration tests
         run: python -m unittest -v
 
+  postgres-foundation:
+    name: PostgreSQL migration and RLS foundation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Install hash-locked build toolchain
+        run: >-
+          python -m pip install --require-hashes --only-binary=:all:
+          --requirement deploy/build/requirements.lock
+      - name: Install hash-locked runtime and PostgreSQL dependencies
+        run: |
+          python -m pip install --require-hashes --only-binary=:all: \
+            --requirement deploy/container/requirements.lock
+          python -m pip install --require-hashes --only-binary=:all: \
+            --requirement deploy/postgres/requirements.lock
+      - name: Install Hormuz without dependency re-resolution
+        run: python -m pip install --no-build-isolation --no-deps --editable .
+      - name: Pull exact PostgreSQL integration image
+        run: >-
+          docker pull
+          postgres@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
+      - name: Run PostgreSQL migration and tenant-isolation integration
+        run: >-
+          python scripts/postgres_foundation_integration.py
+          --output "${{ runner.temp }}/hormuz-postgres-foundation.json"
+      - name: Preserve content-free PostgreSQL evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hormuz-postgres-foundation
+          path: ${{ runner.temp }}/hormuz-postgres-foundation.json
+          if-no-files-found: error
+          retention-days: 7
+
   package:
     name: Build and install package
     runs-on: ubuntu-latest
@@ -99,6 +140,8 @@ jobs:
           "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" mcp-config --help
           "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" context-benchmark --help
           "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" auth token --help
+          "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" storage migrate --help
+          "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" storage verify --help
           "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" dlp evaluate --help
           "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" dlp approval show --help
           "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" dlp approval approve --help

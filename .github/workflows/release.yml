@@ -55,6 +55,10 @@ jobs:
         run: >-
           python -m pip install --require-hashes --only-binary=:all:
           --requirement deploy/container/requirements.lock
+      - name: Install hash-locked PostgreSQL dependencies
+        run: >-
+          python -m pip install --require-hashes --only-binary=:all:
+          --requirement deploy/postgres/requirements.lock
       - name: Install Hormuz runtime
         run: python -m pip install --no-build-isolation --no-deps --editable .
       - name: Verify runtime dependency closure
@@ -86,6 +90,14 @@ jobs:
             --profile release \
             --iterations 5 \
             --output "$RUNNER_TEMP/context-benchmark-release.json"
+      - name: Pull exact PostgreSQL integration image
+        run: >-
+          docker pull
+          postgres@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
+      - name: Verify PostgreSQL migration and tenant isolation
+        run: >-
+          python scripts/postgres_foundation_integration.py
+          --output "$RUNNER_TEMP/hormuz-postgres-foundation.json"
       - name: Build and compare independent exact-source distributions
         run: |
           python scripts/reproducible_build.py \
@@ -152,6 +164,7 @@ jobs:
             ${{ runner.temp }}/hormuz-threat-model-evidence.json
             ${{ runner.temp }}/hormuz-compatibility-evidence.json
             ${{ runner.temp }}/hormuz-incident-drill-evidence.json
+            ${{ runner.temp }}/hormuz-postgres-foundation.json
             ${{ runner.temp }}/context-benchmark-release.json
             ${{ runner.temp }}/hormuz-release.sbom.cdx.json
             ${{ runner.temp }}/hormuz-release-vulnerabilities.json

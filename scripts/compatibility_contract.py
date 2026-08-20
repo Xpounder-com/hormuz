@@ -407,8 +407,9 @@ def _validate_identity_and_persistence(entries: list[dict[str, Any]]) -> None:
         set(persistence) != {"persistence.sqlite", "persistence.postgresql"}
         or persistence["persistence.sqlite"]["support_level"] != "development_only"
         or persistence["persistence.postgresql"]["support_level"]
-        != "pending_owner_decision"
-        or persistence["persistence.postgresql"]["version"] != "not selected"
+        != "development_only"
+        or persistence["persistence.postgresql"]["version"]
+        != "PostgreSQL 16.14 / Hormuz schema 1"
     ):
         raise CompatibilityContractError("compatibility persistence boundary is invalid")
 

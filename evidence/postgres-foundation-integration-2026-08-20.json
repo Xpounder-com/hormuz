@@ -1,0 +1,37 @@
+{
+  "content_free": true,
+  "generated_at": "2026-08-20T12:48:03.608183Z",
+  "isolation": {
+    "cleared_context_rows": 0,
+    "cross_tenant_foreign_key_denied": true,
+    "cross_tenant_visible_rows": 0,
+    "cross_tenant_write_denied": true,
+    "missing_context_rows": 0,
+    "tenant_context_fields_bound": true,
+    "tenant_a_visible_rows": 1,
+    "tenant_b_visible_rows": 1,
+    "tenant_id_update_denied": true
+  },
+  "migration": {
+    "applied_versions": [
+      1
+    ],
+    "checksums_verified": true,
+    "forced_rls_verified": true,
+    "idempotent": true,
+    "policy_definitions_verified": true,
+    "privileges_verified": true,
+    "runtime_role_verified": true,
+    "target_version": 1,
+    "trigger_definition_verified": true
+  },
+  "runner": {
+    "postgres_image": "postgres@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777",
+    "postgres_server_version_num": "160014"
+  },
+  "schema": "hormuz.postgres-foundation-integration.v1",
+  "tamper_detection": {
+    "permissive_policy_rejected": true,
+    "runtime_owner_membership_rejected": true
+  }
+}

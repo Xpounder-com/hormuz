@@ -211,4 +211,9 @@ This is a durable local governance kernel, not the final enterprise context serv
 - there is no context-pack cache, source-specific event collector, or outcome writeback; the current connector API accepts already-validated normalized attestations; and
 - injected packs run before the existing secret-egress boundary, so added content receives the same DLP action as employee request content.
 
-No context caching has been enabled. Cache privacy remains blocked on proposed ADR 0003, and the hosted persistence topology remains blocked on proposed ADR 0002.
+No context caching has been enabled. ADR 0003 now authorizes conservative cache
+privacy tiers, but encrypted tenant storage, authorization rechecks, bounded
+TTL, invalidation, deletion, and isolation evidence remain mandatory before any
+pack cache is activated. ADR 0002 now authorizes the PostgreSQL topology and a
+schema-v1 isolation foundation exists, but the live context repository remains
+SQLite-backed until its PostgreSQL repository contract and KMS gates pass.

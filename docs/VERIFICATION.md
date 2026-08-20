@@ -408,7 +408,7 @@ Observed local result:
 - an isolated source distribution and wheel included the API document, client, implementation, and tests. A clean Python 3.14 environment installed the exact wheel from outside the checkout, loaded Hormuz from `site-packages`, created session schema version 2, exercised the empty tenant event query, displayed all three administrator CLI commands, passed bytecode compilation, and passed the bundled strict release benchmark;
 - `git diff --check`, source bytecode compilation, frozen-corpus regeneration, and a source/wheel runtime scan for private-key, OpenAI, Anthropic, and GitHub credential values passed.
 
-This closes the single-node administrator-revocation and local event-inspection slice of issue #13, not the identity or enterprise-tenancy milestone. The event API is a queryable local evidence ledger, not a signed or externally immutable audit sink. Real owner-selected IdP validation, live configuration reload, SCIM/event-driven deprovisioning, shared multi-node revocation, PostgreSQL tenant isolation, KMS custody, retention/SIEM delivery, immutable session-event export, HA, backup/restore, and independent review remain open. Those shared persistence decisions still depend on proposed ADR 0002.
+This closes the single-node administrator-revocation and local event-inspection slice of issue #13, not the identity or enterprise-tenancy milestone. The event API is a queryable local evidence ledger, not a signed or externally immutable audit sink. Real owner-selected IdP validation, live configuration reload, SCIM/event-driven deprovisioning, shared multi-node revocation, PostgreSQL repository integration, KMS custody, retention/SIEM delivery, immutable session-event export, HA, backup/restore, and independent review remain open. ADR 0002 now supplies the accepted shared-persistence direction and schema foundation; it does not close these implementation gates.
 
 ### Evidence-driven governed-context lifecycle
 
@@ -463,7 +463,14 @@ The tenant-scoped reporting API, CLI, read-audit boundary, and supporting usage-
 - isolated source and wheel builds included the usage administrator client, shared report semantics, API documentation, and tests. A clean Python 3.14 environment installed the wheel outside the checkout, loaded Hormuz from `site-packages`, created the administrative-access table and organization-scoped security column, displayed `hormuz usage report --help`, passed bytecode compilation, and passed the installed regression benchmark with zero failed thresholds;
 - `git diff --check`, source/test bytecode compilation, and high-confidence tracked-source and extracted-wheel scans for private-key, OpenAI, Anthropic, GitHub, AWS, and Google credential patterns passed.
 
-This closes a real single-node usage-administration slice without accepting proposed ADR 0002. SQLite is not evidence for shared hosted tenancy, PostgreSQL row security, HA, externally immutable audit, SCIM, SIEM delivery, final invoice coverage, or complete provider-account usage. Person-level tokens and estimated spend remain consumption metadata, not employee-performance evidence.
+This historical checkpoint closed a real single-node usage-administration slice
+without deciding the then-proposed ADR 0002. The ADR is now accepted and its
+schema foundation is implemented separately, but this usage path remains
+SQLite-backed and is not evidence for shared hosted tenancy, PostgreSQL
+repository behavior, HA, externally immutable audit, SCIM, SIEM delivery,
+final invoice coverage, or complete provider-account usage. Person-level tokens
+and estimated spend remain consumption metadata, not employee-performance
+evidence.
 
 ### Bounded encoded-text DLP inspection
 
@@ -1683,12 +1690,72 @@ python scripts/postgres_rls_feasibility.py \
   --output /tmp/hormuz-postgres-rls-feasibility.json
 ```
 
-This is evidence that the central RLS invariants in proposed ADR 0002 are
-feasible. It is not product-owner acceptance and does not prove an accepted
-schema, repository implementation, migrations, connection-pool behavior,
-production concurrency, backup/PITR, restore, deletion, residency, KMS, HA, or
-independent security review. The compatibility entry therefore remains
-`pending_owner_decision` and `production_supported: false`.
+This historical feasibility result predated product-owner acceptance and the
+schema-v1 implementation below. By itself it did not prove an accepted schema,
+repository implementation, migrations, connection-pool behavior, production
+concurrency, backup/PITR, restore, deletion, residency, KMS, HA, or independent
+security review. The later checkpoint supersedes its historical
+`pending_owner_decision` compatibility status without changing
+`production_supported: false`.
+
+### Accepted PostgreSQL schema-v1 foundation
+
+After the product owner accepted ADR 0002 option A on August 20, 2026, the
+PostgreSQL boundary was implemented and exercised locally against the same
+immutable PostgreSQL `16.14` image digest.
+
+Observed result:
+
+- `hormuz storage migrate` applied packaged schema version 1 from an empty
+  database and reapplied it idempotently; `hormuz storage verify` bound the
+  ordered migration name and SHA-256 to the database ledger;
+- the schema created tenant, workspace, project, team, principal,
+  external-identity, role, capability, and team-membership tables with
+  tenant-leading keys and composite tenant foreign keys;
+- the migration owner and application runtime roles were distinct. The runtime
+  was non-superuser, had no role memberships, lacked `CREATEDB`, `CREATEROLE`,
+  and `BYPASSRLS`, owned no tenant table, could not create in the Hormuz schema,
+  and could not read the migration ledger or truncate/change constraints and
+  triggers;
+- verification required every tenant table to retain the exact bidirectional
+  tenant policy, forced RLS, the exact tenant-immutability function and trigger,
+  and migration-owner ownership. A deliberately permissive replacement policy
+  and a temporary runtime-to-owner membership were each detected and rejected;
+- an application tenant transaction bound tenant, principal, client, and
+  authorization version only for that transaction and rejected an owner or
+  privileged connection. Missing context and the same connection after commit
+  each saw zero rows;
+- one reused runtime connection switched between two synthetic tenants without
+  leakage. Each tenant saw one row, an explicit cross-tenant read saw zero, RLS
+  denied a cross-tenant insert, the composite foreign key denied a cross-tenant
+  reference, and the forced-RLS owner could not change a tenant key;
+- the optional Psycopg `3.3.4` binary driver has a separate hash-locked Linux
+  integration closure, and the package exposes content-free migration and
+  verification CLI commands without accepting a DSN on the command line;
+- the focused PostgreSQL, compatibility, threat-model, and release-contract
+  slice passed. The final complete source suite passed 503 tests with three
+  documented opt-in installed-client/profile skips; and
+- the compatibility matrix now reports two `development_only` persistence
+  surfaces, zero pending owner decisions, and zero production-persistence
+  profiles. The threat model retains five open threats, independent review is
+  pending, and `enterprise_release_ready` remains false.
+
+The checked-in content-free observation is
+[`evidence/postgres-foundation-integration-2026-08-20.json`](../evidence/postgres-foundation-integration-2026-08-20.json).
+Reproduce it with the separately documented optional driver and exact cached
+image:
+
+```bash
+python scripts/postgres_foundation_integration.py \
+  --output /tmp/hormuz-postgres-foundation.json
+```
+
+This is real schema, migration, role, and tenant-isolation evidence. It is not
+evidence that `hormuz serve` uses PostgreSQL: usage, policy, session, approval,
+and governed-context repositories remain SQLite-backed. Repository parity,
+shared budget concurrency, multi-node revocation, backup/PITR, tenant restore,
+deletion, KMS, HA, production operations, and independent security review stay
+open under issues #6, #7, #11, #17, and #9.
 
 ### Per-model capacity enforcement
 
