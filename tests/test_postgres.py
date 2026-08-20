@@ -11,13 +11,26 @@ from unittest import mock
 from types import SimpleNamespace
 
 from hormuz.cli import build_parser, main
-from hormuz.config import Identity
+from hormuz.config import (
+    DLPApprovalConfig,
+    DLPControls,
+    DLPRuleConfig,
+    Identity,
+    ModelRoute,
+    Policy,
+    SecretControls,
+)
 from hormuz.identity_projection import (
     IdentitySyncResult,
     configured_organization_ids,
     identity_projection,
     principal_projection_sha256,
     projection_sha256,
+)
+from hormuz.policy_projection import (
+    PolicySyncResult,
+    policy_projection,
+    policy_projection_sha256,
 )
 from hormuz.postgres import (
     POSTGRES_SCHEMA_VERSION,
@@ -33,8 +46,9 @@ from hormuz.postgres import (
     validate_tenant_id,
 )
 from hormuz.postgres_usage_store import PostgresUsageStore
+from hormuz.postgres_security_store import PostgresSecurityStore
 from hormuz.postgres_session_store import PostgresSessionStore
-from hormuz.store_router import GatewayStoreRouter
+from hormuz.store_router import GatewayStoreRouter, gateway_store
 from scripts.postgres_foundation_integration import (
     EVIDENCE_SCHEMA,
     PostgresFoundationIntegrationError,
@@ -46,6 +60,79 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class PostgresFoundationTests(unittest.TestCase):
+    def test_policy_projection_is_secret_free_deterministic_and_tenant_partitioned(self) -> None:
+        alice = Identity(
+            token_env="ALICE_TOKEN",
+            token="identity-secret",
+            actor_id="alice",
+            actor_name="Alice",
+            team_id="engineering",
+            team_name="Engineering",
+            organization_id="tenant-a",
+        )
+        bob = Identity(
+            token_env="BOB_TOKEN",
+            token="other-identity-secret",
+            actor_id="bob",
+            actor_name="Bob",
+            team_id="marketing",
+            team_name="Marketing",
+            organization_id="tenant-b",
+        )
+        config = SimpleNamespace(
+            identities_by_token={alice.token: alice, bob.token: bob},
+            identities_by_subject={},
+            identities_by_actor={"alice": alice, "bob": bob},
+            model_routes={
+                "reasoning": ModelRoute("reasoning", "openai", "gpt-5.4"),
+            },
+            organization_policy=Policy(allowed_models=("reasoning",)),
+            team_policies={"engineering": Policy(max_output_tokens=2048)},
+            actor_policies={},
+            secret_controls=SecretControls(
+                custom_secret_envs=("COMPANY_SECRET",),
+                custom_secret_values=(("company_secret", "never-store-this"),),
+            ),
+            dlp_controls=DLPControls(
+                policy_version="policy-v1",
+                rules=(
+                    DLPRuleConfig(
+                        "customer-id",
+                        "customer",
+                        "high",
+                        "require_approval",
+                        values_env="CUSTOMER_IDS",
+                        exact_values=("customer-secret",),
+                    ),
+                ),
+                approval=DLPApprovalConfig(
+                    enabled=True,
+                    fingerprint_key_env="APPROVAL_KEY",
+                    fingerprint_key=b"k" * 32,
+                    fingerprint_key_source="resolved-secret-source",
+                ),
+            ),
+            team_dlp_overlays={},
+            actor_dlp_overlays={},
+        )
+
+        value = policy_projection(config, "tenant-a")
+        serialized = json.dumps(value, sort_keys=True)
+        self.assertEqual(
+            policy_projection_sha256(value),
+            policy_projection_sha256(policy_projection(config, "tenant-a")),
+        )
+        self.assertIn("engineering", serialized)
+        self.assertNotIn("marketing", serialized)
+        for secret in (
+            "identity-secret",
+            "other-identity-secret",
+            "never-store-this",
+            "customer-secret",
+            "resolved-secret-source",
+        ):
+            self.assertNotIn(secret, serialized)
+
     def test_identity_projection_is_secret_free_deterministic_and_tenant_partitioned(self) -> None:
         first = Identity(
             token_env="FIRST_TOKEN",
@@ -142,10 +229,21 @@ class PostgresFoundationTests(unittest.TestCase):
         with self.assertRaisesRegex(PostgresStorageError, "tenant_not_configured"):
             store.monthly_totals(organization_id="tenant-c")
 
+    def test_postgres_security_store_requires_explicit_scope_for_multiple_tenants(self) -> None:
+        store = PostgresSecurityStore(
+            "postgresql://runtime:not-used@127.0.0.1/hormuz",
+            organization_ids=("tenant-a", "tenant-b"),
+        )
+        with self.assertRaisesRegex(ValueError, "organization_id is required"):
+            store.monthly_secret_totals()
+        with self.assertRaisesRegex(PostgresStorageError, "tenant_not_configured"):
+            store.monthly_secret_totals(organization_id="tenant-c")
+
     def test_split_store_routes_accounting_and_security_and_combines_audit(self) -> None:
         accounting = mock.Mock()
         security = mock.Mock()
-        security.path = Path("security.sqlite3")
+        legacy = mock.Mock()
+        legacy.path = Path("security.sqlite3")
         accounting.record.return_value = "usage-id"
         security.record_secret_event.return_value = "security-id"
         accounting.audit_events.return_value = [
@@ -158,16 +256,53 @@ class PostgresFoundationTests(unittest.TestCase):
                 "occurred_at": "2026-08-20T00:00:01Z",
             }
         ]
-        router = GatewayStoreRouter(accounting, security)
+        legacy.audit_events.return_value = [
+            {
+                "event_type": "security.secret",
+                "id": "c",
+                "occurred_at": "2026-08-19T23:59:59Z",
+            }
+        ]
+        router = GatewayStoreRouter(accounting, security, legacy_security=legacy)
 
         self.assertEqual(router.record(test=True), "usage-id")
         self.assertEqual(router.record_secret_event(test=True), "security-id")
         self.assertEqual(
             [event["id"] for event in router.audit_events(since="2026-08-20T00:00:00Z")],
-            ["a", "b"],
+            ["c", "a", "b"],
         )
         accounting.record.assert_called_once_with(test=True)
         security.record_secret_event.assert_called_once_with(test=True)
+        self.assertEqual(router.security_database_path, Path("security.sqlite3"))
+
+    def test_postgres_gateway_store_fails_closed_before_building_on_stale_policy(self) -> None:
+        config = SimpleNamespace(
+            usage_storage=SimpleNamespace(
+                backend="postgresql",
+                postgres_dsn_env="HORMUZ_POSTGRES_DSN",
+                postgres_schema="hormuz",
+                postgres_runtime_role="hormuz_runtime",
+            ),
+            identities_by_actor={
+                "alice": SimpleNamespace(organization_id="tenant-a")
+            },
+            database_path=Path("legacy.sqlite3"),
+        )
+        with (
+            mock.patch(
+                "hormuz.store_router.postgres_dsn_from_env",
+                return_value="postgresql://runtime:not-printed@localhost/hormuz",
+            ),
+            mock.patch(
+                "hormuz.store_router.verify_runtime_policy_projection",
+                side_effect=PostgresStorageError("policy_projection_stale"),
+            ) as verify,
+            mock.patch("hormuz.store_router.PostgresUsageStore") as accounting,
+            self.assertRaisesRegex(PostgresStorageError, "policy_projection_stale"),
+        ):
+            gateway_store(config)
+        verify.assert_called_once()
+        accounting.assert_not_called()
 
     def test_packaged_migrations_are_contiguous_and_match_target(self) -> None:
         migrations = load_postgres_migrations()
@@ -467,6 +602,27 @@ class PostgresFoundationTests(unittest.TestCase):
         self.assertEqual(json.loads(output.getvalue()), result.to_dict())
         self.assertNotIn(secret_dsn, output.getvalue())
 
+    def test_policy_sync_cli_uses_owner_dsn_without_printing_it(self) -> None:
+        config = SimpleNamespace(
+            usage_storage=SimpleNamespace(
+                postgres_dsn_env="HORMUZ_OWNER_DSN",
+                postgres_schema="hormuz",
+            )
+        )
+        result = PolicySyncResult(organizations=2, changed_organizations=1)
+        secret_dsn = "postgresql://owner:secret-value@localhost/hormuz"
+        output = io.StringIO()
+        with (
+            mock.patch("hormuz.cli.GatewayConfig.load", return_value=config),
+            mock.patch("hormuz.cli.postgres_dsn_from_env", return_value=secret_dsn),
+            mock.patch("hormuz.cli.sync_policy_projection", return_value=result) as sync,
+            redirect_stdout(output),
+        ):
+            self.assertEqual(main(["policies", "sync"]), 0)
+        sync.assert_called_once_with(config, secret_dsn, schema="hormuz")
+        self.assertEqual(json.loads(output.getvalue()), result.to_dict())
+        self.assertNotIn(secret_dsn, output.getvalue())
+
     def test_checked_in_integration_evidence_is_content_free_and_bounded(self) -> None:
         value = json.loads(
             (ROOT / "evidence/postgres-foundation-integration-2026-08-20.json").read_text(
@@ -492,6 +648,20 @@ class PostgresFoundationTests(unittest.TestCase):
         self.assertEqual(value["identity_sessions"]["atomic_refresh_replay_denied"], 1)
         self.assertTrue(value["identity_sessions"]["refresh_replay_family_revoked"])
         self.assertTrue(value["identity_sessions"]["identity_change_revocation_verified"])
+        self.assertTrue(value["policy_approvals"]["configuration_projection_verified"])
+        self.assertTrue(value["policy_approvals"]["idempotent_sync_verified"])
+        self.assertTrue(value["policy_approvals"]["stale_projection_rejected"])
+        self.assertTrue(value["policy_approvals"]["cross_instance_request_verified"])
+        self.assertTrue(value["policy_approvals"]["cross_tenant_request_hidden"])
+        self.assertTrue(value["policy_approvals"]["self_approval_denied"])
+        self.assertEqual(value["policy_approvals"]["atomic_retry_competitors"], 2)
+        self.assertEqual(value["policy_approvals"]["atomic_retry_consumed"], 1)
+        self.assertEqual(value["policy_approvals"]["atomic_retry_blocked_pending"], 1)
+        self.assertTrue(
+            value["policy_approvals"]["exact_payload_model_policy_binding_verified"]
+        )
+        self.assertTrue(value["policy_approvals"]["model_mismatch_audited"])
+        self.assertTrue(value["policy_approvals"]["security_events_shared"])
         self.assertEqual(value["isolation"]["missing_context_rows"], 0)
         self.assertEqual(value["isolation"]["cleared_context_rows"], 0)
         self.assertTrue(value["isolation"]["tenant_context_fields_bound"])
@@ -499,6 +669,9 @@ class PostgresFoundationTests(unittest.TestCase):
         self.assertTrue(value["tamper_detection"]["runtime_owner_membership_rejected"])
         self.assertTrue(
             value["tamper_detection"]["unexpected_accounting_column_rejected"]
+        )
+        self.assertTrue(
+            value["tamper_detection"]["unexpected_security_column_rejected"]
         )
         serialized = json.dumps(value, sort_keys=True)
         for forbidden in (

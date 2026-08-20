@@ -12,7 +12,7 @@
     "usage_rows_per_tenant": 1
   },
   "content_free": true,
-  "generated_at": "2026-08-20T15:41:15.068923Z",
+  "generated_at": "2026-08-20T16:17:26.451912Z",
   "identity_sessions": {
     "atomic_refresh_competitors": 2,
     "atomic_refresh_replay_denied": 1,
@@ -40,7 +40,8 @@
     "applied_versions": [
       1,
       2,
-      3
+      3,
+      4
     ],
     "checksums_verified": true,
     "forced_rls_verified": true,
@@ -48,17 +49,33 @@
     "policy_definitions_verified": true,
     "privileges_verified": true,
     "runtime_role_verified": true,
-    "target_version": 3,
+    "target_version": 4,
     "trigger_definition_verified": true
+  },
+  "policy_approvals": {
+    "atomic_retry_blocked_pending": 1,
+    "atomic_retry_competitors": 2,
+    "atomic_retry_consumed": 1,
+    "configuration_projection_verified": true,
+    "content_free": true,
+    "cross_instance_request_verified": true,
+    "cross_tenant_request_hidden": true,
+    "exact_payload_model_policy_binding_verified": true,
+    "idempotent_sync_verified": true,
+    "model_mismatch_audited": true,
+    "security_events_shared": true,
+    "self_approval_denied": true,
+    "stale_projection_rejected": true
   },
   "runner": {
     "postgres_image": "postgres@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777",
     "postgres_server_version_num": "160014"
   },
-  "schema": "hormuz.postgres-identity-session-integration.v3",
+  "schema": "hormuz.postgres-policy-approval-integration.v4",
   "tamper_detection": {
     "permissive_policy_rejected": true,
     "runtime_owner_membership_rejected": true,
-    "unexpected_accounting_column_rejected": true
+    "unexpected_accounting_column_rejected": true,
+    "unexpected_security_column_rejected": true
   }
 }

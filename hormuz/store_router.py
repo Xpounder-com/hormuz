@@ -1,4 +1,4 @@
-"""Explicit accounting/security persistence routing during PostgreSQL adoption."""
+"""Explicit current/legacy persistence routing during PostgreSQL adoption."""
 
 from __future__ import annotations
 
@@ -6,6 +6,8 @@ from typing import Any
 
 from .config import GatewayConfig
 from .postgres import postgres_dsn_from_env
+from .policy_projection import verify_runtime_policy_projection
+from .postgres_security_store import PostgresSecurityStore
 from .postgres_usage_store import PostgresUsageStore
 from .store import UsageStore
 
@@ -37,14 +39,24 @@ _SECURITY_METHODS = {
 
 
 class GatewayStoreRouter:
-    """Route named store operations without hiding a split persistence boundary."""
+    """Route current operations to PostgreSQL while retaining legacy audit evidence."""
 
-    backend = "split-postgresql-accounting-sqlite-security"
+    backend = "postgresql-accounting-security-with-sqlite-legacy-audit"
 
-    def __init__(self, accounting: PostgresUsageStore, security: UsageStore):
+    def __init__(
+        self,
+        accounting: PostgresUsageStore,
+        security: PostgresSecurityStore | UsageStore,
+        legacy_security: UsageStore | None = None,
+    ):
         self.accounting = accounting
         self.security = security
-        self.security_database_path = security.path
+        self.legacy_security = legacy_security or (
+            security if isinstance(security, UsageStore) else None
+        )
+        self.security_database_path = (
+            self.legacy_security.path if self.legacy_security is not None else None
+        )
 
     def __getattr__(self, name: str) -> Any:
         if name in _ACCOUNTING_METHODS:
@@ -57,8 +69,10 @@ class GatewayStoreRouter:
         if kind not in {"all", "usage", "security"}:
             raise ValueError(f"Unsupported audit event kind: {kind}")
         events = self.accounting.audit_events(since=since, kind=kind)
-        # Preserve pre-cutover SQLite evidence as well as current PostgreSQL events.
+        # Preserve pre-cutover SQLite evidence alongside current PostgreSQL events.
         events.extend(self.security.audit_events(since=since, kind=kind))
+        if self.legacy_security is not None and self.legacy_security is not self.security:
+            events.extend(self.legacy_security.audit_events(since=since, kind=kind))
         unique = {
             (str(event.get("event_type")), str(event.get("id"))): event
             for event in events
@@ -77,13 +91,30 @@ def gateway_store(config: GatewayConfig, *, environ: dict[str, str] | None = Non
     organizations = tuple(
         sorted({identity.organization_id for identity in config.identities_by_actor.values()})
     )
+    dsn = postgres_dsn_from_env(
+        environ,
+        dsn_env=config.usage_storage.postgres_dsn_env,
+    )
+    verify_runtime_policy_projection(
+        config,
+        dsn,
+        schema=config.usage_storage.postgres_schema,
+        runtime_role=config.usage_storage.postgres_runtime_role,
+    )
     accounting = PostgresUsageStore(
-        postgres_dsn_from_env(
-            environ,
-            dsn_env=config.usage_storage.postgres_dsn_env,
-        ),
+        dsn,
         organization_ids=organizations,
         schema=config.usage_storage.postgres_schema,
         runtime_role=config.usage_storage.postgres_runtime_role,
     )
-    return GatewayStoreRouter(accounting, UsageStore(config.database_path))
+    security = PostgresSecurityStore(
+        dsn,
+        organization_ids=organizations,
+        schema=config.usage_storage.postgres_schema,
+        runtime_role=config.usage_storage.postgres_runtime_role,
+    )
+    return GatewayStoreRouter(
+        accounting,
+        security,
+        legacy_security=UsageStore(config.database_path),
+    )

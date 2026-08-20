@@ -19,7 +19,15 @@ from typing import Any
 from urllib.parse import quote
 
 from hormuz.billing import ProviderCostItem, ProviderCostReport
-from hormuz.config import Identity
+from hormuz.config import (
+    DLPApprovalConfig,
+    DLPControls,
+    DLPRuleConfig,
+    Identity,
+    ModelRoute,
+    Policy,
+    SecretControls,
+)
 from hormuz.postgres import (
     POSTGRES_SCHEMA_VERSION,
     PostgresStorageError,
@@ -30,12 +38,21 @@ from hormuz.postgres import (
 )
 from hormuz.postgres_usage_store import PostgresUsageStore
 from hormuz.identity_projection import sync_identity_projection
+from hormuz.policy_projection import (
+    sync_policy_projection,
+    verify_runtime_policy_projection,
+)
+from hormuz.postgres_security_store import PostgresSecurityStore
 from hormuz.postgres_session_store import PostgresSessionStore
 from hormuz.session_store import SessionStoreError
-from hormuz.store import ReservationDenied, ReservationScope
+from hormuz.store import (
+    DLPApprovalStoreError,
+    ReservationDenied,
+    ReservationScope,
+)
 
 
-EVIDENCE_SCHEMA = "hormuz.postgres-identity-session-integration.v3"
+EVIDENCE_SCHEMA = "hormuz.postgres-policy-approval-integration.v4"
 DEFAULT_IMAGE = (
     "postgres@sha256:"
     "57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777"
@@ -692,6 +709,231 @@ def _prove_identity_sessions(owner_dsn: str, runtime_dsn: str) -> dict[str, obje
     }
 
 
+def _policy_config(*, changed: bool = False) -> object:
+    identity_config = _identity_config()
+    identities = {
+        identity.actor_id: identity
+        for identity in identity_config.identities_by_subject.values()
+    }
+    return SimpleNamespace(
+        identities_by_token={},
+        identities_by_subject=identity_config.identities_by_subject,
+        identities_by_actor=identities,
+        model_routes={
+            "integration-model": ModelRoute(
+                alias="integration-model",
+                protocol="openai",
+                upstream_model="integration-upstream",
+                rate_card_version="integration-v1",
+            )
+        },
+        organization_policy=Policy(
+            allowed_models=("integration-model",),
+            max_output_tokens=2048 if changed else 1024,
+        ),
+        team_policies={},
+        actor_policies={},
+        secret_controls=SecretControls(mode="redact"),
+        dlp_controls=DLPControls(
+            policy_version="integration-dlp-v2" if changed else "integration-dlp-v1",
+            rules=(
+                DLPRuleConfig(
+                    rule_id="integration-rule",
+                    category="integration",
+                    confidence="high",
+                    action="require_approval",
+                ),
+            ),
+            approval=DLPApprovalConfig(
+                enabled=True,
+                fingerprint_key_env="INTEGRATION_APPROVAL_KEY",
+                ttl_seconds=900,
+            ),
+        ),
+        team_dlp_overlays={},
+        actor_dlp_overlays={},
+    )
+
+
+def _prove_policy_approvals(owner_dsn: str, runtime_dsn: str) -> dict[str, object]:
+    config = _policy_config()
+    synced = sync_policy_projection(config, owner_dsn)  # type: ignore[arg-type]
+    repeated = sync_policy_projection(config, owner_dsn)  # type: ignore[arg-type]
+    if synced.changed_organizations != 2 or repeated.changed_organizations != 0:
+        raise PostgresFoundationIntegrationError("policy_sync_not_idempotent")
+    verify_runtime_policy_projection(config, runtime_dsn)  # type: ignore[arg-type]
+    changed_config = _policy_config(changed=True)
+    try:
+        verify_runtime_policy_projection(changed_config, runtime_dsn)  # type: ignore[arg-type]
+    except PostgresStorageError as error:
+        if error.code != "policy_projection_stale":
+            raise PostgresFoundationIntegrationError("policy_stale_error_invalid") from None
+    else:
+        raise PostgresFoundationIntegrationError("policy_stale_projection_accepted")
+    changed = sync_policy_projection(changed_config, owner_dsn)  # type: ignore[arg-type]
+    if changed.changed_organizations != 2:
+        raise PostgresFoundationIntegrationError("policy_change_not_applied")
+    verify_runtime_policy_projection(changed_config, runtime_dsn)  # type: ignore[arg-type]
+
+    organizations = ("tenant-a", "tenant-b")
+    stores = (
+        PostgresSecurityStore(runtime_dsn, organization_ids=organizations),
+        PostgresSecurityStore(runtime_dsn, organization_ids=organizations),
+    )
+    requester = _synthetic_identity("tenant-a", "actor-a")
+    approver = _synthetic_identity(
+        "tenant-a",
+        "approver-a",
+        capabilities=("dlp_approver",),
+    )
+    fingerprint = "hdf_v1_" + "a" * 64
+    arguments = {
+        "identity": requester,
+        "client": "codex",
+        "protocol": "openai",
+        "requested_model": "integration-model",
+        "routed_model": "integration-upstream",
+        "policy_version": "integration-dlp-v2",
+        "payload_fingerprint": fingerprint,
+        "rules": ("integration-rule",),
+        "detection_count": 1,
+        "ttl_seconds": 900,
+    }
+    pending = stores[0].authorize_or_request_dlp_approval(**arguments)
+    try:
+        stores[1].get_dlp_approval_request(
+            pending.request_id,
+            organization_id="tenant-b",
+        )
+    except DLPApprovalStoreError as error:
+        if error.code != "approval_request_not_found":
+            raise PostgresFoundationIntegrationError(
+                "approval_cross_tenant_error_invalid_" + error.code
+            ) from None
+    else:
+        raise PostgresFoundationIntegrationError("approval_cross_tenant_visible")
+    stores[1].approve_dlp_approval_request(
+        pending.request_id,
+        approver=approver,
+        ttl_seconds=900,
+    )
+
+    def consume(store: PostgresSecurityStore) -> object:
+        return store.authorize_or_request_dlp_approval(**arguments)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        outcomes = tuple(
+            future.result(timeout=20)
+            for future in (
+                executor.submit(consume, stores[0]),
+                executor.submit(consume, stores[1]),
+            )
+        )
+    if sorted(item.status for item in outcomes) != ["consumed", "pending"]:
+        raise PostgresFoundationIntegrationError("approval_atomic_consumption_failed")
+    consumed = next(item for item in outcomes if item.status == "consumed")
+    next_pending = next(item for item in outcomes if item.status == "pending")
+
+    same_actor_approver = _synthetic_identity(
+        "tenant-a",
+        "actor-a",
+        capabilities=("dlp_approver",),
+    )
+    try:
+        stores[0].approve_dlp_approval_request(
+            next_pending.request_id,
+            approver=same_actor_approver,
+            ttl_seconds=900,
+        )
+    except DLPApprovalStoreError as error:
+        if error.code != "approval_self_approval_forbidden":
+            raise PostgresFoundationIntegrationError("approval_self_error_invalid") from None
+    else:
+        raise PostgresFoundationIntegrationError("approval_self_approval_allowed")
+    stores[0].approve_dlp_approval_request(
+        next_pending.request_id,
+        approver=approver,
+        ttl_seconds=900,
+    )
+    mutated = stores[1].authorize_or_request_dlp_approval(
+        **{**arguments, "routed_model": "integration-mutated"}
+    )
+    if mutated.status != "pending":
+        raise PostgresFoundationIntegrationError("approval_model_binding_failed")
+    second_consumed = stores[0].authorize_or_request_dlp_approval(**arguments)
+    if second_consumed.status != "consumed" or second_consumed.request_id != next_pending.request_id:
+        raise PostgresFoundationIntegrationError("approval_exact_retry_failed")
+
+    stores[1].record_dlp_approval_model_mismatch(
+        consumed.request_id,
+        organization_id="tenant-a",
+        actual_model="integration-unexpected",
+    )
+    stores[0].record_secret_event(
+        identity=requester,
+        client="codex",
+        protocol="openai",
+        requested_model="integration-model",
+        action="redacted",
+        detection_count=1,
+        rules=("openai-key",),
+    )
+    stores[1].record_dlp_event(
+        identity=requester,
+        client="codex",
+        protocol="openai",
+        requested_model="integration-model",
+        routed_model="integration-upstream",
+        action="approval_required",
+        redaction_count=0,
+        policy_version="integration-dlp-v2",
+        findings=(
+            {
+                "rule_id": "integration-rule",
+                "category": "integration",
+                "confidence": "high",
+                "action": "require_approval",
+                "count": 1,
+            },
+        ),
+    )
+    secret_totals = stores[1].monthly_secret_totals(organization_id="tenant-a")
+    approval_totals = stores[0].monthly_dlp_approval_totals(
+        organization_id="tenant-a"
+    )
+    events = stores[1].audit_events(
+        since=datetime.now(timezone.utc).replace(
+            day=1, hour=0, minute=0, second=0, microsecond=0
+        ).isoformat(),
+        kind="security",
+    )
+    event_types = {str(event["event_type"]) for event in events}
+    if (
+        secret_totals.events != 2
+        or approval_totals.consumed != 2
+        or approval_totals.model_mismatches != 1
+        or not {"security.secret", "security.dlp", "security.dlp.approval"}.issubset(
+            event_types
+        )
+    ):
+        raise PostgresFoundationIntegrationError("approval_security_evidence_mismatch")
+    return {
+        "configuration_projection_verified": True,
+        "idempotent_sync_verified": True,
+        "stale_projection_rejected": True,
+        "cross_instance_request_verified": True,
+        "cross_tenant_request_hidden": True,
+        "self_approval_denied": True,
+        "atomic_retry_competitors": 2,
+        "atomic_retry_consumed": 1,
+        "atomic_retry_blocked_pending": 1,
+        "exact_payload_model_policy_binding_verified": True,
+        "model_mismatch_audited": True,
+        "security_events_shared": True,
+        "content_free": True,
+    }
+
+
 def _expect_verification_code(owner_dsn: str, expected_code: str) -> None:
     try:
         verify_postgres(owner_dsn)
@@ -743,6 +985,17 @@ def _prove_verifier_tamper_detection(admin_dsn: str, owner_dsn: str) -> dict[str
                     "ALTER TABLE hormuz.gateway_usage_events "
                     "DROP COLUMN unexpected_column"
                 )
+                cursor.execute(
+                    "ALTER TABLE hormuz.gateway_dlp_approval_requests "
+                    "ADD COLUMN prompt text"
+                )
+        _expect_verification_code(owner_dsn, "accounting_table_columns_invalid")
+        with psycopg.connect(owner_dsn, autocommit=True) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "ALTER TABLE hormuz.gateway_dlp_approval_requests "
+                    "DROP COLUMN prompt"
+                )
         verify_postgres(owner_dsn)
     except PostgresFoundationIntegrationError:
         raise
@@ -752,6 +1005,7 @@ def _prove_verifier_tamper_detection(admin_dsn: str, owner_dsn: str) -> dict[str
         "permissive_policy_rejected": True,
         "runtime_owner_membership_rejected": True,
         "unexpected_accounting_column_rejected": True,
+        "unexpected_security_column_rejected": True,
     }
 
 
@@ -838,6 +1092,7 @@ def run_integration(*, image: str = DEFAULT_IMAGE) -> dict[str, object]:
         isolation = _prove_runtime_isolation(runtime_dsn, owner_dsn)
         accounting = _prove_accounting_store(runtime_dsn)
         identity_sessions = _prove_identity_sessions(owner_dsn, runtime_dsn)
+        policy_approvals = _prove_policy_approvals(owner_dsn, runtime_dsn)
         tamper_detection = _prove_verifier_tamper_detection(admin_dsn, owner_dsn)
         evidence = {
             "schema": EVIDENCE_SCHEMA,
@@ -860,6 +1115,7 @@ def run_integration(*, image: str = DEFAULT_IMAGE) -> dict[str, object]:
             "isolation": isolation,
             "accounting": accounting,
             "identity_sessions": identity_sessions,
+            "policy_approvals": policy_approvals,
             "tamper_detection": tamper_detection,
             "content_free": True,
         }

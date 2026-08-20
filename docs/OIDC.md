@@ -15,7 +15,7 @@ Register Hormuz as a confidential web OIDC client with the identity provider:
 - a server-held client secret; never install it on employee machines.
 - a login client ID distinct from every workload API audience, so an ID token can never satisfy the resource-server audience check.
 
-Generate a separate 32-byte session-store master key and place the base64url value and OIDC client secret in the Hormuz service environment. The PostgreSQL deployment uses the shared RLS schema for accounting, identity projection, and sessions while keeping DLP approvals and governed context in their explicitly identified stores. SQLite development deployments keep usage, context, and session databases separate.
+Generate a separate 32-byte session-store master key and place the base64url value and OIDC client secret in the Hormuz service environment. The PostgreSQL deployment uses the shared RLS schema for accounting, identity and policy projection, sessions, DLP approvals, and security evidence while keeping governed context in its explicitly identified store. SQLite development deployments keep usage, context, and session databases separate.
 
 ```json
 {
@@ -66,13 +66,14 @@ before starting the runtime-role gateway:
 ```bash
 hormuz storage migrate
 hormuz --config /etc/hormuz/hormuz.json identities sync
+hormuz --config /etc/hormuz/hormuz.json policies sync
 hormuz storage verify
 ```
 
 Use the schema-owner DSN only for these deployment commands. Replace it with the
 distinct runtime-role DSN before `serve`. The running gateway checks the stored
-identity-projection fingerprint and fails closed when synchronization was
-skipped. For local SQLite development, set `"backend": "sqlite"` and add a
+identity- and policy-projection fingerprints and fails closed when either
+synchronization was skipped. For local SQLite development, set `"backend": "sqlite"` and add a
 separate `"database": "./hormuz-sessions.sqlite3"`.
 
 The master key must decode to exactly 32 bytes. Human access lifetime is constrained to 5–15 minutes and defaults to 10 minutes. Absolute session lifetime cannot exceed 12 hours; organizations may shorten it. Loopback HTTP is available only behind explicit development flags and never permits a non-loopback host.

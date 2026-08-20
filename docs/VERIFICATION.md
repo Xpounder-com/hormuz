@@ -1894,6 +1894,55 @@ HA/failover, retention/export/delete operations, deployment rollback, and
 independent security review remain open. Issue #6 and draft PR #19 therefore
 remain open.
 
+### PostgreSQL policy projection and multi-instance DLP approval slice
+
+The third ordered PostgreSQL migration slice was exercised locally on August
+20, 2026:
+
+- packaged schema version 4 adds exact-column, forced-RLS policy-projection,
+  secret/DLP-event, approval-request, and approval-event tables with immutable
+  tenant keys. The runtime role can read but not mutate policy projections and
+  can write only tenant-scoped gateway security/approval state;
+- `hormuz policies sync` used the schema-owner deployment path to store a
+  tenant-specific canonical policy document and SHA-256. It retained model,
+  budget, route, DLP, and context-injection policy metadata while excluding
+  provider/identity credentials, resolved secret and dictionary values, the
+  approval fingerprint key, prompts, responses, matched values, filenames, and
+  source content. An unchanged second sync made zero organization changes;
+- a gateway runtime using the non-owner role matched every configured policy
+  projection. A changed model/output/DLP policy failed closed with
+  `policy_projection_stale` until the owner sync applied the candidate;
+- two independent PostgreSQL security repositories shared pending decisions,
+  metadata-only security events, and approval audit. Cross-tenant request lookup
+  returned only `approval_request_not_found`, and the requesting actor could not
+  self-approve even when separately given the approver capability;
+- a transaction advisory lock serialized two concurrent exact retries. Exactly
+  one consumed the approved grant; the other remained blocked behind a new
+  pending request. A changed routed model did not consume the exact grant, and
+  an actual-provider-model mismatch created a metadata-only audit event;
+- the digest-pinned PostgreSQL `16.14` integration applied and verified
+  migration versions `1` through `4`, retained the accounting, identity/session,
+  and tenant-isolation results, rejected unexpected accounting and security
+  columns, and replaced the checked-in evidence at
+  `evidence/postgres-foundation-integration-2026-08-20.json`;
+- 108 focused PostgreSQL, approval, compatibility, threat-model, CLI, and
+  content-free-schema tests passed. The complete source suite passed 518 tests
+  in `137.004` seconds with the same three documented opt-in installed-client
+  skips; and
+- source/test/script bytecode compilation, `git diff --check`, and a local
+  source/wheel build passed. The built wheel and source archive both included
+  the policy/security repositories and migration `0004_policy_approvals.sql`.
+
+This proves bounded shared PostgreSQL behavior, not a production persistence or
+policy-administration system. Existing SQLite approvals are deliberately not
+backfilled or honored after cutover. Policy rollout currently requires an
+owner-run coordinated sync/replacement sequence; there is no multi-version
+activation, change-approval API, or automatic rollback. Governed context,
+SCIM, representative DLP evaluation, approval notifications/queue UX,
+connection pooling, KMS custody/rotation, backup/PITR and restore, HA/failover,
+retention/export/delete operations, and independent security review remain
+open. Issue #6, issue #10, and draft PR #19 therefore remain open.
+
 ## Automated publication gate
 
 Ordinary GitHub CI runs eight independent gate families without provider credentials:

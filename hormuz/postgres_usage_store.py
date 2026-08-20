@@ -1,8 +1,8 @@
 """PostgreSQL accounting repository with transaction-local tenant isolation.
 
 This store owns gateway usage, provider cost evidence, usage-read audit events,
-and budget reservations. Security/DLP approvals intentionally remain in the
-SQLite security store until their separately reviewed migration.
+and budget reservations. Security/DLP approval state has its own PostgreSQL
+repository so each invariant remains explicit.
 """
 
 from __future__ import annotations

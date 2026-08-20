@@ -1,8 +1,9 @@
 """Versioned PostgreSQL tenancy foundation and fail-closed RLS helpers.
 
-The opt-in gateway path uses PostgreSQL for usage/accounting and human sessions.
-DLP approvals and governed context remain SQLite-backed, so this module is a
-bounded persistence slice rather than a completed hosted storage plane.
+The opt-in gateway path uses PostgreSQL for usage/accounting, human sessions,
+and DLP approval/security state. Governed context remains SQLite-backed, so
+this module is a bounded persistence slice rather than a completed hosted
+storage plane.
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ import re
 from typing import Any, Callable, Iterator, Protocol
 
 
-POSTGRES_SCHEMA_VERSION = 3
+POSTGRES_SCHEMA_VERSION = 4
 DEFAULT_POSTGRES_DSN_ENV = "HORMUZ_POSTGRES_DSN"
 DEFAULT_POSTGRES_SCHEMA = "hormuz"
 DEFAULT_POSTGRES_RUNTIME_ROLE = "hormuz_runtime"
@@ -55,6 +56,10 @@ TENANT_TABLES = (
     "gateway_human_sessions",
     "gateway_consumed_refresh_credentials",
     "gateway_session_security_events",
+    "gateway_policy_projections",
+    "gateway_secret_events",
+    "gateway_dlp_approval_requests",
+    "gateway_dlp_approval_events",
 )
 
 RUNTIME_READ_ONLY_TABLES = (
@@ -67,6 +72,7 @@ RUNTIME_READ_ONLY_TABLES = (
     "team_memberships",
     "gateway_identity_projections",
     "gateway_principal_projections",
+    "gateway_policy_projections",
 )
 RUNTIME_MUTABLE_TABLES = tuple(
     table for table in TENANT_TABLES if table not in RUNTIME_READ_ONLY_TABLES
@@ -143,6 +149,31 @@ IDENTITY_SESSION_TABLE_COLUMNS = {
         "tenant_id", "id", "occurred_at", "session_id", "event_type",
         "target_actor_id", "target_team_id", "decision_actor_id", "decision_scope",
         "reason_code",
+    ),
+}
+
+POLICY_APPROVAL_TABLE_COLUMNS = {
+    "gateway_policy_projections": (
+        "tenant_id", "projection_sha256", "projection_json", "applied_at",
+    ),
+    "gateway_secret_events": (
+        "tenant_id", "id", "occurred_at", "actor_id", "actor_name", "team_id",
+        "team_name", "client", "protocol", "requested_model", "routed_model",
+        "action", "detection_count", "redaction_count", "rules_json",
+        "event_type", "policy_version", "findings_json",
+    ),
+    "gateway_dlp_approval_requests": (
+        "tenant_id", "id", "created_at", "updated_at", "expires_at", "actor_id",
+        "actor_name", "team_id", "team_name", "client", "protocol",
+        "requested_model", "routed_model", "policy_version", "payload_fingerprint",
+        "rules_json", "detection_count", "status", "approved_by_actor_id",
+        "approved_by_actor_name", "approved_at", "consumed_at",
+    ),
+    "gateway_dlp_approval_events": (
+        "tenant_id", "id", "occurred_at", "request_id", "actor_id", "actor_name",
+        "team_id", "team_name", "decision_actor_id", "decision_actor_name",
+        "client", "protocol", "requested_model", "routed_model", "actual_model",
+        "policy_version", "rules_json", "action",
     ),
 }
 
@@ -455,7 +486,11 @@ def _verify_foundation(cursor: _Cursor, schema: str, runtime_role: str) -> None:
         if row[3] != migration_role:
             raise PostgresStorageError("migration_role_does_not_own_tenant_table")
 
-    exact_columns = {**ACCOUNTING_TABLE_COLUMNS, **IDENTITY_SESSION_TABLE_COLUMNS}
+    exact_columns = {
+        **ACCOUNTING_TABLE_COLUMNS,
+        **IDENTITY_SESSION_TABLE_COLUMNS,
+        **POLICY_APPROVAL_TABLE_COLUMNS,
+    }
     cursor.execute(
         "SELECT table_name, column_name FROM information_schema.columns "
         "WHERE table_schema = %s AND table_name = ANY(%s) "

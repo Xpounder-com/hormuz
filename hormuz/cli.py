@@ -75,6 +75,7 @@ from .mcp import (
 )
 from .policy import PolicyEngine
 from .identity_projection import sync_identity_projection
+from .policy_projection import sync_policy_projection
 from .postgres import (
     DEFAULT_POSTGRES_DSN_ENV,
     DEFAULT_POSTGRES_RUNTIME_ROLE,
@@ -175,6 +176,22 @@ def build_parser() -> argparse.ArgumentParser:
         help="Apply configured organizations, people, teams, and OIDC mappings",
     )
     identity_sync.add_argument(
+        "--dsn-env",
+        help="Owner PostgreSQL DSN environment (default: configured PostgreSQL DSN environment)",
+    )
+    policies = subparsers.add_parser(
+        "policies",
+        help="Synchronize secret-free configuration-seeded policy desired state",
+    )
+    policy_subparsers = policies.add_subparsers(
+        dest="policies_command",
+        required=True,
+    )
+    policy_sync = policy_subparsers.add_parser(
+        "sync",
+        help="Apply the canonical model, budget, redaction, and DLP policy projection",
+    )
+    policy_sync.add_argument(
         "--dsn-env",
         help="Owner PostgreSQL DSN environment (default: configured PostgreSQL DSN environment)",
     )
@@ -1111,6 +1128,15 @@ def main(argv: list[str] | None = None) -> int:
             )
             print(json.dumps(result.to_dict(), sort_keys=True, separators=(",", ":")))
             return 0
+        if args.command == "policies":
+            dsn_env = args.dsn_env or config.usage_storage.postgres_dsn_env
+            result = sync_policy_projection(
+                config,
+                postgres_dsn_from_env(dsn_env=dsn_env),
+                schema=config.usage_storage.postgres_schema,
+            )
+            print(json.dumps(result.to_dict(), sort_keys=True, separators=(",", ":")))
+            return 0
         if args.command == "doctor":
             return _doctor(config)
         if args.command == "status":
@@ -1208,7 +1234,8 @@ def _serve(config: GatewayConfig) -> int:
     print(f"Usage storage: {config.usage_storage.backend}")
     if config.usage_storage.backend == "postgresql":
         print(f"Usage PostgreSQL DSN environment: {config.usage_storage.postgres_dsn_env}")
-        print(f"Security database: {config.database_path}")
+        print("Security and DLP approval database: PostgreSQL (shared runtime storage)")
+        print(f"Legacy security audit database: {config.database_path}")
     else:
         print(f"Usage and security database: {config.database_path}")
     print(f"Context database: {config.context_database_path}")

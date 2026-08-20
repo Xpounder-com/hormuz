@@ -1,11 +1,12 @@
 # PostgreSQL tenancy foundation
 
 Hormuz has an accepted shared-schema PostgreSQL tenancy contract and an
-executable schema-version-3 accounting, identity-projection, and human-session
-backend. A deployment can opt into PostgreSQL for usage, cost evidence,
-usage-read audit, atomic budget reservations, and multi-instance human sessions.
-DLP/security approvals and governed context remain in their explicitly
-identified SQLite stores during this transition.
+executable schema-version-4 accounting, identity-projection, policy-projection,
+human-session, and DLP/security backend. A deployment can opt into PostgreSQL
+for usage, cost evidence, usage-read audit, atomic budget reservations,
+multi-instance human sessions, one-time DLP approvals, and security evidence.
+Governed context remains in its explicitly identified SQLite store during this
+transition.
 
 ## Boundary proved by this checkpoint
 
@@ -13,6 +14,8 @@ The packaged PostgreSQL migrations create tenant, workspace, project, team,
 principal, external-identity, role, capability, team-membership, desired-state
 projection, usage, provider-cost, usage-read-audit, budget-reservation,
 enrollment, session, consumed-refresh, and session-security-event tables.
+Schema version 4 adds a secret-free canonical policy projection plus DLP
+approval-request, approval-event, and security-event tables.
 Every tenant-owned table has:
 
 - a non-null tenant key in its primary and foreign-key relationships;
@@ -51,6 +54,7 @@ export HORMUZ_POSTGRES_DSN='injected-by-your-secret-manager'
 hormuz storage migrate
 hormuz storage verify
 hormuz --config /etc/hormuz/hormuz.json identities sync
+hormuz --config /etc/hormuz/hormuz.json policies sync
 ```
 
 Both commands print bounded JSON containing only the schema, runtime-role name,
@@ -79,14 +83,24 @@ Run `identities sync` with the owner DSN after every approved identity mapping
 change. It projects configured organizations, people, teams, OIDC subjects,
 capabilities, and allowed clients transactionally. It increments only affected
 principal authorization versions, revokes their active sessions, and is
-idempotent when desired state is unchanged. The live gateway never receives
-schema-owner credentials: identity-directory tables are read-only, while the
-previously accepted tenant-scoped workspace/project DML and the gateway-owned
-accounting/session DML remain available to the runtime role. Startup fails
-closed when the stored projection fingerprint does not match configuration.
+idempotent when desired state is unchanged.
 
-After migration and identity synchronization, inject the distinct runtime-role
-DSN under the environment name selected in configuration:
+Run `policies sync` with the owner DSN after every approved model, budget,
+redaction, DLP, or context-injection policy change. It writes a tenant-scoped,
+canonical projection containing policy metadata and a fingerprint. The
+projection excludes identity and provider credentials, resolved custom-secret
+values, DLP dictionary values, the approval fingerprint key, prompts,
+responses, matched values, filenames, and source content. Runtime access is
+read-only, and a PostgreSQL-backed gateway fails startup with
+`policy_projection_stale` when any configured tenant does not match.
+
+The live gateway never receives schema-owner credentials. Identity and policy
+projection tables are read-only, while the previously accepted tenant-scoped
+workspace/project DML and the gateway-owned accounting, session, security, and
+approval DML remain available to the runtime role.
+
+After migration plus identity and policy synchronization, inject the distinct
+runtime-role DSN under the environment name selected in configuration:
 
 ```json
 {
@@ -108,17 +122,28 @@ DSN under the environment name selected in configuration:
 }
 ```
 
-`database` is deliberately still the SQLite DLP/security approval ledger. The
-DSN value never belongs in JSON. `identities sync` provisions configured
-organizations; manual tenant-row creation is not the normal path. When the
-session backend is omitted it follows `usage_storage.backend`, so this example's
-explicit value documents rather than changes the default.
+`database` is retained as the pre-cutover SQLite usage/security audit source;
+new security events and DLP approvals use PostgreSQL when
+`usage_storage.backend` is `postgresql`. The DSN value never belongs in JSON.
+Both desired-state commands can provision configured organizations; manual
+tenant-row creation is not the normal path. When the session backend is omitted
+it follows `usage_storage.backend`, so this example's explicit value documents
+rather than changes the default.
 
-Switching the backend does not backfill old SQLite usage rows. New reports and
-budget calculations use PostgreSQL from the cutover onward; `audit-export`
-continues to combine pre-cutover SQLite evidence with current PostgreSQL
-evidence. Perform a separately verified backfill before using a mid-month
-cutover for enforceable monthly limits.
+Switching the backend does not backfill old SQLite usage, security, or approval
+rows. New reports, budget calculations, security totals, and approvals use
+PostgreSQL from the cutover onward; `audit-export` continues to combine
+pre-cutover SQLite evidence with current PostgreSQL evidence. Pending or
+approved SQLite grants do not authorize a PostgreSQL retry and must be requested
+again after cutover. Perform a separately verified backfill before using a
+mid-month cutover for enforceable monthly limits or complete-period reporting.
+
+The current CLI rollout contract is coordinated replacement, not zero-downtime
+policy rollout: migrate, sync identities, sync the candidate policy, start the
+candidate configuration, and readiness-check it. Rollback requires syncing the
+retained prior policy configuration before starting the prior binary/config.
+Multi-version policy activation and an administrator change-approval API remain
+open rather than being implied by this checkpoint.
 
 ## Reproduce the bounded integration proof
 
@@ -143,6 +168,15 @@ roles and two synthetic tenants, then proves:
 - exactly one rotation under a two-instance refresh race, replay denial, and
   family revocation; and
 - immediate invalidation after an affected identity mapping changes.
+- idempotent secret-free policy synchronization and stale-projection startup
+  rejection;
+- hidden cross-tenant approval requests and denied self-approval;
+- exactly one consumed grant under two competing gateway retries, with the
+  second retry blocked behind a new pending request;
+- exact actor/provider/model/policy/payload-fingerprint/rule binding, shared
+  metadata-only security evidence, and actual-model mismatch audit; and
+- rejection of unexpected accounting or security columns during schema
+  verification.
 
 ```bash
 python -m pip install '.[postgres]'
@@ -157,10 +191,11 @@ observation is
 
 ## Gates that remain open
 
-Schema v3 is a real accounting and human-session persistence slice, not the
-completed hosted product. The repository currently opens a fresh PostgreSQL
-connection per operation. Configuration is the desired-state directory source;
-SCIM and an administrative identity API are not implemented. Removing a person
+Schema v4 is a real accounting, human-session, and DLP/security persistence
+slice, not the completed hosted product. The repository currently opens a fresh
+PostgreSQL connection per operation. Configuration is the desired-state
+identity and policy source; SCIM and administrative identity/policy APIs are not
+implemented. Removing a person
 or mapping while retaining its configured organization increments the affected
 authorization version and revokes active sessions. Removing the entire
 organization from configuration is not a deprovisioning operation: the sync
@@ -170,8 +205,9 @@ not consider tenant deletion complete until a separately verified explicit
 deprovision/SCIM workflow exists. A keyed routing
 tag lets an opaque credential select one RLS tenant without exposing the raw
 organization ID or querying a global credential index, but production custody
-and rotation of that key remain open. Issue #6 remains open until policy
-approvals and governed context have tested PostgreSQL contracts; usage backfill,
-export/delete, backup/restore, pooling, KMS, HA, operations, and independent
-security review remain separate gates. Do not describe this checkpoint as the
-completed enterprise storage plane.
+and rotation of that key remain open. Issue #6 remains open until governed
+context has a tested PostgreSQL contract; policy notification/queue UX,
+representative DLP evaluation, usage/security backfill, export/delete,
+backup/restore, pooling, KMS, HA, operations, and independent security review
+remain separate gates. Do not describe this checkpoint as the completed
+enterprise storage plane.

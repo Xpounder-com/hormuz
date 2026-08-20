@@ -13,7 +13,7 @@
     "out_of_scope": [
       "provider-side systems beyond the documented HTTPS API contract",
       "employee endpoints before requests enter Hormuz",
-      "a production PostgreSQL topology beyond the bounded accounting/identity/session slices, KMS, cache, reverse proxy, or multi-region deployment that has not been fully implemented or verified",
+      "a production PostgreSQL topology beyond the bounded accounting/identity/policy/session/approval slices, KMS, cache, reverse proxy, or multi-region deployment that has not been fully implemented or verified",
       "an independent penetration test, which remains a separate release gate"
     ]
   },
@@ -32,10 +32,10 @@
     {"id": "TB-001", "name": "Employee client ingress", "from": "Codex, Claude Code, and administrative CLIs", "to": "Hormuz HTTP and MCP boundaries", "data": "identity credentials, provider-compatible requests, administration inputs, and context queries"},
     {"id": "TB-002", "name": "Provider egress", "from": "Hormuz", "to": "OpenAI and Anthropic HTTPS endpoints", "data": "inspected provider requests, server-held provider credentials, streamed responses, and provider usage metadata"},
     {"id": "TB-003", "name": "Identity provider", "from": "Hormuz and employee browser", "to": "configured OIDC discovery, authorization, token, and JWKS endpoints", "data": "OIDC metadata, authorization codes, PKCE material, ID tokens, and access-token verification keys"},
-    {"id": "TB-004", "name": "Local durable state", "from": "Hormuz runtime", "to": "default SQLite usage/session stores plus approval and governed-context SQLite stores", "data": "content-free telemetry, keyed request fingerprints, session state, and intentionally content-bearing governed context"},
+    {"id": "TB-004", "name": "Local durable state", "from": "Hormuz runtime", "to": "default SQLite usage/session/approval stores plus governed-context SQLite store", "data": "content-free telemetry, keyed request fingerprints, session state, and intentionally content-bearing governed context"},
     {"id": "TB-005", "name": "Lifecycle connector ingress", "from": "trusted CI and source connectors", "to": "Hormuz lifecycle API", "data": "normalized evidence envelopes, repository snapshots, and revalidation requests"},
     {"id": "TB-006", "name": "Build and release", "from": "source repository and GitHub Actions", "to": "Python distributions and private GHCR images", "data": "source, locked dependencies, build inputs, SBOM, provenance, signatures, and release metadata"},
-    {"id": "TB-007", "name": "Shared control plane", "from": "Hormuz replicas and operators", "to": "current PostgreSQL accounting/identity/session stores and future KMS, caches, queues, object storage, and observability systems", "data": "tenant-scoped identity, authorization versions, usage, sessions, policy, context, secrets, jobs, and operational evidence"}
+    {"id": "TB-007", "name": "Shared control plane", "from": "Hormuz replicas and operators", "to": "current PostgreSQL accounting/identity/policy/session/approval stores and future KMS, caches, queues, object storage, and observability systems", "data": "tenant-scoped identity, authorization versions, usage, sessions, policy metadata, keyed approval fingerprints, context, secrets, jobs, and operational evidence"}
   ],
   "incident_scenarios": [
     {"id": "provider_outage", "name": "Provider outage or degradation", "threat_ids": ["TM-011", "TM-012"]},
@@ -73,10 +73,10 @@
       "controls": [
         {"kind": "test", "ref": "tests/test_gateway.py", "claim": "Current single-node APIs exercise identity-derived organization scope and cross-organization denials."},
         {"kind": "documentation", "ref": "docs/decisions/0002-enterprise-tenancy-and-persistence.md", "claim": "The accepted production contract requires mandatory tenant keys, application predicates, forced PostgreSQL RLS, and reused-connection isolation tests."},
-        {"kind": "code", "ref": "hormuz/postgres.py", "claim": "Schema-v3 migration and verification enforce separate roles, forced RLS, immutable tenant keys, read-only identity-directory privileges, exact columns, and transaction-local tenant context."},
-        {"kind": "test", "ref": "scripts/postgres_foundation_integration.py", "claim": "The digest-pinned two-tenant integration exercises migration idempotency, missing/cleared tenant context, reused-connection switching, cross-tenant denial, composite tenant foreign keys, accounting, desired-state identities, and multi-instance sessions."}
+        {"kind": "code", "ref": "hormuz/postgres.py", "claim": "Schema-v4 migration and verification enforce separate roles, forced RLS, immutable tenant keys, read-only identity/policy projection privileges, exact columns, and transaction-local tenant context."},
+        {"kind": "test", "ref": "scripts/postgres_foundation_integration.py", "claim": "The digest-pinned two-tenant integration exercises migration idempotency, missing/cleared tenant context, reused-connection switching, cross-tenant denial, composite tenant foreign keys, accounting, desired-state identities and policies, multi-instance sessions, security evidence, and atomic one-time approvals."}
       ],
-      "residual_risk": "PostgreSQL is connected to accounting and human sessions, but DLP approvals and governed context remain SQLite; pooled concurrency, backup/restore, deletion, HA, KMS, SCIM, and independent review remain unproved.",
+      "residual_risk": "PostgreSQL is connected to accounting, human sessions, policy projections, DLP approvals, and security evidence, but governed context remains SQLite; pooled load, backup/restore, deletion, coordinated policy rollout, HA, KMS, SCIM, and independent review remain unproved.",
       "release_gate": "Issue #6"
     },
     {
