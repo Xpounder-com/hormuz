@@ -149,7 +149,7 @@
         "production_supported": false,
         "tested_environments": [
           "loopback protocol-shaped fake OpenAI provider",
-          "opt-in macOS 26.2 arm64 live OpenAI observation on 2026-08-19"
+          "opt-in macOS 26.2 arm64 live OpenAI observations on 2026-08-19 and governed-context compaction on 2026-08-20"
         ],
         "interfaces": [
           "POST /v1/responses",
@@ -163,12 +163,13 @@
           "tests/test_gateway.py#test_required_openai_compaction_without_user_query_stops_before_provider",
           "evidence/provider-conformance-openai-2026-08-19.json",
           "evidence/provider-redaction-conformance-openai-2026-08-19.json",
+          "evidence/provider-compaction-conformance-openai-2026-08-20.json",
           "evidence/codex-openai-live-2026-08-19.json",
           "evidence/client-conformance-codex-openai-2026-08-19.json"
         ],
         "limitations": [
-          "The blocking release gate remains a local fake; the content-free artifacts record opt-in live connectivity, one fixed synthetic-secret redaction path, and pinned Codex observations, not complete DLP, a provider SLA, retention, residency, availability, or every-model claim.",
-          "Compaction coverage is limited to direct current-user input plus required-mode denial without it; no live compaction or authorized continuation-binding observation exists."
+          "The blocking release gate remains a local fake; the content-free artifacts record opt-in live connectivity, one fixed synthetic-secret redaction path, one fixed governed-context compaction path, and pinned Codex observations, not complete DLP, a provider SLA, retention, residency, availability, or every-model claim.",
+          "Compaction coverage is limited to direct current-user input plus required-mode denial without it; no authorized continuation-binding observation exists."
         ]
       },
       {

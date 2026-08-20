@@ -802,11 +802,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--max-output-tokens",
         type=int,
         default=16,
-        help="Probe output cap from 1 to 64 (default: 16)",
+        help="Generation/redaction output cap from 1 to 64; compact does not forward it (default: 16)",
     )
     conformance.add_argument(
         "--probe",
-        choices=["connectivity", "secret-redaction"],
+        choices=["connectivity", "secret-redaction", "compaction"],
         default="connectivity",
         help="Fixed probe contract to execute (default: connectivity)",
     )

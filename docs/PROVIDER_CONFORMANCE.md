@@ -1,16 +1,17 @@
 # Live provider and stock-client conformance
 
-`hormuz provider-conformance` sends one fixed, low-output text probe through a
-running Hormuz gateway. It verifies that the gateway authenticated the employee,
-applied a policy route, reached the selected provider, received the fixed marker,
-and observed provider-reported token usage.
+`hormuz provider-conformance` sends one of three fixed package-owned probes
+through a running Hormuz gateway: connectivity, synthetic-secret redaction, or
+OpenAI compaction with required governed context. It verifies only the explicit
+conditions for the selected probe and observes provider-reported token usage.
 
 This command is opt in. It creates a real billable provider request. It does not
-send repository, customer, employee, prompt-file, or ticket content. The fixed
-probe is versioned in the package and cannot be supplied on the command line.
+send customer repository, customer, employee, prompt-file, or ticket content.
+Each fixed probe is versioned in the package and cannot be supplied on the
+command line.
 The example rate card is pinned to the public
 [OpenAI GPT-5.6 Luna model page](https://developers.openai.com/api/docs/models/gpt-5.6-luna)
-observed on August 19, 2026; operators must recheck provider pricing rather than
+observed on August 20, 2026; operators must recheck provider pricing rather than
 treating a repository example as an invoice.
 
 ## OpenAI local proof
@@ -88,6 +89,50 @@ endpoint. It does not evaluate customer-specific dictionaries, PII detectors,
 encoded or opaque content, every request position, every model, or an
 organization-representative corpus.
 
+## Governed-context compaction proof
+
+The OpenAI-only `compaction` probe imports one fixed, package-owned verified
+context record, requires Hormuz to inject a valid governed Context Pack, and
+requires OpenAI to return a Responses compaction object plus usage according to
+the official [compact reference](https://developers.openai.com/api/reference/java/resources/responses/methods/compact).
+The result retains neither the context, pack identifier, fixed prompt, opaque
+compaction, nor provider request/response IDs. OpenAI's compact endpoint has no
+generation-style hard output-cap field; Hormuz reserves the configured
+allowance locally, but actual provider output can exceed it.
+
+Generate the two local-only credentials, source the provider key only into the
+gateway environment, import the fixed record, and start the dedicated example:
+
+```bash
+export HORMUZ_CONFORMANCE_TOKEN="$(openssl rand -hex 32)"
+export HORMUZ_UNUSED_ANTHROPIC_KEY="$(openssl rand -hex 32)"
+set -a
+source .env.local
+set +a
+hormuz --config examples/provider-compaction-conformance-openai.json context-import \
+  --records examples/provider-compaction-context.jsonl \
+  --actor provider-compaction-conformance \
+  --policy-version provider-compaction-conformance-v1
+hormuz --config examples/provider-compaction-conformance-openai.json serve
+```
+
+Then run the fixed probe:
+
+```bash
+hormuz provider-conformance \
+  --provider openai \
+  --gateway http://127.0.0.1:8793 \
+  --allow-insecure-http \
+  --credential-env HORMUZ_CONFORMANCE_TOKEN \
+  --model openai-live-luna \
+  --probe compaction \
+  --output /tmp/hormuz-openai-compaction-conformance.json
+```
+
+The `--max-output-tokens` compatibility option is validated but is not sent to
+`/responses/compact`. This probe does not test client continuation state,
+automatic history selection, cache policy, or Anthropic.
+
 ## Stock Codex and Claude Code proof
 
 `hormuz client-conformance` exercises an installed official client against the
@@ -149,13 +194,16 @@ writing keeps the same exclusive mode-`0600` contract as provider conformance.
 ## Evidence boundary
 
 The provider JSON result contains the provider and protocol,
-requested/routed/actual model identifiers, Hormuz policy decision, normalized
+requested/routed model identifiers, the actual model when the provider response
+exposes it, Hormuz policy decision, normalized
 token categories, HTTP status, latency, version metadata, and boolean
 assurances. The redaction result additionally retains the redaction count and
 boolean proof of the gateway header plus sanitized provider echo, without the
-synthetic value or placeholder. The client JSON result contains the client name, exact version,
+synthetic value or placeholder. The compact result records proof of the required
+context header and provider compact shape without the Context Pack ID, governed
+text, or opaque compaction. The client JSON result contains the client name, exact version,
 resolved-launcher digest, protocol, gateway interface, requested policy alias,
-exit code, latency, and boolean assurances. Both omit:
+exit code, latency, and boolean assurances. All results omit:
 
 - the gateway URL and network address;
 - provider and employee credentials;
@@ -234,3 +282,15 @@ fixed prompt nor provider response and is recorded at
 [`evidence/provider-redaction-conformance-openai-2026-08-19.json`](../evidence/provider-redaction-conformance-openai-2026-08-19.json).
 This is one synthetic built-in detector observation, not complete DLP or
 Anthropic evidence.
+
+The fixed governed-context compact probe then traversed Hormuz
+`POST /v1/responses/compact`. Hormuz returned `allowed+context-injected`, and
+OpenAI returned a compaction object with 436 input, 390 output, and 826 billable
+tokens in 4,154 milliseconds. The versioned rate card estimated `$0.000555`.
+The OpenAI compact response did not expose an actual-model field, so the
+content-free result deliberately omits it rather than copying the routed model.
+Exact-value scans found no provider credential, fixed prompt, governed context,
+Context Pack ID, or opaque compaction in the evidence; the recorded artifact is
+[`evidence/provider-compaction-conformance-openai-2026-08-20.json`](../evidence/provider-compaction-conformance-openai-2026-08-20.json).
+This is one OpenAI endpoint observation, not continuation binding, cache-policy,
+Anthropic, SLA, retention, residency, or production-readiness evidence.

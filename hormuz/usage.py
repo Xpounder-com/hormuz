@@ -27,6 +27,7 @@ _OPENAI_USAGE_SPEC: dict[str, object] = {
     "total_tokens": "integer",
     "input_tokens_details": {
         "cached_tokens": "integer",
+        "cache_write_tokens": "integer",
         "audio_tokens": "integer",
     },
     "output_tokens_details": {
@@ -198,6 +199,10 @@ class ResponseUsageParser:
         if isinstance(input_details, dict):
             self.usage.cache_read_tokens = _nonnegative_int(
                 input_details.get("cached_tokens"), self.usage.cache_read_tokens
+            )
+            self.usage.cache_write_tokens = _nonnegative_int(
+                input_details.get("cache_write_tokens"),
+                self.usage.cache_write_tokens,
             )
         output_details = value.get("output_tokens_details")
         if isinstance(output_details, dict):

@@ -1,7 +1,7 @@
 {
   "listen": {
     "host": "127.0.0.1",
-    "port": 8791,
+    "port": 8793,
     "shutdown_grace_seconds": 5,
     "max_concurrent_requests": 4,
     "accept_backlog": 16,
@@ -9,8 +9,15 @@
     "request_header_timeout_seconds": 10,
     "request_body_timeout_seconds": 10
   },
-  "database": "./.hormuz-provider-conformance.sqlite3",
-  "context_database": "./.hormuz-provider-conformance-context.sqlite3",
+  "database": "./.hormuz-provider-compaction-conformance.sqlite3",
+  "context_database": "./.hormuz-provider-compaction-conformance-context.sqlite3",
+  "context_service": {
+    "policy_version": "provider-compaction-conformance-v1",
+    "max_token_budget": 500,
+    "max_items": 1,
+    "requests_per_minute": 10,
+    "allow_provisional": false
+  },
   "max_request_bytes": 1048576,
   "upstream_timeout_seconds": 60,
   "upstreams": {
@@ -36,8 +43,8 @@
   "identities": [
     {
       "token_env": "HORMUZ_CONFORMANCE_TOKEN",
-      "actor_id": "provider-conformance",
-      "actor_name": "Provider Conformance",
+      "actor_id": "provider-compaction-conformance",
+      "actor_name": "Provider Compaction Conformance",
       "team_id": "verification",
       "team_name": "Verification",
       "organization_id": "local-verification",
@@ -64,7 +71,7 @@
       "custom_secret_envs": []
     },
     "dlp": {
-      "policy_version": "provider-conformance-dlp-v1",
+      "policy_version": "provider-compaction-conformance-dlp-v1",
       "approval": {
         "enabled": false
       },
@@ -85,19 +92,23 @@
     "organization": {
       "allowed_clients": ["codex"],
       "allowed_models": ["openai-live-luna"],
-      "max_output_tokens": 16,
+      "max_output_tokens": 100,
       "monthly_budget_usd": 1,
       "per_actor_monthly_budget_usd": 1,
       "context_injection": {
-        "mode": "off",
+        "mode": "required",
+        "allowed_clients": ["codex"],
+        "allowed_models": ["openai-live-luna"],
         "allowed_repositories": [],
-        "max_classification": "internal"
+        "max_classification": "internal",
+        "token_budget": 500,
+        "max_items": 1
       }
     },
     "teams": {
       "verification": {
         "allowed_models": ["openai-live-luna"],
-        "max_output_tokens": 16,
+        "max_output_tokens": 100,
         "monthly_budget_usd": 1
       }
     },

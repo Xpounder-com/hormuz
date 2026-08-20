@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import http.client
 import io
 import json
@@ -23,6 +24,18 @@ from hormuz.cli import build_parser, main
 MARKER = "HORMUZ_OK_1"
 REDACTION_MARKER = "[REDACTED:HORMUZ_SECRET]"
 SYNTHETIC_SECRET = "sk-" + "proj-" + ("H" * 24)
+COMPACTION_PROMPT = "Compact this fixed Hormuz checkpoint context."
+CONTEXT_MARKER = "--- BEGIN HORMUZ GOVERNED CONTEXT "
+CONTEXT_DIGEST = "a" * 64
+CONTEXT_BLOCK = (
+    CONTEXT_MARKER
+    + CONTEXT_DIGEST
+    + " ---\n"
+    + '{"schema_version":"hormuz.context-pack.v1"}\n'
+    + "--- END HORMUZ GOVERNED CONTEXT "
+    + CONTEXT_DIGEST
+    + " ---"
+)
 
 
 def _openai_body(*, marker: str = MARKER) -> bytes:
@@ -63,6 +76,46 @@ def _anthropic_body(*, marker: str = MARKER) -> bytes:
                 "output_tokens": 5,
                 "cache_read_input_tokens": 3,
                 "cache_creation_input_tokens": 2,
+            },
+        }
+    ).encode("utf-8")
+
+
+def _openai_compaction_body() -> bytes:
+    return json.dumps(
+        {
+            "id": "resp_compaction_provider_identifier_must_not_be_retained",
+            "object": "response.compaction",
+            "created_at": 1_764_967_971,
+            "output": [
+                {
+                    "id": "msg_compaction_provider_identifier",
+                    "type": "message",
+                    "role": "user",
+                    "status": "completed",
+                    "content": [
+                        {
+                            "type": "input_text",
+                            "text": CONTEXT_BLOCK,
+                        },
+                        {"type": "input_text", "text": COMPACTION_PROMPT},
+                    ],
+                },
+                {
+                    "id": "cmp_provider_identifier_must_not_be_retained",
+                    "type": "compaction",
+                    "encrypted_content": "opaque-provider-compaction-must-not-be-retained",
+                },
+            ],
+            "usage": {
+                "input_tokens": 90,
+                "input_tokens_details": {
+                    "cached_tokens": 10,
+                    "cache_write_tokens": 5,
+                },
+                "output_tokens": 25,
+                "output_tokens_details": {"reasoning_tokens": 4},
+                "total_tokens": 115,
             },
         }
     ).encode("utf-8")
@@ -119,6 +172,7 @@ def _headers(
     routed: str,
     policy_decision: str = "allowed+capped",
     redactions: str | None = None,
+    context_pack: str | None = None,
 ) -> dict[str, str]:
     headers = {
         "Content-Type": "application/json",
@@ -129,6 +183,8 @@ def _headers(
     }
     if redactions is not None:
         headers["X-Hormuz-Redactions"] = redactions
+    if context_pack is not None:
+        headers["X-Hormuz-Context-Pack"] = context_pack
     return headers
 
 
@@ -223,6 +279,167 @@ class ProviderConformanceClientTests(unittest.TestCase):
         self.assertEqual(result["usage"]["output_tokens"], 5)
         self.assertEqual(result["usage"]["cache_read_tokens"], 3)
         self.assertEqual(result["usage"]["cache_write_tokens"], 2)
+
+    def test_openai_compaction_probe_requires_context_and_emits_content_free_evidence(
+        self,
+    ) -> None:
+        secret = "employee-gateway-secret-must-not-persist"
+        endpoint = "https://hormuz.example/v1/responses/compact"
+        pack_id = "ctxpack_0123456789abcdef01234567"
+        opener = QueueOpener(
+            [
+                FakeResponse(
+                    _openai_compaction_body(),
+                    url=endpoint,
+                    headers=_headers(
+                        requested="openai-live",
+                        routed="gpt-5.6-luna",
+                        policy_decision="allowed+context-injected",
+                        context_pack=pack_id,
+                    ),
+                )
+            ]
+        )
+
+        result = ProviderConformanceClient(
+            "openai",
+            gateway="https://hormuz.example",
+            credential=secret,
+            opener=opener,
+            clock=lambda: 50.0,
+        ).run(model="openai-live", probe="compaction")
+
+        request, timeout = opener.requests[0]
+        body = json.loads(request.data)
+        self.assertEqual(request.full_url, endpoint)
+        self.assertEqual(request.get_header("Authorization"), "Bearer " + secret)
+        self.assertEqual(body["model"], "openai-live")
+        self.assertEqual(
+            body["input"],
+            [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "input_text", "text": COMPACTION_PROMPT}
+                    ],
+                }
+            ],
+        )
+        self.assertNotIn("max_output_tokens", body)
+        self.assertNotIn("store", body)
+        self.assertEqual(timeout, 30)
+
+        self.assertEqual(
+            result["schema_version"],
+            "hormuz.compaction-conformance.v1",
+        )
+        self.assertEqual(result["probe_version"], "hormuz-fixed-compaction-v1")
+        self.assertEqual(result["interface"], "POST /v1/responses/compact")
+        self.assertEqual(result["policy_decision"], "allowed+context-injected")
+        self.assertNotIn("actual_model", result)
+        self.assertEqual(result["usage"]["input_tokens"], 90)
+        self.assertEqual(result["usage"]["output_tokens"], 25)
+        self.assertEqual(result["usage"]["cache_read_tokens"], 10)
+        self.assertEqual(result["usage"]["cache_write_tokens"], 5)
+        self.assertEqual(result["usage"]["reasoning_tokens"], 4)
+        self.assertEqual(result["usage"]["billable_tokens"], 115)
+        self.assertTrue(result["assurances"]["fixed_compaction_probe"])
+        self.assertTrue(
+            result["assurances"]["gateway_context_injection_verified"]
+        )
+        self.assertTrue(result["assurances"]["provider_compaction_verified"])
+        serialized = json.dumps(result, sort_keys=True)
+        for forbidden in (
+            secret,
+            COMPACTION_PROMPT,
+            CONTEXT_MARKER,
+            pack_id,
+            "opaque-provider-compaction-must-not-be-retained",
+            "resp_compaction_provider_identifier_must_not_be_retained",
+            "cmp_provider_identifier_must_not_be_retained",
+            "hormuz.example",
+        ):
+            self.assertNotIn(forbidden, serialized)
+
+    def test_compaction_probe_is_openai_only_before_network_work(self) -> None:
+        opener = QueueOpener([])
+        client = ProviderConformanceClient(
+            "anthropic",
+            gateway="https://hormuz.example",
+            credential="employee-token",
+            opener=opener,
+        )
+
+        with self.assertRaises(ProviderConformanceError) as caught:
+            client.run(model="live", probe="compaction")
+
+        self.assertEqual(caught.exception.code, "unsupported_probe_provider")
+        self.assertEqual(opener.requests, [])
+
+    def test_compaction_probe_fails_closed_on_missing_context_or_bad_output(
+        self,
+    ) -> None:
+        endpoint = "https://hormuz.example/v1/responses/compact"
+        valid_headers = _headers(
+            requested="live",
+            routed="gpt-5.6-luna",
+            policy_decision="allowed+context-injected",
+            context_pack="ctxpack_0123456789abcdef01234567",
+        )
+        wrong_object = json.loads(_openai_compaction_body())
+        wrong_object["object"] = "response"
+        wrong_prompt = json.loads(_openai_compaction_body())
+        wrong_prompt["output"][0]["content"][1]["text"] = "different prompt"
+        missing_context = json.loads(_openai_compaction_body())
+        missing_context["output"][0]["content"][0]["text"] = "no context"
+        mismatched_context = json.loads(_openai_compaction_body())
+        mismatched_context["output"][0]["content"][0]["text"] = (
+            CONTEXT_BLOCK.replace(CONTEXT_DIGEST, "b" * 64, 1)
+        )
+        empty_compaction = json.loads(_openai_compaction_body())
+        empty_compaction["output"][-1]["encrypted_content"] = ""
+        missing_usage = json.loads(_openai_compaction_body())
+        del missing_usage["usage"]
+        cases = (
+            (
+                _openai_compaction_body(),
+                _headers(
+                    requested="live",
+                    routed="gpt-5.6-luna",
+                    policy_decision="allowed+context-injected",
+                ),
+                "gateway_context_mismatch",
+            ),
+            (
+                _openai_compaction_body(),
+                {
+                    **valid_headers,
+                    "X-Hormuz-Context-Pack": "ctxpack_not-a-valid-id",
+                },
+                "gateway_context_mismatch",
+            ),
+            (json.dumps(wrong_object).encode(), valid_headers, "compaction_mismatch"),
+            (json.dumps(wrong_prompt).encode(), valid_headers, "compaction_mismatch"),
+            (json.dumps(missing_context).encode(), valid_headers, "compaction_mismatch"),
+            (json.dumps(mismatched_context).encode(), valid_headers, "compaction_mismatch"),
+            (json.dumps(empty_compaction).encode(), valid_headers, "compaction_mismatch"),
+            (json.dumps(missing_usage).encode(), valid_headers, "missing_provider_usage"),
+        )
+        for body, headers, code in cases:
+            with self.subTest(code=code):
+                client = ProviderConformanceClient(
+                    "openai",
+                    gateway="https://hormuz.example",
+                    credential="employee-token",
+                    opener=QueueOpener(
+                        [FakeResponse(body, url=endpoint, headers=headers)]
+                    ),
+                )
+                with self.assertRaises(ProviderConformanceError) as caught:
+                    client.run(model="live", probe="compaction")
+                self.assertEqual(caught.exception.code, code)
+                self.assertNotIn(COMPACTION_PROMPT, str(caught.exception))
+                self.assertNotIn(CONTEXT_MARKER, str(caught.exception))
 
     def test_synthetic_secret_probe_requires_gateway_redaction_and_sanitized_echo(self) -> None:
         for provider, body_factory, endpoint in (
@@ -467,6 +684,93 @@ class ProviderConformanceClientTests(unittest.TestCase):
 
     def test_checked_in_live_evidence_uses_the_exact_content_free_schema(self) -> None:
         root = Path(__file__).resolve().parents[1]
+        compaction_record = json.loads(
+            (root / "examples/provider-compaction-context.jsonl").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(
+            hashlib.sha256(compaction_record["content"].encode("utf-8")).hexdigest(),
+            compaction_record["source"]["sha256"],
+        )
+        compaction_value = json.loads(
+            (
+                root
+                / "evidence/provider-compaction-conformance-openai-2026-08-20.json"
+            ).read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            set(compaction_value),
+            {
+                "assurances",
+                "gateway_transport",
+                "generated_at",
+                "http_status",
+                "interface",
+                "latency_milliseconds",
+                "policy_decision",
+                "probe_version",
+                "provider",
+                "requested_model",
+                "routed_model",
+                "runner",
+                "schema_version",
+                "status",
+                "usage",
+            },
+        )
+        self.assertNotIn("actual_model", compaction_value)
+        self.assertEqual(
+            set(compaction_value["assurances"]),
+            {
+                "context_pack_id_retained",
+                "credential_retained",
+                "fixed_compaction_probe",
+                "gateway_context_injection_verified",
+                "gateway_policy_headers_verified",
+                "gateway_url_retained",
+                "governed_context_retained",
+                "opaque_compaction_retained",
+                "prompt_retained",
+                "provider_compaction_verified",
+                "provider_request_id_retained",
+                "provider_usage_verified",
+                "response_content_retained",
+            },
+        )
+        self.assertEqual(
+            set(compaction_value["usage"]),
+            {
+                "billable_tokens",
+                "cache_read_tokens",
+                "cache_write_tokens",
+                "input_tokens",
+                "output_tokens",
+                "reasoning_tokens",
+            },
+        )
+        self.assertEqual(compaction_value["status"], "verified")
+        self.assertEqual(compaction_value["provider"], "openai")
+        self.assertEqual(
+            compaction_value["usage"]["billable_tokens"],
+            compaction_value["usage"]["input_tokens"]
+            + compaction_value["usage"]["output_tokens"],
+        )
+        self.assertEqual(
+            compaction_value["interface"],
+            "POST /v1/responses/compact",
+        )
+        serialized_compaction = json.dumps(compaction_value, sort_keys=True)
+        for forbidden in (
+            COMPACTION_PROMPT,
+            CONTEXT_MARKER,
+            "ctxpack_",
+            "encrypted_content",
+            "hormuz.example",
+            compaction_record["content"],
+        ):
+            self.assertNotIn(forbidden, serialized_compaction)
+
         value = json.loads(
             (root / "evidence/provider-conformance-openai-2026-08-19.json").read_text(
                 encoding="utf-8"
@@ -639,6 +943,22 @@ class ProviderConformanceCLITests(unittest.TestCase):
         self.assertEqual(args.max_output_tokens, 16)
         self.assertEqual(args.credential_env, "HORMUZ_TOKEN")
         self.assertEqual(args.probe, "connectivity")
+
+        compaction = build_parser().parse_args(
+            [
+                "provider-conformance",
+                "--provider",
+                "openai",
+                "--gateway",
+                "http://127.0.0.1:8787",
+                "--model",
+                "openai-live",
+                "--probe",
+                "compaction",
+                "--allow-insecure-http",
+            ]
+        )
+        self.assertEqual(compaction.probe, "compaction")
 
     def test_cli_uses_named_gateway_credential_and_writes_verified_result(self) -> None:
         verified = {

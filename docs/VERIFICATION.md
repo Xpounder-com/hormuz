@@ -1597,14 +1597,45 @@ bounded residual documentation were exercised locally on August 20, 2026.
   digests belong in the external PR/CI evidence rather than this self-changing
   source record.
 
+A follow-up content-free live conformance checkpoint completed later on August
+20, 2026:
+
+- red-first tests captured OpenAI `cache_write_tokens` being dropped (`0 != 5`)
+  and the new compact probe being rejected as `invalid_probe` before the
+  implementation changed;
+- the OpenAI usage allowlist now preserves provider-reported cache-write input
+  as a separate cost category while normalized billable volume remains input
+  plus output because OpenAI cache categories are input subsets;
+- the opt-in OpenAI-only probe sends one fixed package prompt, requires a valid
+  Hormuz Context Pack header and injected context marker, validates the returned
+  `response.compaction` shape plus provider usage, and retains none of the raw
+  prompt, context, pack ID, provider request/response IDs, or opaque compaction;
+- the live request routed `openai-live-luna` to `gpt-5.6-luna`, returned
+  `allowed+context-injected`, and reported 436 input, 390 output, zero cache
+  read/write/reasoning, and 826 billable tokens in 4,154 milliseconds. Hormuz
+  estimated 555 micro-USD under `openai-public-2026-08-20-v1`;
+- the provider omitted an actual-model field from its compact response, so the
+  evidence omits `actual_model` instead of manufacturing it from the route;
+- the evidence file was mode `0600`. Exact-value scans found no provider key in
+  the evidence, gateway log, usage database, or context database, while fixed
+  prompt, governed context, Context Pack ID, and opaque compaction markers were
+  absent from the checked-in evidence;
+- 23 focused usage/provider-conformance tests and the focused loopback gateway
+  compaction test passed. The complete suite then ran 471 tests successfully
+  with the same three documented opt-in installed-client/profile skips; and
+- the strict compatibility contract passed with 16 entries and
+  `enterprise_release_ready: false`. The content-free observation is
+  [`evidence/provider-compaction-conformance-openai-2026-08-20.json`](../evidence/provider-compaction-conformance-openai-2026-08-20.json).
+
 This closes a policy-composition bypass for direct-query compaction under
 accepted ADR 0006, not issue #5 or provider certification. OpenAI does not
 define a hard output-cap field for compaction, so the effective cap is a local
 reservation allowance rather than a provider-enforced per-request ceiling.
 Previous-response-only, opaque-compaction-only, and tool-only continuation
-binding still requires a separate owner decision. The test uses a
-provider-compatible loopback fake; there is no live OpenAI compaction, installed
-Codex compaction, live Anthropic, provider SLA, or enterprise-readiness claim.
+binding still requires a separate owner decision. Blocking release coverage
+still uses a provider-compatible loopback fake; the one fixed live OpenAI
+compaction observation does not establish installed Codex compaction, live
+Anthropic, cache policy, provider SLA, or enterprise readiness.
 
 ## Automated publication gate
 

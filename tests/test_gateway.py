@@ -2096,6 +2096,12 @@ class GatewayIntegrationTests(unittest.TestCase):
             ["compaction-checkpoint-standard"],
         )
         self.assertEqual(usage[0]["provider_usage"]["total_tokens"], 115)
+        self.assertEqual(usage[0]["cache_read_tokens"], 10)
+        self.assertEqual(usage[0]["cache_write_tokens"], 5)
+        self.assertEqual(
+            usage[0]["provider_usage"]["input_tokens_details"],
+            {"cached_tokens": 10, "cache_write_tokens": 5},
+        )
         self.assertEqual(usage[0]["provider_request_id"], "req_openai_compact_test")
         self.assertEqual(usage[0]["redaction_count"], 1)
         self.assertNotIn(query, repr(usage))

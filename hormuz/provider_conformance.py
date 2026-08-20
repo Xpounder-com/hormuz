@@ -4,6 +4,7 @@ import http.client
 import json
 import os
 import platform
+import re
 import sys
 import time
 import urllib.error
@@ -22,6 +23,8 @@ RESULT_SCHEMA = "hormuz.provider-conformance.v1"
 PROBE_VERSION = "hormuz-fixed-text-v1"
 REDACTION_RESULT_SCHEMA = "hormuz.redaction-conformance.v1"
 REDACTION_PROBE_VERSION = "hormuz-fixed-synthetic-secret-v1"
+COMPACTION_RESULT_SCHEMA = "hormuz.compaction-conformance.v1"
+COMPACTION_PROBE_VERSION = "hormuz-fixed-compaction-v1"
 MAX_GATEWAY_RESPONSE_BYTES = min(MAX_PROVIDER_USAGE_JSON_BYTES, 1024 * 1024)
 MAX_CREDENTIAL_BYTES = 64 * 1024
 MAX_OUTPUT_TOKENS = 64
@@ -30,7 +33,12 @@ _PROMPT = "Reply with exactly HORMUZ_OK_1 and no other text."
 _SYNTHETIC_SECRET = "sk-" + "proj-" + ("H" * 24)
 _REDACTION_MARKER = "[REDACTED:HORMUZ_SECRET]"
 _REDACTION_PROMPT = f"Repeat exactly and only: {_SYNTHETIC_SECRET}"
-_PROBES = {"connectivity", "secret-redaction"}
+_COMPACTION_PROMPT = "Compact this fixed Hormuz checkpoint context."
+_CONTEXT_PACK_ID = re.compile(r"ctxpack_[0-9a-f]{24}\Z")
+_CONTEXT_BLOCK_START = re.compile(
+    r"--- BEGIN HORMUZ GOVERNED CONTEXT ([0-9a-f]{64}) ---\Z"
+)
+_PROBES = {"connectivity", "secret-redaction", "compaction"}
 
 
 class ProviderConformanceError(RuntimeError):
@@ -90,6 +98,8 @@ class ProviderConformanceClient:
             raise ProviderConformanceError("invalid_output_cap")
         if not isinstance(probe, str) or probe not in _PROBES:
             raise ProviderConformanceError("invalid_probe")
+        if probe == "compaction" and self.provider != "openai":
+            raise ProviderConformanceError("unsupported_probe_provider")
 
         endpoint, body, headers = self._request_contract(
             model=model,
@@ -149,6 +159,17 @@ class ProviderConformanceClient:
             or not is_model_identifier(routed_model)
         ):
             raise ProviderConformanceError("gateway_policy_mismatch")
+        if probe == "compaction":
+            context_pack = _header_value(
+                response_headers,
+                "X-Hormuz-Context-Pack",
+            )
+            if (
+                "context-injected" not in policy_decision.split("+")
+                or not isinstance(context_pack, str)
+                or _CONTEXT_PACK_ID.fullmatch(context_pack) is None
+            ):
+                raise ProviderConformanceError("gateway_context_mismatch")
         redaction_count: int | None = None
         if probe == "secret-redaction":
             redaction_header = _header_value(response_headers, "X-Hormuz-Redactions")
@@ -159,47 +180,56 @@ class ProviderConformanceClient:
                 raise ProviderConformanceError("synthetic_secret_echoed")
 
         value = _strict_json_object(payload)
-        expected_marker = (
-            _REDACTION_MARKER if probe == "secret-redaction" else _MARKER
-        )
-        if not _marker_verified(self.provider, value, expected=expected_marker):
-            raise ProviderConformanceError("marker_mismatch")
+        if probe == "compaction":
+            if not _compaction_verified(value):
+                raise ProviderConformanceError("compaction_mismatch")
+        else:
+            expected_marker = (
+                _REDACTION_MARKER if probe == "secret-redaction" else _MARKER
+            )
+            if not _marker_verified(self.provider, value, expected=expected_marker):
+                raise ProviderConformanceError("marker_mismatch")
         usage_parser = ResponseUsageParser(self.provider, is_event_stream=False)
         usage_parser.feed(payload)
         usage = usage_parser.finish()
         if not usage.usage_reported:
             raise ProviderConformanceError("missing_provider_usage")
-        if usage.actual_model is None:
+        if probe != "compaction" and usage.actual_model is None:
             raise ProviderConformanceError("missing_actual_model")
 
         elapsed_milliseconds = max(
             0,
             min(2**31 - 1, int(round((self._clock() - started_at) * 1000))),
         )
-        interface = (
-            "POST /v1/responses"
-            if self.provider == "openai"
-            else "POST /v1/messages"
-        )
+        if probe == "compaction":
+            interface = "POST /v1/responses/compact"
+        elif self.provider == "openai":
+            interface = "POST /v1/responses"
+        else:
+            interface = "POST /v1/messages"
+        if probe == "compaction":
+            schema_version = COMPACTION_RESULT_SCHEMA
+            probe_version = COMPACTION_PROBE_VERSION
+        elif probe == "secret-redaction":
+            schema_version = REDACTION_RESULT_SCHEMA
+            probe_version = REDACTION_PROBE_VERSION
+        else:
+            schema_version = RESULT_SCHEMA
+            probe_version = PROBE_VERSION
         result: dict[str, Any] = {
-            "schema_version": (
-                REDACTION_RESULT_SCHEMA if probe == "secret-redaction" else RESULT_SCHEMA
-            ),
+            "schema_version": schema_version,
             "status": "verified",
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "runner": {
                 "hormuz_version": __version__,
                 "python_version": platform.python_version(),
             },
-            "probe_version": (
-                REDACTION_PROBE_VERSION if probe == "secret-redaction" else PROBE_VERSION
-            ),
+            "probe_version": probe_version,
             "provider": self.provider,
             "interface": interface,
             "gateway_transport": self.gateway_transport,
             "requested_model": model,
             "routed_model": routed_model,
-            "actual_model": usage.actual_model,
             "policy_decision": policy_decision,
             "http_status": status,
             "latency_milliseconds": elapsed_milliseconds,
@@ -212,7 +242,25 @@ class ProviderConformanceClient:
                 "billable_tokens": usage.billable_tokens,
             },
         }
-        if probe == "secret-redaction":
+        if probe != "compaction":
+            result["actual_model"] = usage.actual_model
+        if probe == "compaction":
+            result["assurances"] = {
+                "fixed_compaction_probe": True,
+                "gateway_policy_headers_verified": True,
+                "gateway_context_injection_verified": True,
+                "provider_compaction_verified": True,
+                "provider_usage_verified": True,
+                "credential_retained": False,
+                "gateway_url_retained": False,
+                "prompt_retained": False,
+                "response_content_retained": False,
+                "provider_request_id_retained": False,
+                "context_pack_id_retained": False,
+                "governed_context_retained": False,
+                "opaque_compaction_retained": False,
+            }
+        elif probe == "secret-redaction":
             result["redaction_count"] = redaction_count
             result["assurances"] = {
                 "fixed_synthetic_secret_probe": True,
@@ -248,7 +296,12 @@ class ProviderConformanceClient:
         max_output_tokens: int,
         probe: str,
     ) -> tuple[str, dict[str, Any], dict[str, str]]:
-        prompt = _REDACTION_PROMPT if probe == "secret-redaction" else _PROMPT
+        if probe == "compaction":
+            prompt = _COMPACTION_PROMPT
+        elif probe == "secret-redaction":
+            prompt = _REDACTION_PROMPT
+        else:
+            prompt = _PROMPT
         common_headers = {
             "Accept": "application/json",
             "Content-Type": "application/json",
@@ -256,6 +309,22 @@ class ProviderConformanceClient:
         }
         if self.provider == "openai":
             common_headers["Authorization"] = "Bearer " + self.credential
+            if probe == "compaction":
+                return (
+                    self.gateway + "/responses/compact",
+                    {
+                        "model": model,
+                        "input": [
+                            {
+                                "role": "user",
+                                "content": [
+                                    {"type": "input_text", "text": prompt}
+                                ],
+                            }
+                        ],
+                    },
+                    common_headers,
+                )
             return (
                 self.gateway + "/responses",
                 {
@@ -497,6 +566,54 @@ def _marker_verified(provider: str, value: dict[str, Any], *, expected: str) -> 
                     return False
                 texts.append(text)
     return len(texts) == 1 and texts[0].strip() == expected
+
+
+def _compaction_verified(value: dict[str, Any]) -> bool:
+    if value.get("object") != "response.compaction":
+        return False
+    output = value.get("output")
+    if not isinstance(output, list) or len(output) < 2:
+        return False
+    compaction = output[-1]
+    if (
+        not isinstance(compaction, dict)
+        or compaction.get("type") != "compaction"
+        or not isinstance(compaction.get("encrypted_content"), str)
+        or not compaction["encrypted_content"]
+    ):
+        return False
+
+    texts: list[str] = []
+    for item in output[:-1]:
+        if (
+            not isinstance(item, dict)
+            or item.get("type") != "message"
+            or item.get("role") != "user"
+        ):
+            return False
+        content = item.get("content")
+        if not isinstance(content, list) or not content:
+            return False
+        for block in content:
+            if not isinstance(block, dict) or block.get("type") != "input_text":
+                return False
+            text = block.get("text")
+            if not isinstance(text, str):
+                return False
+            texts.append(text)
+    return _COMPACTION_PROMPT in texts and any(
+        _governed_context_verified(text) for text in texts
+    )
+
+
+def _governed_context_verified(value: str) -> bool:
+    lines = value.splitlines()
+    if len(lines) < 3:
+        return False
+    match = _CONTEXT_BLOCK_START.fullmatch(lines[0])
+    if match is None or not any(lines[1:-1]):
+        return False
+    return lines[-1] == f"--- END HORMUZ GOVERNED CONTEXT {match.group(1)} ---"
 
 
 def _http_error_code(status: int) -> str:

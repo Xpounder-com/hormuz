@@ -1,0 +1,41 @@
+{
+  "assurances": {
+    "context_pack_id_retained": false,
+    "credential_retained": false,
+    "fixed_compaction_probe": true,
+    "gateway_context_injection_verified": true,
+    "gateway_policy_headers_verified": true,
+    "gateway_url_retained": false,
+    "governed_context_retained": false,
+    "opaque_compaction_retained": false,
+    "prompt_retained": false,
+    "provider_compaction_verified": true,
+    "provider_request_id_retained": false,
+    "provider_usage_verified": true,
+    "response_content_retained": false
+  },
+  "gateway_transport": "loopback_http",
+  "generated_at": "2026-08-20T06:22:03.042305+00:00",
+  "http_status": 200,
+  "interface": "POST /v1/responses/compact",
+  "latency_milliseconds": 4154,
+  "policy_decision": "allowed+context-injected",
+  "probe_version": "hormuz-fixed-compaction-v1",
+  "provider": "openai",
+  "requested_model": "openai-live-luna",
+  "routed_model": "gpt-5.6-luna",
+  "runner": {
+    "hormuz_version": "0.1.0",
+    "python_version": "3.12.12"
+  },
+  "schema_version": "hormuz.compaction-conformance.v1",
+  "status": "verified",
+  "usage": {
+    "billable_tokens": 826,
+    "cache_read_tokens": 0,
+    "cache_write_tokens": 0,
+    "input_tokens": 436,
+    "output_tokens": 390,
+    "reasoning_tokens": 0
+  }
+}

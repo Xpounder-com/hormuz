@@ -26,6 +26,7 @@ class ResponseUsageParserTests(unittest.TestCase):
                         "total_tokens": 150,
                         "input_tokens_details": {
                             "cached_tokens": 20,
+                            "cache_write_tokens": 5,
                             "audio_tokens": 3,
                             "unsupported_detail": "must-not-be-retained",
                         },
@@ -44,6 +45,7 @@ class ResponseUsageParserTests(unittest.TestCase):
         self.assertEqual(usage.input_tokens, 120)
         self.assertEqual(usage.output_tokens, 30)
         self.assertEqual(usage.cache_read_tokens, 20)
+        self.assertEqual(usage.cache_write_tokens, 5)
         self.assertEqual(usage.reasoning_tokens, 7)
         self.assertEqual(usage.billable_tokens, 150)
         self.assertEqual(usage.actual_model, "gpt-test")
@@ -54,7 +56,11 @@ class ResponseUsageParserTests(unittest.TestCase):
                 "input_tokens": 120,
                 "output_tokens": 30,
                 "total_tokens": 150,
-                "input_tokens_details": {"cached_tokens": 20, "audio_tokens": 3},
+                "input_tokens_details": {
+                    "cached_tokens": 20,
+                    "cache_write_tokens": 5,
+                    "audio_tokens": 3,
+                },
                 "output_tokens_details": {
                     "reasoning_tokens": 7,
                     "accepted_prediction_tokens": 2,

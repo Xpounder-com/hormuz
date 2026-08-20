@@ -4,7 +4,7 @@ Hormuz is a CLI-first enterprise control plane that puts organization policy bet
 
 The first executable milestone enforces client, model, output-token, monthly-token, team-budget, and per-person budget rules. It records metadata-only usage in SQLite, estimates cost from configured rate cards, and keeps provider API keys on the Hormuz server rather than distributing them to employees.
 
-The included rate cards are examples current as of August 15, 2026. Treat them as versioned configuration: verify them against provider pricing before production use and reconcile estimated spend against provider invoices.
+The general included rate cards are examples current as of August 15, 2026; the live OpenAI conformance examples pin their separately observed August 20, 2026 rate card. Treat all of them as versioned configuration: verify them against provider pricing before production use and reconcile estimated spend against provider invoices.
 
 Hormuz is alpha software. The local prototype proves routing and policy behavior; it is not yet a production-ready multi-tenant service. The machine-validated [compatibility matrix](docs/COMPATIBILITY.md) separates exact blocking-CI evidence from protocol-shaped local fakes, development-only storage, unsupported production surfaces, and owner-pending architecture.
 
@@ -19,6 +19,7 @@ Hormuz is alpha software. The local prototype proves routing and policy behavior
 - Model fallback, output-token caps, monthly token limits, and USD budget limits.
 - Per-person attribution using unique bootstrap tokens, generic OIDC JWT access tokens, or revocable Hormuz human sessions mapped by issuer and subject.
 - Input, output, cache-read, cache-write, reasoning, and normalized billable-token accounting when providers report them.
+- An opt-in, fixed-content OpenAI compaction conformance probe that requires governed-context injection and emits content-free evidence without retaining the Context Pack ID, governed text, opaque compaction, credentials, or provider request/response IDs.
 - Immutable USD rate-card version, cost-basis, and allowlisted provider-native usage snapshots for every accounted gateway outcome, plus exact-decimal, idempotent offline or authenticated OpenAI/Anthropic cost-report ingestion and honest aggregate reconciliation.
 - Content-free control-plane observability: the SQLite usage/security ledgers, approvals, and built-in HTTP access logs retain bounded metadata but not prompts, responses, raw request targets/queries/headers, OAuth codes, filenames, source content, matched values, credentials, or internal provider exceptions. A versioned exact-column manifest makes routine telemetry stores fail closed at startup if an unreviewed field appears. Prompts and responses are inspected and relayed transiently, not persisted in those surfaces; the governed-context repository is a separate, intentionally content-bearing store.
 - Fail-closed, 1 MiB-bounded configuration parsing that rejects duplicate members, non-standard numbers, invalid UTF-8, and unknown root/nested fields without reflecting attacker-chosen values; exact-file SHA-256 enforcement can bind a rollout to a separately approved configuration artifact.
