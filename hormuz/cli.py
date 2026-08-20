@@ -1447,12 +1447,21 @@ def _policy_check(config: GatewayConfig, args: argparse.Namespace) -> int:
         print(f"unknown actor: {args.actor}", file=sys.stderr)
         return 2
     store = UsageStore(config.database_path)
-    decision = PolicyEngine(config, store).evaluate(
+    policy_engine = PolicyEngine(config, store)
+    decision = policy_engine.evaluate(
         identity=identity,
         client=args.client,
         protocol=args.protocol,
         requested_model=args.model,
         requested_output_tokens=args.max_output_tokens,
+    )
+    model_limit_scopes = (
+        policy_engine.model_limit_scopes(
+            identity,
+            model_alias=decision.resolved_alias,
+        )
+        if decision.resolved_alias is not None
+        else ()
     )
     effective_dlp = (
         config.resolved_dlp_controls(
@@ -1473,6 +1482,18 @@ def _policy_check(config: GatewayConfig, args: argparse.Namespace) -> int:
                 "resolved_alias": decision.resolved_alias,
                 "upstream_model": decision.route.upstream_model if decision.route else None,
                 "max_output_tokens": decision.max_output_tokens,
+                "model_limits": [
+                    {
+                        "scope": scope.name,
+                        "monthly_token_limit": scope.token_limit,
+                        "monthly_budget_usd": (
+                            scope.cost_limit_microusd / 1_000_000
+                            if scope.cost_limit_microusd is not None
+                            else None
+                        ),
+                    }
+                    for scope in model_limit_scopes
+                ],
                 "dlp_policy_version": (
                     effective_dlp.policy_version if effective_dlp is not None else None
                 ),

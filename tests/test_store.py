@@ -19,6 +19,59 @@ from hormuz.store import (
 
 
 class UsageStoreMigrationTests(unittest.TestCase):
+    def test_legacy_budget_reservations_gain_a_nullable_model_alias(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "usage.sqlite3"
+            with sqlite3.connect(path) as connection:
+                connection.execute(
+                    """
+                    CREATE TABLE gateway_budget_reservations (
+                        id TEXT PRIMARY KEY,
+                        created_at TEXT NOT NULL,
+                        expires_at TEXT NOT NULL,
+                        organization_id TEXT,
+                        actor_id TEXT NOT NULL,
+                        team_id TEXT NOT NULL,
+                        reserved_tokens INTEGER NOT NULL,
+                        reserved_cost_microusd INTEGER NOT NULL
+                    )
+                    """
+                )
+                connection.execute(
+                    """
+                    INSERT INTO gateway_budget_reservations (
+                        id, created_at, expires_at, organization_id, actor_id,
+                        team_id, reserved_tokens, reserved_cost_microusd
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        "legacy-reservation",
+                        "2026-08-20T00:00:00+00:00",
+                        "2099-08-20T00:00:00+00:00",
+                        "org-a",
+                        "alice",
+                        "engineering",
+                        10,
+                        20,
+                    ),
+                )
+
+            UsageStore(path)
+
+            with sqlite3.connect(path) as connection:
+                columns = {
+                    str(row[1])
+                    for row in connection.execute(
+                        "PRAGMA table_info(gateway_budget_reservations)"
+                    )
+                }
+                row = connection.execute(
+                    "SELECT model_alias FROM gateway_budget_reservations "
+                    "WHERE id = 'legacy-reservation'"
+                ).fetchone()
+            self.assertIn("model_alias", columns)
+            self.assertEqual(row, (None,))
+
     def test_usage_store_rejects_unbounded_provider_identifiers(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             store = UsageStore(Path(temporary) / "usage.sqlite3")
@@ -1146,6 +1199,175 @@ class UsageStoreMigrationTests(unittest.TestCase):
             self.assertEqual(stores[0].active_budget_reservations(), 1)
             stores[0].release_budget_reservation(allowed_id)
             self.assertEqual(stores[1].active_budget_reservations(), 0)
+
+    def test_atomic_model_reservations_are_isolated_by_resolved_alias(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "usage.sqlite3"
+            stores = (UsageStore(path), UsageStore(path))
+            identity = Identity(
+                token_env="TEST_TOKEN",
+                token="employee-token-long",
+                actor_id="alice",
+                actor_name="Alice",
+                team_id="engineering",
+                team_name="Engineering",
+                organization_id="org-a",
+            )
+            barrier = threading.Barrier(2)
+            outcomes: list[str] = []
+            outcome_lock = threading.Lock()
+
+            def reserve(store: UsageStore) -> None:
+                barrier.wait()
+                try:
+                    store.reserve_budget(
+                        identity=identity,
+                        scopes=(
+                            ReservationScope(
+                                name="team model",
+                                team_id="engineering",
+                                model_alias="model-a",
+                                token_limit=100,
+                            ),
+                        ),
+                        reserved_tokens=60,
+                        reserved_cost_microusd=0,
+                        ttl_seconds=60,
+                    )
+                    outcome = "allowed"
+                except ReservationDenied:
+                    outcome = "denied"
+                with outcome_lock:
+                    outcomes.append(outcome)
+
+            threads = [threading.Thread(target=reserve, args=(store,)) for store in stores]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(timeout=5)
+
+            self.assertEqual(sorted(outcomes), ["allowed", "denied"])
+            other_model = stores[0].reserve_budget(
+                identity=identity,
+                scopes=(
+                    ReservationScope(
+                        name="team model",
+                        team_id="engineering",
+                        model_alias="model-b",
+                        token_limit=100,
+                    ),
+                ),
+                reserved_tokens=60,
+                reserved_cost_microusd=0,
+                ttl_seconds=60,
+            )
+            self.assertIsNotNone(other_model)
+            self.assertEqual(stores[0].active_budget_reservations(), 2)
+
+            stores[0].record(
+                identity=identity,
+                client="codex",
+                protocol="openai",
+                requested_model="model-a",
+                resolved_alias="model-a",
+                upstream_model="provider-model-a",
+                policy_action="allowed",
+                status="succeeded",
+                input_tokens=7,
+                output_tokens=3,
+                billable_tokens=10,
+                cost_microusd=50,
+                cost_basis="estimated",
+            )
+            stores[0].record(
+                identity=identity,
+                client="codex",
+                protocol="openai",
+                requested_model="model-b",
+                resolved_alias="model-b",
+                upstream_model="provider-model-b",
+                policy_action="allowed",
+                status="succeeded",
+                input_tokens=70,
+                output_tokens=30,
+                billable_tokens=100,
+                cost_microusd=500,
+                cost_basis="estimated",
+            )
+            model_a = stores[0].monthly_totals(
+                organization_id="org-a",
+                model_alias="model-a",
+            )
+            self.assertEqual(model_a.total_tokens, 10)
+            self.assertEqual(model_a.cost_microusd, 50)
+
+    def test_model_per_employee_reservations_do_not_share_usage_between_people(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            store = UsageStore(Path(temporary) / "usage.sqlite3")
+            alice = Identity(
+                token_env="ALICE_TOKEN",
+                token="alice-token-long-enough",
+                actor_id="alice",
+                actor_name="Alice",
+                team_id="engineering",
+                team_name="Engineering",
+                organization_id="org-a",
+            )
+            bob = Identity(
+                token_env="BOB_TOKEN",
+                token="bob-token-long-enough",
+                actor_id="bob",
+                actor_name="Bob",
+                team_id="engineering",
+                team_name="Engineering",
+                organization_id="org-a",
+            )
+            store.record(
+                identity=alice,
+                client="codex",
+                protocol="openai",
+                requested_model="model-a",
+                resolved_alias="model-a",
+                upstream_model="provider-model-a",
+                policy_action="allowed",
+                status="succeeded",
+                input_tokens=7,
+                output_tokens=3,
+                billable_tokens=10,
+                cost_basis="estimated",
+            )
+
+            with self.assertRaises(ReservationDenied):
+                store.reserve_budget(
+                    identity=alice,
+                    scopes=(
+                        ReservationScope(
+                            name="organization model per-employee",
+                            actor_id="alice",
+                            model_alias="model-a",
+                            token_limit=10,
+                        ),
+                    ),
+                    reserved_tokens=1,
+                    reserved_cost_microusd=0,
+                    ttl_seconds=60,
+                )
+
+            bob_reservation = store.reserve_budget(
+                identity=bob,
+                scopes=(
+                    ReservationScope(
+                        name="organization model per-employee",
+                        actor_id="bob",
+                        model_alias="model-a",
+                        token_limit=10,
+                    ),
+                ),
+                reserved_tokens=1,
+                reserved_cost_microusd=0,
+                ttl_seconds=60,
+            )
+            self.assertIsNotNone(bob_reservation)
 
 
 if __name__ == "__main__":

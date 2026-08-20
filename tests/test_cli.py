@@ -1315,6 +1315,67 @@ class ClientConfigTests(unittest.TestCase):
                     environ={"HORMUZ_TOKEN": "test-identity-token"},
                 )
 
+    def test_model_usage_limits_are_strict_reference_checked_and_monotonic(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            raw = json.loads((ROOT / "config.example.json").read_text(encoding="utf-8"))
+            raw["policies"]["organization"]["model_limits"] = {
+                "gpt-5.5": {
+                    "monthly_token_limit": 10_000,
+                    "monthly_budget_usd": 100,
+                    "per_actor_monthly_token_limit": 2_000,
+                    "per_actor_monthly_budget_usd": 20,
+                }
+            }
+            raw["policies"]["teams"]["engineering"]["model_limits"] = {
+                "gpt-5.5": {
+                    "monthly_token_limit": 8_000,
+                    "monthly_budget_usd": 120,
+                    "per_actor_monthly_token_limit": 1_500,
+                }
+            }
+            raw["policies"]["actors"]["alice"] = {
+                "model_limits": {
+                    "gpt-5.5": {
+                        "monthly_token_limit": 3_000,
+                        "monthly_budget_usd": 30,
+                        "per_actor_monthly_budget_usd": 10,
+                    }
+                }
+            }
+            path = root / "hormuz.json"
+            path.write_text(json.dumps(raw), encoding="utf-8")
+
+            config = GatewayConfig.load(
+                path,
+                environ={"HORMUZ_TOKEN": "test-identity-token"},
+            )
+            effective = config.resolved_policy(
+                config.identities_by_actor["alice"]
+            ).model_limits["gpt-5.5"]
+            self.assertEqual(effective.monthly_token_limit, 3_000)
+            self.assertEqual(effective.monthly_budget_usd, 30)
+            self.assertEqual(effective.per_actor_monthly_token_limit, 1_500)
+            self.assertEqual(effective.per_actor_monthly_budget_usd, 10)
+
+            raw["policies"]["actors"]["alice"]["model_limits"]["gpt-5.5"] = {}
+            path.write_text(json.dumps(raw), encoding="utf-8")
+            with self.assertRaisesRegex(ConfigError, "must configure at least one limit"):
+                GatewayConfig.load(
+                    path,
+                    environ={"HORMUZ_TOKEN": "test-identity-token"},
+                )
+
+            raw["policies"]["actors"]["alice"]["model_limits"] = {
+                "unknown-model": {"monthly_token_limit": 1}
+            }
+            path.write_text(json.dumps(raw), encoding="utf-8")
+            with self.assertRaisesRegex(ConfigError, "unknown model alias"):
+                GatewayConfig.load(
+                    path,
+                    environ={"HORMUZ_TOKEN": "test-identity-token"},
+                )
+
     def test_lifecycle_config_is_strict_and_requires_an_explicit_promoter(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -1414,6 +1475,43 @@ class ClientConfigTests(unittest.TestCase):
         self.assertEqual(rules["email_address"]["action"], "redact")
         self.assertEqual(rules["email_address"]["providers"], ["openai"])
         self.assertEqual(rules["email_address"]["models"], ["gpt-5.4"])
+
+    def test_policy_check_reports_each_model_capacity_scope(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            raw = json.loads((ROOT / "config.example.json").read_text(encoding="utf-8"))
+            path = root / "hormuz.json"
+            path.write_text(json.dumps(raw), encoding="utf-8")
+            config = GatewayConfig.load(
+                path,
+                environ={"HORMUZ_TOKEN": "test-identity-token"},
+            )
+            output = io.StringIO()
+            with redirect_stdout(output):
+                result = _policy_check(
+                    config,
+                    argparse.Namespace(
+                        actor="alice",
+                        client="codex",
+                        protocol="openai",
+                        model="gpt-5.5",
+                        max_output_tokens=1_000,
+                    ),
+                )
+
+        self.assertEqual(result, 0)
+        limits = json.loads(output.getvalue())["model_limits"]
+        self.assertEqual(
+            [item["scope"] for item in limits],
+            [
+                "organization model",
+                "organization model per-employee",
+                "team model",
+                "team model per-employee",
+            ],
+        )
+        self.assertEqual(limits[0]["monthly_token_limit"], 10_000_000)
+        self.assertEqual(limits[-1]["monthly_budget_usd"], 100.0)
 
     def test_dlp_approval_config_requires_key_and_organization_approver(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

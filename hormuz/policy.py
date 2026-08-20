@@ -70,6 +70,14 @@ class PolicyEngine:
             action = "fallback"
             reason = f"Model {requested_model} is not allowed; routed to {fallback}."
 
+        model_budget_decision = self._check_model_limits(
+            identity,
+            requested_model=requested_model,
+            model_alias=selected_alias,
+        )
+        if model_budget_decision is not None:
+            return model_budget_decision
+
         output_cap = policy.max_output_tokens
         if output_cap is not None and requested_output_tokens is not None and requested_output_tokens > output_cap:
             action = "capped" if action == "allowed" else f"{action}+capped"
@@ -120,6 +128,7 @@ class PolicyEngine:
         self,
         *,
         identity: Identity,
+        model_alias: str,
         reserved_tokens: int,
         reserved_cost_microusd: int,
         ttl_seconds: int,
@@ -159,6 +168,7 @@ class PolicyEngine:
                 cost_limit_microusd=_usd_to_microusd(actor_cost_limit),
             )
         )
+        scopes.extend(self.model_limit_scopes(identity, model_alias=model_alias))
         return self.store.reserve_budget(
             identity=identity,
             scopes=tuple(scopes),
@@ -207,6 +217,117 @@ class PolicyEngine:
                 return self._deny(requested_model, "The employee monthly AI budget has been reached.")
         return None
 
+    def _check_model_limits(
+        self,
+        identity: Identity,
+        *,
+        requested_model: str,
+        model_alias: str,
+    ) -> PolicyDecision | None:
+        for scope in self.model_limit_scopes(identity, model_alias=model_alias):
+            totals = self.store.monthly_totals(
+                organization_id=identity.organization_id,
+                actor_id=scope.actor_id,
+                team_id=scope.team_id,
+                model_alias=model_alias,
+            )
+            if (
+                scope.token_limit is not None
+                and totals.total_tokens >= scope.token_limit
+            ):
+                return self._deny(
+                    requested_model,
+                    f"The {scope.name} monthly token limit has been reached.",
+                )
+            if (
+                scope.cost_limit_microusd is not None
+                and totals.cost_microusd >= scope.cost_limit_microusd
+            ):
+                return self._deny(
+                    requested_model,
+                    f"The {scope.name} monthly AI budget has been reached.",
+                )
+        return None
+
+    def model_limit_scopes(
+        self,
+        identity: Identity,
+        *,
+        model_alias: str,
+    ) -> tuple[ReservationScope, ...]:
+        """Return every independently enforced limit for one routed alias."""
+
+        scopes: list[ReservationScope] = []
+        policies = (
+            ("organization model", self.config.organization_policy, None, None),
+            (
+                "team model",
+                self.config.team_policies.get(identity.team_id),
+                None,
+                identity.team_id,
+            ),
+            (
+                "employee model",
+                self.config.actor_policies.get(identity.actor_id),
+                identity.actor_id,
+                None,
+            ),
+        )
+        for name, policy, actor_id, team_id in policies:
+            if policy is None or (limit := policy.model_limits.get(model_alias)) is None:
+                continue
+            if name == "employee model":
+                token_limit = _minimum_limit(
+                    limit.monthly_token_limit,
+                    limit.per_actor_monthly_token_limit,
+                )
+                budget_limit = _minimum_limit(
+                    limit.monthly_budget_usd,
+                    limit.per_actor_monthly_budget_usd,
+                )
+                scopes.append(
+                    ReservationScope(
+                        name=name,
+                        actor_id=actor_id,
+                        model_alias=model_alias,
+                        token_limit=token_limit,
+                        cost_limit_microusd=_usd_to_microusd(budget_limit),
+                    )
+                )
+                continue
+            if (
+                limit.monthly_token_limit is not None
+                or limit.monthly_budget_usd is not None
+            ):
+                scopes.append(
+                    ReservationScope(
+                        name=name,
+                        team_id=team_id,
+                        model_alias=model_alias,
+                        token_limit=limit.monthly_token_limit,
+                        cost_limit_microusd=_usd_to_microusd(
+                            limit.monthly_budget_usd
+                        ),
+                    )
+                )
+            if (
+                limit.per_actor_monthly_token_limit is not None
+                or limit.per_actor_monthly_budget_usd is not None
+            ):
+                scopes.append(
+                    ReservationScope(
+                        name=f"{name} per-employee",
+                        actor_id=identity.actor_id,
+                        team_id=team_id,
+                        model_alias=model_alias,
+                        token_limit=limit.per_actor_monthly_token_limit,
+                        cost_limit_microusd=_usd_to_microusd(
+                            limit.per_actor_monthly_budget_usd
+                        ),
+                    )
+                )
+        return tuple(scopes)
+
     @staticmethod
     def _client_denial_reason(identity: Identity, policy: Policy, client: str) -> str | None:
         if identity.allowed_clients and client not in identity.allowed_clients:
@@ -231,3 +352,14 @@ class PolicyEngine:
 
 def _usd_to_microusd(value: float | None) -> int | None:
     return None if value is None else max(0, round(value * 1_000_000))
+
+
+def _minimum_limit(
+    first: int | float | None,
+    second: int | float | None,
+) -> int | float | None:
+    if first is None:
+        return second
+    if second is None:
+        return first
+    return min(first, second)

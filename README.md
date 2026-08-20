@@ -2,7 +2,7 @@
 
 Hormuz is a CLI-first enterprise control plane that puts organization policy between employees' existing AI clients and model providers. It currently proxies the OpenAI Responses API used by Codex and the Anthropic Messages API used by Claude Code.
 
-The first executable milestone enforces client, model, output-token, monthly-token, team-budget, and per-person budget rules. It records metadata-only usage in SQLite, estimates cost from configured rate cards, and keeps provider API keys on the Hormuz server rather than distributing them to employees.
+The first executable milestone enforces client, model, output-token, monthly-token, team-budget, per-person budget, and per-model capacity rules. It records metadata-only usage in SQLite, estimates cost from configured rate cards, and keeps provider API keys on the Hormuz server rather than distributing them to employees.
 
 The general included rate cards are examples current as of August 15, 2026; the live OpenAI conformance examples pin their separately observed August 20, 2026 rate card. Treat all of them as versioned configuration: verify them against provider pricing before production use and reconcile estimated spend against provider invoices.
 
@@ -16,7 +16,7 @@ Hormuz is alpha software. The local prototype proves routing and policy behavior
 - Provider model IDs by default, preserving native client model behavior; optional company aliases remain supported.
 - Authenticated Claude Code model discovery that exposes only Claude-compatible aliases allowed by the employee's effective policy, without calling a provider or creating usage charges.
 - Organization, team, and person policy overlays that can only become more restrictive.
-- Model fallback, output-token caps, monthly token limits, and USD budget limits.
+- Model fallback, output-token caps, monthly token limits, USD budget limits, and independent per-model token/spend allowances at organization, team, and employee scopes.
 - Per-person attribution using unique bootstrap tokens, generic OIDC JWT access tokens, or revocable Hormuz human sessions mapped by issuer and subject.
 - Input, output, cache-read, cache-write, reasoning, and normalized billable-token accounting when providers report them.
 - An opt-in, fixed-content OpenAI compaction conformance probe that requires governed-context injection and emits content-free evidence without retaining the Context Pack ID, governed text, opaque compaction, credentials, or provider request/response IDs.

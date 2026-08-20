@@ -685,7 +685,7 @@ This verifies Hormuz's application-level observability boundary, not every deplo
 
 The structural persistence backstop for the owner-approved content-free default was exercised locally on August 16, 2026.
 
-- `hormuz.content-free-schema.v1` enumerates the exact permitted columns for nine gateway usage/security/billing tables, one session-security table, and five governed-context audit tables;
+- `hormuz.content-free-schema.v2` enumerates the exact permitted columns for nine gateway usage/security/billing tables, one session-security table, and five governed-context audit tables; v2 adds only the resolved model alias needed by short-lived per-model budget reservations;
 - fresh usage, session, and context stores matched their manifests exactly, while the existing legacy usage and session migrations plus context schema versions 1, 2, and 3 continued to reach the accepted schemas without losing their prior migration coverage;
 - adding `prompt` to usage telemetry, `raw_query` to session-security audit, or `source_content` to context-read audit caused the corresponding store to refuse its next startup with only `content_free_schema_incompatible`;
 - canonical context records/lifecycle snapshots and session credential/authentication-state tables are explicitly absent from the telemetry manifest, preventing the product from misrepresenting intentionally content-bearing or secret-bearing storage as content-free;
@@ -1689,6 +1689,42 @@ schema, repository implementation, migrations, connection-pool behavior,
 production concurrency, backup/PITR, restore, deletion, residency, KMS, HA, or
 independent security review. The compatibility entry therefore remains
 `pending_owner_decision` and `production_supported: false`.
+
+### Per-model capacity enforcement
+
+Provider-neutral per-model monthly capacity was exercised locally on August
+20, 2026 without making a provider request:
+
+- organization, team, and employee policies independently limited input-plus-
+  output tokens and estimated USD spend for an exact governed model alias;
+- organization and team policies also imposed per-employee model allowances,
+  while concurrent reservation tests proved one employee's usage does not
+  consume another employee's allowance;
+- routing tests proved an unapproved requested model cannot evade capacity by
+  falling back, because the resolved destination alias is checked and reserved;
+- model isolation tests proved a reached allowance for one alias does not block
+  another alias, and legacy reservation tables migrated with a nullable alias;
+- `policy-check` exposed every applicable model-capacity scope without provider
+  work, while strict configuration parsing rejected unknown aliases, empty
+  entries, unknown fields, invalid limits, and identities lacking an effective
+  maximum-output bound;
+- the content-free telemetry manifest advanced to
+  `hormuz.content-free-schema.v2`; its only new field is the governed alias on a
+  short-lived budget reservation;
+- the complete source suite passed 486 tests with the same three documented
+  opt-in installed-client/profile skips; all seven repository-local incident
+  drills passed; and the strict threat and compatibility contracts retained
+  `enterprise_release_ready: false`, five open threats, independent review
+  pending, and zero verified production persistence profiles; and
+- the frozen 60-task, five-iteration governed-context release profile retained
+  precision, recall, and useful-pack rate `1.00`, zero safety-threshold
+  failures, and governed p95 selection latency `0.149` ms.
+
+This closes atomic per-model enforcement for the current single-node SQLite
+deployment. It does not establish shared enforcement across replicas, actual
+provider-invoice caps, or production tenancy. Those remain dependent on the
+owner-approved persistence topology, hosted reconciliation, and the existing
+enterprise release gates.
 
 ## Automated publication gate
 

@@ -23,7 +23,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest import mock
 
-from hormuz.config import GatewayConfig, Policy
+from hormuz.config import GatewayConfig, ModelUsageLimit, Policy
 from hormuz.context import ContextArtifact, ContextLifecycleSnapshot, ContextRecord
 from hormuz.context_lifecycle_client import ContextLifecycleClient
 from hormuz.context_store import ContextStoreError
@@ -2810,6 +2810,13 @@ class GatewayIntegrationTests(unittest.TestCase):
             max_output_tokens=100,
             monthly_budget_usd=100,
             fallback_models={"openai": "engineering-fast"},
+            model_limits={
+                "engineering-fast": ModelUsageLimit(
+                    monthly_token_limit=10_000,
+                    monthly_budget_usd=100,
+                    per_actor_monthly_token_limit=2_000,
+                )
+            },
         )
         team = Policy(
             allowed_clients=("codex", "claude-code"),
@@ -2817,6 +2824,14 @@ class GatewayIntegrationTests(unittest.TestCase):
             max_output_tokens=500,
             monthly_budget_usd=500,
             fallback_models={"anthropic": "claude-standard"},
+            model_limits={
+                "engineering-fast": ModelUsageLimit(
+                    monthly_token_limit=20_000,
+                    monthly_budget_usd=50,
+                    per_actor_monthly_budget_usd=10,
+                ),
+                "engineering-deep": ModelUsageLimit(monthly_token_limit=5_000),
+            },
         )
 
         resolved = organization.overlaid(team)
@@ -2825,6 +2840,19 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertEqual(resolved.allowed_models, ("engineering-fast",))
         self.assertEqual(resolved.max_output_tokens, 100)
         self.assertEqual(resolved.monthly_budget_usd, 100)
+        self.assertEqual(
+            resolved.model_limits["engineering-fast"],
+            ModelUsageLimit(
+                monthly_token_limit=10_000,
+                monthly_budget_usd=50,
+                per_actor_monthly_token_limit=2_000,
+                per_actor_monthly_budget_usd=10,
+            ),
+        )
+        self.assertEqual(
+            resolved.model_limits["engineering-deep"],
+            ModelUsageLimit(monthly_token_limit=5_000),
+        )
         self.assertEqual(
             resolved.fallback_models,
             {"openai": "engineering-fast", "anthropic": "claude-standard"},
@@ -2866,6 +2894,63 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertEqual(len(FakeProviderHandler.requests), before)
         self.assertEqual(json.loads(response)["error"]["code"], "hormuz_budget_denied")
         self.assertEqual(self.gateway.store.active_budget_reservations(), 0)
+
+    def test_resolved_fallback_model_capacity_is_enforced_before_provider(self) -> None:
+        config_value = self._config(self.provider.server_port, _free_port())
+        config_value["policies"]["organization"]["model_limits"] = {
+            "engineering-fast": {"monthly_token_limit": 1}
+        }
+        self._restart_gateway(config_value)
+        before = len(FakeProviderHandler.requests)
+
+        status, headers, response = self._post(
+            "/v1/responses",
+            {"model": "unapproved-model", "input": "hello"},
+        )
+
+        self.assertEqual(status, 403)
+        self.assertEqual(len(FakeProviderHandler.requests), before)
+        self.assertEqual(json.loads(response)["error"]["code"], "hormuz_budget_denied")
+        self.assertNotIn("x-hormuz-routed-model", headers)
+        self.assertEqual(self.gateway.store.active_budget_reservations(), 0)
+
+    def test_reached_model_capacity_does_not_block_a_different_model(self) -> None:
+        config_value = self._config(self.provider.server_port, _free_port())
+        config_value["policies"]["organization"]["model_limits"] = {
+            "engineering-fast": {"monthly_token_limit": 10}
+        }
+        self._restart_gateway(config_value)
+        identity = self.config.identities_by_actor["alice"]
+        self.gateway.store.record(
+            identity=identity,
+            client="codex",
+            protocol="openai",
+            requested_model="engineering-fast",
+            resolved_alias="engineering-fast",
+            upstream_model="gpt-test-fast",
+            policy_action="allowed",
+            status="succeeded",
+            input_tokens=8,
+            output_tokens=2,
+            billable_tokens=10,
+            cost_basis="estimated",
+        )
+        before = len(FakeProviderHandler.requests)
+
+        denied_status, _, denied_response = self._post(
+            "/v1/responses",
+            {"model": "engineering-fast", "input": "hello"},
+        )
+        allowed_status, allowed_headers, _ = self._post(
+            "/v1/responses",
+            {"model": "engineering-deep", "input": "hello"},
+        )
+
+        self.assertEqual(denied_status, 403)
+        self.assertIn("model", json.loads(denied_response)["error"]["message"])
+        self.assertEqual(allowed_status, 200)
+        self.assertEqual(allowed_headers["x-hormuz-routed-model"], "gpt-test-deep")
+        self.assertEqual(len(FakeProviderHandler.requests), before + 1)
 
     def test_invalid_token_is_rejected(self) -> None:
         status, headers, _ = self._post(

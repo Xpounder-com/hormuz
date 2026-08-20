@@ -303,6 +303,36 @@ class ModelRoute:
 
 
 @dataclass(frozen=True)
+class ModelUsageLimit:
+    """Monthly capacity limits for one governed model alias."""
+
+    monthly_token_limit: int | None = None
+    monthly_budget_usd: float | None = None
+    per_actor_monthly_token_limit: int | None = None
+    per_actor_monthly_budget_usd: float | None = None
+
+    def overlaid(self, other: "ModelUsageLimit") -> "ModelUsageLimit":
+        return ModelUsageLimit(
+            monthly_token_limit=_minimum(
+                self.monthly_token_limit,
+                other.monthly_token_limit,
+            ),
+            monthly_budget_usd=_minimum(
+                self.monthly_budget_usd,
+                other.monthly_budget_usd,
+            ),
+            per_actor_monthly_token_limit=_minimum(
+                self.per_actor_monthly_token_limit,
+                other.per_actor_monthly_token_limit,
+            ),
+            per_actor_monthly_budget_usd=_minimum(
+                self.per_actor_monthly_budget_usd,
+                other.per_actor_monthly_budget_usd,
+            ),
+        )
+
+
+@dataclass(frozen=True)
 class Policy:
     allowed_clients: tuple[str, ...] | None = None
     allowed_models: tuple[str, ...] | None = None
@@ -312,6 +342,7 @@ class Policy:
     monthly_token_limit: int | None = None
     monthly_budget_usd: float | None = None
     per_actor_monthly_budget_usd: float | None = None
+    model_limits: dict[str, ModelUsageLimit] = field(default_factory=dict)
     context_injection: ContextInjectionPolicy = field(
         default_factory=ContextInjectionPolicy
     )
@@ -334,6 +365,10 @@ class Policy:
             per_actor_monthly_budget_usd=_minimum(
                 self.per_actor_monthly_budget_usd,
                 other.per_actor_monthly_budget_usd,
+            ),
+            model_limits=_overlay_model_limits(
+                self.model_limits,
+                other.model_limits,
             ),
             context_injection=self.context_injection.overlaid(
                 other.context_injection
@@ -899,6 +934,11 @@ class GatewayConfig:
             for alias in policy.allowed_models or ():
                 if alias not in self.model_routes:
                     raise ConfigError(f"Policy references unknown model alias: {alias}")
+            for alias in policy.model_limits:
+                if alias not in self.model_routes:
+                    raise ConfigError(
+                        f"Policy model_limits references unknown model alias: {alias}"
+                    )
             if policy.fallback_model is not None and policy.fallback_model not in self.model_routes:
                 raise ConfigError(f"Policy references unknown fallback model alias: {policy.fallback_model}")
             for protocol, alias in (policy.fallback_models or {}).items():
@@ -916,6 +956,7 @@ class GatewayConfig:
             policy.monthly_token_limit is not None
             or policy.monthly_budget_usd is not None
             or policy.per_actor_monthly_budget_usd is not None
+            or bool(policy.model_limits)
             for policy in policies
         )
         if limits_require_request_bound:
@@ -1108,6 +1149,7 @@ def _policy(
             "monthly_token_limit",
             "monthly_budget_usd",
             "per_actor_monthly_budget_usd",
+            "model_limits",
             "context_injection",
         },
         path,
@@ -1123,6 +1165,10 @@ def _policy(
         per_actor_monthly_budget_usd=_optional_number(
             item.get("per_actor_monthly_budget_usd"), f"{path}.per_actor_monthly_budget_usd"
         ),
+        model_limits=_model_usage_limits(
+            item.get("model_limits", {}),
+            f"{path}.model_limits",
+        ),
         context_injection=_context_injection_policy(
             item.get("context_injection", {}),
             f"{path}.context_injection",
@@ -1130,6 +1176,57 @@ def _policy(
             default_allowed_repositories=default_context_allowed_repositories,
         ),
     )
+
+
+def _model_usage_limits(value: Any, path: str) -> dict[str, ModelUsageLimit]:
+    items = _object(value, path)
+    limits: dict[str, ModelUsageLimit] = {}
+    allowed_fields = {
+        "monthly_token_limit",
+        "monthly_budget_usd",
+        "per_actor_monthly_token_limit",
+        "per_actor_monthly_budget_usd",
+    }
+    for alias, raw_limit in items.items():
+        if not is_model_identifier(alias):
+            raise ConfigError(
+                f"{path} keys must be safe model identifiers up to 512 characters"
+            )
+        limit_path = f"{path}.{alias}"
+        item = _object(raw_limit, limit_path)
+        _reject_unknown_fields(item, allowed_fields, limit_path)
+        limit = ModelUsageLimit(
+            monthly_token_limit=_optional_integer(
+                item.get("monthly_token_limit"),
+                f"{limit_path}.monthly_token_limit",
+                minimum=1,
+            ),
+            monthly_budget_usd=_optional_number(
+                item.get("monthly_budget_usd"),
+                f"{limit_path}.monthly_budget_usd",
+            ),
+            per_actor_monthly_token_limit=_optional_integer(
+                item.get("per_actor_monthly_token_limit"),
+                f"{limit_path}.per_actor_monthly_token_limit",
+                minimum=1,
+            ),
+            per_actor_monthly_budget_usd=_optional_number(
+                item.get("per_actor_monthly_budget_usd"),
+                f"{limit_path}.per_actor_monthly_budget_usd",
+            ),
+        )
+        if not any(
+            value is not None
+            for value in (
+                limit.monthly_token_limit,
+                limit.monthly_budget_usd,
+                limit.per_actor_monthly_token_limit,
+                limit.per_actor_monthly_budget_usd,
+            )
+        ):
+            raise ConfigError(f"{limit_path} must configure at least one limit")
+        limits[alias] = limit
+    return limits
 
 
 def _context_injection_policy(
@@ -2036,6 +2133,21 @@ def _minimum(parent: int | float | None, child: int | float | None):
     if child is None:
         return parent
     return min(parent, child)
+
+
+def _overlay_model_limits(
+    parent: dict[str, ModelUsageLimit],
+    child: dict[str, ModelUsageLimit],
+) -> dict[str, ModelUsageLimit]:
+    result = dict(parent)
+    for alias, child_limit in child.items():
+        parent_limit = result.get(alias)
+        result[alias] = (
+            child_limit
+            if parent_limit is None
+            else parent_limit.overlaid(child_limit)
+        )
+    return result
 
 
 def _context_classification_overlay(

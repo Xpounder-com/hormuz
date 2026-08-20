@@ -202,6 +202,18 @@
       "max_output_tokens": 32000,
       "monthly_budget_usd": 10000,
       "per_actor_monthly_budget_usd": 500,
+      "model_limits": {
+        "gpt-5.4-mini": {
+          "monthly_token_limit": 50000000,
+          "monthly_budget_usd": 1000
+        },
+        "gpt-5.5": {
+          "monthly_token_limit": 10000000,
+          "monthly_budget_usd": 1000,
+          "per_actor_monthly_token_limit": 2000000,
+          "per_actor_monthly_budget_usd": 200
+        }
+      },
       "context_injection": {
         "mode": "off",
         "allowed_repositories": [],
@@ -222,7 +234,15 @@
           "anthropic": "claude-sonnet-5"
         },
         "max_output_tokens": 16000,
-        "monthly_budget_usd": 5000
+        "monthly_budget_usd": 5000,
+        "model_limits": {
+          "gpt-5.5": {
+            "monthly_token_limit": 5000000,
+            "monthly_budget_usd": 500,
+            "per_actor_monthly_token_limit": 1000000,
+            "per_actor_monthly_budget_usd": 100
+          }
+        }
       }
     },
     "actors": {}

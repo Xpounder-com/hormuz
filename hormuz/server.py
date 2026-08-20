@@ -2475,7 +2475,11 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             requested_output_tokens=requested_output,
         )
         policy_latency_milliseconds = _elapsed_milliseconds(policy_started_at)
-        if not decision.allowed or decision.route is None:
+        if (
+            not decision.allowed
+            or decision.route is None
+            or decision.resolved_alias is None
+        ):
             if account_usage:
                 self._record_timed_usage(
                     policy_latency_milliseconds=policy_latency_milliseconds,
@@ -2907,6 +2911,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             try:
                 reservation_id = self.server.policy_engine.reserve_budget(
                     identity=identity,
+                    model_alias=decision.resolved_alias,
                     reserved_tokens=reserved_input_tokens + max(0, reserved_output_tokens),
                     reserved_cost_microusd=reserved_cost_microusd,
                     ttl_seconds=self.server.config.upstream_timeout_seconds + 60,

@@ -15,6 +15,27 @@ The loader reads at most 1 MiB and decodes exactly one UTF-8 JSON document befor
 
 Model aliases and DLP/team/actor maps intentionally have dynamic keys. Their values still use strict schemas. Model and fallback references must resolve to a configured route. Team and actor policy scopes must resolve to configured identities, and a team policy is rejected when the same team ID appears in more than one configured organization. These checks prevent a misspelled restriction from being silently ignored or shared across tenants.
 
+## Per-model capacity policy
+
+Each organization, team, or actor policy may add a `model_limits` object keyed by an exact configured model alias. A limit can constrain monthly input-plus-output tokens, estimated USD spend, the corresponding per-employee values, or any combination:
+
+```json
+{
+  "model_limits": {
+    "gpt-5.5": {
+      "monthly_token_limit": 5000000,
+      "monthly_budget_usd": 500,
+      "per_actor_monthly_token_limit": 1000000,
+      "per_actor_monthly_budget_usd": 100
+    }
+  }
+}
+```
+
+The alias is the policy and accounting identity after fallback routing, not an untrusted provider-returned model string. Organization, team, and employee limits are enforced independently; a narrower policy cannot relax a higher-scope limit. If an unapproved request falls back to a governed alias, that alias's capacity applies. Other aliases do not consume its allowance.
+
+Every configured model-limit entry must contain at least one limit, must reference an existing route, and requires an effective `max_output_tokens` so Hormuz can reserve a conservative upper bound before provider work. `hormuz policy-check` returns each applicable model-capacity scope without making a provider request.
+
 Unknown-field errors report only the fixed schema path, for example `Unknown listen fields`. Hormuz does not reflect the rejected key into CLI diagnostics because an attacker-controlled JSON key can itself contain sensitive text.
 
 ## Secret boundary
@@ -58,4 +79,4 @@ Do not overwrite the only copy of the active configuration and call that rollbac
 
 ## Current boundary
 
-This checkpoint proves bounded strict application parsing, exact-file deployment binding, and reference integrity. It does not provide a published JSON Schema, signature or signer identity, approval authority, live reload, multi-replica rollout coordination, secret rotation without replacement, or a configuration change-approval workflow. Those remain production-release work under issues #11 and #17.
+This checkpoint proves bounded strict application parsing, exact-file deployment binding, reference integrity, and local atomic per-model capacity enforcement. It does not provide a published JSON Schema, signature or signer identity, approval authority, live reload, multi-replica rollout coordination, secret rotation without replacement, or a configuration change-approval workflow. Shared multi-replica budget enforcement remains dependent on the approved production persistence topology; the other controls remain production-release work under issues #11 and #17.

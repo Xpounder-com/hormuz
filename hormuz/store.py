@@ -12,7 +12,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from .billing import ProviderBillingError, ProviderCostReport, ProviderCostSource
-from .config import Identity
+from .config import Identity, is_model_identifier
 from .content_free import ContentFreeSchemaError, validate_content_free_schema
 from .usage import (
     sanitize_provider_model_id,
@@ -203,6 +203,7 @@ class ReservationScope:
     name: str
     actor_id: str | None = None
     team_id: str | None = None
+    model_alias: str | None = None
     token_limit: int | None = None
     cost_limit_microusd: int | None = None
 
@@ -344,6 +345,7 @@ class UsageStore:
                     organization_id TEXT,
                     actor_id TEXT NOT NULL,
                     team_id TEXT NOT NULL,
+                    model_alias TEXT,
                     reserved_tokens INTEGER NOT NULL,
                     reserved_cost_microusd INTEGER NOT NULL
                 );
@@ -632,6 +634,10 @@ class UsageStore:
                 connection.execute(
                     "ALTER TABLE gateway_budget_reservations ADD COLUMN organization_id TEXT"
                 )
+            if "model_alias" not in reservation_columns:
+                connection.execute(
+                    "ALTER TABLE gateway_budget_reservations ADD COLUMN model_alias TEXT"
+                )
             connection.execute(
                 """
                 CREATE INDEX IF NOT EXISTS idx_gateway_secret_org_month
@@ -642,6 +648,30 @@ class UsageStore:
                 """
                 CREATE INDEX IF NOT EXISTS idx_gateway_reservation_org_expires
                 ON gateway_budget_reservations(organization_id, expires_at)
+                """
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_gateway_reservation_org_model_expires
+                ON gateway_budget_reservations(
+                    organization_id, model_alias, expires_at
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_gateway_reservation_team_model_expires
+                ON gateway_budget_reservations(
+                    organization_id, team_id, model_alias, expires_at
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_gateway_reservation_actor_model_expires
+                ON gateway_budget_reservations(
+                    organization_id, actor_id, model_alias, expires_at
+                )
                 """
             )
             connection.execute(
@@ -1616,6 +1646,16 @@ class UsageStore:
         )
         if not constrained:
             return None
+        model_aliases = {
+            scope.model_alias
+            for scope in constrained
+            if scope.model_alias is not None
+        }
+        if len(model_aliases) > 1:
+            raise ValueError("Budget reservation scopes must use one model alias")
+        model_alias = next(iter(model_aliases), None)
+        if model_alias is not None and not is_model_identifier(model_alias):
+            raise ValueError("Budget reservation model alias must be a safe identifier")
         now = datetime.now(timezone.utc)
         now_value = now.isoformat()
         month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat()
@@ -1641,6 +1681,11 @@ class UsageStore:
                     reservation_clauses.append("team_id = ?")
                     usage_parameters.append(scope.team_id)
                     reservation_parameters.append(scope.team_id)
+                if scope.model_alias is not None:
+                    usage_clauses.append("resolved_alias = ?")
+                    reservation_clauses.append("model_alias = ?")
+                    usage_parameters.append(scope.model_alias)
+                    reservation_parameters.append(scope.model_alias)
                 usage = connection.execute(
                     f"""
                     SELECT
@@ -1677,8 +1722,8 @@ class UsageStore:
                 """
                 INSERT INTO gateway_budget_reservations (
                     id, created_at, expires_at, organization_id, actor_id, team_id,
-                    reserved_tokens, reserved_cost_microusd
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    model_alias, reserved_tokens, reserved_cost_microusd
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     reservation_id,
@@ -1687,6 +1732,7 @@ class UsageStore:
                     identity.organization_id,
                     identity.actor_id,
                     identity.team_id,
+                    model_alias,
                     max(0, reserved_tokens),
                     max(0, reserved_cost_microusd),
                 ),
@@ -1727,6 +1773,7 @@ class UsageStore:
         organization_id: str | None = None,
         actor_id: str | None = None,
         team_id: str | None = None,
+        model_alias: str | None = None,
     ) -> MonthlyTotals:
         start = datetime.now(timezone.utc).replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat()
         clauses = ["occurred_at >= ?"]
@@ -1740,6 +1787,11 @@ class UsageStore:
         if team_id is not None:
             clauses.append("team_id = ?")
             parameters.append(team_id)
+        if model_alias is not None:
+            if not is_model_identifier(model_alias):
+                raise ValueError("Usage model alias must be a safe identifier")
+            clauses.append("resolved_alias = ?")
+            parameters.append(model_alias)
         query = f"""
             SELECT
                 COUNT(*) AS requests,
