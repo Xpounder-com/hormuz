@@ -1,5 +1,7 @@
 # Hormuz architecture
 
+Hormuz's supported architecture is the enterprise AI gateway/control plane: client compatibility, provider routing, identity, policy, budgets, DLP/egress, approvals, content-free accounting, and audit. The built-in context repository, retrieval, lifecycle, MCP, and injection components shown below are deprecated experimental compatibility surfaces and are not runtime dependencies of ordinary provider traffic. See [ADR 0008](decisions/0008-gateway-product-boundary.md).
+
 Hormuz sits on the provider request path while employees continue using Codex or Claude Code.
 
 ```text

@@ -1,5 +1,7 @@
 # Evidence-driven context lifecycle
 
+> **Deprecated historical experiment.** Hormuz no longer owns knowledge verification, promotion, decay, contradiction, or invalidation. See [ADR 0008](decisions/0008-gateway-product-boundary.md).
+
 Hormuz can promote provisional organizational context only after configured evidence is present, and return verified context to provisional when newer negative evidence or trusted source state invalidates it. The lifecycle repository and worker remain local, but trusted CI jobs and internal connectors can now reach them through a capability- and tenant-scoped remote API/CLI. This proves the lifecycle contract, durable recovery, authorization split, and provider-neutral connector transport without claiming a hosted scheduler or source-specific connector.
 
 ## Enable the automation boundary

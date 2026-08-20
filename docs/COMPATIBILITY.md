@@ -12,6 +12,12 @@ The validation evidence contains identifiers, versions, counts, support levels,
 and hashes only; it contains no prompts, responses, credentials, configuration
 values, or customer content.
 
+The built-in context repository, lifecycle, MCP, benchmark, and automatic
+injection entries are deprecated experimental compatibility evidence under
+[ADR 0008](decisions/0008-gateway-product-boundary.md). They are not supported
+Hormuz release gates. Ordinary provider traffic does not initialize their
+content-bearing SQLite database.
+
 ## Meaning of each support level
 
 | Level | Meaning |
@@ -36,7 +42,7 @@ fail validation if the alpha silently gains such a claim.
 | Anthropic Messages subset | `POST /v1/messages`, `POST /v1/messages/count_tokens`, and policy-filtered `GET /v1/models` through local tests | Token-count tests prove the gateway does not add the generation-only `max_tokens` field. No live Anthropic conformance, quota, retention, residency, or availability proof. Model discovery does not call Anthropic. |
 | Generic OIDC | Discovery/JWKS, mapped JWTs, authorization code plus PKCE, refresh rotation, and replay revocation against a standards-shaped fake IdP, plus shared PostgreSQL session persistence | No real vendor-specific IdP is certified. SCIM and production key custody remain open. |
 | SQLite | Single-process local and CI behavior | Development only; not hosted tenancy, concurrency, HA, backup, or restore evidence. |
-| PostgreSQL | Opt-in schema-version-4 usage/cost/budget, desired-state identity and policy, authorization-version, human-session, DLP-approval, and security-event repositories; packaged checksummed migrations and a digest-pinned PostgreSQL `16.14` two-tenant observation, including competing budget writers, session refreshers, and approval retries | `development_only`: governed context remains SQLite-backed; SCIM, cutover backfill, policy rollout coordination, pooling, backup/PITR, restore, deletion, KMS, HA, and production-persistence proof remain open. |
+| PostgreSQL | Opt-in schema-version-4 usage/cost/budget, desired-state identity and policy, authorization-version, human-session, DLP-approval, and security-event repositories; packaged checksummed migrations and a digest-pinned PostgreSQL `16.14` two-tenant observation, including competing budget writers, session refreshers, and approval retries | `development_only`: SCIM, cutover backfill, policy rollout coordination, pooling, backup/PITR, restore, deletion, KMS, HA, and production-persistence proof remain open. The deprecated context experiment is deliberately excluded from the production persistence plan. |
 | Python package `0.1.0` | Reproducible wheel/source build and clean Linux installation | Artifact installation does not prove a production deployment. |
 | OCI `linux/amd64` and `linux/arm64` | Exact-source BuildKit `0.32.2` reproducibility; restricted runtime smoke on amd64 | A single-node alpha artifact, not production TLS, HA, backup, disaster recovery, or support evidence. |
 

@@ -8,6 +8,8 @@ The general included rate cards are examples current as of August 15, 2026; the 
 
 Hormuz is alpha software. The local prototype proves routing and policy behavior; it is not yet a production-ready multi-tenant service. The machine-validated [compatibility matrix](docs/COMPATIBILITY.md) separates exact blocking-CI evidence from protocol-shaped local fakes, development-only storage, unsupported production surfaces, and owner-pending architecture.
 
+The supported product boundary is the gateway: provider connectivity, identity, policy, budgets, DLP/egress, approvals, content-free usage/cost reporting, and audit. Hormuz does not own claims, decisions, provenance, knowledge quality, retrieval, or memory lifecycle. The earlier built-in context repository and its APIs remain a deprecated experimental compatibility surface; ordinary gateway traffic does not open or create its database. See [ADR 0008](docs/decisions/0008-gateway-product-boundary.md).
+
 ## What works
 
 - OpenAI-compatible `POST /v1/responses` proxying, including streaming, plus
@@ -29,6 +31,10 @@ Hormuz is alpha software. The local prototype proves routing and policy behavior
 - Offline evaluation of one configured DLP detector against a strict organization-labeled JSONL corpus, producing only versioned aggregate confusion metrics and never retaining cases, samples, matches, or corpus hashes.
 - OpenAI response storage and background mode disabled by default as enforceable provider privacy policy.
 - Configuration output for installed Codex and Claude Code clients.
+### Deprecated context experiment
+
+The following behavior is retained temporarily for compatibility and historical evidence. It is not part of the supported Hormuz product boundary or an enterprise release gate.
+
 - A separate local governed-context repository with atomic idempotent import, verification evidence, classification/scope authorization, optimistic concurrency, metadata-only mutation/read audit export, private content export, and physical deletion controls.
 - Opt-in, capability-gated lifecycle automation that promotes provisional records through configured merge, CI, review, ADR, incident, human, or validated-failure evidence; invalidates them on newer negative evidence or changed trusted source state; and runs in resumable, lease-safe, tenant-scoped batches.
 - Config-independent `hormuz lifecycle` connector commands and authenticated evidence/snapshot/revalidation HTTP endpoints for trusted CI workloads, with server-owned organization scope, strict versioned schemas, idempotent retries, and metadata-only responses.
@@ -37,7 +43,10 @@ Hormuz is alpha software. The local prototype proves routing and policy behavior
 - Authenticated `POST /v1/context/packs` retrieval with identity-derived scope, server-owned caps, per-actor rate limiting, stable errors, and no provider or usage-ledger side effects.
 - A real `hormuz_get_context` MCP stdio tool for Codex and Claude Code that reuses the authenticated Context Pack API, supports current and next-generation MCP handshakes, and cannot override employee identity or organization policy.
 - An opt-in local macOS proof in which pinned stock Codex and Claude Code binaries authenticate inference through a real Keychain-backed Hormuz profile, execute a model-requested `hormuz_get_context` call through the same profile, and return the authorized pack without receiving the provider credential.
-- A bundled 60-task synthetic context benchmark with no-memory, full-history, simple-lexical, and governed baselines; its strict lifecycle release profile is green on the frozen version-2 corpus.
+- A bundled 60-task synthetic context benchmark with no-memory, full-history, simple-lexical, and governed baselines; its strict lifecycle profile is historical experimental evidence.
+
+### Supported enterprise foundation
+
 - Generic OIDC discovery/JWKS verification with strict issuer, audience, expiry, asymmetric-algorithm, subject-mapping, and signing-key-rotation enforcement.
 - Generic OIDC authorization-code + PKCE browser login with opaque 10-minute Hormuz access credentials, atomic refresh rotation, replay-family revocation, and fail-closed OS secure-store custody.
 - Capability-gated, tenant-scoped `hormuz sessions` listing, metadata-only security-event inspection, and immediate session, employee, team, or organization revocation.
@@ -86,7 +95,7 @@ hormuz --config /etc/hormuz/hormuz.json client-config codex \
 
 The login page opens in the operating system's external browser. The CLI stores the revocable Hormuz session in macOS Keychain, Windows Credential Manager, or Linux Secret Service/KWallet through `keyring`; it refuses plaintext fallback.
 
-Connect governed context to either existing client without placing a provider key on the employee machine:
+The deprecated context experiment can still be connected to either client during the compatibility period. This is not required to use Hormuz as a gateway and control plane:
 
 ```bash
 python3 -m hormuz mcp-config codex \
@@ -311,7 +320,7 @@ fixed-content live OpenAI or Anthropic connectivity and synthetic-secret
 redaction probes, plus isolated stock Codex and Claude Code client proof, and
 their deliberately narrow claim boundaries.
 
-Measure the bundled governed-context contract without a gateway configuration or provider credential:
+The deprecated experimental context contract can still be measured without a gateway configuration or provider credential:
 
 ```bash
 python3 -m hormuz context-benchmark \
@@ -338,4 +347,4 @@ The GitHub publication gate also tests Python 3.11 through 3.14, validates the f
 
 ## Roadmap boundary
 
-The current milestone includes the enforcement, versioned estimate accounting, operator-run authenticated and offline provider cost-report ingestion, aggregate reconciliation with versioned finance-review thresholds, deterministic secret egress, bounded encoded-text inspection, a bounded structured-DLP detector/action subset, provider-format-aware opaque-media denial, replay-safe approval grants, metadata audit, local persistent context records/packs, trusted lifecycle snapshot evaluation, opt-in evidence-driven promotion/invalidation with resumable local revalidation, authenticated provider-neutral connector transport, MCP retrieval, and bounded disabled-by-default automatic injection for verified unscoped or exact administrator-granted repository context, plus OIDC JWT verification and a PostgreSQL-backed multi-instance OIDC login/session kernel with tenant-scoped administrator revocation. PostgreSQL now covers accounting, desired-state identities and policies, authorization versions, human sessions, DLP approvals, and security evidence; governed context remains deliberately local. Before an enterprise release, Hormuz still needs one owner-selected real-IdP validation, SCIM-driven deprovisioning, remaining accepted DLP architecture and representative evaluation, shared governed-context persistence, TLS and deployment hardening, signed or externally immutable audit retention, scheduled provider polling with hosted credential custody, final invoice/credit reconciliation and persistent exception workflow, broader provider conformance coverage, source-specific lifecycle collectors and signed-event verification, remaining decay policy, automatic trusted repository discovery, continuation binding, cache, accepted-task outcome evidence, outcome writeback, pooling, backup/restore, KMS, and HA proof.
+Work is ordered and measured through the issue ledger in [docs/ROADMAP.md](docs/ROADMAP.md). P0 is the gateway boundary and compatibility correction ([#20](https://github.com/Xpounder-com/hormuz/issues/20)), versioned policy administration ([#21](https://github.com/Xpounder-com/hormuz/issues/21)), then real identity and tenant/RBAC completion ([#13](https://github.com/Xpounder-com/hormuz/issues/13), [#6](https://github.com/Xpounder-com/hormuz/issues/6), [#7](https://github.com/Xpounder-com/hormuz/issues/7)). P1 is DLP, provider cache/privacy, billing reconciliation, and authorized organization/team/person consumption reporting. P2 is KMS/audit retention, production TLS/HA/DR, and independent review. The built-in context experiment is archived outside this delivery path; it will not receive shared persistence, lifecycle, retrieval, provenance, or reusable-pack-cache investment in Hormuz.

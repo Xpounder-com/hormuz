@@ -1,6 +1,8 @@
 # ADR 0005: GitHub lifecycle event trust and collection
 
-- Status: **Proposed — owner approval required**
+> **Superseded by [ADR 0008](0008-gateway-product-boundary.md).** Hormuz no longer owns knowledge-memory lifecycle collection. This file is retained as historical design evidence.
+
+- Status: **Superseded**
 - Date proposed: 2026-08-16
 - Decision owner: Product owner
 - Tracking issue: [#12](https://github.com/Xpounder-com/hormuz/issues/12)

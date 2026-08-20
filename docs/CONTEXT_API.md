@@ -1,5 +1,7 @@
 # Context Pack API
 
+> **Deprecated experimental compatibility API.** Responses carry `Deprecation: @1787184000`, the RFC 9745 date for the accepted 2026-08-20 boundary decision. See [ADR 0008](decisions/0008-gateway-product-boundary.md). A future removal requires a separately documented versioned migration and sunset.
+
 Hormuz exposes an authenticated REST boundary for retrieving the smallest authorized governed-context pack without calling a model:
 
 ```http

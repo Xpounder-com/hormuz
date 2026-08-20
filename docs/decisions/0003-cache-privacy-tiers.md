@@ -1,5 +1,7 @@
 # ADR 0003: Provider and Hormuz cache privacy tiers
 
+> **Partially superseded by [ADR 0008](0008-gateway-product-boundary.md).** Provider-native cache governance remains accepted; a Hormuz-owned reusable context-pack cache is no longer planned.
+
 - Status: **Accepted**
 - Date proposed: 2026-08-15
 - Date accepted: 2026-08-20

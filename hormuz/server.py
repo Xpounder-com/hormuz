@@ -129,6 +129,14 @@ _CONTENT_FREE_HTTP_ROUTES = frozenset(
         "/v1/responses/compact",
     }
 )
+_DEPRECATED_BUILTIN_CONTEXT_ROUTES = frozenset(
+    {
+        "/v1/context/evidence",
+        "/v1/context/lifecycle-snapshots",
+        "/v1/context/packs",
+        "/v1/context/revalidation-batches",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -341,7 +349,12 @@ class GatewayServer(ThreadingHTTPServer):
                 )
             self.session_broker = SessionBroker(config, self.authenticator, session_store)
         self.store = gateway_store(config)
-        self.context_repository = SQLiteContextRepository(config.context_database_path)
+        # The built-in context repository is a deprecated experimental surface,
+        # not a dependency of the supported gateway path. Keep it lazy so an
+        # ordinary OpenAI or Anthropic deployment neither opens nor creates a
+        # content-bearing context database.
+        self._context_repository: SQLiteContextRepository | None = None
+        self._context_repository_lock = threading.Lock()
         self.context_rate_limiter = ContextRateLimiter(
             config.context_service.requests_per_minute
         )
@@ -384,6 +397,20 @@ class GatewayServer(ThreadingHTTPServer):
             daemon=True,
         )
         self._header_watchdog.start()
+
+    @property
+    def context_repository(self) -> SQLiteContextRepository:
+        """Open the deprecated built-in context store only on explicit use."""
+
+        repository = self._context_repository
+        if repository is not None:
+            return repository
+        with self._context_repository_lock:
+            repository = self._context_repository
+            if repository is None:
+                repository = SQLiteContextRepository(self.config.context_database_path)
+                self._context_repository = repository
+        return repository
 
     def server_activate(self) -> None:
         """Apply the configured kernel accept backlog at socket activation."""
@@ -3630,11 +3657,14 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         headers: dict[str, str] | None = None,
     ) -> None:
         body = json.dumps(value, separators=(",", ":")).encode("utf-8")
+        response_headers = dict(headers or {})
+        if urlsplit(self.path).path in _DEPRECATED_BUILTIN_CONTEXT_ROUTES:
+            response_headers.setdefault("Deprecation", "@1787184000")
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
-        for name, header_value in (headers or {}).items():
+        for name, header_value in response_headers.items():
             self.send_header(name, header_value)
         self.end_headers()
         self.wfile.write(body)

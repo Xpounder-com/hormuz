@@ -1,5 +1,7 @@
 # Governed context in Codex and Claude Code
 
+> **Deprecated experimental compatibility adapter.** Hormuz's supported Codex and Claude Code integration is the AI gateway path; the built-in context MCP surface is not an enterprise release gate. See [ADR 0008](decisions/0008-gateway-product-boundary.md).
+
 Hormuz exposes one read-only local MCP tool, `hormuz_get_context`. The stdio
 adapter calls the authenticated Hormuz Context Pack API; it does not open the
 context database, read provider credentials, or accept caller-supplied

@@ -1,5 +1,7 @@
 # Governed context records and packs
 
+> **Deprecated experimental compatibility surface.** Hormuz's supported product boundary is the AI gateway/control plane defined in [ADR 0008](decisions/0008-gateway-product-boundary.md). This repository is opened lazily only when legacy context behavior is explicitly used; do not adopt it for new Hormuz deployments.
+
 Hormuz has a local persistent repository for provider-neutral, governed context records. It is intentionally separate from the metadata-only usage database. Importing, listing, exporting, or explicitly retrieving context never calls an embedding model or provider. When an administrator separately enables automatic context policy, supported generation requests can retrieve and inject a verified pack through the gateway path described in [CONTEXT_INJECTION.md](CONTEXT_INJECTION.md).
 
 The repository is a reversible local implementation behind a dedicated storage boundary. It proves the record lifecycle and authorization contract without selecting the pending enterprise PostgreSQL tenancy design.

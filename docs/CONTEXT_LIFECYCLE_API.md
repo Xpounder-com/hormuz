@@ -1,5 +1,7 @@
 # Context lifecycle connector API
 
+> **Deprecated experimental compatibility API.** Responses carry `Deprecation: @1787184000`; no new Hormuz lifecycle investment is planned. See [ADR 0008](decisions/0008-gateway-product-boundary.md).
+
 Hormuz exposes a provider-neutral HTTP and CLI boundary for trusted CI jobs and internal connectors to submit lifecycle evidence, record repository state, and run one bounded revalidation batch. The connector does not need access to the local Hormuz configuration or context database.
 
 This API automates authenticated delivery into the existing governed lifecycle. It is not a GitHub-, GitLab-, or CI-specific webhook, and authentication of the submitting workload does not independently prove that the claimed upstream event occurred.

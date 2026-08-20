@@ -1238,7 +1238,10 @@ def _serve(config: GatewayConfig) -> int:
         print(f"Legacy security audit database: {config.database_path}")
     else:
         print(f"Usage and security database: {config.database_path}")
-    print(f"Context database: {config.context_database_path}")
+    print(
+        "Legacy context database (opened only on deprecated context use): "
+        f"{config.context_database_path}"
+    )
     if config.session_broker.enabled:
         if config.session_broker.backend == "postgresql":
             print("Session database: PostgreSQL (shared runtime storage)")
@@ -1331,7 +1334,10 @@ def _doctor(config: GatewayConfig) -> int:
         print("usage PostgreSQL configuration: DSN environment is present")
     else:
         print(f"usage and security database: {config.database_path}")
-    print(f"context database: {config.context_database_path}")
+    print(
+        "legacy context database (opened only on deprecated context use): "
+        f"{config.context_database_path}"
+    )
     if config.oidc_issuers:
         try:
             metadata = Authenticator(config).validate_metadata()

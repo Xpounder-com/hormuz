@@ -616,6 +616,32 @@ class ProviderQueryInspectionTests(unittest.TestCase):
 
 
 class GatewayConstructionTests(unittest.TestCase):
+    def test_gateway_does_not_create_context_database_until_legacy_surface_is_used(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = Path(__file__).resolve().parents[1] / "config.example.json"
+            raw = json.loads(source.read_text(encoding="utf-8"))
+            raw["listen"]["port"] = _free_port()
+            raw["database"] = str(root / "usage.sqlite3")
+            raw["context_database"] = str(root / "context.sqlite3")
+            path = root / "gateway.json"
+            path.write_text(json.dumps(raw), encoding="utf-8")
+            environment = {
+                "HORMUZ_TOKEN": GATEWAY_TOKEN,
+                "OPENAI_API_KEY": OPENAI_KEY,
+                "ANTHROPIC_API_KEY": ANTHROPIC_KEY,
+            }
+            config = GatewayConfig.load(path, environ=environment)
+
+            with mock.patch.dict(os.environ, environment):
+                gateway = GatewayServer(config)
+            try:
+                self.assertFalse(config.context_database_path.exists())
+                gateway.context_repository
+                self.assertTrue(config.context_database_path.exists())
+            finally:
+                gateway.server_close()
+
     def test_bind_failure_preserves_socket_error_during_partial_cleanup(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -3064,6 +3090,7 @@ class GatewayIntegrationTests(unittest.TestCase):
 
         self.assertEqual(status, 200)
         self.assertEqual(headers["cache-control"], "no-store")
+        self.assertEqual(headers["deprecation"], "@1787184000")
         pack = json.loads(response)
         self.assertEqual(pack["policy_version"], "test-context-v1")
         self.assertEqual(pack["retrieval_version"], "lexical-v1")

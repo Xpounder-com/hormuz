@@ -1,6 +1,8 @@
 # ADR 0006: Automatic governed-context injection
 
-- Status: **Accepted**
+> **Superseded by [ADR 0008](0008-gateway-product-boundary.md).** This behavior remains a deprecated experimental compatibility surface, not a supported Hormuz release gate.
+
+- Status: **Superseded**
 - Date proposed: 2026-08-16
 - Date accepted: 2026-08-16
 - Decision owner: Product owner

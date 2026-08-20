@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "hormuz"
 version = "0.1.0"
-description = "Enterprise AI policy, usage, and governed-context control plane."
+description = "Enterprise AI gateway for policy, privacy, routing, and usage control."
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [

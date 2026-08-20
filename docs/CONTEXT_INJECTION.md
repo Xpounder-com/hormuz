@@ -1,5 +1,7 @@
 # Automatic governed-context injection
 
+> **Deprecated experimental compatibility behavior.** It remains disabled by default and is not a Hormuz enterprise release gate. See [ADR 0008](decisions/0008-gateway-product-boundary.md).
+
 Hormuz can automatically add a bounded, verified Context Pack to ordinary Codex and Claude Code generation requests, direct-query OpenAI compaction, and Anthropic token counting. Employees keep using the official clients. The gateway performs retrieval and provider-specific request mutation after identity and model authorization, so a model does not need to call the MCP tool and the employee does not need a wrapper.
 
 Automatic injection is disabled by default. The first implementation is a bounded checkpoint under [issue #5](https://github.com/Xpounder-com/hormuz/issues/5), not closure of the complete automatic-context milestone.

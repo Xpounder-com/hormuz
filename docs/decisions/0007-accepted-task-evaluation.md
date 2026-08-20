@@ -1,6 +1,8 @@
 # ADR 0007: Accepted-task economics evaluation
 
-- Status: **Proposed — owner approval required**
+> **Superseded by [ADR 0008](0008-gateway-product-boundary.md).** Hormuz reports consumption, enforcement, coverage, and cost; it does not score employee productivity or claim that AI caused work outcomes.
+
+- Status: **Superseded**
 - Date proposed: 2026-08-16
 - Decision owner: Product owner
 - Tracking issue: [#15](https://github.com/Xpounder-com/hormuz/issues/15)
