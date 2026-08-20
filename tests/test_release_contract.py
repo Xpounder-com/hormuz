@@ -306,7 +306,10 @@ class ReleaseContractTests(unittest.TestCase):
         predicate = render_slsa_predicate(
             contract=contract,
             dockerfile=ROOT / "Dockerfile",
-            dependency_lock=ROOT / "deploy/container/requirements.lock",
+            dependency_locks=(
+                ROOT / "deploy/container/requirements.lock",
+                ROOT / "deploy/postgres/requirements.lock",
+            ),
             workflow_run_url=(
                 "https://github.com/Xpounder-com/hormuz/actions/runs/123"
             ),
@@ -319,10 +322,18 @@ class ReleaseContractTests(unittest.TestCase):
         self.assertEqual(
             parameters["platforms"], ["linux/amd64", "linux/arm64"]
         )
+        self.assertEqual(
+            parameters["dependencyLocks"],
+            [
+                "deploy/container/requirements.lock",
+                "deploy/postgres/requirements.lock",
+            ],
+        )
         dependencies = predicate["buildDefinition"]["resolvedDependencies"]
         self.assertEqual(dependencies[0]["digest"], {"gitCommit": SHA})
         self.assertRegex(dependencies[1]["digest"]["sha256"], r"^[0-9a-f]{64}$")
         self.assertRegex(dependencies[2]["digest"]["sha256"], r"^[0-9a-f]{64}$")
+        self.assertRegex(dependencies[3]["digest"]["sha256"], r"^[0-9a-f]{64}$")
 
         statement = {
             "_type": "https://in-toto.io/Statement/v1",

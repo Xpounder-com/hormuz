@@ -27,6 +27,8 @@ MAX_CONFIG_BYTES = 1_048_576
 MAX_CONFIG_DEPTH = 64
 MAX_CONFIG_NODES = 100_000
 _SHA256_PATTERN = re.compile(r"[0-9a-f]{64}\Z")
+_ENVIRONMENT_NAME_PATTERN = re.compile(r"[A-Z][A-Z0-9_]{0,127}\Z")
+_POSTGRES_IDENTIFIER_PATTERN = re.compile(r"[a-z_][a-z0-9_]{0,62}\Z")
 
 
 def _load_configuration_json(source_path: Path) -> tuple[Any, str]:
@@ -269,6 +271,16 @@ class SessionBrokerConfig:
 
 
 @dataclass(frozen=True)
+class UsageStorageConfig:
+    """Select only the usage/cost/budget persistence boundary."""
+
+    backend: str = "sqlite"
+    postgres_dsn_env: str = "HORMUZ_POSTGRES_DSN"
+    postgres_schema: str = "hormuz"
+    postgres_runtime_role: str = "hormuz_runtime"
+
+
+@dataclass(frozen=True)
 class ModelRoute:
     alias: str
     protocol: str
@@ -389,6 +401,7 @@ class GatewayConfig:
     model_routes: dict[str, ModelRoute]
     organization_policy: Policy
     source_sha256: str
+    usage_storage: UsageStorageConfig = field(default_factory=UsageStorageConfig)
     billing_reconciliation: BillingReconciliationPolicy = field(
         default_factory=BillingReconciliationPolicy
     )
@@ -432,6 +445,7 @@ class GatewayConfig:
             {
                 "listen",
                 "database",
+                "usage_storage",
                 "context_database",
                 "context_service",
                 "billing_reconciliation",
@@ -506,6 +520,46 @@ class GatewayConfig:
         database_path = Path(database_value).expanduser()
         if not database_path.is_absolute():
             database_path = (source_path.parent / database_path).resolve()
+
+        usage_storage_raw = _object(raw.get("usage_storage", {}), "usage_storage")
+        _reject_unknown_fields(
+            usage_storage_raw,
+            {
+                "backend",
+                "postgres_dsn_env",
+                "postgres_schema",
+                "postgres_runtime_role",
+            },
+            "usage_storage",
+        )
+        usage_backend = _string(
+            usage_storage_raw.get("backend", "sqlite"),
+            "usage_storage.backend",
+        )
+        if usage_backend not in {"sqlite", "postgresql"}:
+            raise ConfigError("usage_storage.backend must be sqlite or postgresql")
+        postgres_dsn_env = _string(
+            usage_storage_raw.get("postgres_dsn_env", "HORMUZ_POSTGRES_DSN"),
+            "usage_storage.postgres_dsn_env",
+        )
+        if _ENVIRONMENT_NAME_PATTERN.fullmatch(postgres_dsn_env) is None:
+            raise ConfigError(
+                "usage_storage.postgres_dsn_env must be a safe environment variable name"
+            )
+        postgres_schema = _string(
+            usage_storage_raw.get("postgres_schema", "hormuz"),
+            "usage_storage.postgres_schema",
+        )
+        postgres_runtime_role = _string(
+            usage_storage_raw.get("postgres_runtime_role", "hormuz_runtime"),
+            "usage_storage.postgres_runtime_role",
+        )
+        if _POSTGRES_IDENTIFIER_PATTERN.fullmatch(postgres_schema) is None:
+            raise ConfigError("usage_storage.postgres_schema must be a safe PostgreSQL identifier")
+        if _POSTGRES_IDENTIFIER_PATTERN.fullmatch(postgres_runtime_role) is None:
+            raise ConfigError(
+                "usage_storage.postgres_runtime_role must be a safe PostgreSQL identifier"
+            )
 
         context_database_value = _string(
             raw.get("context_database", "./hormuz-context.sqlite3"),
@@ -921,6 +975,12 @@ class GatewayConfig:
             model_routes=model_routes,
             organization_policy=organization_policy,
             source_sha256=source_sha256,
+            usage_storage=UsageStorageConfig(
+                backend=usage_backend,
+                postgres_dsn_env=postgres_dsn_env,
+                postgres_schema=postgres_schema,
+                postgres_runtime_role=postgres_runtime_role,
+            ),
             billing_reconciliation=billing_reconciliation,
             context_service=context_service,
             session_broker=session_broker,

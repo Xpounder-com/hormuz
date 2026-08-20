@@ -17,7 +17,7 @@ import re
 from typing import Any, Callable, Iterator, Protocol
 
 
-POSTGRES_SCHEMA_VERSION = 1
+POSTGRES_SCHEMA_VERSION = 2
 DEFAULT_POSTGRES_DSN_ENV = "HORMUZ_POSTGRES_DSN"
 DEFAULT_POSTGRES_SCHEMA = "hormuz"
 DEFAULT_POSTGRES_RUNTIME_ROLE = "hormuz_runtime"
@@ -44,12 +44,60 @@ TENANT_TABLES = (
     "roles",
     "role_capabilities",
     "team_memberships",
+    "gateway_usage_events",
+    "gateway_budget_reservations",
+    "gateway_admin_access_events",
+    "gateway_provider_cost_imports",
+    "gateway_provider_cost_items",
+    "gateway_provider_cost_sources",
 )
 
 RUNTIME_READ_ONLY_TABLES = ("tenants",)
 RUNTIME_MUTABLE_TABLES = tuple(
     table for table in TENANT_TABLES if table not in RUNTIME_READ_ONLY_TABLES
 )
+
+ACCOUNTING_TABLE_COLUMNS = {
+    "gateway_usage_events": (
+        "tenant_id", "id", "occurred_at", "actor_id", "actor_name", "team_id",
+        "team_name", "client", "protocol", "requested_model", "resolved_alias",
+        "upstream_model", "actual_model", "policy_action", "status", "input_tokens",
+        "output_tokens", "cache_read_tokens", "cache_write_tokens", "reasoning_tokens",
+        "billable_tokens", "cost_microusd", "cost_basis", "currency",
+        "rate_card_version", "provider_usage_json", "provider_request_id",
+        "redaction_count", "redaction_rules", "context_injection_mode",
+        "context_injection_outcome", "context_injection_reason", "context_pack_id",
+        "context_record_ids_json", "context_policy_version",
+        "context_retrieval_version", "context_render_version",
+        "context_repository_revision", "context_estimated_tokens",
+        "context_assembly_milliseconds", "context_reuse_status",
+        "gateway_latency_milliseconds", "policy_latency_milliseconds",
+        "provider_latency_milliseconds",
+    ),
+    "gateway_budget_reservations": (
+        "tenant_id", "id", "created_at", "expires_at", "actor_id", "team_id",
+        "model_alias", "reserved_tokens", "reserved_cost_microusd",
+    ),
+    "gateway_admin_access_events": (
+        "tenant_id", "id", "occurred_at", "decision_actor_id",
+        "decision_actor_name", "action", "group_by", "actor_filter_sha256",
+        "team_filter_sha256", "window_start", "window_end", "result_count",
+    ),
+    "gateway_provider_cost_imports": (
+        "tenant_id", "id", "imported_at", "provider", "source_sha256",
+        "report_start", "report_end", "page_count", "bucket_count", "item_count",
+    ),
+    "gateway_provider_cost_items": (
+        "tenant_id", "id", "import_id", "item_ordinal", "bucket_start",
+        "bucket_end", "amount_usd", "currency", "provider_scope_kind",
+        "provider_scope_id", "line_item", "cost_type", "model", "service_tier",
+        "token_type", "context_window", "inference_geo",
+    ),
+    "gateway_provider_cost_sources": (
+        "tenant_id", "id", "import_id", "observed_at", "source_kind",
+        "api_contract", "query_start", "query_end", "query_scope",
+    ),
+}
 
 
 class PostgresStorageError(RuntimeError):
@@ -354,6 +402,27 @@ def _verify_foundation(cursor: _Cursor, schema: str, runtime_role: str) -> None:
             raise PostgresStorageError("tenant_rls_not_forced")
         if row[3] != migration_role:
             raise PostgresStorageError("migration_role_does_not_own_tenant_table")
+
+    cursor.execute(
+        "SELECT table_name, column_name FROM information_schema.columns "
+        "WHERE table_schema = %s AND table_name = ANY(%s) "
+        "ORDER BY table_name, ordinal_position",
+        (schema, list(ACCOUNTING_TABLE_COLUMNS)),
+    )
+    accounting_columns: dict[str, list[str]] = {
+        table: [] for table in ACCOUNTING_TABLE_COLUMNS
+    }
+    for row in cursor.fetchall():
+        if not isinstance(row, (tuple, list)) or len(row) != 2:
+            raise PostgresStorageError("accounting_table_columns_invalid")
+        table = str(row[0])
+        if table in accounting_columns:
+            accounting_columns[table].append(str(row[1]))
+    if any(
+        tuple(accounting_columns[table]) != expected
+        for table, expected in ACCOUNTING_TABLE_COLUMNS.items()
+    ):
+        raise PostgresStorageError("accounting_table_columns_invalid")
 
     cursor.execute(
         "SELECT tablename, policyname, qual, with_check FROM pg_policies "

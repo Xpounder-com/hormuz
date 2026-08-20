@@ -111,6 +111,26 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _dependency_locks_sha256(source_root: Path) -> str:
+    """Bind every dependency lock copied into the reference image."""
+    digest = hashlib.sha256()
+    for relative in (
+        "deploy/container/requirements.lock",
+        "deploy/postgres/requirements.lock",
+    ):
+        path = source_root / relative
+        digest.update(relative.encode("utf-8"))
+        digest.update(b"\0")
+        try:
+            digest.update(path.read_bytes())
+        except OSError as error:
+            raise OCIReproducibilityError(
+                "reproducibility dependency lock cannot be read"
+            ) from error
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
 def _strict_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
     result: dict[str, object] = {}
     for key, value in pairs:
@@ -795,9 +815,7 @@ def build_reproducible_image(
             _extract_source(source_archive, source_root)
             selected_version = _project_version(source_root)
             selected_dockerfile_digest = _sha256_file(source_root / "Dockerfile")
-            selected_dependency_digest = _sha256_file(
-                source_root / "deploy/container/requirements.lock"
-            )
+            selected_dependency_digest = _dependency_locks_sha256(source_root)
             selected_base_digest = _base_image_digest(source_root / "Dockerfile")
             inputs = (
                 selected_version,

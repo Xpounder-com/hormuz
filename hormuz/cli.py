@@ -80,6 +80,7 @@ from .postgres import (
     DEFAULT_POSTGRES_SCHEMA,
     PostgresStorageError,
     migrate_postgres_from_env,
+    postgres_dsn_from_env,
     verify_postgres_from_env,
 )
 from .provider_conformance import (
@@ -96,7 +97,7 @@ from .session_client import (
     validate_session_gateway,
 )
 from .session_admin_client import SessionAdminClient, SessionAdminClientError
-from .store import UsageStore
+from .store_router import gateway_store
 from .usage_admin_client import UsageAdminClient, UsageAdminClientError
 from .usage_reporting import budget_for_scope, enrich_usage_rows
 
@@ -1132,6 +1133,9 @@ def main(argv: list[str] | None = None) -> int:
     except ContextStoreError as error:
         print(f"context store error: {error}", file=sys.stderr)
         return 2
+    except PostgresStorageError as error:
+        print(f"PostgreSQL storage error: {error.code}", file=sys.stderr)
+        return 2
     except KeyboardInterrupt:
         return 130
     return 2
@@ -1166,7 +1170,12 @@ def _serve(config: GatewayConfig) -> int:
     server = GatewayServer(config)
     print(f"Hormuz listening on http://{config.listen.host}:{config.listen.port}")
     print("Protocols: POST /v1/responses, POST /v1/messages, and POST /v1/context/packs")
-    print(f"Usage database: {config.database_path}")
+    print(f"Usage storage: {config.usage_storage.backend}")
+    if config.usage_storage.backend == "postgresql":
+        print(f"Usage PostgreSQL DSN environment: {config.usage_storage.postgres_dsn_env}")
+        print(f"Security database: {config.database_path}")
+    else:
+        print(f"Usage and security database: {config.database_path}")
     print(f"Context database: {config.context_database_path}")
     if config.session_broker.enabled:
         print(f"Session database: {config.session_broker.database_path}")
@@ -1245,7 +1254,18 @@ def _doctor(config: GatewayConfig) -> int:
                 f"{action}={action_counts[action]}" for action in sorted(action_counts)
             )
         )
-    print(f"usage database: {config.database_path}")
+    print(f"usage storage: {config.usage_storage.backend}")
+    if config.usage_storage.backend == "postgresql":
+        print(f"usage PostgreSQL DSN environment: {config.usage_storage.postgres_dsn_env}")
+        print(f"security database: {config.database_path}")
+        try:
+            postgres_dsn_from_env(dsn_env=config.usage_storage.postgres_dsn_env)
+        except PostgresStorageError as error:
+            print(f"usage PostgreSQL configuration: unavailable ({error.code})")
+            return 1
+        print("usage PostgreSQL configuration: DSN environment is present")
+    else:
+        print(f"usage and security database: {config.database_path}")
     print(f"context database: {config.context_database_path}")
     if config.oidc_issuers:
         try:
@@ -1280,7 +1300,7 @@ def _status(config: GatewayConfig, args: argparse.Namespace) -> int:
     if organization_id not in organizations:
         print("status error: organization is not configured", file=sys.stderr)
         return 2
-    rows = UsageStore(config.database_path).report_rows(
+    rows = gateway_store(config).report_rows(
         group_by=args.group_by,
         organization_id=organization_id,
         actor_id=args.actor,
@@ -1346,7 +1366,7 @@ def _billing_command(config: GatewayConfig, args: argparse.Namespace) -> int:
         if args.billing_command == "import":
             pages = _load_provider_cost_pages(args.input)
             report = parse_provider_cost_pages(args.provider, pages)
-            result = UsageStore(config.database_path).import_provider_cost_report(
+            result = gateway_store(config).import_provider_cost_report(
                 organization_id=args.organization,
                 report=report,
             )
@@ -1382,7 +1402,7 @@ def _billing_command(config: GatewayConfig, args: argparse.Namespace) -> int:
                 args.provider,
                 credential=credential,
             ).fetch(start=start, end=end)
-            result = UsageStore(config.database_path).import_provider_cost_report(
+            result = gateway_store(config).import_provider_cost_report(
                 organization_id=args.organization,
                 report=fetched.report,
                 source=fetched.source,
@@ -1397,7 +1417,7 @@ def _billing_command(config: GatewayConfig, args: argparse.Namespace) -> int:
                 )
                 return 2
             result = evaluate_reconciliation(
-                UsageStore(config.database_path).reconcile_provider_costs(
+                gateway_store(config).reconcile_provider_costs(
                     organization_id=args.organization,
                     provider=args.provider,
                     import_id=args.import_id,
@@ -1529,7 +1549,7 @@ def _policy_check(config: GatewayConfig, args: argparse.Namespace) -> int:
     if identity is None:
         print(f"unknown actor: {args.actor}", file=sys.stderr)
         return 2
-    store = UsageStore(config.database_path)
+    store = gateway_store(config)
     policy_engine = PolicyEngine(config, store)
     decision = policy_engine.evaluate(
         identity=identity,
@@ -2391,7 +2411,7 @@ def _audit_export(config: GatewayConfig, args: argparse.Namespace) -> int:
     except ValueError as error:
         print(f"invalid --since: {error}", file=sys.stderr)
         return 2
-    events = UsageStore(config.database_path).audit_events(since=since, kind=args.kind)
+    events = gateway_store(config).audit_events(since=since, kind=args.kind)
     if getattr(args, "chain", False):
         result = _write_private_audit_chain(
             events,

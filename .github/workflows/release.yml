@@ -390,6 +390,7 @@ jobs:
             --contract "$RUNNER_TEMP/hormuz-release-contract.json" \
             --dockerfile Dockerfile \
             --dependency-lock deploy/container/requirements.lock \
+            --dependency-lock deploy/postgres/requirements.lock \
             --workflow-run-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
             --workflow-run-id "$GITHUB_RUN_ID" \
             --workflow-run-attempt "$GITHUB_RUN_ATTEMPT" \

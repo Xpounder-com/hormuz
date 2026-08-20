@@ -26,7 +26,7 @@ OpenAI Responses API / Anthropic Messages API
         +--> stream response to the original client
         +--> parse provider usage metadata without retaining content
         v
-SQLite usage ledger
+SQLite usage ledger (default) / PostgreSQL accounting ledger (opt-in)
 ```
 
 Provider billing evidence has separate authenticated and offline paths into that metadata ledger:
@@ -120,15 +120,17 @@ The HTTP path authenticates first, derives organization/team/actor from the stat
 
 Hormuz is trusted with plaintext requests and responses because it must inspect and relay them. The usage and DLP approval stores are deliberately metadata-only; the latter keeps only a keyed fingerprint and bounded binding metadata, never the payload. Caller-controlled provider-request headers cross a gateway-owned 1,024-byte visible-ASCII boundary before DLP, policy accounting, or egress; folded, control-bearing, non-ASCII, or overlong values receive a fixed provider-shaped rejection without a usage event. Provider-returned model IDs, request IDs, `Content-Type`, processing-time, and rate-limit headers independently cross a gateway-owned ASCII/length/duplicate boundary before they can enter telemetry or downstream headers; unsafe response metadata is omitted without retaining its value. Provider API credentials can leave the process only through a configured HTTPS upstream, except for literal loopback development fakes; upstream URLs cannot carry user credentials, queries, or fragments. Provider redirects are refused rather than followed, so a configured provider origin cannot move Hormuz's credential or request to a second origin; the `Location` and target are neither reflected nor retained. Offline provider billing import never receives an administrator credential. Authenticated billing fetch holds one transiently in the operator process and sends it only to the fixed provider HTTPS origin; neither path persists the credential or raw response. Both retain normalized financial metadata such as project/workspace IDs and line-item descriptions. Governed content is held in a different SQLite database; usage lineage stores pack/record IDs and versions, never record content or the retrieval query. The current local context codec is plainly labeled as unencrypted and is not an enterprise storage claim. Automatic context lookup occurs only after authentication and model authorization. Repository-scoped lookup additionally requires an exact effective-policy grant plus one supported-client selector; branch and revision only narrow that grant, and a revision must match the trusted repository/branch lifecycle snapshot. Authorized repository and branch IDs may enter the separate context-read audit, while invalid raw selectors never enter routine evidence and no Hormuz scope header reaches a provider. The metadata-only pack-read audit must commit before content can enter the provider-bound request. DLP then runs on the complete request, including injected context and valid consumed scope-header values, before provider storage policy, generation-budget reservation, and upstream serialization. Anthropic token-count requests use the same context mutation and DLP path but do not reserve a generation budget or create an inference-usage row. They retain the context-read audit and any metadata-only DLP security evidence. DLP inspects provider-bound JSON, one UTF-8 form-decoded view of the raw provider query, the exact allowlisted caller headers that the transport will forward, and valid consumed scope values; JSON keys, raw query, and forwarded header values are preserved, so would-be redaction in those locations fails closed. Team and actor overlays are selected only from the authenticated identity and can only strengthen an enabled organization rule; callers cannot request a weaker scope. Recognized opaque provider media is denied before egress unless the organization explicitly turns that rule off; Hormuz does not claim to inspect the underlying bytes. The off-mode exemption is limited to each recognized opaque object, so inspectable siblings remain governed by credential and DLP rules. Approval consumption is atomic, binds the operation/body/raw-query/forwarded-header/consumed-scope map, and precedes egress, so mutation or concurrent replay cannot duplicate the exception. DLP may transform rendered context; pack lineage identifies the selected governed sources rather than attesting to exact post-redaction provider bytes.
 
-The PostgreSQL foundation is a separate accepted future runtime boundary. Its
+The PostgreSQL foundation now supplies an opt-in accounting runtime boundary. Its
 migration DSN is accepted only through a named environment variable and is
 never reflected in CLI output. The migration role must own the schema; the
 application role must be distinct, unprivileged, membership-free, and unable to
 create schema objects or mutate the migration ledger. Every application
 transaction must supply a validated tenant, principal, client, and
 authorization version and must execute as the exact configured runtime role.
-The database then applies forced RLS as defense in depth. These controls do not
-make the current SQLite-backed gateway a hosted PostgreSQL deployment.
+The database then applies forced RLS as defense in depth. Usage, provider-cost,
+usage-read-audit, and budget-reservation operations can use this path; sessions,
+approvals, and governed context remain on SQLite. This split does not make the
+alpha a production hosted PostgreSQL deployment.
 
 ## Compatibility boundary
 

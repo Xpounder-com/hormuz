@@ -95,6 +95,35 @@ class ClientConfigTests(unittest.TestCase):
         self.assertIn('base_url = "https://hormuz.example/v1"', output.getvalue())
         self.assertIn('env_key = "HORMUZ_TOKEN"', output.getvalue())
 
+    def test_usage_storage_defaults_to_sqlite_and_postgres_config_is_strict(self) -> None:
+        self.assertEqual(self.config.usage_storage.backend, "sqlite")
+        raw = json.loads((ROOT / "config.example.json").read_text(encoding="utf-8"))
+        raw["usage_storage"] = {
+            "backend": "postgresql",
+            "postgres_dsn_env": "HORMUZ_ACCOUNTING_DSN",
+            "postgres_schema": "hormuz",
+            "postgres_runtime_role": "hormuz_runtime",
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "config.json"
+            path.write_text(json.dumps(raw), encoding="utf-8")
+            configured = GatewayConfig.load(
+                path,
+                environ={"HORMUZ_TOKEN": "test-identity-token"},
+            )
+            self.assertEqual(configured.usage_storage.backend, "postgresql")
+            self.assertEqual(
+                configured.usage_storage.postgres_dsn_env,
+                "HORMUZ_ACCOUNTING_DSN",
+            )
+            raw["usage_storage"]["postgres_dsn_env"] = "unsafe-name"
+            path.write_text(json.dumps(raw), encoding="utf-8")
+            with self.assertRaisesRegex(ConfigError, "safe environment variable name"):
+                GatewayConfig.load(
+                    path,
+                    environ={"HORMUZ_TOKEN": "test-identity-token"},
+                )
+
     def test_sigterm_uses_nonblocking_idempotent_shutdown_request(self) -> None:
         callbacks: dict[int, object] = {}
 

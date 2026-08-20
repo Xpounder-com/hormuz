@@ -72,8 +72,8 @@ from .store import (
     DLPApprovalStoreError,
     ReservationDenied,
     SecurityStoreError,
-    UsageStore,
 )
+from .store_router import gateway_store
 from .usage import ResponseUsageParser, sanitize_provider_request_id
 from .usage_reporting import REPORT_DIMENSIONS, enrich_usage_rows
 
@@ -313,7 +313,7 @@ class GatewayServer(ThreadingHTTPServer):
                 enrollment_ttl_seconds=session_config.enrollment_ttl_seconds,
             )
             self.session_broker = SessionBroker(config, self.authenticator, session_store)
-        self.store = UsageStore(config.database_path)
+        self.store = gateway_store(config)
         self.context_repository = SQLiteContextRepository(config.context_database_path)
         self.context_rate_limiter = ContextRateLimiter(
             config.context_service.requests_per_minute
@@ -2971,7 +2971,10 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 policy_latency_milliseconds=policy_latency_milliseconds,
             )
         finally:
-            self.server.store.release_budget_reservation(reservation_id)
+            self.server.store.release_budget_reservation(
+                reservation_id,
+                organization_id=identity.organization_id,
+            )
 
     def _forward(
         self,
@@ -3197,6 +3200,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                     self.server.store.refresh_budget_reservation(
                         reservation_id,
                         ttl_seconds=reservation_ttl_seconds,
+                        organization_id=identity.organization_id,
                     )
                     refresh_at = time.monotonic() + max(1, reservation_ttl_seconds // 2)
                 parser.feed(chunk)

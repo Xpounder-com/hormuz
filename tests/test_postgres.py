@@ -23,6 +23,8 @@ from hormuz.postgres import (
     validate_postgres_identifier,
     validate_tenant_id,
 )
+from hormuz.postgres_usage_store import PostgresUsageStore
+from hormuz.store_router import GatewayStoreRouter
 from scripts.postgres_foundation_integration import (
     EVIDENCE_SCHEMA,
     PostgresFoundationIntegrationError,
@@ -34,6 +36,43 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class PostgresFoundationTests(unittest.TestCase):
+    def test_postgres_usage_store_requires_explicit_scope_for_multiple_tenants(self) -> None:
+        store = PostgresUsageStore(
+            "postgresql://runtime:not-used@127.0.0.1/hormuz",
+            organization_ids=("tenant-a", "tenant-b"),
+        )
+        with self.assertRaisesRegex(ValueError, "organization_id is required"):
+            store.monthly_totals()
+        with self.assertRaisesRegex(PostgresStorageError, "tenant_not_configured"):
+            store.monthly_totals(organization_id="tenant-c")
+
+    def test_split_store_routes_accounting_and_security_and_combines_audit(self) -> None:
+        accounting = mock.Mock()
+        security = mock.Mock()
+        security.path = Path("security.sqlite3")
+        accounting.record.return_value = "usage-id"
+        security.record_secret_event.return_value = "security-id"
+        accounting.audit_events.return_value = [
+            {"event_type": "usage", "id": "a", "occurred_at": "2026-08-20T00:00:00Z"}
+        ]
+        security.audit_events.return_value = [
+            {
+                "event_type": "security.dlp",
+                "id": "b",
+                "occurred_at": "2026-08-20T00:00:01Z",
+            }
+        ]
+        router = GatewayStoreRouter(accounting, security)
+
+        self.assertEqual(router.record(test=True), "usage-id")
+        self.assertEqual(router.record_secret_event(test=True), "security-id")
+        self.assertEqual(
+            [event["id"] for event in router.audit_events(since="2026-08-20T00:00:00Z")],
+            ["a", "b"],
+        )
+        accounting.record.assert_called_once_with(test=True)
+        security.record_secret_event.assert_called_once_with(test=True)
+
     def test_packaged_migrations_are_contiguous_and_match_target(self) -> None:
         migrations = load_postgres_migrations()
 
@@ -42,8 +81,9 @@ class PostgresFoundationTests(unittest.TestCase):
             list(range(1, POSTGRES_SCHEMA_VERSION + 1)),
         )
         self.assertEqual(len(migrations[0].sha256), 64)
+        migration_source = "\n".join(migration.sql for migration in migrations)
         for table in TENANT_TABLES:
-            self.assertIn(f"CREATE TABLE {table}", migrations[0].sql)
+            self.assertIn(f"CREATE TABLE {table}", migration_source)
         self.assertIn("FORCE ROW LEVEL SECURITY", migrations[0].sql)
         self.assertIn("current_setting(''hormuz.tenant_id'', true)", migrations[0].sql)
 
@@ -315,11 +355,22 @@ class PostgresFoundationTests(unittest.TestCase):
         self.assertTrue(value["content_free"])
         self.assertEqual(value["migration"]["target_version"], POSTGRES_SCHEMA_VERSION)
         self.assertTrue(value["migration"]["idempotent"])
+        self.assertTrue(value["accounting"]["tenant_scoped_usage_verified"])
+        self.assertEqual(value["accounting"]["atomic_budget_competitors"], 2)
+        self.assertEqual(value["accounting"]["atomic_budget_allowed"], 1)
+        self.assertEqual(value["accounting"]["atomic_budget_denied"], 1)
+        self.assertTrue(value["accounting"]["provider_cost_idempotency_verified"])
+        self.assertTrue(value["accounting"]["provider_reconciliation_verified"])
+        self.assertTrue(value["accounting"]["usage_reporting_verified"])
+        self.assertTrue(value["accounting"]["usage_read_audit_verified"])
         self.assertEqual(value["isolation"]["missing_context_rows"], 0)
         self.assertEqual(value["isolation"]["cleared_context_rows"], 0)
         self.assertTrue(value["isolation"]["tenant_context_fields_bound"])
         self.assertTrue(value["tamper_detection"]["permissive_policy_rejected"])
         self.assertTrue(value["tamper_detection"]["runtime_owner_membership_rejected"])
+        self.assertTrue(
+            value["tamper_detection"]["unexpected_accounting_column_rejected"]
+        )
         serialized = json.dumps(value, sort_keys=True)
         for forbidden in (
             "password",

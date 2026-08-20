@@ -1,14 +1,16 @@
 # PostgreSQL tenancy foundation
 
 Hormuz has an accepted shared-schema PostgreSQL tenancy contract and an
-executable schema-version-1 foundation. The current gateway execution path
-still uses the three local SQLite repositories; this page does not claim that
-hosted usage, session, or governed-context persistence is complete.
+executable schema-version-2 accounting backend. A deployment can opt into
+PostgreSQL for usage, cost evidence, usage-read audit, and atomic budget
+reservations. Sessions, DLP/security approvals, and governed context remain in
+their explicitly identified SQLite stores during this transition.
 
 ## Boundary proved by this checkpoint
 
-The packaged PostgreSQL migration creates tenant, workspace, project, team,
-principal, external-identity, role, capability, and team-membership tables.
+The packaged PostgreSQL migrations create tenant, workspace, project, team,
+principal, external-identity, role, capability, team-membership, usage,
+provider-cost, usage-read-audit, and budget-reservation tables.
 Every tenant-owned table has:
 
 - a non-null tenant key in its primary and foreign-key relationships;
@@ -62,13 +64,39 @@ hormuz storage migrate \
   --runtime-role company_hormuz_runtime
 ```
 
-Future PostgreSQL application repositories must enter through
+The PostgreSQL accounting repository enters through
 `tenant_transaction`, which requires a validated tenant, principal, client, and
 authorization version, verifies that the connection is the exact non-owner
 runtime role without `BYPASSRLS`, and binds every field with PostgreSQL
 transaction-local state. Missing context and state left after commit see no
 rows. Repository methods must still include an explicit tenant predicate; RLS
 is defense in depth.
+
+After applying migrations with the owner DSN, inject the distinct runtime-role
+DSN under the environment name selected in configuration:
+
+```json
+{
+  "database": "./hormuz-security.sqlite3",
+  "usage_storage": {
+    "backend": "postgresql",
+    "postgres_dsn_env": "HORMUZ_POSTGRES_DSN",
+    "postgres_schema": "hormuz",
+    "postgres_runtime_role": "hormuz_runtime"
+  }
+}
+```
+
+`database` is deliberately still the SQLite security/approval ledger. The DSN
+value never belongs in JSON. Each configured organization must be provisioned
+in the PostgreSQL `tenants` table before the gateway starts writing accounting
+events.
+
+Switching the backend does not backfill old SQLite usage rows. New reports and
+budget calculations use PostgreSQL from the cutover onward; `audit-export`
+continues to combine pre-cutover SQLite evidence with current PostgreSQL
+evidence. Perform a separately verified backfill before using a mid-month
+cutover for enforceable monthly limits.
 
 ## Reproduce the bounded integration proof
 
@@ -82,7 +110,12 @@ roles and two synthetic tenants, then proves:
 - no rows with missing or transaction-cleared tenant context;
 - correct tenant switching on one reused runtime connection;
 - denied cross-tenant read/write and composite foreign-key access; and
-- denied tenant-key mutation, including for the forced-RLS table owner.
+- denied tenant-key mutation, including for the forced-RLS table owner;
+- rejected an unexpected accounting column during schema verification;
+- tenant-isolated usage writes, reads, reports, and usage-read audit;
+- one allowed and one denied request under a two-writer competing budget test;
+  and
+- idempotent provider-cost import plus aggregate reconciliation.
 
 ```bash
 python -m pip install '.[postgres]'
@@ -97,11 +130,12 @@ observation is
 
 ## Gates that remain open
 
-Schema v1 is a real persistence and isolation foundation, not the completed
-hosted product. Issue #6 remains open until the usage, session, policy, and
-governed-context repositories share tested SQLite/PostgreSQL contracts; token
-and spend reservations are correct across replicas; identity revocation is
-shared; tenant export/delete and backup/restore are exercised; and production
-pooling, KMS, HA, operations, and independent security review pass their own
-gates. `hormuz serve` therefore continues to use SQLite and must not be
-advertised as PostgreSQL-backed yet.
+Schema v2 is a real accounting persistence slice, not the completed hosted
+product. The repository currently opens a fresh PostgreSQL connection per
+operation, and tenant transactions use authorization version `1` until the
+identity/session migration supplies database-backed authorization versions.
+Issue #6 remains open until sessions, policy approvals, and governed context
+have their own tested PostgreSQL contracts; tenant provisioning and backfill,
+export/delete, backup/restore, pooling, KMS, HA, operations, and independent
+security review pass separate gates. Do not describe this checkpoint as the
+completed enterprise storage plane.

@@ -18,8 +18,19 @@ class ContainerContractTests(unittest.TestCase):
         self.assertIn("org.opencontainers.image.version", dockerfile)
 
         lock = (ROOT / "deploy/container/requirements.lock").read_text()
+        postgres_lock = (ROOT / "deploy/postgres/requirements.lock").read_text()
         self.assertIn("pyjwt==2.13.0", lock)
         self.assertIn("keyring==25.7.0", lock)
+        self.assertIn("psycopg==3.3.4", postgres_lock)
+        self.assertIn("psycopg-binary==3.3.4", postgres_lock)
+        self.assertIn(
+            "COPY deploy/postgres/requirements.lock",
+            dockerfile,
+        )
+        self.assertIn(
+            "--requirement /tmp/hormuz-postgres-requirements.lock",
+            dockerfile,
+        )
         requirements = [
             line for line in lock.splitlines() if re.match(r"^[a-z0-9-]+==", line)
         ]
@@ -73,6 +84,7 @@ class ContainerContractTests(unittest.TestCase):
         ignored = (ROOT / ".dockerignore").read_text().splitlines()
         self.assertEqual(ignored[0], "**")
         self.assertIn("!deploy/container/requirements.lock", ignored)
+        self.assertIn("!deploy/postgres/requirements.lock", ignored)
         self.assertIn("!hormuz/**", ignored)
         self.assertIn("hormuz/**/__pycache__/", ignored)
         self.assertIn("hormuz/**/*.pyc", ignored)

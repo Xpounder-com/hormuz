@@ -27,11 +27,13 @@ RUN addgroup --system --gid 65532 hormuz \
 WORKDIR /opt/hormuz
 
 COPY deploy/container/requirements.lock /tmp/hormuz-requirements.lock
+COPY deploy/postgres/requirements.lock /tmp/hormuz-postgres-requirements.lock
 RUN SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH}" python -m pip install \
         --require-hashes \
         --only-binary=:all: \
         --requirement /tmp/hormuz-requirements.lock \
-    && rm /tmp/hormuz-requirements.lock \
+        --requirement /tmp/hormuz-postgres-requirements.lock \
+    && rm /tmp/hormuz-requirements.lock /tmp/hormuz-postgres-requirements.lock \
     && rm -rf /root/.cache
 
 COPY --chown=65532:65532 hormuz/ ./hormuz/

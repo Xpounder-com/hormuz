@@ -1739,32 +1739,67 @@ class UsageStore:
             )
         return reservation_id
 
-    def release_budget_reservation(self, reservation_id: str | None) -> None:
+    def release_budget_reservation(
+        self,
+        reservation_id: str | None,
+        *,
+        organization_id: str | None = None,
+    ) -> None:
         if reservation_id is None:
             return
         with self._lock, self._connection() as connection:
-            connection.execute(
-                "DELETE FROM gateway_budget_reservations WHERE id = ?",
-                (reservation_id,),
-            )
+            if organization_id is None:
+                connection.execute(
+                    "DELETE FROM gateway_budget_reservations WHERE id = ?",
+                    (reservation_id,),
+                )
+            else:
+                connection.execute(
+                    "DELETE FROM gateway_budget_reservations WHERE id = ? AND organization_id = ?",
+                    (reservation_id, organization_id),
+                )
 
-    def refresh_budget_reservation(self, reservation_id: str | None, *, ttl_seconds: int) -> None:
+    def refresh_budget_reservation(
+        self,
+        reservation_id: str | None,
+        *,
+        ttl_seconds: int,
+        organization_id: str | None = None,
+    ) -> None:
         if reservation_id is None:
             return
         expires_at = (datetime.now(timezone.utc) + timedelta(seconds=max(1, ttl_seconds))).isoformat()
         with self._lock, self._connection() as connection:
-            connection.execute(
-                "UPDATE gateway_budget_reservations SET expires_at = ? WHERE id = ?",
-                (expires_at, reservation_id),
-            )
+            if organization_id is None:
+                connection.execute(
+                    "UPDATE gateway_budget_reservations SET expires_at = ? WHERE id = ?",
+                    (expires_at, reservation_id),
+                )
+            else:
+                connection.execute(
+                    """
+                    UPDATE gateway_budget_reservations SET expires_at = ?
+                    WHERE id = ? AND organization_id = ?
+                    """,
+                    (expires_at, reservation_id, organization_id),
+                )
 
-    def active_budget_reservations(self) -> int:
+    def active_budget_reservations(self, *, organization_id: str | None = None) -> int:
         now = datetime.now(timezone.utc).isoformat()
         with self._lock, self._connection() as connection:
-            row = connection.execute(
-                "SELECT COUNT(*) AS count FROM gateway_budget_reservations WHERE expires_at > ?",
-                (now,),
-            ).fetchone()
+            if organization_id is None:
+                row = connection.execute(
+                    "SELECT COUNT(*) AS count FROM gateway_budget_reservations WHERE expires_at > ?",
+                    (now,),
+                ).fetchone()
+            else:
+                row = connection.execute(
+                    """
+                    SELECT COUNT(*) AS count FROM gateway_budget_reservations
+                    WHERE expires_at > ? AND organization_id = ?
+                    """,
+                    (now, organization_id),
+                ).fetchone()
         return int(row["count"])
 
     def monthly_totals(

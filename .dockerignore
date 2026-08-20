@@ -4,6 +4,8 @@
 !deploy/
 !deploy/container/
 !deploy/container/requirements.lock
+!deploy/postgres/
+!deploy/postgres/requirements.lock
 !hormuz/
 !hormuz/**
 hormuz/**/__pycache__/

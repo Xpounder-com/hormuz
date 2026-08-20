@@ -4,8 +4,9 @@
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
 import os
 from pathlib import Path
@@ -16,6 +17,8 @@ import time
 from typing import Any
 from urllib.parse import quote
 
+from hormuz.billing import ProviderCostItem, ProviderCostReport
+from hormuz.config import Identity
 from hormuz.postgres import (
     POSTGRES_SCHEMA_VERSION,
     PostgresStorageError,
@@ -24,9 +27,11 @@ from hormuz.postgres import (
     tenant_transaction,
     verify_postgres,
 )
+from hormuz.postgres_usage_store import PostgresUsageStore
+from hormuz.store import ReservationDenied, ReservationScope
 
 
-EVIDENCE_SCHEMA = "hormuz.postgres-foundation-integration.v1"
+EVIDENCE_SCHEMA = "hormuz.postgres-accounting-integration.v2"
 DEFAULT_IMAGE = (
     "postgres@sha256:"
     "57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777"
@@ -305,6 +310,204 @@ def _prove_runtime_isolation(runtime_dsn: str, owner_dsn: str) -> dict[str, obje
     }
 
 
+def _synthetic_identity(
+    tenant: str,
+    actor: str,
+    *,
+    capabilities: tuple[str, ...] = (),
+) -> Identity:
+    return Identity(
+        token_env="INTEGRATION_ONLY",
+        token="integration-only-not-persisted",
+        actor_id=actor,
+        actor_name="Synthetic Actor",
+        team_id="engineering",
+        team_name="Engineering",
+        organization_id=tenant,
+        capabilities=capabilities,
+    )
+
+
+def _prove_accounting_store(runtime_dsn: str) -> dict[str, object]:
+    organizations = ("tenant-a", "tenant-b")
+    stores = (
+        PostgresUsageStore(runtime_dsn, organization_ids=organizations),
+        PostgresUsageStore(runtime_dsn, organization_ids=organizations),
+    )
+    identity_a = _synthetic_identity("tenant-a", "actor-a")
+    identity_b = _synthetic_identity("tenant-b", "actor-b")
+    try:
+        for store, identity in ((stores[0], identity_a), (stores[1], identity_b)):
+            store.record(
+                identity=identity,
+                client="integration",
+                protocol="openai",
+                requested_model="gpt-test",
+                resolved_alias="gpt-test",
+                upstream_model="gpt-test",
+                actual_model="gpt-test",
+                policy_action="allowed",
+                status="succeeded",
+                input_tokens=100,
+                output_tokens=50,
+                billable_tokens=150,
+                cost_microusd=125_000,
+                cost_basis="estimated",
+                rate_card_version="integration-v1",
+            )
+    except PostgresStorageError:
+        raise PostgresFoundationIntegrationError("accounting_usage_record_failed") from None
+    try:
+        totals_a = stores[0].monthly_totals(organization_id="tenant-a")
+        totals_b = stores[1].monthly_totals(organization_id="tenant-b")
+    except PostgresStorageError:
+        raise PostgresFoundationIntegrationError("accounting_usage_read_failed") from None
+    if (
+        totals_a.requests != 1
+        or totals_b.requests != 1
+        or totals_a.total_tokens != 150
+        or totals_b.total_tokens != 150
+    ):
+        raise PostgresFoundationIntegrationError("accounting_tenant_isolation_failed")
+    now = datetime.now(timezone.utc)
+    try:
+        report_rows = stores[0].report_rows(
+            group_by="organization",
+            organization_id="tenant-a",
+            include_latency=True,
+        )
+        administrator = _synthetic_identity(
+            "tenant-a",
+            "usage-administrator",
+            capabilities=("usage_viewer",),
+        )
+        stores[0].record_admin_usage_read(
+            administrator=administrator,
+            group_by="organization",
+            actor_filter=None,
+            team_filter=None,
+            window_start=now.isoformat(),
+            window_end=(now + timedelta(seconds=1)).isoformat(),
+            result_count=len(report_rows),
+        )
+        audit_events = stores[0].audit_events(
+            since=now.replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat(),
+            kind="all",
+        )
+    except PostgresStorageError:
+        raise PostgresFoundationIntegrationError("accounting_reporting_failed") from None
+    if (
+        len(report_rows) != 1
+        or int(report_rows[0]["requests"]) != 1
+        or not any(event["event_type"] == "usage" for event in audit_events)
+        or not any(
+            event["event_type"] == "security.admin.usage_read"
+            for event in audit_events
+        )
+    ):
+        raise PostgresFoundationIntegrationError("accounting_reporting_mismatch")
+
+    scope = (
+        ReservationScope(name="organization", token_limit=1_000),
+    )
+
+    def reserve(store: PostgresUsageStore, identity: Identity) -> str | None:
+        try:
+            return store.reserve_budget(
+                identity=identity,
+                scopes=scope,
+                reserved_tokens=600,
+                reserved_cost_microusd=0,
+                ttl_seconds=60,
+            )
+        except ReservationDenied:
+            return None
+
+    competing_a = _synthetic_identity("tenant-a", "competing-a")
+    competing_b = _synthetic_identity("tenant-a", "competing-b")
+    try:
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            futures = (
+                executor.submit(reserve, stores[0], competing_a),
+                executor.submit(reserve, stores[1], competing_b),
+            )
+            reservation_ids = tuple(future.result(timeout=20) for future in futures)
+    except PostgresStorageError:
+        raise PostgresFoundationIntegrationError("accounting_budget_write_failed") from None
+    allowed = tuple(value for value in reservation_ids if value is not None)
+    if len(allowed) != 1 or stores[0].active_budget_reservations(
+        organization_id="tenant-a"
+    ) != 1:
+        raise PostgresFoundationIntegrationError("atomic_budget_reservation_failed")
+    stores[0].release_budget_reservation(
+        allowed[0],
+        organization_id="tenant-a",
+    )
+
+    report = ProviderCostReport(
+        provider="openai",
+        source_sha256="a" * 64,
+        page_count=1,
+        bucket_count=1,
+        report_start=now.replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat(),
+        report_end=(now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)).isoformat(),
+        items=(
+            ProviderCostItem(
+                bucket_start=now.replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat(),
+                bucket_end=(now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)).isoformat(),
+                amount_usd="1.25",
+                currency="USD",
+                provider_scope_kind="unscoped",
+                provider_scope_id=None,
+            ),
+        ),
+    )
+    try:
+        imported = stores[0].import_provider_cost_report(
+            organization_id="tenant-a",
+            report=report,
+        )
+    except PostgresStorageError:
+        raise PostgresFoundationIntegrationError("accounting_provider_cost_import_failed") from None
+    try:
+        duplicate = stores[1].import_provider_cost_report(
+            organization_id="tenant-a",
+            report=report,
+        )
+    except PostgresStorageError:
+        raise PostgresFoundationIntegrationError("accounting_provider_cost_idempotency_failed") from None
+    try:
+        reconciled = stores[0].reconcile_provider_costs(
+            organization_id="tenant-a",
+            provider="openai",
+            import_id=imported.import_id,
+        )
+    except PostgresStorageError as error:
+        if error.code.startswith("provider_cost_"):
+            raise PostgresFoundationIntegrationError(error.code) from None
+        raise PostgresFoundationIntegrationError("accounting_provider_cost_reconcile_failed") from None
+    if (
+        not imported.created
+        or duplicate.created
+        or imported.import_id != duplicate.import_id
+        or reconciled["provider_cost_usd"] != "1.25"
+        or reconciled["gateway_requests"] != 1
+    ):
+        raise PostgresFoundationIntegrationError("provider_cost_accounting_failed")
+    return {
+        "tenant_scoped_usage_verified": True,
+        "usage_rows_per_tenant": 1,
+        "usage_reporting_verified": True,
+        "usage_read_audit_verified": True,
+        "atomic_budget_competitors": 2,
+        "atomic_budget_allowed": 1,
+        "atomic_budget_denied": 1,
+        "reservation_release_verified": True,
+        "provider_cost_idempotency_verified": True,
+        "provider_reconciliation_verified": True,
+    }
+
+
 def _expect_verification_code(owner_dsn: str, expected_code: str) -> None:
     try:
         verify_postgres(owner_dsn)
@@ -342,6 +545,20 @@ def _prove_verifier_tamper_detection(admin_dsn: str, owner_dsn: str) -> dict[str
         with psycopg.connect(admin_dsn, autocommit=True) as connection:
             with connection.cursor() as cursor:
                 cursor.execute("REVOKE hormuz_owner FROM hormuz_runtime")
+
+        with psycopg.connect(owner_dsn, autocommit=True) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "ALTER TABLE hormuz.gateway_usage_events "
+                    "ADD COLUMN unexpected_column text"
+                )
+        _expect_verification_code(owner_dsn, "accounting_table_columns_invalid")
+        with psycopg.connect(owner_dsn, autocommit=True) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "ALTER TABLE hormuz.gateway_usage_events "
+                    "DROP COLUMN unexpected_column"
+                )
         verify_postgres(owner_dsn)
     except PostgresFoundationIntegrationError:
         raise
@@ -350,6 +567,7 @@ def _prove_verifier_tamper_detection(admin_dsn: str, owner_dsn: str) -> dict[str
     return {
         "permissive_policy_rejected": True,
         "runtime_owner_membership_rejected": True,
+        "unexpected_accounting_column_rejected": True,
     }
 
 
@@ -434,6 +652,7 @@ def run_integration(*, image: str = DEFAULT_IMAGE) -> dict[str, object]:
             raise PostgresFoundationIntegrationError("migration_idempotency_failed")
         _provision_synthetic_tenants(owner_dsn)
         isolation = _prove_runtime_isolation(runtime_dsn, owner_dsn)
+        accounting = _prove_accounting_store(runtime_dsn)
         tamper_detection = _prove_verifier_tamper_detection(admin_dsn, owner_dsn)
         evidence = {
             "schema": EVIDENCE_SCHEMA,
@@ -454,6 +673,7 @@ def run_integration(*, image: str = DEFAULT_IMAGE) -> dict[str, object]:
                 "trigger_definition_verified": True,
             },
             "isolation": isolation,
+            "accounting": accounting,
             "tamper_detection": tamper_detection,
             "content_free": True,
         }

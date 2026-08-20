@@ -1,9 +1,31 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Protocol
 
 from .config import GatewayConfig, Identity, ModelRoute, Policy
-from .store import MonthlyTotals, ReservationScope, UsageStore
+from .store import MonthlyTotals, ReservationScope
+
+
+class AccountingStore(Protocol):
+    def monthly_totals(
+        self,
+        *,
+        organization_id: str | None = None,
+        actor_id: str | None = None,
+        team_id: str | None = None,
+        model_alias: str | None = None,
+    ) -> MonthlyTotals: ...
+
+    def reserve_budget(
+        self,
+        *,
+        identity: Identity,
+        scopes: tuple[ReservationScope, ...],
+        reserved_tokens: int,
+        reserved_cost_microusd: int,
+        ttl_seconds: int,
+    ) -> str | None: ...
 
 
 @dataclass(frozen=True)
@@ -25,7 +47,7 @@ class ModelCatalogDecision:
 
 
 class PolicyEngine:
-    def __init__(self, config: GatewayConfig, store: UsageStore):
+    def __init__(self, config: GatewayConfig, store: AccountingStore):
         self.config = config
         self.store = store
 

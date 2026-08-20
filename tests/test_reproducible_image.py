@@ -19,6 +19,7 @@ from scripts.reproducible_image import (
     build_command,
     canonicalize_oci_layout,
     compare_oci_layouts,
+    _dependency_locks_sha256,
     render_manifest,
     validate_builder,
     validate_oci_layout,
@@ -121,6 +122,22 @@ def _write_layout(
 
 
 class ReproducibleImageTests(unittest.TestCase):
+    def test_dependency_digest_binds_both_runtime_locks(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "deploy/container").mkdir(parents=True)
+            (root / "deploy/postgres").mkdir(parents=True)
+            (root / "deploy/container/requirements.lock").write_text("core\n")
+            postgres = root / "deploy/postgres/requirements.lock"
+            postgres.write_text("postgres-a\n")
+
+            first = _dependency_locks_sha256(root)
+            postgres.write_text("postgres-b\n")
+            second = _dependency_locks_sha256(root)
+
+            self.assertRegex(first, r"^[0-9a-f]{64}$")
+            self.assertNotEqual(first, second)
+
     def test_source_and_build_command_are_exact_and_nonpublishing(self) -> None:
         self.assertEqual(validate_source_sha(SHA), SHA)
         for invalid in ("7" * 39, "G" * 40, "../" + SHA, "7" * 41):

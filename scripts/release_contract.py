@@ -21,6 +21,10 @@ EXPECTED_REPOSITORY = "Xpounder-com/hormuz"
 EXPECTED_IMAGE = "ghcr.io/xpounder-com/hormuz"
 EXPECTED_WORKFLOW = ".github/workflows/release.yml"
 EXPECTED_OIDC_ISSUER = "https://token.actions.githubusercontent.com"
+EXPECTED_DEPENDENCY_LOCKS = (
+    "deploy/container/requirements.lock",
+    "deploy/postgres/requirements.lock",
+)
 SLSA_PREDICATE_TYPE = "https://slsa.dev/provenance/v1"
 SEMVER_TAG = re.compile(r"^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
 DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -240,7 +244,7 @@ def render_slsa_predicate(
     *,
     contract: dict[str, Any],
     dockerfile: Path,
-    dependency_lock: Path,
+    dependency_locks: tuple[Path, ...],
     workflow_run_url: str,
     workflow_run_id: str,
     workflow_run_attempt: str,
@@ -277,7 +281,14 @@ def render_slsa_predicate(
     base_name, base_digest = base_match.groups()
     repository_url = f"https://github.com/{EXPECTED_REPOSITORY}"
     source_uri = f"git+{repository_url}@refs/tags/{tag}"
-    lock_uri = f"git+{repository_url}@{sha}#path=deploy/container/requirements.lock"
+    if len(dependency_locks) != len(EXPECTED_DEPENDENCY_LOCKS):
+        raise ReleaseContractError("release dependency lock set is invalid")
+    resolved_locks: list[tuple[str, Path]] = []
+    for expected, supplied in zip(EXPECTED_DEPENDENCY_LOCKS, dependency_locks):
+        normalized = supplied.as_posix()
+        if normalized != expected and not normalized.endswith("/" + expected):
+            raise ReleaseContractError("release dependency lock set is invalid")
+        resolved_locks.append((expected, supplied))
     return {
         "buildDefinition": {
             "buildType": (
@@ -289,7 +300,7 @@ def render_slsa_predicate(
                 "commit": sha,
                 "version": version,
                 "dockerfile": "Dockerfile",
-                "dependencyLock": "deploy/container/requirements.lock",
+                "dependencyLocks": list(EXPECTED_DEPENDENCY_LOCKS),
                 "platforms": ["linux/amd64", "linux/arm64"],
             },
             "internalParameters": {
@@ -304,7 +315,13 @@ def render_slsa_predicate(
                     "uri": f"docker://docker.io/library/{base_name}",
                     "digest": {"sha256": base_digest.removeprefix("sha256:")},
                 },
-                {"uri": lock_uri, "digest": {"sha256": _sha256(dependency_lock)}},
+                *[
+                    {
+                        "uri": f"git+{repository_url}@{sha}#path={relative}",
+                        "digest": {"sha256": _sha256(path)},
+                    }
+                    for relative, path in resolved_locks
+                ],
             ],
         },
         "runDetails": {
@@ -535,7 +552,12 @@ def _parser() -> argparse.ArgumentParser:
     predicate = subparsers.add_parser("predicate")
     predicate.add_argument("--contract", type=Path, required=True)
     predicate.add_argument("--dockerfile", type=Path, required=True)
-    predicate.add_argument("--dependency-lock", type=Path, required=True)
+    predicate.add_argument(
+        "--dependency-lock",
+        type=Path,
+        action="append",
+        required=True,
+    )
     predicate.add_argument("--workflow-run-url", required=True)
     predicate.add_argument("--workflow-run-id", required=True)
     predicate.add_argument("--workflow-run-attempt", required=True)
@@ -623,7 +645,7 @@ def main() -> int:
                 render_slsa_predicate(
                     contract=_read_json(args.contract),
                     dockerfile=args.dockerfile,
-                    dependency_lock=args.dependency_lock,
+                    dependency_locks=tuple(args.dependency_lock),
                     workflow_run_url=args.workflow_run_url,
                     workflow_run_id=args.workflow_run_id,
                     workflow_run_attempt=args.workflow_run_attempt,

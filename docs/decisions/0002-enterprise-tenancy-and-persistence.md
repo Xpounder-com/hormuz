@@ -188,7 +188,8 @@ The product owner approved **A — hybrid shared-schema PostgreSQL plus a
 dedicated database/deployment option** on 2026-08-20. The canonical approval is
 recorded in [issue #1](https://github.com/Xpounder-com/hormuz/issues/1#issuecomment-5355712147).
 
-Acceptance authorizes the contract in this ADR; it does not prove implementation.
-The schema-v1 migration, role, and RLS foundation is evidenced separately in
-the repository. PostgreSQL-backed gateway repositories, pooled multi-instance
-isolation, backup/PITR, HA, KMS, and independent review remain open gates.
+Acceptance authorizes the contract in this ADR; it does not by itself prove
+implementation. Schema v2 now adds an opt-in usage, cost, usage-read-audit, and
+atomic budget-reservation repository to the separately evidenced role/RLS
+foundation. Sessions, approvals, governed context, pooling, backup/PITR, HA,
+KMS, and independent review remain open gates.

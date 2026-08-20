@@ -10,6 +10,12 @@
     "request_body_timeout_seconds": 30
   },
   "database": "./hormuz.sqlite3",
+  "usage_storage": {
+    "backend": "sqlite",
+    "postgres_dsn_env": "HORMUZ_POSTGRES_DSN",
+    "postgres_schema": "hormuz",
+    "postgres_runtime_role": "hormuz_runtime"
+  },
   "context_database": "./hormuz-context.sqlite3",
   "context_service": {
     "policy_version": "engineering-context-v1",

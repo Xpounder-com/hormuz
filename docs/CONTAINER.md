@@ -7,9 +7,9 @@ The reference image is a repeatable single-node deployment artifact for the curr
 The root `Dockerfile`:
 
 - pins the official Python 3.14.6 Alpine 3.23 multi-platform image by registry digest;
-- installs only exact, hash-verified binary Python dependencies from `deploy/container/requirements.lock`, the canonical multi-platform runtime closure also exercised by source/test, wheel-smoke, release-verification, and upstream-canary jobs;
+- installs only exact, hash-verified binary Python dependencies from `deploy/container/requirements.lock` and the PostgreSQL driver closure in `deploy/postgres/requirements.lock`; both locks are inputs to the reproducibility manifest;
 - carries the exact, hash-reviewed `backports-tarfile==1.2.0`, `importlib-metadata==9.0.0`, and `zipp==4.1.0` closure only when `python_full_version < '3.12'`, closing the conditional `jaraco.context==6.1.2` and `keyring==25.7.0` requirements on the oldest supported Python release while remaining inert in the Python 3.14 reference image;
-- copies only the Hormuz package and the dependency lock through a default-deny `.dockerignore`;
+- copies only the Hormuz package and the two dependency locks through a default-deny `.dockerignore`;
 - runs as numeric UID and GID `65532:65532` with no login shell or home directory;
 - writes application data only beneath `/var/lib/hormuz`;
 - exposes port `8787` and probes `GET /health/ready`; and
@@ -33,7 +33,7 @@ docker build \
 python3 scripts/container_smoke.py --image hormuz:local
 ```
 
-`--pull=false` is intentional: the Dockerfile already selects the reviewed base image by digest. Updating that digest or `deploy/container/requirements.lock` is a dependency-review change, not an incidental build action.
+`--pull=false` is intentional: the Dockerfile already selects the reviewed base image by digest. Updating that digest, `deploy/container/requirements.lock`, or `deploy/postgres/requirements.lock` is a dependency-review change, not an incidental build action.
 
 ## Exact-source reproducibility gate
 
