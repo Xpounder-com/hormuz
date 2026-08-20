@@ -46,10 +46,11 @@ The connection ceiling is deliberately higher than the parsed-request default so
 Every newly accounted generation attempt snapshots bounded integer timing
 metadata for gateway handling and policy evaluation, plus provider timing only
 when an upstream attempt begins. Existing automatic-context assembly timing is
-aggregated only for injected packs. An authorized `usage_viewer` can request
-tenant-scoped cumulative histograms through `hormuz usage report
---include-latency`; the ordinary report remains schema v2 and unchanged. See
-[USAGE_ADMIN_API.md](USAGE_ADMIN_API.md) for the exact v3 contract and coverage.
+aggregated only for injected packs. An authorized usage-report capability can
+request tenant-scoped cumulative histograms through `hormuz usage report
+--include-latency`; organization administrators retain schema v3 while
+constrained roles receive schema v5. See [USAGE_ADMIN_API.md](USAGE_ADMIN_API.md)
+for the exact contract and coverage.
 
 This is an SLI input, not an SLO. Hormuz does not yet select availability,
 latency, error-rate, authentication-failure, budget-correctness, or audit-delivery

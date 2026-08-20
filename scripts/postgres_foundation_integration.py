@@ -407,6 +407,7 @@ def _prove_accounting_store(runtime_dsn: str) -> dict[str, object]:
         )
         stores[0].record_admin_usage_read(
             administrator=administrator,
+            access_scope="organization",
             group_by="organization",
             actor_filter=None,
             team_filter=None,

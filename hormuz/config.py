@@ -2430,16 +2430,32 @@ def _context_lifecycle_automation_config(value: Any) -> ContextLifecycleAutomati
 
 def _identity_capabilities(value: Any, path: str) -> tuple[str, ...]:
     capabilities = _string_tuple(value, path)
+    capability_set = set(capabilities)
     supported = {
         "context_promoter",
         "dlp_approver",
         "policy_admin",
         "session_admin",
+        "usage_finance_viewer",
+        "usage_organization_viewer",
+        "usage_self_viewer",
+        "usage_team_viewer",
         "usage_viewer",
     }
-    unknown = sorted(set(capabilities) - supported)
+    unknown = sorted(capability_set - supported)
     if unknown:
         raise ConfigError(f"Unknown {path}")
+    usage_scopes: set[str] = set()
+    if {"usage_viewer", "usage_organization_viewer"} & capability_set:
+        usage_scopes.add("organization")
+    if "usage_self_viewer" in capabilities:
+        usage_scopes.add("self")
+    if "usage_team_viewer" in capabilities:
+        usage_scopes.add("team")
+    if "usage_finance_viewer" in capabilities:
+        usage_scopes.add("finance")
+    if len(usage_scopes) > 1:
+        raise ConfigError(f"{path} must select at most one usage reporting scope")
     return capabilities
 
 

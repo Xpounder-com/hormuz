@@ -50,7 +50,7 @@ The following behavior is retained temporarily for compatibility and historical 
 - Generic OIDC discovery/JWKS verification with strict issuer, audience, expiry, asymmetric-algorithm, subject-mapping, and signing-key-rotation enforcement.
 - Generic OIDC authorization-code + PKCE browser login with opaque 10-minute Hormuz access credentials, atomic refresh rotation, replay-family revocation, and fail-closed OS secure-store custody.
 - Capability-gated, tenant-scoped `hormuz sessions` listing, metadata-only security-event inspection, and immediate session, employee, team, or organization revocation.
-- Capability-gated, tenant-scoped `hormuz usage report` administration over the authenticated gateway, with frozen-window pagination, team/person/model/client/provider drill-downs, mandatory metadata-only read audit, and an opt-in version-3 content-free latency histogram view that leaves the exact version-2 contract unchanged.
+- Scoped, capability-gated, tenant-scoped `hormuz usage report` over the authenticated gateway: self-only, team-aggregate, finance-aggregate, and organization-administrator views; frozen-window pagination; mandatory metadata-only read audit; and versioned content-free latency histograms. Legacy `usage_viewer` organization-administrator clients retain their exact version-2/3 contract.
 - Capability-gated `hormuz policy` administration for canonical secret-free tenant projections, immutable staging, compare-and-swap activation, exact active-version reads, rollback to a previously active version, request-time enforcement, and exact policy-version usage evidence.
 - An opt-in PostgreSQL backend for usage, cost evidence, usage-read audit, cross-replica atomic budget reservations, configuration-seeded identity and secret-free policy projections, immutable live policy versions, multi-instance human sessions, one-time DLP approvals, and security evidence. It uses checksummed migrations, separate owner/runtime roles, mandatory tenant keys, forced row-level security, transaction-local tenant binding, keyed opaque tenant routing tags, authorization-version invalidation, and a digest-pinned two-tenant integration gate. Governed context remains on its separately identified SQLite store in this transition; see [docs/POSTGRESQL.md](docs/POSTGRESQL.md).
 - An explicit kernel accept-backlog hint, pre-thread connection ceiling, absolute request-header and request-body deadlines, exact `Content-Length` body ingestion, versioned content-free liveness/readiness endpoints, atomic parsed-request capacity with saturation-aware readiness, a total provider-response relay deadline, and idempotent `SIGTERM` draining with a bounded in-flight request grace period.
@@ -177,7 +177,9 @@ python3 -m hormuz --config hormuz.json status --group-by model --team engineerin
 python3 -m hormuz --config hormuz.json status --json
 ```
 
-Give an authorized operator the configured `usage_viewer` capability, then inspect the same metadata without granting server filesystem or database access:
+Give an authorized operator `usage_organization_viewer` (or the compatible
+legacy `usage_viewer`) to inspect organization-wide metadata without granting
+server filesystem or database access:
 
 ```bash
 hormuz usage report \

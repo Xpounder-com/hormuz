@@ -84,8 +84,14 @@ class UsageAdminClient:
             "rows",
             "next_cursor",
         }
-        expected_schema = 3 if include_latency else 2
-        if set(response) != required or response.get("schema_version") != expected_schema:
+        expected_schemas = {3, 5} if include_latency else {2, 4}
+        schema_version = response.get("schema_version")
+        if schema_version not in expected_schemas:
+            raise UsageAdminClientError("invalid_gateway_response")
+        constrained_scope = schema_version in {4, 5}
+        if constrained_scope:
+            required.add("access")
+        if set(response) != required:
             raise UsageAdminClientError("invalid_gateway_response")
         if response.get("group_by") != group_by:
             raise UsageAdminClientError("invalid_gateway_response")
@@ -103,7 +109,16 @@ class UsageAdminClient:
             except UsageAdminClientError as error:
                 raise UsageAdminClientError("invalid_gateway_response") from error
         filters = response.get("filters")
-        if filters != {"actor_id": actor_id, "team_id": team_id}:
+        if constrained_scope:
+            if not _valid_constrained_access(
+                response.get("access"),
+                filters,
+                group_by=group_by,
+                requested_actor_id=actor_id,
+                requested_team_id=team_id,
+            ):
+                raise UsageAdminClientError("invalid_gateway_response")
+        elif filters != {"actor_id": actor_id, "team_id": team_id}:
             raise UsageAdminClientError("invalid_gateway_response")
         expected_coverage = {
             "scope": "gateway_captured_requests_only",
@@ -179,6 +194,44 @@ def _bounded_value(value: str, *, max_bytes: int) -> None:
         or any(character in value for character in ("\n", "\r", "\x00"))
     ):
         raise UsageAdminClientError("invalid_usage_report_request")
+
+
+def _valid_constrained_access(
+    access: object,
+    filters: object,
+    *,
+    group_by: str,
+    requested_actor_id: str | None,
+    requested_team_id: str | None,
+) -> bool:
+    if not isinstance(access, dict) or set(access) != {"scope"}:
+        return False
+    scope = access.get("scope")
+    if scope not in {"self", "team", "finance"}:
+        return False
+    if not isinstance(filters, dict) or set(filters) != {"actor_id", "team_id"}:
+        return False
+    actor_id = filters.get("actor_id")
+    team_id = filters.get("team_id")
+    for value in (actor_id, team_id):
+        if value is not None:
+            try:
+                _bounded_value(value, max_bytes=256)
+            except UsageAdminClientError:
+                return False
+    if requested_actor_id is not None and actor_id != requested_actor_id:
+        return False
+    if requested_team_id is not None and team_id != requested_team_id:
+        return False
+    if scope == "self":
+        return isinstance(actor_id, str)
+    if scope == "team":
+        return group_by != "person" and actor_id is None and isinstance(team_id, str)
+    return (
+        group_by in {"organization", "model", "client", "provider"}
+        and actor_id is None
+        and team_id is None
+    )
 
 
 def _valid_window(value: object) -> bool:

@@ -2069,6 +2069,38 @@ security review, connection pooling, KMS custody/rotation, backup/PITR and
 restore, HA/failover, and a tested multi-process rollout under real load remain
 open and must not be inferred from this bounded checkpoint.
 
+### Scoped usage-report RBAC slice
+
+The issue #6 usage-visibility slice was exercised locally on August 20, 2026:
+
+- configuration accepts exactly one scoped report capability per identity:
+  self, current-team aggregate, finance aggregate, or organization
+  administrator. The existing `usage_viewer` remains a compatibility alias for
+  the organization-administrator scope; unrelated policy, identity, DLP, and
+  session capabilities do not grant usage visibility;
+- the authenticated HTTP route derives effective filters server-side. A member
+  sees only their own usage, a manager cannot request person rows or actor
+  filters and receives only current-team aggregates, and finance cannot request
+  person/team rows or actor/team filters. An organization administrator retains
+  person-level drill-down;
+- constrained responses carry an explicit `access` object in schema version 4
+  (or 5 with latency), while organization-administrator responses retain their
+  exact version-2/3 shapes. The bundled CLI validates both response contracts
+  rather than treating an enforced filter as an unfiltered administrator report;
+- SQLite and PostgreSQL usage-read audit methods independently re-authorize the
+  effective filters and reject a supplied scope that does not match the mapped
+  identity. The PostgreSQL negative contract executes before database I/O; and
+- 35 resolver, configuration, SQLite-audit, PostgreSQL-pre-I/O, and CLI-client
+  tests passed in `0.072s`. The real loopback session/gateway suite then passed
+  all 15 tests in `15.816s`, including member, manager, finance, policy-admin,
+  pagination, audit, legacy administrator behavior, and the scoped CLI path.
+
+This establishes a bounded usage-report authorization boundary, not an HR
+directory, group synchronization system, production role-management UI,
+SCIM deprovisioning workflow, workforce-performance system, immutable audit
+service, or complete provider-account telemetry. Those remain separate issue
+#6/#7 and operational gates.
+
 ## Automated publication gate
 
 Ordinary GitHub CI runs seven independent gate families without provider credentials:

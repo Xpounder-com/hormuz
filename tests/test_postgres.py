@@ -54,6 +54,7 @@ from hormuz.postgres import (
 from hormuz.postgres_usage_store import PostgresUsageStore
 from hormuz.postgres_security_store import PostgresSecurityStore
 from hormuz.postgres_session_store import PostgresSessionStore
+from hormuz.store import SecurityStoreError
 from hormuz.store_router import GatewayStoreRouter, gateway_store
 from scripts.postgres_foundation_integration import (
     EVIDENCE_SCHEMA,
@@ -250,6 +251,50 @@ class PostgresFoundationTests(unittest.TestCase):
             store.monthly_totals()
         with self.assertRaisesRegex(PostgresStorageError, "tenant_not_configured"):
             store.monthly_totals(organization_id="tenant-c")
+
+    def test_postgres_usage_audit_rechecks_scope_before_database_io(self) -> None:
+        store = PostgresUsageStore(
+            "postgresql://runtime:not-used@127.0.0.1/hormuz",
+            organization_ids=("tenant-a", "tenant-b"),
+        )
+        manager = Identity(
+            token_env="",
+            token="",
+            actor_id="manager",
+            actor_name="Engineering Manager",
+            team_id="engineering",
+            team_name="Engineering",
+            organization_id="tenant-a",
+            capabilities=("usage_team_viewer",),
+        )
+        with self.assertRaisesRegex(
+            SecurityStoreError,
+            "usage_report_scope_forbidden",
+        ):
+            store.record_admin_usage_read(
+                administrator=manager,
+                access_scope="team",
+                group_by="person",
+                actor_filter=None,
+                team_filter="engineering",
+                window_start="2026-08-01T00:00:00+00:00",
+                window_end="2026-08-01T00:01:00+00:00",
+                result_count=1,
+            )
+        with self.assertRaisesRegex(
+            SecurityStoreError,
+            "usage_admin_audit_scope_mismatch",
+        ):
+            store.record_admin_usage_read(
+                administrator=manager,
+                access_scope="organization",
+                group_by="model",
+                actor_filter=None,
+                team_filter="engineering",
+                window_start="2026-08-01T00:00:00+00:00",
+                window_end="2026-08-01T00:01:00+00:00",
+                result_count=1,
+            )
 
     def test_postgres_security_store_requires_explicit_scope_for_multiple_tenants(self) -> None:
         store = PostgresSecurityStore(

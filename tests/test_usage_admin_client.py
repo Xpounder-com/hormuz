@@ -135,6 +135,28 @@ class UsageAdminClientTests(unittest.TestCase):
                 self.client.report(group_by="team", limit=101)
         request.assert_not_called()
 
+    def test_constrained_scope_response_is_explicit_and_schema_checked(self) -> None:
+        self_view = _response()
+        self_view["schema_version"] = 4
+        self_view["filters"] = {"actor_id": "alice", "team_id": None}
+        self_view["access"] = {"scope": "self"}
+        with mock.patch.object(self.client, "_request", return_value=self_view):
+            self.assertEqual(self.client.report(group_by="team"), self_view)
+
+        team_view = _response()
+        team_view["schema_version"] = 4
+        team_view["filters"] = {"actor_id": None, "team_id": "engineering"}
+        team_view["access"] = {"scope": "team"}
+        with mock.patch.object(self.client, "_request", return_value=team_view):
+            self.assertEqual(self.client.report(group_by="team"), team_view)
+
+        invalid = _response()
+        invalid["schema_version"] = 4
+        invalid["filters"] = {"actor_id": None, "team_id": "engineering"}
+        with mock.patch.object(self.client, "_request", return_value=invalid):
+            with self.assertRaisesRegex(UsageAdminClientError, "invalid_gateway_response"):
+                self.client.report(group_by="team")
+
     def test_latency_view_is_explicit_versioned_and_strict(self) -> None:
         response = _latency_response()
         with mock.patch.object(self.client, "_request", return_value=response) as request:
@@ -167,6 +189,16 @@ class UsageAdminClientTests(unittest.TestCase):
         with mock.patch.object(self.client, "_request", return_value=oversized_integer):
             with self.assertRaisesRegex(UsageAdminClientError, "invalid_gateway_response"):
                 self.client.report(group_by="team", include_latency=True)
+
+        scoped = _latency_response()
+        scoped["schema_version"] = 5
+        scoped["filters"] = {"actor_id": None, "team_id": "engineering"}
+        scoped["access"] = {"scope": "team"}
+        with mock.patch.object(self.client, "_request", return_value=scoped):
+            self.assertEqual(
+                self.client.report(group_by="team", include_latency=True),
+                scoped,
+            )
 
 
 if __name__ == "__main__":

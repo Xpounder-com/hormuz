@@ -83,6 +83,7 @@ from .store import (
 )
 from .store_router import gateway_store
 from .usage import ResponseUsageParser, sanitize_provider_request_id
+from .usage_access import UsageReportAccessError, authorize_usage_report
 from .usage_reporting import REPORT_DIMENSIONS, enrich_usage_rows
 
 
@@ -950,13 +951,6 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         )
 
     def _list_usage_report(self, identity: Identity, query: str) -> None:
-        if "usage_viewer" not in identity.capabilities:
-            self._send_error(
-                "usage_viewer_capability_required",
-                "Usage viewer capability is required",
-                HTTPStatus.FORBIDDEN,
-            )
-            return
         try:
             values = urllib.parse.parse_qs(
                 query,
@@ -992,6 +986,31 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                     or any(character in scope_filter for character in ("\n", "\r", "\x00"))
                 ):
                     raise ValueError
+        except (ValueError, TypeError, OverflowError):
+            self._send_usage_report_error()
+            return
+        try:
+            access = authorize_usage_report(
+                identity,
+                group_by=str(group_by),
+                actor_id=actor_id,
+                team_id=team_id,
+            )
+        except UsageReportAccessError as error:
+            messages = {
+                "usage_viewer_capability_required": "Usage report capability is required",
+                "usage_report_scope_forbidden": "Credential is not authorized for this usage report scope",
+                "usage_report_scope_ambiguous": "Credential has an ambiguous usage report scope",
+            }
+            self._send_error(
+                error.code,
+                messages.get(error.code, "Usage report authorization is invalid"),
+                HTTPStatus.FORBIDDEN,
+            )
+            return
+        actor_id = access.actor_id
+        team_id = access.team_id
+        try:
             if cursor is None:
                 window_end = datetime.now(timezone.utc)
                 offset = 0
@@ -1043,6 +1062,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             )
             self.server.store.record_admin_usage_read(
                 administrator=identity,
+                access_scope=access.scope,
                 group_by=str(group_by),
                 actor_filter=actor_id,
                 team_filter=team_id,
@@ -1068,9 +1088,10 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 include=include,
             )
         LOGGER.info(
-            "usage_admin_read organization=%s decision_actor=%s group_by=%s rows=%d",
+            "usage_admin_read organization=%s decision_actor=%s scope=%s group_by=%s rows=%d",
             identity.organization_id,
             identity.actor_id,
+            access.scope,
             group_by,
             len(rows),
         )
@@ -1087,23 +1108,28 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                     "latency_targets_configured": False,
                 }
             )
-        self._send_json(
-            HTTPStatus.OK,
-            {
-                "schema_version": 3 if include == "latency" else 2,
-                "organization_id": identity.organization_id,
-                "group_by": group_by,
-                "filters": {"actor_id": actor_id, "team_id": team_id},
-                "window": {
-                    "start": window_start.isoformat(),
-                    "end": window_end.isoformat(),
-                    "timezone": "UTC",
-                },
-                "coverage": coverage,
-                "rows": rows,
-                "next_cursor": next_cursor,
+        constrained_scope = access.scope != "organization"
+        if constrained_scope:
+            schema_version = 5 if include == "latency" else 4
+        else:
+            schema_version = 3 if include == "latency" else 2
+        response: dict[str, object] = {
+            "schema_version": schema_version,
+            "organization_id": identity.organization_id,
+            "group_by": group_by,
+            "filters": {"actor_id": actor_id, "team_id": team_id},
+            "window": {
+                "start": window_start.isoformat(),
+                "end": window_end.isoformat(),
+                "timezone": "UTC",
             },
-        )
+            "coverage": coverage,
+            "rows": rows,
+            "next_cursor": next_cursor,
+        }
+        if constrained_scope:
+            response["access"] = {"scope": access.scope}
+        self._send_json(HTTPStatus.OK, response)
 
     def _send_usage_report_error(self) -> None:
         self._send_error(

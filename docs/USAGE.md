@@ -57,7 +57,10 @@ hormuz usage report \
   --group-by person
 ```
 
-This route requires the explicit `usage_viewer` capability, derives organization from the credential, supports frozen-window cursor pagination, and audits every returned page. See [USAGE_ADMIN_API.md](USAGE_ADMIN_API.md).
+This route requires an explicit usage-report capability, derives organization
+and the permitted reporting scope from the credential, supports frozen-window
+cursor pagination, and audits every returned page. See
+[USAGE_ADMIN_API.md](USAGE_ADMIN_API.md).
 
 ## Field semantics
 

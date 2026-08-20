@@ -205,6 +205,9 @@ class SessionBrokerIntegrationTests(unittest.TestCase):
                 "HORMUZ_OIDC_CLIENT_SECRET": "super-secret-client-value",
                 "HORMUZ_ADMIN_TOKEN": "admin-token-" + "a" * 32,
                 "HORMUZ_EMPLOYEE_TOKEN": "employee-token-" + "e" * 32,
+                "HORMUZ_FINANCE_TOKEN": "finance-token-" + "f" * 32,
+                "HORMUZ_MANAGER_TOKEN": "manager-token-" + "m" * 32,
+                "HORMUZ_POLICY_ADMIN_TOKEN": "policy-admin-token-" + "p" * 32,
             },
         )
         self.gateway = GatewayServer(self.config)
@@ -287,6 +290,40 @@ class SessionBrokerIntegrationTests(unittest.TestCase):
                     "organization_id": "xpounder",
                     "clearance": "internal",
                     "allowed_clients": ["codex", "claude-code"],
+                    "capabilities": ["usage_self_viewer"],
+                },
+                {
+                    "token_env": "HORMUZ_MANAGER_TOKEN",
+                    "actor_id": "engineering-manager",
+                    "actor_name": "Engineering Manager",
+                    "team_id": "engineering",
+                    "team_name": "Engineering",
+                    "organization_id": "xpounder",
+                    "clearance": "internal",
+                    "allowed_clients": ["codex", "claude-code"],
+                    "capabilities": ["usage_team_viewer"],
+                },
+                {
+                    "token_env": "HORMUZ_FINANCE_TOKEN",
+                    "actor_id": "finance-analyst",
+                    "actor_name": "Finance Analyst",
+                    "team_id": "finance",
+                    "team_name": "Finance",
+                    "organization_id": "xpounder",
+                    "clearance": "internal",
+                    "allowed_clients": ["codex", "claude-code"],
+                    "capabilities": ["usage_finance_viewer"],
+                },
+                {
+                    "token_env": "HORMUZ_POLICY_ADMIN_TOKEN",
+                    "actor_id": "policy-admin",
+                    "actor_name": "Policy Admin",
+                    "team_id": "security",
+                    "team_name": "Security",
+                    "organization_id": "xpounder",
+                    "clearance": "restricted",
+                    "allowed_clients": ["codex", "claude-code"],
+                    "capabilities": ["policy_admin"],
                 },
             ],
             "model_routes": {
@@ -939,16 +976,32 @@ class SessionBrokerIntegrationTests(unittest.TestCase):
             )
 
         employee_token = "employee-token-" + "e" * 32
-        status, forbidden = self._admin_request(
+        status, self_report = self._admin_request(
             "GET",
             "/v1/admin/usage?group_by=person",
             token=employee_token,
         )
-        self.assertEqual(status, 403)
+        self.assertEqual(status, 200)
         self.assertEqual(
-            forbidden["error"]["code"],
-            "usage_viewer_capability_required",
+            self_report["schema_version"],
+            4,
         )
+        self.assertEqual(self_report["access"], {"scope": "self"})
+        self.assertEqual(
+            self_report["filters"],
+            {"actor_id": "employee", "team_id": None},
+        )
+        self.assertEqual([row["scope_id"] for row in self_report["rows"]], ["employee"])
+        self.assertNotIn("Security Admin", repr(self_report))
+        self.assertNotIn("Other Employee", repr(self_report))
+
+        status, forbidden = self._admin_request(
+            "GET",
+            "/v1/admin/usage?group_by=organization",
+            token="policy-admin-token-" + "p" * 32,
+        )
+        self.assertEqual(status, 403)
+        self.assertEqual(forbidden["error"]["code"], "usage_viewer_capability_required")
 
         admin_token = "admin-token-" + "a" * 32
         status, first = self._admin_request(
@@ -1043,12 +1096,117 @@ class SessionBrokerIntegrationTests(unittest.TestCase):
             for event in audit
             if event["event_type"] == "security.admin.usage_read"
         ]
-        self.assertEqual(len(reads), 4)
+        self.assertEqual(len(reads), 5)
         self.assertTrue(
             all(event["organization_id"] == "xpounder" for event in reads)
         )
-        self.assertTrue(
-            all(event["decision_actor_id"] == "security-admin" for event in reads)
+        self.assertEqual(
+            {event["decision_actor_id"] for event in reads},
+            {"employee", "security-admin"},
+        )
+
+    def test_usage_report_scopes_apply_server_side_aggregate_boundaries(self) -> None:
+        employee = self.config.identities_by_actor["employee"]
+        administrator = self.config.identities_by_actor["security-admin"]
+        colleague = Identity(
+            token_env="COLLEAGUE_TOKEN",
+            token="colleague-token-" + "c" * 32,
+            actor_id="colleague",
+            actor_name="Colleague",
+            team_id="engineering",
+            team_name="Engineering",
+            organization_id="xpounder",
+        )
+        for identity, model, cost in (
+            (employee, "gpt-test", 1_000),
+            (colleague, "gpt-test", 500),
+            (administrator, "claude-test", 2_000),
+        ):
+            self.gateway.store.record(
+                identity=identity,
+                client="codex",
+                protocol="openai",
+                requested_model=model,
+                resolved_alias=model,
+                upstream_model=model,
+                policy_action="allowed",
+                status="succeeded",
+                input_tokens=10,
+                output_tokens=2,
+                billable_tokens=12,
+                cost_microusd=cost,
+                cost_basis="estimated",
+                gateway_latency_milliseconds=20,
+                policy_latency_milliseconds=2,
+                provider_latency_milliseconds=15,
+            )
+
+        manager_token = "manager-token-" + "m" * 32
+        for forbidden_path in (
+            "/v1/admin/usage?group_by=person",
+            "/v1/admin/usage?group_by=model&actor_id=employee",
+            "/v1/admin/usage?group_by=model&team_id=security",
+        ):
+            status, response = self._admin_request(
+                "GET",
+                forbidden_path,
+                token=manager_token,
+            )
+            self.assertEqual(status, 403)
+            self.assertEqual(
+                response["error"]["code"],
+                "usage_report_scope_forbidden",
+            )
+
+        status, team_model_report = self._admin_request(
+            "GET",
+            "/v1/admin/usage?group_by=model",
+            token=manager_token,
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(team_model_report["schema_version"], 4)
+        self.assertEqual(team_model_report["access"], {"scope": "team"})
+        self.assertEqual(
+            team_model_report["filters"],
+            {"actor_id": None, "team_id": "engineering"},
+        )
+        self.assertEqual(
+            [(row["scope_id"], row["cost_microusd"]) for row in team_model_report["rows"]],
+            [("gpt-test", 1_500)],
+        )
+
+        finance_token = "finance-token-" + "f" * 32
+        for forbidden_path in (
+            "/v1/admin/usage?group_by=person",
+            "/v1/admin/usage?group_by=team",
+            "/v1/admin/usage?group_by=model&team_id=engineering",
+        ):
+            status, response = self._admin_request(
+                "GET",
+                forbidden_path,
+                token=finance_token,
+            )
+            self.assertEqual(status, 403)
+            self.assertEqual(
+                response["error"]["code"],
+                "usage_report_scope_forbidden",
+            )
+
+        status, finance_model_report = self._admin_request(
+            "GET",
+            "/v1/admin/usage?group_by=model",
+            token=finance_token,
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(finance_model_report["schema_version"], 4)
+        self.assertEqual(finance_model_report["access"], {"scope": "finance"})
+        self.assertEqual(
+            finance_model_report["filters"],
+            {"actor_id": None, "team_id": None},
+        )
+        self.assertEqual(
+            [(row["scope_id"], row["cost_microusd"]) for row in finance_model_report["rows"]],
+            [("claude-test", 2_000), ("gpt-test", 1_500)],
         )
 
     def test_usage_admin_cli_uses_the_authenticated_gateway_contract(self) -> None:
@@ -1097,6 +1255,55 @@ class SessionBrokerIntegrationTests(unittest.TestCase):
         self.assertEqual(report["rows"][0]["billable_tokens"], 24)
         self.assertEqual(report["schema_version"], 3)
         self.assertEqual(report["rows"][0]["latency"]["gateway"]["count"], 1)
+
+    def test_usage_admin_cli_accepts_a_constrained_gateway_contract(self) -> None:
+        identity = self.config.identities_by_actor["employee"]
+        self.gateway.store.record(
+            identity=identity,
+            client="claude-code",
+            protocol="anthropic",
+            requested_model="claude-test",
+            resolved_alias="claude-test",
+            upstream_model="claude-test",
+            policy_action="allowed",
+            status="succeeded",
+            input_tokens=20,
+            output_tokens=4,
+            billable_tokens=24,
+            cost_microusd=1_500,
+            cost_basis="estimated",
+            gateway_latency_milliseconds=18,
+            policy_latency_milliseconds=2,
+            provider_latency_milliseconds=14,
+        )
+        output = io.StringIO()
+        with mock.patch.dict(
+            os.environ,
+            {"HORMUZ_MANAGER_TOKEN": "manager-token-" + "m" * 32},
+        ), redirect_stdout(output):
+            result = cli_main(
+                [
+                    "usage",
+                    "report",
+                    "--gateway",
+                    self.gateway_url,
+                    "--credential-env",
+                    "HORMUZ_MANAGER_TOKEN",
+                    "--group-by",
+                    "model",
+                    "--allow-insecure-http",
+                ]
+            )
+        self.assertEqual(result, 0)
+        report = json.loads(output.getvalue())
+        self.assertEqual(report["schema_version"], 4)
+        self.assertEqual(report["access"], {"scope": "team"})
+        self.assertEqual(
+            report["filters"],
+            {"actor_id": None, "team_id": "engineering"},
+        )
+        self.assertEqual(report["rows"][0]["scope_id"], "claude-test")
+        self.assertEqual(report["rows"][0]["billable_tokens"], 24)
 
     def test_usage_admin_returns_no_rows_when_read_audit_cannot_commit(self) -> None:
         admin_token = "admin-token-" + "a" * 32

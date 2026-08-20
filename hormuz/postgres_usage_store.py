@@ -51,6 +51,7 @@ from .usage import (
     sanitize_provider_request_id,
     sanitize_provider_usage,
 )
+from .usage_access import UsageReportAccessError, authorize_usage_report
 
 
 def _iso(value: object) -> str:
@@ -651,6 +652,7 @@ class PostgresUsageStore:
         self,
         *,
         administrator: Identity,
+        access_scope: str,
         group_by: str,
         actor_filter: str | None,
         team_filter: str | None,
@@ -659,10 +661,21 @@ class PostgresUsageStore:
         result_count: int,
     ) -> str:
         organization = self._organization(administrator.organization_id)
-        if "usage_viewer" not in administrator.capabilities:
-            raise SecurityStoreError("usage_viewer_capability_required")
-        if group_by not in {"organization", "team", "person", "model", "client", "provider"}:
-            raise SecurityStoreError("invalid_usage_report_request")
+        try:
+            access = authorize_usage_report(
+                administrator,
+                group_by=group_by,
+                actor_id=actor_filter,
+                team_id=team_filter,
+            )
+        except UsageReportAccessError as error:
+            raise SecurityStoreError(error.code) from error
+        if (
+            access.scope != access_scope
+            or access.actor_id != actor_filter
+            or access.team_id != team_filter
+        ):
+            raise SecurityStoreError("usage_admin_audit_scope_mismatch")
         if isinstance(result_count, bool) or not isinstance(result_count, int) or result_count < 0:
             raise SecurityStoreError("invalid_usage_report_request")
         event_id = str(uuid.uuid4())
