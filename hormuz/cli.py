@@ -30,6 +30,7 @@ from .billing import (
     parse_provider_cost_pages,
 )
 from .billing_client import ProviderBillingClient, ProviderBillingClientError
+from .client_conformance import ClientConformanceError, ClientConformanceRunner
 from .config import ConfigError, GatewayConfig, Identity, is_context_selector
 from .context import (
     CLASSIFICATIONS,
@@ -824,6 +825,63 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Allow replacing an existing evidence file",
     )
+
+    client_conformance = subparsers.add_parser(
+        "client-conformance",
+        help="Run a fixed content-free stock-client probe through Hormuz",
+    )
+    client_conformance.add_argument(
+        "--client",
+        required=True,
+        choices=["codex", "claude"],
+        help="Official client to verify",
+    )
+    client_conformance.add_argument("--gateway", required=True, help="Hormuz gateway base URL")
+    client_conformance.add_argument(
+        "--model",
+        required=True,
+        help="Policy model or alias to request",
+    )
+    client_conformance.add_argument(
+        "--credential-env",
+        default="HORMUZ_TOKEN",
+        help="Employee gateway credential environment variable (default: HORMUZ_TOKEN)",
+    )
+    client_conformance.add_argument(
+        "--executable",
+        help="Exact Codex or Claude Code executable path (default: discover on PATH)",
+    )
+    client_conformance.add_argument(
+        "--expected-version",
+        required=True,
+        help="Operator-approved exact client semantic version",
+    )
+    client_conformance.add_argument(
+        "--expected-executable-sha256",
+        required=True,
+        help="Operator-approved SHA-256 of the resolved executable",
+    )
+    client_conformance.add_argument(
+        "--timeout-seconds",
+        type=int,
+        default=120,
+        help="Client timeout from 5 to 600 seconds (default: 120)",
+    )
+    client_conformance.add_argument(
+        "--allow-insecure-http",
+        action="store_true",
+        help="Allow loopback HTTP for local development only",
+    )
+    client_conformance.add_argument(
+        "--output",
+        default="-",
+        help="Content-free evidence JSON path or - for stdout (default: -)",
+    )
+    client_conformance.add_argument(
+        "--force",
+        action="store_true",
+        help="Allow replacing an existing evidence file",
+    )
     return parser
 
 
@@ -907,6 +965,8 @@ def main(argv: list[str] | None = None) -> int:
             return 1
     if args.command == "provider-conformance":
         return _provider_conformance_command(args)
+    if args.command == "client-conformance":
+        return _client_conformance_command(args)
     if args.command == "audit-verify":
         return _audit_verify(args)
     if args.command in {"mcp", "mcp-config"}:
@@ -2018,6 +2078,38 @@ def _provider_conformance_command(args: argparse.Namespace) -> int:
         write_conformance_result(result, args.output, force=args.force)
     except ProviderConformanceError as error:
         print(f"provider conformance failed: {error.code}", file=sys.stderr)
+        return 1
+    return 0
+
+
+def _client_conformance_command(args: argparse.Namespace) -> int:
+    env_name = args.credential_env
+    if (
+        not isinstance(env_name, str)
+        or not env_name
+        or not env_name.replace("_", "A").isalnum()
+        or env_name[0].isdigit()
+    ):
+        print("client conformance failed: invalid_credential_environment", file=sys.stderr)
+        return 2
+    credential = os.environ.get(env_name, "")
+    if not credential:
+        print("client conformance failed: credential_not_set", file=sys.stderr)
+        return 1
+    try:
+        result = ClientConformanceRunner(
+            args.client,
+            gateway=args.gateway,
+            credential=credential,
+            expected_version=args.expected_version,
+            expected_executable_sha256=args.expected_executable_sha256,
+            timeout_seconds=args.timeout_seconds,
+            allow_insecure_http=args.allow_insecure_http,
+            executable=args.executable,
+        ).run(model=args.model)
+        write_conformance_result(result, args.output, force=args.force)
+    except (ClientConformanceError, ProviderConformanceError) as error:
+        print(f"client conformance failed: {error.code}", file=sys.stderr)
         return 1
     return 0
 

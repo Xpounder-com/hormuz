@@ -56,6 +56,8 @@ The OpenAI observations are recorded in
 [`evidence/provider-conformance-openai-2026-08-19.json`](../evidence/provider-conformance-openai-2026-08-19.json)
 and
 [`evidence/codex-openai-live-2026-08-19.json`](../evidence/codex-openai-live-2026-08-19.json).
+The reusable stock-client observation is separately recorded in
+[`evidence/client-conformance-codex-openai-2026-08-19.json`](../evidence/client-conformance-codex-openai-2026-08-19.json).
 They do not change `live_provider_conformance_verified`: that combined flag stays
 false until a defined gate independently covers both OpenAI and Anthropic.
 

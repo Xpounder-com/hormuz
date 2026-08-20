@@ -1409,6 +1409,22 @@ hormuz provider-conformance \
   --output /tmp/hormuz-openai-conformance.json
 ```
 
+With the same gateway running, verify the pinned stock client through the
+reusable isolated harness:
+
+```bash
+hormuz client-conformance \
+  --client codex \
+  --gateway http://127.0.0.1:8791 \
+  --allow-insecure-http \
+  --credential-env HORMUZ_CONFORMANCE_TOKEN \
+  --model openai-live-luna \
+  --executable deploy/clients/node_modules/.bin/codex \
+  --expected-version 0.147.0 \
+  --expected-executable-sha256 134063e133f0b4244fa3b251acf973d4fe4b4aeeacbdc135211bf480f59f1477 \
+  --output /tmp/hormuz-codex-conformance.json
+```
+
 Never add real provider or employee credentials to this record.
 
 One bounded OpenAI observation completed on local evening August 19, 2026. The
@@ -1431,6 +1447,17 @@ returned its fixed marker. Hormuz recorded 12,332 input tokens, 9 output tokens,
 credential scans of Codex stdout, stderr, and the gateway log were negative. The
 content-free observation is
 [`evidence/codex-openai-live-2026-08-19.json`](../evidence/codex-openai-live-2026-08-19.json).
+
+The reusable harness repeated that fixed client path with pinned Codex `0.147.0`
+and its operator-approved resolved-executable SHA-256,
+and recorded a 1,527 millisecond client invocation. It used a sanitized
+environment, empty private workspace, non-persistent read-only Codex execution,
+disabled shell, multi-agent, and web-search tools, and the
+dedicated final-message file rather than matching console output. Its
+content-free evidence is
+[`evidence/client-conformance-codex-openai-2026-08-19.json`](../evidence/client-conformance-codex-openai-2026-08-19.json).
+This adds a repeatable operator command, not a wider provider or production
+support claim.
 
 ## Automated publication gate
 

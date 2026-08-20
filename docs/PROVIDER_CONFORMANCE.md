@@ -1,4 +1,4 @@
-# Live provider conformance
+# Live provider and stock-client conformance
 
 `hormuz provider-conformance` sends one fixed, low-output text probe through a
 running Hormuz gateway. It verifies that the gateway authenticated the employee,
@@ -47,11 +47,72 @@ remain disabled by the example configuration. The strict two-protocol
 configuration schema requires an Anthropic upstream object; its example-only
 credential is random, has no model route, and is never sent.
 
+## Stock Codex and Claude Code proof
+
+`hormuz client-conformance` exercises an installed official client against the
+same running gateway. It uses a separate fixed probe and cannot accept customer
+content. The gateway configuration, identity, client allowlist, model route, and
+policy cap must already authorize the requested client and alias.
+
+For Codex:
+
+```bash
+hormuz client-conformance \
+  --client codex \
+  --gateway http://127.0.0.1:8791 \
+  --allow-insecure-http \
+  --credential-env HORMUZ_CONFORMANCE_TOKEN \
+  --model openai-live-luna \
+  --executable deploy/clients/node_modules/.bin/codex \
+  --expected-version 0.147.0 \
+  --expected-executable-sha256 134063e133f0b4244fa3b251acf973d4fe4b4aeeacbdc135211bf480f59f1477 \
+  --output /tmp/hormuz-codex-conformance.json
+```
+
+For Claude Code, use an Anthropic-authorized gateway identity and model alias:
+
+```bash
+hormuz client-conformance \
+  --client claude \
+  --gateway https://hormuz.example.com \
+  --credential-env HORMUZ_CONFORMANCE_TOKEN \
+  --model claude-live \
+  --executable /approved/path/to/claude \
+  --expected-version 2.1.233 \
+  --expected-executable-sha256 "$APPROVED_CLAUDE_SHA256" \
+  --output /tmp/hormuz-claude-conformance.json
+```
+
+The runner refuses to start until the resolved executable matches the
+operator-approved SHA-256, then requires the client-reported semantic version to
+match the separately approved version. The digest binds the resolved launcher;
+the pinned npm integrity lock remains the separate dependency-closure proof.
+The runner creates an empty private workspace and client home and constructs a
+minimal child environment instead of inheriting host secrets. Codex uses
+ephemeral, read-only execution, disables its shell, multi-agent, and web-search
+tools, and verifies its dedicated final-message file. Claude Code uses bare
+mode, no tools, non-persistent structured output, and an environment-backed
+API-key helper.
+The helper returns the employee-facing Hormuz credential, not the Anthropic
+provider key. See the official
+[Codex CLI reference](https://developers.openai.com/codex/cli/reference),
+[Claude Code programmatic-mode guide](https://code.claude.com/docs/en/headless),
+and [Claude Code gateway guide](https://code.claude.com/docs/en/llm-gateway).
+
+Client stdout/stderr, the temporary final message, structured result, settings,
+client home, gateway URL, fixed prompt, and credential are deleted rather than
+retained. Output is capped at 1 MiB, the final marker is capped at 4 KiB, the
+whole process group is terminated on timeout or excessive output, and evidence
+writing keeps the same exclusive mode-`0600` contract as provider conformance.
+
 ## Evidence boundary
 
-The JSON result contains the provider and protocol, requested/routed/actual model
-identifiers, Hormuz policy decision, normalized token categories, HTTP status,
-latency, version metadata, and boolean assurances. It omits:
+The provider JSON result contains the provider and protocol,
+requested/routed/actual model identifiers, Hormuz policy decision, normalized
+token categories, HTTP status, latency, version metadata, and boolean
+assurances. The client JSON result contains the client name, exact version,
+resolved-launcher digest, protocol, gateway interface, requested policy alias,
+exit code, latency, and boolean assurances. Both omit:
 
 - the gateway URL and network address;
 - provider and employee credentials;
@@ -73,6 +134,13 @@ conservative until both provider paths are independently exercised under a
 defined release gate. Anthropic uses the same command with `--provider anthropic`
 and a policy-authorized Claude model; a secure Anthropic credential must be
 present only in that gateway process.
+
+A successful `client-conformance` result proves only that the exact recorded
+client version and resolved-executable digest completed the fixed request
+through that gateway path. It does
+not independently record gateway policy headers, provider-returned model, token
+usage, or cost; pair it with `provider-conformance` and the gateway usage ledger
+when those claims are required.
 
 ## Recorded OpenAI observation
 
@@ -101,3 +169,14 @@ estimated `$0.002477` cost. The organization policy still capped output at 16
 tokens. Exact-value scans found neither credential in Codex stdout, stderr, or
 the gateway log; those transient client files and the marker are not retained in
 the repository evidence.
+
+The same client path was then repeated through the reusable command. Its
+content-free result is
+[`evidence/client-conformance-codex-openai-2026-08-19.json`](../evidence/client-conformance-codex-openai-2026-08-19.json):
+pinned Codex `0.147.0` with the approved resolved-executable SHA-256 completed
+the fixed request through
+`POST /v1/responses` in 1,527 milliseconds. The command verified the dedicated
+final-message file, used an isolated empty workspace and sanitized child
+environment with shell, multi-agent, and web-search tools disabled, and retained
+none of the prompt, response, client output, gateway address, or employee
+credential. This repeat does not broaden the earlier OpenAI-only claim.

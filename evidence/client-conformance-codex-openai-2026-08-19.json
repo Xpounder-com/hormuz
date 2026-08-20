@@ -1,0 +1,36 @@
+{
+  "assurances": {
+    "client_marker_verified": true,
+    "client_output_retained": false,
+    "client_persistence_disabled": true,
+    "client_version_verified": true,
+    "employee_credential_retained": false,
+    "executable_sha256_verified": true,
+    "fixed_content_probe": true,
+    "gateway_url_retained": false,
+    "host_environment_sanitized": true,
+    "isolated_empty_workspace": true,
+    "prompt_retained": false,
+    "provider_credential_removed_from_client_environment": true,
+    "response_content_retained": false
+  },
+  "client": {
+    "executable_sha256": "134063e133f0b4244fa3b251acf973d4fe4b4aeeacbdc135211bf480f59f1477",
+    "name": "OpenAI Codex CLI",
+    "version": "0.147.0"
+  },
+  "client_exit_code": 0,
+  "gateway_interface": "POST /v1/responses",
+  "gateway_transport": "loopback_http",
+  "generated_at": "2026-08-20T04:27:27.955736+00:00",
+  "latency_milliseconds": 1527,
+  "probe_version": "hormuz-fixed-client-text-v1",
+  "provider_protocol": "openai",
+  "requested_model": "openai-live-luna",
+  "runner": {
+    "hormuz_version": "0.1.0",
+    "python_version": "3.12.12"
+  },
+  "schema_version": "hormuz.client-conformance.v1",
+  "status": "verified"
+}

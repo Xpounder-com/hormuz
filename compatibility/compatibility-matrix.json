@@ -27,6 +27,7 @@
         "evidence": [
           "deploy/clients/package.json",
           "tests/test_gateway.py#test_installed_codex_routes_through_gateway",
+          "evidence/client-conformance-codex-openai-2026-08-19.json",
           ".github/workflows/ci.yml#Codex and Claude Code compatibility"
         ],
         "limitations": [
@@ -157,10 +158,11 @@
           "hormuz/server.py#/v1/responses",
           "tests/test_gateway.py#test_openai_request_falls_back_caps_and_never_forwards_employee_token",
           "evidence/provider-conformance-openai-2026-08-19.json",
-          "evidence/codex-openai-live-2026-08-19.json"
+          "evidence/codex-openai-live-2026-08-19.json",
+          "evidence/client-conformance-codex-openai-2026-08-19.json"
         ],
         "limitations": [
-          "The blocking release gate remains a local fake; the two content-free artifacts record one opt-in live endpoint and pinned Codex observation, not a provider SLA, retention, residency, availability, or every-model claim.",
+          "The blocking release gate remains a local fake; the content-free artifacts record one opt-in live endpoint and pinned Codex observations, not a provider SLA, retention, residency, availability, or every-model claim.",
           "The implemented /v1/responses/compact route is not part of this release-tested compatibility claim."
         ]
       },
