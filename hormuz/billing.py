@@ -4,7 +4,7 @@ import hashlib
 import json
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, localcontext
 from typing import Mapping, Sequence
 
 
@@ -15,6 +15,7 @@ MAX_REPORT_PAGE_BYTES = 16 * 1024 * 1024
 MAX_REPORT_TOTAL_BYTES = 32 * 1024 * 1024
 MAX_AMOUNT_USD = Decimal("1000000000000")
 MAX_AMOUNT_DECIMAL_PLACES = 12
+MAX_RECONCILIATION_AMOUNT_USD = MAX_AMOUNT_USD * MAX_REPORT_ITEMS
 
 _AUTHENTICATED_SOURCE_CONTRACTS = {
     "openai": (
@@ -30,6 +31,107 @@ _AUTHENTICATED_SOURCE_CONTRACTS = {
 
 class ProviderBillingError(ValueError):
     pass
+
+
+@dataclass(frozen=True)
+class BillingReconciliationPolicy:
+    """Exact, versioned thresholds for aggregate provider reconciliation."""
+
+    enabled: bool = False
+    policy_version: str = "billing-reconciliation-disabled-v1"
+    max_absolute_variance_usd: Decimal | None = None
+    max_variance_basis_points: int | None = None
+    max_unpriced_requests: int | None = None
+    max_legacy_unattributed_requests: int | None = None
+    max_unscoped_provider_items: int | None = None
+    require_authenticated_source: bool = False
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.enabled, bool):
+            raise ValueError("Billing reconciliation enabled must be a boolean")
+        if (
+            not isinstance(self.policy_version, str)
+            or not self.policy_version.strip()
+            or self.policy_version != self.policy_version.strip()
+            or len(self.policy_version.encode("utf-8")) > 128
+            or any(character in self.policy_version for character in ("\n", "\r", "\x00"))
+        ):
+            raise ValueError(
+                "Billing reconciliation policy_version must be a bounded single-line string"
+            )
+        if self.max_absolute_variance_usd is not None:
+            value = self.max_absolute_variance_usd
+            if (
+                not isinstance(value, Decimal)
+                or not value.is_finite()
+                or value < 0
+                or value > MAX_RECONCILIATION_AMOUNT_USD
+                or value.as_tuple().exponent < -MAX_AMOUNT_DECIMAL_PLACES
+            ):
+                raise ValueError(
+                    "Billing reconciliation max_absolute_variance_usd is invalid"
+                )
+        for name, value, maximum in (
+            ("max_variance_basis_points", self.max_variance_basis_points, 1_000_000_000),
+            ("max_unpriced_requests", self.max_unpriced_requests, 1_000_000_000),
+            (
+                "max_legacy_unattributed_requests",
+                self.max_legacy_unattributed_requests,
+                1_000_000_000,
+            ),
+            ("max_unscoped_provider_items", self.max_unscoped_provider_items, 500_000),
+        ):
+            if value is not None and (
+                isinstance(value, bool)
+                or not isinstance(value, int)
+                or not 0 <= value <= maximum
+            ):
+                raise ValueError(f"Billing reconciliation {name} is invalid")
+        if not isinstance(self.require_authenticated_source, bool):
+            raise ValueError(
+                "Billing reconciliation require_authenticated_source must be a boolean"
+            )
+        if self.enabled and not any(
+            (
+                self.max_absolute_variance_usd is not None,
+                self.max_variance_basis_points is not None,
+                self.max_unpriced_requests is not None,
+                self.max_legacy_unattributed_requests is not None,
+                self.max_unscoped_provider_items is not None,
+                self.require_authenticated_source,
+            )
+        ):
+            raise ValueError(
+                "Enabled billing reconciliation policy must contain at least one rule"
+            )
+
+    @property
+    def policy_sha256(self) -> str:
+        canonical = json.dumps(
+            self.to_dict(include_digest=False),
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+    def to_dict(self, *, include_digest: bool = True) -> dict[str, object]:
+        value: dict[str, object] = {
+            "enabled": self.enabled,
+            "policy_version": self.policy_version,
+            "max_absolute_variance_usd": (
+                None
+                if self.max_absolute_variance_usd is None
+                else _decimal_text(self.max_absolute_variance_usd)
+            ),
+            "max_variance_basis_points": self.max_variance_basis_points,
+            "max_unpriced_requests": self.max_unpriced_requests,
+            "max_legacy_unattributed_requests": self.max_legacy_unattributed_requests,
+            "max_unscoped_provider_items": self.max_unscoped_provider_items,
+            "require_authenticated_source": self.require_authenticated_source,
+        }
+        if include_digest:
+            value["policy_sha256"] = self.policy_sha256
+        return value
 
 
 @dataclass(frozen=True)
@@ -90,6 +192,118 @@ class ProviderCostSource:
             query_end=_rfc3339(query_end, "Provider query end"),
             query_scope=contract[1],
         )
+
+
+def evaluate_reconciliation(
+    reconciliation: Mapping[str, object],
+    policy: BillingReconciliationPolicy,
+) -> dict[str, object]:
+    """Apply exact thresholds without converting aggregate cost into chargeback."""
+
+    if (
+        not isinstance(reconciliation, Mapping)
+        or isinstance(reconciliation.get("schema_version"), bool)
+        or reconciliation.get("schema_version") != 1
+    ):
+        raise ProviderBillingError("Unsupported billing reconciliation schema")
+    if not isinstance(policy, BillingReconciliationPolicy):
+        raise ProviderBillingError("Billing reconciliation policy is required")
+    provider_cost = _reconciliation_decimal(reconciliation, "provider_cost_usd")
+    gateway_estimated_cost = _reconciliation_decimal(
+        reconciliation,
+        "gateway_estimated_cost_usd",
+    )
+    if gateway_estimated_cost < 0:
+        raise ProviderBillingError("Billing reconciliation facts are invalid")
+    reported_variance = _reconciliation_decimal(reconciliation, "variance_usd")
+    with localcontext() as context:
+        context.prec = 80
+        variance = provider_cost - gateway_estimated_cost
+        absolute_variance = abs(variance)
+        provider_cost_denominator = abs(provider_cost)
+        relative_numerator = absolute_variance * Decimal(10_000)
+        if provider_cost_denominator == 0:
+            variance_basis_points = Decimal(0) if absolute_variance == 0 else None
+        else:
+            variance_basis_points = relative_numerator / provider_cost_denominator
+        relative_limit = (
+            None
+            if policy.max_variance_basis_points is None
+            else provider_cost_denominator * policy.max_variance_basis_points
+        )
+    if reported_variance != variance:
+        raise ProviderBillingError("Billing reconciliation facts are inconsistent")
+    source_kind = reconciliation.get("provider_source_kind")
+    if source_kind not in {"offline_upload", "authenticated_api"}:
+        raise ProviderBillingError("Billing reconciliation facts are invalid")
+    counts = {
+        field: _reconciliation_count(reconciliation, field)
+        for field in (
+            "gateway_unpriced_requests",
+            "legacy_unattributed_gateway_requests",
+            "unscoped_provider_items",
+        )
+    }
+    reasons: list[str] = []
+    if policy.enabled:
+        if (
+            policy.require_authenticated_source
+            and source_kind != "authenticated_api"
+        ):
+            reasons.append("provider_source_not_authenticated")
+        if (
+            policy.max_absolute_variance_usd is not None
+            and absolute_variance > policy.max_absolute_variance_usd
+        ):
+            reasons.append("absolute_variance_exceeded")
+        if policy.max_variance_basis_points is not None:
+            if variance_basis_points is None:
+                reasons.append("variance_basis_unavailable")
+            elif relative_limit is not None and relative_numerator > relative_limit:
+                reasons.append("relative_variance_exceeded")
+        for field, threshold, reason in (
+            (
+                "gateway_unpriced_requests",
+                policy.max_unpriced_requests,
+                "unpriced_requests_exceeded",
+            ),
+            (
+                "legacy_unattributed_gateway_requests",
+                policy.max_legacy_unattributed_requests,
+                "legacy_unattributed_requests_exceeded",
+            ),
+            (
+                "unscoped_provider_items",
+                policy.max_unscoped_provider_items,
+                "unscoped_provider_items_exceeded",
+            ),
+        ):
+            if threshold is not None and counts[field] > threshold:
+                reasons.append(reason)
+
+    result = dict(reconciliation)
+    result.update(
+        {
+            "schema_version": 2,
+            "variance_absolute_usd": _decimal_text(absolute_variance),
+            "variance_basis_points": (
+                None
+                if variance_basis_points is None
+                else _decimal_text(variance_basis_points)
+            ),
+            "variance_basis": "absolute_provider_reported_cost",
+            "exception_status": (
+                "not_evaluated"
+                if not policy.enabled
+                else "review_required"
+                if reasons
+                else "clear"
+            ),
+            "exception_reasons": reasons,
+            "reconciliation_policy": policy.to_dict(),
+        }
+    )
+    return result
 
 
 def decode_provider_cost_page(payload: bytes) -> dict[str, object]:
@@ -352,6 +566,47 @@ def _amount_usd(value: Decimal) -> str:
     if "." in rendered:
         rendered = rendered.rstrip("0").rstrip(".")
     return rendered
+
+
+def _decimal_text(value: Decimal) -> str:
+    if not value.is_finite():
+        raise ProviderBillingError("Billing reconciliation value must be finite")
+    if value == 0:
+        return "0"
+    rendered = format(value, "f")
+    if "." in rendered:
+        rendered = rendered.rstrip("0").rstrip(".")
+    return rendered
+
+
+def _reconciliation_decimal(
+    reconciliation: Mapping[str, object],
+    field: str,
+) -> Decimal:
+    value = reconciliation.get(field)
+    if not isinstance(value, str):
+        raise ProviderBillingError("Billing reconciliation facts are invalid")
+    try:
+        parsed = Decimal(value)
+    except InvalidOperation as error:
+        raise ProviderBillingError("Billing reconciliation facts are invalid") from error
+    if (
+        not parsed.is_finite()
+        or abs(parsed) > MAX_RECONCILIATION_AMOUNT_USD
+        or parsed.as_tuple().exponent < -MAX_AMOUNT_DECIMAL_PLACES
+    ):
+        raise ProviderBillingError("Billing reconciliation facts are invalid")
+    return parsed
+
+
+def _reconciliation_count(
+    reconciliation: Mapping[str, object],
+    field: str,
+) -> int:
+    value = reconciliation.get(field)
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ProviderBillingError("Billing reconciliation facts are invalid")
+    return value
 
 
 def _currency(value: object) -> str:

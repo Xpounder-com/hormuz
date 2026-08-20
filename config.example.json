@@ -57,6 +57,16 @@
       ]
     }
   },
+  "billing_reconciliation": {
+    "enabled": true,
+    "policy_version": "finance-review-v1",
+    "max_absolute_variance_usd": "25.00",
+    "max_variance_basis_points": 500,
+    "max_unpriced_requests": 0,
+    "max_legacy_unattributed_requests": 0,
+    "max_unscoped_provider_items": 0,
+    "require_authenticated_source": true
+  },
   "max_request_bytes": 26214400,
   "upstream_timeout_seconds": 600,
   "upstreams": {

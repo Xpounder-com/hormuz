@@ -1726,6 +1726,48 @@ provider-invoice caps, or production tenancy. Those remain dependent on the
 owner-approved persistence topology, hosted reconciliation, and the existing
 enterprise release gates.
 
+### Versioned billing-reconciliation exception policy
+
+The aggregate provider-cost reconciliation path was extended and exercised
+locally on August 20, 2026 without a live provider request or credential:
+
+- an optional organization policy now binds exact maximum absolute USD
+  variance, relative basis-point variance, unpriced request count, legacy
+  unattributed request count, unscoped provider-item count, and authenticated-
+  source requirements to an explicit version and canonical SHA-256;
+- enabled configuration without an explicit version or at least one rule,
+  floating-point USD thresholds, unknown fields, out-of-range values, excessive
+  decimal precision, inconsistent raw variance, and invalid count/source facts
+  fail closed;
+- relative variance uses the absolute provider-reported cost as its denominator,
+  admits exact threshold equality, treats two zero totals as zero basis points,
+  and emits `variance_basis_unavailable` when provider cost is zero but variance
+  is not;
+- reconciliation schema version 2 emits stable `not_evaluated`, `clear`, or
+  `review_required` status and reason codes. `--fail-on-review` emits the full
+  result before returning exit `3`, and returns exit `2` before database access
+  if the policy is disabled;
+- all 77 focused billing/configuration tests passed. The complete source suite
+  passed 491 tests in `136.435` seconds with the same three documented opt-in
+  installed-client/profile skips;
+- all seven repository-local incident drills passed. The strict compatibility
+  contract retained product stage `alpha`, zero verified production persistence
+  profiles, and `enterprise_release_ready: false`; the threat contract retained
+  five open threats and independent review pending; and
+- the frozen 60-task, five-iteration governed-context release profile retained
+  corpus SHA-256
+  `9822d592868202c7c7539bcdac7d4a5894c01f9e6dba7a434846516b67b32c17`,
+  precision, recall, and useful-pack rate `1.00`, zero safety-threshold failures,
+  and governed p95 selection latency `0.150375` ms. Source/test/script bytecode
+  compilation, `git diff --check`, and a high-confidence tracked-file credential
+  scan also passed.
+
+This is deterministic, automation-safe exception classification over one
+aggregate snapshot. It is not scheduled provider polling, hosted administrator-
+key custody, a persistent authenticated reviewer/case workflow, invoice/credit
+finalization, or final team/person chargeback. Aggregate variance remains
+unresolved evidence and does not by itself prove that traffic bypassed Hormuz.
+
 ## Automated publication gate
 
 Ordinary GitHub CI runs eight independent gate families without provider credentials:

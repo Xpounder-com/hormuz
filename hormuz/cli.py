@@ -27,6 +27,7 @@ from .billing import (
     MAX_REPORT_TOTAL_BYTES,
     ProviderBillingError,
     decode_provider_cost_page,
+    evaluate_reconciliation,
     parse_provider_cost_pages,
 )
 from .billing_client import ProviderBillingClient, ProviderBillingClientError
@@ -234,6 +235,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Exact pci_ import ID; defaults to the latest import for the provider",
     )
     billing_reconcile.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
+    billing_reconcile.add_argument(
+        "--fail-on-review",
+        action="store_true",
+        help="Exit 3 after output when configured thresholds require finance review",
+    )
 
     policy = subparsers.add_parser("policy-check", help="Evaluate a request without sending it upstream")
     policy.add_argument("--actor", required=True, help="Configured actor ID")
@@ -1321,10 +1327,19 @@ def _billing_command(config: GatewayConfig, args: argparse.Namespace) -> int:
             print(json.dumps(result.to_dict(), indent=2))
             return 0
         if args.billing_command == "reconcile":
-            result = UsageStore(config.database_path).reconcile_provider_costs(
-                organization_id=args.organization,
-                provider=args.provider,
-                import_id=args.import_id,
+            if args.fail_on_review and not config.billing_reconciliation.enabled:
+                print(
+                    "billing error: --fail-on-review requires an enabled reconciliation policy",
+                    file=sys.stderr,
+                )
+                return 2
+            result = evaluate_reconciliation(
+                UsageStore(config.database_path).reconcile_provider_costs(
+                    organization_id=args.organization,
+                    provider=args.provider,
+                    import_id=args.import_id,
+                ),
+                config.billing_reconciliation,
             )
             if args.json:
                 print(json.dumps(result, indent=2))
@@ -1344,10 +1359,15 @@ def _billing_command(config: GatewayConfig, args: argparse.Namespace) -> int:
                     f"coverage={result['coverage_status']}"
                 )
                 print(
+                    f"finance-review={result['exception_status']} "
+                    f"policy={result['reconciliation_policy']['policy_version']} "
+                    f"reasons={','.join(result['exception_reasons']) or '-'}"
+                )
+                print(
                     "Variance is unresolved aggregate evidence; it does not by itself prove "
                     "gateway bypass or provide actual per-person cost."
                 )
-            return 0
+            return 3 if args.fail_on_review and result["exception_status"] == "review_required" else 0
     except ProviderBillingClientError as error:
         print(f"billing fetch failed: {error.code}", file=sys.stderr)
         return 1

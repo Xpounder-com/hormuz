@@ -94,10 +94,44 @@ hormuz --config hormuz.json billing reconcile \
   --organization xpounder \
   --provider openai \
   --import-id pci_0123456789abcdef0123456789abcdef \
-  --json
+  --json \
+  --fail-on-review
 ```
 
 Omit `--import-id` to use the latest imported snapshot for that organization and provider.
+
+## Versioned exception policy
+
+The optional `billing_reconciliation` configuration evaluates each aggregate
+organization/provider result against exact, versioned rules:
+
+- absolute variance in USD;
+- relative variance in basis points;
+- unpriced gateway requests;
+- legacy gateway requests without a trustworthy organization binding;
+- provider items without a project/workspace scope; and
+- whether the snapshot came from Hormuz's authenticated fixed-query path.
+
+Relative variance is
+`abs(provider_cost - gateway_estimate) / abs(provider_cost) * 10000`. If both
+costs are zero, it is zero. If provider-reported cost is zero but the variance
+is nonzero, the relative basis is unavailable and an enabled relative rule
+fails closed to `variance_basis_unavailable`. A value exactly equal to a
+configured maximum is allowed; only a larger value requires review.
+
+The JSON reconciliation schema is version `2` and returns
+`exception_status` (`not_evaluated`, `clear`, or `review_required`), stable
+`exception_reasons`, exact `variance_absolute_usd`, relative
+`variance_basis_points`, and the complete policy version plus canonical
+SHA-256. `--fail-on-review` still prints that result and then exits `3` when
+review is required, allowing a scheduled job or CI control to alert without
+discarding evidence. It exits `2` if requested while the policy is disabled.
+
+This is deterministic exception classification, not a persistent finance case
+manager. A reviewer identity, acknowledgements, resolution notes, invoice
+finalization, notifications, and organization-scoped remote billing RBAC remain
+open. The CLI does not infer that a variance proves bypass, and it does not
+allocate aggregate provider cost to a team or employee.
 
 ## Accounting semantics
 

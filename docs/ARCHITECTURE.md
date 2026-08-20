@@ -45,6 +45,7 @@ immutable organization/provider cost snapshot
         +--> raw response and credential discarded; normalized billing metadata retained
         +--> authenticated source records exact API contract, query window, and fixed scope
         +--> compare aggregate provider-reported cost with organization-bound request estimates
+        +--> apply versioned exact-decimal review thresholds and automation exit semantics
         +--> expose unresolved variance without allocating it to employees or calling it bypass
 ```
 

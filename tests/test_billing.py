@@ -16,8 +16,10 @@ from pathlib import Path
 from unittest import mock
 
 from hormuz.billing import (
+    BillingReconciliationPolicy,
     ProviderBillingError,
     ProviderCostSource,
+    evaluate_reconciliation,
     parse_provider_cost_pages,
 )
 from hormuz.billing_client import ProviderCostFetchResult
@@ -174,6 +176,142 @@ class ProviderCostParserTests(unittest.TestCase):
         two_pages = parse_provider_cost_pages("openai", [first, second])
 
         self.assertEqual(one_page.source_sha256, two_pages.source_sha256)
+
+
+def _reconciliation_facts(**overrides: object) -> dict[str, object]:
+    values: dict[str, object] = {
+        "schema_version": 1,
+        "provider_cost_usd": "100",
+        "gateway_estimated_cost_usd": "95",
+        "variance_usd": "5",
+        "provider_source_kind": "authenticated_api",
+        "gateway_unpriced_requests": 0,
+        "legacy_unattributed_gateway_requests": 0,
+        "unscoped_provider_items": 0,
+    }
+    values.update(overrides)
+    return values
+
+
+class BillingReconciliationPolicyTests(unittest.TestCase):
+    def test_exact_thresholds_are_versioned_and_boundary_is_clear(self) -> None:
+        policy = BillingReconciliationPolicy(
+            enabled=True,
+            policy_version="finance-v1",
+            max_absolute_variance_usd=Decimal("5.00"),
+            max_variance_basis_points=500,
+            max_unpriced_requests=0,
+            max_legacy_unattributed_requests=0,
+            max_unscoped_provider_items=0,
+            require_authenticated_source=True,
+        )
+
+        result = evaluate_reconciliation(_reconciliation_facts(), policy)
+
+        self.assertEqual(result["schema_version"], 2)
+        self.assertEqual(result["variance_absolute_usd"], "5")
+        self.assertEqual(result["variance_basis_points"], "500")
+        self.assertEqual(result["exception_status"], "clear")
+        self.assertEqual(result["exception_reasons"], [])
+        self.assertEqual(
+            result["reconciliation_policy"]["max_absolute_variance_usd"],
+            "5",
+        )
+        self.assertRegex(
+            result["reconciliation_policy"]["policy_sha256"],
+            r"^[0-9a-f]{64}$",
+        )
+        self.assertEqual(policy.policy_sha256, replace(policy).policy_sha256)
+
+    def test_every_configured_exception_reason_is_explicit(self) -> None:
+        policy = BillingReconciliationPolicy(
+            enabled=True,
+            policy_version="finance-v2",
+            max_absolute_variance_usd=Decimal("10"),
+            max_variance_basis_points=500,
+            max_unpriced_requests=0,
+            max_legacy_unattributed_requests=0,
+            max_unscoped_provider_items=0,
+            require_authenticated_source=True,
+        )
+
+        result = evaluate_reconciliation(
+            _reconciliation_facts(
+                variance_usd="20",
+                gateway_estimated_cost_usd="80",
+                provider_source_kind="offline_upload",
+                gateway_unpriced_requests=1,
+                legacy_unattributed_gateway_requests=2,
+                unscoped_provider_items=3,
+            ),
+            policy,
+        )
+
+        self.assertEqual(result["exception_status"], "review_required")
+        self.assertEqual(
+            result["exception_reasons"],
+            [
+                "provider_source_not_authenticated",
+                "absolute_variance_exceeded",
+                "relative_variance_exceeded",
+                "unpriced_requests_exceeded",
+                "legacy_unattributed_requests_exceeded",
+                "unscoped_provider_items_exceeded",
+            ],
+        )
+
+    def test_zero_provider_basis_fails_closed_for_relative_threshold(self) -> None:
+        policy = BillingReconciliationPolicy(
+            enabled=True,
+            policy_version="finance-v3",
+            max_variance_basis_points=500,
+        )
+
+        result = evaluate_reconciliation(
+            _reconciliation_facts(
+                provider_cost_usd="0",
+                gateway_estimated_cost_usd="1",
+                variance_usd="-1",
+            ),
+            policy,
+        )
+
+        self.assertIsNone(result["variance_basis_points"])
+        self.assertEqual(result["exception_reasons"], ["variance_basis_unavailable"])
+
+    def test_disabled_policy_is_observable_and_invalid_facts_fail_closed(self) -> None:
+        result = evaluate_reconciliation(
+            _reconciliation_facts(),
+            BillingReconciliationPolicy(),
+        )
+        self.assertEqual(result["exception_status"], "not_evaluated")
+        self.assertEqual(result["exception_reasons"], [])
+
+        with self.assertRaisesRegex(ProviderBillingError, "facts are invalid"):
+            evaluate_reconciliation(
+                _reconciliation_facts(gateway_unpriced_requests=-1),
+                BillingReconciliationPolicy(
+                    enabled=True,
+                    max_unpriced_requests=0,
+                ),
+            )
+        with self.assertRaisesRegex(ProviderBillingError, "facts are inconsistent"):
+            evaluate_reconciliation(
+                _reconciliation_facts(variance_usd="4"),
+                BillingReconciliationPolicy(),
+            )
+        with self.assertRaisesRegex(ProviderBillingError, "facts are invalid"):
+            evaluate_reconciliation(
+                _reconciliation_facts(provider_cost_usd="1e999"),
+                BillingReconciliationPolicy(),
+            )
+        with self.assertRaisesRegex(ProviderBillingError, "facts are invalid"):
+            evaluate_reconciliation(
+                _reconciliation_facts(provider_cost_usd="1.0000000000001"),
+                BillingReconciliationPolicy(),
+            )
+        with self.assertRaisesRegex(ValueError, "at least one rule"):
+            BillingReconciliationPolicy(enabled=True)
 
 
 class ProviderCostStoreTests(unittest.TestCase):
@@ -615,9 +753,58 @@ class ProviderCostCLITests(unittest.TestCase):
             with redirect_stdout(output):
                 self.assertEqual(_billing_command(config, reconcile_args), 0)
             reconciled = json.loads(output.getvalue())
+            self.assertEqual(reconciled["schema_version"], 2)
             self.assertEqual(reconciled["provider_cost_usd"], "1.25")
             self.assertEqual(reconciled["gateway_estimated_cost_usd"], "0")
             self.assertFalse(reconciled["variance_proves_gateway_bypass"])
+            self.assertEqual(reconciled["exception_status"], "review_required")
+            self.assertEqual(
+                reconciled["exception_reasons"],
+                [
+                    "provider_source_not_authenticated",
+                    "relative_variance_exceeded",
+                ],
+            )
+
+            fail_args = build_parser().parse_args(
+                [
+                    "billing",
+                    "reconcile",
+                    "--organization",
+                    organization,
+                    "--provider",
+                    "openai",
+                    "--import-id",
+                    imported["import_id"],
+                    "--json",
+                    "--fail-on-review",
+                ]
+            )
+            with redirect_stdout(io.StringIO()):
+                self.assertEqual(_billing_command(config, fail_args), 3)
+
+            disabled_config = replace(
+                config,
+                billing_reconciliation=BillingReconciliationPolicy(),
+            )
+            with redirect_stderr(disabled_error := io.StringIO()):
+                self.assertEqual(_billing_command(disabled_config, fail_args), 2)
+            self.assertEqual(
+                disabled_error.getvalue(),
+                "billing error: --fail-on-review requires an enabled "
+                "reconciliation policy\n",
+            )
+
+            clear_config = replace(
+                config,
+                billing_reconciliation=BillingReconciliationPolicy(
+                    enabled=True,
+                    policy_version="finance-clear-v1",
+                    max_absolute_variance_usd=Decimal("2"),
+                ),
+            )
+            with redirect_stdout(io.StringIO()):
+                self.assertEqual(_billing_command(clear_config, fail_args), 0)
 
             wrong_scope = build_parser().parse_args(
                 [

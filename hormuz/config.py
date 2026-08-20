@@ -10,10 +10,12 @@ import math
 import os
 import re
 from dataclasses import dataclass, field
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+from .billing import BillingReconciliationPolicy, MAX_RECONCILIATION_AMOUNT_USD
 from .context_lifecycle import LifecyclePolicy
 
 
@@ -387,6 +389,9 @@ class GatewayConfig:
     model_routes: dict[str, ModelRoute]
     organization_policy: Policy
     source_sha256: str
+    billing_reconciliation: BillingReconciliationPolicy = field(
+        default_factory=BillingReconciliationPolicy
+    )
     context_service: ContextServiceConfig = field(default_factory=ContextServiceConfig)
     session_broker: SessionBrokerConfig = field(default_factory=SessionBrokerConfig)
     oidc_issuers: dict[str, OIDCIssuerConfig] = field(default_factory=dict)
@@ -429,6 +434,7 @@ class GatewayConfig:
                 "database",
                 "context_database",
                 "context_service",
+                "billing_reconciliation",
                 "max_request_bytes",
                 "upstream_timeout_seconds",
                 "upstreams",
@@ -872,6 +878,9 @@ class GatewayConfig:
                 context_service_raw.get("lifecycle", {})
             ),
         )
+        billing_reconciliation = _billing_reconciliation_policy(
+            raw.get("billing_reconciliation", {})
+        )
         policies_raw = _object(raw.get("policies"), "policies")
         _reject_unknown_fields(
             policies_raw,
@@ -912,6 +921,7 @@ class GatewayConfig:
             model_routes=model_routes,
             organization_policy=organization_policy,
             source_sha256=source_sha256,
+            billing_reconciliation=billing_reconciliation,
             context_service=context_service,
             session_broker=session_broker,
             oidc_issuers=oidc_issuers,
@@ -1856,6 +1866,89 @@ def is_model_identifier(value: object) -> bool:
     return isinstance(value, str) and _MODEL_IDENTIFIER.fullmatch(value) is not None
 
 
+def _billing_reconciliation_policy(value: Any) -> BillingReconciliationPolicy:
+    path = "billing_reconciliation"
+    item = _object(value, path)
+    _reject_unknown_fields(
+        item,
+        {
+            "enabled",
+            "policy_version",
+            "max_absolute_variance_usd",
+            "max_variance_basis_points",
+            "max_unpriced_requests",
+            "max_legacy_unattributed_requests",
+            "max_unscoped_provider_items",
+            "require_authenticated_source",
+        },
+        path,
+    )
+    enabled = _boolean(item.get("enabled", False), f"{path}.enabled")
+    if enabled and "policy_version" not in item:
+        raise ConfigError(
+            f"{path}.policy_version is required when reconciliation is enabled"
+        )
+    try:
+        return BillingReconciliationPolicy(
+            enabled=enabled,
+            policy_version=_bounded_policy_version(
+                item.get("policy_version", "billing-reconciliation-disabled-v1"),
+                f"{path}.policy_version",
+            ),
+            max_absolute_variance_usd=_optional_decimal_usd_string(
+                item.get("max_absolute_variance_usd"),
+                f"{path}.max_absolute_variance_usd",
+            ),
+            max_variance_basis_points=_optional_integer(
+                item.get("max_variance_basis_points"),
+                f"{path}.max_variance_basis_points",
+                minimum=0,
+                maximum=1_000_000_000,
+            ),
+            max_unpriced_requests=_optional_integer(
+                item.get("max_unpriced_requests"),
+                f"{path}.max_unpriced_requests",
+                minimum=0,
+                maximum=1_000_000_000,
+            ),
+            max_legacy_unattributed_requests=_optional_integer(
+                item.get("max_legacy_unattributed_requests"),
+                f"{path}.max_legacy_unattributed_requests",
+                minimum=0,
+                maximum=1_000_000_000,
+            ),
+            max_unscoped_provider_items=_optional_integer(
+                item.get("max_unscoped_provider_items"),
+                f"{path}.max_unscoped_provider_items",
+                minimum=0,
+                maximum=500_000,
+            ),
+            require_authenticated_source=_boolean(
+                item.get("require_authenticated_source", False),
+                f"{path}.require_authenticated_source",
+            ),
+        )
+    except ValueError as error:
+        raise ConfigError(f"Invalid {path}: {error}") from error
+
+
+def _optional_decimal_usd_string(value: Any, path: str) -> Decimal | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ConfigError(f"{path} must be an exact non-negative decimal string")
+    normalized = value.strip()
+    if re.fullmatch(r"(?:0|[1-9][0-9]*)(?:\.[0-9]+)?", normalized) is None:
+        raise ConfigError(f"{path} must be an exact non-negative decimal string")
+    try:
+        parsed = Decimal(normalized)
+    except InvalidOperation as error:  # pragma: no cover - guarded by the pattern
+        raise ConfigError(f"{path} must be an exact non-negative decimal string") from error
+    if parsed > MAX_RECONCILIATION_AMOUNT_USD:
+        raise ConfigError(f"{path} exceeds the supported bound")
+    return parsed
+
+
 def _context_lifecycle_automation_config(value: Any) -> ContextLifecycleAutomationConfig:
     path = "context_service.lifecycle"
     item = _object(value, path)
@@ -2097,10 +2190,16 @@ def _integer(value: Any, path: str, *, minimum: int, maximum: int | None = None)
     return value
 
 
-def _optional_integer(value: Any, path: str, *, minimum: int) -> int | None:
+def _optional_integer(
+    value: Any,
+    path: str,
+    *,
+    minimum: int,
+    maximum: int | None = None,
+) -> int | None:
     if value is None:
         return None
-    return _integer(value, path, minimum=minimum)
+    return _integer(value, path, minimum=minimum, maximum=maximum)
 
 
 def _number(value: Any, path: str) -> float:

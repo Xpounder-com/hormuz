@@ -1201,6 +1201,70 @@ class ClientConfigTests(unittest.TestCase):
             self.assertIn("GATEWAY_P95_BUCKET_MS", lines[0])
             self.assertTrue(lines[1].endswith("\t25\t5\t25\t-"))
 
+    def test_billing_reconciliation_policy_is_strict_and_exact(self) -> None:
+        policy = self.config.billing_reconciliation
+        self.assertTrue(policy.enabled)
+        self.assertEqual(policy.policy_version, "finance-review-v1")
+        self.assertEqual(policy.to_dict()["max_absolute_variance_usd"], "25")
+        self.assertEqual(policy.max_variance_basis_points, 500)
+        self.assertTrue(policy.require_authenticated_source)
+        self.assertRegex(policy.policy_sha256, r"^[0-9a-f]{64}$")
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            raw = json.loads((ROOT / "config.example.json").read_text(encoding="utf-8"))
+            path = root / "hormuz.json"
+
+            raw["billing_reconciliation"]["unknown"] = True
+            path.write_text(json.dumps(raw), encoding="utf-8")
+            with self.assertRaisesRegex(
+                ConfigError,
+                "Unknown billing_reconciliation fields",
+            ):
+                GatewayConfig.load(
+                    path,
+                    environ={"HORMUZ_TOKEN": "test-identity-token"},
+                )
+
+            raw["billing_reconciliation"].pop("unknown")
+            raw["billing_reconciliation"]["max_absolute_variance_usd"] = 25.0
+            path.write_text(json.dumps(raw), encoding="utf-8")
+            with self.assertRaisesRegex(ConfigError, "exact non-negative decimal string"):
+                GatewayConfig.load(
+                    path,
+                    environ={"HORMUZ_TOKEN": "test-identity-token"},
+                )
+
+            raw["billing_reconciliation"] = {
+                "enabled": True,
+                "policy_version": "empty-v1",
+            }
+            path.write_text(json.dumps(raw), encoding="utf-8")
+            with self.assertRaisesRegex(ConfigError, "at least one rule"):
+                GatewayConfig.load(
+                    path,
+                    environ={"HORMUZ_TOKEN": "test-identity-token"},
+                )
+
+            raw["billing_reconciliation"] = {
+                "enabled": True,
+                "max_unpriced_requests": 0,
+            }
+            path.write_text(json.dumps(raw), encoding="utf-8")
+            with self.assertRaisesRegex(ConfigError, "policy_version is required"):
+                GatewayConfig.load(
+                    path,
+                    environ={"HORMUZ_TOKEN": "test-identity-token"},
+                )
+
+            raw.pop("billing_reconciliation")
+            path.write_text(json.dumps(raw), encoding="utf-8")
+            disabled = GatewayConfig.load(
+                path,
+                environ={"HORMUZ_TOKEN": "test-identity-token"},
+            )
+            self.assertFalse(disabled.billing_reconciliation.enabled)
+
     def test_context_database_is_separate_and_cannot_alias_usage(self) -> None:
         self.assertNotEqual(self.config.context_database_path, self.config.database_path)
         self.assertEqual(self.config.context_service.policy_version, "engineering-context-v1")

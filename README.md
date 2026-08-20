@@ -185,10 +185,18 @@ python3 -m hormuz --config hormuz.json billing import \
 python3 -m hormuz --config hormuz.json billing reconcile \
   --organization xpounder \
   --provider openai \
-  --json
+  --json \
+  --fail-on-review
 ```
 
-Provider cost is aggregate evidence, not a universal final cost per request, employee, or team. See [docs/BILLING_RECONCILIATION.md](docs/BILLING_RECONCILIATION.md) for the official report contracts, pagination, exact-decimal treatment, coverage labels, and remaining invoice boundary.
+`--fail-on-review` exits `3` after emitting the complete result when the
+versioned organization policy detects excessive variance, unpriced or
+unattributed traffic, unscoped provider items, an unauthenticated source, or an
+undefined relative-variance basis. Provider cost remains aggregate evidence,
+not a universal final cost per request, employee, or team. See
+[docs/BILLING_RECONCILIATION.md](docs/BILLING_RECONCILIATION.md) for the
+official report contracts, exact-decimal thresholds, coverage labels, and
+remaining invoice boundary.
 
 Export metadata-only audit evidence for the current month:
 
@@ -329,4 +337,4 @@ The GitHub publication gate also tests Python 3.11 through 3.14, validates the f
 
 ## Roadmap boundary
 
-The current milestone includes the enforcement, versioned estimate accounting, operator-run authenticated and offline provider cost-report ingestion, aggregate reconciliation, deterministic secret egress, bounded encoded-text inspection, a bounded structured-DLP detector/action subset, provider-format-aware opaque-media denial, replay-safe approval grants, metadata audit, local persistent context records/packs, trusted lifecycle snapshot evaluation, opt-in evidence-driven promotion/invalidation with resumable local revalidation, authenticated provider-neutral connector transport, MCP retrieval, and bounded disabled-by-default automatic injection for verified unscoped or exact administrator-granted repository context, plus OIDC JWT verification and a single-node OIDC login/session kernel with tenant-scoped administrator revocation. The usage, approval, context, and session databases are deliberately local implementations; they are not the pending enterprise tenancy, HA, or KMS design. Before an enterprise release, Hormuz still needs one owner-selected real-IdP validation, SCIM-driven deprovisioning, shared multi-node revocation, remaining accepted DLP architecture, durable multi-tenant persistence, TLS and deployment hardening, signed or externally immutable audit retention, scheduled provider polling with hosted credential custody, final invoice/credit reconciliation, broader provider conformance coverage, source-specific lifecycle collectors and signed-event verification, remaining decay policy, automatic trusted repository discovery, continuation binding, cache, accepted-task outcome evidence, and outcome writeback.
+The current milestone includes the enforcement, versioned estimate accounting, operator-run authenticated and offline provider cost-report ingestion, aggregate reconciliation with versioned finance-review thresholds, deterministic secret egress, bounded encoded-text inspection, a bounded structured-DLP detector/action subset, provider-format-aware opaque-media denial, replay-safe approval grants, metadata audit, local persistent context records/packs, trusted lifecycle snapshot evaluation, opt-in evidence-driven promotion/invalidation with resumable local revalidation, authenticated provider-neutral connector transport, MCP retrieval, and bounded disabled-by-default automatic injection for verified unscoped or exact administrator-granted repository context, plus OIDC JWT verification and a single-node OIDC login/session kernel with tenant-scoped administrator revocation. The usage, approval, context, and session databases are deliberately local implementations; they are not the pending enterprise tenancy, HA, or KMS design. Before an enterprise release, Hormuz still needs one owner-selected real-IdP validation, SCIM-driven deprovisioning, shared multi-node revocation, remaining accepted DLP architecture, durable multi-tenant persistence, TLS and deployment hardening, signed or externally immutable audit retention, scheduled provider polling with hosted credential custody, final invoice/credit reconciliation and persistent exception workflow, broader provider conformance coverage, source-specific lifecycle collectors and signed-event verification, remaining decay policy, automatic trusted repository discovery, continuation binding, cache, accepted-task outcome evidence, and outcome writeback.

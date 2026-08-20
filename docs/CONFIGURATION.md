@@ -6,7 +6,7 @@ Hormuz treats configuration as an enforcement input, not a best-effort preferenc
 
 `GatewayConfig.load` accepts one JSON object and rejects unknown fields at every Hormuz-owned configuration object boundary, including:
 
-- the root, listener, provider, authentication, OIDC issuer/login/subject, session, context-service, DLP, and policy objects;
+- the root, listener, provider, authentication, OIDC issuer/login/subject, session, context-service, billing-reconciliation, DLP, and policy objects;
 - each static identity and model route;
 - lifecycle promotion paths and context-injection policy;
 - organization, team, and actor policy bodies.
@@ -35,6 +35,36 @@ Each organization, team, or actor policy may add a `model_limits` object keyed b
 The alias is the policy and accounting identity after fallback routing, not an untrusted provider-returned model string. Organization, team, and employee limits are enforced independently; a narrower policy cannot relax a higher-scope limit. If an unapproved request falls back to a governed alias, that alias's capacity applies. Other aliases do not consume its allowance.
 
 Every configured model-limit entry must contain at least one limit, must reference an existing route, and requires an effective `max_output_tokens` so Hormuz can reserve a conservative upper bound before provider work. `hormuz policy-check` returns each applicable model-capacity scope without making a provider request.
+
+## Billing reconciliation policy
+
+`billing_reconciliation` classifies aggregate provider-versus-gateway
+reconciliation results for finance review. It does not alter provider requests,
+allocate provider-reported cost to employees, or label request estimates final.
+
+```json
+{
+  "billing_reconciliation": {
+    "enabled": true,
+    "policy_version": "finance-review-v1",
+    "max_absolute_variance_usd": "25.00",
+    "max_variance_basis_points": 500,
+    "max_unpriced_requests": 0,
+    "max_legacy_unattributed_requests": 0,
+    "max_unscoped_provider_items": 0,
+    "require_authenticated_source": true
+  }
+}
+```
+
+USD thresholds are strings so configuration parsing preserves exact decimal
+intent; JSON numbers are rejected for this field. Basis points and count limits
+are non-negative integers. An enabled policy must contain at least one rule and
+must explicitly name its `policy_version`. The policy version and canonical
+SHA-256 are emitted with each evaluated CLI result, making threshold changes
+visible to downstream automation. The values in `config.example.json` are
+illustrative operator defaults, not approved universal finance or release
+thresholds.
 
 Unknown-field errors report only the fixed schema path, for example `Unknown listen fields`. Hormuz does not reflect the rejected key into CLI diagnostics because an attacker-controlled JSON key can itself contain sensitive text.
 
