@@ -93,7 +93,7 @@ Those provider reports do not provide a universal per-Hormuz-request invoice cos
 
 ## Concurrent budget enforcement
 
-Before an accounted provider call, Hormuz creates an atomic SQLite reservation against every applicable organization, team, and employee token/cost cap. The reservation conservatively uses the serialized request byte count as the input-token upper bound, the enforced maximum output tokens, and uncached configured token rates. A competing request is denied with `hormuz_budget_denied` when its projected reservation would exceed any scope.
+Before an accounted provider call, Hormuz creates an atomic SQLite reservation against every applicable organization, team, and employee token/cost cap. The reservation conservatively uses the serialized request byte count as the input-token upper bound, the effective maximum-output policy allowance, and uncached configured token rates. A competing request is denied with `hormuz_budget_denied` when its projected reservation would exceed any scope. Generation endpoints also receive the enforced output cap. OpenAI compaction does not define an output-cap request field, so Hormuz uses the allowance only for local reservation and records actual provider usage afterward; actual compaction output can exceed that allowance and therefore cannot provide a hard per-request ceiling.
 
 The reservation is released after the actual provider usage event is recorded. It also has a bounded expiry so an interrupted process cannot hold budget forever. Configurations with monthly token or spend limits must therefore give every identity an effective `max_output_tokens` policy.
 

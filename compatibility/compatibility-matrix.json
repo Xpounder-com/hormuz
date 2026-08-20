@@ -1,6 +1,6 @@
 {
   "schema": "hormuz.compatibility-matrix.v1",
-  "version": "2026-08-17",
+  "version": "2026-08-20",
   "product_stage": "alpha",
   "enterprise_release_ready": false,
   "support_levels": {
@@ -152,11 +152,15 @@
           "opt-in macOS 26.2 arm64 live OpenAI observation on 2026-08-19"
         ],
         "interfaces": [
-          "POST /v1/responses"
+          "POST /v1/responses",
+          "POST /v1/responses/compact"
         ],
         "evidence": [
           "hormuz/server.py#/v1/responses",
+          "hormuz/server.py#/v1/responses/compact",
           "tests/test_gateway.py#test_openai_request_falls_back_caps_and_never_forwards_employee_token",
+          "tests/test_gateway.py#test_openai_compaction_uses_required_context_without_unsupported_fields",
+          "tests/test_gateway.py#test_required_openai_compaction_without_user_query_stops_before_provider",
           "evidence/provider-conformance-openai-2026-08-19.json",
           "evidence/provider-redaction-conformance-openai-2026-08-19.json",
           "evidence/codex-openai-live-2026-08-19.json",
@@ -164,7 +168,7 @@
         ],
         "limitations": [
           "The blocking release gate remains a local fake; the content-free artifacts record opt-in live connectivity, one fixed synthetic-secret redaction path, and pinned Codex observations, not complete DLP, a provider SLA, retention, residency, availability, or every-model claim.",
-          "The implemented /v1/responses/compact route is not part of this release-tested compatibility claim."
+          "Compaction coverage is limited to direct current-user input plus required-mode denial without it; no live compaction or authorized continuation-binding observation exists."
         ]
       },
       {
@@ -184,10 +188,11 @@
         "evidence": [
           "hormuz/server.py#/v1/messages/count_tokens",
           "tests/test_gateway.py#test_anthropic_stream_is_relayed_and_usage_is_recorded",
+          "tests/test_gateway.py#test_token_count_uses_governed_context_and_dlp_without_usage_charge",
           "tests/test_gateway.py#test_claude_model_discovery_returns_only_policy_authorized_aliases_without_side_effects"
         ],
         "limitations": [
-          "No live Anthropic endpoint conformance or provider-SLA evidence is included.",
+          "No live Anthropic endpoint conformance or provider-SLA evidence is included; token-count coverage is protocol-shaped local evidence only.",
           "Model discovery is a policy-filtered Hormuz client endpoint and does not call Anthropic."
         ]
       },

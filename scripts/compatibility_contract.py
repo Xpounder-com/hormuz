@@ -67,7 +67,10 @@ EXPECTED_CLIENTS = {
 }
 EXPECTED_PYTHON_VERSIONS = ["3.11", "3.12", "3.13", "3.14"]
 EXPECTED_PROVIDER_INTERFACES = {
-    "provider.openai-responses": {"POST /v1/responses"},
+    "provider.openai-responses": {
+        "POST /v1/responses",
+        "POST /v1/responses/compact",
+    },
     "provider.anthropic-messages": {
         "POST /v1/messages",
         "POST /v1/messages/count_tokens",
@@ -372,7 +375,13 @@ def _validate_provider_interfaces(entries: list[dict[str, Any]], *, project_root
         server = (project_root / "hormuz" / "server.py").read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as error:
         raise CompatibilityContractError("gateway route source is unavailable") from error
-    for route in ("/v1/responses", "/v1/messages", "/v1/messages/count_tokens", "/v1/models"):
+    for route in (
+        "/v1/responses",
+        "/v1/responses/compact",
+        "/v1/messages",
+        "/v1/messages/count_tokens",
+        "/v1/models",
+    ):
         if f'"{route}"' not in server:
             raise CompatibilityContractError(
                 "compatibility provider interfaces do not match route source"

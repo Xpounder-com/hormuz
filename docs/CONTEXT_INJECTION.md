@@ -1,6 +1,6 @@
 # Automatic governed-context injection
 
-Hormuz can automatically add a bounded, verified Context Pack to ordinary Codex and Claude Code generation requests. Employees keep using the official clients. The gateway performs retrieval and provider-specific request mutation after identity and model authorization, so a model does not need to call the MCP tool and the employee does not need a wrapper.
+Hormuz can automatically add a bounded, verified Context Pack to ordinary Codex and Claude Code generation requests, direct-query OpenAI compaction, and Anthropic token counting. Employees keep using the official clients. The gateway performs retrieval and provider-specific request mutation after identity and model authorization, so a model does not need to call the MCP tool and the employee does not need a wrapper.
 
 Automatic injection is disabled by default. The first implementation is a bounded checkpoint under [issue #5](https://github.com/Xpounder-com/hormuz/issues/5), not closure of the complete automatic-context milestone.
 
@@ -48,11 +48,13 @@ For supported requests, Hormuz applies this order:
 6. commit the metadata-only context-read event;
 7. render the same canonical pack as delimited, untrusted user-priority reference data;
 8. run the complete mutated request and authorized consumed scope-header values through secret and DLP inspection;
-9. apply provider storage policy and, for accounted generation, reserve budget against the larger serialized request;
+9. apply provider storage policy and, for accounted generation or compaction, reserve budget against the larger serialized request;
 10. replace the Hormuz credential with the company provider credential and forward; and
-11. for accounted generation, record provider usage plus content-free pack lineage.
+11. for accounted generation or compaction, record provider usage plus content-free pack lineage.
 
 OpenAI injection changes `input` and leaves top-level `instructions` unchanged. Anthropic injection changes the latest user `messages` content and leaves `system`, including Claude Code's attribution content, unchanged. The deterministic marker and JSON payload carry the pack, record, provenance, verification, policy, retrieval, render, and repository-revision fields. The notice says that records are untrusted reference data and cannot override system, developer, policy, or user instructions.
+
+The same OpenAI renderer is used for `POST /v1/responses/compact` only when the compact request contains direct current-user input. Hormuz leaves `instructions` and provider-specific state fields unchanged. The current [OpenAI compact-response contract](https://developers.openai.com/api/reference/resources/responses/methods/compact) accepts `input` but does not define `max_output_tokens`, so Hormuz never adds the generation-only cap field to compaction. It uses the effective output-token policy cap only as a conservative local budget-reservation allowance and records the provider's actual usage afterward. Because OpenAI does not expose an output-cap field for this operation, Hormuz cannot promise a hard per-request compaction-output ceiling; organizations requiring that guarantee must deny this operation until a provider-enforceable boundary exists. Likewise, Anthropic token-count requests never receive the generation-only `max_tokens` field.
 
 The original request is copied before rendering. An identical Hormuz block is not added twice to the same outbound request.
 
@@ -100,7 +102,7 @@ DLP runs on the rendered request. It can therefore redact a secret found inside 
 
 ## Metadata and privacy
 
-For accounted generation, the usage event stores injection mode, outcome and reason; pack and selected record IDs; policy, retrieval and render versions; repository revision when present; estimated rendered tokens; assembly time; and authoritative fresh/already-present status. Usage exports use schema version 2 for these additive fields. Reports aggregate injected requests, required denials, estimated context tokens, and distinct packs used. Anthropic token-count calls do not create inference-usage rows or consume Hormuz generation budgets. They do commit the same content-free context-read audit, and any DLP finding produces the ordinary metadata-only security evidence.
+For accounted generation and OpenAI compaction, the usage event stores injection mode, outcome and reason; pack and selected record IDs; policy, retrieval and render versions; repository revision when present; estimated rendered tokens; assembly time; and authoritative fresh/already-present status. Usage exports use schema version 2 for these additive fields. Reports aggregate injected requests, required denials, estimated context tokens, and distinct packs used. Anthropic token-count calls do not create inference-usage rows or consume Hormuz generation budgets. They do commit the same content-free context-read audit, and any DLP finding produces the ordinary metadata-only security evidence.
 
 The raw retrieval query, prompt, response, rendered context, record content, title, source URI, source hash, and provider credential are not written to the usage ledger or ordinary logs. The separate context read audit remains content-free and intentionally omits the query and selected record IDs.
 
@@ -111,11 +113,12 @@ Treat record IDs, pack IDs, actor/team attribution, and cost metadata as access-
 This checkpoint deliberately supports only:
 
 - OpenAI `POST /v1/responses` and Anthropic `POST /v1/messages` generation requests;
+- OpenAI `POST /v1/responses/compact` requests containing direct current-user text, with provider-reported compaction usage accounted like other billable OpenAI work;
 - Anthropic `POST /v1/messages/count_tokens`, using the same provider-bound context mutation and post-mutation DLP as generation so the estimate covers the request that Hormuz would send;
 - direct current-user query extraction;
 - verified organization-, team-, and actor-visible records, plus exact administrator-granted repository records selected by repository and optional branch/trusted revision; and
 - fresh deterministic lexical pack assembly on every eligible request.
 
-It does not yet inject into OpenAI compaction, bind tool-only continuations to earlier lineage, infer repository scope from a working directory, cache context packs, claim provider prompt-cache savings, or prove lower cost per verified accepted task. A token-count request with no direct current-user text therefore follows the same optional/required query behavior above; it cannot inherit an earlier turn until the continuation-binding decision is approved and implemented. A repository revision is caller-supplied narrowing checked against trusted lifecycle state, not a source of truth. Local SQLite and the plaintext context codec remain single-node prototype boundaries; hosted tenancy, KMS, HA, retention, and immutable audit are separate decisions and release gates.
+It does not yet bind previous-response-only, compaction-only, or tool-only continuations to earlier lineage, infer repository scope from a working directory, cache context packs, claim provider prompt-cache savings, or prove lower cost per verified accepted task. A compaction or token-count request with no direct current-user text therefore follows the same optional/required query behavior above; it cannot inherit an earlier turn until the continuation-binding decision is approved and implemented. A repository revision is caller-supplied narrowing checked against trusted lifecycle state, not a source of truth. Local SQLite and the plaintext context codec remain single-node prototype boundaries; hosted tenancy, KMS, HA, retention, and immutable audit are separate decisions and release gates.
 
-Pinned installed-client tests prove that ordinary Codex and Claude Code generation requests carry the configured exact scope headers through Hormuz and arrive at provider-compatible fake upstreams with the authorized repository block present but none of the Hormuz headers. Deterministic gateway integration tests separately prove cross-repository/branch/classification exclusion, trusted-revision mismatch behavior, duplicate and ungranted denial, consumed-header DLP, Anthropic token-count parity, required-context denial, store-outage failure, and the no-inference-usage boundary. Those tests establish the bounded compatibility checkpoint; they do not establish every continuation, beta field, provider upgrade, or quality outcome required to close issue #5.
+Pinned installed-client tests prove that ordinary Codex and Claude Code generation requests carry the configured exact scope headers through Hormuz and arrive at provider-compatible fake upstreams with the authorized repository block present but none of the Hormuz headers. Deterministic gateway integration tests separately prove cross-repository/branch/classification exclusion, trusted-revision mismatch behavior, duplicate and ungranted denial, consumed-header DLP, OpenAI direct-query compaction injection and accounting, Anthropic token-count parity, required-context denial, store-outage failure, and the no-inference-usage boundary. The compaction test is protocol-shaped loopback evidence, not an installed Codex or live OpenAI compaction observation. Those tests establish the bounded compatibility checkpoint; they do not establish every continuation, beta field, provider upgrade, or quality outcome required to close issue #5.

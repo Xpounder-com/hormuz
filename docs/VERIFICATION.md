@@ -1545,6 +1545,67 @@ contents, source classification, semantic detection, organization-specific
 threshold approval, shared approval/KMS/HA, immutable retention, future cache
 invalidation, and independent review remain open.
 
+### OpenAI direct-query compaction governance
+
+The OpenAI compaction route, automatic governed-context policy, post-injection
+DLP, budget reservation, provider usage accounting, compatibility contract, and
+bounded residual documentation were exercised locally on August 20, 2026.
+
+- red-first gateway tests proved that `POST /v1/responses/compact` was classified
+  as an unsupported injection operation: required mode still reached the fake
+  provider, a direct-query request lacked the governed pack, and shared output
+  logic added the generation-only `max_output_tokens` field. Anthropic token
+  counting likewise received an unsupported `max_tokens` field;
+- the gateway now treats direct current-user compaction as a supported automatic
+  context operation. It uses the existing OpenAI user-priority renderer, leaves
+  `instructions` unchanged, consumes the same authorized repository selectors,
+  and runs the fully rendered provider body through secret/DLP inspection;
+- a verified organization record containing a configured fake provider secret
+  produced one redaction after injection. The provider-compatible fake received
+  the authorized reference and placeholder but not the secret; the client
+  response, content-free usage event, and SQLite bytes also excluded both the
+  secret and raw query;
+- compaction usage retained the Context Pack and selected-record lineage plus
+  the fake provider request ID and reported 90 input, 25 output, 4 reasoning,
+  and 115 total tokens. A compaction-only opaque input in required mode returned
+  stable HTTP `403` with `no_eligible_query`, made zero provider calls, and
+  recorded only content-free denied metadata;
+- Hormuz no longer sends `max_output_tokens` to compaction or `max_tokens` to
+  Anthropic token counting. For accounted compaction it still reserves the
+  effective 100-token policy allowance locally in addition to serialized input,
+  then replaces the reservation with actual provider usage;
+- the complete suite ran 468 tests successfully with three documented opt-in
+  installed-client/profile tests skipped. The focused compaction, token-count,
+  and compatibility slice ran 15 tests successfully;
+- all seven repository-local incident drills passed. The strict threat contract
+  retained 18 threats, five open threats, seven covered incident scenarios,
+  independent review pending, and `enterprise_release_ready: false`;
+- the strict compatibility contract retained 16 entries, exact Codex `0.147.0`
+  and Claude Code `2.1.233` pins, no verified production persistence or
+  deployment profile, and `enterprise_release_ready: false`; and
+- the frozen 60-task release benchmark retained corpus SHA-256
+  `9822d592868202c7c7539bcdac7d4a5894c01f9e6dba7a434846516b67b32c17`,
+  precision, recall, and useful-pack rate `1.00`, zero authorization, stale,
+  malicious, contradiction-selection, determinism, or token-budget failures,
+  and governed p95 selection latency `0.178917` ms; and
+- isolated source and wheel builds succeeded. A clean Python 3.14 environment
+  installed the built wheel and hash-locked runtime dependencies outside the
+  checkout, loaded `hormuz.server` from `site-packages`, asserted the compaction
+  operation and reservation branch, compiled the installed package, displayed
+  CLI help, passed `pip check`, and passed the installed strict 60-task
+  benchmark with zero failed thresholds. Exact final-commit distribution
+  digests belong in the external PR/CI evidence rather than this self-changing
+  source record.
+
+This closes a policy-composition bypass for direct-query compaction under
+accepted ADR 0006, not issue #5 or provider certification. OpenAI does not
+define a hard output-cap field for compaction, so the effective cap is a local
+reservation allowance rather than a provider-enforced per-request ceiling.
+Previous-response-only, opaque-compaction-only, and tool-only continuation
+binding still requires a separate owner decision. The test uses a
+provider-compatible loopback fake; there is no live OpenAI compaction, installed
+Codex compaction, live Anthropic, provider SLA, or enterprise-readiness claim.
+
 ## Automated publication gate
 
 Ordinary GitHub CI runs eight independent gate families without provider credentials:

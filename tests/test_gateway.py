@@ -86,6 +86,48 @@ class FakeProviderHandler(BaseHTTPRequestHandler):
             self.end_headers()
             return
 
+        if request_path.endswith("/responses/compact"):
+            input_items = body.get("input")
+            if isinstance(input_items, str):
+                input_items = [
+                    {
+                        "type": "message",
+                        "role": "user",
+                        "content": [
+                            {"type": "input_text", "text": input_items}
+                        ],
+                    }
+                ]
+            elif not isinstance(input_items, list):
+                input_items = []
+            self._send_json(
+                {
+                    "id": "resp_compact_test",
+                    "object": "response.compaction",
+                    "created_at": 1_764_967_971,
+                    "output": [
+                        *input_items,
+                        {
+                            "id": "cmp_test",
+                            "type": "compaction",
+                            "encrypted_content": "opaque-test-compaction",
+                        },
+                    ],
+                    "usage": {
+                        "input_tokens": 90,
+                        "input_tokens_details": {
+                            "cached_tokens": 10,
+                            "cache_write_tokens": 5,
+                        },
+                        "output_tokens": 25,
+                        "output_tokens_details": {"reasoning_tokens": 4},
+                        "total_tokens": 115,
+                    },
+                },
+                request_id="req_openai_compact_test",
+            )
+            return
+
         if request_path.endswith("/responses"):
             payload = {
                 "id": "resp_test",
@@ -1956,6 +1998,148 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertTrue(all(str(event["context_pack_id"]).startswith("ctxpack_") for event in usage))
         self.assertNotIn("Fix retry jitter", repr(usage))
         self.assertNotIn(b"Fix retry jitter", self.config.database_path.read_bytes())
+
+    def test_openai_compaction_uses_required_context_without_unsupported_fields(self) -> None:
+        config_value = self._config(self.provider.server_port, _free_port())
+        config_value["policies"]["organization"]["context_injection"] = {
+            "mode": "required",
+            "allowed_clients": ["codex"],
+            "allowed_models": ["engineering-fast"],
+            "token_budget": 500,
+            "max_items": 1,
+        }
+        self._restart_gateway(config_value)
+        identity = self.config.identities_by_actor["alice"]
+        now = datetime.now(timezone.utc)
+        safe_record_content = (
+            "Use bounded compaction checkpoints after tool-heavy milestones."
+        )
+        record_content = (
+            f"{safe_record_content} Never expose this test credential: {OPENAI_KEY}"
+        )
+        self.gateway.context_repository.ingest(
+            ContextRecord(
+                record_id="compaction-checkpoint-standard",
+                record_kind="decision",
+                title="Compaction checkpoint standard",
+                content=record_content,
+                owner_id="platform",
+                organization_id=identity.organization_id,
+                visibility="organization",
+                scope_id=identity.organization_id,
+                classification="internal",
+                source_uri="repo://standards/compaction.md",
+                source_revision="git:compaction-proof",
+                source_sha256="e" * 64,
+                source_item_key="compaction-checkpoint-standard",
+                verification="verified",
+                verification_evidence=("human:approved",),
+                effective_at=now - timedelta(minutes=1),
+                verified_at=now - timedelta(minutes=1),
+                tags=("compaction", "checkpoint"),
+            ),
+            actor_id="alice",
+            policy_version="test-context-v1",
+        )
+        instructions = "Preserve this developer instruction exactly."
+        query = "Compact the tool-heavy compaction checkpoint transcript."
+
+        with mock.patch.object(
+            self.gateway.policy_engine,
+            "reserve_budget",
+            wraps=self.gateway.policy_engine.reserve_budget,
+        ) as reserve_budget:
+            status, headers, response = self._post(
+                "/v1/responses/compact",
+                {
+                    "model": "engineering-fast",
+                    "instructions": instructions,
+                    "input": query,
+                },
+            )
+
+        self.assertEqual(status, 200)
+        self.assertIn("context-injected", headers["x-hormuz-policy-decision"])
+        self.assertIn("redacted", headers["x-hormuz-policy-decision"])
+        self.assertEqual(headers["x-hormuz-redactions"], "1")
+        self.assertTrue(headers["x-hormuz-context-pack"].startswith("ctxpack_"))
+        self.assertEqual(json.loads(response)["object"], "response.compaction")
+        self.assertNotIn(OPENAI_KEY.encode("utf-8"), response)
+        upstream = FakeProviderHandler.requests[-1]
+        self.assertEqual(upstream["path"], "/v1/responses/compact")
+        self.assertEqual(upstream["body"]["model"], "gpt-test-fast")
+        self.assertEqual(upstream["body"]["instructions"], instructions)
+        self.assertNotIn("max_output_tokens", upstream["body"])
+        self.assertNotIn("store", upstream["body"])
+        serialized = json.dumps(upstream["body"])
+        self.assertIn(safe_record_content, serialized)
+        self.assertIn("[REDACTED:HORMUZ_SECRET]", serialized)
+        self.assertNotIn(OPENAI_KEY, serialized)
+        self.assertIn(query, serialized)
+        self.assertEqual(reserve_budget.call_count, 1)
+        expected_reserved_tokens = len(
+            json.dumps(upstream["body"], separators=(",", ":")).encode("utf-8")
+        ) + 100
+        self.assertEqual(
+            reserve_budget.call_args.kwargs["reserved_tokens"],
+            expected_reserved_tokens,
+        )
+        usage = self.gateway.store.audit_events(
+            since="2000-01-01T00:00:00+00:00",
+            kind="usage",
+        )
+        self.assertEqual(len(usage), 1)
+        self.assertEqual(usage[0]["context_injection_mode"], "required")
+        self.assertEqual(usage[0]["context_injection_outcome"], "injected")
+        self.assertEqual(
+            usage[0]["context_record_ids"],
+            ["compaction-checkpoint-standard"],
+        )
+        self.assertEqual(usage[0]["provider_usage"]["total_tokens"], 115)
+        self.assertEqual(usage[0]["provider_request_id"], "req_openai_compact_test")
+        self.assertEqual(usage[0]["redaction_count"], 1)
+        self.assertNotIn(query, repr(usage))
+        self.assertNotIn(query.encode("utf-8"), self.config.database_path.read_bytes())
+        self.assertNotIn(OPENAI_KEY.encode("utf-8"), self.config.database_path.read_bytes())
+
+    def test_required_openai_compaction_without_user_query_stops_before_provider(self) -> None:
+        config_value = self._config(self.provider.server_port, _free_port())
+        config_value["policies"]["organization"]["context_injection"] = {
+            "mode": "required",
+            "allowed_clients": ["codex"],
+            "allowed_models": ["engineering-fast"],
+            "token_budget": 500,
+            "max_items": 1,
+        }
+        self._restart_gateway(config_value)
+        before = len(FakeProviderHandler.requests)
+
+        status, _, response = self._post(
+            "/v1/responses/compact",
+            {
+                "model": "engineering-fast",
+                "input": [
+                    {
+                        "type": "compaction",
+                        "encrypted_content": "opaque-client-compaction",
+                    }
+                ],
+            },
+        )
+
+        self.assertEqual(status, 403)
+        self.assertEqual(len(FakeProviderHandler.requests), before)
+        self.assertEqual(
+            json.loads(response)["error"]["code"],
+            "hormuz_context_required",
+        )
+        usage = self.gateway.store.audit_events(
+            since="2000-01-01T00:00:00+00:00",
+            kind="usage",
+        )
+        self.assertEqual(len(usage), 1)
+        self.assertEqual(usage[0]["context_injection_outcome"], "denied")
+        self.assertEqual(usage[0]["context_injection_reason"], "no_eligible_query")
 
     def test_repository_grant_selectors_and_classification_scope_both_provider_paths(self) -> None:
         config_value = self._config(self.provider.server_port, _free_port())
@@ -4441,6 +4625,7 @@ class GatewayIntegrationTests(unittest.TestCase):
             "/v1/messages/count_tokens",
         )
         self.assertEqual(upstream["body"]["model"], "claude-test")
+        self.assertNotIn("max_tokens", upstream["body"])
         self.assertEqual(upstream["body"]["system"], system)
         provider_body = json.dumps(upstream["body"])
         redaction_count = int(headers["x-hormuz-redactions"])

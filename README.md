@@ -10,7 +10,8 @@ Hormuz is alpha software. The local prototype proves routing and policy behavior
 
 ## What works
 
-- OpenAI-compatible `POST /v1/responses` proxying, including streaming.
+- OpenAI-compatible `POST /v1/responses` proxying, including streaming, plus
+  `POST /v1/responses/compact` compaction relay.
 - Anthropic-compatible `POST /v1/messages`, `/v1/messages/count_tokens`, and streaming.
 - Provider model IDs by default, preserving native client model behavior; optional company aliases remain supported.
 - Authenticated Claude Code model discovery that exposes only Claude-compatible aliases allowed by the employee's effective policy, without calling a provider or creating usage charges.
@@ -31,7 +32,7 @@ Hormuz is alpha software. The local prototype proves routing and policy behavior
 - Opt-in, capability-gated lifecycle automation that promotes provisional records through configured merge, CI, review, ADR, incident, human, or validated-failure evidence; invalidates them on newer negative evidence or changed trusted source state; and runs in resumable, lease-safe, tenant-scoped batches.
 - Config-independent `hormuz lifecycle` connector commands and authenticated evidence/snapshot/revalidation HTTP endpoints for trusted CI workloads, with server-owned organization scope, strict versioned schemas, idempotent retries, and metadata-only responses.
 - Explicit, provider-neutral governed context packs retrieved authorization-first from that repository, with versioned retrieval/render contracts, explicit authorized freshness/provisional exclusions, expiry, supersession, trusted dependency snapshots, prompt-injection quarantine, structured contradiction outcomes, deterministic lexical ranking, and token-budget enforcement.
-- Disabled-by-default automatic injection of verified organization/team/person Context Packs into user-priority OpenAI Responses and Anthropic Messages content, including Anthropic token counts and exact administrator-granted repository/branch/trusted-revision selection through the official clients, with monotonic repository/classification/model caps, consumed-header DLP, generation-budget accounting, and metadata-only pack lineage.
+- Disabled-by-default automatic injection of verified organization/team/person Context Packs into user-priority OpenAI Responses, direct-query OpenAI compaction, and Anthropic Messages content, including Anthropic token counts and exact administrator-granted repository/branch/trusted-revision selection through the official clients, with monotonic repository/classification/model caps, consumed-header DLP, accounted compaction/generation usage, and metadata-only pack lineage.
 - Authenticated `POST /v1/context/packs` retrieval with identity-derived scope, server-owned caps, per-actor rate limiting, stable errors, and no provider or usage-ledger side effects.
 - A real `hormuz_get_context` MCP stdio tool for Codex and Claude Code that reuses the authenticated Context Pack API, supports current and next-generation MCP handshakes, and cannot override employee identity or organization policy.
 - An opt-in local macOS proof in which pinned stock Codex and Claude Code binaries authenticate inference through a real Keychain-backed Hormuz profile, execute a model-requested `hormuz_get_context` call through the same profile, and return the authorized pack without receiving the provider credential.

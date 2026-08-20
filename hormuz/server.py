@@ -2275,6 +2275,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             ), {}
         if operation not in {
             "/v1/responses",
+            "/v1/responses/compact",
             "/v1/messages",
             "/v1/messages/count_tokens",
         }:
@@ -2437,6 +2438,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         request_body = self._read_json_body()
         if request_body is None:
             return
+        operation = urlsplit(self.path).path
         requested_model = request_body.get("model")
         if not isinstance(requested_model, str) or not requested_model.strip():
             self._send_protocol_error(protocol, "Request field model must be a non-empty string", HTTPStatus.BAD_REQUEST)
@@ -2449,9 +2451,16 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 HTTPStatus.BAD_REQUEST,
             )
             return
-        output_field = "max_output_tokens" if protocol == "openai" else "max_tokens"
-        requested_output = request_body.get(output_field)
-        if requested_output is not None and (
+        output_field = {
+            "/v1/responses": "max_output_tokens",
+            "/v1/messages": "max_tokens",
+        }.get(operation)
+        requested_output = (
+            request_body.get(output_field)
+            if output_field is not None
+            else None
+        )
+        if output_field is not None and requested_output is not None and (
             isinstance(requested_output, bool) or not isinstance(requested_output, int) or requested_output <= 0
         ):
             self._send_protocol_error(protocol, f"Request field {output_field} must be a positive integer", HTTPStatus.BAD_REQUEST)
@@ -2493,7 +2502,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             return
 
         request_body["model"] = decision.route.upstream_model
-        if decision.max_output_tokens is not None:
+        if output_field is not None and decision.max_output_tokens is not None:
             current_output = request_body.get(output_field)
             if current_output is None or current_output > decision.max_output_tokens:
                 request_body[output_field] = decision.max_output_tokens
@@ -2503,7 +2512,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 protocol=protocol,
                 client=client,
                 resolved_alias=decision.resolved_alias or requested_model,
-                operation=urlsplit(self.path).path,
+                operation=operation,
                 request_body=request_body,
             )
         except (ContextError, ContextStoreError, sqlite3.Error):
@@ -2625,7 +2634,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 )
                 try:
                     approval_material = {
-                        "operation": urlsplit(self.path).path,
+                        "operation": operation,
                         "payload": redaction.value,
                         "provider_headers": forwarded_headers,
                     }
@@ -2825,7 +2834,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             return
 
         upstream = self.server.config.upstreams[protocol]
-        is_responses_create = protocol == "openai" and urlsplit(self.path).path == "/v1/responses"
+        is_responses_create = protocol == "openai" and operation == "/v1/responses"
         if (
             is_responses_create
             and redaction.value.get("background") is True
@@ -2877,7 +2886,15 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         body = json.dumps(redaction.value, separators=(",", ":")).encode("utf-8")
         reservation_id: str | None = None
         if account_usage:
-            reserved_output_tokens = redaction.value.get(output_field, 0)
+            reserved_output_tokens = (
+                redaction.value.get(output_field, 0)
+                if output_field is not None
+                else (
+                    decision.max_output_tokens or 0
+                    if operation == "/v1/responses/compact"
+                    else 0
+                )
+            )
             if not isinstance(reserved_output_tokens, int) or isinstance(reserved_output_tokens, bool):
                 reserved_output_tokens = 0
             reserved_input_tokens = len(body)
