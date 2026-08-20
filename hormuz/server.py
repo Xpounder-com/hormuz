@@ -291,6 +291,7 @@ class GatewayServer(ThreadingHTTPServer):
         self._connections: set[socket.socket] = set()
         self._header_deadlines: dict[socket.socket, float] = {}
         self._header_watchdog_stopped = False
+        self._header_watchdog: threading.Thread | None = None
         self._last_connection_capacity_log: float | None = None
         self._suppressed_connection_capacity_logs = 0
         self._last_body_deadline_log: float | None = None
@@ -404,7 +405,8 @@ class GatewayServer(ThreadingHTTPServer):
             except OSError:
                 pass
         super().server_close()
-        self._header_watchdog.join(timeout=1)
+        if self._header_watchdog is not None:
+            self._header_watchdog.join(timeout=1)
 
     def handle_error(
         self,

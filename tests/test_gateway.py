@@ -573,6 +573,35 @@ class ProviderQueryInspectionTests(unittest.TestCase):
             _provider_query_inspection_strings("feature=%25FF")
 
 
+class GatewayConstructionTests(unittest.TestCase):
+    def test_bind_failure_preserves_socket_error_during_partial_cleanup(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = Path(__file__).resolve().parents[1] / "config.example.json"
+            raw = json.loads(source.read_text(encoding="utf-8"))
+            raw["listen"]["port"] = 8787
+            raw["database"] = str(root / "usage.sqlite3")
+            raw["context_database"] = str(root / "context.sqlite3")
+            path = root / "gateway.json"
+            path.write_text(json.dumps(raw), encoding="utf-8")
+            environment = {
+                "HORMUZ_TOKEN": GATEWAY_TOKEN,
+                "OPENAI_API_KEY": OPENAI_KEY,
+                "ANTHROPIC_API_KEY": ANTHROPIC_KEY,
+            }
+            config = GatewayConfig.load(path, environ=environment)
+
+            with (
+                mock.patch.dict(os.environ, environment),
+                mock.patch(
+                    "socketserver.TCPServer.server_bind",
+                    side_effect=PermissionError("bind blocked"),
+                ),
+                self.assertRaisesRegex(PermissionError, "bind blocked"),
+            ):
+                GatewayServer(config)
+
+
 class GatewayIntegrationTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()

@@ -1392,13 +1392,45 @@ The test refuses to run outside macOS or without the explicit opt-in flags.
 It writes only transient test sessions to Keychain and deletes them on success
 or failure.
 
-The live OpenAI check requires an ignored credential file or secret-manager injection. Start Hormuz with credentials in its environment, configure Codex using [CLIENTS.md](CLIENTS.md), request a fixed marker, then verify metadata with:
+The live-provider check requires an ignored credential file or secret-manager
+injection. The reusable content-free command and its claim boundary are defined
+in [PROVIDER_CONFORMANCE.md](PROVIDER_CONFORMANCE.md). For OpenAI, start the
+loopback example with the provider credential only in the Hormuz process, then
+run:
 
 ```bash
-hormuz --config hormuz.json status --json
+hormuz provider-conformance \
+  --provider openai \
+  --gateway http://127.0.0.1:8791 \
+  --allow-insecure-http \
+  --credential-env HORMUZ_CONFORMANCE_TOKEN \
+  --model openai-live-luna \
+  --max-output-tokens 16 \
+  --output /tmp/hormuz-openai-conformance.json
 ```
 
 Never add real provider or employee credentials to this record.
+
+One bounded OpenAI observation completed on local evening August 19, 2026. The
+request traversed Hormuz `POST /v1/responses`, the policy alias routed to
+`gpt-5.6-luna`, the fixed marker and provider usage were verified, and Hormuz
+recorded 20 input tokens, 10 output tokens, 30 billable tokens, and an estimated
+`$0.000016` cost under the example rate card. The generated evidence was mode
+`0600`; exact-value scans found neither credential in it or the gateway log, and
+the marker was absent from the evidence. The checked-in content-free artifact is
+[`evidence/provider-conformance-openai-2026-08-19.json`](../evidence/provider-conformance-openai-2026-08-19.json).
+This does not claim Anthropic live conformance, provider SLA/retention/residency,
+or production readiness; the combined compatibility flag remains false.
+
+The same live gateway was then exercised by the pinned stock Codex CLI `0.147.0`
+with `OPENAI_API_KEY` explicitly removed from the client environment. Codex
+received only the generated Hormuz employee credential, exited zero, and
+returned its fixed marker. Hormuz recorded 12,332 input tokens, 9 output tokens,
+12,341 billable tokens, 2,029 milliseconds gateway latency, and an estimated
+`$0.002477` cost while enforcing the 16-token organization output cap. Exact
+credential scans of Codex stdout, stderr, and the gateway log were negative. The
+content-free observation is
+[`evidence/codex-openai-live-2026-08-19.json`](../evidence/codex-openai-live-2026-08-19.json).
 
 ## Automated publication gate
 

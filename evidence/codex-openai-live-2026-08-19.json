@@ -1,0 +1,40 @@
+{
+  "actual_model": "gpt-5.6-luna",
+  "assurances": {
+    "client_marker_verified": true,
+    "client_output_retained": false,
+    "employee_credential_retained": false,
+    "gateway_policy_verified": true,
+    "gateway_url_retained": false,
+    "prompt_retained": false,
+    "provider_credential_removed_from_client_environment": true,
+    "provider_credential_retained": false,
+    "provider_response_retained": false
+  },
+  "client": {
+    "name": "OpenAI Codex CLI",
+    "version": "0.147.0"
+  },
+  "client_exit_code": 0,
+  "generated_at": "2026-08-20T03:52:21.558667+00:00",
+  "gateway_interface": "POST /v1/responses",
+  "latency": {
+    "gateway_milliseconds": 2029,
+    "provider_milliseconds": 2020
+  },
+  "policy_decision": "allowed",
+  "provider": "openai",
+  "requested_model": "openai-live-luna",
+  "routed_model": "gpt-5.6-luna",
+  "schema_version": "hormuz.installed-client-live-observation.v1",
+  "status": "verified",
+  "usage": {
+    "billable_tokens": 12341,
+    "cache_read_tokens": 0,
+    "cache_write_tokens": 0,
+    "estimated_cost_microusd": 2477,
+    "input_tokens": 12332,
+    "output_tokens": 9,
+    "reasoning_tokens": 0
+  }
+}

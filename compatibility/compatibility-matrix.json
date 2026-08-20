@@ -147,17 +147,20 @@
         "support_level": "protocol_tested",
         "production_supported": false,
         "tested_environments": [
-          "loopback protocol-shaped fake OpenAI provider"
+          "loopback protocol-shaped fake OpenAI provider",
+          "opt-in macOS 26.2 arm64 live OpenAI observation on 2026-08-19"
         ],
         "interfaces": [
           "POST /v1/responses"
         ],
         "evidence": [
           "hormuz/server.py#/v1/responses",
-          "tests/test_gateway.py#test_openai_request_falls_back_caps_and_never_forwards_employee_token"
+          "tests/test_gateway.py#test_openai_request_falls_back_caps_and_never_forwards_employee_token",
+          "evidence/provider-conformance-openai-2026-08-19.json",
+          "evidence/codex-openai-live-2026-08-19.json"
         ],
         "limitations": [
-          "No live OpenAI endpoint conformance or provider-SLA evidence is included.",
+          "The blocking release gate remains a local fake; the two content-free artifacts record one opt-in live endpoint and pinned Codex observation, not a provider SLA, retention, residency, availability, or every-model claim.",
           "The implemented /v1/responses/compact route is not part of this release-tested compatibility claim."
         ]
       },
@@ -200,7 +203,7 @@
           "docs/VERIFICATION.md#Reproduce locally"
         ],
         "limitations": [
-          "Repository CI uses no live provider credential and proves no live vendor behavior, quota, retention, residency, or availability commitment."
+          "Repository CI uses no live provider credential. One opt-in OpenAI observation does not prove combined OpenAI and Anthropic behavior, quota, retention, residency, or availability commitments."
         ]
       }
     ],
