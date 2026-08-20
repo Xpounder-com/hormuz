@@ -60,6 +60,9 @@ from .context_store import (
 )
 from .dlp_approval import DLPApprovalError, payload_fingerprint
 from .policy import PolicyDecision, PolicyEngine
+from .identity_projection import configured_organization_ids, verify_runtime_identity_projection
+from .postgres import PostgresStorageError, postgres_dsn_from_env
+from .postgres_session_store import PostgresSessionStore
 from .redaction import RedactionError, SecretRedactor
 from .session import SessionBroker, SessionBrokerError
 from .session_store import (
@@ -303,15 +306,39 @@ class GatewayServer(ThreadingHTTPServer):
         self.session_broker: SessionBroker | None = None
         if config.session_broker.enabled:
             session_config = config.session_broker
-            if session_config.database_path is None:
-                raise SessionStoreError("session_store_path_missing")
-            session_store = SQLiteSessionStore(
-                session_config.database_path,
-                master_key=session_config.master_key,
-                access_ttl_seconds=session_config.access_ttl_seconds,
-                absolute_ttl_seconds=session_config.absolute_ttl_seconds,
-                enrollment_ttl_seconds=session_config.enrollment_ttl_seconds,
-            )
+            if session_config.backend == "postgresql":
+                try:
+                    dsn = postgres_dsn_from_env(
+                        dsn_env=config.usage_storage.postgres_dsn_env
+                    )
+                    verify_runtime_identity_projection(
+                        config,
+                        dsn,
+                        schema=config.usage_storage.postgres_schema,
+                        runtime_role=config.usage_storage.postgres_runtime_role,
+                    )
+                    session_store = PostgresSessionStore(
+                        dsn,
+                        organization_ids=configured_organization_ids(config),
+                        master_key=session_config.master_key,
+                        access_ttl_seconds=session_config.access_ttl_seconds,
+                        absolute_ttl_seconds=session_config.absolute_ttl_seconds,
+                        enrollment_ttl_seconds=session_config.enrollment_ttl_seconds,
+                        schema=config.usage_storage.postgres_schema,
+                        runtime_role=config.usage_storage.postgres_runtime_role,
+                    )
+                except PostgresStorageError as error:
+                    raise SessionStoreError(error.code) from None
+            else:
+                if session_config.database_path is None:
+                    raise SessionStoreError("session_store_path_missing")
+                session_store = SQLiteSessionStore(
+                    session_config.database_path,
+                    master_key=session_config.master_key,
+                    access_ttl_seconds=session_config.access_ttl_seconds,
+                    absolute_ttl_seconds=session_config.absolute_ttl_seconds,
+                    enrollment_ttl_seconds=session_config.enrollment_ttl_seconds,
+                )
             self.session_broker = SessionBroker(config, self.authenticator, session_store)
         self.store = gateway_store(config)
         self.context_repository = SQLiteContextRepository(config.context_database_path)
@@ -1153,7 +1180,9 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         request = self._read_json_body(max_bytes=MAX_AUTH_REQUEST_BYTES)
         if request is None:
             return
-        unknown = sorted(set(request) - {"issuer", "client", "enrollment_secret"})
+        unknown = sorted(
+            set(request) - {"issuer", "organization_id", "client", "enrollment_secret"}
+        )
         if unknown:
             self._send_error(
                 "invalid_enrollment_request",
@@ -1169,6 +1198,14 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 HTTPStatus.BAD_REQUEST,
             )
             return
+        organization_id = request.get("organization_id")
+        if organization_id is not None and not isinstance(organization_id, str):
+            self._send_error(
+                "invalid_enrollment_request",
+                "organization_id must be a string when provided",
+                HTTPStatus.BAD_REQUEST,
+            )
+            return
         client = request.get("client")
         enrollment_secret = request.get("enrollment_secret")
         if not isinstance(client, str) or not isinstance(enrollment_secret, str):
@@ -1181,6 +1218,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         try:
             enrollment, login_url = broker.create_enrollment(
                 issuer_name=issuer,
+                organization_id=organization_id,
                 client_name=client,
                 enrollment_secret=enrollment_secret,
             )

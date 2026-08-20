@@ -1,9 +1,8 @@
 """Versioned PostgreSQL tenancy foundation and fail-closed RLS helpers.
 
-The gateway still uses SQLite repositories for its local alpha execution path.
-This module establishes the accepted hosted PostgreSQL security boundary without
-silently claiming that the usage, session, or context repositories have already
-been ported.
+The opt-in gateway path uses PostgreSQL for usage/accounting and human sessions.
+DLP approvals and governed context remain SQLite-backed, so this module is a
+bounded persistence slice rather than a completed hosted storage plane.
 """
 
 from __future__ import annotations
@@ -17,7 +16,7 @@ import re
 from typing import Any, Callable, Iterator, Protocol
 
 
-POSTGRES_SCHEMA_VERSION = 2
+POSTGRES_SCHEMA_VERSION = 3
 DEFAULT_POSTGRES_DSN_ENV = "HORMUZ_POSTGRES_DSN"
 DEFAULT_POSTGRES_SCHEMA = "hormuz"
 DEFAULT_POSTGRES_RUNTIME_ROLE = "hormuz_runtime"
@@ -50,9 +49,25 @@ TENANT_TABLES = (
     "gateway_provider_cost_imports",
     "gateway_provider_cost_items",
     "gateway_provider_cost_sources",
+    "gateway_identity_projections",
+    "gateway_principal_projections",
+    "gateway_session_enrollments",
+    "gateway_human_sessions",
+    "gateway_consumed_refresh_credentials",
+    "gateway_session_security_events",
 )
 
-RUNTIME_READ_ONLY_TABLES = ("tenants",)
+RUNTIME_READ_ONLY_TABLES = (
+    "tenants",
+    "teams",
+    "principals",
+    "external_identities",
+    "roles",
+    "role_capabilities",
+    "team_memberships",
+    "gateway_identity_projections",
+    "gateway_principal_projections",
+)
 RUNTIME_MUTABLE_TABLES = tuple(
     table for table in TENANT_TABLES if table not in RUNTIME_READ_ONLY_TABLES
 )
@@ -96,6 +111,38 @@ ACCOUNTING_TABLE_COLUMNS = {
     "gateway_provider_cost_sources": (
         "tenant_id", "id", "import_id", "observed_at", "source_kind",
         "api_contract", "query_start", "query_end", "query_scope",
+    ),
+}
+
+IDENTITY_SESSION_TABLE_COLUMNS = {
+    "gateway_identity_projections": (
+        "tenant_id", "projection_sha256", "applied_at",
+    ),
+    "gateway_principal_projections": (
+        "tenant_id", "principal_id", "projection_sha256", "actor_name",
+        "team_id", "team_name", "clearance", "allowed_clients_json",
+        "capabilities_json", "applied_at",
+    ),
+    "gateway_session_enrollments": (
+        "tenant_id", "id", "secret_hash", "issuer", "client_name", "status",
+        "state_hash", "browser_cookie_hash", "encrypted_flow", "subject",
+        "actor_id", "team_id", "clearance", "authorization_version",
+        "created_at", "expires_at", "authorization_started_at", "authorized_at",
+        "redeemed_at",
+    ),
+    "gateway_human_sessions": (
+        "tenant_id", "id", "issuer", "subject", "client_name", "access_hash",
+        "refresh_hash", "access_expires_at", "absolute_expires_at", "generation",
+        "created_at", "refreshed_at", "actor_id", "team_id", "clearance",
+        "authorization_version", "revoked_at",
+    ),
+    "gateway_consumed_refresh_credentials": (
+        "tenant_id", "credential_hash", "session_id", "consumed_at", "expires_at",
+    ),
+    "gateway_session_security_events": (
+        "tenant_id", "id", "occurred_at", "session_id", "event_type",
+        "target_actor_id", "target_team_id", "decision_actor_id", "decision_scope",
+        "reason_code",
     ),
 }
 
@@ -364,9 +411,14 @@ def _grant_runtime_access(cursor: _Cursor, schema: str, runtime_role: str) -> No
     cursor.execute(f"REVOKE CREATE ON SCHEMA {quoted_schema} FROM PUBLIC")
     cursor.execute(f"REVOKE ALL ON SCHEMA {quoted_schema} FROM {quoted_role}")
     cursor.execute(f"GRANT USAGE ON SCHEMA {quoted_schema} TO {quoted_role}")
-    cursor.execute(
-        f"GRANT SELECT ON TABLE {quoted_schema}.tenants TO {quoted_role}"
+    all_tables = ", ".join(
+        f"{quoted_schema}.{_quote_identifier(table)}" for table in TENANT_TABLES
     )
+    cursor.execute(f"REVOKE ALL ON TABLE {all_tables} FROM {quoted_role}")
+    read_only = ", ".join(
+        f"{quoted_schema}.{_quote_identifier(table)}" for table in RUNTIME_READ_ONLY_TABLES
+    )
+    cursor.execute(f"GRANT SELECT ON TABLE {read_only} TO {quoted_role}")
     mutable = ", ".join(
         f"{quoted_schema}.{_quote_identifier(table)}" for table in RUNTIME_MUTABLE_TABLES
     )
@@ -403,15 +455,14 @@ def _verify_foundation(cursor: _Cursor, schema: str, runtime_role: str) -> None:
         if row[3] != migration_role:
             raise PostgresStorageError("migration_role_does_not_own_tenant_table")
 
+    exact_columns = {**ACCOUNTING_TABLE_COLUMNS, **IDENTITY_SESSION_TABLE_COLUMNS}
     cursor.execute(
         "SELECT table_name, column_name FROM information_schema.columns "
         "WHERE table_schema = %s AND table_name = ANY(%s) "
         "ORDER BY table_name, ordinal_position",
-        (schema, list(ACCOUNTING_TABLE_COLUMNS)),
+        (schema, list(exact_columns)),
     )
-    accounting_columns: dict[str, list[str]] = {
-        table: [] for table in ACCOUNTING_TABLE_COLUMNS
-    }
+    accounting_columns: dict[str, list[str]] = {table: [] for table in exact_columns}
     for row in cursor.fetchall():
         if not isinstance(row, (tuple, list)) or len(row) != 2:
             raise PostgresStorageError("accounting_table_columns_invalid")
@@ -420,7 +471,7 @@ def _verify_foundation(cursor: _Cursor, schema: str, runtime_role: str) -> None:
             accounting_columns[table].append(str(row[1]))
     if any(
         tuple(accounting_columns[table]) != expected
-        for table, expected in ACCOUNTING_TABLE_COLUMNS.items()
+        for table, expected in exact_columns.items()
     ):
         raise PostgresStorageError("accounting_table_columns_invalid")
 
@@ -517,7 +568,7 @@ def _verify_foundation(cursor: _Cursor, schema: str, runtime_role: str) -> None:
     for table, values in privileges.items():
         expected_dml = (
             (True, False, False, False)
-            if table == "tenants"
+            if table in RUNTIME_READ_ONLY_TABLES
             else (True, True, True, True)
         )
         if values[:4] != expected_dml or values[4:] != (False, False, False):

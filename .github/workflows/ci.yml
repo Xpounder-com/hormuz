@@ -142,6 +142,7 @@ jobs:
           "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" auth token --help
           "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" storage migrate --help
           "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" storage verify --help
+          "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" identities sync --help
           "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" dlp evaluate --help
           "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" dlp approval show --help
           "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" dlp approval approve --help

@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import base64
+from datetime import datetime, timezone
 import json
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 from hormuz.config import ConfigError, GatewayConfig
-from hormuz.session import SessionBrokerError, _build_authorization_url
+from hormuz.auth import Authenticator
+from hormuz.session import SessionBroker, SessionBrokerError, _build_authorization_url
+from hormuz.session_store import Enrollment
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -77,6 +81,28 @@ class SessionConfigurationTests(unittest.TestCase):
         self.assertNotIn(self.environ["OIDC_CLIENT_SECRET"], representation)
         self.assertNotIn(self.environ["SESSION_MASTER_KEY"], representation)
 
+    def test_postgresql_usage_defaults_sessions_to_shared_postgresql(self) -> None:
+        self.raw["usage_storage"] = {
+            "backend": "postgresql",
+            "postgres_dsn_env": "HORMUZ_POSTGRES_DSN",
+        }
+        self.raw["authentication"]["session_broker"].pop("database")
+        config = self._load()
+        self.assertEqual(config.session_broker.backend, "postgresql")
+        self.assertIsNone(config.session_broker.database_path)
+
+        self.raw["authentication"]["session_broker"]["database"] = "./sessions.sqlite3"
+        with self.assertRaisesRegex(ConfigError, "only valid for the sqlite backend"):
+            self._load()
+
+        self.raw["authentication"]["session_broker"]["backend"] = "sqlite"
+        config = self._load()
+        self.assertEqual(config.session_broker.backend, "sqlite")
+        self.assertEqual(
+            config.session_broker.database_path,
+            (self.root / "sessions.sqlite3").resolve(),
+        )
+
     def test_master_key_lifetimes_transport_and_database_are_fail_closed(self) -> None:
         cases = (
             ("missing_key", "Required session broker master key"),
@@ -132,6 +158,44 @@ class SessionConfigurationTests(unittest.TestCase):
                     str(captured.exception),
                 )
                 self.assertNotIn(sentinel, str(captured.exception))
+
+    def test_multi_organization_issuer_requires_explicit_tenant_binding(self) -> None:
+        issuer = self.raw["authentication"]["oidc"]["issuers"][0]
+        second = dict(issuer["subjects"][0])
+        second.update(
+            {
+                "subject": "stable-bob",
+                "actor_id": "bob",
+                "actor_name": "Bob Example",
+                "team_id": "engineering-other",
+                "team_name": "Engineering Other",
+                "organization_id": "another-tenant",
+            }
+        )
+        issuer["subjects"].append(second)
+        config = self._load()
+        store = mock.Mock()
+        store.create_enrollment.return_value = Enrollment(
+            enrollment_id="e" * 24,
+            issuer="https://identity.example",
+            client_name="codex",
+            expires_at=datetime.now(timezone.utc),
+            organization_id="xpounder",
+        )
+        broker = SessionBroker(config, Authenticator(config), store)
+        with self.assertRaisesRegex(SessionBrokerError, "organization_required"):
+            broker.create_enrollment(
+                issuer_name="https://identity.example",
+                client_name="codex",
+                enrollment_secret="s" * 32,
+            )
+        broker.create_enrollment(
+            issuer_name="https://identity.example",
+            organization_id="xpounder",
+            client_name="codex",
+            enrollment_secret="s" * 32,
+        )
+        self.assertEqual(store.create_enrollment.call_args.kwargs["organization_id"], "xpounder")
 
     def test_authorization_endpoint_query_is_preserved_without_reserved_override(self) -> None:
         url = _build_authorization_url(

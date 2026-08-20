@@ -74,6 +74,7 @@ from .mcp import (
     validate_gateway_url,
 )
 from .policy import PolicyEngine
+from .identity_projection import sync_identity_projection
 from .postgres import (
     DEFAULT_POSTGRES_DSN_ENV,
     DEFAULT_POSTGRES_RUNTIME_ROLE,
@@ -96,6 +97,7 @@ from .session_client import (
     logout as session_logout,
     validate_session_gateway,
 )
+from .session_store import SessionStoreError
 from .session_admin_client import SessionAdminClient, SessionAdminClientError
 from .store_router import gateway_store
 from .usage_admin_client import UsageAdminClient, UsageAdminClientError
@@ -159,6 +161,23 @@ def build_parser() -> argparse.ArgumentParser:
                 f"(default: {DEFAULT_POSTGRES_RUNTIME_ROLE})"
             ),
         )
+
+    identities = subparsers.add_parser(
+        "identities",
+        help="Synchronize configuration-seeded identity desired state",
+    )
+    identity_subparsers = identities.add_subparsers(
+        dest="identities_command",
+        required=True,
+    )
+    identity_sync = identity_subparsers.add_parser(
+        "sync",
+        help="Apply configured organizations, people, teams, and OIDC mappings",
+    )
+    identity_sync.add_argument(
+        "--dsn-env",
+        help="Owner PostgreSQL DSN environment (default: configured PostgreSQL DSN environment)",
+    )
     status = subparsers.add_parser("status", help="Print a current-month usage and cost report")
     status.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
     status.add_argument(
@@ -335,6 +354,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="AI client bound to this session (default: codex)",
     )
     login_parser.add_argument("--issuer", help="OIDC issuer URL; required when multiple login issuers exist")
+    login_parser.add_argument(
+        "--organization",
+        help="Organization ID; required only when one issuer serves multiple organizations",
+    )
     login_parser.add_argument("--no-open", action="store_true", help="Print the login URL instead of opening a browser")
     login_parser.add_argument(
         "--wait-seconds",
@@ -1079,6 +1102,15 @@ def main(argv: list[str] | None = None) -> int:
         )
         if args.command == "serve":
             return _serve(config)
+        if args.command == "identities":
+            dsn_env = args.dsn_env or config.usage_storage.postgres_dsn_env
+            result = sync_identity_projection(
+                config,
+                postgres_dsn_from_env(dsn_env=dsn_env),
+                schema=config.usage_storage.postgres_schema,
+            )
+            print(json.dumps(result.to_dict(), sort_keys=True, separators=(",", ":")))
+            return 0
         if args.command == "doctor":
             return _doctor(config)
         if args.command == "status":
@@ -1136,6 +1168,9 @@ def main(argv: list[str] | None = None) -> int:
     except PostgresStorageError as error:
         print(f"PostgreSQL storage error: {error.code}", file=sys.stderr)
         return 2
+    except SessionStoreError as error:
+        print(f"session store error: {error.code}", file=sys.stderr)
+        return 2
     except KeyboardInterrupt:
         return 130
     return 2
@@ -1178,7 +1213,10 @@ def _serve(config: GatewayConfig) -> int:
         print(f"Usage and security database: {config.database_path}")
     print(f"Context database: {config.context_database_path}")
     if config.session_broker.enabled:
-        print(f"Session database: {config.session_broker.database_path}")
+        if config.session_broker.backend == "postgresql":
+            print("Session database: PostgreSQL (shared runtime storage)")
+        else:
+            print(f"Session database: {config.session_broker.database_path}")
 
     def stop(_signum, _frame):
         # BaseServer.shutdown() deadlocks when called from the same thread as
@@ -2255,6 +2293,7 @@ def _session_login_command(args: argparse.Namespace) -> int:
             profile=args.profile,
             client=args.client,
             issuer=args.issuer,
+            organization=args.organization,
             no_open=args.no_open,
             allow_insecure_http=args.allow_insecure_http,
             wait_seconds=args.wait_seconds,

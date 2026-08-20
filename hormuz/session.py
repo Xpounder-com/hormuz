@@ -10,7 +10,7 @@ import urllib.parse
 import urllib.request
 from dataclasses import replace
 from datetime import datetime
-from typing import Any
+from typing import Any, Protocol
 
 from .auth import AuthenticationError, Authenticator, _validate_remote_url
 from .config import GatewayConfig, Identity
@@ -41,6 +41,10 @@ class SessionBrokerError(RuntimeError):
         self.code = code
 
 
+class SessionStore(Protocol):
+    def create_enrollment(self, **kwargs: object) -> Enrollment: ...
+
+
 class SessionBroker:
     """OIDC authorization-code broker backed by opaque Hormuz credentials."""
 
@@ -48,7 +52,7 @@ class SessionBroker:
         self,
         config: GatewayConfig,
         authenticator: Authenticator,
-        store: SQLiteSessionStore,
+        store: SQLiteSessionStore | SessionStore,
     ):
         if not config.session_broker.enabled or config.session_broker.public_base_url is None:
             raise SessionBrokerError("session_broker_disabled")
@@ -61,6 +65,7 @@ class SessionBroker:
         self,
         *,
         issuer_name: str | None,
+        organization_id: str | None = None,
         client_name: str,
         enrollment_secret: str,
     ) -> tuple[Enrollment, str]:
@@ -77,10 +82,25 @@ class SessionBroker:
             issuer = self.config.oidc_issuers.get(issuer_name)
             if issuer is None or issuer.login is None:
                 raise SessionBrokerError("login_issuer_unavailable")
+        organizations = sorted(
+            {
+                identity.organization_id
+                for (configured_issuer, _subject), identity
+                in self.config.identities_by_subject.items()
+                if configured_issuer == issuer.issuer
+            }
+        )
+        if organization_id is None:
+            if len(organizations) != 1:
+                raise SessionBrokerError("organization_required")
+            organization_id = organizations[0]
+        elif organization_id not in organizations:
+            raise SessionBrokerError("organization_not_configured_for_issuer")
         enrollment = self.store.create_enrollment(
             issuer=issuer.issuer,
             client_name=client_name,
             enrollment_secret=enrollment_secret,
+            organization_id=organization_id,
         )
         login_url = (
             self.config.session_broker.public_base_url
@@ -90,7 +110,12 @@ class SessionBroker:
         return enrollment, login_url
 
     def begin_authorization(self, enrollment_id: str) -> tuple[str, str]:
-        state = secrets.token_urlsafe(32)
+        state_factory = getattr(self.store, "new_authorization_state", None)
+        state = (
+            state_factory(enrollment_id)
+            if callable(state_factory)
+            else secrets.token_urlsafe(32)
+        )
         browser_cookie = secrets.token_urlsafe(32)
         nonce = secrets.token_urlsafe(32)
         verifier = secrets.token_urlsafe(64)
@@ -183,6 +208,8 @@ class SessionBroker:
                 identity.allowed_clients and flow.client_name not in identity.allowed_clients
             ):
                 raise AuthenticationError("client_not_allowed_for_subject")
+            if flow.organization_id is not None and identity.organization_id != flow.organization_id:
+                raise AuthenticationError("organization_mismatch_for_subject")
             self.store.authorize_enrollment(
                 enrollment_id=flow.enrollment_id,
                 subject=subject,
@@ -318,6 +345,7 @@ class SessionBroker:
             self.store.revoke_session(
                 principal.session_id,
                 event_type="authorization_mapping_removed",
+                organization_id=principal.organization_id,
             )
             raise AuthenticationError("session_authorization_removed")
         return replace(

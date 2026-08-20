@@ -15,14 +15,14 @@ Register Hormuz as a confidential web OIDC client with the identity provider:
 - a server-held client secret; never install it on employee machines.
 - a login client ID distinct from every workload API audience, so an ID token can never satisfy the resource-server audience check.
 
-Generate a separate 32-byte session-store master key and place the base64url value and OIDC client secret in the Hormuz service environment. Keep the usage, context, and session databases separate.
+Generate a separate 32-byte session-store master key and place the base64url value and OIDC client secret in the Hormuz service environment. The PostgreSQL deployment uses the shared RLS schema for accounting, identity projection, and sessions while keeping DLP approvals and governed context in their explicitly identified stores. SQLite development deployments keep usage, context, and session databases separate.
 
 ```json
 {
   "authentication": {
     "session_broker": {
       "enabled": true,
-      "database": "./hormuz-sessions.sqlite3",
+      "backend": "postgresql",
       "public_base_url": "https://hormuz.example.com",
       "master_key_env": "HORMUZ_SESSION_MASTER_KEY",
       "access_ttl_seconds": 600,
@@ -60,6 +60,21 @@ Generate a separate 32-byte session-store master key and place the base64url val
 }
 ```
 
+After applying PostgreSQL migrations, run the privileged desired-state step
+before starting the runtime-role gateway:
+
+```bash
+hormuz storage migrate
+hormuz --config /etc/hormuz/hormuz.json identities sync
+hormuz storage verify
+```
+
+Use the schema-owner DSN only for these deployment commands. Replace it with the
+distinct runtime-role DSN before `serve`. The running gateway checks the stored
+identity-projection fingerprint and fails closed when synchronization was
+skipped. For local SQLite development, set `"backend": "sqlite"` and add a
+separate `"database": "./hormuz-sessions.sqlite3"`.
+
 The master key must decode to exactly 32 bytes. Human access lifetime is constrained to 5–15 minutes and defaults to 10 minutes. Absolute session lifetime cannot exceed 12 hours; organizations may shorten it. Loopback HTTP is available only behind explicit development flags and never permits a non-loopback host.
 
 An employee creates one client-bound profile for each AI client they use:
@@ -82,11 +97,16 @@ hormuz mcp-config claude \
   --url https://hormuz.example.com --profile claude
 ```
 
+When one OIDC issuer intentionally serves multiple Hormuz organizations, add
+`--organization <configured-id>` to `hormuz login`. A single-organization issuer
+is inferred automatically. The organization is bound before browser redirect
+and must match the returned issuer-subject mapping.
+
 `hormuz login` opens the one-time URL in the operating system's external browser. Use `--no-open` to print it for a headless terminal. The browser receives no Hormuz access or refresh credential. The terminal redeems its independent enrollment secret once and stores the session through the OS secure store. Provider-gateway helpers invoke `hormuz auth token`; the MCP adapter resolves the same profile for every context-tool call. Both reuse an unexpired access credential or atomically rotate the access/refresh pair near expiry.
 
 Hormuz supports macOS Keychain, Windows Credential Manager, and Linux Secret Service/KWallet through an allowlisted `keyring` backend. Persistent login fails when none is available; it does not silently write a refresh credential to a dotfile. `hormuz logout --gateway ... --profile ...` revokes the server-side family before deleting the local entry.
 
-The session database contains keyed credential hashes, encrypted temporary PKCE verifier/nonce state, and tenant/actor/team/client binding metadata. It does not contain raw Hormuz credentials or retained provider tokens. Reuse of any rotated refresh credential revokes the current family. See [SESSION_ADMIN_API.md](SESSION_ADMIN_API.md) for capability-gated listing and immediate session, actor, team, or organization revocation.
+The session database contains keyed credential hashes, encrypted temporary PKCE verifier/nonce state, and tenant/actor/team/client binding metadata. It does not contain raw Hormuz credentials or retained provider tokens. PostgreSQL credentials and OAuth state carry a short keyed tenant-routing tag, not the raw organization ID, so the gateway can open one RLS-scoped transaction without a global cross-tenant credential lookup. Reuse of any rotated refresh credential revokes the current family. See [SESSION_ADMIN_API.md](SESSION_ADMIN_API.md) for capability-gated listing and immediate session, actor, team, or organization revocation.
 
 ## Workload JWT resource-server path
 
@@ -193,7 +213,7 @@ Authentication logs contain only a stable failure code. Hormuz does not log toke
 
 ## Current boundary
 
-[Accepted ADR 0001](decisions/0001-oidc-login-and-session-architecture.md) governs the implemented login architecture. The repository includes protocol, persistence, HTTP, and CLI integration tests against a standards-shaped fake IdP. It has not yet been validated against the owner-selected real identity provider, and the local SQLite broker is not a claim of multi-node availability.
+[Accepted ADR 0001](decisions/0001-oidc-login-and-session-architecture.md) governs the implemented login architecture. The repository includes protocol, persistence, HTTP, and CLI integration tests against a standards-shaped fake IdP. It has not yet been validated against the owner-selected real identity provider.
 
 An opt-in local macOS test now proves that exact installed Codex and Claude Code
 clients can use client-bound Hormuz sessions from the real Keychain for both
@@ -202,4 +222,4 @@ call. The deterministic fixture issues the short-lived session inside the local
 broker and uses loopback provider fakes; it does not claim a browser enrollment
 against a real IdP, Linux/Windows secure-store support, or production custody.
 
-The local `session_admin` API and CLI provide immediate tenant-scoped revocation on this process and inspect cursor-paginated, metadata-only logout, refresh-replay, mapping-removal, and administrative-revocation evidence. This local query path is not an immutable audit sink. SCIM provisioning/deprovisioning, workload identity exchange, KMS-backed shared session storage, signed or externally immutable security-event export, and distributed enrollment throttling remain enterprise gates. Until live configuration reload and SCIM exist, changing a subject mapping takes effect after a service reload/restart; the next request then compares the stored organization/actor/team/clearance binding, revokes on mismatch, and fails closed. `hormuz logout` provides employee-initiated revocation.
+The PostgreSQL `session_admin` path provides tenant-scoped multi-instance revocation and cursor-paginated, metadata-only logout, refresh-replay, mapping-removal, and administrative-revocation evidence. A digest-pinned local PostgreSQL gate proves cross-instance enrollment/authentication, competing refresh rotation, replay-family revocation, and configuration-seeded authorization-version invalidation. This query path is not an immutable audit sink. SCIM provisioning/deprovisioning, workload identity exchange, KMS custody/rotation, signed or externally immutable security-event export, retention controls, distributed enrollment throttling, pooling, HA, and backup/restore remain enterprise gates. `hormuz logout` provides employee-initiated revocation.

@@ -60,6 +60,7 @@ from hormuz.config import (
 )
 from hormuz.context import ContextError
 from hormuz.context_store import SQLiteContextRepository
+from hormuz.session_store import SessionStoreError
 from hormuz.store import UsageStore
 
 
@@ -123,6 +124,22 @@ class ClientConfigTests(unittest.TestCase):
                     path,
                     environ={"HORMUZ_TOKEN": "test-identity-token"},
                 )
+
+    def test_cli_normalizes_session_startup_failure_to_content_free_code(self) -> None:
+        error = io.StringIO()
+        with (
+            mock.patch("hormuz.cli.GatewayConfig.load", return_value=self.config),
+            mock.patch(
+                "hormuz.cli._serve",
+                side_effect=SessionStoreError("identity_projection_stale"),
+            ),
+            redirect_stderr(error),
+        ):
+            self.assertEqual(main(["serve"]), 2)
+        self.assertEqual(
+            error.getvalue(),
+            "session store error: identity_projection_stale\n",
+        )
 
     def test_sigterm_uses_nonblocking_idempotent_shutdown_request(self) -> None:
         callbacks: dict[int, object] = {}

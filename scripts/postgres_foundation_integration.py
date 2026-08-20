@@ -14,6 +14,7 @@ import re
 import secrets
 import subprocess
 import time
+from types import SimpleNamespace
 from typing import Any
 from urllib.parse import quote
 
@@ -28,10 +29,13 @@ from hormuz.postgres import (
     verify_postgres,
 )
 from hormuz.postgres_usage_store import PostgresUsageStore
+from hormuz.identity_projection import sync_identity_projection
+from hormuz.postgres_session_store import PostgresSessionStore
+from hormuz.session_store import SessionStoreError
 from hormuz.store import ReservationDenied, ReservationScope
 
 
-EVIDENCE_SCHEMA = "hormuz.postgres-accounting-integration.v2"
+EVIDENCE_SCHEMA = "hormuz.postgres-identity-session-integration.v3"
 DEFAULT_IMAGE = (
     "postgres@sha256:"
     "57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777"
@@ -508,6 +512,186 @@ def _prove_accounting_store(runtime_dsn: str) -> dict[str, object]:
     }
 
 
+def _identity_config(*, changed: bool = False) -> object:
+    subjects: dict[tuple[str, str], Identity] = {}
+    for suffix in ("a", "b"):
+        identity = Identity(
+            token_env="",
+            token="",
+            actor_id=f"human-{suffix}",
+            actor_name="Synthetic Human",
+            team_id="engineering",
+            team_name="Engineering",
+            organization_id=f"tenant-{suffix}",
+            clearance="internal",
+            allowed_clients=("codex", "claude-code"),
+            capabilities=("session_admin",) if suffix == "a" else (),
+            authentication_source=f"oidc:https://issuer.example/{suffix}",
+        )
+        subject = (
+            f"subject-{suffix}-reassigned"
+            if changed and suffix == "a"
+            else f"subject-{suffix}"
+        )
+        subjects[(f"https://issuer.example/{suffix}", subject)] = identity
+    return SimpleNamespace(identities_by_token={}, identities_by_subject=subjects)
+
+
+def _issue_session(
+    first: PostgresSessionStore,
+    second: PostgresSessionStore,
+    *,
+    organization_id: str,
+    suffix: str,
+) -> object:
+    stage = "create"
+    try:
+        secret = "integration-enrollment-" + secrets.token_urlsafe(32)
+        enrollment = first.create_enrollment(
+            issuer=f"https://issuer.example/{suffix}",
+            client_name="codex",
+            enrollment_secret=secret,
+            organization_id=organization_id,
+        )
+        stage = "begin"
+        state = first.new_authorization_state(enrollment.enrollment_id)
+        browser_cookie = "browser-" + secrets.token_urlsafe(32)
+        nonce = "nonce-" + secrets.token_urlsafe(32)
+        verifier = "verifier-" + secrets.token_urlsafe(64)
+        second.begin_authorization(
+            enrollment_id=enrollment.enrollment_id,
+            state=state,
+            browser_cookie=browser_cookie,
+            nonce=nonce,
+            pkce_verifier=verifier,
+        )
+        stage = "consume"
+        flow = first.consume_callback(state=state, browser_cookie=browser_cookie)
+        if flow.nonce != nonce or flow.pkce_verifier != verifier:
+            raise PostgresFoundationIntegrationError("session_shared_flow_mismatch")
+        stage = "authorize"
+        second.authorize_enrollment(
+            enrollment_id=enrollment.enrollment_id,
+            subject=f"subject-{suffix}",
+            organization_id=organization_id,
+            actor_id=f"human-{suffix}",
+            team_id="engineering",
+            clearance="internal",
+        )
+        stage = "redeem"
+        return first.redeem_enrollment(
+            enrollment_id=enrollment.enrollment_id,
+            enrollment_secret=secret,
+        )
+    except SessionStoreError as error:
+        raise PostgresFoundationIntegrationError(
+            "session_" + stage + "_" + error.code
+        ) from None
+
+
+def _prove_identity_sessions(owner_dsn: str, runtime_dsn: str) -> dict[str, object]:
+    config = _identity_config()
+    synced = sync_identity_projection(config, owner_dsn)  # type: ignore[arg-type]
+    repeated = sync_identity_projection(config, owner_dsn)  # type: ignore[arg-type]
+    if (
+        synced.changed_organizations != 2
+        or synced.changed_principals != 2
+        or repeated.changed_organizations != 0
+        or repeated.changed_principals != 0
+    ):
+        raise PostgresFoundationIntegrationError("identity_sync_not_idempotent")
+    master_key = b"integration-session-key-value!"[:32].ljust(32, b"x")
+    stores = (
+        PostgresSessionStore(
+            runtime_dsn,
+            organization_ids=("tenant-a", "tenant-b"),
+            master_key=master_key,
+            access_ttl_seconds=600,
+            absolute_ttl_seconds=43_200,
+            enrollment_ttl_seconds=300,
+        ),
+        PostgresSessionStore(
+            runtime_dsn,
+            organization_ids=("tenant-a", "tenant-b"),
+            master_key=master_key,
+            access_ttl_seconds=600,
+            absolute_ttl_seconds=43_200,
+            enrollment_ttl_seconds=300,
+        ),
+    )
+    try:
+        first_pair = _issue_session(
+            stores[0], stores[1], organization_id="tenant-a", suffix="a"
+        )
+        principal = stores[1].authenticate_access(first_pair.access_token)
+        if principal.organization_id != "tenant-a" or principal.actor_id != "human-a":
+            raise PostgresFoundationIntegrationError("session_cross_instance_auth_failed")
+
+        def rotate(store: PostgresSessionStore) -> tuple[str, object | None]:
+            try:
+                return "rotated", store.refresh(first_pair.refresh_token)
+            except SessionStoreError as error:
+                return error.code, None
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            outcomes = tuple(
+                future.result(timeout=20)
+                for future in (
+                    executor.submit(rotate, stores[0]),
+                    executor.submit(rotate, stores[1]),
+                )
+            )
+        codes = sorted(value[0] for value in outcomes)
+        if codes != ["refresh_replay_detected", "rotated"]:
+            raise PostgresFoundationIntegrationError(
+                "session_refresh_atomicity_failed_" + "_".join(codes)
+            )
+        winner = next(value[1] for value in outcomes if value[0] == "rotated")
+        try:
+            stores[0].authenticate_access(winner.access_token)
+        except SessionStoreError as error:
+            if error.code != "invalid_session_credential":
+                raise PostgresFoundationIntegrationError(
+                    "session_replay_revocation_failed_" + error.code
+                ) from None
+        else:
+            raise PostgresFoundationIntegrationError("session_replay_revocation_failed_active")
+
+        second_pair = _issue_session(
+            stores[1], stores[0], organization_id="tenant-a", suffix="a"
+        )
+        changed = sync_identity_projection(  # type: ignore[arg-type]
+            _identity_config(changed=True), owner_dsn
+        )
+        if changed.changed_principals != 1 or changed.revoked_sessions < 1:
+            raise PostgresFoundationIntegrationError("identity_change_not_propagated")
+        try:
+            stores[0].authenticate_access(second_pair.access_token)
+        except SessionStoreError as error:
+            if error.code != "invalid_session_credential":
+                raise PostgresFoundationIntegrationError("identity_session_not_invalidated") from None
+        else:
+            raise PostgresFoundationIntegrationError("identity_session_not_invalidated")
+    except PostgresFoundationIntegrationError:
+        raise
+    except (PostgresStorageError, SessionStoreError) as error:
+        raise PostgresFoundationIntegrationError(
+            "identity_session_runtime_" + error.code
+        ) from None
+    return {
+        "configuration_projection_verified": True,
+        "idempotent_sync_verified": True,
+        "cross_instance_enrollment_verified": True,
+        "cross_instance_authentication_verified": True,
+        "atomic_refresh_competitors": 2,
+        "atomic_refresh_rotated": 1,
+        "atomic_refresh_replay_denied": 1,
+        "refresh_replay_family_revoked": True,
+        "identity_change_revocation_verified": True,
+        "tenant_routing_tag_is_keyed": True,
+    }
+
+
 def _expect_verification_code(owner_dsn: str, expected_code: str) -> None:
     try:
         verify_postgres(owner_dsn)
@@ -653,6 +837,7 @@ def run_integration(*, image: str = DEFAULT_IMAGE) -> dict[str, object]:
         _provision_synthetic_tenants(owner_dsn)
         isolation = _prove_runtime_isolation(runtime_dsn, owner_dsn)
         accounting = _prove_accounting_store(runtime_dsn)
+        identity_sessions = _prove_identity_sessions(owner_dsn, runtime_dsn)
         tamper_detection = _prove_verifier_tamper_detection(admin_dsn, owner_dsn)
         evidence = {
             "schema": EVIDENCE_SCHEMA,
@@ -674,6 +859,7 @@ def run_integration(*, image: str = DEFAULT_IMAGE) -> dict[str, object]:
             },
             "isolation": isolation,
             "accounting": accounting,
+            "identity_sessions": identity_sessions,
             "tamper_detection": tamper_detection,
             "content_free": True,
         }

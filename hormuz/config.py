@@ -259,6 +259,7 @@ class OIDCLoginConfig:
 @dataclass(frozen=True)
 class SessionBrokerConfig:
     enabled: bool = False
+    backend: str = "sqlite"
     database_path: Path | None = None
     public_base_url: str | None = None
     master_key_env: str | None = None
@@ -800,6 +801,7 @@ class GatewayConfig:
             authentication_raw.get("session_broker", {}),
             env,
             source_path=source_path,
+            default_backend=usage_backend,
         )
         if session_broker.enabled and not any(
             issuer.login is not None for issuer in oidc_issuers.values()
@@ -807,7 +809,10 @@ class GatewayConfig:
             raise ConfigError(
                 "authentication.session_broker requires at least one OIDC issuer with login configuration"
             )
-        if session_broker.database_path in {database_path, context_database_path}:
+        if (
+            session_broker.backend == "sqlite"
+            and session_broker.database_path in {database_path, context_database_path}
+        ):
             raise ConfigError(
                 "authentication.session_broker.database must be separate from usage and context databases"
             )
@@ -1423,6 +1428,7 @@ def _session_broker_config(
     env: dict[str, str],
     *,
     source_path: Path,
+    default_backend: str,
 ) -> SessionBrokerConfig:
     path = "authentication.session_broker"
     item = _object(value, path)
@@ -1430,6 +1436,7 @@ def _session_broker_config(
         item,
         {
             "enabled",
+            "backend",
             "database",
             "public_base_url",
             "master_key_env",
@@ -1444,10 +1451,17 @@ def _session_broker_config(
     if not enabled:
         return SessionBrokerConfig()
 
-    database_value = _string(item.get("database"), f"{path}.database")
-    database_path = Path(database_value).expanduser()
-    if not database_path.is_absolute():
-        database_path = (source_path.parent / database_path).resolve()
+    backend = _string(item.get("backend", default_backend), f"{path}.backend")
+    if backend not in {"sqlite", "postgresql"}:
+        raise ConfigError(f"{path}.backend must be sqlite or postgresql")
+    database_path = None
+    if backend == "sqlite":
+        database_value = _string(item.get("database"), f"{path}.database")
+        database_path = Path(database_value).expanduser()
+        if not database_path.is_absolute():
+            database_path = (source_path.parent / database_path).resolve()
+    elif "database" in item:
+        raise ConfigError(f"{path}.database is only valid for the sqlite backend")
     public_base_url = _url(item.get("public_base_url"), f"{path}.public_base_url").rstrip("/")
     if urlparse(public_base_url).path not in {"", "/"}:
         raise ConfigError(f"{path}.public_base_url must not include a path")
@@ -1497,6 +1511,7 @@ def _session_broker_config(
     )
     return SessionBrokerConfig(
         enabled=True,
+        backend=backend,
         database_path=database_path,
         public_base_url=public_base_url,
         master_key_env=master_key_env,

@@ -1846,6 +1846,54 @@ key custody, a persistent authenticated reviewer/case workflow, invoice/credit
 finalization, or final team/person chargeback. Aggregate variance remains
 unresolved evidence and does not by itself prove that traffic bypassed Hormuz.
 
+### PostgreSQL desired-state identity and multi-instance session slice
+
+The second ordered PostgreSQL migration slice was exercised locally on August
+20, 2026:
+
+- packaged schema version 3 adds exact-column, forced-RLS identity-projection,
+  principal-projection, enrollment, session, consumed-refresh, and
+  session-security-event tables with immutable tenant keys;
+- the runtime role was reduced to read-only access for tenants, teams,
+  principals, external identities, roles, capabilities, memberships, and
+  desired-state projection metadata. It retains the previously accepted
+  tenant-scoped workspace/project DML and write access to the gateway-owned
+  accounting/session tables currently migrated;
+- `hormuz identities sync` used the schema-owner deployment path to project
+  configuration without provider, employee, or database credential values. An
+  unchanged second sync made zero organization/principal changes;
+- the runtime startup verifier matched each configured organization's canonical
+  projection fingerprint. Changing only an actor's configured OIDC subject
+  mapping incremented that principal's authorization version and revoked the
+  affected active session;
+- tenant-bound enrollment is inferred when one issuer maps to one organization
+  and requires an explicit CLI organization only for a multi-organization
+  issuer. Enrollment IDs, OAuth state, access credentials, and refresh
+  credentials carry a keyed 96-bit hexadecimal routing tag rather than the raw
+  organization ID;
+- two independent PostgreSQL repository instances completed one enrollment and
+  authenticated the resulting credential across instances. Under two
+  concurrent refreshers, exactly one rotated, one detected replay, and the
+  current credential family was revoked. A transaction advisory lock binds the
+  race to the exact tenant and keyed refresh hash;
+- the digest-pinned PostgreSQL `16.14` integration applied and verified
+  migration versions `1`, `2`, and `3`, retained the prior accounting and RLS
+  results, and wrote content-free evidence to
+  `evidence/postgres-foundation-integration-2026-08-20.json`;
+- 110 focused configuration, SQLite-session, PostgreSQL, CLI, compatibility,
+  and threat-model tests passed; the complete source suite passed 514 tests in
+  `137.852` seconds with the same
+  three documented opt-in installed-client/profile skips; and
+- source/test/script bytecode compilation and `git diff --check` passed before
+  the full suite.
+
+This is bounded local multi-instance persistence evidence, not a production
+storage claim. Real IdP validation, SCIM, DLP-approval and governed-context
+migration, connection pooling, KMS custody/rotation, backup/PITR and restore,
+HA/failover, retention/export/delete operations, deployment rollback, and
+independent security review remain open. Issue #6 and draft PR #19 therefore
+remain open.
+
 ## Automated publication gate
 
 Ordinary GitHub CI runs eight independent gate families without provider credentials:

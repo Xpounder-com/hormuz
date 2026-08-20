@@ -85,6 +85,7 @@ def login(
     profile: str,
     client: str,
     issuer: str | None,
+    organization: str | None = None,
     no_open: bool,
     allow_insecure_http: bool,
     wait_seconds: int,
@@ -104,6 +105,8 @@ def login(
     }
     if issuer is not None:
         request["issuer"] = issuer
+    if organization is not None:
+        request["organization_id"] = organization
     status, response = gateway_client.post("/v1/auth/enrollments", request)
     if status != 201:
         raise SessionClientError("enrollment_rejected")

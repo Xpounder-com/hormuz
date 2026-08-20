@@ -275,7 +275,7 @@
           "governed context"
         ],
         "evidence": [
-          "docs/ARCHITECTURE.md#SQLite usage ledger",
+          "docs/ARCHITECTURE.md#SQLite ledgers (default)",
           "docs/OPERATIONS.md#Current deployment boundary"
         ],
         "limitations": [
@@ -284,8 +284,8 @@
       },
       {
         "id": "persistence.postgresql",
-        "name": "PostgreSQL accounting and tenancy foundation",
-        "version": "PostgreSQL 16.14 / Hormuz schema 2",
+        "name": "PostgreSQL accounting, identity, session, and tenancy foundation",
+        "version": "PostgreSQL 16.14 / Hormuz schema 3",
         "support_level": "development_only",
         "production_supported": false,
         "tested_environments": [
@@ -294,6 +294,7 @@
         "interfaces": [
           "shared-schema PostgreSQL with forced row-level security",
           "usage, cost evidence, usage-read audit, and atomic budget reservations",
+          "configuration-seeded identity projection and multi-instance human sessions",
           "dedicated database option"
         ],
         "evidence": [
@@ -304,14 +305,17 @@
           "hormuz/postgres.py",
           "hormuz/migrations/postgresql/0001_tenant_authorization.sql",
           "hormuz/migrations/postgresql/0002_gateway_accounting.sql",
+          "hormuz/migrations/postgresql/0003_identity_sessions.sql",
           "hormuz/postgres_usage_store.py",
+          "hormuz/identity_projection.py",
+          "hormuz/postgres_session_store.py",
           "scripts/postgres_foundation_integration.py",
           "tests/test_postgres.py",
           "evidence/postgres-foundation-integration-2026-08-20.json",
           ".github/workflows/ci.yml#PostgreSQL migration and RLS foundation"
         ],
         "limitations": [
-          "ADR 0002 is accepted and schema version 2 can persist live usage, cost evidence, usage-read audit, and shared budget reservations. Sessions, approvals, and governed context remain SQLite-backed; cutover backfill, dynamic database authorization versions, pooling, backup, restore, deletion, KMS, HA, and production-persistence proof remain open."
+          "ADR 0002 is accepted and schema version 3 can persist live usage, cost evidence, usage-read audit, shared budget reservations, configuration-seeded identities, authorization versions, and human sessions. DLP approvals and governed context remain SQLite-backed; SCIM, cutover backfill, pooling, backup, restore, deletion, KMS, HA, and production-persistence proof remain open."
         ]
       }
     ],

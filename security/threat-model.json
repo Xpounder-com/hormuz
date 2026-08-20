@@ -6,14 +6,14 @@
     "statement": "The CLI-first Hormuz alpha that authenticates Codex and Claude Code requests, enforces model, budget, DLP, and governed-context policy, relays OpenAI and Anthropic protocols, and records content-free control-plane evidence.",
     "in_scope": [
       "HTTP ingress, authentication, policy, DLP, provider relay, and usage accounting",
-      "OIDC discovery, browser login, rotating local sessions, and secure client credential custody",
+      "OIDC discovery, browser login, rotating SQLite or PostgreSQL sessions, and secure client credential custody",
       "governed-context retrieval, lifecycle evidence, injection, and local persistence",
       "configuration, build, CI, container, and release evidence boundaries"
     ],
     "out_of_scope": [
       "provider-side systems beyond the documented HTTPS API contract",
       "employee endpoints before requests enter Hormuz",
-      "a production PostgreSQL-backed gateway, KMS, cache, reverse proxy, or multi-region topology that has not been fully implemented or verified",
+      "a production PostgreSQL topology beyond the bounded accounting/identity/session slices, KMS, cache, reverse proxy, or multi-region deployment that has not been fully implemented or verified",
       "an independent penetration test, which remains a separate release gate"
     ]
   },
@@ -32,10 +32,10 @@
     {"id": "TB-001", "name": "Employee client ingress", "from": "Codex, Claude Code, and administrative CLIs", "to": "Hormuz HTTP and MCP boundaries", "data": "identity credentials, provider-compatible requests, administration inputs, and context queries"},
     {"id": "TB-002", "name": "Provider egress", "from": "Hormuz", "to": "OpenAI and Anthropic HTTPS endpoints", "data": "inspected provider requests, server-held provider credentials, streamed responses, and provider usage metadata"},
     {"id": "TB-003", "name": "Identity provider", "from": "Hormuz and employee browser", "to": "configured OIDC discovery, authorization, token, and JWKS endpoints", "data": "OIDC metadata, authorization codes, PKCE material, ID tokens, and access-token verification keys"},
-    {"id": "TB-004", "name": "Local durable state", "from": "Hormuz runtime", "to": "usage, approval, session, and governed-context SQLite stores", "data": "content-free telemetry, keyed request fingerprints, session state, and intentionally content-bearing governed context"},
+    {"id": "TB-004", "name": "Local durable state", "from": "Hormuz runtime", "to": "default SQLite usage/session stores plus approval and governed-context SQLite stores", "data": "content-free telemetry, keyed request fingerprints, session state, and intentionally content-bearing governed context"},
     {"id": "TB-005", "name": "Lifecycle connector ingress", "from": "trusted CI and source connectors", "to": "Hormuz lifecycle API", "data": "normalized evidence envelopes, repository snapshots, and revalidation requests"},
     {"id": "TB-006", "name": "Build and release", "from": "source repository and GitHub Actions", "to": "Python distributions and private GHCR images", "data": "source, locked dependencies, build inputs, SBOM, provenance, signatures, and release metadata"},
-    {"id": "TB-007", "name": "Future shared control plane", "from": "Hormuz replicas and operators", "to": "PostgreSQL, KMS, caches, queues, object storage, and observability systems", "data": "tenant-scoped policy, identity, usage, context, secrets, jobs, and operational evidence"}
+    {"id": "TB-007", "name": "Shared control plane", "from": "Hormuz replicas and operators", "to": "current PostgreSQL accounting/identity/session stores and future KMS, caches, queues, object storage, and observability systems", "data": "tenant-scoped identity, authorization versions, usage, sessions, policy, context, secrets, jobs, and operational evidence"}
   ],
   "incident_scenarios": [
     {"id": "provider_outage", "name": "Provider outage or degradation", "threat_ids": ["TM-011", "TM-012"]},
@@ -73,10 +73,10 @@
       "controls": [
         {"kind": "test", "ref": "tests/test_gateway.py", "claim": "Current single-node APIs exercise identity-derived organization scope and cross-organization denials."},
         {"kind": "documentation", "ref": "docs/decisions/0002-enterprise-tenancy-and-persistence.md", "claim": "The accepted production contract requires mandatory tenant keys, application predicates, forced PostgreSQL RLS, and reused-connection isolation tests."},
-        {"kind": "code", "ref": "hormuz/postgres.py", "claim": "Schema-v1 migration and verification enforce separate roles, forced RLS, immutable tenant keys, bounded runtime privileges, and transaction-local tenant context."},
-        {"kind": "test", "ref": "scripts/postgres_foundation_integration.py", "claim": "The digest-pinned two-tenant integration exercises migration idempotency, missing/cleared tenant context, reused-connection switching, cross-tenant denial, and composite tenant foreign keys."}
+        {"kind": "code", "ref": "hormuz/postgres.py", "claim": "Schema-v3 migration and verification enforce separate roles, forced RLS, immutable tenant keys, read-only identity-directory privileges, exact columns, and transaction-local tenant context."},
+        {"kind": "test", "ref": "scripts/postgres_foundation_integration.py", "claim": "The digest-pinned two-tenant integration exercises migration idempotency, missing/cleared tenant context, reused-connection switching, cross-tenant denial, composite tenant foreign keys, accounting, desired-state identities, and multi-instance sessions."}
       ],
-      "residual_risk": "The PostgreSQL foundation is not connected to the gateway usage, context, session, or policy repositories; repository parity, pooled multi-instance concurrency, backup/restore, deletion, HA, KMS, and independent review remain unproved.",
+      "residual_risk": "PostgreSQL is connected to accounting and human sessions, but DLP approvals and governed context remain SQLite; pooled concurrency, backup/restore, deletion, HA, KMS, SCIM, and independent review remain unproved.",
       "release_gate": "Issue #6"
     },
     {
@@ -151,9 +151,10 @@
       "scenario": "A stolen refresh token, replayed family member, or stale identity mapping continues to authorize provider requests.",
       "controls": [
         {"kind": "code", "ref": "hormuz/session_store.py", "claim": "Opaque credentials are keyed-hash stored, rotate atomically, revoke on replay, and carry event-time tenant bindings."},
-        {"kind": "test", "ref": "tests/test_session_broker.py", "claim": "PKCE, nonce, state, single redemption, rotation, replay-family revocation, logout, and mapping-removal paths are tested."}
+        {"kind": "code", "ref": "hormuz/postgres_session_store.py", "claim": "PostgreSQL sessions route by a keyed opaque tenant tag, bind database authorization versions, and serialize refresh families transactionally across instances."},
+        {"kind": "test", "ref": "scripts/postgres_foundation_integration.py", "claim": "Two independent session repositories prove cross-instance enrollment/authentication, one-winner refresh rotation, replay-family revocation, and mapping-change invalidation."}
       ],
-      "residual_risk": "Revocation and session state remain single-node; SCIM and shared immediate revocation are not implemented.",
+      "residual_risk": "Shared immediate revocation is implemented for the bounded PostgreSQL path, but SCIM, real-IdP validation, KMS custody and rotation, pooling, backup/restore, and HA are not complete.",
       "release_gate": "Issues #7 and #13"
     },
     {
@@ -194,7 +195,7 @@
       "boundary_ids": ["TB-004", "TB-007"],
       "asset_ids": ["AST-007"],
       "status": "partially_mitigated",
-      "scenario": "An operator or compromised process changes the SQLite ledger, deletes events, or replaces an audit export and its co-located anchor.",
+      "scenario": "An operator or compromised process changes a SQLite or PostgreSQL ledger, deletes events, or replaces an audit export and its co-located anchor.",
       "controls": [
         {"kind": "code", "ref": "hormuz/audit_chain.py", "claim": "Canonical exports can carry a deterministic hash chain and validate against an externally retained count, head, and exact-file digest."},
         {"kind": "test", "ref": "tests/test_audit_chain.py", "claim": "Mutation, truncation, reordering, wrong-anchor, and cross-store verification failures are tested."}

@@ -8,8 +8,17 @@ import tempfile
 import tomllib
 import unittest
 from unittest import mock
+from types import SimpleNamespace
 
 from hormuz.cli import build_parser, main
+from hormuz.config import Identity
+from hormuz.identity_projection import (
+    IdentitySyncResult,
+    configured_organization_ids,
+    identity_projection,
+    principal_projection_sha256,
+    projection_sha256,
+)
 from hormuz.postgres import (
     POSTGRES_SCHEMA_VERSION,
     TENANT_TABLES,
@@ -24,6 +33,7 @@ from hormuz.postgres import (
     validate_tenant_id,
 )
 from hormuz.postgres_usage_store import PostgresUsageStore
+from hormuz.postgres_session_store import PostgresSessionStore
 from hormuz.store_router import GatewayStoreRouter
 from scripts.postgres_foundation_integration import (
     EVIDENCE_SCHEMA,
@@ -36,6 +46,92 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class PostgresFoundationTests(unittest.TestCase):
+    def test_identity_projection_is_secret_free_deterministic_and_tenant_partitioned(self) -> None:
+        first = Identity(
+            token_env="FIRST_TOKEN",
+            token="first-secret-value",
+            actor_id="alice",
+            actor_name="Alice",
+            team_id="engineering",
+            team_name="Engineering",
+            organization_id="tenant-a",
+            allowed_clients=("codex",),
+        )
+        second = Identity(
+            token_env="SECOND_TOKEN",
+            token="different-secret-value",
+            actor_id="alice",
+            actor_name="Alice",
+            team_id="engineering",
+            team_name="Engineering",
+            organization_id="tenant-a",
+            allowed_clients=("codex",),
+        )
+        other = Identity(
+            token_env="OTHER_TOKEN",
+            token="other-secret-value",
+            actor_id="bob",
+            actor_name="Bob",
+            team_id="marketing",
+            team_name="Marketing",
+            organization_id="tenant-b",
+        )
+        config_a = SimpleNamespace(
+            identities_by_token={first.token: first, other.token: other},
+            identities_by_subject={},
+        )
+        config_b = SimpleNamespace(
+            identities_by_token={second.token: second, other.token: other},
+            identities_by_subject={},
+        )
+        self.assertEqual(configured_organization_ids(config_a), ("tenant-a", "tenant-b"))
+        value = identity_projection(config_a, "tenant-a")
+        self.assertEqual(projection_sha256(value), projection_sha256(identity_projection(config_b, "tenant-a")))
+        serialized = json.dumps(value, sort_keys=True)
+        self.assertNotIn("secret", serialized)
+        self.assertNotIn("bob", serialized)
+
+    def test_oidc_subject_change_updates_principal_authorization_fingerprint(self) -> None:
+        identity = Identity(
+            token_env="",
+            token="",
+            actor_id="alice",
+            actor_name="Alice",
+            team_id="engineering",
+            team_name="Engineering",
+            organization_id="tenant-a",
+            allowed_clients=("codex",),
+        )
+        first = SimpleNamespace(
+            identities_by_token={},
+            identities_by_subject={("https://id.example", "subject-a"): identity},
+        )
+        second = SimpleNamespace(
+            identities_by_token={},
+            identities_by_subject={("https://id.example", "subject-b"): identity},
+        )
+        first_principal = identity_projection(first, "tenant-a")["principals"][0]
+        second_principal = identity_projection(second, "tenant-a")["principals"][0]
+        self.assertNotEqual(
+            principal_projection_sha256(first_principal),
+            principal_projection_sha256(second_principal),
+        )
+
+    def test_postgres_session_routing_tag_is_keyed_and_unambiguous(self) -> None:
+        store = PostgresSessionStore(
+            "postgresql://not-connected",
+            organization_ids=("tenant-a", "tenant-b"),
+            master_key=b"m" * 32,
+            access_ttl_seconds=600,
+            absolute_ttl_seconds=43_200,
+            enrollment_ttl_seconds=300,
+        )
+        tag = store._routing_tag("tenant-a")
+        self.assertRegex(tag, r"[0-9a-f]{24}\Z")
+        self.assertNotIn("tenant", tag)
+        routed = "hox_a_" + tag + "_" + "s" * 32
+        self.assertEqual(store._route(routed, "hox_a_", "invalid"), "tenant-a")
+
     def test_postgres_usage_store_requires_explicit_scope_for_multiple_tenants(self) -> None:
         store = PostgresUsageStore(
             "postgresql://runtime:not-used@127.0.0.1/hormuz",
@@ -345,6 +441,32 @@ class PostgresFoundationTests(unittest.TestCase):
             "PostgreSQL storage error: postgres_connection_failed",
         )
 
+    def test_identity_sync_cli_uses_owner_dsn_without_printing_it(self) -> None:
+        config = SimpleNamespace(
+            usage_storage=SimpleNamespace(
+                postgres_dsn_env="HORMUZ_OWNER_DSN",
+                postgres_schema="hormuz",
+            )
+        )
+        result = IdentitySyncResult(
+            organizations=2,
+            changed_organizations=1,
+            changed_principals=1,
+            revoked_sessions=3,
+        )
+        secret_dsn = "postgresql://owner:secret-value@localhost/hormuz"
+        output = io.StringIO()
+        with (
+            mock.patch("hormuz.cli.GatewayConfig.load", return_value=config),
+            mock.patch("hormuz.cli.postgres_dsn_from_env", return_value=secret_dsn),
+            mock.patch("hormuz.cli.sync_identity_projection", return_value=result) as sync,
+            redirect_stdout(output),
+        ):
+            self.assertEqual(main(["identities", "sync"]), 0)
+        sync.assert_called_once_with(config, secret_dsn, schema="hormuz")
+        self.assertEqual(json.loads(output.getvalue()), result.to_dict())
+        self.assertNotIn(secret_dsn, output.getvalue())
+
     def test_checked_in_integration_evidence_is_content_free_and_bounded(self) -> None:
         value = json.loads(
             (ROOT / "evidence/postgres-foundation-integration-2026-08-20.json").read_text(
@@ -363,6 +485,13 @@ class PostgresFoundationTests(unittest.TestCase):
         self.assertTrue(value["accounting"]["provider_reconciliation_verified"])
         self.assertTrue(value["accounting"]["usage_reporting_verified"])
         self.assertTrue(value["accounting"]["usage_read_audit_verified"])
+        self.assertTrue(value["identity_sessions"]["configuration_projection_verified"])
+        self.assertTrue(value["identity_sessions"]["cross_instance_enrollment_verified"])
+        self.assertEqual(value["identity_sessions"]["atomic_refresh_competitors"], 2)
+        self.assertEqual(value["identity_sessions"]["atomic_refresh_rotated"], 1)
+        self.assertEqual(value["identity_sessions"]["atomic_refresh_replay_denied"], 1)
+        self.assertTrue(value["identity_sessions"]["refresh_replay_family_revoked"])
+        self.assertTrue(value["identity_sessions"]["identity_change_revocation_verified"])
         self.assertEqual(value["isolation"]["missing_context_rows"], 0)
         self.assertEqual(value["isolation"]["cleared_context_rows"], 0)
         self.assertTrue(value["isolation"]["tenant_context_fields_bound"])

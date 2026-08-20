@@ -52,6 +52,7 @@ class Enrollment:
     issuer: str
     client_name: str
     expires_at: datetime
+    organization_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -61,6 +62,7 @@ class AuthorizationFlow:
     client_name: str
     nonce: str
     pkce_verifier: str
+    organization_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -96,6 +98,7 @@ class SessionPrincipal:
     clearance: str
     access_expires_at: datetime
     session_expires_at: datetime
+    authorization_version: int = 1
 
 
 @dataclass(frozen=True)
@@ -195,22 +198,26 @@ class SQLiteSessionStore:
         issuer: str,
         client_name: str,
         enrollment_secret: str,
+        organization_id: str | None = None,
     ) -> Enrollment:
         _require_secret(enrollment_secret, "invalid_enrollment_secret")
+        if organization_id is not None:
+            _require_binding(organization_id, "invalid_organization_id")
         now = self._now()
         enrollment = Enrollment(
             enrollment_id=secrets.token_urlsafe(24),
             issuer=issuer,
             client_name=client_name,
             expires_at=now + self._enrollment_ttl,
+            organization_id=organization_id,
         )
         with self._lock, self._connection() as connection:
             connection.execute(
                 """
                 INSERT INTO session_enrollments (
                     id, secret_hash, issuer, client_name, status,
-                    created_at, expires_at
-                ) VALUES (?, ?, ?, ?, 'pending', ?, ?)
+                    created_at, expires_at, organization_id
+                ) VALUES (?, ?, ?, ?, 'pending', ?, ?, ?)
                 """,
                 (
                     enrollment.enrollment_id,
@@ -219,6 +226,7 @@ class SQLiteSessionStore:
                     client_name,
                     _isoformat(now),
                     _isoformat(enrollment.expires_at),
+                    organization_id,
                 ),
             )
         return enrollment
@@ -249,7 +257,8 @@ class SQLiteSessionStore:
         with self._lock, self._connection() as connection:
             connection.execute("BEGIN IMMEDIATE")
             row = connection.execute(
-                "SELECT issuer, client_name, status, expires_at FROM session_enrollments WHERE id = ?",
+                "SELECT issuer, client_name, status, expires_at, organization_id "
+                "FROM session_enrollments WHERE id = ?",
                 (enrollment_id,),
             ).fetchone()
             if row is None or row["status"] != "pending" or _parse_time(row["expires_at"]) <= now:
@@ -275,6 +284,11 @@ class SQLiteSessionStore:
                 client_name=str(row["client_name"]),
                 nonce=nonce,
                 pkce_verifier=pkce_verifier,
+                organization_id=(
+                    str(row["organization_id"])
+                    if row["organization_id"] is not None
+                    else None
+                ),
             )
 
     def consume_callback(
@@ -292,7 +306,8 @@ class SQLiteSessionStore:
             connection.execute("BEGIN IMMEDIATE")
             row = connection.execute(
                 """
-                SELECT id, issuer, client_name, browser_cookie_hash, encrypted_flow, expires_at
+                SELECT id, issuer, client_name, browser_cookie_hash, encrypted_flow,
+                       expires_at, organization_id
                 FROM session_enrollments
                 WHERE state_hash = ? AND status = 'authorizing'
                 """,
@@ -326,6 +341,11 @@ class SQLiteSessionStore:
                 client_name=str(row["client_name"]),
                 nonce=str(flow["nonce"]),
                 pkce_verifier=str(flow["pkce_verifier"]),
+                organization_id=(
+                    str(row["organization_id"])
+                    if row["organization_id"] is not None
+                    else None
+                ),
             )
 
     def authorize_enrollment(
@@ -352,6 +372,7 @@ class SQLiteSessionStore:
                     actor_id = ?, team_id = ?, clearance = ?, authorized_at = ?,
                     encrypted_flow = NULL
                 WHERE id = ? AND status = 'exchanging' AND expires_at > ?
+                  AND (organization_id IS NULL OR organization_id = ?)
                 """,
                 (
                     subject,
@@ -362,6 +383,7 @@ class SQLiteSessionStore:
                     _isoformat(now),
                     enrollment_id,
                     _isoformat(now),
+                    organization_id,
                 ),
             )
             if cursor.rowcount != 1:
@@ -609,21 +631,37 @@ class SQLiteSessionStore:
             )
             return True
 
-    def revoke_session(self, session_id: str, *, event_type: str) -> None:
+    def revoke_session(
+        self,
+        session_id: str,
+        *,
+        event_type: str,
+        organization_id: str | None = None,
+    ) -> None:
         now = self._now()
+        if organization_id is not None:
+            _require_binding(organization_id, "invalid_organization_id")
+        scope = " AND organization_id = ?" if organization_id is not None else ""
+        parameters: tuple[object, ...] = (
+            (session_id, organization_id)
+            if organization_id is not None
+            else (session_id,)
+        )
         with self._lock, self._connection() as connection:
             connection.execute("BEGIN IMMEDIATE")
             row = connection.execute(
-                """
+                f"""
                 SELECT organization_id, actor_id, team_id
-                FROM human_sessions WHERE id = ?
+                FROM human_sessions WHERE id = ?{scope}
                 """,
-                (session_id,),
+                parameters,
             ).fetchone()
-            connection.execute(
-                "UPDATE human_sessions SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL",
-                (_isoformat(now), session_id),
-            )
+            if row is not None:
+                connection.execute(
+                    "UPDATE human_sessions SET revoked_at = ? WHERE id = ? "
+                    "AND organization_id = ? AND revoked_at IS NULL",
+                    (_isoformat(now), session_id, row["organization_id"]),
+                )
             self._record_event(
                 connection,
                 session_id=session_id,
