@@ -159,10 +159,12 @@ def _assert_runtime_contract(container: str) -> None:
         "uid": 65532,
         "gid": 65532,
         "usage": True,
-        "context": True,
+        "context": False,
         "pyc": False,
     }:
-        raise SmokeFailure("non-root process did not initialize both data stores")
+        raise SmokeFailure(
+            "non-root gateway did not initialize only the supported usage store"
+        )
 
 
 def run_smoke(image: str) -> None:

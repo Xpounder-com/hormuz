@@ -84,7 +84,7 @@ Start from `config.example.json` and make these container-specific changes:
 
 - set `listen.host` to `0.0.0.0`;
 - set `database` to `/var/lib/hormuz/usage.sqlite3`;
-- set `context_database` to `/var/lib/hormuz/context.sqlite3`; and
+- if retaining the deprecated context compatibility surface, set `context_database` to `/var/lib/hormuz/context.sqlite3`; ordinary gateway startup will not create it; and
 - keep `listen.shutdown_grace_seconds` below the deployment platform's termination grace;
 - set `listen.accept_backlog` to an intentional burst queue no larger than the surrounding ingress and operating-system policy permit; the default `256` aligns with the default application connection ceiling, but the operating system may cap the hint;
 - size `listen.max_connections` above `listen.max_concurrent_requests` so probes and ordinary header parsing retain headroom;
@@ -133,8 +133,8 @@ Set the stop timeout above the configured Hormuz shutdown grace. A non-zero cont
 
 For any shared deployment, keep Hormuz on a private network behind a separately hardened TLS terminator. Permit egress only to the configured OpenAI and Anthropic API hosts and explicitly configured OIDC discovery/JWKS hosts. Hormuz refuses a non-loopback plaintext provider URL, rejects provider base URLs containing user credentials, a query, or a fragment, and never follows a provider redirect. These application checks bind the server-held credential to the configured origin but do not replace a workload egress firewall or private endpoint policy. The current server does not interpret forwarded headers as client identity, so a proxy must not invent an employee identity or expose the private listener directly.
 
-Disable body, raw URL, query, header, and process-dump collection in the load balancer, proxy, service mesh, container runtime, and log shipper. Hormuz's routine telemetry remains content-free inside the container, but provider-bound content is still inspected and relayed transiently, and the governed-context database intentionally contains reusable context. Mount, encrypt, retain, back up, and authorize that data accordingly.
+Disable body, raw URL, query, header, and process-dump collection in the load balancer, proxy, service mesh, container runtime, and log shipper. Hormuz's routine telemetry remains content-free inside the container, but provider-bound content is still inspected and relayed transiently. Explicit use of the deprecated context experiment also creates a content-bearing database; do not enable it for new deployments, and mount, encrypt, retain, back up, and authorize it separately during the compatibility period.
 
 ## Current boundary
 
-This reference process still uses SQLite and is single-node. Multiple replicas must not share the SQLite volume. PostgreSQL/shared-store topology, distributed budgets and throttles, HA sessions and approvals, backup/PITR, RPO/RTO, key rotation without restart, immutable external audit export, TLS reference configuration, executed upgrade/rollback proof, tag/environment governance, and an observed signed registry release remain open enterprise gates.
+This reference process uses SQLite by default and is single-node. Multiple replicas must not share the SQLite volume. The opt-in PostgreSQL repositories cover bounded usage/accounting, identity projection, policy projection, sessions, approvals, and security evidence, but coordinated policy rollout, pooling, distributed throttles, backup/PITR, RPO/RTO, key rotation without restart, immutable external audit export, TLS reference configuration, executed upgrade/rollback proof, tag/environment governance, and an observed signed registry release remain open enterprise gates.
