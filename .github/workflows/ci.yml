@@ -2,7 +2,34 @@ name: CI
 
 on:
   push:
+    branches:
+      - main
+    paths:
+      - "**.py"
+      - "pyproject.toml"
+      - "MANIFEST.in"
+      - "Dockerfile"
+      - "config.example.json"
+      - "hormuz/**"
+      - "scripts/**"
+      - "tests/**"
+      - "benchmarks/**"
+      - "deploy/**"
+      - "examples/**"
+      - "operations/**"
+      - "security/**"
+      - "compatibility/**"
+      - "evidence/**"
+      - ".github/workflows/**"
+  # PR filtering is done by the changes job so skipped jobs remain successful
+  # for repositories that require named CI checks.
   pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+      - converted_to_draft
   workflow_dispatch:
 
 permissions:
@@ -13,14 +40,75 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: Filter changed paths
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      source_changed: ${{ steps.filter.outputs.source_changed }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Classify changed paths
+        id: filter
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BEFORE_SHA: ${{ github.event.before }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            echo "source_changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            base="$BASE_SHA"
+          else
+            base="$BEFORE_SHA"
+          fi
+
+          if [[ -z "$base" || "$base" =~ ^0+$ ]]; then
+            echo "source_changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if ! changed="$(git diff --name-only "$base" "$GITHUB_SHA")"; then
+            echo "source_changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [[ -z "$changed" ]]; then
+            echo "source_changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          source_changed=false
+          while IFS= read -r path; do
+            case "$path" in
+              docs/*|*.md|*.rst|LICENSE|LICENSE.*)
+                ;;
+              *)
+                source_changed=true
+                break
+                ;;
+            esac
+          done <<< "$changed"
+
+          echo "source_changed=$source_changed" >> "$GITHUB_OUTPUT"
+
   test:
     name: Python ${{ matrix.python-version }}
+    needs: changes
+    if: needs.changes.outputs.source_changed == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
-        python-version: ["3.11", "3.12", "3.13", "3.14"]
+        python-version: ${{ fromJSON(github.event_name == 'pull_request' && '["3.12"]' || '["3.11", "3.12", "3.13", "3.14"]') }}
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -30,6 +118,10 @@ jobs:
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: |
+            deploy/build/requirements.lock
+            deploy/container/requirements.lock
       - name: Install hash-locked build toolchain
         run: >-
           python -m pip install --require-hashes --only-binary=:all:
@@ -43,10 +135,27 @@ jobs:
       - name: Verify runtime dependency closure
         run: python -m pip check
       - name: Run unit and gateway integration tests
-        run: python -m unittest -v
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
+            python -m unittest -v \
+              tests.test_gateway.ProviderQueryInspectionTests \
+              tests.test_gateway.GatewayConstructionTests \
+              tests.test_gateway.GatewayIntegrationTests.test_openai_request_falls_back_caps_and_never_forwards_employee_token \
+              tests.test_gateway.GatewayIntegrationTests.test_active_policy_is_enforced_and_versioned_usage_is_exact \
+              tests.test_gateway.GatewayIntegrationTests.test_secret_is_redacted_before_provider_and_audited \
+              tests.test_redaction.SecretRedactorTests \
+              tests.test_auth.OIDCAuthenticationTests \
+              tests.test_cli.ClientConfigTests
+          else
+            python -m unittest -v
+          fi
 
   postgres-foundation:
     name: PostgreSQL migration and RLS foundation
+    needs: changes
+    if: >-
+      needs.changes.outputs.source_changed == 'true' &&
+      (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -58,6 +167,11 @@ jobs:
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            deploy/build/requirements.lock
+            deploy/container/requirements.lock
+            deploy/postgres/requirements.lock
       - name: Install hash-locked build toolchain
         run: >-
           python -m pip install --require-hashes --only-binary=:all:
@@ -88,6 +202,10 @@ jobs:
 
   package:
     name: Build and install package
+    needs: changes
+    if: >-
+      needs.changes.outputs.source_changed == 'true' &&
+      (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -99,6 +217,10 @@ jobs:
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            deploy/build/requirements.lock
+            deploy/container/requirements.lock
       - name: Install hash-locked build toolchain
         run: >-
           python -m pip install --require-hashes --only-binary=:all:
@@ -207,6 +329,10 @@ jobs:
 
   client-compatibility:
     name: Codex and Claude Code compatibility
+    needs: changes
+    if: >-
+      needs.changes.outputs.source_changed == 'true' &&
+      (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -218,6 +344,10 @@ jobs:
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            deploy/build/requirements.lock
+            deploy/container/requirements.lock
       - name: Install hash-locked build toolchain
         run: >-
           python -m pip install --require-hashes --only-binary=:all:
@@ -272,6 +402,10 @@ jobs:
 
   container:
     name: Restricted container, SBOM, and vulnerability gate
+    needs: changes
+    if: >-
+      needs.changes.outputs.source_changed == 'true' &&
+      (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:

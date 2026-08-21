@@ -33,6 +33,11 @@ jobs:
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: |
+            deploy/build/requirements.lock
+            deploy/container/requirements.lock
+            deploy/postgres/requirements.lock
       - name: Validate annotated tag, version, repository, and main ancestry
         run: |
           git fetch --no-tags origin main:refs/remotes/origin/main
@@ -179,6 +184,10 @@ jobs:
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: |
+            deploy/build/requirements.lock
+            deploy/container/requirements.lock
       - name: Install hash-locked build toolchain
         run: >-
           python -m pip install --require-hashes --only-binary=:all:
@@ -254,6 +263,11 @@ jobs:
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: |
+            deploy/build/requirements.lock
+            deploy/container/requirements.lock
+            deploy/postgres/requirements.lock
       - name: Revalidate the release contract
         id: contract
         run: |
