@@ -129,6 +129,7 @@ _CONTENT_FREE_HTTP_ROUTES = frozenset(
         "/v1/admin/session-revocations",
         "/v1/admin/sessions",
         "/v1/admin/usage",
+        "/v1/admin/usage/coverage",
         "/v1/admin/policy-active",
         "/v1/admin/policy-activations",
         "/v1/admin/policy-rollbacks",
@@ -830,6 +831,9 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         if path == "/v1/admin/session-events":
             self._list_session_security_events(identity, request_url.query)
             return
+        if path == "/v1/admin/usage/coverage":
+            self._get_usage_coverage(identity, request_url.query)
+            return
         if path == "/v1/admin/usage":
             self._list_usage_report(identity, request_url.query)
             return
@@ -1167,6 +1171,100 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             "invalid_usage_report_request",
             "Usage report query is invalid",
             HTTPStatus.BAD_REQUEST,
+        )
+
+    def _get_usage_coverage(self, identity: Identity, query: str) -> None:
+        """Return the coverage Hormuz can observe without inflating it to an org total."""
+
+        if query:
+            self._send_error(
+                "invalid_usage_coverage_request",
+                "Usage coverage query is invalid",
+                HTTPStatus.BAD_REQUEST,
+            )
+            return
+        try:
+            access = authorize_usage_report(
+                identity,
+                group_by="organization",
+                actor_id=None,
+                team_id=None,
+            )
+        except UsageReportAccessError as error:
+            messages = {
+                "usage_viewer_capability_required": "Usage report capability is required",
+                "usage_report_scope_forbidden": "Credential is not authorized for this usage report scope",
+                "usage_report_scope_ambiguous": "Credential has an ambiguous usage report scope",
+            }
+            self._send_error(
+                error.code,
+                messages.get(error.code, "Usage report authorization is invalid"),
+                HTTPStatus.FORBIDDEN,
+            )
+            return
+        window_end = datetime.now(timezone.utc)
+        window_start = window_end.replace(
+            day=1,
+            hour=0,
+            minute=0,
+            second=0,
+            microsecond=0,
+        )
+        try:
+            summary = self.server.store.coverage_summary(
+                organization_id=identity.organization_id,
+                actor_id=access.actor_id,
+                team_id=access.team_id,
+                start=window_start.isoformat(),
+                end=window_end.isoformat(),
+            )
+            self.server.store.record_admin_usage_read(
+                administrator=identity,
+                access_scope=access.scope,
+                group_by="organization",
+                actor_filter=access.actor_id,
+                team_filter=access.team_id,
+                window_start=window_start.isoformat(),
+                window_end=window_end.isoformat(),
+                result_count=1,
+            )
+        except (ValueError, sqlite3.Error, SecurityStoreError, PostgresStorageError):
+            self._send_error(
+                "usage_admin_unavailable",
+                "Usage administration is temporarily unavailable",
+                HTTPStatus.SERVICE_UNAVAILABLE,
+            )
+            return
+        coverage = {
+            **summary,
+            "scope": "accounted_authenticated_gateway_requests_only",
+            "legacy_unattributed_rows_excluded": True,
+            "pre_authentication_attempts_included": False,
+            "outside_gateway_traffic_observable": False,
+            "provider_invoice_reconciled": False,
+            "provider_invoice_reconciliation": "separate_billing_reconciliation_required",
+            "organization_total": False,
+        }
+        LOGGER.info(
+            "usage_coverage_read organization=%s decision_actor=%s scope=%s requests=%d",
+            identity.organization_id,
+            identity.actor_id,
+            access.scope,
+            int(summary["accounted_gateway_requests"]),
+        )
+        self._send_json(
+            HTTPStatus.OK,
+            {
+                "schema_version": 1,
+                "organization_id": identity.organization_id,
+                "access": {"scope": access.scope},
+                "window": {
+                    "start": window_start.isoformat(),
+                    "end": window_end.isoformat(),
+                    "timezone": "UTC",
+                },
+                "coverage": coverage,
+            },
         )
 
     def _policy_admin_store(self, identity: Identity) -> PostgresPolicyStore | None:

@@ -181,7 +181,8 @@ roles and two synthetic tenants, then proves:
 - denied cross-tenant read/write and composite foreign-key access;
 - denied tenant-key mutation, including for the forced-RLS table owner;
 - rejected an unexpected accounting column during schema verification;
-- tenant-isolated usage writes, reads, reports, and usage-read audit;
+- tenant-isolated usage writes, reads, reports, bounded coverage summaries, and
+  usage-read audit;
 - one allowed and one denied request under a two-writer competing budget test;
 - idempotent provider-cost import plus aggregate reconciliation;
 - idempotent configuration-seeded identity synchronization;

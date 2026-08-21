@@ -1239,6 +1239,97 @@ class SessionBrokerIntegrationTests(unittest.TestCase):
             [("claude-test", 2_000), ("gpt-test", 1_500)],
         )
 
+    def test_usage_coverage_is_scoped_and_never_claims_an_organization_total(self) -> None:
+        employee = self.config.identities_by_actor["employee"]
+        administrator = self.config.identities_by_actor["security-admin"]
+        ci_workload = Identity(
+            token_env="",
+            token="",
+            actor_id="ci-build",
+            actor_name="CI build",
+            team_id="engineering",
+            team_name="Engineering",
+            organization_id="xpounder",
+            identity_type="ci",
+        )
+        for identity, client in (
+            (employee, "codex"),
+            (ci_workload, "claude-code"),
+            (administrator, "codex"),
+        ):
+            self.gateway.store.record(
+                identity=identity,
+                client=client,
+                protocol="openai",
+                requested_model="gpt-test",
+                resolved_alias="gpt-test",
+                upstream_model="gpt-test",
+                policy_action="allowed",
+                status="succeeded",
+            )
+
+        status, self_coverage = self._admin_request(
+            "GET",
+            "/v1/admin/usage/coverage",
+            token="employee-token-" + "e" * 32,
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(self_coverage["access"], {"scope": "self"})
+        self.assertEqual(self_coverage["coverage"]["accounted_gateway_requests"], 1)
+        self.assertEqual(
+            self_coverage["coverage"]["identity_type_requests"],
+            {"human": 1, "service_account": 0, "ci": 0, "connector": 0},
+        )
+
+        status, team_coverage = self._admin_request(
+            "GET",
+            "/v1/admin/usage/coverage",
+            token="manager-token-" + "m" * 32,
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(team_coverage["access"], {"scope": "team"})
+        self.assertEqual(team_coverage["coverage"]["accounted_gateway_requests"], 2)
+        self.assertEqual(
+            team_coverage["coverage"]["identity_type_requests"],
+            {"human": 1, "service_account": 0, "ci": 1, "connector": 0},
+        )
+        self.assertNotIn("Security Admin", repr(team_coverage))
+
+        status, finance_coverage = self._admin_request(
+            "GET",
+            "/v1/admin/usage/coverage",
+            token="finance-token-" + "f" * 32,
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(finance_coverage["access"], {"scope": "finance"})
+        coverage = finance_coverage["coverage"]
+        self.assertEqual(coverage["accounted_gateway_requests"], 3)
+        self.assertEqual(coverage["identity_bound_gateway_requests"], 3)
+        self.assertEqual(coverage["unattributed_accounted_gateway_requests"], 0)
+        self.assertFalse(coverage["outside_gateway_traffic_observable"])
+        self.assertFalse(coverage["organization_total"])
+        self.assertEqual(
+            coverage["provider_invoice_reconciliation"],
+            "separate_billing_reconciliation_required",
+        )
+        self.assertNotIn("Employee", repr(finance_coverage))
+
+        status, forbidden = self._admin_request(
+            "GET",
+            "/v1/admin/usage/coverage",
+            token="policy-admin-token-" + "p" * 32,
+        )
+        self.assertEqual(status, 403)
+        self.assertEqual(forbidden["error"]["code"], "usage_viewer_capability_required")
+
+        status, invalid = self._admin_request(
+            "GET",
+            "/v1/admin/usage/coverage?unexpected=value",
+            token="admin-token-" + "a" * 32,
+        )
+        self.assertEqual(status, 400)
+        self.assertEqual(invalid["error"]["code"], "invalid_usage_coverage_request")
+
     def test_usage_admin_cli_uses_the_authenticated_gateway_contract(self) -> None:
         identity = self.config.identities_by_actor["employee"]
         self.gateway.store.record(
@@ -1285,6 +1376,41 @@ class SessionBrokerIntegrationTests(unittest.TestCase):
         self.assertEqual(report["rows"][0]["billable_tokens"], 24)
         self.assertEqual(report["schema_version"], 3)
         self.assertEqual(report["rows"][0]["latency"]["gateway"]["count"], 1)
+
+    def test_usage_coverage_cli_uses_the_authenticated_gateway_contract(self) -> None:
+        identity = self.config.identities_by_actor["employee"]
+        self.gateway.store.record(
+            identity=identity,
+            client="codex",
+            protocol="openai",
+            requested_model="gpt-test",
+            resolved_alias="gpt-test",
+            upstream_model="gpt-test",
+            policy_action="allowed",
+            status="succeeded",
+        )
+        output = io.StringIO()
+        with mock.patch.dict(
+            os.environ,
+            {"HORMUZ_ADMIN_TOKEN": "admin-token-" + "a" * 32},
+        ), redirect_stdout(output):
+            result = cli_main(
+                [
+                    "usage",
+                    "coverage",
+                    "--gateway",
+                    self.gateway_url,
+                    "--credential-env",
+                    "HORMUZ_ADMIN_TOKEN",
+                    "--allow-insecure-http",
+                ]
+            )
+        self.assertEqual(result, 0)
+        coverage = json.loads(output.getvalue())
+        self.assertEqual(coverage["schema_version"], 1)
+        self.assertEqual(coverage["access"], {"scope": "organization"})
+        self.assertEqual(coverage["coverage"]["accounted_gateway_requests"], 1)
+        self.assertFalse(coverage["coverage"]["organization_total"])
 
     def test_usage_admin_cli_accepts_a_constrained_gateway_contract(self) -> None:
         identity = self.config.identities_by_actor["employee"]
@@ -1350,6 +1476,20 @@ class SessionBrokerIntegrationTests(unittest.TestCase):
         self.assertEqual(status, 503)
         self.assertEqual(response["error"]["code"], "usage_admin_unavailable")
         self.assertNotIn("rows", response)
+
+        with mock.patch.object(
+            self.gateway.store,
+            "record_admin_usage_read",
+            side_effect=SecurityStoreError("usage_admin_audit_unavailable"),
+        ):
+            status, response = self._admin_request(
+                "GET",
+                "/v1/admin/usage/coverage",
+                token=admin_token,
+            )
+        self.assertEqual(status, 503)
+        self.assertEqual(response["error"]["code"], "usage_admin_unavailable")
+        self.assertNotIn("coverage", response)
 
     def test_session_admin_cli_uses_the_authenticated_gateway_contract(self) -> None:
         pair = self._login(client="claude-code")

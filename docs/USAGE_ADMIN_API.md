@@ -67,6 +67,33 @@ hormuz usage report \
 
 For a workload credential, replace `--profile` with `--credential-env HORMUZ_TOKEN`. Plain HTTP is refused except explicit loopback development with `--allow-insecure-http`, redirects are refused, credentials are never included in output, and responses are bounded and schema-checked.
 
+## Coverage summary
+
+Use the separate coverage read when an operator needs to know exactly what this
+Hormuz gateway can substantiate for the credential's own reporting scope:
+
+```bash
+hormuz usage coverage \
+  --gateway https://hormuz.example.com \
+  --profile ai-operations
+```
+
+`GET /v1/admin/usage/coverage` has no query fields. It returns a schema-version
+1, current-UTC-month summary of authenticated, accounted gateway events in the
+effective self, team, finance, or organization scope. The summary includes
+recorded requests, identity-bound versus unattributed recorded requests, active
+identities and teams, the four bounded identity types, and the observed Hormuz
+client identifiers (`codex` and `claude-code`). It uses the same capability
+checks and metadata-only read audit as the report endpoint.
+
+This is deliberately **not** an organization-wide AI usage total. It cannot
+observe pre-authentication attempts, requests that bypass Hormuz, or whether a
+client is deployed but did not send a recorded request during the window. The
+response fixes `organization_total` and `outside_gateway_traffic_observable` to
+`false`; `observed_gateway_clients` is observed traffic, not client-deployment
+coverage. Provider invoice reconciliation remains a separate aggregate billing
+workflow and is never presented as a per-request or per-person final cost.
+
 ## HTTP contract
 
 `GET /v1/admin/usage` accepts these single-valued query fields:
@@ -152,13 +179,19 @@ applicable budget fields documented in [USAGE.md](USAGE.md).
 
 Unknown, repeated, blank, over-limit, malformed, cursor/filter-mismatched, and unsupported fields return `400 invalid_usage_report_request`. A storage or mandatory audit-write failure returns `503 usage_admin_unavailable` without returning report rows.
 
+`GET /v1/admin/usage/coverage` rejects all query fields with
+`400 invalid_usage_coverage_request`. Its response does not paginate because it
+is one bounded aggregate for the current request. A storage or mandatory
+audit-write failure returns the same content-free `503 usage_admin_unavailable`
+without a coverage object.
+
 ## Audit and interpretation
 
-Every successful page writes `security.admin.usage_read` before its rows are
-returned. The event records the organization, viewing actor, grouping, frozen
-window, row count, and SHA-256 digests of the effective actor/team filters. It
-contains no request content. The event appears in local `audit-export --kind
-security` output.
+Every successful report page and coverage read writes `security.admin.usage_read`
+before its result is returned. The event records the organization, viewing
+actor, grouping, frozen window, row count, and SHA-256 digests of the effective
+actor/team filters. It contains no request content. The event appears in local
+`audit-export --kind security` output.
 
 The report covers only generation attempts recorded through this Hormuz gateway. Legacy rows without an organization are excluded rather than guessed, and request-time costs remain estimates until separately reconciled. Tokens and spend measure consumption, not employee productivity or work quality. Treat person-level output as access-controlled employee metadata and never as a performance ranking.
 

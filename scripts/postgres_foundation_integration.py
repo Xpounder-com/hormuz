@@ -53,7 +53,7 @@ from hormuz.store import (
 )
 
 
-EVIDENCE_SCHEMA = "hormuz.postgres-policy-administration-integration.v7"
+EVIDENCE_SCHEMA = "hormuz.postgres-policy-administration-integration.v8"
 DEFAULT_IMAGE = (
     "postgres@sha256:"
     "57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777"
@@ -400,6 +400,9 @@ def _prove_accounting_store(runtime_dsn: str) -> dict[str, object]:
             organization_id="tenant-a",
             include_latency=True,
         )
+        coverage = stores[0].coverage_summary(
+            organization_id="tenant-a",
+        )
         administrator = _synthetic_identity(
             "tenant-a",
             "usage-administrator",
@@ -424,6 +427,11 @@ def _prove_accounting_store(runtime_dsn: str) -> dict[str, object]:
     if (
         len(report_rows) != 1
         or int(report_rows[0]["requests"]) != 1
+        or int(coverage["accounted_gateway_requests"]) != 1
+        or int(coverage["identity_bound_gateway_requests"]) != 1
+        or int(coverage["unattributed_accounted_gateway_requests"]) != 0
+        or coverage["identity_type_requests"]
+        != {"human": 1, "service_account": 0, "ci": 0, "connector": 0}
         or not any(event["event_type"] == "usage" for event in audit_events)
         or not any(
             event["event_type"] == "usage"
@@ -529,6 +537,7 @@ def _prove_accounting_store(runtime_dsn: str) -> dict[str, object]:
         "tenant_scoped_usage_verified": True,
         "usage_rows_per_tenant": 1,
         "usage_reporting_verified": True,
+        "usage_coverage_summary_verified": True,
         "usage_read_audit_verified": True,
         "exact_governance_policy_version_verified": True,
         "atomic_budget_competitors": 2,

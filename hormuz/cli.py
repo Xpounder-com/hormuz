@@ -311,6 +311,25 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Allow loopback HTTP for local development only",
     )
+    usage_coverage = usage_subparsers.add_parser(
+        "coverage",
+        help="Show the bounded gateway traffic coverage observable to this credential",
+    )
+    usage_coverage.add_argument("--gateway", required=True, help="Hormuz gateway base URL")
+    usage_coverage_credential = usage_coverage.add_mutually_exclusive_group()
+    usage_coverage_credential.add_argument(
+        "--credential-env",
+        help="Usage viewer credential environment variable (default: HORMUZ_TOKEN)",
+    )
+    usage_coverage_credential.add_argument(
+        "--profile",
+        help="Saved human-session profile instead of an environment credential",
+    )
+    usage_coverage.add_argument(
+        "--allow-insecure-http",
+        action="store_true",
+        help="Allow loopback HTTP for local development only",
+    )
 
     billing = subparsers.add_parser(
         "billing",
@@ -2308,16 +2327,19 @@ def _usage_admin_command(args: argparse.Namespace) -> int:
             credential=credential,
             allow_insecure_http=args.allow_insecure_http,
         )
-        if args.usage_command != "report":
+        if args.usage_command == "report":
+            result = client.report(
+                group_by=args.group_by,
+                actor_id=args.actor,
+                team_id=args.team,
+                limit=args.limit,
+                cursor=args.cursor,
+                include_latency=args.include_latency,
+            )
+        elif args.usage_command == "coverage":
+            result = client.coverage()
+        else:
             return 2
-        result = client.report(
-            group_by=args.group_by,
-            actor_id=args.actor,
-            team_id=args.team,
-            limit=args.limit,
-            cursor=args.cursor,
-            include_latency=args.include_latency,
-        )
     except (
         UsageAdminClientError,
         SessionClientError,

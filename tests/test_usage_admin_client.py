@@ -102,6 +102,43 @@ def _latency_response() -> dict[str, object]:
     return response
 
 
+def _coverage_response() -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "organization_id": "xpounder",
+        "access": {"scope": "organization"},
+        "window": {
+            "start": "2026-08-01T00:00:00+00:00",
+            "end": "2026-08-16T12:00:00+00:00",
+            "timezone": "UTC",
+        },
+        "coverage": {
+            "scope": "accounted_authenticated_gateway_requests_only",
+            "accounted_gateway_requests": 3,
+            "identity_bound_gateway_requests": 3,
+            "unattributed_accounted_gateway_requests": 0,
+            "active_identities": 2,
+            "active_teams": 1,
+            "identity_type_requests": {
+                "human": 2,
+                "service_account": 0,
+                "ci": 1,
+                "connector": 0,
+            },
+            "observed_gateway_clients": [
+                {"client": "claude-code", "requests": 1},
+                {"client": "codex", "requests": 2},
+            ],
+            "legacy_unattributed_rows_excluded": True,
+            "pre_authentication_attempts_included": False,
+            "outside_gateway_traffic_observable": False,
+            "provider_invoice_reconciled": False,
+            "provider_invoice_reconciliation": "separate_billing_reconciliation_required",
+            "organization_total": False,
+        },
+    }
+
+
 class UsageAdminClientTests(unittest.TestCase):
     def setUp(self) -> None:
         self.client = UsageAdminClient(
@@ -199,6 +236,24 @@ class UsageAdminClientTests(unittest.TestCase):
                 self.client.report(group_by="team", include_latency=True),
                 scoped,
             )
+
+    def test_coverage_requires_the_bounded_non_total_contract(self) -> None:
+        response = _coverage_response()
+        with mock.patch.object(self.client, "_request", return_value=response) as request:
+            self.assertEqual(self.client.coverage(), response)
+        self.assertEqual(request.call_args.args[0], "/v1/admin/usage/coverage")
+
+        unsafe = _coverage_response()
+        unsafe["coverage"]["identity_type_requests"]["prompt"] = "must-not-be-accepted"  # type: ignore[index]
+        with mock.patch.object(self.client, "_request", return_value=unsafe):
+            with self.assertRaisesRegex(UsageAdminClientError, "invalid_gateway_response"):
+                self.client.coverage()
+
+        misleading = _coverage_response()
+        misleading["coverage"]["organization_total"] = True  # type: ignore[index]
+        with mock.patch.object(self.client, "_request", return_value=misleading):
+            with self.assertRaisesRegex(UsageAdminClientError, "invalid_gateway_response"):
+                self.client.coverage()
 
 
 if __name__ == "__main__":

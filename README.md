@@ -50,7 +50,7 @@ The following behavior is retained temporarily for compatibility and historical 
 - Generic OIDC discovery/JWKS verification with strict issuer, audience, expiry, asymmetric-algorithm, subject-mapping, and signing-key-rotation enforcement.
 - Generic OIDC authorization-code + PKCE browser login with opaque 10-minute Hormuz access credentials, atomic refresh rotation, replay-family revocation, and fail-closed OS secure-store custody.
 - Capability-gated, tenant-scoped `hormuz sessions` listing, metadata-only security-event inspection, and immediate session, employee, team, or organization revocation.
-- Scoped, capability-gated, tenant-scoped `hormuz usage report` over the authenticated gateway: self-only, team-aggregate, finance-aggregate, and organization-administrator views; frozen-window pagination; mandatory metadata-only read audit; and versioned content-free latency histograms. Legacy `usage_viewer` organization-administrator clients retain their exact version-2/3 contract.
+- Scoped, capability-gated, tenant-scoped `hormuz usage report` and bounded `hormuz usage coverage` reads over the authenticated gateway: self-only, team-aggregate, finance-aggregate, and organization-administrator views; frozen-window pagination for reports; mandatory metadata-only read audit; versioned content-free latency histograms; and an explicit non-total boundary for observed gateway traffic. Legacy `usage_viewer` organization-administrator clients retain their exact version-2/3 report contract.
 - Capability-gated `hormuz policy` administration for canonical secret-free tenant projections, immutable staging, compare-and-swap activation, exact active-version reads, rollback to a previously active version, request-time enforcement, and exact policy-version usage evidence.
 - An opt-in PostgreSQL backend for usage, cost evidence, usage-read audit, cross-replica atomic budget reservations, configuration-seeded identity and secret-free policy projections, immutable live policy versions, multi-instance human sessions, one-time DLP approvals, and security evidence. It uses checksummed migrations, separate owner/runtime roles, mandatory tenant keys, forced row-level security, transaction-local tenant binding, keyed opaque tenant routing tags, authorization-version invalidation, and a digest-pinned two-tenant integration gate. Governed context remains on its separately identified SQLite store in this transition; see [docs/POSTGRESQL.md](docs/POSTGRESQL.md).
 - An opt-in, content-free local SCIM identity lifecycle for users, groups, and federated workload identities. It applies live OIDC identity, team/client/capability mapping, deactivation, and session invalidation at a single gateway host; shared directory persistence and SCIM vendor certification remain open. See [docs/SCIM.md](docs/SCIM.md).
@@ -192,6 +192,15 @@ hormuz usage report \
 Add `--include-latency` to opt into tenant-scoped gateway, policy, provider,
 and injected-context latency histograms. The flag reports measurement inputs;
 it does not configure or claim SLO targets.
+
+To inspect only the authenticated gateway traffic Hormuz can substantiate for
+the credential's scope, without claiming a complete organization AI total:
+
+```bash
+hormuz usage coverage \
+  --gateway https://hormuz.example.com \
+  --profile ai-operations
+```
 
 The server derives organization scope from the credential. See [docs/USAGE_ADMIN_API.md](docs/USAGE_ADMIN_API.md) for pagination, RBAC, audit, and coverage semantics.
 

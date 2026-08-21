@@ -143,7 +143,7 @@ class UsageStoreMigrationTests(unittest.TestCase):
                         organization_id="org-a",
                         identity_type=identity_type,
                     ),
-                    client="codex",
+                    client="claude-code" if identity_type == "ci" else "codex",
                     protocol="openai",
                     requested_model="gpt-test",
                     resolved_alias="gpt-test",
@@ -161,6 +161,23 @@ class UsageStoreMigrationTests(unittest.TestCase):
                 {"human", "service_account", "ci", "connector"},
             )
             self.assertTrue(all(item["schema_version"] == 4 for item in observed))
+            coverage = store.coverage_summary(organization_id="org-a")
+            self.assertEqual(coverage["accounted_gateway_requests"], 4)
+            self.assertEqual(coverage["identity_bound_gateway_requests"], 4)
+            self.assertEqual(coverage["unattributed_accounted_gateway_requests"], 0)
+            self.assertEqual(coverage["active_identities"], 4)
+            self.assertEqual(coverage["active_teams"], 1)
+            self.assertEqual(
+                coverage["identity_type_requests"],
+                {"human": 1, "service_account": 1, "ci": 1, "connector": 1},
+            )
+            self.assertEqual(
+                coverage["observed_gateway_clients"],
+                [
+                    {"client": "claude-code", "requests": 1},
+                    {"client": "codex", "requests": 3},
+                ],
+            )
             with self.assertRaisesRegex(ValueError, "Usage identity type"):
                 store.record(
                     identity=Identity(

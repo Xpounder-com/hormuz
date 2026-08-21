@@ -750,6 +750,7 @@ class PostgresFoundationTests(unittest.TestCase):
         self.assertTrue(value["accounting"]["provider_cost_idempotency_verified"])
         self.assertTrue(value["accounting"]["provider_reconciliation_verified"])
         self.assertTrue(value["accounting"]["usage_reporting_verified"])
+        self.assertTrue(value["accounting"]["usage_coverage_summary_verified"])
         self.assertTrue(value["accounting"]["usage_read_audit_verified"])
         self.assertTrue(value["identity_sessions"]["configuration_projection_verified"])
         self.assertTrue(value["identity_sessions"]["cross_instance_enrollment_verified"])

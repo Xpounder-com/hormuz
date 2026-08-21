@@ -23,6 +23,7 @@ _ACCOUNTING_METHODS = {
     "monthly_totals",
     "summary_rows",
     "report_rows",
+    "coverage_summary",
     "record_admin_usage_read",
 }
 

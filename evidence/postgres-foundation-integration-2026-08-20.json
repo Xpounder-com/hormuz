@@ -8,12 +8,13 @@
     "provider_reconciliation_verified": true,
     "reservation_release_verified": true,
     "tenant_scoped_usage_verified": true,
+    "usage_coverage_summary_verified": true,
     "usage_read_audit_verified": true,
     "usage_reporting_verified": true,
     "usage_rows_per_tenant": 1
   },
   "content_free": true,
-  "generated_at": "2026-08-21T00:30:36.129835Z",
+  "generated_at": "2026-08-21T00:54:03.216480Z",
   "identity_sessions": {
     "atomic_refresh_competitors": 2,
     "atomic_refresh_replay_denied": 1,
@@ -83,7 +84,7 @@
     "postgres_image": "postgres@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777",
     "postgres_server_version_num": "160014"
   },
-  "schema": "hormuz.postgres-policy-administration-integration.v7",
+  "schema": "hormuz.postgres-policy-administration-integration.v8",
   "tamper_detection": {
     "permissive_policy_rejected": true,
     "runtime_owner_membership_rejected": true,

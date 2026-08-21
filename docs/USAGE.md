@@ -62,6 +62,22 @@ and the permitted reporting scope from the credential, supports frozen-window
 cursor pagination, and audits every returned page. See
 [USAGE_ADMIN_API.md](USAGE_ADMIN_API.md).
 
+For a bounded account of gateway-observed coverage instead of report rows, an
+authorized operator can run:
+
+```bash
+hormuz usage coverage \
+  --gateway https://hormuz.example.com \
+  --profile ai-operations
+```
+
+It reports only authenticated, accounted requests Hormuz recorded within the
+credential's self, team, finance, or organization scope. It explicitly does
+not observe gateway-bypassing or pre-authentication traffic, client deployment
+coverage, or an organization-wide AI total. Provider invoice reconciliation is
+separate; see [USAGE_ADMIN_API.md](USAGE_ADMIN_API.md) and
+[BILLING_RECONCILIATION.md](BILLING_RECONCILIATION.md).
+
 ## Field semantics
 
 - `requests`, `succeeded`, `failed`, and `denied` describe gateway outcomes.

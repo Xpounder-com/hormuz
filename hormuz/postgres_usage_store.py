@@ -53,6 +53,7 @@ from .usage import (
     sanitize_provider_usage,
 )
 from .usage_access import UsageReportAccessError, authorize_usage_report
+from .usage_reporting import IDENTITY_TYPES
 
 
 def _iso(value: object) -> str:
@@ -650,6 +651,99 @@ class PostgresUsageStore:
                 item["latency"] = _extract_latency_histograms(item)
             result.append(item)
         return result
+
+    def coverage_summary(
+        self,
+        *,
+        organization_id: str | None = None,
+        actor_id: str | None = None,
+        team_id: str | None = None,
+        start: str | None = None,
+        end: str | None = None,
+    ) -> dict[str, object]:
+        """Return the observable gateway coverage for one tenant-bound scope."""
+
+        organization = self._organization(organization_id)
+        clauses = ["tenant_id = %s", "occurred_at >= %s"]
+        parameters: list[object] = [
+            organization,
+            start
+            or datetime.now(timezone.utc).replace(
+                day=1,
+                hour=0,
+                minute=0,
+                second=0,
+                microsecond=0,
+            ),
+        ]
+        if end is not None:
+            clauses.append("occurred_at < %s")
+            parameters.append(end)
+        for column, value in (("actor_id", actor_id), ("team_id", team_id)):
+            if value is not None:
+                clauses.append(f"{column} = %s")
+                parameters.append(value)
+        where = " AND ".join(clauses)
+        with self._transaction(organization) as connection:
+            with self._dict_cursor(connection) as cursor:
+                cursor.execute(
+                    f"""
+                    SELECT
+                      COUNT(*) AS accounted_gateway_requests,
+                      COALESCE(SUM(CASE WHEN actor_id <> '' AND team_id <> ''
+                        THEN 1 ELSE 0 END), 0) AS identity_bound_gateway_requests,
+                      COUNT(DISTINCT CASE WHEN actor_id <> '' AND team_id <> ''
+                        THEN actor_id END) AS active_identities,
+                      COUNT(DISTINCT CASE WHEN actor_id <> '' AND team_id <> ''
+                        THEN team_id END) AS active_teams
+                    FROM gateway_usage_events
+                    WHERE {where}
+                    """,
+                    parameters,
+                )
+                totals = cursor.fetchone()
+                cursor.execute(
+                    f"""
+                    SELECT identity_type, COUNT(*) AS requests
+                    FROM gateway_usage_events
+                    WHERE {where}
+                    GROUP BY identity_type
+                    ORDER BY identity_type
+                    """,
+                    parameters,
+                )
+                identity_rows = cursor.fetchall()
+                cursor.execute(
+                    f"""
+                    SELECT client, COUNT(*) AS requests
+                    FROM gateway_usage_events
+                    WHERE {where}
+                    GROUP BY client
+                    ORDER BY client
+                    """,
+                    parameters,
+                )
+                client_rows = cursor.fetchall()
+        identity_type_requests = {identity_type: 0 for identity_type in IDENTITY_TYPES}
+        for row in identity_rows:
+            identity_type = str(row["identity_type"])
+            if identity_type not in identity_type_requests:
+                raise ValueError("Usage coverage contains an unsupported identity type")
+            identity_type_requests[identity_type] = int(row["requests"])
+        accounted = int(totals["accounted_gateway_requests"])
+        identity_bound = int(totals["identity_bound_gateway_requests"])
+        return {
+            "accounted_gateway_requests": accounted,
+            "identity_bound_gateway_requests": identity_bound,
+            "unattributed_accounted_gateway_requests": accounted - identity_bound,
+            "active_identities": int(totals["active_identities"]),
+            "active_teams": int(totals["active_teams"]),
+            "identity_type_requests": identity_type_requests,
+            "observed_gateway_clients": [
+                {"client": str(row["client"]), "requests": int(row["requests"])}
+                for row in client_rows
+            ],
+        }
 
     def record_admin_usage_read(
         self,

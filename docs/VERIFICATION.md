@@ -1744,8 +1744,8 @@ Observed result:
   denied a cross-tenant insert, the composite foreign key denied a cross-tenant
   reference, and the forced-RLS owner could not change a tenant key;
 - two independent PostgreSQL accounting stores each wrote and read only their
-  selected tenant; usage reports and metadata-only usage-read audit were
-  exercised against the real database;
+  selected tenant; usage reports, bounded gateway-coverage summaries, and
+  metadata-only usage-read audit were exercised against the real database;
 - two concurrent writers attempted 600-token reservations against the same
   tenant-month with 1,000 tokens available after recorded usage. Exactly one
   reservation committed, one was denied, and release removed the winner;
@@ -2053,7 +2053,7 @@ The second issue #21 implementation slice was exercised locally on August 20,
   `16.14` integration applies migrations 1 through 7,
   exercised staged and active versions across independent repositories, and
   emitted schema
-  `hormuz.postgres-policy-administration-integration.v7` with exact-version
+  `hormuz.postgres-policy-administration-integration.v8` with exact-version
   accounting proof;
 - policy-store outage, active-version enforcement, exact usage lineage,
   administration authorization, CLI transport, rollback input, configuration

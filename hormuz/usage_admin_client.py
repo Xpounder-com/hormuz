@@ -8,12 +8,13 @@ import urllib.request
 from datetime import datetime
 
 from .session_client import validate_session_gateway
-from .usage_reporting import LATENCY_BUCKETS_MS
+from .usage_reporting import IDENTITY_TYPES, LATENCY_BUCKETS_MS
 
 
 _MAX_RESPONSE_BYTES = 512 * 1024
 _MAX_SQLITE_INTEGER = 2**63 - 1
 _DIMENSIONS = {"organization", "team", "person", "model", "client", "provider"}
+_GATEWAY_CLIENTS = {"codex", "claude-code"}
 
 
 class UsageAdminClientError(RuntimeError):
@@ -144,6 +145,22 @@ class UsageAdminClient:
                 raise UsageAdminClientError("invalid_gateway_response")
         return response
 
+    def coverage(self) -> dict[str, object]:
+        """Read exactly the bounded gateway coverage the credential may inspect."""
+
+        response = self._request("/v1/admin/usage/coverage")
+        required = {"schema_version", "organization_id", "access", "window", "coverage"}
+        if set(response) != required or response.get("schema_version") != 1:
+            raise UsageAdminClientError("invalid_gateway_response")
+        organization_id = response.get("organization_id")
+        if not isinstance(organization_id, str) or not organization_id:
+            raise UsageAdminClientError("invalid_gateway_response")
+        if not _valid_coverage_access(response.get("access")):
+            raise UsageAdminClientError("invalid_gateway_response")
+        if not _valid_window(response.get("window")) or not _valid_coverage(response.get("coverage")):
+            raise UsageAdminClientError("invalid_gateway_response")
+        return response
+
     def _request(self, path: str) -> dict[str, object]:
         request = urllib.request.Request(
             self.gateway + path,
@@ -231,6 +248,100 @@ def _valid_constrained_access(
         group_by in {"organization", "model", "client", "provider"}
         and actor_id is None
         and team_id is None
+    )
+
+
+def _valid_coverage_access(value: object) -> bool:
+    return (
+        isinstance(value, dict)
+        and set(value) == {"scope"}
+        and value.get("scope") in {"self", "team", "finance", "organization"}
+    )
+
+
+def _valid_coverage(value: object) -> bool:
+    if not isinstance(value, dict):
+        return False
+    required = {
+        "scope",
+        "accounted_gateway_requests",
+        "identity_bound_gateway_requests",
+        "unattributed_accounted_gateway_requests",
+        "active_identities",
+        "active_teams",
+        "identity_type_requests",
+        "observed_gateway_clients",
+        "legacy_unattributed_rows_excluded",
+        "pre_authentication_attempts_included",
+        "outside_gateway_traffic_observable",
+        "provider_invoice_reconciled",
+        "provider_invoice_reconciliation",
+        "organization_total",
+    }
+    if set(value) != required:
+        return False
+    if (
+        value.get("scope") != "accounted_authenticated_gateway_requests_only"
+        or value.get("legacy_unattributed_rows_excluded") is not True
+        or value.get("pre_authentication_attempts_included") is not False
+        or value.get("outside_gateway_traffic_observable") is not False
+        or value.get("provider_invoice_reconciled") is not False
+        or value.get("provider_invoice_reconciliation")
+        != "separate_billing_reconciliation_required"
+        or value.get("organization_total") is not False
+    ):
+        return False
+    integer_fields = {
+        "accounted_gateway_requests",
+        "identity_bound_gateway_requests",
+        "unattributed_accounted_gateway_requests",
+        "active_identities",
+        "active_teams",
+    }
+    if not all(_valid_nonnegative_int(value.get(field)) for field in integer_fields):
+        return False
+    accounted = int(value["accounted_gateway_requests"])
+    identity_bound = int(value["identity_bound_gateway_requests"])
+    unattributed = int(value["unattributed_accounted_gateway_requests"])
+    if (
+        identity_bound + unattributed != accounted
+        or int(value["active_identities"]) > identity_bound
+        or int(value["active_teams"]) > identity_bound
+    ):
+        return False
+    identity_types = value.get("identity_type_requests")
+    if not isinstance(identity_types, dict) or set(identity_types) != set(IDENTITY_TYPES):
+        return False
+    if not all(_valid_nonnegative_int(identity_types.get(identity_type)) for identity_type in IDENTITY_TYPES):
+        return False
+    if sum(int(identity_types[identity_type]) for identity_type in IDENTITY_TYPES) != accounted:
+        return False
+    clients = value.get("observed_gateway_clients")
+    if not isinstance(clients, list) or len(clients) > len(_GATEWAY_CLIENTS):
+        return False
+    observed_clients: set[str] = set()
+    observed_requests = 0
+    for client in clients:
+        if (
+            not isinstance(client, dict)
+            or set(client) != {"client", "requests"}
+            or not isinstance(client.get("client"), str)
+            or client["client"] not in _GATEWAY_CLIENTS
+            or client["client"] in observed_clients
+            or not _valid_nonnegative_int(client.get("requests"))
+            or int(client["requests"]) == 0
+        ):
+            return False
+        observed_clients.add(client["client"])
+        observed_requests += int(client["requests"])
+    return observed_requests == accounted
+
+
+def _valid_nonnegative_int(value: object) -> bool:
+    return (
+        not isinstance(value, bool)
+        and isinstance(value, int)
+        and 0 <= value <= _MAX_SQLITE_INTEGER
     )
 
 
