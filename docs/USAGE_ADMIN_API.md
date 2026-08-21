@@ -48,6 +48,9 @@ hormuz usage report \
 
 Add `--include-latency` when an operator needs the versioned content-free
 gateway, policy, provider, and automatic-context latency histograms.
+Add `--include-outcomes` when the operator needs exact, content-free counts of
+recorded model fallbacks, enforced output caps, and atomic budget-reservation
+denials. The flags can be combined.
 
 An organization-scoped administrator can group by `organization`, `team`,
 `person`, `model`, `client`, or `provider`, and can use exact event-time
@@ -105,6 +108,11 @@ workflow and is never presented as a per-request or per-person final cost.
 - `include=latency` opts into a latency response: version 3 for organization
   scope and version 5 for constrained scope. Omitting it preserves version 2
   for organization scope and returns version 4 for constrained scope.
+- `include=outcomes` opts into recorded policy-outcome aggregates: version 6
+  for organization scope and version 8 for constrained scope.
+- `include=latency,outcomes` opts into both additions: version 7 for
+  organization scope and version 9 for constrained scope. The order is
+  canonical; `outcomes,latency` is rejected.
 
 An organization-scoped response has schema version 2. Version 2 adds the
 content-free automatic-context aggregates documented in [USAGE.md](USAGE.md):
@@ -139,9 +147,33 @@ histogram has null average and maximum. The coverage object also states that
 only accounted gateway requests are included, historical rows without timings
 are excluded, and no SLO target is configured.
 
-Constrained roles receive schema version 4, or version 5 with
-`include=latency`. These response shapes add an explicit `access` object and
-return the effective, server-applied filters:
+Schema version 6 is returned only for an organization-scoped
+`include=outcomes` response. Each row then adds this fixed, content-free
+object:
+
+```json
+{
+  "outcomes": {
+    "model_fallback_requests": 12,
+    "output_capped_requests": 9,
+    "reservation_budget_denied_requests": 2
+  }
+}
+```
+
+The counts are independent and may overlap: one `fallback+capped` event adds
+one to both of the first two fields. Hormuz derives them from the gateway's
+stored policy-action marker only. `reservation_budget_denied_requests` counts
+only the exact atomic-reservation action. Older generic `denied` rows do not
+retain a reason category, so the report does not claim to classify historical
+static-policy or budget-cap denials. The response coverage explicitly states
+that limitation. Schema version 7 combines the version-3 `latency` object and
+the version-6 `outcomes` object.
+
+Constrained roles receive schema version 4 by default, version 5 with
+`include=latency`, version 8 with `include=outcomes`, and version 9 with both
+options. These response shapes add an explicit `access` object and return the
+effective, server-applied filters:
 
 ```json
 {
@@ -151,12 +183,12 @@ return the effective, server-applied filters:
 }
 ```
 
-The bundled CLI accepts versions 2–5 and validates the constrained scope/filter
+The bundled CLI accepts versions 2–9 and validates the constrained scope/filter
 shape. Version 2/3 organization-administrator responses are unchanged for
 existing clients.
 
-Latency cursors bind `include=latency`; using one against a non-latency view, or
-using a non-latency cursor against the latency view, fails with
+Every opt-in cursor binds its exact `include` value; using it against a default
+or different opt-in view fails with
 `400 invalid_usage_report_request`. This prevents a page sequence from silently
 changing its response contract. Cursor state is never an authorization source:
 Hormuz re-derives the role and effective filters from the credential on every
@@ -165,12 +197,13 @@ page.
 ## Compatibility and migration
 
 Existing organization administrators and clients require no change: requests
-without `include=latency` continue to receive the exact schema-version-2
-envelope and row shape. To consume timings, upgrade the Hormuz CLI/client and
-add `--include-latency` or `include=latency`; the response is version 3 for an
-organization scope and version 5 for a constrained scope. Do not treat a later
-schema as a replacement for earlier schemas or send the new query to an older
-gateway that does not advertise this contract.
+without an `include` field continue to receive the exact schema-version-2
+organization envelope and row shape (or version 4 for a constrained scope). To
+consume timings, upgrade the Hormuz CLI/client and add `--include-latency` or
+`include=latency`; to consume exact policy outcomes, add
+`--include-outcomes` or `include=outcomes`. Do not treat a later schema as a
+replacement for earlier schemas or send the new query to an older gateway that
+does not advertise this contract.
 
 The first request freezes an exclusive `window.end`; every cursor page reuses
 that window. Rows have the token, request-status, cost-basis, rate-card,

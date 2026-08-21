@@ -1137,7 +1137,18 @@ class ClientConfigTests(unittest.TestCase):
 
     def test_status_accepts_dimension_and_scope_filters(self) -> None:
         args = build_parser().parse_args(
-            ["status", "--group-by", "model", "--team", "engineering", "--actor", "alice", "--json", "--include-latency"]
+            [
+                "status",
+                "--group-by",
+                "model",
+                "--team",
+                "engineering",
+                "--actor",
+                "alice",
+                "--json",
+                "--include-latency",
+                "--include-outcomes",
+            ]
         )
 
         self.assertEqual(args.group_by, "model")
@@ -1145,6 +1156,7 @@ class ClientConfigTests(unittest.TestCase):
         self.assertEqual(args.actor, "alice")
         self.assertTrue(args.json)
         self.assertTrue(args.include_latency)
+        self.assertTrue(args.include_outcomes)
 
     def test_status_json_labels_versioned_estimates_and_unpriced_requests(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -1216,7 +1228,7 @@ class ClientConfigTests(unittest.TestCase):
                 requested_model="gpt-5.4-mini",
                 resolved_alias="gpt-5.4-mini",
                 upstream_model="gpt-5.4-mini",
-                policy_action="allowed",
+                policy_action="fallback+capped",
                 status="succeeded",
                 gateway_latency_milliseconds=18,
                 policy_latency_milliseconds=2,
@@ -1228,6 +1240,7 @@ class ClientConfigTests(unittest.TestCase):
                 "team": None,
                 "organization": None,
                 "include_latency": True,
+                "include_outcomes": True,
             }
             with redirect_stdout(json_output := io.StringIO()):
                 self.assertEqual(
@@ -1235,8 +1248,12 @@ class ClientConfigTests(unittest.TestCase):
                     0,
                 )
             latency = json.loads(json_output.getvalue())[0]["latency"]
+            outcomes = json.loads(json_output.getvalue())[0]["outcomes"]
             self.assertEqual(latency["gateway"]["count"], 1)
             self.assertEqual(latency["provider"]["average_ms"], 14.0)
+            self.assertEqual(outcomes["model_fallback_requests"], 1)
+            self.assertEqual(outcomes["output_capped_requests"], 1)
+            self.assertEqual(outcomes["reservation_budget_denied_requests"], 0)
 
             with redirect_stdout(table_output := io.StringIO()):
                 self.assertEqual(
@@ -1245,7 +1262,8 @@ class ClientConfigTests(unittest.TestCase):
                 )
             lines = table_output.getvalue().splitlines()
             self.assertIn("GATEWAY_P95_BUCKET_MS", lines[0])
-            self.assertTrue(lines[1].endswith("\t25\t5\t25\t-"))
+            self.assertIn("MODEL_FALLBACKS", lines[0])
+            self.assertTrue(lines[1].endswith("\t25\t5\t25\t-\t1\t1\t0"))
 
     def test_billing_reconciliation_policy_is_strict_and_exact(self) -> None:
         policy = self.config.billing_reconciliation

@@ -220,7 +220,7 @@ def _encode_usage_cursor(
             "offset": offset,
     }
     if include is not None:
-        value["v"] = 2
+        value["v"] = 2 if include == "latency" else 3
         value["include"] = include
     payload = json.dumps(
         value,
@@ -253,13 +253,18 @@ def _decode_usage_cursor(cursor: str) -> dict[str, object]:
         "window_end",
         "offset",
     }
-    latency_fields = legacy_fields | {"include"}
+    included_fields = legacy_fields | {"include"}
+    version = value.get("v")
     if (
-        (value.get("v") == 1 and set(value) != legacy_fields)
-        or (value.get("v") == 2 and set(value) != latency_fields)
-        or value.get("v") not in {1, 2}
+        (version == 1 and set(value) != legacy_fields)
+        or (version in {2, 3} and set(value) != included_fields)
+        or version not in {1, 2, 3}
         or value.get("group_by") not in REPORT_DIMENSIONS
-        or (value.get("v") == 2 and value.get("include") != "latency")
+        or (version == 2 and value.get("include") != "latency")
+        or (
+            version == 3
+            and value.get("include") not in {"outcomes", "latency,outcomes"}
+        )
     ):
         raise ValueError("invalid cursor")
     if not isinstance(value["window_end"], str):
@@ -1229,12 +1234,18 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         team_id = values.get("team_id", [None])[0]
         cursor = values.get("cursor", [None])[0]
         include = values.get("include", [None])[0]
+        include_options = {
+            None: (False, False),
+            "latency": (True, False),
+            "outcomes": (False, True),
+            "latency,outcomes": (True, True),
+        }
         try:
             limit = int(values.get("limit", ["50"])[0])
             if (
                 group_by not in REPORT_DIMENSIONS
                 or not 1 <= limit <= 100
-                or include not in {None, "latency"}
+                or include not in include_options
             ):
                 raise ValueError
             for scope_filter in (actor_id, team_id):
@@ -1246,6 +1257,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         except (ValueError, TypeError, OverflowError):
             self._send_usage_report_error()
             return
+        include_latency, include_outcomes = include_options[include]
         try:
             access = authorize_usage_report(
                 identity,
@@ -1307,7 +1319,8 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 end=window_end.isoformat(),
                 limit=limit + 1,
                 offset=offset,
-                include_latency=include == "latency",
+                include_latency=include_latency,
+                include_outcomes=include_outcomes,
             )
             has_more = len(raw_rows) > limit
             rows = enrich_usage_rows(
@@ -1357,7 +1370,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             "legacy_unattributed_rows_excluded": True,
             "provider_invoice_reconciled": False,
         }
-        if include == "latency":
+        if include_latency:
             coverage.update(
                 {
                     "latency_scope": "accounted_gateway_requests_only",
@@ -1365,11 +1378,30 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                     "latency_targets_configured": False,
                 }
             )
+        if include_outcomes:
+            coverage.update(
+                {
+                    "outcome_scope": "recorded_gateway_policy_actions_only",
+                    "historical_policy_denial_reasons_separately_classified": False,
+                }
+            )
         constrained_scope = access.scope != "organization"
-        if constrained_scope:
-            schema_version = 5 if include == "latency" else 4
-        else:
-            schema_version = 3 if include == "latency" else 2
+        schema_versions = (
+            {
+                (False, False): 4,
+                (True, False): 5,
+                (False, True): 8,
+                (True, True): 9,
+            }
+            if constrained_scope
+            else {
+                (False, False): 2,
+                (True, False): 3,
+                (False, True): 6,
+                (True, True): 7,
+            }
+        )
+        schema_version = schema_versions[(include_latency, include_outcomes)]
         response: dict[str, object] = {
             "schema_version": schema_version,
             "organization_id": identity.organization_id,

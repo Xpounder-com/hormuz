@@ -102,6 +102,38 @@ def _latency_response() -> dict[str, object]:
     return response
 
 
+def _outcome_response() -> dict[str, object]:
+    response = _response()
+    response["schema_version"] = 6
+    response["coverage"] = {
+        **response["coverage"],  # type: ignore[arg-type]
+        "outcome_scope": "recorded_gateway_policy_actions_only",
+        "historical_policy_denial_reasons_separately_classified": False,
+    }
+    response["rows"][0]["outcomes"] = {  # type: ignore[index]
+        "model_fallback_requests": 1,
+        "output_capped_requests": 1,
+        "reservation_budget_denied_requests": 0,
+    }
+    return response
+
+
+def _latency_and_outcome_response() -> dict[str, object]:
+    response = _latency_response()
+    response["schema_version"] = 7
+    response["coverage"] = {
+        **response["coverage"],  # type: ignore[arg-type]
+        "outcome_scope": "recorded_gateway_policy_actions_only",
+        "historical_policy_denial_reasons_separately_classified": False,
+    }
+    response["rows"][0]["outcomes"] = {  # type: ignore[index]
+        "model_fallback_requests": 1,
+        "output_capped_requests": 1,
+        "reservation_budget_denied_requests": 0,
+    }
+    return response
+
+
 def _coverage_response() -> dict[str, object]:
     return {
         "schema_version": 1,
@@ -170,6 +202,8 @@ class UsageAdminClientTests(unittest.TestCase):
                 self.client.report(group_by="team", actor_id="x" * 257)
             with self.assertRaisesRegex(UsageAdminClientError, "invalid_usage_report_request"):
                 self.client.report(group_by="team", limit=101)
+            with self.assertRaisesRegex(UsageAdminClientError, "invalid_usage_report_request"):
+                self.client.report(group_by="team", include_outcomes="true")  # type: ignore[arg-type]
         request.assert_not_called()
 
     def test_constrained_scope_response_is_explicit_and_schema_checked(self) -> None:
@@ -235,6 +269,75 @@ class UsageAdminClientTests(unittest.TestCase):
             self.assertEqual(
                 self.client.report(group_by="team", include_latency=True),
                 scoped,
+            )
+
+    def test_outcome_views_are_explicit_versioned_and_strict(self) -> None:
+        response = _outcome_response()
+        with mock.patch.object(self.client, "_request", return_value=response) as request:
+            self.assertEqual(
+                self.client.report(group_by="team", include_outcomes=True),
+                response,
+            )
+        self.assertIn("include=outcomes", request.call_args.args[0])
+
+        unrequested = _response()
+        unrequested["rows"][0]["outcomes"] = response["rows"][0]["outcomes"]  # type: ignore[index]
+        with mock.patch.object(self.client, "_request", return_value=unrequested):
+            with self.assertRaisesRegex(UsageAdminClientError, "invalid_gateway_response"):
+                self.client.report(group_by="team")
+
+        wrong_version = _outcome_response()
+        wrong_version["schema_version"] = 2
+        with mock.patch.object(self.client, "_request", return_value=wrong_version):
+            with self.assertRaisesRegex(UsageAdminClientError, "invalid_gateway_response"):
+                self.client.report(group_by="team", include_outcomes=True)
+
+        unsafe = _outcome_response()
+        unsafe["rows"][0]["outcomes"]["prompt"] = "must-not-be-accepted"  # type: ignore[index]
+        with mock.patch.object(self.client, "_request", return_value=unsafe):
+            with self.assertRaisesRegex(UsageAdminClientError, "invalid_gateway_response"):
+                self.client.report(group_by="team", include_outcomes=True)
+
+        impossible = _outcome_response()
+        impossible["rows"][0]["outcomes"]["model_fallback_requests"] = 2  # type: ignore[index]
+        with mock.patch.object(self.client, "_request", return_value=impossible):
+            with self.assertRaisesRegex(UsageAdminClientError, "invalid_gateway_response"):
+                self.client.report(group_by="team", include_outcomes=True)
+
+        scoped = _outcome_response()
+        scoped["schema_version"] = 8
+        scoped["filters"] = {"actor_id": "alice", "team_id": None}
+        scoped["access"] = {"scope": "self"}
+        with mock.patch.object(self.client, "_request", return_value=scoped):
+            self.assertEqual(
+                self.client.report(group_by="team", include_outcomes=True),
+                scoped,
+            )
+
+        combined = _latency_and_outcome_response()
+        with mock.patch.object(self.client, "_request", return_value=combined) as request:
+            self.assertEqual(
+                self.client.report(
+                    group_by="team",
+                    include_latency=True,
+                    include_outcomes=True,
+                ),
+                combined,
+            )
+        self.assertIn("include=latency%2Coutcomes", request.call_args.args[0])
+
+        constrained_combined = _latency_and_outcome_response()
+        constrained_combined["schema_version"] = 9
+        constrained_combined["filters"] = {"actor_id": None, "team_id": "engineering"}
+        constrained_combined["access"] = {"scope": "team"}
+        with mock.patch.object(self.client, "_request", return_value=constrained_combined):
+            self.assertEqual(
+                self.client.report(
+                    group_by="team",
+                    include_latency=True,
+                    include_outcomes=True,
+                ),
+                constrained_combined,
             )
 
     def test_coverage_requires_the_bounded_non_total_contract(self) -> None:

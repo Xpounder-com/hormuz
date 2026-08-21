@@ -38,7 +38,9 @@ from .store import (
     _bounded_billing_identifier,
     _decimal_text,
     _extract_latency_histograms,
+    _extract_usage_outcomes,
     _latency_select_sql,
+    _outcome_select_sql,
     _optional_sha256,
     _sqlite_nonnegative,
     _validated_context_lineage,
@@ -568,6 +570,7 @@ class PostgresUsageStore:
         limit: int | None = None,
         offset: int = 0,
         include_latency: bool = False,
+        include_outcomes: bool = False,
     ) -> list[dict[str, object]]:
         organization = self._organization(organization_id)
         dimensions: dict[str, tuple[list[str], list[str]]] = {
@@ -584,6 +587,8 @@ class PostgresUsageStore:
             raise ValueError("Usage report offset must be a non-negative integer")
         if not isinstance(include_latency, bool):
             raise ValueError("Usage report latency selection must be boolean")
+        if not isinstance(include_outcomes, bool):
+            raise ValueError("Usage report outcome selection must be boolean")
         if limit is not None and (isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 101):
             raise ValueError("Usage report limit must be an integer from 1 to 101")
         select_dimensions, group_dimensions = dimensions[group_by]
@@ -606,6 +611,7 @@ class PostgresUsageStore:
             page = "LIMIT %s OFFSET %s"
             parameters.extend((limit, offset))
         latency_select = _latency_select_sql() if include_latency else ""
+        outcome_select = _outcome_select_sql() if include_outcomes else ""
         query = f"""
           SELECT {', '.join(select_dimensions)},
             COUNT(*) AS requests,
@@ -632,6 +638,7 @@ class PostgresUsageStore:
             COALESCE(SUM(context_estimated_tokens), 0) AS context_estimated_tokens,
             COUNT(DISTINCT context_pack_id) AS context_packs_used
             {latency_select}
+            {outcome_select}
           FROM gateway_usage_events
           WHERE {' AND '.join(clauses)}
           GROUP BY {grouping}
@@ -651,6 +658,8 @@ class PostgresUsageStore:
                 item[field] = sorted(set(str(raw).split(","))) if raw else []
             if include_latency:
                 item["latency"] = _extract_latency_histograms(item)
+            if include_outcomes:
+                item["outcomes"] = _extract_usage_outcomes(item)
             result.append(item)
         return result
 

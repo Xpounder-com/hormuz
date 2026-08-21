@@ -401,7 +401,10 @@ def _prove_accounting_store(runtime_dsn: str) -> dict[str, object]:
     identity_b = _synthetic_identity("tenant-b", "actor-b")
     governance_policy_version = "hpv_v1_" + "a" * 64
     try:
-        for store, identity in ((stores[0], identity_a), (stores[1], identity_b)):
+        for store, identity, policy_action in (
+            (stores[0], identity_a, "fallback+capped"),
+            (stores[1], identity_b, "allowed"),
+        ):
             store.record(
                 identity=identity,
                 client="integration",
@@ -410,7 +413,7 @@ def _prove_accounting_store(runtime_dsn: str) -> dict[str, object]:
                 resolved_alias="gpt-test",
                 upstream_model="gpt-test",
                 actual_model="gpt-test",
-                policy_action="allowed",
+                policy_action=policy_action,
                 status="succeeded",
                 input_tokens=100,
                 output_tokens=50,
@@ -440,6 +443,7 @@ def _prove_accounting_store(runtime_dsn: str) -> dict[str, object]:
             group_by="organization",
             organization_id="tenant-a",
             include_latency=True,
+            include_outcomes=True,
         )
         coverage = stores[0].coverage_summary(
             organization_id="tenant-a",
@@ -500,6 +504,12 @@ def _prove_accounting_store(runtime_dsn: str) -> dict[str, object]:
     if (
         len(report_rows) != 1
         or int(report_rows[0]["requests"]) != 1
+        or report_rows[0].get("outcomes")
+        != {
+            "model_fallback_requests": 1,
+            "output_capped_requests": 1,
+            "reservation_budget_denied_requests": 0,
+        }
         or int(coverage["accounted_gateway_requests"]) != 1
         or int(coverage["identity_bound_gateway_requests"]) != 1
         or int(coverage["unattributed_accounted_gateway_requests"]) != 0

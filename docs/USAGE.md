@@ -8,7 +8,7 @@ provider work. They contain no route query, prompt, response, credential,
 filename, source text, network address, or arbitrary label. Historical events
 remain null rather than being presented as zero-latency observations. These
 columns are deliberately excluded from the stable usage audit-export v3 shape;
-administrative aggregation is opt-in through usage-report schema v3.
+administrative aggregation is opt-in through usage-report schemas v3 and later.
 
 ## CLI reports
 
@@ -34,6 +34,9 @@ hormuz --config hormuz.json status --group-by provider
 Add `--include-latency` for content-free cumulative histograms in JSON, or for
 p95 histogram-bucket upper bounds in the tabular view. A p95 bucket is an upper
 bound from the fixed buckets, not an exact percentile and not an approved SLO.
+Add `--include-outcomes` for exact, content-free counts of policy-routed model
+fallbacks, enforced output caps, and atomic budget-reservation denials. The two
+flags can be combined.
 
 Limit any view to an event-time team or actor:
 
@@ -86,6 +89,13 @@ separate; see [USAGE_ADMIN_API.md](USAGE_ADMIN_API.md) and
   timings, which may be lower than `requests`; null historical values and
   requests that never reached a provider are excluded from the applicable
   histogram.
+- opt-in `outcomes` contains only gateway-recorded policy-action aggregates:
+  `model_fallback_requests`, `output_capped_requests`, and
+  `reservation_budget_denied_requests`. A fallback that is also capped counts
+  in both applicable fields. The reservation field is deliberately narrower
+  than generic `denied`: it counts only the exact action recorded when the
+  atomic in-flight reservation failed. Hormuz does not infer the reason for
+  generic historical denials that did not persist one.
 - `requested_model`, `resolved_alias`, and `upstream_model` preserve policy/routing intent; `actual_model` is the bounded provider-returned model identifier when present. Model reports prefer the actual model and fall back through those routing fields when the provider omits it.
 - `input_tokens` and `output_tokens` come from the provider response.
 - `cache_read_tokens`, `cache_write_tokens`, and `reasoning_tokens` are shown separately when the provider exposes them. Some are subcategories of input or output, so Hormuz does not add them again to `total_tokens`.

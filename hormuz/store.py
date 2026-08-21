@@ -1910,6 +1910,7 @@ class UsageStore:
         limit: int | None = None,
         offset: int = 0,
         include_latency: bool = False,
+        include_outcomes: bool = False,
     ) -> list[dict[str, object]]:
         dimensions: dict[str, tuple[list[str], list[str]]] = {
             "organization": (
@@ -1958,6 +1959,8 @@ class UsageStore:
             raise ValueError("Usage report offset must be a non-negative integer")
         if not isinstance(include_latency, bool):
             raise ValueError("Usage report latency selection must be boolean")
+        if not isinstance(include_outcomes, bool):
+            raise ValueError("Usage report outcome selection must be boolean")
         if limit is not None and (
             isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 101
         ):
@@ -1990,6 +1993,7 @@ class UsageStore:
             page = "LIMIT ? OFFSET ?"
             parameters.extend((limit, offset))
         latency_select = _latency_select_sql() if include_latency else ""
+        outcome_select = _outcome_select_sql() if include_outcomes else ""
         query = f"""
             SELECT
                 {', '.join(select_dimensions)},
@@ -2022,6 +2026,7 @@ class UsageStore:
                 COALESCE(SUM(context_estimated_tokens), 0) AS context_estimated_tokens,
                 COUNT(DISTINCT context_pack_id) AS context_packs_used
                 {latency_select}
+                {outcome_select}
             FROM gateway_usage_events
             WHERE {' AND '.join(clauses)}
             {grouping}
@@ -2039,6 +2044,8 @@ class UsageStore:
             item["rate_card_versions"] = _sorted_csv(item.pop("rate_card_versions_csv"))
             if include_latency:
                 item["latency"] = _extract_latency_histograms(item)
+            if include_outcomes:
+                item["outcomes"] = _extract_usage_outcomes(item)
             result.append(item)
         return result
 
@@ -2527,6 +2534,39 @@ def _latency_select_sql() -> str:
                 f"AS latency_{name}_le_{bucket}"
             )
     return ",\n                " + ",\n                ".join(expressions)
+
+
+def _outcome_select_sql() -> str:
+    """Return safe aggregates for policy outcomes already stored per event.
+
+    The values intentionally describe only exact gateway outcomes.  In
+    particular, a budget-reservation denial is observable separately from a
+    generic historical ``policy_action=denied`` row, whose reason was not
+    stored before this opt-in report contract.
+    """
+
+    return """
+                , COALESCE(SUM(CASE WHEN policy_action = 'fallback'
+                    OR policy_action LIKE 'fallback+%'
+                    THEN 1 ELSE 0 END), 0) AS outcome_model_fallback_requests
+                , COALESCE(SUM(CASE WHEN policy_action = 'capped'
+                    OR policy_action LIKE 'capped+%'
+                    OR policy_action LIKE '%+capped'
+                    OR policy_action LIKE '%+capped+%'
+                    THEN 1 ELSE 0 END), 0) AS outcome_output_capped_requests
+                , COALESCE(SUM(CASE WHEN policy_action = 'budget_reservation_denied'
+                    THEN 1 ELSE 0 END), 0) AS outcome_reservation_budget_denied_requests
+    """
+
+
+def _extract_usage_outcomes(item: dict[str, object]) -> dict[str, int]:
+    return {
+        "model_fallback_requests": int(item.pop("outcome_model_fallback_requests")),
+        "output_capped_requests": int(item.pop("outcome_output_capped_requests")),
+        "reservation_budget_denied_requests": int(
+            item.pop("outcome_reservation_budget_denied_requests")
+        ),
+    }
 
 
 def _extract_latency_histograms(item: dict[str, object]) -> dict[str, object]:

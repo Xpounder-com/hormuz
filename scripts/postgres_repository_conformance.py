@@ -361,7 +361,7 @@ def _exercise_usage_security_contract(
         resolved_alias="repository-contract-model",
         upstream_model="repository-contract-upstream",
         actual_model="repository-contract-actual",
-        policy_action="allowed",
+        policy_action="fallback+capped",
         status="succeeded",
         input_tokens=17,
         output_tokens=9,
@@ -391,8 +391,18 @@ def _exercise_usage_security_contract(
         organization_id=PRIMARY_ORGANIZATION,
         actor_id=CONFORMANCE_ACTOR,
         include_latency=True,
+        include_outcomes=True,
     )
     _require(len(report_rows) == 1, "repository_contract_report_row_missing")
+    _require(
+        report_rows[0].get("outcomes")
+        == {
+            "model_fallback_requests": 1,
+            "output_capped_requests": 1,
+            "reservation_budget_denied_requests": 0,
+        },
+        "repository_contract_policy_outcomes_missing",
+    )
     coverage = accounting.coverage_summary(
         organization_id=PRIMARY_ORGANIZATION,
         actor_id=CONFORMANCE_ACTOR,

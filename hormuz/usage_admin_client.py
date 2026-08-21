@@ -55,16 +55,26 @@ class UsageAdminClient:
         limit: int = 50,
         cursor: str | None = None,
         include_latency: bool = False,
+        include_outcomes: bool = False,
     ) -> dict[str, object]:
         if group_by not in _DIMENSIONS:
             raise UsageAdminClientError("invalid_usage_report_request")
         if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 100:
             raise UsageAdminClientError("invalid_usage_report_request")
-        if not isinstance(include_latency, bool):
+        if not isinstance(include_latency, bool) or not isinstance(include_outcomes, bool):
             raise UsageAdminClientError("invalid_usage_report_request")
         query: dict[str, str] = {"group_by": group_by, "limit": str(limit)}
-        if include_latency:
-            query["include"] = "latency"
+        include = (
+            "latency,outcomes"
+            if include_latency and include_outcomes
+            else "latency"
+            if include_latency
+            else "outcomes"
+            if include_outcomes
+            else None
+        )
+        if include is not None:
+            query["include"] = include
         for key, value in (("actor_id", actor_id), ("team_id", team_id)):
             if value is not None:
                 _bounded_value(value, max_bytes=256)
@@ -85,11 +95,16 @@ class UsageAdminClient:
             "rows",
             "next_cursor",
         }
-        expected_schemas = {3, 5} if include_latency else {2, 4}
+        expected_schemas = {
+            (False, False): {2, 4},
+            (True, False): {3, 5},
+            (False, True): {6, 8},
+            (True, True): {7, 9},
+        }[(include_latency, include_outcomes)]
         schema_version = response.get("schema_version")
         if schema_version not in expected_schemas:
             raise UsageAdminClientError("invalid_gateway_response")
-        constrained_scope = schema_version in {4, 5}
+        constrained_scope = schema_version in {4, 5, 8, 9}
         if constrained_scope:
             required.add("access")
         if set(response) != required:
@@ -134,6 +149,13 @@ class UsageAdminClient:
                     "latency_targets_configured": False,
                 }
             )
+        if include_outcomes:
+            expected_coverage.update(
+                {
+                    "outcome_scope": "recorded_gateway_policy_actions_only",
+                    "historical_policy_denial_reasons_separately_classified": False,
+                }
+            )
         if not _valid_window(response.get("window")) or response.get("coverage") != expected_coverage:
             raise UsageAdminClientError("invalid_gateway_response")
         for row in rows:
@@ -141,6 +163,7 @@ class UsageAdminClient:
                 row,
                 group_by=group_by,
                 include_latency=include_latency,
+                include_outcomes=include_outcomes,
             ):
                 raise UsageAdminClientError("invalid_gateway_response")
         return response
@@ -371,6 +394,7 @@ def _valid_row(
     *,
     group_by: str,
     include_latency: bool = False,
+    include_outcomes: bool = False,
 ) -> bool:
     if not isinstance(value, dict):
         return False
@@ -414,11 +438,13 @@ def _valid_row(
     }.get(group_by, set())
     if include_latency:
         extras = extras | {"latency"}
+    if include_outcomes:
+        extras = extras | {"outcomes"}
     if set(value) != required | extras:
         return False
     if not all(
         isinstance(value.get(key), str) and bool(value[key])
-        for key in {"scope_id", "scope_name"} | (extras - {"latency"})
+        for key in {"scope_id", "scope_name"} | (extras - {"latency", "outcomes"})
     ):
         return False
     integer_fields = required - {
@@ -460,7 +486,26 @@ def _valid_row(
             return False
     if include_latency and not _valid_latency(value.get("latency")):
         return False
+    if include_outcomes and not _valid_outcomes(
+        value.get("outcomes"),
+        requests=int(value["requests"]),
+    ):
+        return False
     return True
+
+
+def _valid_outcomes(value: object, *, requests: int) -> bool:
+    required = {
+        "model_fallback_requests",
+        "output_capped_requests",
+        "reservation_budget_denied_requests",
+    }
+    if not isinstance(value, dict) or set(value) != required:
+        return False
+    return all(
+        _valid_nonnegative_int(value.get(field)) and int(value[field]) <= requests
+        for field in required
+    )
 
 
 def _valid_latency(value: object) -> bool:

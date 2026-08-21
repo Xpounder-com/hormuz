@@ -981,10 +981,16 @@ class SessionBrokerIntegrationTests(unittest.TestCase):
             team_name=employee.team_name,
             organization_id="other-company",
         )
-        for identity, model, cost in (
-            (employee, "gpt-test", 1_000),
-            (admin, "claude-test", 2_000),
-            (outsider, "gpt-test", 9_000),
+        for identity, model, cost, policy_action, status in (
+            (employee, "gpt-test", 1_000, "fallback+capped", "succeeded"),
+            (
+                admin,
+                "claude-test",
+                2_000,
+                "budget_reservation_denied",
+                "denied",
+            ),
+            (outsider, "gpt-test", 9_000, "allowed", "succeeded"),
         ):
             self.gateway.store.record(
                 identity=identity,
@@ -993,8 +999,8 @@ class SessionBrokerIntegrationTests(unittest.TestCase):
                 requested_model=model,
                 resolved_alias=model,
                 upstream_model=model,
-                policy_action="allowed",
-                status="succeeded",
+                policy_action=policy_action,
+                status=status,
                 input_tokens=10,
                 output_tokens=2,
                 billable_tokens=12,
@@ -1117,6 +1123,86 @@ class SessionBrokerIntegrationTests(unittest.TestCase):
         self.assertEqual(latency_second["schema_version"], 3)
         self.assertIsNone(latency_second["next_cursor"])
 
+        status, organization_outcomes = self._admin_request(
+            "GET",
+            "/v1/admin/usage?group_by=organization&include=outcomes",
+            token=admin_token,
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(organization_outcomes["schema_version"], 6)
+        self.assertEqual(
+            organization_outcomes["coverage"],
+            {
+                "scope": "gateway_captured_requests_only",
+                "legacy_unattributed_rows_excluded": True,
+                "provider_invoice_reconciled": False,
+                "outcome_scope": "recorded_gateway_policy_actions_only",
+                "historical_policy_denial_reasons_separately_classified": False,
+            },
+        )
+        self.assertEqual(
+            organization_outcomes["rows"][0]["outcomes"],
+            {
+                "model_fallback_requests": 1,
+                "output_capped_requests": 1,
+                "reservation_budget_denied_requests": 1,
+            },
+        )
+
+        status, outcomes_first = self._admin_request(
+            "GET",
+            "/v1/admin/usage?group_by=person&limit=1&include=outcomes",
+            token=admin_token,
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(outcomes_first["schema_version"], 6)
+        self.assertIn("outcomes", outcomes_first["rows"][0])
+        self.assertNotIn("latency", outcomes_first["rows"][0])
+        self.assertIsInstance(outcomes_first["next_cursor"], str)
+
+        status, outcome_cursor_mismatch = self._admin_request(
+            "GET",
+            "/v1/admin/usage?group_by=person&limit=1&include=latency&cursor="
+            + urllib.parse.quote(str(outcomes_first["next_cursor"]), safe=""),
+            token=admin_token,
+        )
+        self.assertEqual(status, 400)
+        self.assertEqual(
+            outcome_cursor_mismatch["error"]["code"],
+            "invalid_usage_report_request",
+        )
+
+        status, outcomes_second = self._admin_request(
+            "GET",
+            "/v1/admin/usage?group_by=person&limit=1&include=outcomes&cursor="
+            + urllib.parse.quote(str(outcomes_first["next_cursor"]), safe=""),
+            token=admin_token,
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(outcomes_second["schema_version"], 6)
+        self.assertIsNone(outcomes_second["next_cursor"])
+
+        status, combined_first = self._admin_request(
+            "GET",
+            "/v1/admin/usage?group_by=person&limit=1&include=latency,outcomes",
+            token=admin_token,
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(combined_first["schema_version"], 7)
+        self.assertIn("latency", combined_first["rows"][0])
+        self.assertIn("outcomes", combined_first["rows"][0])
+        self.assertIsInstance(combined_first["next_cursor"], str)
+
+        status, combined_second = self._admin_request(
+            "GET",
+            "/v1/admin/usage?group_by=person&limit=1&include=latency,outcomes&cursor="
+            + urllib.parse.quote(str(combined_first["next_cursor"]), safe=""),
+            token=admin_token,
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(combined_second["schema_version"], 7)
+        self.assertIsNone(combined_second["next_cursor"])
+
         audit = self.gateway.store.audit_events(
             since="2000-01-01T00:00:00+00:00",
             kind="security",
@@ -1126,7 +1212,7 @@ class SessionBrokerIntegrationTests(unittest.TestCase):
             for event in audit
             if event["event_type"] == "security.admin.usage_read"
         ]
-        self.assertEqual(len(reads), 5)
+        self.assertEqual(len(reads), 10)
         self.assertTrue(
             all(event["organization_id"] == "xpounder" for event in reads)
         )
@@ -1476,7 +1562,7 @@ class SessionBrokerIntegrationTests(unittest.TestCase):
             requested_model="claude-test",
             resolved_alias="claude-test",
             upstream_model="claude-test",
-            policy_action="allowed",
+            policy_action="fallback+capped",
             status="succeeded",
             input_tokens=20,
             output_tokens=4,
@@ -1503,6 +1589,7 @@ class SessionBrokerIntegrationTests(unittest.TestCase):
                     "--group-by",
                     "team",
                     "--include-latency",
+                    "--include-outcomes",
                     "--allow-insecure-http",
                 ]
             )
@@ -1511,8 +1598,16 @@ class SessionBrokerIntegrationTests(unittest.TestCase):
         self.assertEqual(report["organization_id"], "xpounder")
         self.assertEqual(report["rows"][0]["scope_id"], "engineering")
         self.assertEqual(report["rows"][0]["billable_tokens"], 24)
-        self.assertEqual(report["schema_version"], 3)
+        self.assertEqual(report["schema_version"], 7)
         self.assertEqual(report["rows"][0]["latency"]["gateway"]["count"], 1)
+        self.assertEqual(
+            report["rows"][0]["outcomes"],
+            {
+                "model_fallback_requests": 1,
+                "output_capped_requests": 1,
+                "reservation_budget_denied_requests": 0,
+            },
+        )
 
     def test_usage_coverage_cli_uses_the_authenticated_gateway_contract(self) -> None:
         identity = self.config.identities_by_actor["employee"]

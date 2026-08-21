@@ -371,6 +371,54 @@ class UsageStoreMigrationTests(unittest.TestCase):
                         "SET gateway_latency_milliseconds = -1"
                     )
 
+    def test_policy_outcomes_are_exact_opt_in_aggregates(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            store = UsageStore(Path(temporary) / "usage.sqlite3")
+            identity = Identity(
+                token_env="ALICE_TOKEN",
+                token="alice-employee-token",
+                actor_id="alice",
+                actor_name="Alice",
+                team_id="engineering",
+                team_name="Engineering",
+                organization_id="org-a",
+            )
+            for policy_action, status in (
+                ("fallback+capped", "succeeded"),
+                ("fallback+redacted", "succeeded"),
+                ("capped+context-injected", "succeeded"),
+                ("budget_reservation_denied", "denied"),
+                ("denied", "denied"),
+            ):
+                store.record(
+                    identity=identity,
+                    client="codex",
+                    protocol="openai",
+                    requested_model="gpt-fast",
+                    resolved_alias="gpt-fast",
+                    upstream_model="gpt-upstream",
+                    policy_action=policy_action,
+                    status=status,
+                )
+
+            legacy_shape = store.report_rows(group_by="person")[0]
+            self.assertNotIn("outcomes", legacy_shape)
+            outcomes = store.report_rows(
+                group_by="person",
+                include_outcomes=True,
+            )[0]["outcomes"]
+            self.assertEqual(
+                outcomes,
+                {
+                    "model_fallback_requests": 2,
+                    "output_capped_requests": 2,
+                    "reservation_budget_denied_requests": 1,
+                },
+            )
+
+            with self.assertRaises(ValueError):
+                store.report_rows(group_by="person", include_outcomes="true")  # type: ignore[arg-type]
+
     def test_dlp_approval_is_metadata_only_non_self_exact_and_single_use(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             store = UsageStore(Path(temporary) / "usage.sqlite3")

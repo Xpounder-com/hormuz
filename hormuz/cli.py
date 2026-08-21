@@ -398,6 +398,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Include content-free gateway, policy, provider, and context latency histograms",
     )
     status.add_argument(
+        "--include-outcomes",
+        action="store_true",
+        help="Include content-free model fallback, output-cap, and reservation-denial counts",
+    )
+    status.add_argument(
         "--group-by",
         choices=["organization", "team", "person", "model", "client", "provider"],
         default="person",
@@ -432,6 +437,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--include-latency",
         action="store_true",
         help="Request versioned content-free latency histograms",
+    )
+    usage_report.add_argument(
+        "--include-outcomes",
+        action="store_true",
+        help="Request versioned content-free model fallback, output-cap, and reservation-denial counts",
     )
     usage_report.add_argument("--gateway", required=True, help="Hormuz gateway base URL")
     usage_credential = usage_report.add_mutually_exclusive_group()
@@ -1708,6 +1718,7 @@ def _status(config: GatewayConfig, args: argparse.Namespace) -> int:
         actor_id=args.actor,
         team_id=args.team,
         include_latency=getattr(args, "include_latency", False),
+        include_outcomes=getattr(args, "include_outcomes", False),
     )
     report = enrich_usage_rows(
         config,
@@ -1723,6 +1734,7 @@ def _status(config: GatewayConfig, args: argparse.Namespace) -> int:
         print("No Hormuz requests recorded this month.")
         return 0
     include_latency = getattr(args, "include_latency", False)
+    include_outcomes = getattr(args, "include_outcomes", False)
     header = (
         "SCOPE_ID\tSCOPE_NAME\tTEAM\tPROVIDER\tCLIENT\tREQUESTS\tSUCCEEDED\tFAILED\tDENIED\t"
         "INPUT\tOUTPUT\tCACHE_READ\tCACHE_WRITE\tREASONING\tTOTAL\tCOST_USD\tBUDGET_USD\t"
@@ -1734,6 +1746,8 @@ def _status(config: GatewayConfig, args: argparse.Namespace) -> int:
             "\tGATEWAY_P95_BUCKET_MS\tPOLICY_P95_BUCKET_MS\t"
             "PROVIDER_P95_BUCKET_MS\tCONTEXT_P95_BUCKET_MS"
         )
+    if include_outcomes:
+        header += "\tMODEL_FALLBACKS\tOUTPUT_CAPPED\tRESERVATION_BUDGET_DENIED"
     print(header)
     for row in report:
         line = (
@@ -1752,6 +1766,13 @@ def _status(config: GatewayConfig, args: argparse.Namespace) -> int:
             line += "\t" + "\t".join(
                 _latency_p95_bucket(latency[name])
                 for name in ("gateway", "policy", "provider", "context")
+            )
+        if include_outcomes:
+            outcomes = row["outcomes"]
+            line += (
+                f"\t{outcomes['model_fallback_requests']}"
+                f"\t{outcomes['output_capped_requests']}"
+                f"\t{outcomes['reservation_budget_denied_requests']}"
             )
         print(line)
     return 0
@@ -2569,6 +2590,7 @@ def _usage_admin_command(args: argparse.Namespace) -> int:
                 limit=args.limit,
                 cursor=args.cursor,
                 include_latency=args.include_latency,
+                include_outcomes=args.include_outcomes,
             )
         elif args.usage_command == "coverage":
             result = client.coverage()

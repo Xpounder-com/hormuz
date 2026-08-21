@@ -773,6 +773,19 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertEqual(latency["policy"]["count"], 1)
         self.assertEqual(latency["provider"]["count"], 1)
         self.assertEqual(latency["context"]["count"], 0)
+        outcomes = self.gateway.store.report_rows(
+            group_by="person",
+            actor_id="alice",
+            include_outcomes=True,
+        )[0]["outcomes"]
+        self.assertEqual(
+            outcomes,
+            {
+                "model_fallback_requests": 1,
+                "output_capped_requests": 1,
+                "reservation_budget_denied_requests": 0,
+            },
+        )
 
     def test_openai_explicit_cache_controls_pass_unchanged_when_allowed(self) -> None:
         cache_key = "cache-key-must-not-persist"
@@ -3365,6 +3378,18 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertEqual(len(FakeProviderHandler.requests), before)
         self.assertEqual(json.loads(response)["error"]["code"], "hormuz_budget_denied")
         self.assertEqual(self.gateway.store.active_budget_reservations(), 0)
+        outcomes = self.gateway.store.report_rows(
+            group_by="organization",
+            include_outcomes=True,
+        )[0]["outcomes"]
+        self.assertEqual(
+            outcomes,
+            {
+                "model_fallback_requests": 0,
+                "output_capped_requests": 0,
+                "reservation_budget_denied_requests": 1,
+            },
+        )
 
     def test_resolved_fallback_model_capacity_is_enforced_before_provider(self) -> None:
         config_value = self._config(self.provider.server_port, _free_port())
