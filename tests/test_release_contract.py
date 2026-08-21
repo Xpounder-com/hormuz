@@ -566,6 +566,15 @@ class ReleaseContractTests(unittest.TestCase):
         release = (ROOT / ".github/workflows/release.yml").read_text()
         self.assertIn("client-compatibility:", release)
         self.assertIn("needs: [verify, client-compatibility]", release)
+        for path in (
+            ROOT / ".github/workflows/ci.yml",
+            ROOT / ".github/workflows/release.yml",
+            ROOT / ".github/workflows/upstream-canary.yml",
+        ):
+            with self.subTest(path=path.name):
+                workflow = path.read_text()
+                self.assertIn("test_installed_codex_reloads_auth_helper_after_401", workflow)
+                self.assertIn("test_official_claude_code_reloads_auth_helper_after_401", workflow)
 
     def test_latest_upstream_client_canary_remains_explicitly_dynamic(self) -> None:
         workflow = (ROOT / ".github/workflows/upstream-canary.yml").read_text()

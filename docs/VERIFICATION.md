@@ -2142,7 +2142,7 @@ Ordinary GitHub CI runs seven independent gate families without provider credent
 
 - the complete unit, compatibility, and loopback gateway suite on Python 3.11, 3.12, 3.13, and 3.14;
 - two independent exact-commit source-distribution and wheel builds under pinned packaging inputs, raw-byte equality with a content-free digest manifest, and installation of the verified wheel in a clean virtual environment;
-- installed-client routing through local fake providers using pinned official Codex and Claude Code package versions;
+- installed-client routing and deliberate-401 helper reload through local fake providers using pinned official Codex and Claude Code package versions;
 - pinned-base/hash-locked container build, restricted-runtime smoke, CycloneDX SBOM, and a fail-on-any-high-or-critical vulnerability gate;
 - strict versioned threat-model validation covering all STRIDE categories and the issue #9 incident scenarios, with content-free evidence retained for audit;
 - strict versioned compatibility validation binding exact client, Python, provider-protocol, identity, persistence, package, and OCI claims to repository evidence while preserving unsupported and owner-pending boundaries; and

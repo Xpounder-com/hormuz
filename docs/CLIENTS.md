@@ -138,6 +138,15 @@ from the child environment, and removes its transient Keychain entries during
 cleanup. This is local compatibility evidence, not real-IdP or production-host
 certification.
 
+The pinned Codex and Claude Code publication gates separately prove the native
+authentication-hook retry contract: each client first receives a deliberately
+invalid, ephemeral credential; the local gateway returns `401`; the client
+re-invokes its helper; and only the fresh credential reaches the provider path.
+The test stores only helper-invocation markers, asserts that neither test
+credential appears in output or the usage database, and does not claim that a
+revoked Hormuz session can be refreshed. Secure-store rotation and
+replay-family revocation are tested at the session-broker boundary.
+
 ## Image and file boundary
 
 Codex and Claude Code can represent provider image and file inputs, but Hormuz does not yet have a trusted byte decoder/classifier. The secure default therefore denies recognized OpenAI image/file/screenshot blocks and Anthropic image or non-text document/file blocks before provider egress. The employee keeps the same client configuration; the request receives the provider-shaped DLP denial. Inline Anthropic text documents remain inspectable and usable.

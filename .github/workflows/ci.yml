@@ -391,7 +391,9 @@ jobs:
         run: |
           python -m unittest -v \
             tests.test_gateway.GatewayIntegrationTests.test_installed_codex_routes_through_gateway \
-            tests.test_gateway.GatewayIntegrationTests.test_official_claude_code_routes_through_gateway
+            tests.test_gateway.GatewayIntegrationTests.test_official_claude_code_routes_through_gateway \
+            tests.test_gateway.GatewayIntegrationTests.test_installed_codex_reloads_auth_helper_after_401 \
+            tests.test_gateway.GatewayIntegrationTests.test_official_claude_code_reloads_auth_helper_after_401
       - name: Preserve pinned-client lock evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

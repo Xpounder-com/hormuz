@@ -62,4 +62,6 @@ jobs:
         run: |
           python -m unittest -v \
             tests.test_gateway.GatewayIntegrationTests.test_installed_codex_routes_through_gateway \
-            tests.test_gateway.GatewayIntegrationTests.test_official_claude_code_routes_through_gateway
+            tests.test_gateway.GatewayIntegrationTests.test_official_claude_code_routes_through_gateway \
+            tests.test_gateway.GatewayIntegrationTests.test_installed_codex_reloads_auth_helper_after_401 \
+            tests.test_gateway.GatewayIntegrationTests.test_official_claude_code_reloads_auth_helper_after_401

@@ -6167,6 +6167,65 @@ class GatewayIntegrationTests(unittest.TestCase):
             "client-proof-revision",
         )
 
+    @unittest.skipUnless(shutil.which("codex"), "Codex CLI is not installed")
+    def test_installed_codex_reloads_auth_helper_after_401(self) -> None:
+        """The real Codex executable must ask its helper for a fresh credential after 401."""
+        before = len(FakeProviderHandler.requests)
+        environment = os.environ.copy()
+        helper, state_path, ready_path, stale_token = self._retrying_auth_helper(environment)
+        command = [
+            "codex",
+            "exec",
+            "--ignore-user-config",
+            "--skip-git-repo-check",
+            "--ephemeral",
+            "--sandbox",
+            "read-only",
+            "-C",
+            str(self.root),
+            "-m",
+            "engineering-fast",
+            "-c",
+            'model_provider="company_gateway"',
+            "-c",
+            'model_providers.company_gateway.name="Hormuz"',
+            "-c",
+            f'model_providers.company_gateway.base_url="http://127.0.0.1:{self.gateway.server_port}/v1"',
+            "-c",
+            f"model_providers.company_gateway.auth.command={json.dumps(helper[0])}",
+            "-c",
+            "model_providers.company_gateway.auth.args=" + json.dumps(helper[1:]),
+            # Zero is Codex's documented "refresh only after authentication retry"
+            # mode. The first helper result remains stale until the gateway returns 401.
+            "-c",
+            "model_providers.company_gateway.auth.refresh_interval_ms=0",
+            "-c",
+            'model_providers.company_gateway.wire_api="responses"',
+            "Reply with exactly GATEWAY_OK and do not call tools.",
+        ]
+
+        auth_attempts, result = self._run_with_auth_retry_tracking(
+            stale_token=stale_token,
+            ready_path=ready_path,
+            run=lambda: subprocess.run(
+                command,
+                env=environment,
+                text=True,
+                capture_output=True,
+                timeout=30,
+            ),
+        )
+
+        self._assert_auth_helper_retried_after_401(
+            result=result,
+            state_path=state_path,
+            ready_path=ready_path,
+            stale_token=stale_token,
+            auth_attempts=auth_attempts,
+            before_provider_requests=before,
+            expected_output="GATEWAY_OK",
+        )
+
     @unittest.skipUnless(
         os.environ.get("HORMUZ_RUN_CLAUDE_CLIENT_TEST") == "1"
         and (shutil.which("claude") or shutil.which("npx")),
@@ -6303,6 +6362,71 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertEqual(
             usage[-1]["context_repository_revision"],
             "client-proof-revision",
+        )
+
+    @unittest.skipUnless(
+        os.environ.get("HORMUZ_RUN_CLAUDE_CLIENT_TEST") == "1"
+        and (shutil.which("claude") or shutil.which("npx")),
+        "Set HORMUZ_RUN_CLAUDE_CLIENT_TEST=1 and install Claude Code or npx",
+    )
+    def test_official_claude_code_reloads_auth_helper_after_401(self) -> None:
+        """The real Claude Code executable must ask its helper for a fresh credential after 401."""
+        before = len(FakeProviderHandler.requests)
+        environment = os.environ.copy()
+        environment.pop("ANTHROPIC_API_KEY", None)
+        environment.pop("ANTHROPIC_AUTH_TOKEN", None)
+        environment["DISABLE_AUTOUPDATER"] = "1"
+        environment["CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT"] = "1"
+        environment["CLAUDE_CONFIG_DIR"] = str(self.root / "claude-retry-config")
+        helper, state_path, ready_path, stale_token = self._retrying_auth_helper(environment)
+        settings_path = self.root / "claude-retry-settings.json"
+        settings_path.write_text(
+            json.dumps(
+                {
+                    "apiKeyHelper": shlex.join(helper),
+                    "env": {
+                        "ANTHROPIC_BASE_URL": f"http://127.0.0.1:{self.gateway.server_port}",
+                        "CLAUDE_CODE_API_KEY_HELPER_TTL_MS": "300000",
+                        "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY": "1",
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        claude = shutil.which("claude")
+        command = ([claude] if claude else ["npx", "-y", "@anthropic-ai/claude-code"]) + [
+            "-p",
+            "--no-session-persistence",
+            "--settings",
+            str(settings_path),
+            "--tools",
+            "",
+            "--model",
+            "claude-sonnet-5",
+            "Reply with exactly ok and do not call tools.",
+        ]
+
+        auth_attempts, result = self._run_with_auth_retry_tracking(
+            stale_token=stale_token,
+            ready_path=ready_path,
+            run=lambda: subprocess.run(
+                command,
+                cwd=self.root,
+                env=environment,
+                text=True,
+                capture_output=True,
+                timeout=45,
+            ),
+        )
+
+        self._assert_auth_helper_retried_after_401(
+            result=result,
+            state_path=state_path,
+            ready_path=ready_path,
+            stale_token=stale_token,
+            auth_attempts=auth_attempts,
+            before_provider_requests=before,
+            expected_output="ok",
         )
 
     @unittest.skipUnless(
@@ -6619,6 +6743,105 @@ class GatewayIntegrationTests(unittest.TestCase):
             FakeProviderHandler.anthropic_context_tool_arguments = None
             secure_store.delete(profile)
         self.assertIsNone(secure_store.get(profile))
+
+    def _retrying_auth_helper(
+        self,
+        environment: dict[str, str],
+    ) -> tuple[list[str], Path, Path, str]:
+        """Build a content-free helper that changes output only after gateway rejection."""
+        stale_token = "hormuz-retry-stale-" + secrets.token_urlsafe(24)
+        state_path = self.root / f"auth-helper-retry-{secrets.token_hex(6)}.state"
+        ready_path = self.root / f"auth-helper-retry-{secrets.token_hex(6)}.ready"
+        environment.update(
+            {
+                "HORMUZ_TEST_AUTH_RETRY_STATE": str(state_path),
+                "HORMUZ_TEST_AUTH_RETRY_READY": str(ready_path),
+                "HORMUZ_TEST_AUTH_RETRY_STALE": stale_token,
+                "HORMUZ_TEST_AUTH_RETRY_FRESH": GATEWAY_TOKEN,
+            }
+        )
+        program = (
+            "from pathlib import Path\n"
+            "import os\n"
+            "state = Path(os.environ['HORMUZ_TEST_AUTH_RETRY_STATE'])\n"
+            "with state.open('a', encoding='ascii') as stream:\n"
+            "    stream.write('invoked\\n')\n"
+            "ready = Path(os.environ['HORMUZ_TEST_AUTH_RETRY_READY']).exists()\n"
+            "print(os.environ['HORMUZ_TEST_AUTH_RETRY_FRESH'] if ready "
+            "else os.environ['HORMUZ_TEST_AUTH_RETRY_STALE'])\n"
+        )
+        return [sys.executable, "-c", program], state_path, ready_path, stale_token
+
+    def _run_with_auth_retry_tracking(
+        self,
+        *,
+        stale_token: str,
+        ready_path: Path,
+        run,
+    ) -> tuple[list[str], subprocess.CompletedProcess[str]]:
+        auth_attempts: list[str] = []
+        authenticate = self.gateway.authenticator.authenticate
+
+        def track(token: str):
+            if token == stale_token:
+                auth_attempts.append("stale")
+                ready_path.touch(exist_ok=True)
+            elif token == GATEWAY_TOKEN:
+                auth_attempts.append("fresh")
+            else:
+                auth_attempts.append("other")
+            return authenticate(token)
+
+        with mock.patch.object(self.gateway.authenticator, "authenticate", side_effect=track):
+            result = run()
+        return auth_attempts, result
+
+    def _assert_auth_helper_retried_after_401(
+        self,
+        *,
+        result: subprocess.CompletedProcess[str],
+        state_path: Path,
+        ready_path: Path,
+        stale_token: str,
+        auth_attempts: list[str],
+        before_provider_requests: int,
+        expected_output: str,
+    ) -> None:
+        output = result.stdout + result.stderr
+        helper_invocations = (
+            state_path.read_text(encoding="ascii").count("invoked")
+            if state_path.exists()
+            else 0
+        )
+        safe_output = output.replace(stale_token, "<redacted-stale-credential>").replace(
+            GATEWAY_TOKEN,
+            "<redacted-fresh-credential>",
+        )
+        self.assertEqual(
+            result.returncode,
+            0,
+            msg=(
+                f"stdout/stderr:\n{safe_output}\n"
+                f"auth_attempts={auth_attempts}\n"
+                f"helper_invocations={helper_invocations}\n"
+                f"provider_requests={len(FakeProviderHandler.requests) - before_provider_requests}"
+            ),
+        )
+        self.assertIn(expected_output.lower(), output.lower())
+        self.assertTrue(ready_path.is_file())
+        self.assertIn("stale", auth_attempts)
+        self.assertIn("fresh", auth_attempts)
+        self.assertLess(auth_attempts.index("stale"), auth_attempts.index("fresh"))
+        self.assertTrue(state_path.is_file())
+        helper_state = state_path.read_text(encoding="ascii")
+        self.assertGreaterEqual(helper_state.count("invoked\n"), 2)
+        self.assertGreater(len(FakeProviderHandler.requests), before_provider_requests)
+        self.assertNotIn(stale_token, helper_state)
+        self.assertNotIn(stale_token, output)
+        self.assertNotIn(GATEWAY_TOKEN, output)
+        database = self.config.database_path.read_bytes()
+        self.assertNotIn(stale_token.encode("utf-8"), database)
+        self.assertNotIn(GATEWAY_TOKEN.encode("utf-8"), database)
 
     def _post(self, path: str, body: dict, *, extra_headers: dict[str, str] | None = None, token: str = GATEWAY_TOKEN):
         connection = http.client.HTTPConnection("127.0.0.1", self.gateway.server_port, timeout=5)
