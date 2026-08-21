@@ -1062,6 +1062,7 @@ class UsageStoreMigrationTests(unittest.TestCase):
                 requested_model="gpt-fast",
                 resolved_alias="gpt-fast",
                 upstream_model="gpt-upstream",
+                actual_model="gpt-provider-v1",
                 policy_action="allowed+redacted",
                 status="succeeded",
                 input_tokens=100,
@@ -1131,8 +1132,39 @@ class UsageStoreMigrationTests(unittest.TestCase):
             self.assertEqual(people["bob"]["cache_write_tokens"], 5)
 
             models = {row["scope_id"]: row for row in store.report_rows(group_by="model")}
-            self.assertEqual(models["gpt-upstream"]["protocol"], "openai")
+            self.assertEqual(models["gpt-provider-v1"]["protocol"], "openai")
             self.assertEqual(models["claude-blocked"]["denied"], 1)
+
+            requested_models = {
+                (row["scope_id"], row["protocol"]): row
+                for row in store.report_rows(group_by="requested_model")
+            }
+            self.assertEqual(requested_models[("gpt-fast", "openai")]["requests"], 1)
+            self.assertEqual(
+                requested_models[("claude-blocked", "anthropic")]["denied"],
+                1,
+            )
+
+            actual_models = {
+                (row["scope_id"], row["protocol"], row["actual_model_reported"]): row
+                for row in store.report_rows(group_by="actual_model")
+            }
+            self.assertEqual(
+                actual_models[("gpt-provider-v1", "openai", True)]["requests"],
+                1,
+            )
+            self.assertEqual(
+                actual_models[("not_reported", "anthropic", False)]["requests"],
+                2,
+            )
+
+            policies = {row["scope_id"]: row for row in store.report_rows(group_by="policy")}
+            self.assertEqual(policies["allowed+redacted"]["redactions"], 1)
+            self.assertEqual(policies["denied"]["denied"], 1)
+
+            statuses = {row["scope_id"]: row for row in store.report_rows(group_by="status")}
+            self.assertEqual(statuses["succeeded"]["requests"], 2)
+            self.assertEqual(statuses["denied"]["requests"], 1)
 
             alice_only = store.report_rows(group_by="organization", actor_id="alice")
             self.assertEqual(alice_only[0]["requests"], 1)

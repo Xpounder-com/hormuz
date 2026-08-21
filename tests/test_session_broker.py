@@ -999,6 +999,7 @@ class SessionBrokerIntegrationTests(unittest.TestCase):
                 requested_model=model,
                 resolved_alias=model,
                 upstream_model=model,
+                actual_model="gpt-provider-v1" if identity is employee else None,
                 policy_action=policy_action,
                 status=status,
                 input_tokens=10,
@@ -1031,6 +1032,54 @@ class SessionBrokerIntegrationTests(unittest.TestCase):
         self.assertNotIn("Security Admin", repr(self_report))
         self.assertNotIn("Other Employee", repr(self_report))
 
+        admin_token = "admin-token-" + "a" * 32
+        status, requested_models = self._admin_request(
+            "GET",
+            "/v1/admin/usage?group_by=requested_model",
+            token=admin_token,
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(
+            {(row["scope_id"], row["protocol"]) for row in requested_models["rows"]},
+            {("gpt-test", "openai"), ("claude-test", "openai")},
+        )
+
+        status, actual_models = self._admin_request(
+            "GET",
+            "/v1/admin/usage?group_by=actual_model",
+            token=admin_token,
+        )
+        self.assertEqual(status, 200)
+        actual_rows = {
+            (row["scope_id"], row["actual_model_reported"]): row
+            for row in actual_models["rows"]
+        }
+        self.assertEqual(actual_rows[("gpt-provider-v1", True)]["requests"], 1)
+        self.assertEqual(actual_rows[("not_reported", False)]["denied"], 1)
+        self.assertNotIn("Other Employee", repr(actual_models))
+
+        status, policies = self._admin_request(
+            "GET",
+            "/v1/admin/usage?group_by=policy",
+            token=admin_token,
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(
+            {row["scope_id"] for row in policies["rows"]},
+            {"fallback+capped", "budget_reservation_denied"},
+        )
+
+        status, statuses = self._admin_request(
+            "GET",
+            "/v1/admin/usage?group_by=status",
+            token=admin_token,
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(
+            {row["scope_id"] for row in statuses["rows"]},
+            {"succeeded", "denied"},
+        )
+
         status, forbidden = self._admin_request(
             "GET",
             "/v1/admin/usage?group_by=organization",
@@ -1039,7 +1088,6 @@ class SessionBrokerIntegrationTests(unittest.TestCase):
         self.assertEqual(status, 403)
         self.assertEqual(forbidden["error"]["code"], "usage_viewer_capability_required")
 
-        admin_token = "admin-token-" + "a" * 32
         status, first = self._admin_request(
             "GET",
             "/v1/admin/usage?group_by=person&limit=1",
@@ -1212,7 +1260,7 @@ class SessionBrokerIntegrationTests(unittest.TestCase):
             for event in audit
             if event["event_type"] == "security.admin.usage_read"
         ]
-        self.assertEqual(len(reads), 10)
+        self.assertEqual(len(reads), 14)
         self.assertTrue(
             all(event["organization_id"] == "xpounder" for event in reads)
         )

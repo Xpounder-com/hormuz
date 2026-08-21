@@ -1140,7 +1140,7 @@ class ClientConfigTests(unittest.TestCase):
             [
                 "status",
                 "--group-by",
-                "model",
+                "actual_model",
                 "--team",
                 "engineering",
                 "--actor",
@@ -1151,7 +1151,7 @@ class ClientConfigTests(unittest.TestCase):
             ]
         )
 
-        self.assertEqual(args.group_by, "model")
+        self.assertEqual(args.group_by, "actual_model")
         self.assertEqual(args.team, "engineering")
         self.assertEqual(args.actor, "alice")
         self.assertTrue(args.json)

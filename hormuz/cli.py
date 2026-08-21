@@ -404,7 +404,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     status.add_argument(
         "--group-by",
-        choices=["organization", "team", "person", "model", "client", "provider"],
+        choices=[
+            "organization",
+            "team",
+            "person",
+            "model",
+            "requested_model",
+            "actual_model",
+            "policy",
+            "status",
+            "client",
+            "provider",
+        ],
         default="person",
         help="Report dimension (default: person)",
     )
@@ -426,7 +437,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     usage_report.add_argument(
         "--group-by",
-        choices=["organization", "team", "person", "model", "client", "provider"],
+        choices=[
+            "organization",
+            "team",
+            "person",
+            "model",
+            "requested_model",
+            "actual_model",
+            "policy",
+            "status",
+            "client",
+            "provider",
+        ],
         default="person",
     )
     usage_report.add_argument("--actor", help="Filter by exact event-time actor ID")

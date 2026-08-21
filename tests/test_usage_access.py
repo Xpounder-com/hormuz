@@ -94,6 +94,16 @@ class UsageReportAccessTests(unittest.TestCase):
         self.assertIsNone(access.actor_id)
         self.assertIsNone(access.team_id)
 
+        for group_by in ("requested_model", "actual_model", "policy", "status"):
+            with self.subTest(allowed_group_by=group_by):
+                allowed = authorize_usage_report(
+                    _identity("usage_finance_viewer"),
+                    group_by=group_by,
+                    actor_id=None,
+                    team_id=None,
+                )
+                self.assertEqual(allowed.scope, "finance")
+
         for group_by, actor_id, team_id in (
             ("person", None, None),
             ("team", None, None),

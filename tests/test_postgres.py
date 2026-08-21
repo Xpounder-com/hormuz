@@ -252,6 +252,64 @@ class PostgresFoundationTests(unittest.TestCase):
         with self.assertRaisesRegex(PostgresStorageError, "tenant_not_configured"):
             store.monthly_totals(organization_id="tenant-c")
 
+    def test_postgres_actual_model_grouping_keeps_missing_coverage_explicit(self) -> None:
+        store = PostgresUsageStore(
+            "postgresql://runtime:not-used@127.0.0.1/hormuz",
+            organization_ids=("tenant-a",),
+        )
+        cursor = mock.MagicMock()
+        cursor.fetchall.return_value = [
+            {
+                "scope_id": "not_reported",
+                "scope_name": "not_reported",
+                "protocol": "openai",
+                "actual_model_reported": 0,
+                "requests": 1,
+                "succeeded": 0,
+                "failed": 0,
+                "denied": 1,
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "cache_read_tokens": 0,
+                "cache_write_tokens": 0,
+                "reasoning_tokens": 0,
+                "total_tokens": 0,
+                "billable_tokens": 0,
+                "cost_microusd": 0,
+                "estimated_cost_microusd": 0,
+                "unpriced_requests": 0,
+                "cost_bases_csv": "not_applicable",
+                "currencies_csv": "USD",
+                "rate_card_versions_csv": "unversioned",
+                "active_actors": 1,
+                "redactions": 0,
+                "context_injected_requests": 0,
+                "context_required_denials": 0,
+                "context_estimated_tokens": 0,
+                "context_packs_used": 0,
+            }
+        ]
+        transaction = mock.MagicMock()
+        transaction.return_value.__enter__.return_value = object()
+        cursor_context = mock.MagicMock()
+        cursor_context.__enter__.return_value = cursor
+
+        with mock.patch.object(store, "_transaction", transaction), mock.patch.object(
+            store,
+            "_dict_cursor",
+            return_value=cursor_context,
+        ):
+            rows = store.report_rows(
+                group_by="actual_model",
+                organization_id="tenant-a",
+            )
+
+        self.assertEqual(rows[0]["scope_id"], "not_reported")
+        self.assertFalse(rows[0]["actual_model_reported"])
+        query = str(cursor.execute.call_args.args[0])
+        self.assertIn("COALESCE(actual_model, 'not_reported')", query)
+        self.assertIn("actual_model_reported", query)
+
     def test_postgres_usage_audit_rechecks_scope_before_database_io(self) -> None:
         store = PostgresUsageStore(
             "postgresql://runtime:not-used@127.0.0.1/hormuz",

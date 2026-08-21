@@ -1941,6 +1941,35 @@ class UsageStore:
                     "protocol",
                 ],
             ),
+            "requested_model": (
+                [
+                    "requested_model AS scope_id",
+                    "requested_model AS scope_name",
+                    "protocol",
+                ],
+                ["requested_model", "protocol"],
+            ),
+            "actual_model": (
+                [
+                    "COALESCE(actual_model, 'not_reported') AS scope_id",
+                    "COALESCE(actual_model, 'not_reported') AS scope_name",
+                    "protocol",
+                    "CASE WHEN actual_model IS NULL THEN 0 ELSE 1 END AS actual_model_reported",
+                ],
+                [
+                    "COALESCE(actual_model, 'not_reported')",
+                    "protocol",
+                    "CASE WHEN actual_model IS NULL THEN 0 ELSE 1 END",
+                ],
+            ),
+            "policy": (
+                ["policy_action AS scope_id", "policy_action AS scope_name"],
+                ["policy_action"],
+            ),
+            "status": (
+                ["status AS scope_id", "status AS scope_name"],
+                ["status"],
+            ),
             "client": (
                 ["client AS scope_id", "client AS scope_name", "client"],
                 ["client"],
@@ -2042,6 +2071,11 @@ class UsageStore:
             item["cost_bases"] = _sorted_csv(item.pop("cost_bases_csv"))
             item["currencies"] = _sorted_csv(item.pop("currencies_csv"))
             item["rate_card_versions"] = _sorted_csv(item.pop("rate_card_versions_csv"))
+            if group_by == "actual_model":
+                reported = item.get("actual_model_reported")
+                if reported not in {0, 1}:
+                    raise ValueError("Actual-model report contains an invalid coverage flag")
+                item["actual_model_reported"] = bool(reported)
             if include_latency:
                 item["latency"] = _extract_latency_histograms(item)
             if include_outcomes:

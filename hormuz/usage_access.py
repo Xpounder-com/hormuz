@@ -21,7 +21,16 @@ _TEAM = "usage_team_viewer"
 _FINANCE = "usage_finance_viewer"
 _ORGANIZATION = "usage_organization_viewer"
 _LEGACY_ORGANIZATION = "usage_viewer"
-_FINANCE_DIMENSIONS = {"organization", "model", "client", "provider"}
+_FINANCE_DIMENSIONS = {
+    "organization",
+    "model",
+    "requested_model",
+    "actual_model",
+    "policy",
+    "status",
+    "client",
+    "provider",
+}
 
 
 class UsageReportAccessError(ValueError):

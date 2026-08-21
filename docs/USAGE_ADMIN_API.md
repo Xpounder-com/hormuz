@@ -21,7 +21,7 @@ Assign exactly one usage-report scope to an identity or OIDC subject mapping:
 | --- | --- |
 | `usage_self_viewer` | The authenticated person's own usage. Hormuz forces the actor filter to that person. |
 | `usage_team_viewer` | Aggregates for the authenticated person's current team. Person rows and actor filters are denied. |
-| `usage_finance_viewer` | Organization-wide aggregates by organization, model, client, or provider. Person/team rows and actor/team filters are denied. |
+| `usage_finance_viewer` | Organization-wide aggregates by organization, model, requested model, actual model, policy action, status, client, or provider. Person/team rows and actor/team filters are denied. |
 | `usage_organization_viewer` | All current-organization report dimensions, including person-level drill-down and bounded actor/team filters. |
 | `usage_viewer` | Backward-compatible alias for `usage_organization_viewer`. |
 
@@ -66,7 +66,8 @@ returns request, input-plus-output-token, and estimated-spend shares alongside
 status and unpriced-request counts.
 
 An organization-scoped administrator can group by `organization`, `team`,
-`person`, `model`, `client`, or `provider`, and can use exact event-time
+`person`, `model`, `requested_model`, `actual_model`, `policy`, `status`,
+`client`, or `provider`, and can use exact event-time
 `--actor` and `--team` filters. Narrower roles are constrained by the table
 above; the gateway applies their actor or team filter server-side. `--limit`
 accepts 1–100 rows. When `next_cursor` is present, pass it with the same
@@ -263,6 +264,13 @@ consume timings, upgrade the Hormuz CLI/client and add `--include-latency` or
 `--include-outcomes` or `include=outcomes`. Do not treat a later schema as a
 replacement for earlier schemas or send the new query to an older gateway that
 does not advertise this contract.
+
+`requested_model`, `actual_model`, `policy`, and `status` are additional
+non-breaking `group_by` values under the existing report envelope. The explicit
+actual-model view never substitutes the routed model: a row with
+`actual_model_reported=false` uses `scope_id="not_reported"` because the
+provider did not return an actual-model identifier. This is a coverage fact,
+not a model or request failure classification.
 
 The first request freezes an exclusive `window.end`; every cursor page reuses
 that window. Rows have the token, request-status, cost-basis, rate-card,

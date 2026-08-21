@@ -27,6 +27,10 @@ hormuz --config hormuz.json status --group-by organization
 hormuz --config hormuz.json status --group-by team
 hormuz --config hormuz.json status --group-by person
 hormuz --config hormuz.json status --group-by model
+hormuz --config hormuz.json status --group-by requested_model
+hormuz --config hormuz.json status --group-by actual_model
+hormuz --config hormuz.json status --group-by policy
+hormuz --config hormuz.json status --group-by status
 hormuz --config hormuz.json status --group-by client
 hormuz --config hormuz.json status --group-by provider
 ```
@@ -137,7 +141,7 @@ invoice-reconciled cost or proof of total organizational AI use.
   than generic `denied`: it counts only the exact action recorded when the
   atomic in-flight reservation failed. Hormuz does not infer the reason for
   generic historical denials that did not persist one.
-- `requested_model`, `resolved_alias`, and `upstream_model` preserve policy/routing intent; `actual_model` is the bounded provider-returned model identifier when present. Model reports prefer the actual model and fall back through those routing fields when the provider omits it.
+- `requested_model`, `resolved_alias`, and `upstream_model` preserve policy/routing intent; `actual_model` is the bounded provider-returned model identifier when present. The legacy `model` report prefers the actual model and falls back through those routing fields when the provider omits it. The explicit `requested_model` and `actual_model` groupings do not conflate those facts: an actual-model row has `actual_model_reported=true` only when the provider returned it; otherwise it uses `scope_id="not_reported"` with `actual_model_reported=false`. `policy` groups by the recorded bounded Hormuz policy action, and `status` groups by the recorded gateway outcome.
 - `model_mix` applies that same actual-model-or-routed-fallback basis to the
   caller's current UTC calendar month. Its request share includes all accounted
   gateway attempts; status counts make succeeded, failed, and denied attempts

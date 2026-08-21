@@ -315,6 +315,63 @@ class UsageAdminClientTests(unittest.TestCase):
                 self.client.report(group_by="team", include_outcomes="true")  # type: ignore[arg-type]
         request.assert_not_called()
 
+    def test_explicit_routing_and_outcome_dimensions_are_validated(self) -> None:
+        requested = _response()
+        requested["group_by"] = "requested_model"
+        requested["rows"][0].update(
+            {
+                "scope_id": "gpt-policy",
+                "scope_name": "gpt-policy",
+                "protocol": "openai",
+            }
+        )
+        with mock.patch.object(self.client, "_request", return_value=requested) as request:
+            self.assertEqual(self.client.report(group_by="requested_model"), requested)
+        self.assertIn("group_by=requested_model", request.call_args.args[0])
+
+        actual = _response()
+        actual["group_by"] = "actual_model"
+        actual["rows"][0].update(
+            {
+                "scope_id": "not_reported",
+                "scope_name": "not_reported",
+                "protocol": "openai",
+                "actual_model_reported": False,
+            }
+        )
+        with mock.patch.object(self.client, "_request", return_value=actual):
+            self.assertEqual(self.client.report(group_by="actual_model"), actual)
+
+        invalid_unreported = _response()
+        invalid_unreported["group_by"] = "actual_model"
+        invalid_unreported["rows"][0].update(
+            {
+                "scope_id": "gpt-provider-v1",
+                "scope_name": "gpt-provider-v1",
+                "protocol": "openai",
+                "actual_model_reported": False,
+            }
+        )
+        with mock.patch.object(self.client, "_request", return_value=invalid_unreported):
+            with self.assertRaisesRegex(UsageAdminClientError, "invalid_gateway_response"):
+                self.client.report(group_by="actual_model")
+
+        for group_by in ("policy", "status"):
+            response = _response()
+            response["group_by"] = group_by
+            response["rows"][0].update(
+                {
+                    "scope_id": "allowed" if group_by == "policy" else "succeeded",
+                    "scope_name": "allowed" if group_by == "policy" else "succeeded",
+                }
+            )
+            with self.subTest(group_by=group_by), mock.patch.object(
+                self.client,
+                "_request",
+                return_value=response,
+            ):
+                self.assertEqual(self.client.report(group_by=group_by), response)
+
     def test_constrained_scope_response_is_explicit_and_schema_checked(self) -> None:
         self_view = _response()
         self_view["schema_version"] = 4

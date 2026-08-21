@@ -578,6 +578,10 @@ class PostgresUsageStore:
             "team": (["team_id AS scope_id", "team_name AS scope_name"], ["team_id", "team_name"]),
             "person": (["actor_id AS scope_id", "actor_name AS scope_name", "team_id", "team_name"], ["actor_id", "actor_name", "team_id", "team_name"]),
             "model": (["COALESCE(actual_model, upstream_model, resolved_alias, requested_model) AS scope_id", "COALESCE(actual_model, upstream_model, resolved_alias, requested_model) AS scope_name", "protocol"], ["COALESCE(actual_model, upstream_model, resolved_alias, requested_model)", "protocol"]),
+            "requested_model": (["requested_model AS scope_id", "requested_model AS scope_name", "protocol"], ["requested_model", "protocol"]),
+            "actual_model": (["COALESCE(actual_model, 'not_reported') AS scope_id", "COALESCE(actual_model, 'not_reported') AS scope_name", "protocol", "CASE WHEN actual_model IS NULL THEN 0 ELSE 1 END AS actual_model_reported"], ["COALESCE(actual_model, 'not_reported')", "protocol", "CASE WHEN actual_model IS NULL THEN 0 ELSE 1 END"]),
+            "policy": (["policy_action AS scope_id", "policy_action AS scope_name"], ["policy_action"]),
+            "status": (["status AS scope_id", "status AS scope_name"], ["status"]),
             "client": (["client AS scope_id", "client AS scope_name", "client"], ["client"]),
             "provider": (["protocol AS scope_id", "protocol AS scope_name", "protocol"], ["protocol"]),
         }
@@ -656,6 +660,11 @@ class PostgresUsageStore:
             for field in ("cost_bases", "currencies", "rate_card_versions"):
                 raw = item.pop(field + "_csv")
                 item[field] = sorted(set(str(raw).split(","))) if raw else []
+            if group_by == "actual_model":
+                reported = item.get("actual_model_reported")
+                if reported not in {0, 1}:
+                    raise ValueError("Actual-model report contains an invalid coverage flag")
+                item["actual_model_reported"] = bool(reported)
             if include_latency:
                 item["latency"] = _extract_latency_histograms(item)
             if include_outcomes:

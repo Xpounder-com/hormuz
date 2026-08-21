@@ -21,7 +21,18 @@ from .usage_reporting import (
 
 _MAX_RESPONSE_BYTES = 512 * 1024
 _MAX_SQLITE_INTEGER = 2**63 - 1
-_DIMENSIONS = {"organization", "team", "person", "model", "client", "provider"}
+_DIMENSIONS = {
+    "organization",
+    "team",
+    "person",
+    "model",
+    "requested_model",
+    "actual_model",
+    "policy",
+    "status",
+    "client",
+    "provider",
+}
 _GATEWAY_CLIENTS = {"codex", "claude-code"}
 
 
@@ -338,7 +349,17 @@ def _valid_constrained_access(
     if scope == "team":
         return group_by != "person" and actor_id is None and isinstance(team_id, str)
     return (
-        group_by in {"organization", "model", "client", "provider"}
+        group_by
+        in {
+            "organization",
+            "model",
+            "requested_model",
+            "actual_model",
+            "policy",
+            "status",
+            "client",
+            "provider",
+        }
         and actor_id is None
         and team_id is None
     )
@@ -879,6 +900,8 @@ def _valid_row(
     extras = {
         "person": {"team_id", "team_name"},
         "model": {"protocol"},
+        "requested_model": {"protocol"},
+        "actual_model": {"protocol", "actual_model_reported"},
         "client": {"client"},
         "provider": {"protocol"},
     }.get(group_by, set())
@@ -888,9 +911,18 @@ def _valid_row(
         extras = extras | {"outcomes"}
     if set(value) != required | extras:
         return False
+    text_extras = extras - {"latency", "outcomes", "actual_model_reported"}
     if not all(
         isinstance(value.get(key), str) and bool(value[key])
-        for key in {"scope_id", "scope_name"} | (extras - {"latency", "outcomes"})
+        for key in {"scope_id", "scope_name"} | text_extras
+    ):
+        return False
+    if group_by == "actual_model" and (
+        not isinstance(value.get("actual_model_reported"), bool)
+        or (
+            value["actual_model_reported"] is False
+            and (value["scope_id"] != "not_reported" or value["scope_name"] != "not_reported")
+        )
     ):
         return False
     integer_fields = required - {
