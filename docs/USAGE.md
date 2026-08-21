@@ -51,9 +51,9 @@ Cost is an estimate based on the rate card attached to the routed model in the a
 
 ## Concurrent budget enforcement
 
-Before an accounted provider call, Hormuz creates an atomic SQLite reservation against every applicable organization, team, and employee token/cost cap. The reservation conservatively uses the serialized request byte count as the input-token upper bound, the enforced maximum output tokens, and uncached configured token rates. A competing request is denied with `hormuz_budget_denied` when its projected reservation would exceed any scope.
+Before an accounted provider call, Hormuz creates an atomic reservation against every applicable organization, team, and employee token/cost cap. SQLite uses an immediate local transaction; the optional PostgreSQL repository uses a transaction-local tenant context, forced row-level security, and a per-organization/month advisory transaction lock. The reservation conservatively uses the serialized request byte count as the input-token upper bound, the enforced maximum output tokens, and uncached configured token rates. A competing request is denied with `hormuz_budget_denied` when its projected reservation would exceed any scope.
 
-The reservation is released after the actual provider usage event is recorded. It also has a bounded expiry so an interrupted process cannot hold budget forever. Configurations with monthly token or spend limits must therefore give every identity an effective `max_output_tokens` policy.
+The reservation is released after the actual provider usage event is recorded. It also has a bounded expiry so an interrupted process cannot hold budget forever. Configurations with monthly token or spend limits must therefore give every identity an effective `max_output_tokens` policy. See [STORAGE.md](STORAGE.md) for the PostgreSQL operational boundary and recovery rules.
 
 This is intentionally conservative: a request may be rejected even though caching or a short answer would have made its eventual cost smaller. It closes the concurrent-request race for configured token charges, but it cannot reserve provider tool-call fees or invoice adjustments that are absent from the rate card. Those remain reconciliation items and are another reason not to describe an estimate as final invoiced spend.
 

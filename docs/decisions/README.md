@@ -16,7 +16,7 @@ An agent, test result, or convenient implementation detail cannot move a decisio
 | ADR | Status | Decision | GitHub issue |
 | --- | --- | --- | --- |
 | [0001](0001-oidc-login-and-session-architecture.md) | Proposed | OIDC login and Hormuz session architecture | [#2](https://github.com/Xpounder-com/hormuz/issues/2) |
-| [0002](0002-enterprise-tenancy-and-persistence.md) | Proposed | Enterprise tenancy, authorization, and persistence | [#1](https://github.com/Xpounder-com/hormuz/issues/1) |
+| [0002](0002-enterprise-tenancy-and-persistence.md) | Accepted | Enterprise tenancy, authorization, and persistence | [#1](https://github.com/Xpounder-com/hormuz/issues/1) |
 | [0003](0003-cache-privacy-tiers.md) | Superseded for core | Retire the Hormuz-owned context-cache proposal; archive it with the experiment | [#23](https://github.com/Xpounder-com/hormuz/issues/23) |
 
 ## Acceptance record

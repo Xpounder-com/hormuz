@@ -22,6 +22,7 @@ HEALTH_SCHEMA_ID = "hormuz.gateway-health"
 IDENTITY_SCHEMA_ID = "hormuz.gateway-identity"
 USAGE_SUMMARY_SCHEMA_ID = "hormuz.gateway-usage-summary"
 ERROR_SCHEMA_ID = "hormuz.gateway-error"
+ERROR_SCHEMA_VERSION = 2
 POLICY_DECISION_SCHEMA_ID = "hormuz.policy-decision"
 USAGE_REPORT_SCHEMA_ID = "hormuz.usage-report"
 
@@ -29,7 +30,7 @@ COST_BASIS_CONFIGURED_RATE_CARD_ESTIMATE = "configured_rate_card_estimate"
 ALLOCATION_BASIS_DIRECT_GATEWAY_REQUEST = "direct_gateway_request"
 COVERAGE_GATEWAY_CAPTURED_REQUESTS_ONLY = "gateway_captured_requests_only"
 
-PUBLIC_ERROR_CODES = frozenset(
+PUBLIC_ERROR_CODES_V1 = frozenset(
     {
         "not_found",
         "unauthorized",
@@ -46,12 +47,13 @@ PUBLIC_ERROR_CODES = frozenset(
         "gateway_upstream_error",
     }
 )
+PUBLIC_ERROR_CODES = frozenset({*PUBLIC_ERROR_CODES_V1, "hormuz_storage_unavailable"})
 
 _CURRENT_SCHEMA_VERSIONS = {
     HEALTH_SCHEMA_ID: 1,
     IDENTITY_SCHEMA_ID: 1,
     USAGE_SUMMARY_SCHEMA_ID: 1,
-    ERROR_SCHEMA_ID: 1,
+    ERROR_SCHEMA_ID: ERROR_SCHEMA_VERSION,
     POLICY_DECISION_SCHEMA_ID: 1,
     USAGE_REPORT_SCHEMA_ID: 1,
 }
@@ -177,6 +179,14 @@ def contract_manifest() -> dict[str, object]:
             _manifest_schema(
                 ERROR_SCHEMA_ID,
                 1,
+                "response",
+                "hormuz",
+                ["schema_id", "schema_version", "error"],
+                legacy=True,
+            ),
+            _manifest_schema(
+                ERROR_SCHEMA_ID,
+                ERROR_SCHEMA_VERSION,
                 "response",
                 "hormuz",
                 ["schema_id", "schema_version", "error"],
@@ -388,7 +398,8 @@ def validate_contract(value: Mapping[str, Any]) -> None:
         (HEALTH_SCHEMA_ID, 1): _validate_health,
         (IDENTITY_SCHEMA_ID, 1): _validate_identity,
         (USAGE_SUMMARY_SCHEMA_ID, 1): _validate_usage_summary,
-        (ERROR_SCHEMA_ID, 1): _validate_error,
+        (ERROR_SCHEMA_ID, 1): lambda item: _validate_error(item, PUBLIC_ERROR_CODES_V1),
+        (ERROR_SCHEMA_ID, ERROR_SCHEMA_VERSION): lambda item: _validate_error(item, PUBLIC_ERROR_CODES),
         (POLICY_DECISION_SCHEMA_ID, 1): _validate_policy_decision,
         (USAGE_REPORT_SCHEMA_ID, 1): _validate_usage_report,
     }.get((schema_id, schema_version))
@@ -522,12 +533,12 @@ def _validate_usage_summary(value: Mapping[str, Any]) -> None:
     _validate_cost_coverage_values(value)
 
 
-def _validate_error(value: Mapping[str, Any]) -> None:
+def _validate_error(value: Mapping[str, Any], allowed_codes: frozenset[str]) -> None:
     _exact_keys(value, {"schema_id", "schema_version", "error"})
     error = _value_mapping(value, "error")
     _exact_keys(error, {"code", "message"}, path="error")
     code = _value_string(error, "code", path="error")
-    if code not in PUBLIC_ERROR_CODES:
+    if code not in allowed_codes:
         raise ContractValidationError(f"unsupported public error code: {code}")
     _value_string(error, "message", path="error")
 

@@ -2,7 +2,7 @@
 
 Hormuz is a CLI-first enterprise control plane that puts organization policy between employees' existing AI clients and model providers. It currently proxies the OpenAI Responses API used by Codex and the Anthropic Messages API used by Claude Code.
 
-The first executable milestone enforces client, model, output-token, monthly-token, team-budget, and per-person budget rules. It records metadata-only usage in SQLite, estimates cost from configured rate cards, and keeps provider API keys on the Hormuz server rather than distributing them to employees.
+The first executable milestone enforces client, model, output-token, monthly-token, team-budget, and per-person budget rules. It records metadata-only usage in a local SQLite ledger or an explicitly configured PostgreSQL usage/evidence repository, estimates cost from configured rate cards, and keeps provider API keys on the Hormuz server rather than distributing them to employees.
 
 The included rate cards are examples current as of August 15, 2026. Treat them as versioned configuration: verify them against provider pricing before production use and reconcile estimated spend against provider invoices.
 
@@ -17,7 +17,7 @@ Hormuz is alpha software. The local prototype proves routing and policy behavior
 - Model fallback, output-token caps, monthly token limits, and USD budget limits.
 - Per-person attribution using unique bootstrap tokens or generic OIDC JWT access tokens mapped by issuer and subject.
 - Input, output, cache-read, cache-write, and reasoning-token accounting when providers report them.
-- Metadata-only SQLite usage ledger. Prompts and responses are relayed, not persisted.
+- Metadata-only usage ledger: SQLite by default, with an optional PostgreSQL adapter for the same narrow usage/evidence contract. Prompts and responses are relayed, not persisted.
 - Metadata-only JSONL audit export for usage and secret-egress evidence, with private file permissions and a SHA-256 checksum.
 - Pre-provider secret redaction or denial with built-in detectors, custom environment-provided values, and metadata-only detection evidence.
 - OpenAI response storage and background mode disabled by default as enforceable provider privacy policy.
@@ -84,7 +84,7 @@ python3 -m hormuz --config hormuz.json audit-export \
 
 The deprecated context-pack experiment is intentionally outside the core gateway. See [docs/CONTEXT_EXPERIMENT_MIGRATION.md](docs/CONTEXT_EXPERIMENT_MIGRATION.md) for the separate package and its temporary compatibility shim.
 
-See [docs/ROADMAP.md](docs/ROADMAP.md) for the evidence-gated enterprise program, [docs/CONTRACTS.md](docs/CONTRACTS.md) for the versioned policy/evidence contract and migration boundary, [docs/decisions/README.md](docs/decisions/README.md) for proposed and accepted architecture decisions, [docs/CLIENTS.md](docs/CLIENTS.md) for Codex and Claude Code setup, [docs/OIDC.md](docs/OIDC.md) for generic enterprise identity, [docs/USAGE.md](docs/USAGE.md) for team/person/model cost and budget reporting, [docs/AUDIT.md](docs/AUDIT.md) for the export contract and limitations, [docs/SECRET_CONTROLS.md](docs/SECRET_CONTROLS.md) for the egress boundary, [docs/VERIFICATION.md](docs/VERIFICATION.md) for executable compatibility evidence, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the request path and current trust boundary.
+See [docs/ROADMAP.md](docs/ROADMAP.md) for the evidence-gated enterprise program, [docs/CONTRACTS.md](docs/CONTRACTS.md) for the versioned policy/evidence contract and migration boundary, [docs/STORAGE.md](docs/STORAGE.md) for SQLite/PostgreSQL setup, upgrade, rollback, and recovery boundaries, [docs/decisions/README.md](docs/decisions/README.md) for proposed and accepted architecture decisions, [docs/CLIENTS.md](docs/CLIENTS.md) for Codex and Claude Code setup, [docs/OIDC.md](docs/OIDC.md) for generic enterprise identity, [docs/USAGE.md](docs/USAGE.md) for team/person/model cost and budget reporting, [docs/AUDIT.md](docs/AUDIT.md) for the export contract and limitations, [docs/SECRET_CONTROLS.md](docs/SECRET_CONTROLS.md) for the egress boundary, [docs/VERIFICATION.md](docs/VERIFICATION.md) for executable compatibility evidence, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the request path and current trust boundary.
 
 ## Test
 
@@ -102,4 +102,4 @@ The GitHub publication gate also tests Python 3.11 through 3.14, builds and inst
 
 ## Roadmap boundary
 
-The current hardening program focuses on a minimal gateway core: policy enforcement, accounting, deterministic secret egress, metadata-only audit, and OIDC JWT verification. Before an enterprise release, Hormuz still needs a stable policy/evidence contract, real IdP conformance, KMS and audit retention, TLS and deployment hardening, shared PostgreSQL operations, backup/restore evidence, multi-instance coordination, and independent review. It is not building an organizational-memory or workflow product.
+The current hardening program focuses on a minimal gateway core: policy enforcement, accounting, deterministic secret egress, metadata-only audit, and OIDC JWT verification. The package boundary and versioned policy/evidence contract are now explicit, and the SQLite/PostgreSQL compatibility seam is tested; before an enterprise release, Hormuz still needs real IdP conformance, KMS and audit retention, TLS and deployment hardening, shared PostgreSQL operations, backup/restore evidence, multi-instance coordination, and independent review. It is not building an organizational-memory or workflow product.

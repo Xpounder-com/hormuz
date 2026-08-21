@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import sqlite3
 import threading
 import time
 import urllib.error
@@ -25,13 +26,17 @@ from .contracts import (
     contract_envelope,
     relay_contract_header,
 )
+from .evidence import EvidenceStorageError
 from .policy import PolicyDecision, PolicyEngine
+from .postgres import PostgresStorageError
 from .redaction import RedactionError, SecretRedactor
-from .store import ReservationDenied, UsageStore
+from .store import ReservationDenied, StorageSchemaError, UsageRepository
+from .store_router import create_usage_store
 from .usage import ResponseUsageParser
 
 
 LOGGER = logging.getLogger("hormuz")
+_STORAGE_FAILURES = (sqlite3.Error, EvidenceStorageError, PostgresStorageError, StorageSchemaError)
 
 
 class GatewayServer(ThreadingHTTPServer):
@@ -41,7 +46,7 @@ class GatewayServer(ThreadingHTTPServer):
     def __init__(self, config: GatewayConfig):
         self.config = config
         self.authenticator = Authenticator(config)
-        self.store = UsageStore(config.database_path)
+        self.store: UsageRepository = create_usage_store(config)
         self.policy_engine = PolicyEngine(config, self.store)
         protected_values = [
             ("hormuz_identity_token", identity.token)
@@ -94,8 +99,18 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             )
             return
         if path == "/v1/gateway/usage":
-            totals = self.server.store.monthly_totals(actor_id=identity.actor_id)
-            secret_totals = self.server.store.monthly_secret_totals(actor_id=identity.actor_id)
+            try:
+                totals = self.server.store.monthly_totals(
+                    actor_id=identity.actor_id,
+                    organization_id=identity.organization_id,
+                )
+                secret_totals = self.server.store.monthly_secret_totals(
+                    actor_id=identity.actor_id,
+                    organization_id=identity.organization_id,
+                )
+            except _STORAGE_FAILURES as error:
+                self._send_storage_failure(None, error)
+                return
             self._send_contract_json(
                 HTTPStatus.OK,
                 USAGE_SUMMARY_SCHEMA_ID,
@@ -123,6 +138,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         self._send_error("not_found", "Route not found", HTTPStatus.NOT_FOUND)
 
     def do_POST(self) -> None:  # noqa: N802
+        self._response_started = False
         path = urlsplit(self.path).path
         routes = {
             "/v1/responses": ("openai", "codex", True),
@@ -138,14 +154,17 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         if identity is None:
             return
         protocol, default_client, account_usage = route
-        self._proxy_generation(
-            identity=identity,
-            protocol=protocol,
-            # Do not trust a caller-supplied application name for enforcement.
-            # The compatibility endpoint determines the policy client.
-            client=default_client,
-            account_usage=account_usage,
-        )
+        try:
+            self._proxy_generation(
+                identity=identity,
+                protocol=protocol,
+                # Do not trust a caller-supplied application name for enforcement.
+                # The compatibility endpoint determines the policy client.
+                client=default_client,
+                account_usage=account_usage,
+            )
+        except _STORAGE_FAILURES as error:
+            self._send_storage_failure(protocol, error)
 
     def do_OPTIONS(self) -> None:  # noqa: N802
         self.send_response(HTTPStatus.NO_CONTENT)
@@ -366,7 +385,10 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 reservation_ttl_seconds=self.server.config.upstream_timeout_seconds + 60,
             )
         finally:
-            self.server.store.release_budget_reservation(reservation_id)
+            self.server.store.release_budget_reservation(
+                reservation_id,
+                organization_id=identity.organization_id,
+            )
 
     def _forward(
         self,
@@ -432,6 +454,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         parser = ResponseUsageParser(protocol, is_event_stream=is_event_stream)
         provider_request_id = response.headers.get("x-request-id") or response.headers.get("request-id")
 
+        self._response_started = True
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Cache-Control", "no-store")
@@ -462,6 +485,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                     self.server.store.refresh_budget_reservation(
                         reservation_id,
                         ttl_seconds=reservation_ttl_seconds,
+                        organization_id=identity.organization_id,
                     )
                     refresh_at = time.monotonic() + max(1, reservation_ttl_seconds // 2)
                 parser.feed(chunk)
@@ -625,6 +649,29 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
 
     def _send_error(self, code: str, message: str, status: HTTPStatus) -> None:
         self._send_contract_json(status, ERROR_SCHEMA_ID, {"error": {"code": code, "message": message}})
+
+    def _send_storage_failure(self, protocol: str | None, error: BaseException) -> None:
+        """Fail closed without exposing a database error or request content."""
+
+        code = getattr(error, "code", "storage_unavailable")
+        LOGGER.error(
+            "storage_failure code=%s relay_started=%s",
+            code,
+            getattr(self, "_response_started", False),
+        )
+        self.close_connection = True
+        if getattr(self, "_response_started", False):
+            return
+        message = "Hormuz durable policy storage is temporarily unavailable."
+        if protocol is None:
+            self._send_error("hormuz_storage_unavailable", message, HTTPStatus.SERVICE_UNAVAILABLE)
+            return
+        self._send_protocol_error(
+            protocol,
+            message,
+            HTTPStatus.SERVICE_UNAVAILABLE,
+            code="hormuz_storage_unavailable",
+        )
 
     def _send_contract_json(
         self,

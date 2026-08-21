@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .config import GatewayConfig, Identity, ModelRoute
-from .store import MonthlyTotals, ReservationScope, UsageStore
+from .store import MonthlyTotals, ReservationScope, UsageRepository
 
 
 @dataclass(frozen=True)
@@ -19,7 +19,7 @@ class PolicyDecision:
 
 
 class PolicyEngine:
-    def __init__(self, config: GatewayConfig, store: UsageStore):
+    def __init__(self, config: GatewayConfig, store: UsageRepository):
         self.config = config
         self.store = store
         self.policy_version = config.policy_version
@@ -134,13 +134,29 @@ class PolicyEngine:
         )
 
     def _check_limits(self, identity: Identity, requested_model: str) -> PolicyDecision | None:
-        actor_totals = self.store.monthly_totals(actor_id=identity.actor_id)
+        actor_totals = self.store.monthly_totals(
+            actor_id=identity.actor_id,
+            organization_id=identity.organization_id,
+        )
         scopes: list[tuple[str, object, MonthlyTotals]] = [
-            ("organization", self.config.organization_policy, self.store.monthly_totals()),
+            (
+                "organization",
+                self.config.organization_policy,
+                self.store.monthly_totals(organization_id=identity.organization_id),
+            ),
         ]
         team_policy = self.config.team_policies.get(identity.team_id)
         if team_policy is not None:
-            scopes.append(("team", team_policy, self.store.monthly_totals(team_id=identity.team_id)))
+            scopes.append(
+                (
+                    "team",
+                    team_policy,
+                    self.store.monthly_totals(
+                        team_id=identity.team_id,
+                        organization_id=identity.organization_id,
+                    ),
+                )
+            )
         actor_policy = self.config.actor_policies.get(identity.actor_id)
         if actor_policy is not None:
             scopes.append(("employee", actor_policy, actor_totals))

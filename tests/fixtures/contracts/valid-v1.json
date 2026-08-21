@@ -47,6 +47,14 @@
       "message": "Missing or invalid Hormuz identity credential"
     }
   },
+  "error_v2": {
+    "schema_id": "hormuz.gateway-error",
+    "schema_version": 2,
+    "error": {
+      "code": "hormuz_storage_unavailable",
+      "message": "Hormuz durable policy storage is temporarily unavailable."
+    }
+  },
   "policy_decision": {
     "schema_id": "hormuz.policy-decision",
     "schema_version": 1,
