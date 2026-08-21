@@ -22,7 +22,6 @@ Hormuz is alpha software. The local prototype proves routing and policy behavior
 - Pre-provider secret redaction or denial with built-in detectors, custom environment-provided values, and metadata-only detection evidence.
 - OpenAI response storage and background mode disabled by default as enforceable provider privacy policy.
 - Configuration output for installed Codex and Claude Code clients.
-- Explicit, provider-neutral governed context packs with authorization, classification, verification, expiry, supersession, provenance, and deterministic token-budget enforcement.
 - Generic OIDC discovery/JWKS verification with strict issuer, audience, expiry, asymmetric-algorithm, subject-mapping, and signing-key-rotation enforcement.
 
 ## Quick start
@@ -77,21 +76,9 @@ python3 -m hormuz --config hormuz.json audit-export \
   --output hormuz-audit.jsonl
 ```
 
-Build an explicit governed context pack without injecting or sending it to a provider:
+The deprecated context-pack experiment is intentionally outside the core gateway. See [docs/CONTEXT_EXPERIMENT_MIGRATION.md](docs/CONTEXT_EXPERIMENT_MIGRATION.md) for the separate package and its temporary compatibility shim.
 
-```bash
-python3 -m hormuz --config hormuz.json context-pack \
-  --records examples/context-records.jsonl \
-  --query "How should API retries work?" \
-  --organization xpounder \
-  --actor alice \
-  --repository Xpounder-com/hormuz \
-  --branch main \
-  --token-budget 2000 \
-  --policy-version engineering-v1
-```
-
-See [docs/ROADMAP.md](docs/ROADMAP.md) for the evidence-gated enterprise program, [docs/decisions/README.md](docs/decisions/README.md) for proposed and accepted architecture decisions, [docs/CLIENTS.md](docs/CLIENTS.md) for Codex and Claude Code setup, [docs/OIDC.md](docs/OIDC.md) for generic enterprise identity, [docs/USAGE.md](docs/USAGE.md) for team/person/model cost and budget reporting, [docs/AUDIT.md](docs/AUDIT.md) for the export contract and limitations, [docs/SECRET_CONTROLS.md](docs/SECRET_CONTROLS.md) for the egress boundary, [docs/CONTEXT.md](docs/CONTEXT.md) for governed context-pack semantics, [docs/VERIFICATION.md](docs/VERIFICATION.md) for executable compatibility evidence, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the request path and current trust boundary.
+See [docs/ROADMAP.md](docs/ROADMAP.md) for the evidence-gated enterprise program, [docs/decisions/README.md](docs/decisions/README.md) for proposed and accepted architecture decisions, [docs/CLIENTS.md](docs/CLIENTS.md) for Codex and Claude Code setup, [docs/OIDC.md](docs/OIDC.md) for generic enterprise identity, [docs/USAGE.md](docs/USAGE.md) for team/person/model cost and budget reporting, [docs/AUDIT.md](docs/AUDIT.md) for the export contract and limitations, [docs/SECRET_CONTROLS.md](docs/SECRET_CONTROLS.md) for the egress boundary, [docs/VERIFICATION.md](docs/VERIFICATION.md) for executable compatibility evidence, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the request path and current trust boundary.
 
 ## Test
 
@@ -109,4 +96,4 @@ The GitHub publication gate also tests Python 3.11 through 3.14, builds and inst
 
 ## Roadmap boundary
 
-The current milestone includes the enforcement, accounting, deterministic secret-egress, metadata-audit, explicit context-pack, and OIDC JWT-verification kernels. Before an enterprise release, Hormuz still needs an OIDC login/session or introspection strategy for opaque tokens, SCIM and revocation, structured PII/semantic DLP, durable tenancy, TLS and deployment hardening, signed or externally immutable audit retention, invoice reconciliation, broader provider conformance coverage, and a persistent context lifecycle with retrieval, approvals, invalidation, cache, and outcome writeback.
+The current hardening program focuses on a minimal gateway core: policy enforcement, accounting, deterministic secret egress, metadata-only audit, and OIDC JWT verification. Before an enterprise release, Hormuz still needs a stable policy/evidence contract, real IdP conformance, KMS and audit retention, TLS and deployment hardening, shared PostgreSQL operations, backup/restore evidence, multi-instance coordination, and independent review. It is not building an organizational-memory or workflow product.

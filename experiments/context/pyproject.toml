@@ -3,9 +3,9 @@ requires = ["setuptools>=75"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "hormuz"
-version = "0.2.0"
-description = "Enterprise AI gateway policy, usage, and control plane."
+name = "hormuz-context-experiment"
+version = "0.1.0"
+description = "Deprecated experimental context-pack tooling separated from the Hormuz core gateway."
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [
@@ -16,15 +16,15 @@ classifiers = [
   "Environment :: Console",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3 :: Only",
-  "Topic :: Internet :: Proxy Servers",
   "Topic :: Security"
 ]
 dependencies = [
-  "PyJWT[crypto]>=2.13,<3"
+  "hormuz>=0.2.0,<0.3.0"
 ]
 
 [project.scripts]
-hormuz = "hormuz.cli:main"
+hormuz-context-experiment = "hormuz_context_experiment.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["hormuz*"]
+where = ["src"]
+include = ["hormuz_context_experiment*"]

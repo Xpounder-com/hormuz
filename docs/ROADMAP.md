@@ -1,88 +1,58 @@
-# Hormuz enterprise roadmap
+# Hormuz core hardening roadmap
 
-Hormuz is being built as a model-neutral AI policy and governed-context control plane for employees' existing Codex and Claude Code workflows. The durable product asset is authorized, source-linked organizational context; model routing and caching are governed execution mechanisms around it.
+Hormuz is a model-neutral enterprise AI gateway and policy control plane for employees' existing Codex and Claude Code workflows. Its core job is to authenticate a request, apply organization policy, route or deny it, protect secrets before provider egress, and retain metadata-only evidence of governed usage.
 
-This roadmap is evidence-gated. A milestone is not complete because code exists, a narrow test passes, or an issue has no remaining checklist text. Every acceptance criterion must link to authoritative source, executable tests, package/deployment evidence, and any required product-owner decision.
+This roadmap is evidence-gated. A milestone is not complete because code exists or a narrow test passes. Every closure needs an explicit scope, executable checks, package or deployment proof where relevant, and a truthful statement of what remains unproven.
 
-## Current verified foundation
+## Current implementation order
 
-The private alpha currently has:
+### 1. Separate the deprecated context experiment
 
-- OpenAI Responses and Anthropic Messages proxy compatibility, including streaming;
-- organization/team/actor model policy, fallback, output caps, atomic token/spend reservations, and metadata-only reporting;
-- pre-provider secret redaction/denial and default OpenAI storage restrictions;
-- generic OIDC JWT discovery/JWKS verification with explicit issuer-subject identity mapping;
-- metadata-only audit export;
-- deterministic authorization-first context packs from explicit records;
-- local and GitHub package/client verification.
+Current release gate: [#23](https://github.com/Xpounder-com/hormuz/issues/23).
 
-The foundation is not an enterprise release. Browser SSO/session custody, shared tenancy, SCIM, persistent governed memory, automatic lifecycle/invalidation, context injection, structured DLP, cache policy, invoice reconciliation, HA deployment, KMS, and independent security review remain open gates.
+Move the former context-pack kernel out of the primary `hormuz` distribution and runtime into a separately buildable experiment in this repository. The core wheel must have no context retrieval, lifecycle, cache, provenance, memory, content-storage, active route, or active CLI implementation. Its only temporary compatibility behavior is a content-free `context_experiment_moved` error for the former CLI command.
 
-## Material decisions awaiting owner approval
+Exit evidence:
 
-These issues record product decisions and block dependent implementation. They must not be closed by implementation convenience.
+- clean-wheel and source-distribution inspection;
+- a gateway-start test proving no context module import or storage initialization;
+- a route test proving `/v1/context/...` is not active;
+- a separately buildable experimental package and migration documentation.
 
-1. [#2 — Select the Hormuz OIDC login and session architecture](https://github.com/Xpounder-com/hormuz/issues/2) — [Proposed ADR 0001](decisions/0001-oidc-login-and-session-architecture.md)
-2. [#1 — Approve the enterprise tenancy, authorization, and persistence topology](https://github.com/Xpounder-com/hormuz/issues/1) — [Proposed ADR 0002](decisions/0002-enterprise-tenancy-and-persistence.md)
-3. [#3 — Define provider and Hormuz cache privacy tiers](https://github.com/Xpounder-com/hormuz/issues/3) — [Proposed ADR 0003](decisions/0003-cache-privacy-tiers.md)
+### 2. Stabilize the policy and evidence contract
 
-## v0.2 — Enterprise identity and tenancy
+After the package boundary is merged, freeze what the core gateway promises before adding operational integrations.
 
-[Milestone](https://github.com/Xpounder-com/hormuz/milestone/2)
+The contract includes authenticated identity and event-time organization/team/person binding; requested, routed, and provider-reported models; policy version and enforcement outcome; allow/deny/reroute/cap/redact/rate-limit meanings; token and cost bases; allocation and coverage labels; metadata-only audit fields; stable public error codes; and SQLite/PostgreSQL parity.
 
-- [#2 — OIDC login and session architecture decision](https://github.com/Xpounder-com/hormuz/issues/2)
-- [#1 — Tenancy, authorization, and persistence decision](https://github.com/Xpounder-com/hormuz/issues/1)
-- [#13 — Browser SSO and rotating Hormuz sessions](https://github.com/Xpounder-com/hormuz/issues/13)
-- [#6 — Tenant-aware RBAC and PostgreSQL migrations](https://github.com/Xpounder-com/hormuz/issues/6)
-- [#7 — SCIM provisioning, service accounts, and immediate revocation](https://github.com/Xpounder-com/hormuz/issues/7)
+Every public response and durable evidence format will receive an explicit schema version, strict validation, compatibility fixtures, documented migration rules, and upgrade/rollback/failure-path checks. New fields are not casual additions after this point.
 
-Exit outcome: employees and workloads authenticate through a deployable company identity boundary; every authorization and durable operation is tenant-scoped; revocation is immediate and testable.
+### 3. Close production-readiness gates
 
-## v0.3 — Governed context lifecycle
+Only after the core contract is stable, the program proceeds through real operational gates:
 
-[Milestone](https://github.com/Xpounder-com/hormuz/milestone/1)
+1. validate generic OIDC against an external identity provider while keeping Hormuz a resource server, not an IdP;
+2. add KMS/BYOK custody, secret rotation, and tamper-evident audit retention ([#17](https://github.com/Xpounder-com/hormuz/issues/17));
+3. prove TLS deployment, shared PostgreSQL operation, pooling, backup/restore/PITR, multi-instance revocation and coordination, health/readiness/SLOs, alerts, and incident procedures ([#11](https://github.com/Xpounder-com/hormuz/issues/11));
+4. prove container signing, SBOM and vulnerability gates, and independent release review ([#9](https://github.com/Xpounder-com/hormuz/issues/9)).
 
-- [#4 — Persist governed context outside the usage ledger](https://github.com/Xpounder-com/hormuz/issues/4)
-- [#18 — Authorization-first Context Pack API and MCP tool](https://github.com/Xpounder-com/hormuz/issues/18)
-- [#12 — Automatic verification, promotion, decay, contradiction, and invalidation](https://github.com/Xpounder-com/hormuz/issues/12)
-- [#5 — Inject governed context into Codex and Claude without a new UI](https://github.com/Xpounder-com/hormuz/issues/5)
-- [#16 — Retrieval, freshness, and authorization benchmark](https://github.com/Xpounder-com/hormuz/issues/16)
+## Feature-freeze rule
 
-Exit outcome: Hormuz owns a persistent, source-linked and automatically maintained organizational-memory lifecycle and can inject the smallest authorized pack into supported clients with measurable retrieval quality and zero scope leaks.
+> A change is current-priority only if it removes deprecated context coupling, stabilizes the policy/evidence contract, fixes a security or correctness defect, or closes a production-readiness gate.
 
-## v0.4 — Privacy, cache, and accepted-task economics
+Work is organized as a small PR for one issue and one verifiable outcome. Contract and package evidence are required before merge. Schema compatibility, migration, rollback, recovery, and failure behavior are implementation work, not deferred operational cleanup.
 
-[Milestone](https://github.com/Xpounder-com/hormuz/milestone/4)
+## Deferred during hardening
 
-- [#3 — Provider and Hormuz cache privacy decision](https://github.com/Xpounder-com/hormuz/issues/3)
-- [#14 — Reusable context-pack cache with dependency-aware invalidation](https://github.com/Xpounder-com/hormuz/issues/14)
-- [#10 — Structured DLP, PII policy, and untrusted-context defenses](https://github.com/Xpounder-com/hormuz/issues/10)
-- [#8 — Provider invoice reconciliation and versioned rate cards](https://github.com/Xpounder-com/hormuz/issues/8)
-- [#15 — Cost and quality per verified accepted engineering task](https://github.com/Xpounder-com/hormuz/issues/15)
+The existing local allocation engine and CLI remain part of gateway economics, but receive only correctness, compatibility, or security fixes during this phase. Do not expand:
 
-Exit outcome: reuse is privacy-policy controlled and invalidated correctly; provider and Hormuz cache effects are distinguishable; cost claims reconcile to billing and improve accepted-task economics without weakening quality or security guardrails.
+- remote cost-allocation APIs, allocation roles, response variants, or reporting dimensions;
+- new DLP detector families unless they close a demonstrated bypass;
+- ticketing, productivity, quality, or workflow integrations;
+- new context, memory, lifecycle, cache, retrieval, provenance, or content-governance capabilities.
 
-## v1.0 — Enterprise release gate
+The separately packaged context experiment is outside the core release surface. It does not make Hormuz an organizational-memory system; the AI Metadata Compiler remains the separate product for enterprise asset ingestion, normalization, claims, provenance, and freshness.
 
-[Milestone](https://github.com/Xpounder-com/hormuz/milestone/3)
+## Definition of done
 
-- [#11 — Production deployment with TLS, HA, readiness, and disaster recovery](https://github.com/Xpounder-com/hormuz/issues/11)
-- [#17 — KMS/BYOK custody and tamper-evident audit retention](https://github.com/Xpounder-com/hormuz/issues/17)
-- [#9 — Operational and independent security release gate](https://github.com/Xpounder-com/hormuz/issues/9)
-
-Exit outcome: a supported deployment can be installed, upgraded, operated, restored, audited, and independently reviewed against a documented compatibility, privacy, security, and support boundary.
-
-## Universal definition of done
-
-An issue may close only when all applicable evidence exists:
-
-1. the contract and threat/failure boundary are documented;
-2. authorization and tenant isolation are enforced before data access or expensive work;
-3. success, denial, concurrency, stale data, dependency outage, and rollback paths have executable tests;
-4. content and credentials do not leak into metadata logs, usage storage, audit output, build artifacts, or errors;
-5. source, wheel/container, supported-version, and migration/upgrade checks pass where relevant;
-6. metrics distinguish estimated from reconciled facts and consumption from quality/productivity;
-7. GitHub CI and any milestone-specific benchmark/release gate are green;
-8. the issue links the exact evidence, and every `decision-required` item has explicit product-owner approval.
-
-The [verification record](VERIFICATION.md) captures executed evidence. It is not a substitute for the open milestone acceptance criteria.
+An issue closes only when its contract and threat/failure boundary are documented; authorization happens before data access or expensive work; success, denial, concurrency, dependency outage, migration, rollback, and recovery paths are tested where applicable; content and credentials are absent from logs, storage, exports, errors, and build artifacts; and the linked GitHub evidence records the exact command/test/package result.

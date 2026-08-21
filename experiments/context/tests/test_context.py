@@ -4,7 +4,7 @@ import unittest
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
-from hormuz.context import (
+from hormuz_context_experiment.context import (
     CONTEXT_PACK_SCHEMA,
     ContextError,
     ContextPackRequest,
