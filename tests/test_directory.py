@@ -510,6 +510,32 @@ class DirectoryHTTPTests(unittest.TestCase):
         finally:
             connection.close()
 
+    def _assert_protected_paths_denied(self, access_token: str) -> None:
+        denied_requests = (
+            ("POST", "/v1/responses", {"model": "gpt-test", "input": "blocked"}),
+            ("GET", "/v1/admin/policy-active", None),
+            (
+                "POST",
+                "/v1/admin/policy-activations",
+                {"version_id": "hpv_v1_" + "0" * 64, "expected_active_version_id": None},
+            ),
+            (
+                "POST",
+                "/v1/dlp/approval-requests/apr_" + "0" * 32 + "/decisions",
+                {"decision": "approve"},
+            ),
+        )
+        for method, path, value in denied_requests:
+            with self.subTest(method=method, path=path):
+                status, response = self._session_request(
+                    method,
+                    path,
+                    access_token,
+                    value,
+                )
+                self.assertEqual(status, 401)
+                self.assertEqual(response["error"]["code"], "unauthorized")
+
     def test_scim_http_provisions_and_deprovisions_the_identity_used_by_authentication(self) -> None:
         user_payload = {
             "schemas": [SCIM_USER_SCHEMA, HORMUZ_USER_EXTENSION],
@@ -602,30 +628,47 @@ class DirectoryHTTPTests(unittest.TestCase):
         )
         self.assertEqual(status, 200)
 
-        denied_requests = (
-            ("POST", "/v1/responses", {"model": "gpt-test", "input": "blocked"}),
-            ("GET", "/v1/admin/policy-active", None),
-            (
-                "POST",
-                "/v1/admin/policy-activations",
-                {"version_id": "hpv_v1_" + "0" * 64, "expected_active_version_id": None},
-            ),
-            (
-                "POST",
-                "/v1/dlp/approval-requests/apr_" + "0" * 32 + "/decisions",
-                {"decision": "approve"},
-            ),
+        self._assert_protected_paths_denied(access_token)
+
+    def test_deactivated_user_session_cannot_reach_provider_or_administrative_paths(self) -> None:
+        user_payload = {
+            "schemas": [SCIM_USER_SCHEMA, HORMUZ_USER_EXTENSION],
+            "externalId": "alice-id",
+            "userName": "alice@example.test",
+            "displayName": "Alice",
+            "active": True,
+            HORMUZ_USER_EXTENSION: {"issuer": ISSUER, "subject": "alice-id"},
+        }
+        status, _headers, user = self._request("POST", "/v1/admin/scim/v2/Users", user_payload)
+        self.assertEqual(status, 201)
+        user_id = str(user["id"])
+        group_payload = {
+            "schemas": [SCIM_GROUP_SCHEMA, HORMUZ_GROUP_EXTENSION],
+            "externalId": "engineering",
+            "displayName": "Engineering",
+            "members": [{"value": user_id}],
+            HORMUZ_GROUP_EXTENSION: {"active": True},
+        }
+        status, _headers, _group = self._request("POST", "/v1/admin/scim/v2/Groups", group_payload)
+        self.assertEqual(status, 201)
+        access_token = self._issue_directory_session(actor_id=user_id)
+        status, identity = self._session_request(
+            "GET",
+            "/v1/gateway/whoami",
+            access_token,
         )
-        for method, path, value in denied_requests:
-            with self.subTest(method=method, path=path):
-                status, response = self._session_request(
-                    method,
-                    path,
-                    access_token,
-                    value,
-                )
-                self.assertEqual(status, 401)
-                self.assertEqual(response["error"]["code"], "unauthorized")
+        self.assertEqual(status, 200)
+        self.assertEqual(identity["actor_id"], user_id)
+
+        status, _headers, deactivated = self._request(
+            "DELETE",
+            "/v1/admin/scim/v2/Users/" + user_id,
+            headers={"If-Match": str(user["meta"]["version"])},  # type: ignore[index]
+        )
+        self.assertEqual(status, 200)
+        self.assertFalse(deactivated["active"])
+
+        self._assert_protected_paths_denied(access_token)
 
 
 if __name__ == "__main__":
