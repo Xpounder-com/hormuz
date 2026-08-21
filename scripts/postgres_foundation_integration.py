@@ -72,10 +72,11 @@ from hormuz.store import (
     DLPApprovalStoreError,
     ReservationDenied,
     ReservationScope,
+    SecurityStoreError,
 )
 
 
-EVIDENCE_SCHEMA = "hormuz.postgres-policy-administration-integration.v11"
+EVIDENCE_SCHEMA = "hormuz.postgres-policy-administration-integration.v12"
 DEFAULT_IMAGE = (
     "postgres@sha256:"
     "57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777"
@@ -383,6 +384,7 @@ def _prove_accounting_store(runtime_dsn: str) -> dict[str, object]:
         PostgresUsageStore(runtime_dsn, organization_ids=organizations),
         PostgresUsageStore(runtime_dsn, organization_ids=organizations),
     )
+    security_store = PostgresSecurityStore(runtime_dsn, organization_ids=organizations)
     identity_a = _synthetic_identity("tenant-a", "actor-a")
     identity_b = _synthetic_identity("tenant-b", "actor-b")
     governance_policy_version = "hpv_v1_" + "a" * 64
@@ -435,6 +437,7 @@ def _prove_accounting_store(runtime_dsn: str) -> dict[str, object]:
             "usage-administrator",
             capabilities=("usage_viewer",),
         )
+        audit_window_end = (now + timedelta(minutes=1)).isoformat()
         stores[0].record_admin_usage_read(
             administrator=administrator,
             access_scope="organization",
@@ -442,12 +445,43 @@ def _prove_accounting_store(runtime_dsn: str) -> dict[str, object]:
             actor_filter=None,
             team_filter=None,
             window_start=now.isoformat(),
-            window_end=(now + timedelta(seconds=1)).isoformat(),
+            window_end=audit_window_end,
             result_count=len(report_rows),
         )
+        audit_administrator = _synthetic_identity(
+            "tenant-a",
+            "audit-administrator",
+            capabilities=("audit_viewer",),
+        )
+        stores[0].record_admin_audit_read(
+            administrator=audit_administrator,
+            kind="usage",
+            window_start=now.isoformat(),
+            window_end=audit_window_end,
+            result_count=1,
+        )
+        audit_read_denied = False
+        try:
+            stores[0].record_admin_audit_read(
+                administrator=_synthetic_identity("tenant-a", "not-an-auditor"),
+                kind="usage",
+                window_start=now.isoformat(),
+                window_end=audit_window_end,
+                result_count=1,
+            )
+        except SecurityStoreError as error:
+            audit_read_denied = str(error) == "audit_viewer_capability_required"
         audit_events = stores[0].audit_events(
             since=now.replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat(),
+            until=audit_window_end,
             kind="all",
+            organization_id="tenant-a",
+        )
+        security_events = security_store.audit_events(
+            since=now.replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat(),
+            until=audit_window_end,
+            kind="security",
+            organization_id="tenant-a",
         )
     except PostgresStorageError:
         raise PostgresFoundationIntegrationError("accounting_reporting_failed") from None
@@ -470,6 +504,15 @@ def _prove_accounting_store(runtime_dsn: str) -> dict[str, object]:
             event["event_type"] == "security.admin.usage_read"
             for event in audit_events
         )
+        or not audit_read_denied
+        or not any(
+            event["event_type"] == "security.admin.audit_read"
+            and event.get("decision_actor_id") == "audit-administrator"
+            and event.get("organization_id") == "tenant-a"
+            for event in audit_events
+        )
+        or any(event.get("organization_id") != "tenant-a" for event in audit_events)
+        or any(event.get("organization_id") != "tenant-a" for event in security_events)
     ):
         raise PostgresFoundationIntegrationError("accounting_reporting_mismatch")
 
@@ -566,6 +609,8 @@ def _prove_accounting_store(runtime_dsn: str) -> dict[str, object]:
         "usage_reporting_verified": True,
         "usage_coverage_summary_verified": True,
         "usage_read_audit_verified": True,
+        "audit_read_authorization_verified": True,
+        "audit_reader_tenant_scope_verified": True,
         "exact_governance_policy_version_verified": True,
         "atomic_budget_competitors": 2,
         "atomic_budget_allowed": 1,

@@ -22,6 +22,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from .auth import AuthenticationError, Authenticator
+from .audit_access import AuditAccessError, authorize_audit_read
 from .config import (
     ConfigError,
     GatewayConfig,
@@ -133,6 +134,7 @@ _CONTENT_FREE_HTTP_ROUTES = frozenset(
         "/v1/admin/session-events",
         "/v1/admin/session-revocations",
         "/v1/admin/sessions",
+        "/v1/admin/audit-events",
         "/v1/admin/usage",
         "/v1/admin/usage/coverage",
         "/v1/admin/policy-active",
@@ -274,6 +276,58 @@ def _decode_usage_cursor(cursor: str) -> dict[str, object]:
             or any(character in item for character in ("\n", "\r", "\x00"))
         ):
             raise ValueError("invalid cursor")
+    return value
+
+
+def _encode_audit_cursor(
+    *,
+    kind: str,
+    since: str,
+    window_end: str,
+    offset: int,
+) -> str:
+    payload = json.dumps(
+        {
+            "v": 1,
+            "kind": kind,
+            "since": since,
+            "window_end": window_end,
+            "offset": offset,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return base64.urlsafe_b64encode(payload).rstrip(b"=").decode("ascii")
+
+
+def _decode_audit_cursor(cursor: str) -> dict[str, object]:
+    if len(cursor.encode("utf-8")) > 4096:
+        raise ValueError("invalid cursor")
+    padding = "=" * (-len(cursor) % 4)
+    try:
+        payload = base64.b64decode(
+            (cursor + padding).encode("ascii"),
+            altchars=b"-_",
+            validate=True,
+        )
+        value = json.loads(payload)
+    except (ValueError, UnicodeError, binascii.Error, json.JSONDecodeError) as error:
+        raise ValueError("invalid cursor") from error
+    fields = {"v", "kind", "since", "window_end", "offset"}
+    if (
+        not isinstance(value, dict)
+        or set(value) != fields
+        or value.get("v") != 1
+        or value.get("kind") not in {"all", "usage", "security"}
+        or not isinstance(value.get("since"), str)
+        or not isinstance(value.get("window_end"), str)
+        or isinstance(value.get("offset"), bool)
+        or not isinstance(value.get("offset"), int)
+        or not 0 <= value["offset"] <= 1_000_000
+    ):
+        raise ValueError("invalid cursor")
+    _parse_utc_filter(str(value["since"]))
+    _parse_utc_filter(str(value["window_end"]))
     return value
 
 
@@ -859,6 +913,9 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         if path == "/v1/admin/session-events":
             self._list_session_security_events(identity, request_url.query)
             return
+        if path == "/v1/admin/audit-events":
+            self._list_audit_events(identity, request_url.query)
+            return
         if path == "/v1/admin/usage/coverage":
             self._get_usage_coverage(identity, request_url.query)
             return
@@ -1010,6 +1067,140 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         self._send_error(
             "invalid_model_discovery_request",
             "Claude Code model discovery requires exactly limit=1000",
+            HTTPStatus.BAD_REQUEST,
+        )
+
+    def _list_audit_events(self, identity: Identity, query: str) -> None:
+        try:
+            values = urllib.parse.parse_qs(
+                query,
+                keep_blank_values=True,
+                strict_parsing=True,
+                max_num_fields=4,
+            )
+        except ValueError:
+            self._send_audit_events_error()
+            return
+        allowed = {"kind", "since", "limit", "cursor"}
+        if set(values) - allowed or any(
+            len(items) != 1 or not items[0] for items in values.values()
+        ):
+            self._send_audit_events_error()
+            return
+        kind = values.get("kind", ["all"])[0]
+        since = values.get("since", [None])[0]
+        cursor = values.get("cursor", [None])[0]
+        try:
+            limit = int(values.get("limit", ["50"])[0])
+            if kind not in {"all", "usage", "security"} or not 1 <= limit <= 100:
+                raise ValueError
+            if since is not None and (
+                len(since.encode("utf-8")) > 256
+                or any(character in since for character in ("\n", "\r", "\x00"))
+            ):
+                raise ValueError
+        except (ValueError, TypeError, OverflowError):
+            self._send_audit_events_error()
+            return
+        try:
+            authorize_audit_read(identity)
+        except AuditAccessError as error:
+            self._send_error(
+                error.code,
+                "Audit viewer capability is required",
+                HTTPStatus.FORBIDDEN,
+            )
+            return
+        try:
+            now = datetime.now(timezone.utc)
+            if cursor is None:
+                window_end = now
+                window_start = (
+                    _parse_utc_filter(since)
+                    if since is not None
+                    else now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+                )
+                offset = 0
+            else:
+                cursor_value = _decode_audit_cursor(cursor)
+                if cursor_value["kind"] != kind:
+                    raise ValueError
+                window_start = _parse_utc_filter(str(cursor_value["since"]))
+                if since is not None and _parse_utc_filter(since) != window_start:
+                    raise ValueError
+                window_end = _parse_utc_filter(str(cursor_value["window_end"]))
+                offset = int(cursor_value["offset"])
+                if window_end > now + timedelta(seconds=5):
+                    raise ValueError
+        except (ValueError, TypeError, OverflowError):
+            self._send_audit_events_error()
+            return
+        try:
+            events = self.server.store.audit_events(
+                since=window_start.isoformat(),
+                until=window_end.isoformat(),
+                kind=kind,
+                organization_id=identity.organization_id,
+            )
+            if any(
+                not isinstance(event, dict)
+                or event.get("organization_id") != identity.organization_id
+                for event in events
+            ):
+                raise SecurityStoreError("audit_scope_mismatch")
+            page = events[offset : offset + limit + 1]
+            has_more = len(page) > limit
+            if has_more:
+                page.pop()
+            self.server.store.record_admin_audit_read(
+                administrator=identity,
+                kind=kind,
+                window_start=window_start.isoformat(),
+                window_end=window_end.isoformat(),
+                result_count=len(page),
+            )
+        except (ValueError, sqlite3.Error, SecurityStoreError, PostgresStorageError):
+            self._send_error(
+                "audit_events_unavailable",
+                "Audit events are temporarily unavailable",
+                HTTPStatus.SERVICE_UNAVAILABLE,
+            )
+            return
+        next_cursor = None
+        if has_more:
+            next_cursor = _encode_audit_cursor(
+                kind=str(kind),
+                since=window_start.isoformat(),
+                window_end=window_end.isoformat(),
+                offset=offset + len(page),
+            )
+        LOGGER.info(
+            "audit_admin_read organization=%s decision_actor=%s kind=%s events=%d",
+            identity.organization_id,
+            identity.actor_id,
+            kind,
+            len(page),
+        )
+        self._send_json(
+            HTTPStatus.OK,
+            {
+                "schema_version": 1,
+                "organization_id": identity.organization_id,
+                "kind": kind,
+                "window": {
+                    "start": window_start.isoformat(),
+                    "end": window_end.isoformat(),
+                    "timezone": "UTC",
+                },
+                "events": page,
+                "next_cursor": next_cursor,
+            },
+        )
+
+    def _send_audit_events_error(self) -> None:
+        self._send_error(
+            "invalid_audit_event_request",
+            "Audit event query is invalid",
             HTTPStatus.BAD_REQUEST,
         )
 

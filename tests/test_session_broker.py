@@ -279,7 +279,7 @@ class SessionBrokerIntegrationTests(unittest.TestCase):
                     "organization_id": "xpounder",
                     "clearance": "restricted",
                     "allowed_clients": ["codex", "claude-code"],
-                    "capabilities": ["session_admin", "usage_viewer"],
+                    "capabilities": ["session_admin", "usage_viewer", "audit_viewer"],
                 },
                 {
                     "token_env": "HORMUZ_EMPLOYEE_TOKEN",
@@ -1134,6 +1134,143 @@ class SessionBrokerIntegrationTests(unittest.TestCase):
             {event["decision_actor_id"] for event in reads},
             {"employee", "security-admin"},
         )
+
+    def test_audit_admin_is_tenant_scoped_paginated_and_self_audited(self) -> None:
+        employee = self.config.identities_by_actor["employee"]
+        administrator = self.config.identities_by_actor["security-admin"]
+        outsider = Identity(
+            token_env="OUTSIDER_TOKEN",
+            token="outsider-token-" + "o" * 32,
+            actor_id="outside-employee",
+            actor_name="Other Employee",
+            team_id="engineering",
+            team_name="Engineering",
+            organization_id="other-company",
+        )
+        for identity, model in (
+            (employee, "gpt-test"),
+            (administrator, "claude-test"),
+            (outsider, "gpt-test"),
+        ):
+            self.gateway.store.record(
+                identity=identity,
+                client="codex",
+                protocol="openai",
+                requested_model=model,
+                resolved_alias=model,
+                upstream_model=model,
+                policy_action="allowed",
+                status="succeeded",
+                input_tokens=10,
+                output_tokens=2,
+                billable_tokens=12,
+                cost_microusd=1_000,
+                cost_basis="estimated",
+            )
+
+        status, forbidden = self._admin_request(
+            "GET",
+            "/v1/admin/audit-events?kind=usage",
+            token="policy-admin-token-" + "p" * 32,
+        )
+        self.assertEqual(status, 403)
+        self.assertEqual(forbidden["error"]["code"], "audit_viewer_capability_required")
+        self.assertNotIn("events", forbidden)
+
+        admin_token = "admin-token-" + "a" * 32
+        status, first = self._admin_request(
+            "GET",
+            "/v1/admin/audit-events?kind=usage&since=2000-01-01T00%3A00%3A00Z&limit=1",
+            token=admin_token,
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(first["schema_version"], 1)
+        self.assertEqual(first["organization_id"], "xpounder")
+        self.assertEqual(first["kind"], "usage")
+        self.assertEqual(len(first["events"]), 1)
+        self.assertIsInstance(first["next_cursor"], str)
+        self.assertTrue(
+            all(event["organization_id"] == "xpounder" for event in first["events"])
+        )
+        self.assertNotIn("Other Employee", repr(first))
+
+        status, second = self._admin_request(
+            "GET",
+            "/v1/admin/audit-events?kind=usage&limit=1&cursor="
+            + urllib.parse.quote(str(first["next_cursor"]), safe=""),
+            token=admin_token,
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(len(second["events"]), 1)
+        self.assertIsNone(second["next_cursor"])
+        self.assertNotEqual(first["events"][0]["id"], second["events"][0]["id"])
+        self.assertTrue(
+            all(event["organization_id"] == "xpounder" for event in second["events"])
+        )
+
+        status, invalid = self._admin_request(
+            "GET",
+            "/v1/admin/audit-events?kind=security&cursor="
+            + urllib.parse.quote(str(first["next_cursor"]), safe=""),
+            token=admin_token,
+        )
+        self.assertEqual(status, 400)
+        self.assertEqual(invalid["error"]["code"], "invalid_audit_event_request")
+
+        audit = self.gateway.store.audit_events(
+            since="2000-01-01T00:00:00+00:00",
+            kind="security",
+            organization_id="xpounder",
+        )
+        reads = [
+            event
+            for event in audit
+            if event["event_type"] == "security.admin.audit_read"
+        ]
+        self.assertEqual(len(reads), 2)
+        self.assertTrue(all(event["organization_id"] == "xpounder" for event in reads))
+        self.assertEqual({event["decision_actor_id"] for event in reads}, {"security-admin"})
+
+        output = io.StringIO()
+        with mock.patch.dict(
+            os.environ,
+            {"HORMUZ_ADMIN_TOKEN": admin_token},
+        ), redirect_stdout(output):
+            result = cli_main(
+                [
+                    "audit",
+                    "events",
+                    "--gateway",
+                    self.gateway_url,
+                    "--credential-env",
+                    "HORMUZ_ADMIN_TOKEN",
+                    "--kind",
+                    "usage",
+                    "--since",
+                    "2000-01-01T00:00:00Z",
+                    "--allow-insecure-http",
+                ]
+            )
+        self.assertEqual(result, 0)
+        listing = json.loads(output.getvalue())
+        self.assertEqual(listing["organization_id"], "xpounder")
+        self.assertEqual(len(listing["events"]), 2)
+        self.assertNotIn("Other Employee", output.getvalue())
+
+    def test_audit_admin_returns_no_events_when_read_audit_cannot_commit(self) -> None:
+        with mock.patch.object(
+            self.gateway.store,
+            "record_admin_audit_read",
+            side_effect=SecurityStoreError("audit_admin_audit_unavailable"),
+        ):
+            status, response = self._admin_request(
+                "GET",
+                "/v1/admin/audit-events?kind=usage",
+                token="admin-token-" + "a" * 32,
+            )
+        self.assertEqual(status, 503)
+        self.assertEqual(response["error"]["code"], "audit_events_unavailable")
+        self.assertNotIn("events", response)
 
     def test_usage_report_scopes_apply_server_side_aggregate_boundaries(self) -> None:
         employee = self.config.identities_by_actor["employee"]

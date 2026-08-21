@@ -22,6 +22,7 @@ from .audit_chain import (
     verify_audit_chain,
     write_audit_chain,
 )
+from .audit_admin_client import AuditAdminClient, AuditAdminClientError
 from .auth import AuthenticationError, Authenticator
 from .billing import (
     MAX_REPORT_PAGE_BYTES,
@@ -462,6 +463,35 @@ def build_parser() -> argparse.ArgumentParser:
         help="Saved human-session profile instead of an environment credential",
     )
     usage_coverage.add_argument(
+        "--allow-insecure-http",
+        action="store_true",
+        help="Allow loopback HTTP for local development only",
+    )
+
+    audit_admin = subparsers.add_parser(
+        "audit",
+        help="Inspect tenant-scoped metadata-only audit events through an authenticated Hormuz gateway",
+    )
+    audit_subparsers = audit_admin.add_subparsers(dest="audit_command", required=True)
+    audit_events = audit_subparsers.add_parser(
+        "events",
+        help="Read tenant-scoped metadata-only audit events",
+    )
+    audit_events.add_argument("--kind", choices=["all", "usage", "security"], default="all")
+    audit_events.add_argument("--since", help="UTC ISO-8601 lower bound (default: start of current month)")
+    audit_events.add_argument("--limit", type=int, default=50, help="Page size from 1 to 100")
+    audit_events.add_argument("--cursor", help="Opaque cursor returned by the previous page")
+    audit_events.add_argument("--gateway", required=True, help="Hormuz gateway base URL")
+    audit_credential = audit_events.add_mutually_exclusive_group()
+    audit_credential.add_argument(
+        "--credential-env",
+        help="Audit viewer credential environment variable (default: HORMUZ_TOKEN)",
+    )
+    audit_credential.add_argument(
+        "--profile",
+        help="Saved human-session profile instead of an environment credential",
+    )
+    audit_events.add_argument(
         "--allow-insecure-http",
         action="store_true",
         help="Allow loopback HTTP for local development only",
@@ -1255,6 +1285,8 @@ def main(argv: list[str] | None = None) -> int:
         return _session_admin_command(args)
     if args.command == "usage":
         return _usage_admin_command(args)
+    if args.command == "audit":
+        return _audit_admin_command(args)
     if args.command == "policy" and args.policy_command != "export":
         return _policy_admin_command(args)
     if args.command == "lifecycle":
@@ -2548,6 +2580,52 @@ def _usage_admin_command(args: argparse.Namespace) -> int:
         CredentialStoreError,
     ) as error:
         print(f"usage administration failed: {error.code}", file=sys.stderr)
+        return 1
+    print(json.dumps(result, indent=2, sort_keys=True))
+    return 0
+
+
+def _audit_admin_command(args: argparse.Namespace) -> int:
+    try:
+        if args.profile is not None:
+            credential = session_access_token(
+                gateway=args.gateway,
+                profile=args.profile,
+                allow_insecure_http=args.allow_insecure_http,
+            )
+        else:
+            env_name = args.credential_env or "HORMUZ_TOKEN"
+            if (
+                not env_name
+                or not env_name.replace("_", "A").isalnum()
+                or env_name[0].isdigit()
+            ):
+                print("credential environment variable name is invalid", file=sys.stderr)
+                return 2
+            credential = os.environ.get(env_name, "")
+            if not credential:
+                print(f"credential environment variable is not set: {env_name}", file=sys.stderr)
+                return 1
+        client = AuditAdminClient(
+            args.gateway,
+            credential=credential,
+            allow_insecure_http=args.allow_insecure_http,
+        )
+        if args.audit_command == "events":
+            result = client.list_events(
+                kind=args.kind,
+                since=args.since,
+                limit=args.limit,
+                cursor=args.cursor,
+            )
+        else:
+            return 2
+    except (
+        AuditAdminClientError,
+        SessionClientError,
+        CredentialStoreError,
+    ) as error:
+        print(f"audit administration failed: {error.code}", file=sys.stderr)
         return 1
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0

@@ -31,6 +31,11 @@ Hormuz writes the event count and the SHA-256 checksum of the exact JSONL bytes 
 shasum -a 256 hormuz-audit.jsonl
 ```
 
+`audit-export` is an operator-local command over the configured stores. For a
+credential-authenticated, tenant-scoped audit reader, use `hormuz audit events`
+instead. See [AUDIT_ADMIN_API.md](AUDIT_ADMIN_API.md) for the exact gateway
+contract and its separate authorization boundary.
+
 ## Chained export and anchored verification
 
 Raw JSONL remains the compatibility default. For evidence that must expose an
@@ -114,7 +119,7 @@ The manifest is a structural backstop, not a claim that every Hormuz table is co
 Every line is one JSON object containing:
 
 - `schema_version`: usage events are `4`; security and administrative events remain `1`. Usage version 4 adds the controlled `identity_type`; nullable gateway/policy/provider latency columns remain available only through the explicit usage-report schema-v3 aggregation.
-- `event_type`: `usage`, `security.secret`, `security.dlp`, `security.dlp.approval`, or `security.admin.usage_read`.
+- `event_type`: `usage`, `security.secret`, `security.dlp`, `security.dlp.approval`, `security.admin.usage_read`, or `security.admin.audit_read`.
 - `id` and `occurred_at`: the event identifier and UTC occurrence time.
 - event-time organization, actor, team, client, protocol, requested/resolved/routed/actual model, policy, status, normalized token, cost-basis, currency, rate-card-version, provider-request, and redaction metadata when applicable. Pre-organization usage rows retain a null organization rather than receiving a guessed tenant.
 - `provider_usage`: a provider-specific allowlisted object containing only documented usage counters and bounded categorical metadata. Unknown fields and content-bearing provider data are removed before the event is written.
@@ -133,12 +138,12 @@ claim set, or employee-performance signal.
 
 Array fields such as `redaction_rules`, `rules`, and DLP `findings` are emitted as JSON arrays. A finding is restricted to rule ID, category, confidence, action, and count. The `opaque_media` finding therefore records only the `unsupported_media` category and number of provider content blocks; URLs, file IDs, filenames, media types, encoded bytes, and surrounding content are excluded. DLP events also carry the exact routed upstream model and the effective policy version. For an identity with team/person overlays, that version is a deterministic digest of safe layer versions and rule metadata; it contains no dictionary values and binds later approval matching. Approval events record `requested`, `approved`, `consumed`, or post-egress `model_mismatch` transitions with the opaque request ID, event-time employee/team, separate decision actor, provider/model/policy, and rule IDs. They exclude the keyed payload fingerprint as well as all content.
 
-Administrative usage-read events record the viewing actor, organization, report grouping, frozen UTC window, returned row count, and SHA-256 digests of any exact actor/team filters. A successful report page is not disclosed when its mandatory audit write fails. These events contain no prompt, response, model output, provider credential, or raw filter value.
+Administrative usage-read events record the viewing actor, organization, report grouping, frozen UTC window, returned row count, and SHA-256 digests of any exact actor/team filters. Administrative audit-read events record the viewing actor, organization, selected event kind, frozen UTC window, and returned event count. A successful authenticated page is not disclosed when its mandatory audit write fails. These events contain no prompt, response, model output, provider credential, or raw filter value.
 
 Events are ordered by occurrence time and ID, and object keys are serialized deterministically. Rate-card versions and estimates are immutable event snapshots, not a lookup through the current configuration. The store snapshots actor and team names on each request, so administrators should treat audit files as access-controlled employee metadata even though request content is absent.
 
 ## Security boundary
 
-The raw checksum and the optional chain detect changes only when a trusted copy of the applicable external anchor is retained elsewhere. Hormuz does not yet sign exports, make the local SQLite database append-only, send events to WORM storage, record who ran an export, or enforce audit-reader RBAC. Production deployments should ship events to an organization-controlled append-only destination and apply retention, legal-hold, access-review, and deletion policies there.
+The raw checksum and the optional chain detect changes only when a trusted copy of the applicable external anchor is retained elsewhere. The authenticated audit-event API requires the independent `audit_viewer` capability and commits a `security.admin.audit_read` event before disclosing a successful page. The local `audit-export` command remains operator-local: it does not authenticate who ran an export or create an export-read event. Hormuz does not yet sign exports, make the local SQLite database append-only, or send events to WORM storage. Production deployments should ship events to an organization-controlled append-only destination and apply retention, legal-hold, access-review, and deletion policies there.
 
 The export covers only requests that passed through Hormuz. The separate provider-cost reconciliation kernel can expose aggregate unexplained variance and apply a versioned metadata-only finance-review threshold policy, but it cannot prove report scope or gateway bypass and does not convert this audit file into complete organization-wide usage. Authenticated provider polling, a persistent reviewer workflow, final invoice reconciliation, and externally immutable audit remain enterprise milestones.

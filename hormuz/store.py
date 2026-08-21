@@ -12,6 +12,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from .billing import ProviderBillingError, ProviderCostReport, ProviderCostSource
+from .audit_access import AuditAccessError, authorize_audit_read
 from .config import Identity, is_model_identifier
 from .content_free import ContentFreeSchemaError, validate_content_free_schema
 from .usage import (
@@ -366,7 +367,9 @@ class UsageStore:
                     organization_id TEXT NOT NULL,
                     decision_actor_id TEXT NOT NULL,
                     decision_actor_name TEXT NOT NULL,
-                    action TEXT NOT NULL CHECK (action = 'usage.report.read'),
+                    action TEXT NOT NULL CHECK (
+                        action IN ('usage.report.read', 'audit.events.read')
+                    ),
                     group_by TEXT NOT NULL,
                     actor_filter_sha256 TEXT,
                     team_filter_sha256 TEXT,
@@ -492,6 +495,7 @@ class UsageStore:
                 """
             )
             _migrate_provider_cost_bucket_count(connection)
+            _migrate_admin_access_actions(connection)
             connection.execute(
                 """
                 INSERT OR IGNORE INTO gateway_provider_cost_sources (
@@ -2273,9 +2277,69 @@ class UsageStore:
             raise SecurityStoreError("usage_admin_audit_unavailable") from error
         return event_id
 
-    def audit_events(self, *, since: str, kind: str = "all") -> list[dict[str, object]]:
+    def record_admin_audit_read(
+        self,
+        *,
+        administrator: Identity,
+        kind: str,
+        window_start: str,
+        window_end: str,
+        result_count: int,
+    ) -> str:
+        try:
+            authorize_audit_read(administrator)
+        except AuditAccessError as error:
+            raise SecurityStoreError(error.code) from error
+        if kind not in {"all", "usage", "security"}:
+            raise SecurityStoreError("invalid_audit_event_request")
+        if isinstance(result_count, bool) or not isinstance(result_count, int) or result_count < 0:
+            raise SecurityStoreError("invalid_audit_event_request")
+        event_id = str(uuid.uuid4())
+        try:
+            with self._lock, self._connection() as connection:
+                connection.execute(
+                    """
+                    INSERT INTO gateway_admin_access_events (
+                        id, occurred_at, organization_id, decision_actor_id,
+                        decision_actor_name, action, group_by, actor_filter_sha256,
+                        team_filter_sha256, window_start, window_end, result_count
+                    ) VALUES (?, ?, ?, ?, ?, 'audit.events.read', ?, NULL, NULL, ?, ?, ?)
+                    """,
+                    (
+                        event_id,
+                        datetime.now(timezone.utc).isoformat(),
+                        administrator.organization_id,
+                        administrator.actor_id,
+                        administrator.actor_name,
+                        kind,
+                        window_start,
+                        window_end,
+                        result_count,
+                    ),
+                )
+        except sqlite3.Error as error:
+            raise SecurityStoreError("audit_admin_audit_unavailable") from error
+        return event_id
+
+    def audit_events(
+        self,
+        *,
+        since: str,
+        kind: str = "all",
+        organization_id: str | None = None,
+        until: str | None = None,
+    ) -> list[dict[str, object]]:
         if kind not in {"all", "usage", "security"}:
             raise ValueError(f"Unsupported audit event kind: {kind}")
+        filters = ["occurred_at >= ?"]
+        parameters: list[object] = [since]
+        if until is not None:
+            filters.append("occurred_at <= ?")
+            parameters.append(until)
+        if organization_id is not None:
+            filters.append("organization_id = ?")
+            parameters.append(organization_id)
+        where = " AND ".join(filters)
         events: list[dict[str, object]] = []
         with self._lock, self._connection() as connection:
             connection.execute("BEGIN")
@@ -2297,10 +2361,10 @@ class UsageStore:
                         context_estimated_tokens, context_assembly_milliseconds,
                         context_reuse_status, governance_policy_version
                     FROM gateway_usage_events
-                    WHERE occurred_at >= ?
+                    WHERE {where}
                     ORDER BY occurred_at, id
-                    """,
-                    (since,),
+                    """.format(where=where),
+                    parameters,
                 ).fetchall()
                 for row in rows:
                     event = dict(row)
@@ -2325,10 +2389,10 @@ class UsageStore:
                         detection_count, redaction_count, rules, event_type,
                         policy_version, findings_json
                     FROM gateway_secret_events
-                    WHERE occurred_at >= ?
+                    WHERE {where}
                     ORDER BY occurred_at, id
-                    """,
-                    (since,),
+                    """.format(where=where),
+                    parameters,
                 ).fetchall()
                 for row in rows:
                     event = dict(row)
@@ -2349,17 +2413,22 @@ class UsageStore:
                         decision_actor_name, action, group_by, actor_filter_sha256,
                         team_filter_sha256, window_start, window_end, result_count
                     FROM gateway_admin_access_events
-                    WHERE occurred_at >= ?
+                    WHERE {where}
                     ORDER BY occurred_at, id
-                    """,
-                    (since,),
+                    """.format(where=where),
+                    parameters,
                 ).fetchall()
                 for row in admin_rows:
+                    event = dict(row)
                     events.append(
                         {
                             "schema_version": 1,
-                            "event_type": "security.admin.usage_read",
-                            **dict(row),
+                            "event_type": (
+                                "security.admin.audit_read"
+                                if event["action"] == "audit.events.read"
+                                else "security.admin.usage_read"
+                            ),
+                            **event,
                         }
                     )
                 approval_rows = connection.execute(
@@ -2370,10 +2439,10 @@ class UsageStore:
                         decision_actor_name, client, protocol, requested_model,
                         routed_model, actual_model, policy_version, rules_json, action
                     FROM gateway_dlp_approval_events
-                    WHERE occurred_at >= ?
+                    WHERE {where}
                     ORDER BY occurred_at, id
-                    """,
-                    (since,),
+                    """.format(where=where),
+                    parameters,
                 ).fetchall()
                 for row in approval_rows:
                     event = dict(row)
@@ -2911,6 +2980,64 @@ def _migrate_provider_cost_bucket_count(connection: sqlite3.Connection) -> None:
         """
         CREATE INDEX idx_gateway_provider_cost_import_scope
         ON gateway_provider_cost_imports(organization_id, provider, imported_at, id)
+        """
+    )
+
+
+def _migrate_admin_access_actions(connection: sqlite3.Connection) -> None:
+    row = connection.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?",
+        ("gateway_admin_access_events",),
+    ).fetchone()
+    if row is None or not isinstance(row["sql"], str):
+        raise ValueError("Administrative access schema is unavailable")
+    normalized = " ".join(str(row["sql"]).lower().split())
+    if "audit.events.read" in normalized:
+        return
+    if "check (action = 'usage.report.read')" not in normalized:
+        raise ValueError("Administrative access schema is incompatible")
+    connection.execute("DROP INDEX IF EXISTS idx_gateway_admin_access_org_time")
+    connection.execute(
+        "ALTER TABLE gateway_admin_access_events RENAME TO gateway_admin_access_events_legacy"
+    )
+    connection.execute(
+        """
+        CREATE TABLE gateway_admin_access_events (
+            id TEXT PRIMARY KEY,
+            occurred_at TEXT NOT NULL,
+            organization_id TEXT NOT NULL,
+            decision_actor_id TEXT NOT NULL,
+            decision_actor_name TEXT NOT NULL,
+            action TEXT NOT NULL CHECK (
+                action IN ('usage.report.read', 'audit.events.read')
+            ),
+            group_by TEXT NOT NULL,
+            actor_filter_sha256 TEXT,
+            team_filter_sha256 TEXT,
+            window_start TEXT NOT NULL,
+            window_end TEXT NOT NULL,
+            result_count INTEGER NOT NULL CHECK (result_count >= 0)
+        )
+        """
+    )
+    connection.execute(
+        """
+        INSERT INTO gateway_admin_access_events (
+            id, occurred_at, organization_id, decision_actor_id,
+            decision_actor_name, action, group_by, actor_filter_sha256,
+            team_filter_sha256, window_start, window_end, result_count
+        )
+        SELECT id, occurred_at, organization_id, decision_actor_id,
+               decision_actor_name, action, group_by, actor_filter_sha256,
+               team_filter_sha256, window_start, window_end, result_count
+        FROM gateway_admin_access_events_legacy
+        """
+    )
+    connection.execute("DROP TABLE gateway_admin_access_events_legacy")
+    connection.execute(
+        """
+        CREATE INDEX idx_gateway_admin_access_org_time
+        ON gateway_admin_access_events(organization_id, occurred_at, id)
         """
     )
 

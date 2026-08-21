@@ -15,6 +15,7 @@ import json
 import uuid
 from typing import Iterator
 
+from .audit_access import AuditAccessError, authorize_audit_read
 from .billing import ProviderCostReport, ProviderCostSource
 from .config import Identity, is_model_identifier
 from .postgres import (
@@ -810,6 +811,56 @@ class PostgresUsageStore:
             raise SecurityStoreError("usage_admin_audit_unavailable") from error
         return event_id
 
+    def record_admin_audit_read(
+        self,
+        *,
+        administrator: Identity,
+        kind: str,
+        window_start: str,
+        window_end: str,
+        result_count: int,
+    ) -> str:
+        organization = self._organization(administrator.organization_id)
+        try:
+            authorize_audit_read(administrator)
+        except AuditAccessError as error:
+            raise SecurityStoreError(error.code) from error
+        if kind not in {"all", "usage", "security"}:
+            raise SecurityStoreError("invalid_audit_event_request")
+        if isinstance(result_count, bool) or not isinstance(result_count, int) or result_count < 0:
+            raise SecurityStoreError("invalid_audit_event_request")
+        event_id = str(uuid.uuid4())
+        try:
+            with self._transaction(
+                organization,
+                principal_id=administrator.actor_id,
+                client_id="audit-events",
+            ) as connection:
+                with connection.cursor() as cursor:  # type: ignore[attr-defined]
+                    cursor.execute(
+                        """
+                        INSERT INTO gateway_admin_access_events (
+                          tenant_id, id, occurred_at, decision_actor_id,
+                          decision_actor_name, action, group_by, actor_filter_sha256,
+                          team_filter_sha256, window_start, window_end, result_count
+                        ) VALUES (%s, %s, %s, %s, %s, 'audit.events.read', %s, NULL, NULL, %s, %s, %s)
+                        """,
+                        (
+                            organization,
+                            event_id,
+                            datetime.now(timezone.utc),
+                            administrator.actor_id,
+                            administrator.actor_name,
+                            kind,
+                            window_start,
+                            window_end,
+                            result_count,
+                        ),
+                    )
+        except PostgresStorageError as error:
+            raise SecurityStoreError("audit_admin_audit_unavailable") from error
+        return event_id
+
     def import_provider_cost_report(
         self,
         *,
@@ -1091,11 +1142,27 @@ class PostgresUsageStore:
             "credential_retained": False,
         }
 
-    def audit_events(self, *, since: str, kind: str = "all") -> list[dict[str, object]]:
+    def audit_events(
+        self,
+        *,
+        since: str,
+        kind: str = "all",
+        organization_id: str | None = None,
+        until: str | None = None,
+    ) -> list[dict[str, object]]:
         if kind not in {"all", "usage", "security"}:
             raise ValueError(f"Unsupported audit event kind: {kind}")
+        organizations = (
+            (self._organization(organization_id),)
+            if organization_id is not None
+            else self.organization_ids
+        )
+        until_clause = " AND occurred_at <= %s" if until is not None else ""
         events: list[dict[str, object]] = []
-        for organization in self.organization_ids:
+        for organization in organizations:
+            parameters: tuple[object, ...] = (organization, since)
+            if until is not None:
+                parameters += (until,)
             with self._transaction(organization, client_id="audit-export") as connection:
                 with self._dict_cursor(connection) as cursor:
                     if kind in {"all", "usage"}:
@@ -1115,10 +1182,10 @@ class PostgresUsageStore:
                               context_estimated_tokens, context_assembly_milliseconds,
                               context_reuse_status, governance_policy_version
                             FROM gateway_usage_events
-                            WHERE tenant_id = %s AND occurred_at >= %s
+                            WHERE tenant_id = %s AND occurred_at >= %s{until_clause}
                             ORDER BY occurred_at, id
-                            """,
-                            (organization, since),
+                            """.format(until_clause=until_clause),
+                            parameters,
                         )
                         for row in cursor.fetchall():
                             event = dict(row)
@@ -1134,15 +1201,25 @@ class PostgresUsageStore:
                               actor_filter_sha256, team_filter_sha256, window_start,
                               window_end, result_count
                             FROM gateway_admin_access_events
-                            WHERE tenant_id = %s AND occurred_at >= %s
+                            WHERE tenant_id = %s AND occurred_at >= %s{until_clause}
                             ORDER BY occurred_at, id
-                            """,
-                            (organization, since),
+                            """.format(until_clause=until_clause),
+                            parameters,
                         )
                         for row in cursor.fetchall():
                             event = dict(row)
                             for field in ("occurred_at", "window_start", "window_end"):
                                 event[field] = _iso(event[field])
-                            events.append({"schema_version": 1, "event_type": "security.admin.usage_read", **event})
+                            events.append(
+                                {
+                                    "schema_version": 1,
+                                    "event_type": (
+                                        "security.admin.audit_read"
+                                        if event["action"] == "audit.events.read"
+                                        else "security.admin.usage_read"
+                                    ),
+                                    **event,
+                                }
+                            )
         events.sort(key=lambda event: (str(event["occurred_at"]), str(event["id"])))
         return events

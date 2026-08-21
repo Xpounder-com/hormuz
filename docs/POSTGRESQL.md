@@ -1,10 +1,10 @@
 # PostgreSQL tenancy foundation
 
 Hormuz has an accepted shared-schema PostgreSQL tenancy contract and an
-executable schema-version-11 accounting, identity-projection, policy-projection,
+executable schema-version-12 accounting, identity-projection, policy-projection,
 policy-version, human-session, DLP/security, identity-type usage,
 tenant-lifecycle, and shared-SCIM-directory backend. A deployment can opt into PostgreSQL
-for usage, cost evidence, usage-read audit, atomic budget reservations,
+for usage, cost evidence, administrative read audit, atomic budget reservations,
 multi-instance human sessions, one-time DLP approvals, and security evidence.
 The deprecated built-in context experiment is deliberately excluded from the
 PostgreSQL production-persistence plan under ADR 0008.
@@ -13,7 +13,7 @@ PostgreSQL production-persistence plan under ADR 0008.
 
 The packaged PostgreSQL migrations create tenant, workspace, project, team,
 principal, external-identity, role, capability, team-membership, desired-state
-projection, usage, provider-cost, usage-read-audit, budget-reservation,
+projection, usage, provider-cost, administrative-read-audit, budget-reservation,
 enrollment, session, consumed-refresh, and session-security-event tables.
 Schema version 4 adds a secret-free canonical policy projection plus DLP
 approval-request, approval-event, and security-event tables. Schema version 5
@@ -37,6 +37,9 @@ directory resource.
 Schema version 11 permits immutable policy projection v4 documents, which carry
 policy-owned SCIM authorization profiles and tenant-qualified group bindings.
 It does not make SCIM payload fields an authorization source.
+Schema version 12 adds the independently authorized audit-reader action to the
+tenant-isolated administrative-access ledger. It records the bounded audit kind,
+frozen query window, and result count without request content or credentials.
 When a dynamic subject is next resolved after a profile change, the directory
 reconciles its effective principal projection before it is returned. That
 revokes sessions with a changed authorization mapping and lets a new enrollment
@@ -238,8 +241,9 @@ rather than changes the default.
 
 Switching the backend does not backfill old SQLite usage, security, or approval
 rows. New reports, budget calculations, security totals, and approvals use
-PostgreSQL from the cutover onward; `audit-export` continues to combine
-pre-cutover SQLite evidence with current PostgreSQL evidence. Pending or
+PostgreSQL from the cutover onward; `audit-export` and authenticated audit-event
+reads continue to combine pre-cutover SQLite evidence with current PostgreSQL
+evidence. Pending or
 approved SQLite grants do not authorize a PostgreSQL retry and must be requested
 again after cutover. Perform a separately verified backfill before using a
 mid-month cutover for enforceable monthly limits or complete-period reporting.
@@ -266,8 +270,9 @@ roles and two synthetic tenants, then proves:
 - denied cross-tenant read/write and composite foreign-key access;
 - denied tenant-key mutation, including for the forced-RLS table owner;
 - rejected an unexpected accounting column during schema verification;
-- tenant-isolated usage writes, reads, reports, bounded coverage summaries, and
-  usage-read audit;
+- tenant-isolated usage writes, reads, reports, bounded coverage summaries,
+  usage-read audit, independently authorized audit-read evidence, and
+  bounded-window tenant audit queries;
 - one allowed and one denied request under a two-writer competing budget test;
 - idempotent provider-cost import plus aggregate reconciliation;
 - idempotent configuration-seeded identity synchronization;
@@ -312,7 +317,7 @@ observation is
 
 ## Gates that remain open
 
-Schema v11 is a real accounting, human-session, DLP/security, policy-version,
+Schema v12 is a real accounting, human-session, DLP/security, policy-version,
 identity-type usage, tenant-lifecycle, and shared-directory persistence slice,
 not the completed hosted product.
 The repository currently opens a fresh PostgreSQL connection per operation.

@@ -25,6 +25,7 @@ _ACCOUNTING_METHODS = {
     "report_rows",
     "coverage_summary",
     "record_admin_usage_read",
+    "record_admin_audit_read",
 }
 
 _SECURITY_METHODS = {
@@ -66,14 +67,26 @@ class GatewayStoreRouter:
             return getattr(self.security, name)
         raise AttributeError(name)
 
-    def audit_events(self, *, since: str, kind: str = "all") -> list[dict[str, object]]:
+    def audit_events(
+        self,
+        *,
+        since: str,
+        kind: str = "all",
+        organization_id: str | None = None,
+        until: str | None = None,
+    ) -> list[dict[str, object]]:
         if kind not in {"all", "usage", "security"}:
             raise ValueError(f"Unsupported audit event kind: {kind}")
-        events = self.accounting.audit_events(since=since, kind=kind)
+        options: dict[str, object] = {"since": since, "kind": kind}
+        if organization_id is not None:
+            options["organization_id"] = organization_id
+        if until is not None:
+            options["until"] = until
+        events = self.accounting.audit_events(**options)
         # Preserve pre-cutover SQLite evidence alongside current PostgreSQL events.
-        events.extend(self.security.audit_events(since=since, kind=kind))
+        events.extend(self.security.audit_events(**options))
         if self.legacy_security is not None and self.legacy_security is not self.security:
-            events.extend(self.legacy_security.audit_events(since=since, kind=kind))
+            events.extend(self.legacy_security.audit_events(**options))
         unique = {
             (str(event.get("event_type")), str(event.get("id"))): event
             for event in events

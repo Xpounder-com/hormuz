@@ -728,13 +728,29 @@ class PostgresSecurityStore:
                 row = cursor.fetchone()
                 return DLPApprovalTotals(**{key: int(value) for key, value in row.items()})
 
-    def audit_events(self, *, since: str, kind: str = "all") -> list[dict[str, object]]:
+    def audit_events(
+        self,
+        *,
+        since: str,
+        kind: str = "all",
+        organization_id: str | None = None,
+        until: str | None = None,
+    ) -> list[dict[str, object]]:
         if kind not in {"all", "usage", "security"}:
             raise ValueError(f"Unsupported audit event kind: {kind}")
         if kind == "usage":
             return []
+        organizations = (
+            (self._organization(organization_id),)
+            if organization_id is not None
+            else self.organization_ids
+        )
+        until_clause = " AND occurred_at <= %s" if until is not None else ""
         events: list[dict[str, object]] = []
-        for organization in self.organization_ids:
+        for organization in organizations:
+            parameters: tuple[object, ...] = (organization, since)
+            if until is not None:
+                parameters += (until,)
             with self._transaction(
                 organization,
                 principal_id="security-auditor",
@@ -746,8 +762,9 @@ class PostgresSecurityStore:
                         "actor_name, team_id, team_name, client, protocol, requested_model, "
                         "routed_model, action, detection_count, redaction_count, rules_json, "
                         "event_type, policy_version, findings_json FROM gateway_secret_events "
-                        "WHERE tenant_id = %s AND occurred_at >= %s ORDER BY occurred_at, id",
-                        (organization, since),
+                        "WHERE tenant_id = %s AND occurred_at >= %s{until_clause} "
+                        "ORDER BY occurred_at, id".format(until_clause=until_clause),
+                        parameters,
                     )
                     for row in cursor.fetchall():
                         event = dict(row)
@@ -762,8 +779,10 @@ class PostgresSecurityStore:
                         "decision_actor_name, client, protocol, requested_model, routed_model, "
                         "actual_model, policy_version, rules_json, action "
                         "FROM gateway_dlp_approval_events WHERE tenant_id = %s "
-                        "AND occurred_at >= %s ORDER BY occurred_at, id",
-                        (organization, since),
+                        "AND occurred_at >= %s{until_clause} ORDER BY occurred_at, id".format(
+                            until_clause=until_clause
+                        ),
+                        parameters,
                     )
                     for row in cursor.fetchall():
                         event = dict(row)

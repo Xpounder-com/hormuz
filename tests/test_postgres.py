@@ -355,6 +355,7 @@ class PostgresFoundationTests(unittest.TestCase):
         legacy = mock.Mock()
         legacy.path = Path("security.sqlite3")
         accounting.record.return_value = "usage-id"
+        accounting.record_admin_audit_read.return_value = "audit-read-id"
         security.record_secret_event.return_value = "security-id"
         accounting.audit_events.return_value = [
             {"event_type": "usage", "id": "a", "occurred_at": "2026-08-20T00:00:00Z"}
@@ -376,13 +377,32 @@ class PostgresFoundationTests(unittest.TestCase):
         router = GatewayStoreRouter(accounting, security, legacy_security=legacy)
 
         self.assertEqual(router.record(test=True), "usage-id")
+        self.assertEqual(router.record_admin_audit_read(test=True), "audit-read-id")
         self.assertEqual(router.record_secret_event(test=True), "security-id")
         self.assertEqual(
-            [event["id"] for event in router.audit_events(since="2026-08-20T00:00:00Z")],
+            [
+                event["id"]
+                for event in router.audit_events(
+                    since="2026-08-20T00:00:00Z",
+                    kind="security",
+                    organization_id="tenant-a",
+                    until="2026-08-21T00:00:00Z",
+                )
+            ],
             ["c", "a", "b"],
         )
         accounting.record.assert_called_once_with(test=True)
+        accounting.record_admin_audit_read.assert_called_once_with(test=True)
         security.record_secret_event.assert_called_once_with(test=True)
+        expected_audit_options = {
+            "since": "2026-08-20T00:00:00Z",
+            "kind": "security",
+            "organization_id": "tenant-a",
+            "until": "2026-08-21T00:00:00Z",
+        }
+        accounting.audit_events.assert_called_once_with(**expected_audit_options)
+        security.audit_events.assert_called_once_with(**expected_audit_options)
+        legacy.audit_events.assert_called_once_with(**expected_audit_options)
         self.assertEqual(router.security_database_path, Path("security.sqlite3"))
 
     def test_postgres_gateway_store_fails_closed_before_building_on_stale_policy(self) -> None:
@@ -780,6 +800,8 @@ class PostgresFoundationTests(unittest.TestCase):
         self.assertTrue(value["accounting"]["usage_reporting_verified"])
         self.assertTrue(value["accounting"]["usage_coverage_summary_verified"])
         self.assertTrue(value["accounting"]["usage_read_audit_verified"])
+        self.assertTrue(value["accounting"]["audit_read_authorization_verified"])
+        self.assertTrue(value["accounting"]["audit_reader_tenant_scope_verified"])
         self.assertTrue(value["identity_sessions"]["configuration_projection_verified"])
         self.assertTrue(value["identity_sessions"]["cross_instance_enrollment_verified"])
         self.assertEqual(value["identity_sessions"]["atomic_refresh_competitors"], 2)

@@ -3019,6 +3019,7 @@ def _identity_capabilities(value: Any, path: str) -> tuple[str, ...]:
     capabilities = _string_tuple(value, path)
     capability_set = set(capabilities)
     supported = {
+        "audit_viewer",
         "context_promoter",
         "dlp_approver",
         "policy_admin",
