@@ -306,7 +306,12 @@ def verify_runtime_policy_projection(
     try:
         for organization_id in configured_organization_ids(config):
             context = TenantContext(organization_id, "policy-verifier", "hormuz-startup", 1)
-            with tenant_transaction(connection, context, runtime_role=runtime_role):
+            with tenant_transaction(
+                connection,
+                context,
+                runtime_role=runtime_role,
+                schema=schema,
+            ):
                 with connection.cursor() as cursor:  # type: ignore[attr-defined]
                     cursor.execute(f"SET LOCAL search_path TO {quoted_schema}, pg_catalog")
                     cursor.execute(

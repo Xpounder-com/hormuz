@@ -13,6 +13,7 @@ from pathlib import Path
 import re
 import secrets
 import subprocess
+import tempfile
 import time
 from types import SimpleNamespace
 from typing import Any
@@ -46,6 +47,11 @@ from hormuz.postgres_policy_store import PolicyAdminError, PostgresPolicyStore
 from hormuz.postgres_security_store import PostgresSecurityStore
 from hormuz.postgres_session_store import PostgresSessionStore
 from hormuz.session_store import SessionStoreError
+from hormuz.tenant_lifecycle import (
+    TenantLifecycleError,
+    TenantLifecycleRuntimeGate,
+    TenantLifecycleService,
+)
 from hormuz.store import (
     DLPApprovalStoreError,
     ReservationDenied,
@@ -53,7 +59,7 @@ from hormuz.store import (
 )
 
 
-EVIDENCE_SCHEMA = "hormuz.postgres-policy-administration-integration.v8"
+EVIDENCE_SCHEMA = "hormuz.postgres-policy-administration-integration.v9"
 DEFAULT_IMAGE = (
     "postgres@sha256:"
     "57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777"
@@ -180,6 +186,10 @@ def _provision_synthetic_tenants(owner_dsn: str) -> None:
                         cursor.execute(
                             "INSERT INTO hormuz.tenants (tenant_id, display_name) VALUES (%s, %s)",
                             (f"tenant-{suffix}", f"Synthetic {suffix.upper()}"),
+                        )
+                        cursor.execute(
+                            "INSERT INTO hormuz.gateway_tenant_lifecycle (tenant_id) VALUES (%s)",
+                            (f"tenant-{suffix}",),
                         )
                         cursor.execute(
                             "INSERT INTO hormuz.workspaces "
@@ -1076,6 +1086,152 @@ def _expect_verification_code(owner_dsn: str, expected_code: str) -> None:
     raise PostgresFoundationIntegrationError("verification_tamper_not_detected")
 
 
+def _prove_tenant_lifecycle(owner_dsn: str, runtime_dsn: str) -> dict[str, object]:
+    """Exercise the irreversible path only after every other tenant-b proof."""
+
+    organization_id = "tenant-b"
+    now = datetime.now(timezone.utc)
+    master_key = b"integration-session-key-value!"[:32].ljust(32, b"x")
+    session_store = PostgresSessionStore(
+        runtime_dsn,
+        organization_ids=("tenant-a", organization_id),
+        master_key=master_key,
+        access_ttl_seconds=600,
+        absolute_ttl_seconds=43_200,
+        enrollment_ttl_seconds=300,
+    )
+    try:
+        pair = _issue_session(
+            session_store,
+            session_store,
+            organization_id=organization_id,
+            suffix="b",
+        )
+        runtime_gate = TenantLifecycleRuntimeGate(runtime_dsn)
+        runtime_gate.require_active(_synthetic_identity(organization_id, "human-b"))
+
+        service = TenantLifecycleService(owner_dsn, clock=lambda: now)
+        deactivated = service.deactivate(
+            organization_id=organization_id,
+            reason_code="administrative",
+        )
+        if (
+            not deactivated.changed
+            or deactivated.revoked_sessions < 1
+            or deactivated.state != "deactivated"
+        ):
+            raise PostgresFoundationIntegrationError("tenant_deactivation_not_effective")
+        try:
+            runtime_gate.require_active(_synthetic_identity(organization_id, "human-b"))
+        except TenantLifecycleError as error:
+            if error.code != "tenant_inactive":
+                raise PostgresFoundationIntegrationError("tenant_gate_error_invalid") from None
+        else:
+            raise PostgresFoundationIntegrationError("tenant_deactivation_runtime_allowed")
+        try:
+            session_store.authenticate_access(pair.access_token)
+        except SessionStoreError as error:
+            if error.code != "tenant_inactive":
+                raise PostgresFoundationIntegrationError("tenant_session_error_invalid") from None
+        else:
+            raise PostgresFoundationIntegrationError("tenant_session_not_revoked")
+
+        with tempfile.TemporaryDirectory() as temporary:
+            export_path = Path(temporary) / "tenant-b.hormuz"
+            receipt = service.export(
+                organization_id=organization_id,
+                encryption_key=b"tenant-lifecycle-export-key".ljust(32, b"x"),
+                output=export_path,
+            )
+            plan = TenantLifecycleService.restore_plan(
+                input_path=export_path,
+                encryption_key=b"tenant-lifecycle-export-key".ljust(32, b"x"),
+            )
+            export_mode = export_path.stat().st_mode & 0o777
+            if (
+                export_mode != 0o600
+                or plan.organization_id != organization_id
+                or plan.table_counts.get("gateway_human_sessions", 0) < 1
+                or plan.table_counts.get("gateway_usage_events", 0) < 1
+            ):
+                raise PostgresFoundationIntegrationError("tenant_export_restore_plan_invalid")
+            scheduled = service.schedule_purge(
+                organization_id=organization_id,
+                export_id=receipt.export_id,
+                retention_days=1,
+            )
+            if not scheduled.changed or scheduled.state != "purge_scheduled":
+                raise PostgresFoundationIntegrationError("tenant_purge_not_scheduled")
+            try:
+                service.purge(
+                    organization_id=organization_id,
+                    export_id=receipt.export_id,
+                    confirm_ciphertext_sha256=receipt.ciphertext_sha256,
+                )
+            except TenantLifecycleError as error:
+                if error.code != "tenant_purge_retention_pending":
+                    raise PostgresFoundationIntegrationError("tenant_retention_error_invalid") from None
+            else:
+                raise PostgresFoundationIntegrationError("tenant_purge_retention_bypassed")
+
+            future_service = TenantLifecycleService(
+                owner_dsn,
+                clock=lambda: now + timedelta(days=1, seconds=1),
+            )
+            purged = future_service.purge(
+                organization_id=organization_id,
+                export_id=receipt.export_id,
+                confirm_ciphertext_sha256=receipt.ciphertext_sha256,
+            )
+            if purged.organization_id != organization_id:
+                raise PostgresFoundationIntegrationError("tenant_purge_result_invalid")
+
+        try:
+            runtime_gate.require_active(_synthetic_identity(organization_id, "human-b"))
+        except TenantLifecycleError as error:
+            if error.code != "tenant_lifecycle_missing":
+                raise PostgresFoundationIntegrationError("tenant_purge_gate_error_invalid") from None
+        else:
+            raise PostgresFoundationIntegrationError("tenant_purge_runtime_allowed")
+
+        psycopg, _sql = _require_driver()
+        with psycopg.connect(owner_dsn) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT export_id, export_ciphertext_sha256 "
+                    "FROM hormuz.gateway_tenant_purge_tombstones WHERE tenant_id = %s",
+                    (organization_id,),
+                )
+                tombstone = cursor.fetchone()
+        if tombstone != (receipt.export_id, receipt.ciphertext_sha256):
+            raise PostgresFoundationIntegrationError("tenant_purge_tombstone_invalid")
+        try:
+            sync_identity_projection(_identity_config(changed=True), owner_dsn)  # type: ignore[arg-type]
+        except PostgresStorageError as error:
+            if error.code != "tenant_reonboard_required":
+                raise PostgresFoundationIntegrationError("tenant_tombstone_error_invalid") from None
+        else:
+            raise PostgresFoundationIntegrationError("tenant_tombstone_reonboarded_implicitly")
+    except PostgresFoundationIntegrationError:
+        raise
+    except (PostgresStorageError, SessionStoreError, TenantLifecycleError) as error:
+        raise PostgresFoundationIntegrationError("tenant_lifecycle_" + error.code) from None
+    except Exception:
+        raise PostgresFoundationIntegrationError("tenant_lifecycle_probe_failed") from None
+    return {
+        "runtime_gate_active_before_deactivation": True,
+        "deactivation_blocks_runtime": True,
+        "active_human_session_revoked": True,
+        "encrypted_export_verified": True,
+        "restore_plan_content_free": True,
+        "private_export_mode": "0600",
+        "purge_retention_enforced": True,
+        "hard_purge_verified": True,
+        "owner_only_tombstone_retained": True,
+        "tombstone_blocks_implicit_reonboarding": True,
+    }
+
+
 def _prove_verifier_tamper_detection(admin_dsn: str, owner_dsn: str) -> dict[str, bool]:
     psycopg, _sql = _require_driver()
     try:
@@ -1230,6 +1386,7 @@ def run_integration(*, image: str = DEFAULT_IMAGE) -> dict[str, object]:
             runtime_dsn,
         )
         tamper_detection = _prove_verifier_tamper_detection(admin_dsn, owner_dsn)
+        tenant_lifecycle = _prove_tenant_lifecycle(owner_dsn, runtime_dsn)
         evidence = {
             "schema": EVIDENCE_SCHEMA,
             "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
@@ -1253,6 +1410,7 @@ def run_integration(*, image: str = DEFAULT_IMAGE) -> dict[str, object]:
             "identity_sessions": identity_sessions,
             "policy_administration": policy_administration,
             "tamper_detection": tamper_detection,
+            "tenant_lifecycle": tenant_lifecycle,
             "content_free": True,
         }
     except PostgresStorageError as error:

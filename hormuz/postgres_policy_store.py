@@ -228,6 +228,7 @@ class PostgresPolicyStore:
                 connection,
                 TenantContext(organization_id, identity.actor_id, "hormuz-policy-admin", 1),
                 runtime_role=self.runtime_role,
+                schema=self.schema,
             ):
                 with connection.cursor() as cursor:  # type: ignore[attr-defined]
                     cursor.execute(f"SET LOCAL search_path TO {self._qualified}, pg_catalog")

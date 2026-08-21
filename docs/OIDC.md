@@ -2,6 +2,12 @@
 
 Hormuz has two standards-based OpenID Connect paths. Human employees can use browser authorization-code + PKCE login and receive short-lived, opaque Hormuz credentials. CI and service workloads can continue to present a JWT access token minted for the Hormuz API audience. Both resolve the exact `(issuer, subject)` pair to an organization, team, person, clearance, and policy principal. That mapping can be configuration-seeded or, for the bounded single-node lifecycle prototype, resolved from the live local [SCIM directory](SCIM.md).
 
+This is one generic OIDC/OAuth implementation, not separate Okta, Entra, or
+Google integrations. A customer supplies any standards-conformant issuer,
+registered redirect URI, client ID, and secret through its own deployment
+configuration; live validation against one selected IdP is a conformance check,
+not a product dependency.
+
 An OIDC ID token is accepted only inside Hormuz's server-side authorization-code callback and is never accepted as a gateway bearer credential. Provider access and refresh tokens are not retained.
 
 ## Human browser login and session broker

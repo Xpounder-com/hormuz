@@ -138,7 +138,12 @@ class PostgresSessionStore:
                 client_id,
                 authorization_version,
             )
-            with tenant_transaction(connection, context, runtime_role=self.runtime_role):
+            with tenant_transaction(
+                connection,
+                context,
+                runtime_role=self.runtime_role,
+                schema=self.schema,
+            ):
                 with connection.cursor() as cursor:  # type: ignore[attr-defined]
                     cursor.execute(f"SET LOCAL search_path TO {self._qualified}, pg_catalog")
                 yield connection

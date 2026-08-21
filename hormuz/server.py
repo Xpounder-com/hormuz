@@ -77,6 +77,7 @@ from .identity_projection import configured_organization_ids, verify_runtime_ide
 from .postgres import PostgresStorageError, postgres_dsn_from_env
 from .postgres_policy_store import PolicyAdminError, PostgresPolicyStore
 from .postgres_session_store import PostgresSessionStore
+from .tenant_lifecycle import TenantLifecycleError, TenantLifecycleRuntimeGate
 from .policy_projection import policy_projection
 from .policy_runtime import PolicyRuntime, ResolvedPolicy
 from .redaction import RedactionError, SecretRedactor
@@ -343,6 +344,13 @@ class GatewayServer(ThreadingHTTPServer):
                 trusted_issuers=tuple(config.oidc_issuers),
             )
         self.authenticator = Authenticator(config, self.directory)
+        self.tenant_lifecycle_gate: TenantLifecycleRuntimeGate | None = None
+        if config.usage_storage.backend == "postgresql":
+            self.tenant_lifecycle_gate = TenantLifecycleRuntimeGate(
+                postgres_dsn_from_env(dsn_env=config.usage_storage.postgres_dsn_env),
+                schema=config.usage_storage.postgres_schema,
+                runtime_role=config.usage_storage.postgres_runtime_role,
+            )
         self.session_broker: SessionBroker | None = None
         if config.session_broker.enabled:
             session_config = config.session_broker
@@ -4411,12 +4419,16 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         for candidate in candidates:
             if candidate.startswith("hox_a_") and self.server.session_broker is not None:
                 try:
-                    return self.server.session_broker.authenticate(candidate)
+                    return self._require_active_tenant(
+                        self.server.session_broker.authenticate(candidate)
+                    )
                 except AuthenticationError as error:
                     LOGGER.info("authentication_denied reason=%s", error.code)
                     continue
             try:
-                return self.server.authenticator.authenticate(candidate)
+                return self._require_active_tenant(
+                    self.server.authenticator.authenticate(candidate)
+                )
             except AuthenticationError as error:
                 LOGGER.info("authentication_denied reason=%s", error.code)
         self._send_error(
@@ -4426,6 +4438,17 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             close_connection=True,
         )
         return None
+
+    def _require_active_tenant(self, identity: Identity) -> Identity:
+        gate = self.server.tenant_lifecycle_gate
+        if gate is None:
+            return identity
+        try:
+            gate.require_active(identity)
+        except TenantLifecycleError as error:
+            LOGGER.info("authentication_denied reason=%s", error.code)
+            raise AuthenticationError("tenant_access_unavailable") from None
+        return identity
 
     def _read_json_body(
         self,

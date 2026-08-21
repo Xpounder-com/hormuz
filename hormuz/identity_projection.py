@@ -177,9 +177,24 @@ def sync_identity_projection(
                     tenant = cursor.fetchone()
                     if tenant is None:
                         cursor.execute(
+                            "SELECT 1 FROM gateway_tenant_purge_tombstones WHERE tenant_id = %s",
+                            (organization_id,),
+                        )
+                        if cursor.fetchone() is not None:
+                            raise PostgresStorageError("tenant_reonboard_required")
+                        cursor.execute(
                             "INSERT INTO tenants (tenant_id, display_name) VALUES (%s, %s)",
                             (organization_id, organization_id),
                         )
+                    # Lifecycle state is deliberately created only by the
+                    # owner-controlled desired-state path. A later identity
+                    # synchronization must never reactivate a tenant that an
+                    # owner explicitly deactivated or scheduled for purge.
+                    cursor.execute(
+                        "INSERT INTO gateway_tenant_lifecycle (tenant_id) VALUES (%s) "
+                        "ON CONFLICT (tenant_id) DO NOTHING",
+                        (organization_id,),
+                    )
                     cursor.execute(
                         "SELECT projection_sha256 FROM gateway_identity_projections "
                         "WHERE tenant_id = %s",
@@ -408,7 +423,12 @@ def verify_runtime_identity_projection(
     try:
         for organization_id in configured_organization_ids(config):
             context = TenantContext(organization_id, "identity-verifier", "hormuz-startup", 1)
-            with tenant_transaction(connection, context, runtime_role=runtime_role):
+            with tenant_transaction(
+                connection,
+                context,
+                runtime_role=runtime_role,
+                schema=schema,
+            ):
                 with connection.cursor() as cursor:  # type: ignore[attr-defined]
                     cursor.execute(f"SET LOCAL search_path TO {quoted_schema}, pg_catalog")
                     cursor.execute(

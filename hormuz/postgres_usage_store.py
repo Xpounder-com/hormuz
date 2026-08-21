@@ -120,6 +120,7 @@ class PostgresUsageStore:
                 connection,
                 context,
                 runtime_role=self.runtime_role,
+                schema=self.schema,
             ):
                 with connection.cursor() as cursor:
                     cursor.execute(

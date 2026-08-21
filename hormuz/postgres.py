@@ -17,7 +17,7 @@ import re
 from typing import Any, Callable, Iterator, Protocol
 
 
-POSTGRES_SCHEMA_VERSION = 8
+POSTGRES_SCHEMA_VERSION = 9
 DEFAULT_POSTGRES_DSN_ENV = "HORMUZ_POSTGRES_DSN"
 DEFAULT_POSTGRES_SCHEMA = "hormuz"
 DEFAULT_POSTGRES_RUNTIME_ROLE = "hormuz_runtime"
@@ -66,6 +66,8 @@ TENANT_TABLES = (
     "gateway_secret_events",
     "gateway_dlp_approval_requests",
     "gateway_dlp_approval_events",
+    "gateway_tenant_lifecycle",
+    "gateway_tenant_exports",
 )
 
 RUNTIME_READ_ONLY_TABLES = (
@@ -79,6 +81,7 @@ RUNTIME_READ_ONLY_TABLES = (
     "gateway_identity_projections",
     "gateway_principal_projections",
     "gateway_policy_projections",
+    "gateway_tenant_lifecycle",
 )
 RUNTIME_APPEND_ONLY_TABLES = (
     "gateway_policy_versions",
@@ -86,6 +89,12 @@ RUNTIME_APPEND_ONLY_TABLES = (
 )
 RUNTIME_POINTER_TABLES = (
     "gateway_active_policies",
+)
+RUNTIME_OWNER_ONLY_TABLES = (
+    "gateway_tenant_exports",
+)
+OWNER_ONLY_GLOBAL_TABLES = (
+    "gateway_tenant_purge_tombstones",
 )
 RUNTIME_MUTABLE_TABLES = tuple(
     table
@@ -95,6 +104,7 @@ RUNTIME_MUTABLE_TABLES = tuple(
         *RUNTIME_READ_ONLY_TABLES,
         *RUNTIME_APPEND_ONLY_TABLES,
         *RUNTIME_POINTER_TABLES,
+        *RUNTIME_OWNER_ONLY_TABLES,
     )
 )
 
@@ -208,6 +218,19 @@ POLICY_APPROVAL_TABLE_COLUMNS = {
         "team_id", "team_name", "decision_actor_id", "decision_actor_name",
         "client", "protocol", "requested_model", "routed_model", "actual_model",
         "policy_version", "rules_json", "action",
+    ),
+}
+
+TENANT_LIFECYCLE_TABLE_COLUMNS = {
+    "gateway_tenant_lifecycle": (
+        "tenant_id", "state", "state_version", "deactivated_at",
+        "deactivation_reason_code", "purge_not_before", "required_export_id",
+        "required_export_ciphertext_sha256", "updated_at",
+    ),
+    "gateway_tenant_exports": (
+        "tenant_id", "export_id", "created_at", "export_schema",
+        "encryption_algorithm", "lifecycle_state_version", "payload_sha256",
+        "ciphertext_sha256", "table_counts_json",
     ),
 }
 
@@ -503,6 +526,10 @@ def _grant_runtime_access(cursor: _Cursor, schema: str, runtime_role: str) -> No
     cursor.execute(
         f"REVOKE ALL ON TABLE {quoted_schema}.schema_migrations FROM {quoted_role}"
     )
+    global_owner_only = ", ".join(
+        f"{quoted_schema}.{_quote_identifier(table)}" for table in OWNER_ONLY_GLOBAL_TABLES
+    )
+    cursor.execute(f"REVOKE ALL ON TABLE {global_owner_only} FROM {quoted_role}")
 
 
 def _verify_foundation(cursor: _Cursor, schema: str, runtime_role: str) -> None:
@@ -534,6 +561,7 @@ def _verify_foundation(cursor: _Cursor, schema: str, runtime_role: str) -> None:
         **ACCOUNTING_TABLE_COLUMNS,
         **IDENTITY_SESSION_TABLE_COLUMNS,
         **POLICY_APPROVAL_TABLE_COLUMNS,
+        **TENANT_LIFECYCLE_TABLE_COLUMNS,
     }
     cursor.execute(
         "SELECT table_name, column_name FROM information_schema.columns "
@@ -688,10 +716,39 @@ def _verify_foundation(cursor: _Cursor, schema: str, runtime_role: str) -> None:
             expected_dml = (True, True, False, False)
         elif table in RUNTIME_POINTER_TABLES:
             expected_dml = (True, True, True, False)
+        elif table in RUNTIME_OWNER_ONLY_TABLES:
+            expected_dml = (False, False, False, False)
         else:
             expected_dml = (True, True, True, True)
         if values[:4] != expected_dml or values[4:] != (False, False, False):
             raise PostgresStorageError("runtime_table_privileges_invalid")
+
+    cursor.execute(
+        "SELECT c.relname, "
+        "has_table_privilege(%s, c.oid, 'SELECT'), "
+        "has_table_privilege(%s, c.oid, 'INSERT'), "
+        "has_table_privilege(%s, c.oid, 'UPDATE'), "
+        "has_table_privilege(%s, c.oid, 'DELETE') "
+        "FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
+        "WHERE n.nspname = %s AND c.relname = ANY(%s)",
+        (
+            runtime_role,
+            runtime_role,
+            runtime_role,
+            runtime_role,
+            schema,
+            list(OWNER_ONLY_GLOBAL_TABLES),
+        ),
+    )
+    global_privileges = {
+        str(row[0]): tuple(bool(value) for value in row[1:])
+        for row in cursor.fetchall()
+    }
+    if (
+        set(global_privileges) != set(OWNER_ONLY_GLOBAL_TABLES)
+        or any(values != (False, False, False, False) for values in global_privileges.values())
+    ):
+        raise PostgresStorageError("runtime_owner_only_table_privileges_invalid")
 
     cursor.execute(
         f"SELECT has_table_privilege(%s, '{quoted_schema}.schema_migrations', 'SELECT')",
@@ -808,12 +865,15 @@ def tenant_transaction(
     context: TenantContext,
     *,
     runtime_role: str = DEFAULT_POSTGRES_RUNTIME_ROLE,
+    schema: str = DEFAULT_POSTGRES_SCHEMA,
 ) -> Iterator[_Connection]:
     """Bind a verified tenant only for the lifetime of one database transaction."""
 
     if not isinstance(context, TenantContext):
         raise PostgresStorageError("invalid_tenant_context")
     runtime_role = validate_postgres_identifier(runtime_role, "runtime_role")
+    schema = validate_postgres_identifier(schema, "postgres_schema")
+    quoted_schema = _quote_identifier(schema)
     try:
         with connection.transaction():
             with connection.cursor() as cursor:
@@ -842,6 +902,25 @@ def tenant_transaction(
                     False,
                 ):
                     raise PostgresStorageError("runtime_connection_role_invalid")
+                cursor.execute(f"SET LOCAL search_path TO {quoted_schema}, pg_catalog")
+                cursor.execute(
+                    "SELECT pg_advisory_xact_lock_shared(hashtextextended(%s, 0))",
+                    ("hormuz:tenant-lifecycle:" + schema + ":" + context.tenant_id,),
+                )
+                cursor.fetchone()
+                cursor.execute(
+                    "SELECT state FROM gateway_tenant_lifecycle "
+                    "WHERE tenant_id = %s",
+                    (context.tenant_id,),
+                )
+                lifecycle = cursor.fetchone()
+                if (
+                    not isinstance(lifecycle, (tuple, list))
+                    or len(lifecycle) != 1
+                ):
+                    raise PostgresStorageError("tenant_lifecycle_missing")
+                if lifecycle[0] != "active":
+                    raise PostgresStorageError("tenant_inactive")
             yield connection
     except PostgresStorageError:
         raise
@@ -850,6 +929,7 @@ def tenant_transaction(
             "42501": "tenant_policy_denied",
             "23503": "tenant_foreign_key_denied",
             "23514": "tenant_immutability_denied",
+            "42P01": "tenant_lifecycle_unavailable",
         }.get(getattr(error, "sqlstate", None), "tenant_transaction_failed")
         raise PostgresStorageError(code) from None
 

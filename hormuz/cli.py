@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import hmac
 import json
 import logging
 import os
@@ -90,6 +91,12 @@ from .postgres import (
     postgres_dsn_from_env,
     verify_postgres_from_env,
 )
+from .tenant_lifecycle import (
+    TenantLifecycleError,
+    TenantLifecycleService,
+    export_key_from_env,
+    tenant_lifecycle_service_from_env,
+)
 from .provider_conformance import (
     ProviderConformanceClient,
     ProviderConformanceError,
@@ -167,6 +174,135 @@ def build_parser() -> argparse.ArgumentParser:
                 f"(default: {DEFAULT_POSTGRES_RUNTIME_ROLE})"
             ),
         )
+
+    tenant = storage_subparsers.add_parser(
+        "tenant",
+        help="Owner-only tenant deactivation, encrypted export, and delayed purge",
+    )
+    tenant_subparsers = tenant.add_subparsers(dest="tenant_command", required=True)
+
+    def owner_storage_options(command: argparse.ArgumentParser) -> None:
+        command.add_argument(
+            "--dsn-env",
+            default=DEFAULT_POSTGRES_DSN_ENV,
+            help=(
+                "Environment variable containing the schema-owner PostgreSQL DSN "
+                f"(default: {DEFAULT_POSTGRES_DSN_ENV})"
+            ),
+        )
+        command.add_argument(
+            "--schema",
+            default=DEFAULT_POSTGRES_SCHEMA,
+            help=f"PostgreSQL schema (default: {DEFAULT_POSTGRES_SCHEMA})",
+        )
+
+    tenant_status = tenant_subparsers.add_parser(
+        "status", help="Show the content-free lifecycle state for one tenant"
+    )
+    tenant_status.add_argument("--organization", required=True)
+    owner_storage_options(tenant_status)
+
+    tenant_deactivate = tenant_subparsers.add_parser(
+        "deactivate",
+        help="Immediately block a tenant and revoke its active human sessions",
+    )
+    tenant_deactivate.add_argument("--organization", required=True)
+    tenant_deactivate.add_argument(
+        "--reason-code",
+        required=True,
+        help="Bounded operational reason code, not free-form tenant content",
+    )
+    tenant_deactivate.add_argument(
+        "--confirm-organization",
+        required=True,
+        help="Repeat the exact organization ID to confirm deactivation",
+    )
+    owner_storage_options(tenant_deactivate)
+
+    tenant_reactivate = tenant_subparsers.add_parser(
+        "reactivate",
+        help="Explicitly re-enable a deactivated tenant; prior sessions stay revoked",
+    )
+    tenant_reactivate.add_argument("--organization", required=True)
+    tenant_reactivate.add_argument(
+        "--confirm-organization",
+        required=True,
+        help="Repeat the exact organization ID to confirm reactivation",
+    )
+    owner_storage_options(tenant_reactivate)
+
+    tenant_reonboard = tenant_subparsers.add_parser(
+        "re-onboard",
+        help="Clear a hard-purge tombstone before an explicit identity synchronization",
+    )
+    tenant_reonboard.add_argument("--organization", required=True)
+    tenant_reonboard.add_argument(
+        "--confirm-organization",
+        required=True,
+        help="Repeat the exact organization ID to confirm re-onboarding",
+    )
+    owner_storage_options(tenant_reonboard)
+
+    tenant_export = tenant_subparsers.add_parser(
+        "export",
+        help="Write one new AES-256-GCM encrypted export after tenant deactivation",
+    )
+    tenant_export.add_argument("--organization", required=True)
+    tenant_export.add_argument("--output", required=True, help="New private export-file path")
+    tenant_export.add_argument(
+        "--encryption-key-env",
+        required=True,
+        help="Environment variable containing a base64url 32-byte export key",
+    )
+    owner_storage_options(tenant_export)
+
+    tenant_schedule = tenant_subparsers.add_parser(
+        "schedule-purge",
+        help="Bind a frozen encrypted export to one delayed hard-purge schedule",
+    )
+    tenant_schedule.add_argument("--organization", required=True)
+    tenant_schedule.add_argument("--export-id", required=True)
+    tenant_schedule.add_argument(
+        "--retention-days",
+        required=True,
+        type=int,
+        help="Retention period recorded before hard purge (1-3650 days)",
+    )
+    tenant_schedule.add_argument(
+        "--confirm-organization",
+        required=True,
+        help="Repeat the exact organization ID to confirm scheduling",
+    )
+    owner_storage_options(tenant_schedule)
+
+    tenant_purge = tenant_subparsers.add_parser(
+        "purge",
+        help="Hard-purge only after the recorded retention period and second confirmation",
+    )
+    tenant_purge.add_argument("--organization", required=True)
+    tenant_purge.add_argument("--export-id", required=True)
+    tenant_purge.add_argument(
+        "--confirm-ciphertext-sha256",
+        required=True,
+        help="Exact encrypted-export ciphertext SHA-256 from the retained receipt",
+    )
+    tenant_purge.add_argument(
+        "--confirm-organization",
+        required=True,
+        help="Repeat the exact organization ID to confirm hard purge",
+    )
+    owner_storage_options(tenant_purge)
+
+    tenant_restore_plan = tenant_subparsers.add_parser(
+        "restore-plan",
+        help="Validate an encrypted export and print a non-mutating owner restore plan",
+    )
+    tenant_restore_plan.add_argument("--input", required=True, help="Encrypted export-file path")
+    tenant_restore_plan.add_argument(
+        "--encryption-key-env",
+        required=True,
+        help="Environment variable containing the matching base64url 32-byte export key",
+    )
 
     identities = subparsers.add_parser(
         "identities",
@@ -1291,6 +1427,8 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _storage_command(args: argparse.Namespace) -> int:
+    if args.storage_command == "tenant":
+        return _tenant_lifecycle_command(args)
     try:
         operation = (
             migrate_postgres_from_env
@@ -1307,6 +1445,70 @@ def _storage_command(args: argparse.Namespace) -> int:
         return 2
     print(json.dumps(status.to_dict(), sort_keys=True, separators=(",", ":")))
     return 0
+
+
+def _tenant_lifecycle_command(args: argparse.Namespace) -> int:
+    try:
+        if args.tenant_command == "restore-plan":
+            key = export_key_from_env(args.encryption_key_env)
+            result = TenantLifecycleService.restore_plan(
+                input_path=Path(args.input),
+                encryption_key=key,
+            )
+        else:
+            service = tenant_lifecycle_service_from_env(
+                dsn_env=args.dsn_env,
+                schema=args.schema,
+            )
+            if args.tenant_command == "status":
+                result = service.status(organization_id=args.organization)
+            elif args.tenant_command == "export":
+                result = service.export(
+                    organization_id=args.organization,
+                    encryption_key=export_key_from_env(args.encryption_key_env),
+                    output=Path(args.output),
+                )
+            else:
+                _require_tenant_confirmation(
+                    args.organization,
+                    args.confirm_organization,
+                )
+                if args.tenant_command == "deactivate":
+                    result = service.deactivate(
+                        organization_id=args.organization,
+                        reason_code=args.reason_code,
+                    )
+                elif args.tenant_command == "reactivate":
+                    result = service.reactivate(organization_id=args.organization)
+                elif args.tenant_command == "re-onboard":
+                    result = service.re_onboard(organization_id=args.organization)
+                elif args.tenant_command == "schedule-purge":
+                    result = service.schedule_purge(
+                        organization_id=args.organization,
+                        export_id=args.export_id,
+                        retention_days=args.retention_days,
+                    )
+                elif args.tenant_command == "purge":
+                    result = service.purge(
+                        organization_id=args.organization,
+                        export_id=args.export_id,
+                        confirm_ciphertext_sha256=args.confirm_ciphertext_sha256,
+                    )
+                else:  # pragma: no cover - argparse enforces the subcommand set
+                    raise TenantLifecycleError("tenant_lifecycle_command_invalid")
+    except (TenantLifecycleError, PostgresStorageError) as error:
+        print(f"PostgreSQL storage error: {error.code}", file=sys.stderr)
+        return 2
+    print(json.dumps(result.to_dict(), sort_keys=True, separators=(",", ":")))
+    return 0
+
+
+def _require_tenant_confirmation(organization_id: str, confirmation: str) -> None:
+    if not isinstance(organization_id, str) or not isinstance(confirmation, str) or not hmac.compare_digest(
+        organization_id,
+        confirmation,
+    ):
+        raise TenantLifecycleError("tenant_lifecycle_confirmation_mismatch")
 
 
 def _serve(config: GatewayConfig) -> int:

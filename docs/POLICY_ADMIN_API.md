@@ -112,7 +112,8 @@ immutable history or compare-and-swap contract.
 ## Operator deploy, verify, and rollback runbook
 
 1. Back up PostgreSQL according to the organization's database procedure, then
-   install the candidate package and apply schema version 8 with the owner DSN:
+   install the candidate package and apply the current schema version 9 with
+   the owner DSN:
 
    ```bash
    hormuz --config /etc/hormuz/hormuz.json storage migrate

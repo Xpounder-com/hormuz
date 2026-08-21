@@ -110,7 +110,12 @@ class PostgresSecurityStore:
         try:
             connection = _open_connection(self._dsn, self._connect)  # type: ignore[arg-type]
             context = TenantContext(organization_id, principal_id, client_id, 1)
-            with tenant_transaction(connection, context, runtime_role=self.runtime_role):
+            with tenant_transaction(
+                connection,
+                context,
+                runtime_role=self.runtime_role,
+                schema=self.schema,
+            ):
                 with connection.cursor() as cursor:  # type: ignore[attr-defined]
                     cursor.execute(f"SET LOCAL search_path TO {self._qualified}, pg_catalog")
                 yield connection

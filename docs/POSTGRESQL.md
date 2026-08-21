@@ -1,8 +1,9 @@
 # PostgreSQL tenancy foundation
 
 Hormuz has an accepted shared-schema PostgreSQL tenancy contract and an
-executable schema-version-7 accounting, identity-projection, policy-projection,
-policy-version, human-session, DLP/security, and identity-type usage backend. A deployment can opt into PostgreSQL
+executable schema-version-9 accounting, identity-projection, policy-projection,
+policy-version, human-session, DLP/security, identity-type usage, and
+tenant-lifecycle backend. A deployment can opt into PostgreSQL
 for usage, cost evidence, usage-read audit, atomic budget reservations,
 multi-instance human sessions, one-time DLP approvals, and security evidence.
 The deprecated built-in context experiment is deliberately excluded from the
@@ -22,6 +23,10 @@ usage event to the exact immutable governance policy version evaluated for its
 request. Schema version 7 adds the controlled event-time identity type used to
 distinguish human, service-account, CI, and connector traffic without storing
 request content.
+Schema version 8 permits both immutable v2 and v3 policy projections. Schema
+version 9 adds a fail-closed active-tenant runtime gate, owner-only encrypted
+export receipts, a delayed hard-purge state machine, and an owner-only purge
+tombstone. It does not add document or prompt storage.
 Every tenant-owned table has:
 
 - a non-null tenant key in its primary and foreign-key relationships;
@@ -82,9 +87,12 @@ The PostgreSQL accounting repository enters through
 `tenant_transaction`, which requires a validated tenant, principal, client, and
 authorization version, verifies that the connection is the exact non-owner
 runtime role without `BYPASSRLS`, and binds every field with PostgreSQL
-transaction-local state. Missing context and state left after commit see no
-rows. Repository methods must still include an explicit tenant predicate; RLS
-is defense in depth.
+transaction-local state. It holds a shared transaction-scoped advisory lock and
+requires the tenant lifecycle row to be `active`; an owner deactivation takes
+the matching exclusive lock before changing state. Missing context, a missing
+lifecycle row, inactive state, and state left after commit see no rows.
+Repository methods must still include an explicit tenant predicate; RLS is
+defense in depth.
 
 Run `identities sync` with the owner DSN after every approved identity mapping
 change. It projects configured organizations, people, teams, OIDC subjects,
@@ -112,6 +120,57 @@ existing v2 active pointer. Apply migration 8 before deploying a runtime that
 stages v3 documents, then run `hormuz policies sync` through the schema-owner
 path. The expected startup failure before the required projection sync is
 `policy_projection_stale`.
+
+## Tenant lifecycle (owner-only)
+
+The lifecycle CLI has no gateway configuration dependency and accepts only a
+schema-owner DSN from a named environment variable. Its output is bounded
+metadata; it never prints provider credentials, raw session material, prompts,
+responses, or exported rows.
+
+The safe sequence is deactivate, export the now-frozen tenant, schedule a
+retention period, then hard-purge with a second confirmation bound to the exact
+encrypted-export digest. Deactivation blocks every PostgreSQL-backed gateway
+request and revokes active human sessions in the same owner transaction.
+
+```bash
+# 1. Freeze access and revoke active human sessions.
+hormuz storage tenant deactivate \
+  --organization acme \
+  --reason-code administrative \
+  --confirm-organization acme
+
+# 2. Supply a base64url 32-byte AES-256-GCM key from the deployment secret
+#    manager, then create one new mode-0600 encrypted artifact.
+hormuz storage tenant export \
+  --organization acme \
+  --output /secure-exports/acme.hormuz \
+  --encryption-key-env HORMUZ_TENANT_EXPORT_KEY
+
+# 3. Record the retention duration and bind it to the printed export receipt.
+hormuz storage tenant schedule-purge \
+  --organization acme \
+  --export-id tex_... \
+  --retention-days 30 \
+  --confirm-organization acme
+
+# 4. After the recorded time, require a second confirmation of the artifact.
+hormuz storage tenant purge \
+  --organization acme \
+  --export-id tex_... \
+  --confirm-ciphertext-sha256 <receipt-ciphertext-sha256> \
+  --confirm-organization acme
+```
+
+`hormuz storage tenant restore-plan --input ... --encryption-key-env ...`
+decrypts and integrity-checks an artifact, then prints only a non-mutating,
+content-free restore plan. It intentionally does not automate restoration;
+restore conflict handling, customer KMS/BYOK custody and rotation, database
+backup/PITR, legal hold, and HA/DR remain separate operational gates. A hard
+purge retains only an owner-only tombstone containing the organization ID and
+export receipt, so a future re-onboarding requires the explicit
+`hormuz storage tenant re-onboard ...` step before `identities sync` can create
+the organization again.
 
 The live gateway never receives schema-owner credentials. Identity and policy
 projection tables are read-only, while the previously accepted tenant-scoped
@@ -209,6 +268,9 @@ roles and two synthetic tenants, then proves:
   second retry blocked behind a new pending request;
 - exact actor/provider/model/policy/payload-fingerprint/rule binding, shared
   metadata-only security evidence, and actual-model mismatch audit; and
+- lifecycle-gated runtime access, active-session revocation, private
+  AES-256-GCM export plus content-free restore-plan validation, retention
+  enforcement, hard purge, and owner-only tombstone retention; and
 - rejection of unexpected accounting or security columns during schema
   verification.
 
@@ -225,8 +287,9 @@ observation is
 
 ## Gates that remain open
 
-Schema v7 is a real accounting, human-session, DLP/security, policy-version,
-and identity-type usage persistence slice, not the completed hosted product.
+Schema v9 is a real accounting, human-session, DLP/security, policy-version,
+identity-type usage, and tenant-lifecycle persistence slice, not the completed
+hosted product.
 The repository currently opens a fresh PostgreSQL connection per operation.
 Configuration remains the desired-state identity source and deployment
 provisioning boundary for the shared runtime. The repository also has a
@@ -242,9 +305,9 @@ not consider tenant deletion complete until a separately verified shared
 deprovision/SCIM workflow exists. A keyed routing
 tag lets an opaque credential select one RLS tenant without exposing the raw
 organization ID or querying a global credential index, but production custody
-and rotation of that key remain open. Policy notification/queue UX,
-two-person activation approval,
-representative DLP evaluation, usage/security backfill, export/delete,
-backup/restore, pooling, KMS, HA, operations, and independent security review
+and rotation of that key remain open. Policy notification/queue UX, two-person
+activation approval, representative DLP evaluation, usage/security backfill,
+automated restore and backup/PITR, central retention-policy administration,
+customer KMS/BYOK, pooling, HA, operations, and independent security review
 remain separate gates. Do not describe this checkpoint as the completed
 enterprise storage plane.

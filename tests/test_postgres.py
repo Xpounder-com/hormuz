@@ -495,19 +495,25 @@ class PostgresFoundationTests(unittest.TestCase):
         events: list[object] = []
 
         class Cursor:
+            def __init__(self) -> None:
+                self.fetchone_calls = 0
+
             def execute(self, query: str, params: object | None = None) -> None:
                 events.append((query, params))
 
             def fetchone(self) -> object:
-                return (
-                    "tenant-a",
-                    "principal-a",
-                    "codex",
-                    "7",
-                    "hormuz_runtime",
-                    False,
-                    False,
-                )
+                self.fetchone_calls += 1
+                if self.fetchone_calls == 1:
+                    return (
+                        "tenant-a",
+                        "principal-a",
+                        "codex",
+                        "7",
+                        "hormuz_runtime",
+                        False,
+                        False,
+                    )
+                return ("active",)
 
             def __enter__(self) -> "Cursor":
                 events.append("cursor-enter")
@@ -546,6 +552,21 @@ class PostgresFoundationTests(unittest.TestCase):
             ),
             events,
         )
+        self.assertIn(
+            (
+                "SELECT state FROM gateway_tenant_lifecycle "
+                "WHERE tenant_id = %s",
+                ("tenant-a",),
+            ),
+            events,
+        )
+        self.assertIn(
+            (
+                "SELECT pg_advisory_xact_lock_shared(hashtextextended(%s, 0))",
+                ("hormuz:tenant-lifecycle:hormuz:tenant-a",),
+            ),
+            events,
+        )
         self.assertEqual(events[-1], "transaction-exit")
 
     def test_tenant_transaction_maps_integrity_denials_without_details(self) -> None:
@@ -555,19 +576,25 @@ class PostgresFoundationTests(unittest.TestCase):
                 self.sqlstate = sqlstate
 
         class Cursor:
+            def __init__(self) -> None:
+                self.fetchone_calls = 0
+
             def execute(self, _query: str, _params: object | None = None) -> None:
                 pass
 
             def fetchone(self) -> object:
-                return (
-                    "tenant-a",
-                    "principal-a",
-                    "codex",
-                    "1",
-                    "hormuz_runtime",
-                    False,
-                    False,
-                )
+                self.fetchone_calls += 1
+                if self.fetchone_calls == 1:
+                    return (
+                        "tenant-a",
+                        "principal-a",
+                        "codex",
+                        "1",
+                        "hormuz_runtime",
+                        False,
+                        False,
+                    )
+                return ("active",)
 
             def __enter__(self) -> "Cursor":
                 return self
@@ -802,6 +829,17 @@ class PostgresFoundationTests(unittest.TestCase):
         self.assertTrue(
             value["tamper_detection"]["unexpected_security_column_rejected"]
         )
+        lifecycle = value["tenant_lifecycle"]
+        self.assertTrue(lifecycle["runtime_gate_active_before_deactivation"])
+        self.assertTrue(lifecycle["deactivation_blocks_runtime"])
+        self.assertTrue(lifecycle["active_human_session_revoked"])
+        self.assertTrue(lifecycle["encrypted_export_verified"])
+        self.assertTrue(lifecycle["restore_plan_content_free"])
+        self.assertEqual(lifecycle["private_export_mode"], "0600")
+        self.assertTrue(lifecycle["purge_retention_enforced"])
+        self.assertTrue(lifecycle["hard_purge_verified"])
+        self.assertTrue(lifecycle["owner_only_tombstone_retained"])
+        self.assertTrue(lifecycle["tombstone_blocks_implicit_reonboarding"])
         serialized = json.dumps(value, sort_keys=True)
         for forbidden in (
             "password",
