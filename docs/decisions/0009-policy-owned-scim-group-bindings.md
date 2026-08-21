@@ -61,5 +61,5 @@ what that membership is permitted to do.
 The product owner explicitly approved the stronger policy-owned design,
 including stable external-ID bindings, tenant qualification, policy-admin
 authority, default denial for unbound groups, and pre-approved authorization
-profiles. The issue checkpoint records the implementation evidence and any
-remaining non-production gates.
+profiles. The [issue checkpoint](https://github.com/Xpounder-com/hormuz/issues/7#issuecomment-5370393319)
+records the implementation evidence and remaining non-production gates.
