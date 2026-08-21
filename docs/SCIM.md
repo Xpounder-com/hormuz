@@ -214,6 +214,14 @@ single fallback profile. All selected bindings must produce the same
 profile supplies the effective team, clearance, allowed clients, capabilities,
 and an additional restrictive policy overlay.
 
+For a team transfer, send versioned membership updates. Hormuz deliberately
+fails closed during a separate-event transition: adding the destination group
+before removing the source group produces an ambiguous-profile denial, while
+removing the source first produces an unassigned-subject denial. Access resumes
+only once exactly one authorized profile remains. A late event with an old ETag
+receives `412 scim_version_conflict` rather than rolling the transfer back.
+This is a deterministic safety boundary, not a zero-downtime transfer API.
+
 In configuration, this lives under the policy system, not under
 `authentication.directory`:
 

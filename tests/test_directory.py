@@ -129,6 +129,19 @@ class DirectoryStoreTests(unittest.TestCase):
             value=self._group(str(user.resource["id"])),
         )
         self.assertTrue(group.changed)
+        repeated_group = self.store.create_group(
+            administrator=self.admin,
+            value=self._group(str(user.resource["id"])),
+        )
+        self.assertFalse(repeated_group.changed)
+        self.assertEqual(repeated_group.resource["id"], group.resource["id"])
+        repeated_membership = self.store.replace_group(
+            administrator=self.admin,
+            resource_id=str(group.resource["id"]),
+            value=self._group(str(user.resource["id"])),
+            if_match=str(group.resource["meta"]["version"]),  # type: ignore[index]
+        )
+        self.assertFalse(repeated_membership.changed)
 
         identity = self.store.identity_for_subject(ISSUER, "alice-id")
         self.assertIsNotNone(identity)
@@ -270,12 +283,68 @@ class DirectoryStoreTests(unittest.TestCase):
         )
         self.assertTrue(updated.changed)
         self.assertEqual(updated.resource["displayName"], "Alice Renamed")
+        repeated_update = self.store.replace_user(
+            administrator=self.admin,
+            resource_id=str(current["id"]),
+            value=patched,
+            if_match=str(updated.resource["meta"]["version"]),  # type: ignore[index]
+        )
+        self.assertFalse(repeated_update.changed)
         with self.assertRaisesRegex(DirectoryError, "scim_version_conflict"):
             self.store.replace_user(
                 administrator=self.admin,
                 resource_id=str(current["id"]),
                 value=patched,
                 if_match=str(current["meta"]["version"]),  # type: ignore[index]
+            )
+
+    def test_team_transfer_is_deterministic_and_stale_membership_event_fails_closed(self) -> None:
+        user = self.store.create_user(administrator=self.admin, value=self._user())
+        user_id = str(user.resource["id"])
+        engineering = self.store.create_group(
+            administrator=self.admin,
+            value=self._group(user_id, team_id="engineering"),
+        )
+        marketing_value = self._group(user_id, team_id="marketing")
+        marketing_value["members"] = []
+        marketing = self.store.create_group(
+            administrator=self.admin,
+            value=marketing_value,
+        )
+        self.assertEqual(
+            self.store.identity_for_subject(ISSUER, "alice-id").team_id,  # type: ignore[union-attr]
+            "engineering",
+        )
+
+        added_destination = self.store.replace_group(
+            administrator=self.admin,
+            resource_id=str(marketing.resource["id"]),
+            value=self._group(user_id, team_id="marketing"),
+            if_match=str(marketing.resource["meta"]["version"]),  # type: ignore[index]
+        )
+        self.assertTrue(added_destination.changed)
+        with self.assertRaisesRegex(DirectoryError, "directory_subject_policy_ambiguous"):
+            self.store.identity_for_subject(ISSUER, "alice-id")
+
+        source_removed = self._group(user_id, team_id="engineering")
+        source_removed["members"] = []
+        completed_transfer = self.store.replace_group(
+            administrator=self.admin,
+            resource_id=str(engineering.resource["id"]),
+            value=source_removed,
+            if_match=str(engineering.resource["meta"]["version"]),  # type: ignore[index]
+        )
+        self.assertTrue(completed_transfer.changed)
+        self.assertEqual(
+            self.store.identity_for_subject(ISSUER, "alice-id").team_id,  # type: ignore[union-attr]
+            "marketing",
+        )
+        with self.assertRaisesRegex(DirectoryError, "scim_version_conflict"):
+            self.store.replace_group(
+                administrator=self.admin,
+                resource_id=str(marketing.resource["id"]),
+                value=marketing_value,
+                if_match=str(marketing.resource["meta"]["version"]),  # type: ignore[index]
             )
 
     def test_cross_team_groups_fail_closed_instead_of_guessing_policy_scope(self) -> None:
