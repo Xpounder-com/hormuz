@@ -103,7 +103,13 @@ from .store import (
 from .store_router import gateway_store
 from .usage import ResponseUsageParser, sanitize_provider_request_id
 from .usage_access import UsageReportAccessError, authorize_usage_report
-from .usage_reporting import REPORT_DIMENSIONS, enrich_usage_rows
+from .usage_reporting import (
+    REPORT_DIMENSIONS,
+    budget_for_pacing_scope,
+    build_budget_pacing,
+    enrich_usage_rows,
+    utc_month_bounds,
+)
 
 
 LOGGER = logging.getLogger("hormuz")
@@ -140,6 +146,7 @@ _CONTENT_FREE_HTTP_ROUTES = frozenset(
         "/v1/admin/audit-events",
         "/v1/admin/usage",
         "/v1/admin/usage/coverage",
+        "/v1/admin/usage/pacing",
         "/v1/admin/policy-active",
         "/v1/admin/policy-activations",
         "/v1/admin/policy-rollbacks",
@@ -924,6 +931,9 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         if path == "/v1/admin/audit-events":
             self._list_audit_events(identity, request_url.query)
             return
+        if path == "/v1/admin/usage/pacing":
+            self._get_usage_pacing(identity, request_url.query)
+            return
         if path == "/v1/admin/usage/coverage":
             self._get_usage_coverage(identity, request_url.query)
             return
@@ -1519,6 +1529,113 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 },
                 "coverage": coverage,
             },
+        )
+
+    def _get_usage_pacing(self, identity: Identity, query: str) -> None:
+        """Return an advisory UTC-calendar-month estimate for the permitted scope."""
+
+        if query:
+            self._send_usage_pacing_error()
+            return
+        try:
+            access = authorize_usage_report(
+                identity,
+                group_by="organization",
+                actor_id=None,
+                team_id=None,
+            )
+        except UsageReportAccessError as error:
+            messages = {
+                "usage_viewer_capability_required": "Usage report capability is required",
+                "usage_report_scope_forbidden": "Credential is not authorized for this usage report scope",
+                "usage_report_scope_ambiguous": "Credential has an ambiguous usage report scope",
+            }
+            self._send_error(
+                error.code,
+                messages.get(error.code, "Usage report authorization is invalid"),
+                HTTPStatus.FORBIDDEN,
+            )
+            return
+
+        as_of = datetime.now(timezone.utc)
+        window_start, window_end = utc_month_bounds(as_of)
+        try:
+            rows = self.server.store.report_rows(
+                group_by="organization",
+                organization_id=identity.organization_id,
+                actor_id=access.actor_id,
+                team_id=access.team_id,
+                start=window_start.isoformat(),
+                end=as_of.isoformat(),
+            )
+            if len(rows) > 1:
+                raise ValueError("Usage pacing must have one aggregate row")
+            row = rows[0] if rows else {}
+            pacing = build_budget_pacing(
+                as_of=as_of,
+                estimated_spend_microusd=int(row.get("estimated_cost_microusd", 0)),
+                unpriced_requests=int(row.get("unpriced_requests", 0)),
+                monthly_budget_usd=budget_for_pacing_scope(
+                    self.server.config,
+                    organization_id=identity.organization_id,
+                    actor_id=access.actor_id,
+                    team_id=access.team_id,
+                ),
+            )
+            self.server.store.record_admin_usage_read(
+                administrator=identity,
+                access_scope=access.scope,
+                group_by="organization",
+                actor_filter=access.actor_id,
+                team_filter=access.team_id,
+                window_start=window_start.isoformat(),
+                window_end=as_of.isoformat(),
+                result_count=1,
+            )
+        except (ValueError, sqlite3.Error, SecurityStoreError, PostgresStorageError):
+            self._send_error(
+                "usage_admin_unavailable",
+                "Usage administration is temporarily unavailable",
+                HTTPStatus.SERVICE_UNAVAILABLE,
+            )
+            return
+
+        LOGGER.info(
+            "usage_pacing_read organization=%s decision_actor=%s scope=%s unpriced=%d",
+            identity.organization_id,
+            identity.actor_id,
+            access.scope,
+            int(pacing["unpriced_requests"]),
+        )
+        self._send_json(
+            HTTPStatus.OK,
+            {
+                "schema_version": 1,
+                "organization_id": identity.organization_id,
+                "access": {"scope": access.scope},
+                "filters": {"actor_id": access.actor_id, "team_id": access.team_id},
+                "window": {
+                    "start": window_start.isoformat(),
+                    "as_of": as_of.isoformat(),
+                    "end": window_end.isoformat(),
+                    "timezone": "UTC",
+                },
+                "coverage": {
+                    "scope": "gateway_captured_requests_only",
+                    "legacy_unattributed_rows_excluded": True,
+                    "outside_gateway_traffic_observable": False,
+                    "provider_invoice_reconciled": False,
+                    "partial_projection": pacing["partial_projection"],
+                },
+                "budget_pacing": pacing,
+            },
+        )
+
+    def _send_usage_pacing_error(self) -> None:
+        self._send_error(
+            "invalid_usage_pacing_request",
+            "Usage pacing query is invalid",
+            HTTPStatus.BAD_REQUEST,
         )
 
     def _policy_admin_store(self, identity: Identity) -> PostgresPolicyStore | None:

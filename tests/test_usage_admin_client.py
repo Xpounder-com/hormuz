@@ -171,6 +171,47 @@ def _coverage_response() -> dict[str, object]:
     }
 
 
+def _pacing_response() -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "organization_id": "xpounder",
+        "access": {"scope": "organization"},
+        "filters": {"actor_id": None, "team_id": None},
+        "window": {
+            "start": "2026-08-01T00:00:00+00:00",
+            "as_of": "2026-08-16T12:00:00+00:00",
+            "end": "2026-09-01T00:00:00+00:00",
+            "timezone": "UTC",
+        },
+        "coverage": {
+            "scope": "gateway_captured_requests_only",
+            "legacy_unattributed_rows_excluded": True,
+            "outside_gateway_traffic_observable": False,
+            "provider_invoice_reconciled": False,
+            "partial_projection": False,
+        },
+        "budget_pacing": {
+            "methodology": "calendar_pace_estimate",
+            "advisory_only": True,
+            "policy_enforcement_basis": "actual_usage_plus_active_reservations_only",
+            "elapsed_fraction": 0.5,
+            "early_period": False,
+            "projection_available": True,
+            "month_to_date_estimated_spend_microusd": 15_500_000,
+            "month_to_date_estimated_spend_usd": 15.5,
+            "average_estimated_spend_per_calendar_day_microusd": 1_000_000,
+            "average_estimated_spend_per_calendar_day_usd": 1.0,
+            "projected_month_end_estimated_spend_microusd": 31_000_000,
+            "projected_month_end_estimated_spend_usd": 31.0,
+            "configured_monthly_budget_usd": 30.0,
+            "projected_budget_utilization_percent": 103.333333,
+            "projected_budget_overage_usd": 1.0,
+            "unpriced_requests": 0,
+            "partial_projection": False,
+        },
+    }
+
+
 class UsageAdminClientTests(unittest.TestCase):
     def setUp(self) -> None:
         self.client = UsageAdminClient(
@@ -357,6 +398,30 @@ class UsageAdminClientTests(unittest.TestCase):
         with mock.patch.object(self.client, "_request", return_value=misleading):
             with self.assertRaisesRegex(UsageAdminClientError, "invalid_gateway_response"):
                 self.client.coverage()
+
+    def test_pacing_requires_the_advisory_calendar_month_contract(self) -> None:
+        response = _pacing_response()
+        with mock.patch.object(self.client, "_request", return_value=response) as request:
+            self.assertEqual(self.client.pacing(), response)
+        self.assertEqual(request.call_args.args[0], "/v1/admin/usage/pacing")
+
+        unsafe = _pacing_response()
+        unsafe["budget_pacing"]["prompt"] = "must-not-be-accepted"  # type: ignore[index]
+        with mock.patch.object(self.client, "_request", return_value=unsafe):
+            with self.assertRaisesRegex(UsageAdminClientError, "invalid_gateway_response"):
+                self.client.pacing()
+
+        enforcing = _pacing_response()
+        enforcing["budget_pacing"]["advisory_only"] = False  # type: ignore[index]
+        with mock.patch.object(self.client, "_request", return_value=enforcing):
+            with self.assertRaisesRegex(UsageAdminClientError, "invalid_gateway_response"):
+                self.client.pacing()
+
+        partial_mismatch = _pacing_response()
+        partial_mismatch["budget_pacing"]["unpriced_requests"] = 1  # type: ignore[index]
+        with mock.patch.object(self.client, "_request", return_value=partial_mismatch):
+            with self.assertRaisesRegex(UsageAdminClientError, "invalid_gateway_response"):
+                self.client.pacing()
 
 
 if __name__ == "__main__":

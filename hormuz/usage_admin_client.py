@@ -5,10 +5,15 @@ import math
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timezone
 
 from .session_client import validate_session_gateway
-from .usage_reporting import IDENTITY_TYPES, LATENCY_BUCKETS_MS
+from .usage_reporting import (
+    BUDGET_PACING_METHODOLOGY,
+    IDENTITY_TYPES,
+    LATENCY_BUCKETS_MS,
+    utc_month_bounds,
+)
 
 
 _MAX_RESPONSE_BYTES = 512 * 1024
@@ -184,6 +189,35 @@ class UsageAdminClient:
             raise UsageAdminClientError("invalid_gateway_response")
         return response
 
+    def pacing(self) -> dict[str, object]:
+        """Read an advisory calendar-pace estimate for this credential's scope."""
+
+        response = self._request("/v1/admin/usage/pacing")
+        required = {
+            "schema_version",
+            "organization_id",
+            "access",
+            "filters",
+            "window",
+            "coverage",
+            "budget_pacing",
+        }
+        if set(response) != required or response.get("schema_version") != 1:
+            raise UsageAdminClientError("invalid_gateway_response")
+        if not isinstance(response.get("organization_id"), str) or not response["organization_id"]:
+            raise UsageAdminClientError("invalid_gateway_response")
+        if not _valid_pacing_access(response.get("access"), response.get("filters")):
+            raise UsageAdminClientError("invalid_gateway_response")
+        if not _valid_pacing_window(response.get("window")):
+            raise UsageAdminClientError("invalid_gateway_response")
+        pacing = response.get("budget_pacing")
+        if not _valid_budget_pacing(pacing) or not _valid_pacing_coverage(
+            response.get("coverage"),
+            partial_projection=bool(pacing["partial_projection"]),
+        ):
+            raise UsageAdminClientError("invalid_gateway_response")
+        return response
+
     def _request(self, path: str) -> dict[str, object]:
         request = urllib.request.Request(
             self.gateway + path,
@@ -279,6 +313,182 @@ def _valid_coverage_access(value: object) -> bool:
         isinstance(value, dict)
         and set(value) == {"scope"}
         and value.get("scope") in {"self", "team", "finance", "organization"}
+    )
+
+
+def _valid_pacing_access(access: object, filters: object) -> bool:
+    if not isinstance(access, dict) or set(access) != {"scope"}:
+        return False
+    if not isinstance(filters, dict) or set(filters) != {"actor_id", "team_id"}:
+        return False
+    scope = access.get("scope")
+    actor_id = filters.get("actor_id")
+    team_id = filters.get("team_id")
+    for value in (actor_id, team_id):
+        if value is not None:
+            try:
+                _bounded_value(value, max_bytes=256)
+            except UsageAdminClientError:
+                return False
+    if scope in {"organization", "finance"}:
+        return actor_id is None and team_id is None
+    if scope == "self":
+        return isinstance(actor_id, str) and team_id is None
+    if scope == "team":
+        return actor_id is None and isinstance(team_id, str)
+    return False
+
+
+def _valid_pacing_window(value: object) -> bool:
+    if not isinstance(value, dict) or set(value) != {"start", "as_of", "end", "timezone"}:
+        return False
+    if value.get("timezone") != "UTC" or not all(
+        isinstance(value.get(key), str) for key in ("start", "as_of", "end")
+    ):
+        return False
+    try:
+        start = datetime.fromisoformat(value["start"])
+        as_of = datetime.fromisoformat(value["as_of"])
+        end = datetime.fromisoformat(value["end"])
+        expected_start, expected_end = utc_month_bounds(as_of)
+    except (TypeError, ValueError, OverflowError):
+        return False
+    return (
+        start.tzinfo is not None
+        and start.utcoffset() is not None
+        and as_of.tzinfo is not None
+        and as_of.utcoffset() is not None
+        and end.tzinfo is not None
+        and end.utcoffset() is not None
+        and start.utcoffset() == timezone.utc.utcoffset(None)
+        and as_of.utcoffset() == timezone.utc.utcoffset(None)
+        and end.utcoffset() == timezone.utc.utcoffset(None)
+        and start == expected_start
+        and end == expected_end
+        and start <= as_of <= end
+    )
+
+
+def _valid_pacing_coverage(value: object, *, partial_projection: bool) -> bool:
+    expected = {
+        "scope": "gateway_captured_requests_only",
+        "legacy_unattributed_rows_excluded": True,
+        "outside_gateway_traffic_observable": False,
+        "provider_invoice_reconciled": False,
+        "partial_projection": partial_projection,
+    }
+    return value == expected
+
+
+def _valid_budget_pacing(value: object) -> bool:
+    if not isinstance(value, dict):
+        return False
+    required = {
+        "methodology",
+        "advisory_only",
+        "policy_enforcement_basis",
+        "elapsed_fraction",
+        "early_period",
+        "projection_available",
+        "month_to_date_estimated_spend_microusd",
+        "month_to_date_estimated_spend_usd",
+        "average_estimated_spend_per_calendar_day_microusd",
+        "average_estimated_spend_per_calendar_day_usd",
+        "projected_month_end_estimated_spend_microusd",
+        "projected_month_end_estimated_spend_usd",
+        "configured_monthly_budget_usd",
+        "projected_budget_utilization_percent",
+        "projected_budget_overage_usd",
+        "unpriced_requests",
+        "partial_projection",
+    }
+    if set(value) != required or (
+        value.get("methodology") != BUDGET_PACING_METHODOLOGY
+        or value.get("advisory_only") is not True
+        or value.get("policy_enforcement_basis")
+        != "actual_usage_plus_active_reservations_only"
+        or not isinstance(value.get("early_period"), bool)
+        or not isinstance(value.get("projection_available"), bool)
+        or not isinstance(value.get("partial_projection"), bool)
+    ):
+        return False
+    if not _valid_nonnegative_int(value.get("month_to_date_estimated_spend_microusd")):
+        return False
+    if not _valid_nonnegative_int(value.get("unpriced_requests")):
+        return False
+    if value["partial_projection"] != (value["unpriced_requests"] > 0):
+        return False
+    elapsed_fraction = value.get("elapsed_fraction")
+    if not _valid_nonnegative_number(elapsed_fraction) or float(elapsed_fraction) > 1:
+        return False
+    month_to_date_usd = value.get("month_to_date_estimated_spend_usd")
+    if not _valid_nonnegative_number(month_to_date_usd) or not math.isclose(
+        float(month_to_date_usd),
+        int(value["month_to_date_estimated_spend_microusd"]) / 1_000_000,
+        rel_tol=0,
+        abs_tol=1e-9,
+    ):
+        return False
+    budget_usd = value.get("configured_monthly_budget_usd")
+    if budget_usd is not None and not _valid_nonnegative_number(budget_usd):
+        return False
+
+    projection_available = value["projection_available"]
+    projected_microusd = value.get("projected_month_end_estimated_spend_microusd")
+    projected_usd = value.get("projected_month_end_estimated_spend_usd")
+    average_microusd = value.get("average_estimated_spend_per_calendar_day_microusd")
+    average_usd = value.get("average_estimated_spend_per_calendar_day_usd")
+    if not projection_available:
+        return (
+            float(elapsed_fraction) == 0
+            and all(
+                item is None
+                for item in (
+                    projected_microusd,
+                    projected_usd,
+                    average_microusd,
+                    average_usd,
+                    value.get("projected_budget_utilization_percent"),
+                    value.get("projected_budget_overage_usd"),
+                )
+            )
+        )
+    if not all(
+        (
+            _valid_nonnegative_int(average_microusd),
+            _valid_nonnegative_number(average_usd),
+            _valid_nonnegative_int(projected_microusd),
+            _valid_nonnegative_number(projected_usd),
+        )
+    ):
+        return False
+    if (
+        int(projected_microusd) < int(value["month_to_date_estimated_spend_microusd"])
+        or not math.isclose(
+            float(average_usd), int(average_microusd) / 1_000_000, rel_tol=0, abs_tol=1e-9
+        )
+        or not math.isclose(
+            float(projected_usd), int(projected_microusd) / 1_000_000, rel_tol=0, abs_tol=1e-9
+        )
+    ):
+        return False
+    if budget_usd is None:
+        return (
+            value.get("projected_budget_utilization_percent") is None
+            and value.get("projected_budget_overage_usd") is None
+        )
+    if not _valid_nonnegative_number(value.get("projected_budget_overage_usd")):
+        return False
+    utilization = value.get("projected_budget_utilization_percent")
+    return utilization is None or _valid_nonnegative_number(utilization)
+
+
+def _valid_nonnegative_number(value: object) -> bool:
+    return (
+        not isinstance(value, bool)
+        and isinstance(value, (int, float))
+        and math.isfinite(value)
+        and value >= 0
     )
 
 

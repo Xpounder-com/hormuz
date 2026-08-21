@@ -1221,6 +1221,147 @@ class SessionBrokerIntegrationTests(unittest.TestCase):
             {"employee", "security-admin"},
         )
 
+    def test_usage_budget_pacing_is_advisory_and_preserves_reporting_scopes(self) -> None:
+        self.gateway.config = replace(
+            self.gateway.config,
+            organization_policy=replace(
+                self.gateway.config.organization_policy,
+                monthly_budget_usd=0.002,
+            ),
+        )
+        employee = self.config.identities_by_actor["employee"]
+        administrator = self.config.identities_by_actor["security-admin"]
+        for identity, cost, basis in (
+            (employee, 1_000, "estimated"),
+            (employee, 0, "not_available"),
+            (administrator, 2_000, "estimated"),
+        ):
+            self.gateway.store.record(
+                identity=identity,
+                client="codex",
+                protocol="openai",
+                requested_model="gpt-test",
+                resolved_alias="gpt-test",
+                upstream_model="gpt-test",
+                policy_action="allowed",
+                status="succeeded",
+                input_tokens=10,
+                output_tokens=2,
+                billable_tokens=12,
+                cost_microusd=cost,
+                cost_basis=basis,
+            )
+
+        with mock.patch.object(self.gateway.store, "reserve_budget") as reserve_budget:
+            status, organization = self._admin_request(
+                "GET",
+                "/v1/admin/usage/pacing",
+                token="admin-token-" + "a" * 32,
+            )
+        self.assertEqual(status, 200)
+        reserve_budget.assert_not_called()
+        self.assertEqual(organization["schema_version"], 1)
+        self.assertEqual(organization["access"], {"scope": "organization"})
+        self.assertEqual(organization["filters"], {"actor_id": None, "team_id": None})
+        self.assertEqual(
+            organization["coverage"],
+            {
+                "scope": "gateway_captured_requests_only",
+                "legacy_unattributed_rows_excluded": True,
+                "outside_gateway_traffic_observable": False,
+                "provider_invoice_reconciled": False,
+                "partial_projection": True,
+            },
+        )
+        pacing = organization["budget_pacing"]
+        self.assertEqual(pacing["methodology"], "calendar_pace_estimate")
+        self.assertTrue(pacing["advisory_only"])
+        self.assertEqual(
+            pacing["policy_enforcement_basis"],
+            "actual_usage_plus_active_reservations_only",
+        )
+        self.assertEqual(pacing["month_to_date_estimated_spend_microusd"], 3_000)
+        self.assertEqual(pacing["unpriced_requests"], 1)
+        self.assertTrue(pacing["partial_projection"])
+        self.assertEqual(pacing["configured_monthly_budget_usd"], 0.002)
+        self.assertIsNotNone(pacing["projected_budget_utilization_percent"])
+        self.assertIsNotNone(pacing["projected_budget_overage_usd"])
+        self.assertEqual(organization["window"]["timezone"], "UTC")
+        self.assertNotIn("Employee", repr(organization))
+
+        status, self_pacing = self._admin_request(
+            "GET",
+            "/v1/admin/usage/pacing",
+            token="employee-token-" + "e" * 32,
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(self_pacing["access"], {"scope": "self"})
+        self.assertEqual(
+            self_pacing["filters"],
+            {"actor_id": "employee", "team_id": None},
+        )
+        self.assertEqual(
+            self_pacing["budget_pacing"]["month_to_date_estimated_spend_microusd"],
+            1_000,
+        )
+        self.assertNotIn("Security Admin", repr(self_pacing))
+
+        status, team_pacing = self._admin_request(
+            "GET",
+            "/v1/admin/usage/pacing",
+            token="manager-token-" + "m" * 32,
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(team_pacing["access"], {"scope": "team"})
+        self.assertEqual(
+            team_pacing["filters"],
+            {"actor_id": None, "team_id": "engineering"},
+        )
+        self.assertEqual(
+            team_pacing["budget_pacing"]["month_to_date_estimated_spend_microusd"],
+            1_000,
+        )
+
+        status, finance_pacing = self._admin_request(
+            "GET",
+            "/v1/admin/usage/pacing",
+            token="finance-token-" + "f" * 32,
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(finance_pacing["access"], {"scope": "finance"})
+        self.assertEqual(
+            finance_pacing["budget_pacing"]["month_to_date_estimated_spend_microusd"],
+            3_000,
+        )
+
+        status, forbidden = self._admin_request(
+            "GET",
+            "/v1/admin/usage/pacing",
+            token="policy-admin-token-" + "p" * 32,
+        )
+        self.assertEqual(status, 403)
+        self.assertEqual(forbidden["error"]["code"], "usage_viewer_capability_required")
+
+        status, invalid = self._admin_request(
+            "GET",
+            "/v1/admin/usage/pacing?actor_id=employee",
+            token="admin-token-" + "a" * 32,
+        )
+        self.assertEqual(status, 400)
+        self.assertEqual(invalid["error"]["code"], "invalid_usage_pacing_request")
+
+        audit = self.gateway.store.audit_events(
+            since="2000-01-01T00:00:00+00:00",
+            kind="security",
+        )
+        reads = [
+            event
+            for event in audit
+            if event["event_type"] == "security.admin.usage_read"
+        ]
+        self.assertEqual(len(reads), 4)
+        self.assertTrue(all(event["action"] == "usage.report.read" for event in reads))
+
     def test_audit_admin_is_tenant_scoped_paginated_and_self_audited(self) -> None:
         employee = self.config.identities_by_actor["employee"]
         administrator = self.config.identities_by_actor["security-admin"]
@@ -1643,6 +1784,53 @@ class SessionBrokerIntegrationTests(unittest.TestCase):
         self.assertEqual(coverage["access"], {"scope": "organization"})
         self.assertEqual(coverage["coverage"]["accounted_gateway_requests"], 1)
         self.assertFalse(coverage["coverage"]["organization_total"])
+
+    def test_usage_pacing_cli_uses_the_authenticated_gateway_contract(self) -> None:
+        identity = self.config.identities_by_actor["employee"]
+        self.gateway.store.record(
+            identity=identity,
+            client="codex",
+            protocol="openai",
+            requested_model="gpt-test",
+            resolved_alias="gpt-test",
+            upstream_model="gpt-test",
+            policy_action="allowed",
+            status="succeeded",
+            input_tokens=20,
+            output_tokens=4,
+            billable_tokens=24,
+            cost_microusd=1_500,
+            cost_basis="estimated",
+        )
+        output = io.StringIO()
+        with mock.patch.dict(
+            os.environ,
+            {"HORMUZ_ADMIN_TOKEN": "admin-token-" + "a" * 32},
+        ), redirect_stdout(output):
+            result = cli_main(
+                [
+                    "usage",
+                    "pacing",
+                    "--gateway",
+                    self.gateway_url,
+                    "--credential-env",
+                    "HORMUZ_ADMIN_TOKEN",
+                    "--allow-insecure-http",
+                ]
+            )
+        self.assertEqual(result, 0)
+        pacing = json.loads(output.getvalue())
+        self.assertEqual(pacing["schema_version"], 1)
+        self.assertEqual(pacing["access"], {"scope": "organization"})
+        self.assertEqual(
+            pacing["budget_pacing"]["month_to_date_estimated_spend_microusd"],
+            1_500,
+        )
+        self.assertEqual(
+            pacing["budget_pacing"]["methodology"],
+            "calendar_pace_estimate",
+        )
+        self.assertTrue(pacing["budget_pacing"]["advisory_only"])
 
     def test_usage_admin_cli_accepts_a_constrained_gateway_contract(self) -> None:
         identity = self.config.identities_by_actor["employee"]

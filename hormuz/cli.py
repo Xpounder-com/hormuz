@@ -477,6 +477,25 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Allow loopback HTTP for local development only",
     )
+    usage_pacing = usage_subparsers.add_parser(
+        "pacing",
+        help="Read an advisory UTC-calendar-month budget pace for the permitted scope",
+    )
+    usage_pacing.add_argument("--gateway", required=True, help="Hormuz gateway base URL")
+    usage_pacing_credential = usage_pacing.add_mutually_exclusive_group()
+    usage_pacing_credential.add_argument(
+        "--credential-env",
+        help="Usage viewer credential environment variable (default: HORMUZ_TOKEN)",
+    )
+    usage_pacing_credential.add_argument(
+        "--profile",
+        help="Saved human-session profile instead of an environment credential",
+    )
+    usage_pacing.add_argument(
+        "--allow-insecure-http",
+        action="store_true",
+        help="Allow loopback HTTP for local development only",
+    )
 
     audit_admin = subparsers.add_parser(
         "audit",
@@ -2594,6 +2613,8 @@ def _usage_admin_command(args: argparse.Namespace) -> int:
             )
         elif args.usage_command == "coverage":
             result = client.coverage()
+        elif args.usage_command == "pacing":
+            result = client.pacing()
         else:
             return 2
     except (

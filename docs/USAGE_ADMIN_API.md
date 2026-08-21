@@ -97,6 +97,52 @@ response fixes `organization_total` and `outside_gateway_traffic_observable` to
 coverage. Provider invoice reconciliation remains a separate aggregate billing
 workflow and is never presented as a per-request or per-person final cost.
 
+## Budget pacing
+
+Use budget pacing for a deterministic, advisory view of whether the permitted
+scope is on pace to consume its configured monthly budget:
+
+```bash
+hormuz usage pacing \
+  --gateway https://hormuz.example.com \
+  --profile ai-operations
+```
+
+`GET /v1/admin/usage/pacing` has no query fields and returns schema version 1.
+It applies the exact same self, team, finance, or organization reporting scope
+as the other usage views, and includes the effective server-applied filters.
+An organization or finance viewer sees the organization budget when configured;
+a team viewer sees its current team's budget; a self viewer sees the effective
+per-person budget when one is configured. A missing applicable cap is returned
+as `null`, not inferred from another reporting scope.
+
+The feature is named **budget pacing**. Its methodology is a
+`calendar_pace_estimate`:
+
+```text
+elapsed_fraction = elapsed UTC-month seconds / total UTC-month seconds
+projected_month_end_estimated_spend = recorded month-to-date estimated spend
+                                        / elapsed_fraction
+```
+
+It uses calendar days, never working days. The response includes month-to-date
+estimated spend, average estimated spend per elapsed calendar-day equivalent,
+projected month-end estimated spend, configured budget, projected utilization,
+projected overage, unpriced-request count, and `early_period=true` from UTC
+calendar days 1 through 7. At the exact UTC-month boundary, where the formula
+has no elapsed time, `projection_available=false` and the projection fields are
+`null` rather than invented.
+
+`partial_projection=true` whenever one or more included requests has no
+request-time price. That does not turn the missing request into zero cost.
+`coverage.scope` is fixed to `gateway_captured_requests_only`; the result is
+not invoice-reconciled spend, financial guidance, a complete organization-wide
+AI-usage total, or employee productivity information.
+
+Budget pacing is advisory only. A projected overage never denies a request.
+Hormuz enforcement continues to use actual recorded usage plus active
+reservations under the active policy.
+
 ## HTTP contract
 
 `GET /v1/admin/usage` accepts these single-valued query fields:
@@ -218,13 +264,18 @@ is one bounded aggregate for the current request. A storage or mandatory
 audit-write failure returns the same content-free `503 usage_admin_unavailable`
 without a coverage object.
 
+`GET /v1/admin/usage/pacing` likewise rejects every query field with
+`400 invalid_usage_pacing_request`. Its current-month response does not
+paginate. A storage or mandatory audit-write failure returns
+`503 usage_admin_unavailable` without a budget-pacing object.
+
 ## Audit and interpretation
 
-Every successful report page and coverage read writes `security.admin.usage_read`
-before its result is returned. The event records the organization, viewing
-actor, grouping, frozen window, row count, and SHA-256 digests of the effective
-actor/team filters. It contains no request content. The event appears in local
-`audit-export --kind security` output.
+Every successful report page, coverage read, and budget-pacing read writes
+`security.admin.usage_read` before its result is returned. The event records
+the organization, viewing actor, grouping, frozen window, row count, and
+SHA-256 digests of the effective actor/team filters. It contains no request
+content. The event appears in local `audit-export --kind security` output.
 
 The report covers only generation attempts recorded through this Hormuz gateway. Legacy rows without an organization are excluded rather than guessed, and request-time costs remain estimates until separately reconciled. Tokens and spend measure consumption, not employee productivity or work quality. Treat person-level output as access-controlled employee metadata and never as a performance ranking.
 

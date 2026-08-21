@@ -81,6 +81,31 @@ coverage, or an organization-wide AI total. Provider invoice reconciliation is
 separate; see [USAGE_ADMIN_API.md](USAGE_ADMIN_API.md) and
 [BILLING_RECONCILIATION.md](BILLING_RECONCILIATION.md).
 
+For an advisory current-month budget pace in the credential's existing reporting
+scope, run:
+
+```bash
+hormuz usage pacing \
+  --gateway https://hormuz.example.com \
+  --profile ai-operations
+```
+
+This is **budget pacing**, not a predictive forecast engine. Its
+`calendar_pace_estimate` divides Hormuz-recorded month-to-date estimated spend
+by the elapsed fraction of the UTC calendar month. It reports the current
+estimated spend, estimated per-calendar-day pace, projected month-end estimated
+spend, applicable configured budget, projected utilization/overage, unpriced
+requests, and whether the first seven UTC calendar days make the projection
+early. It uses calendar days rather than working days.
+
+The output is advisory and content-free. A projection with any unpriced request
+is marked `partial_projection=true`; it is not invoice-reconciled spend,
+financial guidance, organization-wide usage proof, or employee performance
+data. A projected overage never changes enforcement: only actual usage plus
+active budget reservations under the active policy can deny a request. See
+[USAGE_ADMIN_API.md](USAGE_ADMIN_API.md) for the exact authenticated contract
+and scope rules.
+
 ## Field semantics
 
 - `requests`, `succeeded`, `failed`, and `denied` describe gateway outcomes.
