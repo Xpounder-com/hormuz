@@ -5,12 +5,18 @@ from datetime import datetime, timezone
 import json
 import tempfile
 import unittest
+import urllib.parse
 from unittest import mock
 from pathlib import Path
 
 from hormuz.config import ConfigError, GatewayConfig
 from hormuz.auth import Authenticator
-from hormuz.session import SessionBroker, SessionBrokerError, _build_authorization_url
+from hormuz.session import (
+    SessionBroker,
+    SessionBrokerError,
+    _build_authorization_url,
+    _exchange_code,
+)
 from hormuz.session_store import Enrollment
 
 
@@ -80,6 +86,78 @@ class SessionConfigurationTests(unittest.TestCase):
         representation = repr(config)
         self.assertNotIn(self.environ["OIDC_CLIENT_SECRET"], representation)
         self.assertNotIn(self.environ["SESSION_MASTER_KEY"], representation)
+
+    def test_entra_reference_uses_the_generic_tenant_scoped_contract(self) -> None:
+        issuer = self.raw["authentication"]["oidc"]["issuers"][0]
+        issuer["issuer"] = (
+            "https://login.microsoftonline.com/"
+            "11111111-2222-3333-4444-555555555555/v2.0"
+        )
+        issuer["audiences"] = ["api://hormuz-workload"]
+        issuer["algorithms"] = ["RS256"]
+        issuer["login"]["token_endpoint_auth_method"] = "client_secret_post"
+        issuer["subjects"][0]["subject"] = "entra-pairwise-test-subject"
+
+        config = self._load()
+        reference = config.oidc_issuers[
+            "https://login.microsoftonline.com/11111111-2222-3333-4444-555555555555/v2.0"
+        ]
+        self.assertEqual(reference.algorithms, ("RS256",))
+        self.assertEqual(reference.audiences, ("api://hormuz-workload",))
+        self.assertEqual(
+            reference.login.token_endpoint_auth_method,  # type: ignore[union-attr]
+            "client_secret_post",
+        )
+        self.assertIn(
+            (reference.issuer, "entra-pairwise-test-subject"),
+            config.identities_by_subject,
+        )
+
+    def test_client_secret_post_exchange_uses_no_basic_authorization_header(self) -> None:
+        captured: dict[str, object] = {}
+
+        class Response:
+            def geturl(self) -> str:
+                return "https://identity.example/token"
+
+            def read(self, _maximum: int) -> bytes:
+                return b'{"id_token":"provider-id-token-not-retained"}'
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args: object) -> bool:
+                return False
+
+        class Opener:
+            def open(self, request, *, timeout: int):
+                captured["request"] = request
+                captured["timeout"] = timeout
+                return Response()
+
+        with mock.patch(
+            "hormuz.session.urllib.request.build_opener",
+            return_value=Opener(),
+        ):
+            response = _exchange_code(
+                "https://identity.example/token",
+                allow_insecure_http=False,
+                client_id="hormuz-login-client",
+                client_secret="post-secret-must-not-leak",
+                auth_method="client_secret_post",
+                redirect_uri="https://hormuz.example/v1/auth/callback",
+                code="authorization-code",
+                pkce_verifier="pkce-verifier",
+            )
+
+        request = captured["request"]
+        fields = urllib.parse.parse_qs(request.data.decode("ascii"), strict_parsing=True)
+        self.assertEqual(fields["client_id"], ["hormuz-login-client"])
+        self.assertEqual(fields["client_secret"], ["post-secret-must-not-leak"])
+        self.assertEqual(fields["code_verifier"], ["pkce-verifier"])
+        self.assertIsNone(request.get_header("Authorization"))
+        self.assertEqual(response, {"id_token": "provider-id-token-not-retained"})
+        self.assertNotIn("post-secret-must-not-leak", repr(response))
 
     def test_postgresql_usage_defaults_sessions_to_shared_postgresql(self) -> None:
         self.raw["usage_storage"] = {

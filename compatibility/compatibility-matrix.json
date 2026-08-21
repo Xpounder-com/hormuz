@@ -243,20 +243,23 @@
         ]
       },
       {
-        "id": "identity.real-idp-profile",
-        "name": "Vendor-specific production identity-provider profile",
-        "version": "none",
+        "id": "identity.entra-reference",
+        "name": "Microsoft Entra ID generic OIDC reference profile",
+        "version": "planned tenant-scoped v2.0 authority",
         "support_level": "unsupported",
         "production_supported": false,
         "tested_environments": [],
         "interfaces": [
-          "owner-selected enterprise IdP"
+          "Microsoft Entra ID tenant-scoped OIDC discovery",
+          "OAuth 2.0 authorization code with PKCE"
         ],
         "evidence": [
+          "docs/ENTRA_REFERENCE.md#Certification evidence required",
           "docs/OIDC.md#Current boundary"
         ],
         "limitations": [
-          "No Okta, Microsoft Entra ID, Auth0, Google Workspace, or other real IdP is currently certified."
+          "No non-production Entra application or mapped employee has completed the reference evidence run.",
+          "Hormuz remains a generic OIDC relying party; no real IdP is currently certified."
         ]
       }
     ],
@@ -286,7 +289,7 @@
       {
         "id": "persistence.postgresql",
         "name": "PostgreSQL accounting, identity, policy, session, approval, and tenancy foundation",
-        "version": "PostgreSQL 16.14 / Hormuz schema 6",
+        "version": "PostgreSQL 16.14 / Hormuz schema 13",
         "support_level": "development_only",
         "production_supported": false,
         "tested_environments": [

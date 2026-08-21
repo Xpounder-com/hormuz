@@ -400,9 +400,9 @@ def _validate_identity_and_persistence(entries: list[dict[str, Any]]) -> None:
         entry["id"]: entry for entry in entries if entry["category"] == "identity"
     }
     if (
-        set(identity) != {"identity.generic-oidc", "identity.real-idp-profile"}
+        set(identity) != {"identity.generic-oidc", "identity.entra-reference"}
         or identity["identity.generic-oidc"]["support_level"] != "protocol_tested"
-        or identity["identity.real-idp-profile"]["support_level"] != "unsupported"
+        or identity["identity.entra-reference"]["support_level"] != "unsupported"
     ):
         raise CompatibilityContractError("compatibility identity boundary is invalid")
     persistence = {
@@ -416,7 +416,7 @@ def _validate_identity_and_persistence(entries: list[dict[str, Any]]) -> None:
         or persistence["persistence.postgresql"]["support_level"]
         != "development_only"
         or persistence["persistence.postgresql"]["version"]
-        != "PostgreSQL 16.14 / Hormuz schema 6"
+        != "PostgreSQL 16.14 / Hormuz schema 13"
     ):
         raise CompatibilityContractError("compatibility persistence boundary is invalid")
 

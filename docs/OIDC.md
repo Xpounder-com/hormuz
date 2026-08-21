@@ -8,6 +8,13 @@ registered redirect URI, client ID, and secret through its own deployment
 configuration; live validation against one selected IdP is a conformance check,
 not a product dependency.
 
+Microsoft Entra ID is the first planned reference profile, not a separate
+Hormuz integration or an identity-provider feature. The
+[Entra reference profile](ENTRA_REFERENCE.md) records the exact generic
+configuration and evidence required before it can be called certified. If an
+organization already operates another conformant IdP, validate this same
+contract there instead of creating an unnecessary Entra tenant.
+
 An OIDC ID token is accepted only inside Hormuz's server-side authorization-code callback and is never accepted as a gateway bearer credential. Provider access and refresh tokens are not retained.
 
 ## Human browser login and session broker
@@ -234,6 +241,11 @@ hormuz --config /etc/hormuz/hormuz.json doctor
 ## Current boundary
 
 [Accepted ADR 0001](decisions/0001-oidc-login-and-session-architecture.md) governs the implemented login architecture. The repository includes protocol, persistence, HTTP, and CLI integration tests against a standards-shaped fake IdP. It has not yet been validated against the owner-selected real identity provider.
+
+The Entra reference profile is documentation and configuration-contract
+coverage only until a non-production Entra application, registered callback,
+and mapped test employee complete the live evidence run. It does not change the
+generic product contract or certify any Entra tenant today.
 
 An opt-in local macOS test now proves that exact installed Codex and Claude Code
 clients can use client-bound Hormuz sessions from the real Keychain for both

@@ -44,6 +44,21 @@ class CompatibilityContractTests(unittest.TestCase):
         self.assertEqual(evidence["production_deployment_profiles_verified"], 0)
         self.assertGreater(evidence["unsupported_or_pending_count"], 0)
 
+    def test_entra_reference_is_named_but_not_certified(self) -> None:
+        identity = {
+            entry["id"]: entry
+            for entry in self._matrix()["categories"]["identity"]
+        }
+
+        reference = identity["identity.entra-reference"]
+        self.assertEqual(reference["support_level"], "unsupported")
+        self.assertFalse(reference["production_supported"])
+        self.assertEqual(reference["tested_environments"], [])
+        self.assertIn(
+            "docs/ENTRA_REFERENCE.md#Certification evidence required",
+            reference["evidence"],
+        )
+
     def test_duplicate_members_and_unknown_fields_fail_closed(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "compatibility-matrix.json"

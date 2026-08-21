@@ -107,6 +107,21 @@ This is easy to implement but weakens attribution, offboarding, and replay conta
 - Employees keep using Codex and Claude Code; their existing auth-helper hooks receive short-lived Hormuz credentials.
 - A real IdP integration is still required before the milestone closes. A fake IdP alone is insufficient evidence.
 
+### Reference-profile direction
+
+The product contract remains generic OIDC. Hormuz is a confidential OIDC
+relying party and session broker; it does not become an identity provider and
+does not receive an Entra-specific runtime adapter. Microsoft Entra ID is the
+first planned certified reference profile because it can exercise the ordinary
+tenant-scoped discovery, authorization-code, PKCE, confidential-client, and
+ID-token contract. If a deploying organization already operates another
+standards-conformant IdP, it may be the first live validation target instead.
+
+The reference profile does not claim certification until a non-production
+tenant, registered callback, mapped employee, browser flow, and evidence run
+are completed. It is a conformance target, not a product dependency. See
+[the Entra reference profile](../ENTRA_REFERENCE.md).
+
 ## Verification required
 
 Acceptance of this ADR does not prove the implementation. Issue #13 closes only with:
