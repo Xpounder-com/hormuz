@@ -19,6 +19,7 @@ from hormuz.config import (
     PolicyTeamBinding,
     ResolvedSCIMGroupAuthorization,
     SCIMGroupAuthorizationError,
+    SessionBrokerConfig,
     UpstreamConfig,
 )
 from hormuz.directory import (
@@ -376,6 +377,14 @@ class DirectoryHTTPTests(unittest.TestCase):
             },
             organization_policy=Policy(allowed_models=("gpt-test",)),
             source_sha256="a" * 64,
+            session_broker=SessionBrokerConfig(
+                enabled=True,
+                backend="sqlite",
+                database_path=root / "sessions.sqlite3",
+                public_base_url="http://127.0.0.1:1",
+                master_key=b"m" * 32,
+                master_key_source="directory-http-test-session-master-key",
+            ),
             directory=DirectoryConfig(enabled=True, database_path=root / "directory.sqlite3"),
             oidc_issuers={ISSUER: OIDCIssuerConfig(issuer=ISSUER, audiences=("hormuz",))},
             authorization_profiles={
@@ -386,7 +395,7 @@ class DirectoryHTTPTests(unittest.TestCase):
                     team_name="Engineering",
                     clearance="internal",
                     allowed_clients=("codex",),
-                    capabilities=(),
+                    capabilities=("dlp_approver", "policy_admin"),
                     policy=Policy(allowed_clients=("codex",)),
                 )
             },
@@ -431,6 +440,73 @@ class DirectoryHTTPTests(unittest.TestCase):
             response = connection.getresponse()
             parsed = json.loads(response.read())
             return response.status, {key.lower(): value for key, value in response.getheaders()}, parsed
+        finally:
+            connection.close()
+
+    def _issue_directory_session(self, *, actor_id: str) -> str:
+        broker = self.gateway.session_broker
+        self.assertIsNotNone(broker)
+        assert broker is not None
+        store = broker.store
+        enrollment_secret = "directory-session-enrollment-" + "s" * 32
+        enrollment = store.create_enrollment(
+            issuer=ISSUER,
+            client_name="codex",
+            enrollment_secret=enrollment_secret,
+            organization_id="acme",
+        )
+        state = "directory-session-state-" + "t" * 32
+        browser_cookie = "directory-session-browser-" + "b" * 32
+        store.begin_authorization(  # type: ignore[attr-defined]
+            enrollment_id=enrollment.enrollment_id,
+            state=state,
+            browser_cookie=browser_cookie,
+            nonce="directory-session-nonce-" + "n" * 32,
+            pkce_verifier="directory-session-pkce-" + "p" * 48,
+        )
+        store.consume_callback(  # type: ignore[attr-defined]
+            state=state,
+            browser_cookie=browser_cookie,
+        )
+        store.authorize_enrollment(  # type: ignore[attr-defined]
+            enrollment_id=enrollment.enrollment_id,
+            subject="alice-id",
+            organization_id="acme",
+            actor_id=actor_id,
+            team_id="engineering",
+            clearance="internal",
+        )
+        return store.redeem_enrollment(  # type: ignore[attr-defined]
+            enrollment_id=enrollment.enrollment_id,
+            enrollment_secret=enrollment_secret,
+        ).access_token
+
+    def _session_request(
+        self,
+        method: str,
+        path: str,
+        access_token: str,
+        value: dict[str, object] | None = None,
+    ) -> tuple[int, dict[str, object]]:
+        body = json.dumps(value).encode("utf-8") if value is not None else None
+        headers = {"Authorization": "Bearer " + access_token}
+        if body is not None:
+            headers.update(
+                {
+                    "Content-Type": "application/json",
+                    "Content-Length": str(len(body)),
+                }
+            )
+        connection = http.client.HTTPConnection(
+            "127.0.0.1",
+            self.gateway.server_address[1],
+            timeout=5,
+        )
+        try:
+            connection.request(method, path, body=body, headers=headers)
+            response = connection.getresponse()
+            parsed = json.loads(response.read())
+            return response.status, parsed
         finally:
             connection.close()
 
@@ -484,6 +560,72 @@ class DirectoryHTTPTests(unittest.TestCase):
         self.assertEqual(patched["members"], [])
         with self.assertRaisesRegex(AuthenticationError, "directory_subject_unassigned"):
             self.gateway.authenticator.identity_for_subject(ISSUER, "alice-id")
+
+    def test_removed_member_session_cannot_reach_provider_or_administrative_paths(self) -> None:
+        user_payload = {
+            "schemas": [SCIM_USER_SCHEMA, HORMUZ_USER_EXTENSION],
+            "externalId": "alice-id",
+            "userName": "alice@example.test",
+            "displayName": "Alice",
+            "active": True,
+            HORMUZ_USER_EXTENSION: {"issuer": ISSUER, "subject": "alice-id"},
+        }
+        status, _headers, user = self._request("POST", "/v1/admin/scim/v2/Users", user_payload)
+        self.assertEqual(status, 201)
+        user_id = str(user["id"])
+        group_payload = {
+            "schemas": [SCIM_GROUP_SCHEMA, HORMUZ_GROUP_EXTENSION],
+            "externalId": "engineering",
+            "displayName": "Engineering",
+            "members": [{"value": user_id}],
+            HORMUZ_GROUP_EXTENSION: {"active": True},
+        }
+        status, _headers, group = self._request("POST", "/v1/admin/scim/v2/Groups", group_payload)
+        self.assertEqual(status, 201)
+        access_token = self._issue_directory_session(actor_id=user_id)
+        status, identity = self._session_request(
+            "GET",
+            "/v1/gateway/whoami",
+            access_token,
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(identity["actor_id"], user_id)
+
+        status, _headers, _patched = self._request(
+            "PATCH",
+            "/v1/admin/scim/v2/Groups/" + str(group["id"]),
+            {
+                "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+                "Operations": [{"op": "replace", "path": "members", "value": []}],
+            },
+            headers={"If-Match": str(group["meta"]["version"])},  # type: ignore[index]
+        )
+        self.assertEqual(status, 200)
+
+        denied_requests = (
+            ("POST", "/v1/responses", {"model": "gpt-test", "input": "blocked"}),
+            ("GET", "/v1/admin/policy-active", None),
+            (
+                "POST",
+                "/v1/admin/policy-activations",
+                {"version_id": "hpv_v1_" + "0" * 64, "expected_active_version_id": None},
+            ),
+            (
+                "POST",
+                "/v1/dlp/approval-requests/apr_" + "0" * 32 + "/decisions",
+                {"decision": "approve"},
+            ),
+        )
+        for method, path, value in denied_requests:
+            with self.subTest(method=method, path=path):
+                status, response = self._session_request(
+                    method,
+                    path,
+                    access_token,
+                    value,
+                )
+                self.assertEqual(status, 401)
+                self.assertEqual(response["error"]["code"], "unauthorized")
 
 
 if __name__ == "__main__":
