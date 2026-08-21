@@ -68,6 +68,16 @@ from hormuz.tenant_lifecycle import (
     TenantLifecycleRuntimeGate,
     TenantLifecycleService,
 )
+try:  # Support both ``python scripts/...`` and package imports in unit tests.
+    from scripts.postgres_repository_conformance import (
+        RepositoryConformanceError,
+        prove_repository_conformance,
+    )
+except ModuleNotFoundError:  # pragma: no cover - direct-script launcher path
+    from postgres_repository_conformance import (  # type: ignore[no-redef]
+        RepositoryConformanceError,
+        prove_repository_conformance,
+    )
 from hormuz.store import (
     DLPApprovalStoreError,
     ReservationDenied,
@@ -1796,6 +1806,7 @@ def run_integration(*, image: str = DEFAULT_IMAGE) -> dict[str, object]:
             owner_dsn,
             runtime_dsn,
         )
+        repository_conformance = prove_repository_conformance(runtime_dsn)
         shared_directory = _prove_shared_scim_directory(runtime_dsn)
         tamper_detection = _prove_verifier_tamper_detection(admin_dsn, owner_dsn)
         tenant_lifecycle = _prove_tenant_lifecycle(owner_dsn, runtime_dsn)
@@ -1820,6 +1831,7 @@ def run_integration(*, image: str = DEFAULT_IMAGE) -> dict[str, object]:
             "isolation": isolation,
             "accounting": accounting,
             "identity_sessions": identity_sessions,
+            "repository_conformance": repository_conformance,
             "shared_directory": shared_directory,
             "policy_administration": policy_administration,
             "tamper_detection": tamper_detection,
@@ -1827,6 +1839,8 @@ def run_integration(*, image: str = DEFAULT_IMAGE) -> dict[str, object]:
             "content_free": True,
         }
     except PostgresStorageError as error:
+        primary_error = PostgresFoundationIntegrationError(error.code)
+    except RepositoryConformanceError as error:
         primary_error = PostgresFoundationIntegrationError(error.code)
     except PostgresFoundationIntegrationError as error:
         primary_error = error

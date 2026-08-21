@@ -809,6 +809,20 @@ class PostgresFoundationTests(unittest.TestCase):
         self.assertEqual(value["identity_sessions"]["atomic_refresh_replay_denied"], 1)
         self.assertTrue(value["identity_sessions"]["refresh_replay_family_revoked"])
         self.assertTrue(value["identity_sessions"]["identity_change_revocation_verified"])
+        repository_conformance = value["repository_conformance"]
+        self.assertTrue(repository_conformance["sqlite_postgresql_semantic_parity"])
+        self.assertTrue(repository_conformance["usage_security_contract"])
+        self.assertTrue(repository_conformance["session_contract"])
+        self.assertTrue(repository_conformance["directory_contract"])
+        self.assertTrue(repository_conformance["tenant_scoped_negative_reads"])
+        self.assertEqual(
+            repository_conformance["postgresql_only_contracts"],
+            ["policy_administration", "tenant_lifecycle"],
+        )
+        self.assertEqual(
+            repository_conformance["excluded_contracts"],
+            ["deprecated_builtin_context"],
+        )
         self.assertTrue(value["shared_directory"]["shared_scim_crud_verified"])
         self.assertTrue(value["shared_directory"]["generic_oidc_subject_resolution_verified"])
         self.assertTrue(value["shared_directory"]["keyed_global_route_lookup_verified"])

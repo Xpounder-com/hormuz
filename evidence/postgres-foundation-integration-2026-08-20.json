@@ -16,7 +16,7 @@
     "usage_rows_per_tenant": 1
   },
   "content_free": true,
-  "generated_at": "2026-08-21T14:26:57.140719Z",
+  "generated_at": "2026-08-21T14:48:21.106682Z",
   "identity_sessions": {
     "atomic_refresh_competitors": 2,
     "atomic_refresh_replay_denied": 1,
@@ -86,6 +86,20 @@
     "security_events_shared": true,
     "self_approval_denied": true,
     "stale_projection_rejected": true
+  },
+  "repository_conformance": {
+    "directory_contract": true,
+    "excluded_contracts": [
+      "deprecated_builtin_context"
+    ],
+    "postgresql_only_contracts": [
+      "policy_administration",
+      "tenant_lifecycle"
+    ],
+    "session_contract": true,
+    "sqlite_postgresql_semantic_parity": true,
+    "tenant_scoped_negative_reads": true,
+    "usage_security_contract": true
   },
   "runner": {
     "postgres_image": "postgres@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777",

@@ -304,6 +304,27 @@ roles and two synthetic tenants, then proves:
 - rejection of unexpected accounting or security columns during schema
   verification.
 
+### SQLite/PostgreSQL repository conformance
+
+The same disposable run also executes the supported shared repository
+contracts once through local SQLite and once through the split PostgreSQL
+adapters, then compares normalized observable results. Opaque IDs, session
+credentials, and write timestamps are deliberately not compared; policy
+outcomes, tenant scope, normalized metadata, and externally observable
+accounting state are.
+
+| Shared contract | Executable parity coverage |
+| --- | --- |
+| Usage and security ledger | Usage recording, totals, summaries, reports, coverage, scoped budget lifecycle, idempotent provider-cost import/reconciliation, administrative-read audit, secret/DLP metadata, one-time approval, and cross-tenant negative reads. |
+| Human session repository | OIDC enrollment/callback, projection-bound authorization, credential rotation and replay-family revocation, logout, authorization-mapping and administrative revocation, session/event listing, failed enrollment, and tenant scope. |
+| SCIM directory repository | User/group lifecycle resolved through a policy-owned profile, workload lifecycle, idempotent create, group removal/reassignment, deactivation, issuer discovery, and cross-tenant reads. |
+
+Policy administration and tenant lifecycle are PostgreSQL-only shared-control
+plane contracts; their real PostgreSQL proofs remain separate in this runner.
+The deprecated built-in context repository is explicitly excluded under
+[ADR 0008](decisions/0008-gateway-product-boundary.md),
+so it is not represented as SQLite/PostgreSQL parity.
+
 ```bash
 python -m pip install '.[postgres]'
 docker pull postgres@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
