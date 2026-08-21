@@ -617,6 +617,7 @@ class PostgresFoundationTests(unittest.TestCase):
         for sqlstate, code in (
             ("42501", "tenant_policy_denied"),
             ("23503", "tenant_foreign_key_denied"),
+            ("23505", "tenant_uniqueness_denied"),
             ("23514", "tenant_immutability_denied"),
             ("08006", "tenant_transaction_failed"),
         ):
@@ -786,6 +787,13 @@ class PostgresFoundationTests(unittest.TestCase):
         self.assertEqual(value["identity_sessions"]["atomic_refresh_replay_denied"], 1)
         self.assertTrue(value["identity_sessions"]["refresh_replay_family_revoked"])
         self.assertTrue(value["identity_sessions"]["identity_change_revocation_verified"])
+        self.assertTrue(value["shared_directory"]["shared_scim_crud_verified"])
+        self.assertTrue(value["shared_directory"]["generic_oidc_subject_resolution_verified"])
+        self.assertTrue(value["shared_directory"]["keyed_global_route_lookup_verified"])
+        self.assertTrue(value["shared_directory"]["raw_global_route_table_denied"])
+        self.assertTrue(value["shared_directory"]["cross_tenant_subject_collision_denied"])
+        self.assertTrue(value["shared_directory"]["directory_session_projection_verified"])
+        self.assertTrue(value["shared_directory"]["directory_unassignment_revokes_session"])
         policy_administration = value["policy_administration"]
         self.assertTrue(policy_administration["configuration_projection_verified"])
         self.assertTrue(policy_administration["idempotent_sync_verified"])

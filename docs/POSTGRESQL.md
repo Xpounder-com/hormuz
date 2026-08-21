@@ -1,9 +1,9 @@
 # PostgreSQL tenancy foundation
 
 Hormuz has an accepted shared-schema PostgreSQL tenancy contract and an
-executable schema-version-9 accounting, identity-projection, policy-projection,
-policy-version, human-session, DLP/security, identity-type usage, and
-tenant-lifecycle backend. A deployment can opt into PostgreSQL
+executable schema-version-10 accounting, identity-projection, policy-projection,
+policy-version, human-session, DLP/security, identity-type usage,
+tenant-lifecycle, and shared-SCIM-directory backend. A deployment can opt into PostgreSQL
 for usage, cost evidence, usage-read audit, atomic budget reservations,
 multi-instance human sessions, one-time DLP approvals, and security evidence.
 The deprecated built-in context experiment is deliberately excluded from the
@@ -27,6 +27,13 @@ Schema version 8 permits both immutable v2 and v3 policy projections. Schema
 version 9 adds a fail-closed active-tenant runtime gate, owner-only encrypted
 export receipts, a delayed hard-purge state machine, and an owner-only purge
 tombstone. It does not add document or prompt storage.
+Schema version 10 adds tenant-isolated SCIM resources, users, groups,
+memberships, workloads, lifecycle events, and dynamic principal projections.
+It uses a global table of HMAC routing tags only to discover the tenant for an
+OIDC `(issuer, subject)` pair before a tenant RLS context exists. The runtime
+cannot select that table directly; it can invoke exact-tag security-definer
+functions and a projection function constrained to an existing managed
+directory resource.
 Every tenant-owned table has:
 
 - a non-null tenant key in its primary and foreign-key relationships;
@@ -255,6 +262,10 @@ roles and two synthetic tenants, then proves:
 - exactly one rotation under a two-instance refresh race, replay denial, and
   family revocation; and
 - immediate invalidation after an affected identity mapping changes.
+- shared SCIM user/group/workload provisioning, generic OIDC subject resolution
+  through keyed exact routing tags, denied raw global-route reads, denied
+  cross-tenant subject collisions, and immediate session revocation after an
+  unassignment; and
 - idempotent secret-free policy synchronization and stale-projection startup
   rejection;
 - idempotent immutable policy staging with deterministic SHA-256-derived
@@ -287,25 +298,24 @@ observation is
 
 ## Gates that remain open
 
-Schema v9 is a real accounting, human-session, DLP/security, policy-version,
-identity-type usage, and tenant-lifecycle persistence slice, not the completed
-hosted product.
+Schema v10 is a real accounting, human-session, DLP/security, policy-version,
+identity-type usage, tenant-lifecycle, and shared-directory persistence slice,
+not the completed hosted product.
 The repository currently opens a fresh PostgreSQL connection per operation.
 Configuration remains the desired-state identity source and deployment
-provisioning boundary for the shared runtime. The repository also has a
-deliberately separate single-node SQLite SCIM directory and administrative API,
-documented in [SCIM.md](SCIM.md); it does not yet migrate employee-directory
-state into PostgreSQL. Removing a person
+provisioning boundary for bootstrap/admin identities. The repository also has a
+shared PostgreSQL SCIM directory and administrative API, plus a separate
+single-node SQLite adapter, documented in [SCIM.md](SCIM.md). Removing a person
 or mapping while retaining its configured organization increments the affected
 authorization version and revokes active sessions. Removing the entire
 organization from configuration is not a deprovisioning operation: the sync
 command intentionally will not discover or scan tenants outside the supplied
 desired state. Keep the organization present while removing its people, and do
 not consider tenant deletion complete until a separately verified shared
-deprovision/SCIM workflow exists. A keyed routing
-tag lets an opaque credential select one RLS tenant without exposing the raw
-organization ID or querying a global credential index, but production custody
-and rotation of that key remain open. Policy notification/queue UX, two-person
+deprovision/SCIM workflow exists. A keyed routing tag lets an OIDC subject
+select one RLS tenant without exposing raw issuer or subject values in a global
+directory index, but production custody and rotation of that key remain open.
+Policy notification/queue UX, two-person
 activation approval, representative DLP evaluation, usage/security backfill,
 automated restore and backup/PITR, central retention-policy administration,
 customer KMS/BYOK, pooling, HA, operations, and independent security review

@@ -46,6 +46,14 @@ from hormuz.policy_projection import (
 from hormuz.postgres_policy_store import PolicyAdminError, PostgresPolicyStore
 from hormuz.postgres_security_store import PostgresSecurityStore
 from hormuz.postgres_session_store import PostgresSessionStore
+from hormuz.postgres_directory import PostgresDirectoryStore
+from hormuz.directory import (
+    HORMUZ_GROUP_EXTENSION,
+    HORMUZ_USER_EXTENSION,
+    SCIM_GROUP_SCHEMA,
+    SCIM_USER_SCHEMA,
+    DirectoryError,
+)
 from hormuz.session_store import SessionStoreError
 from hormuz.tenant_lifecycle import (
     TenantLifecycleError,
@@ -59,7 +67,7 @@ from hormuz.store import (
 )
 
 
-EVIDENCE_SCHEMA = "hormuz.postgres-policy-administration-integration.v9"
+EVIDENCE_SCHEMA = "hormuz.postgres-policy-administration-integration.v10"
 DEFAULT_IMAGE = (
     "postgres@sha256:"
     "57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777"
@@ -739,6 +747,182 @@ def _prove_identity_sessions(owner_dsn: str, runtime_dsn: str) -> dict[str, obje
     }
 
 
+def _prove_shared_scim_directory(runtime_dsn: str) -> dict[str, object]:
+    """Prove the generic directory path without retaining source identity data."""
+
+    issuer = "https://directory.integration.example"
+    routing_key = b"directory-routing-key-for-integration"[:32].ljust(32, b"d")
+    store = PostgresDirectoryStore(
+        runtime_dsn,
+        trusted_issuers=(issuer,),
+        routing_key=routing_key,
+    )
+    admin_a = _synthetic_identity(
+        "tenant-a",
+        "directory-admin-a",
+        capabilities=("identity_admin",),
+    )
+    admin_b = _synthetic_identity(
+        "tenant-b",
+        "directory-admin-b",
+        capabilities=("identity_admin",),
+    )
+    user_payload = {
+        "schemas": [SCIM_USER_SCHEMA, HORMUZ_USER_EXTENSION],
+        "externalId": "directory-user-a",
+        "userName": "directory-user-a@example.invalid",
+        "displayName": "Directory User A",
+        "active": True,
+        HORMUZ_USER_EXTENSION: {"issuer": issuer, "subject": "directory-subject-a"},
+    }
+    try:
+        user = store.create_user(administrator=admin_a, value=user_payload)
+        user_id = str(user.resource["id"])
+        group_payload = {
+            "schemas": [SCIM_GROUP_SCHEMA, HORMUZ_GROUP_EXTENSION],
+            "externalId": "directory-engineering-a",
+            "displayName": "Directory Engineering A",
+            "members": [{"value": user_id}],
+            HORMUZ_GROUP_EXTENSION: {
+                "teamId": "directory-engineering",
+                "teamName": "Directory Engineering",
+                "clearance": "internal",
+                "allowedClients": ["codex", "claude-code"],
+                "capabilities": [],
+            },
+        }
+        group = store.create_group(administrator=admin_a, value=group_payload)
+        group_id = str(group.resource["id"])
+        identity = store.identity_for_subject(issuer, "directory-subject-a")
+        if (
+            identity is None
+            or identity.organization_id != "tenant-a"
+            or identity.actor_id != user_id
+            or identity.team_id != "directory-engineering"
+        ):
+            raise PostgresFoundationIntegrationError("directory_identity_resolution_failed")
+
+        sessions = PostgresSessionStore(
+            runtime_dsn,
+            organization_ids=("tenant-a", "tenant-b"),
+            master_key=b"directory-session-key-for-integration"[:32].ljust(32, b"s"),
+            access_ttl_seconds=600,
+            absolute_ttl_seconds=43_200,
+            enrollment_ttl_seconds=300,
+        )
+        enrollment = sessions.create_enrollment(
+            issuer=issuer,
+            client_name="codex",
+            enrollment_secret="directory-enrollment-secret-" + "a" * 32,
+            organization_id="tenant-a",
+        )
+        state = sessions.new_authorization_state(enrollment.enrollment_id)
+        browser_cookie = "directory-browser-cookie-" + "b" * 32
+        sessions.begin_authorization(
+            enrollment_id=enrollment.enrollment_id,
+            state=state,
+            browser_cookie=browser_cookie,
+            nonce="directory-oidc-nonce-" + "c" * 32,
+            pkce_verifier="directory-pkce-verifier-" + "d" * 48,
+        )
+        sessions.consume_callback(state=state, browser_cookie=browser_cookie)
+        sessions.authorize_enrollment(
+            enrollment_id=enrollment.enrollment_id,
+            subject="directory-subject-a",
+            organization_id="tenant-a",
+            actor_id=user_id,
+            team_id="directory-engineering",
+            clearance="internal",
+        )
+        pair = sessions.redeem_enrollment(
+            enrollment_id=enrollment.enrollment_id,
+            enrollment_secret="directory-enrollment-secret-" + "a" * 32,
+        )
+        if sessions.authenticate_access(pair.access_token).actor_id != user_id:
+            raise PostgresFoundationIntegrationError("directory_session_enrollment_failed")
+
+        workload_payload = {
+            "externalId": "directory-workload-b",
+            "displayName": "Directory Workload B",
+            "identityType": "ci",
+            "active": True,
+            "issuer": issuer,
+            "subject": "directory-workload-subject-b",
+            "teamId": "directory-platform",
+            "teamName": "Directory Platform",
+            "clearance": "internal",
+            "allowedClients": ["codex"],
+            "capabilities": [],
+        }
+        workload = store.create_workload(administrator=admin_b, value=workload_payload)
+        if store.identity_for_subject(issuer, "directory-workload-subject-b") is None:
+            raise PostgresFoundationIntegrationError("directory_workload_resolution_failed")
+        if store.organizations_for_issuer(issuer) != ("tenant-a", "tenant-b"):
+            raise PostgresFoundationIntegrationError("directory_issuer_routing_failed")
+
+        collision = dict(workload_payload)
+        collision["externalId"] = "directory-workload-collision"
+        collision["subject"] = "directory-subject-a"
+        try:
+            store.create_workload(administrator=admin_b, value=collision)
+        except DirectoryError as error:
+            if error.code != "directory_subject_conflict":
+                raise PostgresFoundationIntegrationError("directory_subject_conflict_invalid") from None
+        else:
+            raise PostgresFoundationIntegrationError("directory_subject_collision_allowed")
+
+        removed_group = dict(group_payload)
+        removed_group["members"] = []
+        store.replace_group(
+            administrator=admin_a,
+            resource_id=group_id,
+            value=removed_group,
+            if_match=str(group.resource["meta"]["version"]),
+        )
+        try:
+            store.identity_for_subject(issuer, "directory-subject-a")
+        except DirectoryError as error:
+            if error.code != "directory_subject_unassigned":
+                raise PostgresFoundationIntegrationError(
+                    "directory_unassignment_error_" + error.code
+                ) from None
+        else:
+            raise PostgresFoundationIntegrationError("directory_unassignment_allowed")
+        try:
+            sessions.authenticate_access(pair.access_token)
+        except SessionStoreError as error:
+            if error.code != "invalid_session_credential":
+                raise PostgresFoundationIntegrationError("directory_session_revocation_error_invalid") from None
+        else:
+            raise PostgresFoundationIntegrationError("directory_session_not_revoked")
+    except PostgresFoundationIntegrationError:
+        raise
+    except (DirectoryError, PostgresStorageError, SessionStoreError) as error:
+        raise PostgresFoundationIntegrationError(
+            "directory_runtime_" + error.code
+        ) from None
+
+    psycopg, _sql = _require_driver()
+    try:
+        with psycopg.connect(runtime_dsn) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT count(*) FROM hormuz.gateway_directory_subject_routes")
+    except Exception as error:
+        if getattr(error, "sqlstate", None) != "42501":
+            raise PostgresFoundationIntegrationError("directory_global_index_access_error") from None
+    else:
+        raise PostgresFoundationIntegrationError("directory_global_index_visible")
+    return {
+        "shared_scim_crud_verified": True,
+        "generic_oidc_subject_resolution_verified": True,
+        "keyed_global_route_lookup_verified": True,
+        "raw_global_route_table_denied": True,
+        "cross_tenant_subject_collision_denied": True,
+        "directory_session_projection_verified": True,
+        "directory_unassignment_revokes_session": True,
+    }
+
+
 def _policy_config(*, changed: bool = False) -> object:
     identity_config = _identity_config()
     identities = {
@@ -1381,6 +1565,7 @@ def run_integration(*, image: str = DEFAULT_IMAGE) -> dict[str, object]:
         isolation = _prove_runtime_isolation(runtime_dsn, owner_dsn)
         accounting = _prove_accounting_store(runtime_dsn)
         identity_sessions = _prove_identity_sessions(owner_dsn, runtime_dsn)
+        shared_directory = _prove_shared_scim_directory(runtime_dsn)
         policy_administration = _prove_policy_administration_and_approvals(
             owner_dsn,
             runtime_dsn,
@@ -1408,6 +1593,7 @@ def run_integration(*, image: str = DEFAULT_IMAGE) -> dict[str, object]:
             "isolation": isolation,
             "accounting": accounting,
             "identity_sessions": identity_sessions,
+            "shared_directory": shared_directory,
             "policy_administration": policy_administration,
             "tamper_detection": tamper_detection,
             "tenant_lifecycle": tenant_lifecycle,

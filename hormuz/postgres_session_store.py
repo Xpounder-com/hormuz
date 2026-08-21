@@ -361,7 +361,7 @@ class PostgresSessionStore:
                     "projection.team_id, projection.clearance "
                     "FROM external_identities AS external "
                     "JOIN principals AS principal USING (tenant_id, principal_id) "
-                    "JOIN gateway_principal_projections AS projection USING (tenant_id, principal_id) "
+                    "JOIN gateway_effective_principal_projections AS projection USING (tenant_id, principal_id) "
                     "WHERE external.tenant_id = %s AND external.issuer = ("
                     "SELECT issuer FROM gateway_session_enrollments "
                     "WHERE tenant_id = %s AND id = %s) "
@@ -481,7 +481,7 @@ class PostgresSessionStore:
                     "projection.clearance FROM gateway_human_sessions AS session "
                     "JOIN principals AS principal ON principal.tenant_id = session.tenant_id "
                     "AND principal.principal_id = session.actor_id "
-                    "LEFT JOIN gateway_principal_projections AS projection ON "
+                    "LEFT JOIN gateway_effective_principal_projections AS projection ON "
                     "projection.tenant_id = session.tenant_id AND projection.principal_id = session.actor_id "
                     "WHERE session.tenant_id = %s AND session.access_hash = %s FOR UPDATE OF session",
                     (organization_id, self._digest("access", access_token)),

@@ -71,6 +71,7 @@ from .directory import (
     DirectoryMutation,
     SQLiteDirectoryStore,
 )
+from .postgres_directory import PostgresDirectoryStore
 from .policy import PolicyDecision, PolicyEngine
 from .provider_cache import inspect_explicit_cache_controls
 from .identity_projection import configured_organization_ids, verify_runtime_identity_projection
@@ -335,14 +336,25 @@ class GatewayServer(ThreadingHTTPServer):
         self._shutdown_lock = threading.Lock()
         self._shutdown_started = False
         self.config = config
-        self.directory: SQLiteDirectoryStore | None = None
+        self.directory: SQLiteDirectoryStore | PostgresDirectoryStore | None = None
         if config.directory.enabled:
-            if config.directory.database_path is None:
-                raise DirectoryError("directory_database_path_missing")
-            self.directory = SQLiteDirectoryStore(
-                config.directory.database_path,
-                trusted_issuers=tuple(config.oidc_issuers),
-            )
+            if config.directory.backend == "postgresql":
+                if len(config.directory.routing_key) != 32:
+                    raise DirectoryError("directory_routing_key_missing")
+                self.directory = PostgresDirectoryStore(
+                    postgres_dsn_from_env(dsn_env=config.usage_storage.postgres_dsn_env),
+                    trusted_issuers=tuple(config.oidc_issuers),
+                    routing_key=config.directory.routing_key,
+                    schema=config.usage_storage.postgres_schema,
+                    runtime_role=config.usage_storage.postgres_runtime_role,
+                )
+            else:
+                if config.directory.database_path is None:
+                    raise DirectoryError("directory_database_path_missing")
+                self.directory = SQLiteDirectoryStore(
+                    config.directory.database_path,
+                    trusted_issuers=tuple(config.oidc_issuers),
+                )
         self.authenticator = Authenticator(config, self.directory)
         self.tenant_lifecycle_gate: TenantLifecycleRuntimeGate | None = None
         if config.usage_storage.backend == "postgresql":

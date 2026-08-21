@@ -112,7 +112,7 @@ immutable history or compare-and-swap contract.
 ## Operator deploy, verify, and rollback runbook
 
 1. Back up PostgreSQL according to the organization's database procedure, then
-   install the candidate package and apply the current schema version 9 with
+   install the candidate package and apply the current schema version 10 with
    the owner DSN:
 
    ```bash

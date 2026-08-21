@@ -274,16 +274,18 @@ class SessionBrokerConfig:
 
 @dataclass(frozen=True)
 class DirectoryConfig:
-    """Opt-in local SCIM directory boundary for the first lifecycle milestone.
+    """Opt-in SCIM directory, local SQLite or shared PostgreSQL.
 
-    The directory is deliberately separate from the legacy usage/security and
-    deprecated context databases.  PostgreSQL shared-directory support is a
-    follow-on; this explicit sqlite boundary is useful for a single gateway
-    process or single host without pretending to be a multi-instance service.
+    PostgreSQL keeps all directory records tenant scoped.  It needs a distinct
+    process secret only to calculate blind OIDC subject routing tags before a
+    tenant can be selected; the secret is never persisted by Hormuz.
     """
 
     enabled: bool = False
+    backend: str = "sqlite"
     database_path: Path | None = None
+    routing_key_env: str | None = None
+    routing_key: bytes = field(default=b"", repr=False)
 
 
 @dataclass(frozen=True)
@@ -726,7 +728,9 @@ class GatewayConfig:
         )
         directory = _directory_config(
             authentication_raw.get("directory", {}),
+            env,
             source_path=source_path,
+            default_backend=usage_backend,
         )
         oidc_raw = _object(authentication_raw.get("oidc", {}), "authentication.oidc")
         _reject_unknown_fields(oidc_raw, {"issuers"}, "authentication.oidc")
@@ -897,7 +901,7 @@ class GatewayConfig:
             raise ConfigError(
                 "authentication.session_broker.database must be separate from usage and context databases"
             )
-        if directory.enabled and directory.database_path in {
+        if directory.enabled and directory.backend == "sqlite" and directory.database_path in {
             database_path,
             context_database_path,
             session_broker.database_path,
@@ -2000,20 +2004,72 @@ def _session_broker_config(
     )
 
 
-def _directory_config(value: Any, *, source_path: Path) -> DirectoryConfig:
+def _directory_config(
+    value: Any,
+    env: dict[str, str],
+    *,
+    source_path: Path,
+    default_backend: str,
+) -> DirectoryConfig:
     path = "authentication.directory"
     item = _object(value, path)
-    _reject_unknown_fields(item, {"enabled", "database"}, path)
+    _reject_unknown_fields(
+        item,
+        {"enabled", "backend", "database", "routing_key_env"},
+        path,
+    )
     enabled = _boolean(item.get("enabled", False), f"{path}.enabled")
     if not enabled:
-        if "database" in item:
-            raise ConfigError(f"{path}.database is only valid when enabled")
+        for name in ("backend", "database", "routing_key_env"):
+            if name in item:
+                raise ConfigError(f"{path}.{name} is only valid when enabled")
         return DirectoryConfig()
-    database_value = _string(item.get("database"), f"{path}.database")
-    database_path = Path(database_value).expanduser()
-    if not database_path.is_absolute():
-        database_path = (source_path.parent / database_path).resolve()
-    return DirectoryConfig(enabled=True, database_path=database_path)
+    backend = _string(item.get("backend", default_backend), f"{path}.backend")
+    if backend not in {"sqlite", "postgresql"}:
+        raise ConfigError(f"{path}.backend must be sqlite or postgresql")
+    if backend == "sqlite":
+        if "routing_key_env" in item:
+            raise ConfigError(f"{path}.routing_key_env is only valid for the postgresql backend")
+        database_value = _string(item.get("database"), f"{path}.database")
+        database_path = Path(database_value).expanduser()
+        if not database_path.is_absolute():
+            database_path = (source_path.parent / database_path).resolve()
+        return DirectoryConfig(enabled=True, backend="sqlite", database_path=database_path)
+    if "database" in item:
+        raise ConfigError(f"{path}.database is only valid for the sqlite backend")
+    if default_backend != "postgresql":
+        raise ConfigError(
+            "authentication.directory.backend postgresql requires usage_storage.backend postgresql"
+        )
+    routing_key_env = _string(item.get("routing_key_env"), f"{path}.routing_key_env")
+    if _ENVIRONMENT_NAME_PATTERN.fullmatch(routing_key_env) is None:
+        raise ConfigError(f"{path}.routing_key_env must be a safe environment variable name")
+    encoded_routing_key = env.get(routing_key_env, "")
+    if not encoded_routing_key:
+        raise ConfigError(
+            f"Required directory routing key environment variable is not set: {routing_key_env}"
+        )
+    try:
+        padding = "=" * (-len(encoded_routing_key) % 4)
+        routing_key = base64.b64decode(
+            encoded_routing_key + padding,
+            altchars=b"-_",
+            validate=True,
+        )
+    except (ValueError, binascii.Error) as error:
+        raise ConfigError(
+            f"Directory routing key from {routing_key_env} must be base64url"
+        ) from error
+    if len(routing_key) != 32:
+        raise ConfigError(
+            f"Directory routing key from {routing_key_env} must decode to exactly 32 bytes"
+        )
+    return DirectoryConfig(
+        enabled=True,
+        backend="postgresql",
+        routing_key_env=routing_key_env,
+        routing_key=routing_key,
+    )
 
 
 def _secret_controls(value: Any, env: dict[str, str]) -> SecretControls:

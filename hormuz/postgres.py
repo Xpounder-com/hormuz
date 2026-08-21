@@ -17,7 +17,7 @@ import re
 from typing import Any, Callable, Iterator, Protocol
 
 
-POSTGRES_SCHEMA_VERSION = 9
+POSTGRES_SCHEMA_VERSION = 10
 DEFAULT_POSTGRES_DSN_ENV = "HORMUZ_POSTGRES_DSN"
 DEFAULT_POSTGRES_SCHEMA = "hormuz"
 DEFAULT_POSTGRES_RUNTIME_ROLE = "hormuz_runtime"
@@ -68,6 +68,13 @@ TENANT_TABLES = (
     "gateway_dlp_approval_events",
     "gateway_tenant_lifecycle",
     "gateway_tenant_exports",
+    "gateway_directory_resources",
+    "gateway_directory_users",
+    "gateway_directory_groups",
+    "gateway_directory_group_memberships",
+    "gateway_directory_workloads",
+    "gateway_directory_principal_projections",
+    "gateway_directory_events",
 )
 
 RUNTIME_READ_ONLY_TABLES = (
@@ -86,6 +93,7 @@ RUNTIME_READ_ONLY_TABLES = (
 RUNTIME_APPEND_ONLY_TABLES = (
     "gateway_policy_versions",
     "gateway_policy_events",
+    "gateway_directory_events",
 )
 RUNTIME_POINTER_TABLES = (
     "gateway_active_policies",
@@ -95,6 +103,20 @@ RUNTIME_OWNER_ONLY_TABLES = (
 )
 OWNER_ONLY_GLOBAL_TABLES = (
     "gateway_tenant_purge_tombstones",
+    "gateway_directory_subject_routes",
+)
+RUNTIME_READ_ONLY_VIEWS = (
+    "gateway_effective_principal_projections",
+)
+DIRECTORY_ROUTING_FUNCTIONS = (
+    ("gateway_directory_subject_route_lookup", "bytea"),
+    ("gateway_directory_issuer_route_lookup", "bytea"),
+    ("gateway_directory_subject_route_upsert", "bytea, bytea, text, text"),
+    ("gateway_directory_subject_route_delete", "bytea, text, text"),
+    (
+        "gateway_directory_principal_sync",
+        "text, boolean, text, text, text, text, jsonb, jsonb, text, text, text",
+    ),
 )
 RUNTIME_MUTABLE_TABLES = tuple(
     table
@@ -231,6 +253,44 @@ TENANT_LIFECYCLE_TABLE_COLUMNS = {
         "tenant_id", "export_id", "created_at", "export_schema",
         "encryption_algorithm", "lifecycle_state_version", "payload_sha256",
         "ciphertext_sha256", "table_counts_json",
+    ),
+}
+
+DIRECTORY_TABLE_COLUMNS = {
+    "gateway_directory_resources": (
+        "tenant_id", "resource_type", "resource_id", "external_id", "active",
+        "revision", "created_at", "updated_at",
+    ),
+    "gateway_directory_users": (
+        "tenant_id", "resource_id", "issuer", "subject", "user_name", "display_name",
+    ),
+    "gateway_directory_groups": (
+        "tenant_id", "resource_id", "display_name", "team_id", "team_name",
+        "clearance", "allowed_clients_json", "capabilities_json",
+    ),
+    "gateway_directory_group_memberships": (
+        "tenant_id", "group_id", "user_id", "created_at",
+    ),
+    "gateway_directory_workloads": (
+        "tenant_id", "resource_id", "issuer", "subject", "display_name",
+        "identity_type", "team_id", "team_name", "clearance", "allowed_clients_json",
+        "capabilities_json",
+    ),
+    "gateway_directory_principal_projections": (
+        "tenant_id", "principal_id", "projection_sha256", "actor_name", "team_id",
+        "team_name", "clearance", "allowed_clients_json", "capabilities_json", "applied_at",
+    ),
+    "gateway_directory_events": (
+        "tenant_id", "id", "occurred_at", "decision_actor_id", "decision_actor_name",
+        "action", "resource_type", "resource_id", "target_actor_id", "prior_revision",
+        "revision",
+    ),
+}
+
+DIRECTORY_GLOBAL_TABLE_COLUMNS = {
+    "gateway_directory_subject_routes": (
+        "subject_tag", "issuer_tag", "tenant_id", "resource_type", "resource_id",
+        "created_at", "updated_at",
     ),
 }
 
@@ -530,6 +590,18 @@ def _grant_runtime_access(cursor: _Cursor, schema: str, runtime_role: str) -> No
         f"{quoted_schema}.{_quote_identifier(table)}" for table in OWNER_ONLY_GLOBAL_TABLES
     )
     cursor.execute(f"REVOKE ALL ON TABLE {global_owner_only} FROM {quoted_role}")
+    for view in RUNTIME_READ_ONLY_VIEWS:
+        cursor.execute(
+            f"REVOKE ALL ON TABLE {quoted_schema}.{_quote_identifier(view)} FROM {quoted_role}"
+        )
+        cursor.execute(
+            f"GRANT SELECT ON TABLE {quoted_schema}.{_quote_identifier(view)} TO {quoted_role}"
+        )
+    for function_name, argument_types in DIRECTORY_ROUTING_FUNCTIONS:
+        function = f"{quoted_schema}.{_quote_identifier(function_name)}({argument_types})"
+        cursor.execute(f"REVOKE ALL ON FUNCTION {function} FROM PUBLIC")
+        cursor.execute(f"REVOKE ALL ON FUNCTION {function} FROM {quoted_role}")
+        cursor.execute(f"GRANT EXECUTE ON FUNCTION {function} TO {quoted_role}")
 
 
 def _verify_foundation(cursor: _Cursor, schema: str, runtime_role: str) -> None:
@@ -562,6 +634,7 @@ def _verify_foundation(cursor: _Cursor, schema: str, runtime_role: str) -> None:
         **IDENTITY_SESSION_TABLE_COLUMNS,
         **POLICY_APPROVAL_TABLE_COLUMNS,
         **TENANT_LIFECYCLE_TABLE_COLUMNS,
+        **DIRECTORY_TABLE_COLUMNS,
     }
     cursor.execute(
         "SELECT table_name, column_name FROM information_schema.columns "
@@ -581,6 +654,27 @@ def _verify_foundation(cursor: _Cursor, schema: str, runtime_role: str) -> None:
         for table, expected in exact_columns.items()
     ):
         raise PostgresStorageError("accounting_table_columns_invalid")
+
+    cursor.execute(
+        "SELECT table_name, column_name FROM information_schema.columns "
+        "WHERE table_schema = %s AND table_name = ANY(%s) "
+        "ORDER BY table_name, ordinal_position",
+        (schema, list(DIRECTORY_GLOBAL_TABLE_COLUMNS)),
+    )
+    global_columns: dict[str, list[str]] = {
+        table: [] for table in DIRECTORY_GLOBAL_TABLE_COLUMNS
+    }
+    for row in cursor.fetchall():
+        if not isinstance(row, (tuple, list)) or len(row) != 2:
+            raise PostgresStorageError("directory_global_table_columns_invalid")
+        table = str(row[0])
+        if table in global_columns:
+            global_columns[table].append(str(row[1]))
+    if any(
+        tuple(global_columns[table]) != expected
+        for table, expected in DIRECTORY_GLOBAL_TABLE_COLUMNS.items()
+    ):
+        raise PostgresStorageError("directory_global_table_columns_invalid")
 
     cursor.execute(
         "SELECT tablename, policyname, qual, with_check FROM pg_policies "
@@ -749,6 +843,57 @@ def _verify_foundation(cursor: _Cursor, schema: str, runtime_role: str) -> None:
         or any(values != (False, False, False, False) for values in global_privileges.values())
     ):
         raise PostgresStorageError("runtime_owner_only_table_privileges_invalid")
+
+    cursor.execute(
+        "SELECT c.relname, has_table_privilege(%s, c.oid, 'SELECT') "
+        "FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
+        "WHERE n.nspname = %s AND c.relkind IN ('v', 'm') AND c.relname = ANY(%s)",
+        (runtime_role, schema, list(RUNTIME_READ_ONLY_VIEWS)),
+    )
+    view_privileges = {
+        str(row[0]): bool(row[1]) for row in cursor.fetchall()
+    }
+    if (
+        set(view_privileges) != set(RUNTIME_READ_ONLY_VIEWS)
+        or not all(view_privileges.values())
+    ):
+        raise PostgresStorageError("runtime_directory_view_privileges_invalid")
+
+    cursor.execute(
+        "SELECT p.proname, oidvectortypes(p.proargtypes), p.prosecdef, "
+        "p.proconfig, pg_get_userbyid(p.proowner), "
+        "has_function_privilege(%s, p.oid, 'EXECUTE') "
+        "FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace "
+        "WHERE n.nspname = %s AND p.proname = ANY(%s)",
+        (
+            runtime_role,
+            schema,
+            [item[0] for item in DIRECTORY_ROUTING_FUNCTIONS],
+        ),
+    )
+    expected_functions = {
+        (name, arguments.replace(" ", ""))
+        for name, arguments in DIRECTORY_ROUTING_FUNCTIONS
+    }
+    observed_functions: set[tuple[str, str]] = set()
+    for row in cursor.fetchall():
+        if not isinstance(row, (tuple, list)) or len(row) != 6:
+            raise PostgresStorageError("directory_routing_function_invalid")
+        name = str(row[0])
+        arguments = re.sub(r"\s+", "", str(row[1]))
+        observed_functions.add((name, arguments))
+        configurations = list(row[3] or ())
+        if (
+            not bool(row[2])
+            or row[4] != migration_role
+            or not bool(row[5])
+            or len(configurations) != 1
+            or not str(configurations[0]).startswith("search_path=")
+            or "pg_temp" in str(configurations[0])
+        ):
+            raise PostgresStorageError("directory_routing_function_invalid")
+    if observed_functions != expected_functions:
+        raise PostgresStorageError("directory_routing_function_invalid")
 
     cursor.execute(
         f"SELECT has_table_privilege(%s, '{quoted_schema}.schema_migrations', 'SELECT')",
@@ -925,12 +1070,25 @@ def tenant_transaction(
     except PostgresStorageError:
         raise
     except Exception as error:
+        sqlstate = getattr(error, "sqlstate", None)
+        # Preserve only application-level *content-free* domain errors raised
+        # inside the bound transaction. Database-driver failures carry a
+        # SQLSTATE; arbitrary Python errors remain a stable storage failure.
+        if sqlstate is None:
+            domain_code = getattr(error, "code", None)
+            if (
+                isinstance(domain_code, str)
+                and re.fullmatch(r"[a-z][a-z0-9_]{0,127}", domain_code) is not None
+            ):
+                raise
+            raise PostgresStorageError("tenant_transaction_failed") from None
         code = {
             "42501": "tenant_policy_denied",
             "23503": "tenant_foreign_key_denied",
+            "23505": "tenant_uniqueness_denied",
             "23514": "tenant_immutability_denied",
             "42P01": "tenant_lifecycle_unavailable",
-        }.get(getattr(error, "sqlstate", None), "tenant_transaction_failed")
+        }.get(sqlstate, "tenant_transaction_failed")
         raise PostgresStorageError(code) from None
 
 

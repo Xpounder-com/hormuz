@@ -14,7 +14,7 @@
     "usage_rows_per_tenant": 1
   },
   "content_free": true,
-  "generated_at": "2026-08-21T02:17:33.658366Z",
+  "generated_at": "2026-08-21T02:59:28.713320Z",
   "identity_sessions": {
     "atomic_refresh_competitors": 2,
     "atomic_refresh_replay_denied": 1,
@@ -48,7 +48,8 @@
       6,
       7,
       8,
-      9
+      9,
+      10
     ],
     "checksums_verified": true,
     "forced_rls_verified": true,
@@ -56,7 +57,7 @@
     "policy_definitions_verified": true,
     "privileges_verified": true,
     "runtime_role_verified": true,
-    "target_version": 9,
+    "target_version": 10,
     "trigger_definition_verified": true
   },
   "policy_administration": {
@@ -86,7 +87,16 @@
     "postgres_image": "postgres@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777",
     "postgres_server_version_num": "160014"
   },
-  "schema": "hormuz.postgres-policy-administration-integration.v9",
+  "schema": "hormuz.postgres-policy-administration-integration.v10",
+  "shared_directory": {
+    "cross_tenant_subject_collision_denied": true,
+    "directory_session_projection_verified": true,
+    "directory_unassignment_revokes_session": true,
+    "generic_oidc_subject_resolution_verified": true,
+    "keyed_global_route_lookup_verified": true,
+    "raw_global_route_table_denied": true,
+    "shared_scim_crud_verified": true
+  },
   "tamper_detection": {
     "permissive_policy_rejected": true,
     "runtime_owner_membership_rejected": true,

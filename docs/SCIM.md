@@ -1,16 +1,18 @@
-# Local SCIM identity lifecycle
+# SCIM identity lifecycle
 
-Hormuz can use a SCIM 2.0-shaped directory for its **current single-node
-gateway**. It lets an organization provision people and policy-bearing groups
-without asking employees to adopt a new AI client: a successful OIDC login is
-resolved against the live directory before Hormuz applies model, client, DLP,
-budget, or usage policy.
+Hormuz can use a SCIM 2.0-shaped directory to provision people and
+policy-bearing groups without asking employees to adopt a new AI client: a
+successful OIDC login is resolved against the live directory before Hormuz
+applies model, client, DLP, budget, or usage policy.
 
-This is a bounded issue #7 milestone, not a claim of a shared enterprise
-directory service. It is backed by a separate local SQLite database and is
-appropriate for one gateway process or host. Shared PostgreSQL directory state,
-HA, SCIM certification, real-IdP conformance, SCIM bulk/filtering, KMS, and
-immutable external audit remain open gates.
+This is a bounded issue #7 milestone, not a claim of a completed enterprise
+directory service. Choose either a separate local SQLite database for one
+gateway process/host or the tenant-isolated PostgreSQL adapter for a shared
+deployment. PostgreSQL shared state is covered by a real, disposable database
+proof of CRUD, generic OIDC resolution, collision denial, denied raw routing
+table access, and session revocation. HA, SCIM certification, real-IdP
+conformance, SCIM bulk/filtering, KMS, and immutable external audit remain open
+gates.
 
 ## What is governed
 
@@ -25,7 +27,10 @@ The directory stores only identity and authorization metadata:
 
 It does **not** store prompts, responses, code, provider keys, OIDC bearer
 tokens, or static workload secrets. Directory data is still employee metadata,
-so restrict SQLite-file and administrator access accordingly.
+so restrict database/file and administrator access accordingly. In PostgreSQL
+mode, the only cross-tenant lookup relation contains HMAC tags of issuer and
+subject, never their plaintext values; the runtime cannot read that relation
+directly and can use only exact-tag security-definer functions.
 
 Dynamic directory identities take precedence over a matching configured
 `(issuer, subject)` mapping. An inactive user, inactive workload, removed group
@@ -82,9 +87,42 @@ principal. Replace or remove that credential through the normal configuration
 rollout after a least-privileged federated directory administrator is working.
 It is break-glass only, not a workload credential pattern.
 
-The directory database must differ from the usage, context, and SQLite session
-databases. `hormuz --config /etc/hormuz/hormuz.json doctor` validates the
-configuration and OIDC metadata before the service starts.
+The SQLite directory database must differ from the usage, context, and SQLite
+session databases. `hormuz --config /etc/hormuz/hormuz.json doctor` validates
+the configuration and OIDC metadata before the service starts.
+
+### Shared PostgreSQL mode
+
+For a shared deployment, first migrate the schema and synchronize the
+deployment-owned bootstrap identity state. Set a distinct, random 32-byte
+base64url routing secret in the process environment; it is used only to make
+opaque routing tags and is not stored by Hormuz.
+
+```bash
+hormuz storage migrate
+hormuz --config /etc/hormuz/hormuz.json identities sync
+export HORMUZ_DIRECTORY_ROUTING_KEY='injected-by-your-secret-manager'
+```
+
+```json
+{
+  "usage_storage": {"backend": "postgresql"},
+  "authentication": {
+    "directory": {
+      "enabled": true,
+      "backend": "postgresql",
+      "routing_key_env": "HORMUZ_DIRECTORY_ROUTING_KEY"
+    }
+  }
+}
+```
+
+The PostgreSQL directory uses the same configured `usage_storage` DSN, schema,
+and non-owner runtime role. It intentionally rejects a separate directory DSN:
+tenant lifecycle, session revocation, and policy enforcement must share the
+same RLS boundary. It does not grant the runtime direct writes to deployment
+identity tables; a narrowly scoped security-definer projection function accepts
+only an existing managed User or Workload in the already-bound tenant.
 
 ## SCIM surface
 
@@ -169,6 +207,14 @@ two teams is denied rather than assigned a guessed scope. Moving a group to a
 new team is therefore an optimistic-concurrency update with a new ETag, not a
 silent reassignment.
 
+Group mappings govern the identity's effective team, clearance, client, and
+capability scope immediately. A configuration-owned team policy overlay is
+applied only when that team is already bound to exactly one organization in the
+deployment configuration; otherwise the group receives the organization's
+policy. Hormuz deliberately does not accept an arbitrary new SCIM `teamId` as
+a cross-tenant policy key. Tenant-qualified dynamic team-policy bindings are a
+remaining #7 design and implementation gate.
+
 ## Federated workload identities
 
 Workloads are intentionally separate from SCIM people/groups. They are
@@ -204,8 +250,9 @@ short-lived OIDC workload token in CI or a connector instead.
 
 ## Rollout and incident procedure
 
-1. Enable the directory with a separate database and one least-privileged
-   bootstrap `identity_admin`.
+1. Choose the local SQLite adapter for one host, or migrate PostgreSQL and set
+   its routing-key environment variable for a shared deployment. Keep one
+   least-privileged bootstrap `identity_admin`.
 2. Configure and preflight the OIDC issuer; keep its audience and signing
    policy separate from the browser-login client.
 3. Create an empty group mapping first, then users and memberships, and test a
@@ -217,10 +264,11 @@ short-lived OIDC workload token in CI or a connector instead.
    the membership. The next gateway request denies the identity; a session
    broker also eagerly revokes matching browser-session families.
 6. Rotate or remove the bootstrap credential after testing a federated
-   `identity_admin`; audit local directory ownership and back it up according
-   to the organization's employee-data policy.
+   `identity_admin`; audit directory ownership and back it up according to the
+   organization's employee-data policy.
 
-The local lifecycle log is not an immutable audit sink and does not replace
-IdP, HR, or SIEM records. PostgreSQL shared-directory migration, SCIM vendor
-testing, service-account token exchange, retention/legal-hold, and multi-node
-revocation are deliberately not represented as complete by this document.
+The directory lifecycle log is not an immutable audit sink and does not replace
+IdP, HR, or SIEM records. SCIM vendor testing, service-account token exchange,
+retention/legal-hold, KMS custody/rotation, pooling/HA, backup/PITR, and
+independent review are deliberately not represented as complete by this
+document.

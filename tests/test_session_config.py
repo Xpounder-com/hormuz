@@ -222,6 +222,38 @@ class SessionConfigurationTests(unittest.TestCase):
         with self.assertRaisesRegex(ConfigError, "requires at least one configured OIDC issuer"):
             self._load()
 
+    def test_postgresql_directory_uses_a_distinct_keyed_routing_secret(self) -> None:
+        self.raw["usage_storage"] = {
+            "backend": "postgresql",
+            "postgres_dsn_env": "HORMUZ_POSTGRES_DSN",
+        }
+        self.raw["authentication"].pop("session_broker")
+        self.raw["authentication"]["directory"] = {
+            "enabled": True,
+            "backend": "postgresql",
+            "routing_key_env": "DIRECTORY_ROUTING_KEY",
+        }
+        self.raw["authentication"]["oidc"]["issuers"][0]["subjects"] = []
+        self.environ["DIRECTORY_ROUTING_KEY"] = base64.urlsafe_b64encode(
+            b"directory-routing-key-test-value"[:32].ljust(32, b"d")
+        ).decode("ascii")
+        config = self._load()
+        self.assertTrue(config.directory.enabled)
+        self.assertEqual(config.directory.backend, "postgresql")
+        self.assertIsNone(config.directory.database_path)
+        self.assertEqual(config.directory.routing_key_env, "DIRECTORY_ROUTING_KEY")
+        self.assertEqual(len(config.directory.routing_key), 32)
+        self.assertNotIn(self.environ["DIRECTORY_ROUTING_KEY"], repr(config))
+
+        self.environ.pop("DIRECTORY_ROUTING_KEY")
+        with self.assertRaisesRegex(ConfigError, "Required directory routing key"):
+            self._load()
+
+        self.raw["usage_storage"] = {"backend": "sqlite"}
+        self.environ["DIRECTORY_ROUTING_KEY"] = base64.urlsafe_b64encode(b"d" * 32).decode("ascii")
+        with self.assertRaisesRegex(ConfigError, "requires usage_storage.backend postgresql"):
+            self._load()
+
     def test_configured_oidc_identity_type_is_explicit_and_checked(self) -> None:
         subject = self.raw["authentication"]["oidc"]["issuers"][0]["subjects"][0]
         subject["identity_type"] = "ci"

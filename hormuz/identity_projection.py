@@ -220,7 +220,12 @@ def sync_identity_projection(
                         "principal.authorization_version, principal.disabled_at "
                         "FROM principals AS principal LEFT JOIN "
                         "gateway_principal_projections AS projection USING (tenant_id, principal_id) "
-                        "WHERE principal.tenant_id = %s FOR UPDATE OF principal",
+                        "LEFT JOIN gateway_directory_resources AS directory_resource "
+                        "ON directory_resource.tenant_id = principal.tenant_id "
+                        "AND directory_resource.resource_id = principal.principal_id "
+                        "AND directory_resource.resource_type IN ('User', 'Workload') "
+                        "WHERE principal.tenant_id = %s "
+                        "AND directory_resource.resource_id IS NULL FOR UPDATE OF principal",
                         (organization_id,),
                     )
                     existing = {
@@ -291,7 +296,11 @@ def sync_identity_projection(
                         )
 
                     cursor.execute(
-                        "DELETE FROM external_identities WHERE tenant_id = %s",
+                        "DELETE FROM external_identities AS external WHERE external.tenant_id = %s "
+                        "AND NOT EXISTS (SELECT 1 FROM gateway_directory_resources AS directory_resource "
+                        "WHERE directory_resource.tenant_id = external.tenant_id "
+                        "AND directory_resource.resource_id = external.principal_id "
+                        "AND directory_resource.resource_type IN ('User', 'Workload'))",
                         (organization_id,),
                     )
                     for item in projection["subjects"]:  # type: ignore[index]
