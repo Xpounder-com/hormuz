@@ -1,6 +1,6 @@
 # Usage, cost, and budget reporting
 
-Hormuz records one metadata-only usage event for each accounted generation attempt. The event snapshots the actor and team at request time, the client, provider protocol, requested and routed model, policy outcome, provider-reported token categories, configured-rate-card cost estimate, status, provider request ID, and secret-redaction count. Prompt and response bodies are not stored.
+Hormuz records one metadata-only usage event for each accounted generation attempt. The event snapshots the organization, actor, team, identity type, authentication source, and policy version at request time; the client, provider protocol, requested/routed/provider-reported model; policy outcome; provider-reported token categories; configured-rate-card cost estimate; status; provider request ID; and secret-redaction count. Prompt and response bodies are not stored.
 
 ## CLI reports
 
@@ -34,9 +34,11 @@ Use JSON for scripts, exports, or a future dashboard:
 hormuz --config hormuz.json status --group-by person --json
 ```
 
+The JSON command emits `hormuz.usage-report` v1. Its `rows` array contains the usage rows; the envelope declares the UTC month, grouping/filter selection, cost basis, allocation basis, and coverage. See [CONTRACTS.md](CONTRACTS.md) before integrating it into a script.
+
 ## Field semantics
 
-- `requests`, `succeeded`, `failed`, and `denied` describe gateway outcomes.
+- `requests`, `succeeded`, `failed`, `denied`, and `rate_limited` describe gateway outcomes. `rate_limited` means an upstream provider returned HTTP 429 after Hormuz allowed the request.
 - `input_tokens` and `output_tokens` come from the provider response.
 - `cache_read_tokens`, `cache_write_tokens`, and `reasoning_tokens` are shown separately when the provider exposes them. Some are subcategories of input or output, so Hormuz does not add them again to `total_tokens`.
 - `total_tokens` is input plus output tokens.
@@ -45,7 +47,7 @@ hormuz --config hormuz.json status --group-by person --json
 - `redactions` counts transformations attached to accounted generation events. The separate secret-event ledger also covers non-generation endpoints.
 - `budget_usd`, `budget_remaining_usd`, and `budget_used_percent` appear for organization, team, and person scopes when a corresponding cap is configured.
 
-Cost is an estimate based on the rate card attached to the routed model in the active Hormuz configuration. Provider prices, discounts, credits, cache rules, and invoice adjustments can change. Production reporting must version rate cards and reconcile estimates against provider invoices before calling spend final.
+Cost is an estimate based on the rate card attached to the routed model in the active Hormuz configuration. The precise contract labels are `configured_rate_card_estimate`, `direct_gateway_request`, and `gateway_captured_requests_only`. Provider prices, discounts, credits, cache rules, and invoice adjustments can change. Production reporting must version rate cards and reconcile estimates against provider invoices before calling spend final.
 
 ## Concurrent budget enforcement
 

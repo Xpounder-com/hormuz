@@ -15,12 +15,14 @@ class PolicyDecision:
     resolved_alias: str | None
     route: ModelRoute | None
     max_output_tokens: int | None
+    policy_version: str
 
 
 class PolicyEngine:
     def __init__(self, config: GatewayConfig, store: UsageStore):
         self.config = config
         self.store = store
+        self.policy_version = config.policy_version
 
     def evaluate(
         self,
@@ -77,6 +79,7 @@ class PolicyEngine:
             resolved_alias=selected_alias,
             route=route,
             max_output_tokens=output_cap,
+            policy_version=self.policy_version,
         )
 
     def reserve_budget(
@@ -154,8 +157,7 @@ class PolicyEngine:
                 return self._deny(requested_model, "The employee monthly AI budget has been reached.")
         return None
 
-    @staticmethod
-    def _deny(requested_model: str, reason: str) -> PolicyDecision:
+    def _deny(self, requested_model: str, reason: str) -> PolicyDecision:
         return PolicyDecision(
             allowed=False,
             action="denied",
@@ -164,6 +166,7 @@ class PolicyEngine:
             resolved_alias=None,
             route=None,
             max_output_tokens=None,
+            policy_version=self.policy_version,
         )
 
 

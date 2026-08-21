@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -66,6 +67,7 @@ class Identity:
     allowed_clients: tuple[str, ...] = ()
     organization_id: str = "organization"
     clearance: str = "internal"
+    identity_type: str = "human"
     authentication_source: str = "static"
 
 
@@ -233,6 +235,7 @@ class GatewayConfig:
                 allowed_clients=_string_tuple(item.get("allowed_clients", []), f"{prefix}.allowed_clients"),
                 organization_id=_string(item.get("organization_id", "organization"), f"{prefix}.organization_id"),
                 clearance=_classification(item.get("clearance", "internal"), f"{prefix}.clearance"),
+                identity_type=_identity_type(item.get("identity_type", "human"), f"{prefix}.identity_type"),
             )
             identities_by_token[token] = identity
 
@@ -331,6 +334,10 @@ class GatewayConfig:
                     clearance=_classification(
                         subject_item.get("clearance", "internal"),
                         f"{subject_prefix}.clearance",
+                    ),
+                    identity_type=_identity_type(
+                        subject_item.get("identity_type", "human"),
+                        f"{subject_prefix}.identity_type",
                     ),
                     authentication_source=f"oidc:{issuer}",
                 )
@@ -439,6 +446,61 @@ class GatewayConfig:
             .overlaid(self.actor_policies.get(identity.actor_id))
         )
 
+    @property
+    def policy_version(self) -> str:
+        """Return a content-free fingerprint of the active local policy projection.
+
+        This is deliberately a local-configuration version.  Issue #21 replaces
+        it with immutable server-side policy versions and activation history.
+        """
+
+        payload = {
+            "identities": {
+                "static": [
+                    _identity_policy_payload(identity)
+                    for identity in sorted(self.identities_by_token.values(), key=lambda item: item.actor_id)
+                ],
+                "oidc": [
+                    {
+                        "issuer": issuer,
+                        "subject": subject,
+                        **_identity_policy_payload(identity),
+                    }
+                    for (issuer, subject), identity in sorted(self.identities_by_subject.items())
+                ],
+            },
+            "model_routes": {
+                alias: {
+                    "protocol": route.protocol,
+                    "upstream_model": route.upstream_model,
+                    "input_cost_per_million": route.input_cost_per_million,
+                    "cache_read_cost_per_million": route.cache_read_cost_per_million,
+                    "cache_write_cost_per_million": route.cache_write_cost_per_million,
+                    "output_cost_per_million": route.output_cost_per_million,
+                }
+                for alias, route in sorted(self.model_routes.items())
+            },
+            "policies": {
+                "organization": _policy_payload(self.organization_policy),
+                "teams": {name: _policy_payload(policy) for name, policy in sorted(self.team_policies.items())},
+                "actors": {name: _policy_payload(policy) for name, policy in sorted(self.actor_policies.items())},
+            },
+            "upstream_controls": {
+                protocol: {
+                    "allow_response_storage": upstream.allow_response_storage,
+                    "allow_background": upstream.allow_background,
+                }
+                for protocol, upstream in sorted(self.upstreams.items())
+            },
+            "secret_controls": {
+                "mode": self.secret_controls.mode,
+                "builtins": self.secret_controls.builtins,
+                "custom_secret_envs": sorted(self.secret_controls.custom_secret_envs),
+            },
+        }
+        canonical = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        return f"local-config-{hashlib.sha256(canonical).hexdigest()[:16]}"
+
 
 def _policy(value: Any, path: str) -> Policy:
     item = _object(value, path)
@@ -454,6 +516,30 @@ def _policy(value: Any, path: str) -> Policy:
             item.get("per_actor_monthly_budget_usd"), f"{path}.per_actor_monthly_budget_usd"
         ),
     )
+
+
+def _policy_payload(policy: Policy) -> dict[str, object]:
+    return {
+        "allowed_clients": list(policy.allowed_clients) if policy.allowed_clients is not None else None,
+        "allowed_models": list(policy.allowed_models) if policy.allowed_models is not None else None,
+        "fallback_model": policy.fallback_model,
+        "fallback_models": dict(sorted((policy.fallback_models or {}).items())),
+        "max_output_tokens": policy.max_output_tokens,
+        "monthly_token_limit": policy.monthly_token_limit,
+        "monthly_budget_usd": policy.monthly_budget_usd,
+        "per_actor_monthly_budget_usd": policy.per_actor_monthly_budget_usd,
+    }
+
+
+def _identity_policy_payload(identity: Identity) -> dict[str, object]:
+    return {
+        "actor_id": identity.actor_id,
+        "team_id": identity.team_id,
+        "organization_id": identity.organization_id,
+        "identity_type": identity.identity_type,
+        "allowed_clients": list(identity.allowed_clients),
+        "authentication_source": identity.authentication_source,
+    }
 
 
 def _reject_deprecated_context_configuration(raw: dict[str, Any]) -> None:
@@ -533,6 +619,13 @@ def _classification(value: Any, path: str) -> str:
     return result
 
 
+def _identity_type(value: Any, path: str) -> str:
+    result = _string(value, path)
+    if result not in {"human", "service_account", "ci", "connector"}:
+        raise ConfigError(f"{path} must be human, service_account, ci, or connector")
+    return result
+
+
 def _validate_oidc_transport(
     *,
     issuer: str,
@@ -566,6 +659,7 @@ def _validate_identity_consistency(identities: tuple[Identity, ...]) -> None:
             "allowed_clients",
             "organization_id",
             "clearance",
+            "identity_type",
         )
         if any(getattr(existing, name) != getattr(identity, name) for name in fields):
             raise ConfigError(

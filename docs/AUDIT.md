@@ -29,16 +29,19 @@ Hormuz writes the event count and the SHA-256 checksum of the exact JSONL bytes 
 shasum -a 256 hormuz-audit.jsonl
 ```
 
-## Schema version 1
+## Schema version 2
 
-Every line is one JSON object containing:
+Every newly exported line is a `hormuz.audit-event` version `2` JSON object containing:
 
-- `schema_version`: currently `1`.
+- `schema_id`: `hormuz.audit-event`.
+- `schema_version`: currently `2`.
 - `event_type`: `usage` or `security.secret`.
 - `id` and `occurred_at`: the event identifier and UTC occurrence time.
-- event-time actor, team, client, protocol, model, policy, status, token, cost, provider-request, and redaction metadata when applicable.
+- event-time organization, actor, team, identity type, authentication source, client, protocol, requested/routed/provider-reported model, policy version and outcome, status, token, cost basis, allocation basis, coverage, provider-request, and redaction metadata when applicable.
 
 Array fields such as `redaction_rules` and `rules` are emitted as JSON arrays. Events are ordered by occurrence time and ID, and object keys are serialized deterministically. The store snapshots actor and team names on each request, so administrators should treat audit files as access-controlled employee metadata even though request content is absent.
+
+Version 1 files remain readable by the contract validator for historical compatibility, but Hormuz no longer emits them. In v2, the old `upstream_model` field is named `routed_model`; v2 also makes the identity, policy-version, provider-reported-model, cost/allocation, and coverage boundaries explicit. See [CONTRACTS.md](CONTRACTS.md) for the manifest, strict validation rules, and migration boundary.
 
 ## Security boundary
 

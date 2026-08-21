@@ -14,6 +14,15 @@ from urllib.parse import urlparse
 
 from .auth import AuthenticationError, Authenticator
 from .config import ConfigError, GatewayConfig
+from .contracts import (
+    ALLOCATION_BASIS_DIRECT_GATEWAY_REQUEST,
+    COST_BASIS_CONFIGURED_RATE_CARD_ESTIMATE,
+    COVERAGE_GATEWAY_CAPTURED_REQUESTS_ONLY,
+    POLICY_DECISION_SCHEMA_ID,
+    USAGE_REPORT_SCHEMA_ID,
+    contract_envelope,
+    contract_manifest,
+)
 from .policy import PolicyEngine
 from .server import GatewayServer
 from .store import UsageStore
@@ -38,6 +47,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers.add_parser("serve", help="Run the OpenAI Responses and Anthropic Messages gateway")
     subparsers.add_parser("doctor", help="Validate configuration and required credentials")
+    subparsers.add_parser("contract-manifest", help="Print the stable policy and evidence schema manifest")
     status = subparsers.add_parser("status", help="Print a current-month usage and cost report")
     status.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
     status.add_argument(
@@ -96,6 +106,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     if args.command == "auth" and args.auth_command == "token":
         return _auth_token(args.env)
+    if args.command == "contract-manifest":
+        print(json.dumps(contract_manifest(), indent=2, sort_keys=True))
+        return 0
     try:
         config = GatewayConfig.load(args.config)
         if args.command == "serve":
@@ -232,13 +245,29 @@ def _status(config: GatewayConfig, args: argparse.Namespace) -> int:
             }
         )
     if args.json:
-        print(json.dumps(report, indent=2))
+        print(
+            json.dumps(
+                contract_envelope(
+                    USAGE_REPORT_SCHEMA_ID,
+                    {
+                        "month": "current",
+                        "group_by": args.group_by,
+                        "filters": {"actor_id": args.actor, "team_id": args.team},
+                        "cost_basis": COST_BASIS_CONFIGURED_RATE_CARD_ESTIMATE,
+                        "allocation_basis": ALLOCATION_BASIS_DIRECT_GATEWAY_REQUEST,
+                        "coverage": COVERAGE_GATEWAY_CAPTURED_REQUESTS_ONLY,
+                        "rows": report,
+                    },
+                ),
+                indent=2,
+            )
+        )
         return 0
     if not report:
         print("No Hormuz requests recorded this month.")
         return 0
     print(
-        "SCOPE_ID\tSCOPE_NAME\tTEAM\tPROVIDER\tCLIENT\tREQUESTS\tSUCCEEDED\tFAILED\tDENIED\t"
+        "SCOPE_ID\tSCOPE_NAME\tTEAM\tPROVIDER\tCLIENT\tREQUESTS\tSUCCEEDED\tFAILED\tDENIED\tRATE_LIMITED\t"
         "INPUT\tOUTPUT\tCACHE_READ\tCACHE_WRITE\tREASONING\tTOTAL\tCOST_USD\tBUDGET_USD\t"
         "REMAINING_USD\tBUDGET_USED_PCT\tACTORS\tREDACTIONS"
     )
@@ -246,7 +275,7 @@ def _status(config: GatewayConfig, args: argparse.Namespace) -> int:
         print(
             f"{row['scope_id']}\t{row['scope_name']}\t{row.get('team_name', '-')}\t"
             f"{row.get('protocol', '-')}\t{row.get('client', '-')}\t{row['requests']}\t"
-            f"{row['succeeded']}\t{row['failed']}\t{row['denied']}\t{row['input_tokens']}\t"
+            f"{row['succeeded']}\t{row['failed']}\t{row['denied']}\t{row['rate_limited']}\t{row['input_tokens']}\t"
             f"{row['output_tokens']}\t{row['cache_read_tokens']}\t{row['cache_write_tokens']}\t"
             f"{row['reasoning_tokens']}\t{row['total_tokens']}\t{row['cost_usd']:.6f}\t"
             f"{_display_number(row['budget_usd'])}\t{_display_number(row['budget_remaining_usd'])}\t"
@@ -313,15 +342,19 @@ def _policy_check(config: GatewayConfig, args: argparse.Namespace) -> int:
     )
     print(
         json.dumps(
-            {
-                "allowed": decision.allowed,
-                "action": decision.action,
-                "reason": decision.reason,
-                "requested_model": decision.requested_model,
-                "resolved_alias": decision.resolved_alias,
-                "upstream_model": decision.route.upstream_model if decision.route else None,
-                "max_output_tokens": decision.max_output_tokens,
-            },
+            contract_envelope(
+                POLICY_DECISION_SCHEMA_ID,
+                {
+                    "allowed": decision.allowed,
+                    "action": decision.action,
+                    "reason": decision.reason,
+                    "requested_model": decision.requested_model,
+                    "resolved_alias": decision.resolved_alias,
+                    "routed_model": decision.route.upstream_model if decision.route else None,
+                    "max_output_tokens": decision.max_output_tokens,
+                    "policy_version": decision.policy_version,
+                },
+            ),
             indent=2,
         )
     )

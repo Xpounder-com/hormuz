@@ -7,6 +7,7 @@ import unittest
 from pathlib import Path
 
 from hormuz.config import Identity
+from hormuz.contracts import validate_audit_event
 from hormuz.store import ReservationDenied, ReservationScope, UsageStore
 
 
@@ -93,8 +94,26 @@ class UsageStoreMigrationTests(unittest.TestCase):
 
             audit = store.audit_events(since="2000-01-01T00:00:00+00:00")
             self.assertEqual([event["event_type"] for event in audit], ["usage", "security.secret"])
+            self.assertEqual([event["schema_version"] for event in audit], [2, 2])
+            self.assertEqual(audit[0]["schema_id"], "hormuz.audit-event")
             self.assertEqual(audit[0]["redaction_rules"], ["openai_api_key"])
             self.assertEqual(audit[1]["rules"], ["openai_api_key"])
+            self.assertEqual(audit[0]["organization_id"], "organization")
+            self.assertEqual(audit[0]["identity_type"], "human")
+            self.assertEqual(audit[0]["cost_basis"], "configured_rate_card_estimate")
+            self.assertIsNone(audit[0]["provider_reported_model"])
+            validate_audit_event(audit[0])
+            validate_audit_event(audit[1])
+            connection = sqlite3.connect(path)
+            usage_schema = connection.execute(
+                "SELECT evidence_schema_id, evidence_schema_version FROM gateway_usage_events"
+            ).fetchone()
+            secret_schema = connection.execute(
+                "SELECT evidence_schema_id, evidence_schema_version FROM gateway_secret_events"
+            ).fetchone()
+            connection.close()
+            self.assertEqual(usage_schema, ("hormuz.audit-event", 2))
+            self.assertEqual(secret_schema, ("hormuz.audit-event", 2))
             self.assertNotIn("prompt", audit[0])
             self.assertNotIn("response", audit[0])
             self.assertNotIn("matched_value", audit[1])

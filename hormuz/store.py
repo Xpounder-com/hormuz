@@ -10,12 +10,23 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from .config import Identity
+from .contracts import (
+    ALLOCATION_BASIS_DIRECT_GATEWAY_REQUEST,
+    AUDIT_EVENT_SCHEMA_ID,
+    AUDIT_EVENT_SCHEMA_VERSION,
+    COST_BASIS_CONFIGURED_RATE_CARD_ESTIMATE,
+    COVERAGE_GATEWAY_CAPTURED_REQUESTS_ONLY,
+    validate_audit_event,
+    validate_policy_action,
+    validate_request_status,
+)
 
 
 @dataclass(frozen=True)
 class MonthlyTotals:
     requests: int = 0
     denied_requests: int = 0
+    rate_limited_requests: int = 0
     input_tokens: int = 0
     output_tokens: int = 0
     cache_read_tokens: int = 0
@@ -83,15 +94,22 @@ class UsageStore:
                 CREATE TABLE IF NOT EXISTS gateway_usage_events (
                     id TEXT PRIMARY KEY,
                     occurred_at TEXT NOT NULL,
+                    evidence_schema_id TEXT NOT NULL DEFAULT 'hormuz.audit-event',
+                    evidence_schema_version INTEGER NOT NULL DEFAULT 2,
+                    organization_id TEXT NOT NULL DEFAULT 'organization',
                     actor_id TEXT NOT NULL,
                     actor_name TEXT NOT NULL,
                     team_id TEXT NOT NULL,
                     team_name TEXT NOT NULL,
+                    identity_type TEXT NOT NULL DEFAULT 'human',
+                    authentication_source TEXT NOT NULL DEFAULT 'static',
                     client TEXT NOT NULL,
                     protocol TEXT NOT NULL,
                     requested_model TEXT NOT NULL,
                     resolved_alias TEXT,
                     upstream_model TEXT,
+                    provider_reported_model TEXT,
+                    policy_version TEXT NOT NULL DEFAULT 'legacy-unversioned',
                     policy_action TEXT NOT NULL,
                     status TEXT NOT NULL,
                     input_tokens INTEGER NOT NULL DEFAULT 0,
@@ -100,6 +118,9 @@ class UsageStore:
                     cache_write_tokens INTEGER NOT NULL DEFAULT 0,
                     reasoning_tokens INTEGER NOT NULL DEFAULT 0,
                     cost_microusd INTEGER NOT NULL DEFAULT 0,
+                    cost_basis TEXT NOT NULL DEFAULT 'configured_rate_card_estimate',
+                    allocation_basis TEXT NOT NULL DEFAULT 'direct_gateway_request',
+                    coverage TEXT NOT NULL DEFAULT 'gateway_captured_requests_only',
                     provider_request_id TEXT,
                     redaction_count INTEGER NOT NULL DEFAULT 0,
                     redaction_rules TEXT NOT NULL DEFAULT '[]'
@@ -113,13 +134,20 @@ class UsageStore:
                 CREATE TABLE IF NOT EXISTS gateway_secret_events (
                     id TEXT PRIMARY KEY,
                     occurred_at TEXT NOT NULL,
+                    evidence_schema_id TEXT NOT NULL DEFAULT 'hormuz.audit-event',
+                    evidence_schema_version INTEGER NOT NULL DEFAULT 2,
+                    organization_id TEXT NOT NULL DEFAULT 'organization',
                     actor_id TEXT NOT NULL,
                     actor_name TEXT NOT NULL,
                     team_id TEXT NOT NULL,
                     team_name TEXT NOT NULL,
+                    identity_type TEXT NOT NULL DEFAULT 'human',
+                    authentication_source TEXT NOT NULL DEFAULT 'static',
                     client TEXT NOT NULL,
                     protocol TEXT NOT NULL,
                     requested_model TEXT NOT NULL,
+                    policy_version TEXT NOT NULL DEFAULT 'legacy-unversioned',
+                    coverage TEXT NOT NULL DEFAULT 'gateway_captured_requests_only',
                     action TEXT NOT NULL,
                     detection_count INTEGER NOT NULL,
                     rules TEXT NOT NULL
@@ -147,18 +175,48 @@ class UsageStore:
                     ON gateway_budget_reservations(team_id, expires_at);
                 """
             )
-            columns = {
-                row["name"]
-                for row in connection.execute("PRAGMA table_info(gateway_usage_events)").fetchall()
-            }
-            if "redaction_count" not in columns:
-                connection.execute(
-                    "ALTER TABLE gateway_usage_events ADD COLUMN redaction_count INTEGER NOT NULL DEFAULT 0"
-                )
-            if "redaction_rules" not in columns:
-                connection.execute(
-                    "ALTER TABLE gateway_usage_events ADD COLUMN redaction_rules TEXT NOT NULL DEFAULT '[]'"
-                )
+            self._add_missing_columns(
+                connection,
+                "gateway_usage_events",
+                {
+                    "evidence_schema_id": "TEXT NOT NULL DEFAULT 'hormuz.audit-event'",
+                    "evidence_schema_version": "INTEGER NOT NULL DEFAULT 2",
+                    "organization_id": "TEXT NOT NULL DEFAULT 'organization'",
+                    "identity_type": "TEXT NOT NULL DEFAULT 'human'",
+                    "authentication_source": "TEXT NOT NULL DEFAULT 'static'",
+                    "provider_reported_model": "TEXT",
+                    "policy_version": "TEXT NOT NULL DEFAULT 'legacy-unversioned'",
+                    "cost_basis": "TEXT NOT NULL DEFAULT 'configured_rate_card_estimate'",
+                    "allocation_basis": "TEXT NOT NULL DEFAULT 'direct_gateway_request'",
+                    "coverage": "TEXT NOT NULL DEFAULT 'gateway_captured_requests_only'",
+                    "redaction_count": "INTEGER NOT NULL DEFAULT 0",
+                    "redaction_rules": "TEXT NOT NULL DEFAULT '[]'",
+                },
+            )
+            self._add_missing_columns(
+                connection,
+                "gateway_secret_events",
+                {
+                    "evidence_schema_id": "TEXT NOT NULL DEFAULT 'hormuz.audit-event'",
+                    "evidence_schema_version": "INTEGER NOT NULL DEFAULT 2",
+                    "organization_id": "TEXT NOT NULL DEFAULT 'organization'",
+                    "identity_type": "TEXT NOT NULL DEFAULT 'human'",
+                    "authentication_source": "TEXT NOT NULL DEFAULT 'static'",
+                    "policy_version": "TEXT NOT NULL DEFAULT 'legacy-unversioned'",
+                    "coverage": "TEXT NOT NULL DEFAULT 'gateway_captured_requests_only'",
+                },
+            )
+
+    @staticmethod
+    def _add_missing_columns(
+        connection: sqlite3.Connection,
+        table: str,
+        columns: dict[str, str],
+    ) -> None:
+        existing = {row["name"] for row in connection.execute(f"PRAGMA table_info({table})").fetchall()}
+        for name, declaration in columns.items():
+            if name not in existing:
+                connection.execute(f"ALTER TABLE {table} ADD COLUMN {name} {declaration}")
 
     def record(
         self,
@@ -169,6 +227,8 @@ class UsageStore:
         requested_model: str,
         resolved_alias: str | None,
         upstream_model: str | None,
+        provider_reported_model: str | None = None,
+        policy_version: str = "legacy-unversioned",
         policy_action: str,
         status: str,
         input_tokens: int = 0,
@@ -177,34 +237,50 @@ class UsageStore:
         cache_write_tokens: int = 0,
         reasoning_tokens: int = 0,
         cost_microusd: int = 0,
+        cost_basis: str = COST_BASIS_CONFIGURED_RATE_CARD_ESTIMATE,
+        allocation_basis: str = ALLOCATION_BASIS_DIRECT_GATEWAY_REQUEST,
+        coverage: str = COVERAGE_GATEWAY_CAPTURED_REQUESTS_ONLY,
         provider_request_id: str | None = None,
         redaction_count: int = 0,
         redaction_rules: tuple[str, ...] = (),
     ) -> str:
+        validate_policy_action(policy_action)
+        validate_request_status(status)
         event_id = str(uuid.uuid4())
         with self._lock, self._connection() as connection:
             connection.execute(
                 """
                 INSERT INTO gateway_usage_events (
-                    id, occurred_at, actor_id, actor_name, team_id, team_name, client, protocol,
-                    requested_model, resolved_alias, upstream_model, policy_action, status,
+                    id, occurred_at, evidence_schema_id, evidence_schema_version,
+                    organization_id, actor_id, actor_name, team_id, team_name,
+                    identity_type, authentication_source, client, protocol, requested_model,
+                    resolved_alias, upstream_model, provider_reported_model, policy_version,
+                    policy_action, status,
                     input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
-                    reasoning_tokens, cost_microusd, provider_request_id, redaction_count,
+                    reasoning_tokens, cost_microusd, cost_basis, allocation_basis, coverage,
+                    provider_request_id, redaction_count,
                     redaction_rules
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     event_id,
                     datetime.now(timezone.utc).isoformat(),
+                    AUDIT_EVENT_SCHEMA_ID,
+                    AUDIT_EVENT_SCHEMA_VERSION,
+                    identity.organization_id,
                     identity.actor_id,
                     identity.actor_name,
                     identity.team_id,
                     identity.team_name,
+                    identity.identity_type,
+                    identity.authentication_source,
                     client,
                     protocol,
                     requested_model,
                     resolved_alias,
                     upstream_model,
+                    provider_reported_model,
+                    policy_version,
                     policy_action,
                     status,
                     max(0, input_tokens),
@@ -213,6 +289,9 @@ class UsageStore:
                     max(0, cache_write_tokens),
                     max(0, reasoning_tokens),
                     max(0, cost_microusd),
+                    cost_basis,
+                    allocation_basis,
+                    coverage,
                     provider_request_id,
                     max(0, redaction_count),
                     json.dumps(sorted(set(redaction_rules)), separators=(",", ":")),
@@ -227,6 +306,8 @@ class UsageStore:
         client: str,
         protocol: str,
         requested_model: str,
+        policy_version: str = "legacy-unversioned",
+        coverage: str = COVERAGE_GATEWAY_CAPTURED_REQUESTS_ONLY,
         action: str,
         detection_count: int,
         rules: tuple[str, ...],
@@ -238,20 +319,29 @@ class UsageStore:
             connection.execute(
                 """
                 INSERT INTO gateway_secret_events (
-                    id, occurred_at, actor_id, actor_name, team_id, team_name,
-                    client, protocol, requested_model, action, detection_count, rules
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    id, occurred_at, evidence_schema_id, evidence_schema_version,
+                    organization_id, actor_id, actor_name, team_id, team_name,
+                    identity_type, authentication_source, client, protocol, requested_model,
+                    policy_version, coverage, action, detection_count, rules
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     event_id,
                     datetime.now(timezone.utc).isoformat(),
+                    AUDIT_EVENT_SCHEMA_ID,
+                    AUDIT_EVENT_SCHEMA_VERSION,
+                    identity.organization_id,
                     identity.actor_id,
                     identity.actor_name,
                     identity.team_id,
                     identity.team_name,
+                    identity.identity_type,
+                    identity.authentication_source,
                     client,
                     protocol,
                     requested_model,
+                    policy_version,
+                    coverage,
                     action,
                     max(0, detection_count),
                     json.dumps(sorted(set(rules)), separators=(",", ":")),
@@ -392,7 +482,8 @@ class UsageStore:
         query = f"""
             SELECT
                 COUNT(*) AS requests,
-                SUM(CASE WHEN status = 'denied' THEN 1 ELSE 0 END) AS denied_requests,
+                COALESCE(SUM(CASE WHEN status = 'denied' THEN 1 ELSE 0 END), 0) AS denied_requests,
+                COALESCE(SUM(CASE WHEN status = 'rate_limited' THEN 1 ELSE 0 END), 0) AS rate_limited_requests,
                 COALESCE(SUM(input_tokens), 0) AS input_tokens,
                 COALESCE(SUM(output_tokens), 0) AS output_tokens,
                 COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens,
@@ -491,6 +582,7 @@ class UsageStore:
                 COALESCE(SUM(CASE WHEN status = 'succeeded' THEN 1 ELSE 0 END), 0) AS succeeded,
                 COALESCE(SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END), 0) AS failed,
                 COALESCE(SUM(CASE WHEN status = 'denied' THEN 1 ELSE 0 END), 0) AS denied,
+                COALESCE(SUM(CASE WHEN status = 'rate_limited' THEN 1 ELSE 0 END), 0) AS rate_limited,
                 COALESCE(SUM(input_tokens), 0) AS input_tokens,
                 COALESCE(SUM(output_tokens), 0) AS output_tokens,
                 COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens,
@@ -547,11 +639,14 @@ class UsageStore:
                 rows = connection.execute(
                     """
                     SELECT
-                        id, occurred_at, actor_id, actor_name, team_id, team_name,
-                        client, protocol, requested_model, resolved_alias, upstream_model,
+                        id, occurred_at, evidence_schema_id, evidence_schema_version,
+                        organization_id, actor_id, actor_name, team_id, team_name,
+                        identity_type, authentication_source, client, protocol, requested_model,
+                        resolved_alias, upstream_model, provider_reported_model, policy_version,
                         policy_action, status, input_tokens, output_tokens,
                         cache_read_tokens, cache_write_tokens, reasoning_tokens,
-                        cost_microusd, provider_request_id, redaction_count,
+                        cost_microusd, cost_basis, allocation_basis, coverage,
+                        provider_request_id, redaction_count,
                         redaction_rules
                     FROM gateway_usage_events
                     WHERE occurred_at >= ?
@@ -560,21 +655,26 @@ class UsageStore:
                     (since,),
                 ).fetchall()
                 for row in rows:
-                    event = dict(row)
-                    event["redaction_rules"] = json.loads(str(event["redaction_rules"]))
-                    events.append(
-                        {
-                            "schema_version": 1,
-                            "event_type": "usage",
-                            **event,
-                        }
-                    )
+                    stored = dict(row)
+                    stored["redaction_rules"] = json.loads(str(stored["redaction_rules"]))
+                    event = {
+                        "schema_id": stored.pop("evidence_schema_id"),
+                        "schema_version": stored.pop("evidence_schema_version"),
+                        "event_type": "usage",
+                        **stored,
+                        "routed_model": stored["upstream_model"],
+                    }
+                    del event["upstream_model"]
+                    validate_audit_event(event)
+                    events.append(event)
             if kind in {"all", "security"}:
                 rows = connection.execute(
                     """
                     SELECT
-                        id, occurred_at, actor_id, actor_name, team_id, team_name,
-                        client, protocol, requested_model, action, detection_count, rules
+                        id, occurred_at, evidence_schema_id, evidence_schema_version,
+                        organization_id, actor_id, actor_name, team_id, team_name,
+                        identity_type, authentication_source, client, protocol, requested_model,
+                        policy_version, coverage, action, detection_count, rules
                     FROM gateway_secret_events
                     WHERE occurred_at >= ?
                     ORDER BY occurred_at, id
@@ -584,12 +684,13 @@ class UsageStore:
                 for row in rows:
                     event = dict(row)
                     event["rules"] = json.loads(str(event["rules"]))
-                    events.append(
-                        {
-                            "schema_version": 1,
-                            "event_type": "security.secret",
-                            **event,
-                        }
-                    )
+                    event = {
+                        "schema_id": event.pop("evidence_schema_id"),
+                        "schema_version": event.pop("evidence_schema_version"),
+                        "event_type": "security.secret",
+                        **event,
+                    }
+                    validate_audit_event(event)
+                    events.append(event)
         events.sort(key=lambda event: (str(event["occurred_at"]), str(event["id"])))
         return events
