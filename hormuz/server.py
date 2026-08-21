@@ -76,7 +76,10 @@ from .directory import (
 )
 from .postgres_directory import PostgresDirectoryStore
 from .policy import PolicyDecision, PolicyEngine
-from .provider_cache import inspect_explicit_cache_controls
+from .provider_cache import (
+    evaluate_provider_cache_request,
+    inspect_explicit_cache_controls,
+)
 from .identity_projection import configured_organization_ids, verify_runtime_identity_projection
 from .postgres import PostgresStorageError, postgres_dsn_from_env
 from .postgres_policy_store import PolicyAdminError, PostgresPolicyStore
@@ -4080,19 +4083,34 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         )
         cache_policy = runtime_config.resolved_policy(identity).provider_cache
         resolved_alias = decision.resolved_alias or decision.requested_model
-        cache_policy_is_restrictive = (
-            not cache_policy.explicit_requests_allowed
-            or cache_policy.allowed_clients is not None
-            or cache_policy.allowed_models is not None
+        cache_decision = evaluate_provider_cache_request(
+            policy=cache_policy,
+            capability=runtime_config.provider_cache_capabilities.get(
+                resolved_alias
+            ),
+            protocol=protocol,
+            upstream_model=decision.route.upstream_model,
+            operation=operation,
+            client=client,
+            model_alias=resolved_alias,
+            inspection=cache_inspection,
         )
-        cache_request_denied = (
-            cache_inspection.requested
-            and not cache_policy.allows(
-                client=client,
-                model_alias=resolved_alias,
+        if not cache_decision.allowed:
+            cache_policy_action = (
+                "provider_cache_disabled_denied"
+                if cache_policy.strict_no_cache_required
+                else "provider_cache_explicit_denied"
             )
-        ) or (not cache_inspection.complete and cache_policy_is_restrictive)
-        if cache_request_denied:
+            cache_error_code = (
+                "hormuz_provider_cache_disabled"
+                if cache_policy.strict_no_cache_required
+                else "hormuz_provider_cache_denied"
+            )
+            cache_error_message = (
+                "Organization policy requires a reviewed, client-supplied provider no-cache opt-out for this route."
+                if cache_policy.strict_no_cache_required
+                else "Organization policy does not allow explicit provider prompt-cache controls for this client or model."
+            )
             if account_usage:
                 self._record_timed_usage(
                     policy_latency_milliseconds=policy_latency_milliseconds,
@@ -4102,7 +4120,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                     requested_model=decision.requested_model,
                     resolved_alias=decision.resolved_alias,
                     upstream_model=decision.route.upstream_model,
-                    policy_action="provider_cache_explicit_denied",
+                    policy_action=cache_policy_action,
                     status="denied",
                     cost_basis="not_applicable",
                     currency=decision.route.currency,
@@ -4112,7 +4130,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                     context_lineage=context_lineage,
                 )
             LOGGER.info(
-                "provider_cache_explicit_denied actor=%s team=%s client=%s protocol=%s requested_model=%s routed_model=%s inspection_complete=%s",
+                "provider_cache_denied actor=%s team=%s client=%s protocol=%s requested_model=%s routed_model=%s inspection_complete=%s reason=%s",
                 identity.actor_id,
                 identity.team_id,
                 client,
@@ -4120,12 +4138,13 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 decision.requested_model,
                 decision.route.upstream_model,
                 cache_inspection.complete,
+                cache_decision.reason,
             )
             self._send_protocol_error(
                 protocol,
-                "Organization policy does not allow explicit provider prompt-cache controls for this client or model.",
+                cache_error_message,
                 HTTPStatus.FORBIDDEN,
-                code="hormuz_provider_cache_denied",
+                code=cache_error_code,
             )
             return
 
@@ -4179,7 +4198,9 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             policy_action = f"{policy_action}+redacted"
         if approval_authorized:
             policy_action = f"{policy_action}+dlp-approved"
-        if cache_inspection.requested:
+        if cache_policy.strict_no_cache_required:
+            policy_action = f"{policy_action}+provider-cache-disabled"
+        elif cache_inspection.requested:
             policy_action = f"{policy_action}+provider-cache-explicit"
         elif not cache_inspection.complete:
             policy_action = f"{policy_action}+provider-cache-unknown"

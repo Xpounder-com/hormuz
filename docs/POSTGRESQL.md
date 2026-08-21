@@ -1,7 +1,7 @@
 # PostgreSQL tenancy foundation
 
 Hormuz has an accepted shared-schema PostgreSQL tenancy contract and an
-executable schema-version-12 accounting, identity-projection, policy-projection,
+executable schema-version-13 accounting, identity-projection, policy-projection,
 policy-version, human-session, DLP/security, identity-type usage,
 tenant-lifecycle, and shared-SCIM-directory backend. A deployment can opt into PostgreSQL
 for usage, cost evidence, administrative read audit, atomic budget reservations,
@@ -44,6 +44,10 @@ When a dynamic subject is next resolved after a profile change, the directory
 reconciles its effective principal projection before it is returned. That
 revokes sessions with a changed authorization mapping and lets a new enrollment
 use the current mapping.
+Schema version 13 permits immutable policy projection v5 documents. Version 5
+adds a content-free provider-cache capability catalog bound to route protocol,
+upstream model, and supported gateway operation. Older immutable v2, v3, and
+v4 policy versions remain readable.
 Every tenant-owned table has:
 
 - a non-null tenant key in its primary and foreign-key relationships;
@@ -118,7 +122,7 @@ principal authorization versions, revokes their active sessions, and is
 idempotent when desired state is unchanged.
 
 Run `policies sync` with the owner DSN after every approved model, budget,
-redaction, or DLP policy change. It writes a tenant-scoped,
+provider-cache capability, redaction, or DLP policy change. It writes a tenant-scoped,
 canonical projection containing policy metadata and a fingerprint. The
 projection excludes identity and provider credentials, resolved custom-secret
 values, DLP dictionary values, the approval fingerprint key, prompts,
@@ -144,6 +148,15 @@ permits immutable v2, v3, and v4 versions. A v4 group binding uses the stable
 SCIM group `externalId`; its IdP-controlled display name and payload cannot
 authorize models, budgets, clients, clearance, or capabilities. Apply migration
 11 before staging v4 documents, then activate the reviewed policy version.
+
+Policy projection v5 adds the reviewed, content-free provider-cache capability
+catalog. PostgreSQL migration 13 permits immutable v2 through v5 versions, so
+a rolling replacement can still validate an older active pointer. The catalog
+must match the deployment-supported route/protocol/model/operation records;
+policy administration cannot invent a provider guarantee. Apply migration 13
+before staging v5 documents, then run `hormuz policies sync` through the
+schema-owner path. A strict `provider_cache.mode: "disabled"` policy cannot be
+exported or activated through a legacy projection schema.
 
 ## Tenant lifecycle (owner-only)
 

@@ -256,7 +256,7 @@ In configuration, this lives under the policy system, not under
 ```
 
 The policy API projects these fields as `authorization_profiles` and
-`team_bindings` in tenant policy projection v4. Thus only `policy_admin` can
+`team_bindings` in tenant policy projection v4 and later. Thus only `policy_admin` can
 stage, activate, or roll back a new group-to-profile authorization decision;
 an `identity_admin` may add/remove membership but cannot grant a new model,
 budget, client, clearance, or capability. `unbound_scim_group_action` defaults
@@ -271,7 +271,7 @@ contract is no longer accepted for new or replacement group requests. Its
 `teamId`, `teamName`, `clearance`, `allowedClients`, and `capabilities` fields
 produce `scim_group_authorization_fields_forbidden`. Update the connector to
 send the directory 3.0 extension above while preserving the same stable group
-`externalId`, then stage and activate the v4 policy binding before relying on
+`externalId`, then stage and activate the v4-or-later policy binding before relying on
 the membership. Existing stored legacy values are ignored for authorization;
 there is no fallback to their former permissions.
 

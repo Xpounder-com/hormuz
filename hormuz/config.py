@@ -10,6 +10,7 @@ import math
 import os
 import re
 from dataclasses import dataclass, field, replace
+from datetime import date
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
@@ -29,6 +30,13 @@ MAX_CONFIG_NODES = 100_000
 _SHA256_PATTERN = re.compile(r"[0-9a-f]{64}\Z")
 _ENVIRONMENT_NAME_PATTERN = re.compile(r"[A-Z][A-Z0-9_]{0,127}\Z")
 _POSTGRES_IDENTIFIER_PATTERN = re.compile(r"[a-z_][a-z0-9_]{0,62}\Z")
+_ISO_DATE_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}\Z")
+_PROVIDER_CACHE_OPERATION_PROTOCOLS = {
+    "/v1/responses": "openai",
+    "/v1/responses/compact": "openai",
+    "/v1/messages": "anthropic",
+    "/v1/messages/count_tokens": "anthropic",
+}
 
 
 def _load_configuration_json(source_path: Path) -> tuple[Any, str]:
@@ -338,6 +346,31 @@ class ModelRoute:
 
 
 @dataclass(frozen=True)
+class ProviderCacheCapability:
+    """Reviewed, content-free behavior for one routed provider/model pair.
+
+    The catalog is deliberately keyed by Hormuz's immutable route alias.  It
+    is policy input, not telemetry: source URLs and review dates explain why a
+    restrictive policy can make a particular request, while raw request data
+    and provider cache identifiers never enter this record.
+    """
+
+    protocol: str
+    upstream_model: str
+    operations: tuple[str, ...]
+    capability_version: str
+    reviewed_at: date
+    source_urls: tuple[str, ...]
+    strict_no_cache: str
+
+    def review_is_current(self, *, maximum_age_days: int, today: date) -> bool:
+        return (
+            self.reviewed_at <= today
+            and (today - self.reviewed_at).days <= maximum_age_days
+        )
+
+
+@dataclass(frozen=True)
 class ModelUsageLimit:
     """Monthly capacity limits for one governed model alias."""
 
@@ -369,16 +402,19 @@ class ModelUsageLimit:
 
 @dataclass(frozen=True)
 class ProviderCachePolicy:
-    """Govern known explicit provider cache controls without rewriting them.
+    """Govern provider-native prompt caching without rewriting directives.
 
     ``mode`` applies only to static, documented request fields identified by
-    :mod:`hormuz.provider_cache`. It intentionally does not claim to disable
-    provider-automatic or unknown cache behavior.
+    :mod:`hormuz.provider_cache`. ``allow`` and ``deny`` intentionally do not
+    claim to disable provider-automatic or unknown cache behavior. ``disabled``
+    is stricter: it allows only a fresh, reviewed route capability's exact
+    client-supplied no-cache request, otherwise denying before egress.
     """
 
     mode: str | None = None
     allowed_clients: tuple[str, ...] | None = None
     allowed_models: tuple[str, ...] | None = None
+    capability_max_age_days: int | None = None
 
     def overlaid(
         self,
@@ -396,11 +432,19 @@ class ProviderCachePolicy:
                 self.allowed_models,
                 other.allowed_models,
             ),
+            capability_max_age_days=_minimum(
+                self.capability_max_age_days,
+                other.capability_max_age_days,
+            ),
         )
 
     @property
     def explicit_requests_allowed(self) -> bool:
-        return self.mode != "deny"
+        return self.mode not in {"deny", "disabled"}
+
+    @property
+    def strict_no_cache_required(self) -> bool:
+        return self.mode == "disabled"
 
     def allows(self, *, client: str, model_alias: str) -> bool:
         return (
@@ -534,6 +578,9 @@ class GatewayConfig:
     actor_dlp_overlays: dict[str, DLPPolicyOverlay] = field(default_factory=dict)
     team_policies: dict[str, Policy] = field(default_factory=dict)
     actor_policies: dict[str, Policy] = field(default_factory=dict)
+    provider_cache_capabilities: dict[str, ProviderCacheCapability] = field(
+        default_factory=dict
+    )
     authorization_profiles: dict[str, AuthorizationProfile] = field(
         default_factory=dict
     )
@@ -1109,6 +1156,7 @@ class GatewayConfig:
                 "organization",
                 "teams",
                 "actors",
+                "provider_cache_capabilities",
                 "authorization_profiles",
                 "team_bindings",
                 "unbound_scim_group_action",
@@ -1130,6 +1178,10 @@ class GatewayConfig:
             scope_id: _policy(value, f"policies.actors.{scope_id}")
             for scope_id, value in _object(policies_raw.get("actors", {}), "policies.actors").items()
         }
+        provider_cache_capabilities = _provider_cache_capabilities(
+            policies_raw.get("provider_cache_capabilities", {}),
+            "policies.provider_cache_capabilities",
+        )
         authorization_profiles = _authorization_profiles(
             policies_raw.get("authorization_profiles", {}),
             "policies.authorization_profiles",
@@ -1184,6 +1236,7 @@ class GatewayConfig:
             actor_dlp_overlays=actor_dlp_overlays,
             team_policies=team_policies,
             actor_policies=actor_policies,
+            provider_cache_capabilities=provider_cache_capabilities,
             authorization_profiles=authorization_profiles,
             team_bindings=team_bindings,
             unbound_scim_group_action=unbound_scim_group_action,
@@ -1274,6 +1327,67 @@ class GatewayConfig:
                 if alias not in self.model_routes:
                     raise ConfigError(
                         f"Provider-cache policy references unknown model alias: {alias}"
+                    )
+
+        today = date.today()
+        for alias, capability in self.provider_cache_capabilities.items():
+            route = self.model_routes.get(alias)
+            if route is None:
+                raise ConfigError(
+                    "Provider-cache capability references an unknown model alias"
+                )
+            if capability.protocol != route.protocol:
+                raise ConfigError(
+                    "Provider-cache capability protocol does not match its model route"
+                )
+            if capability.upstream_model != route.upstream_model:
+                raise ConfigError(
+                    "Provider-cache capability upstream model does not match its model route"
+                )
+            if any(
+                _PROVIDER_CACHE_OPERATION_PROTOCOLS.get(operation)
+                != capability.protocol
+                for operation in capability.operations
+            ):
+                raise ConfigError(
+                    "Provider-cache capability operation does not match its protocol"
+                )
+            if capability.reviewed_at > today:
+                raise ConfigError(
+                    "Provider-cache capability review date cannot be in the future"
+                )
+            if (
+                capability.strict_no_cache
+                == "openai_explicit_without_breakpoints"
+                and route.protocol != "openai"
+            ):
+                raise ConfigError(
+                    "OpenAI strict no-cache capability must reference an OpenAI route"
+                )
+
+        # Validate every configured policy scope rather than only identities
+        # present at startup. A later SCIM/OIDC assignment must not activate a
+        # stale or incomplete strict policy without a config rejection first.
+        for cache_policy in (policy.provider_cache for policy in policies):
+            if not cache_policy.strict_no_cache_required:
+                continue
+            maximum_age_days = cache_policy.capability_max_age_days
+            if maximum_age_days is None:  # pragma: no cover - parser invariant
+                raise ConfigError(
+                    "Provider-cache disabled policy requires a review window"
+                )
+            for alias in self.model_routes:
+                capability = self.provider_cache_capabilities.get(alias)
+                if capability is None:
+                    raise ConfigError(
+                        "Provider-cache disabled policy requires a capability record for every model route"
+                    )
+                if not capability.review_is_current(
+                    maximum_age_days=maximum_age_days,
+                    today=today,
+                ):
+                    raise ConfigError(
+                        "Provider-cache disabled policy references a stale capability record"
                     )
         limits_require_request_bound = any(
             policy.monthly_token_limit is not None
@@ -1578,6 +1692,14 @@ def configuration_from_policy_projection(
             "unbound_scim_group_action",
             "unbound_scim_group_fallback",
         }
+    elif schema == "hormuz.policy-projection.v5":
+        expected_fields = legacy_expected_fields | {
+            "authorization_profiles",
+            "team_bindings",
+            "unbound_scim_group_action",
+            "unbound_scim_group_fallback",
+            "provider_cache_capabilities",
+        }
     else:
         expected_fields = set()
     if set(item) != expected_fields:
@@ -1586,6 +1708,7 @@ def configuration_from_policy_projection(
         "hormuz.policy-projection.v2",
         "hormuz.policy-projection.v3",
         "hormuz.policy-projection.v4",
+        "hormuz.policy-projection.v5",
     }:
         raise ConfigError("Policy projection schema is unsupported")
     if item.get("organization_id") != organization_id:
@@ -1605,7 +1728,7 @@ def configuration_from_policy_projection(
     team_bindings: tuple[PolicyTeamBinding, ...] = ()
     unbound_scim_group_action = "deny"
     unbound_scim_group_fallback: UnboundSCIMGroupFallback | None = None
-    if schema == "hormuz.policy-projection.v4":
+    if schema in {"hormuz.policy-projection.v4", "hormuz.policy-projection.v5"}:
         authorization_profiles = _authorization_profiles(
             item["authorization_profiles"],
             "policy projection authorization_profiles",
@@ -1700,6 +1823,29 @@ def configuration_from_policy_projection(
         path="policy projection actor_policies",
         allowed_scope_ids=tenant_actor_ids,
     )
+    provider_cache_capabilities = dict(base.provider_cache_capabilities)
+    if schema == "hormuz.policy-projection.v5":
+        projected_capabilities = _provider_cache_capabilities(
+            item["provider_cache_capabilities"],
+            "policy projection provider_cache_capabilities",
+        )
+        if projected_capabilities != base.provider_cache_capabilities:
+            raise ConfigError(
+                "Policy projection provider-cache capabilities are not deployment-supported"
+            )
+        provider_cache_capabilities = projected_capabilities
+    elif any(
+        policy.provider_cache.strict_no_cache_required
+        for policy in (
+            organization_policy,
+            *team_policies.values(),
+            *actor_policies.values(),
+            *(profile.policy for profile in authorization_profiles.values()),
+        )
+    ):
+        raise ConfigError(
+            "Provider-cache disabled policy requires policy projection v5"
+        )
 
     secret_raw = _object(item["secret_controls"], "policy projection secret_controls")
     if set(secret_raw) != {"mode", "builtins", "custom_secret_envs"}:
@@ -1761,6 +1907,7 @@ def configuration_from_policy_projection(
         organization_policy=organization_policy,
         team_policies=team_policies,
         actor_policies=actor_policies,
+        provider_cache_capabilities=provider_cache_capabilities,
         authorization_profiles=authorization_profiles,
         team_bindings=team_bindings,
         unbound_scim_group_action=unbound_scim_group_action,
@@ -2154,23 +2301,141 @@ def _provider_cache_policy(value: Any, path: str) -> ProviderCachePolicy:
     item = _object(value, path)
     _reject_unknown_fields(
         item,
-        {"mode", "allowed_clients", "allowed_models"},
+        {
+            "mode",
+            "allowed_clients",
+            "allowed_models",
+            "capability_max_age_days",
+        },
         path,
     )
     mode = _optional_string(item.get("mode"), f"{path}.mode")
-    if mode not in {None, "allow", "deny"}:
-        raise ConfigError(f"{path}.mode must be allow or deny")
+    if mode not in {None, "allow", "deny", "disabled"}:
+        raise ConfigError(f"{path}.mode must be allow, deny, or disabled")
+    allowed_clients = _optional_string_tuple(
+        item.get("allowed_clients"),
+        f"{path}.allowed_clients",
+    )
+    allowed_models = _optional_string_tuple(
+        item.get("allowed_models"),
+        f"{path}.allowed_models",
+    )
+    capability_max_age_days = _optional_integer(
+        item.get("capability_max_age_days"),
+        f"{path}.capability_max_age_days",
+        minimum=1,
+    )
+    if mode == "disabled":
+        if allowed_clients is not None or allowed_models is not None:
+            raise ConfigError(
+                f"{path}.disabled must apply to every client and model route"
+            )
+        if capability_max_age_days is None:
+            raise ConfigError(
+                f"{path}.disabled requires capability_max_age_days"
+            )
+    elif capability_max_age_days is not None:
+        raise ConfigError(
+            f"{path}.capability_max_age_days requires mode disabled"
+        )
     return ProviderCachePolicy(
         mode=mode,
-        allowed_clients=_optional_string_tuple(
-            item.get("allowed_clients"),
-            f"{path}.allowed_clients",
-        ),
-        allowed_models=_optional_string_tuple(
-            item.get("allowed_models"),
-            f"{path}.allowed_models",
-        ),
+        allowed_clients=allowed_clients,
+        allowed_models=allowed_models,
+        capability_max_age_days=capability_max_age_days,
     )
+
+
+def _provider_cache_capabilities(
+    value: Any,
+    path: str,
+) -> dict[str, ProviderCacheCapability]:
+    item = _object(value, path)
+    if len(item) > 10_000:
+        raise ConfigError(f"{path} must contain at most 10000 model routes")
+    result: dict[str, ProviderCacheCapability] = {}
+    for raw_alias, raw_capability in item.items():
+        alias = _model_identifier(raw_alias, f"{path} model alias")
+        capability_path = f"{path}.{alias}"
+        capability = _object(raw_capability, capability_path)
+        _reject_unknown_fields(
+            capability,
+            {
+                "protocol",
+                "upstream_model",
+                "operations",
+                "capability_version",
+                "reviewed_at",
+                "source_urls",
+                "strict_no_cache",
+            },
+            capability_path,
+        )
+        source_urls = tuple(
+            sorted(
+                {
+                    _https_url(item, f"{capability_path}.source_urls[]")
+                    for item in _string_tuple(
+                        capability.get("source_urls"),
+                        f"{capability_path}.source_urls",
+                    )
+                }
+            )
+        )
+        if not source_urls or len(source_urls) > 16:
+            raise ConfigError(
+                f"{capability_path}.source_urls must contain 1 to 16 HTTPS URLs"
+            )
+        operations = tuple(
+            sorted(
+                set(
+                    _string_tuple(
+                        capability.get("operations"),
+                        f"{capability_path}.operations",
+                    )
+                )
+            )
+        )
+        if not operations or any(
+            operation not in _PROVIDER_CACHE_OPERATION_PROTOCOLS
+            for operation in operations
+        ):
+            raise ConfigError(
+                f"{capability_path}.operations must contain supported provider operations"
+            )
+        strict_no_cache = _string(
+            capability.get("strict_no_cache"),
+            f"{capability_path}.strict_no_cache",
+        )
+        if strict_no_cache not in {
+            "openai_explicit_without_breakpoints",
+            "unsupported",
+        }:
+            raise ConfigError(
+                f"{capability_path}.strict_no_cache is unsupported"
+            )
+        result[alias] = ProviderCacheCapability(
+            protocol=_string(
+                capability.get("protocol"),
+                f"{capability_path}.protocol",
+            ),
+            upstream_model=_model_identifier(
+                capability.get("upstream_model"),
+                f"{capability_path}.upstream_model",
+            ),
+            operations=operations,
+            capability_version=_bounded_policy_version(
+                capability.get("capability_version"),
+                f"{capability_path}.capability_version",
+            ),
+            reviewed_at=_iso_date(
+                capability.get("reviewed_at"),
+                f"{capability_path}.reviewed_at",
+            ),
+            source_urls=source_urls,
+            strict_no_cache=strict_no_cache,
+        )
+    return result
 
 
 def _context_injection_policy(
@@ -3109,6 +3374,23 @@ def _url(value: Any, path: str) -> str:
     return result
 
 
+def _https_url(value: Any, path: str) -> str:
+    result = _url(value, path)
+    if urlparse(result).scheme != "https":
+        raise ConfigError(f"{path} must be an HTTPS URL")
+    return result
+
+
+def _iso_date(value: Any, path: str) -> date:
+    result = _string(value, path)
+    if _ISO_DATE_PATTERN.fullmatch(result) is None:
+        raise ConfigError(f"{path} must be an ISO calendar date")
+    try:
+        return date.fromisoformat(result)
+    except ValueError as error:
+        raise ConfigError(f"{path} must be an ISO calendar date") from error
+
+
 def _classification(value: Any, path: str) -> str:
     result = _string(value, path)
     if result not in {"public", "internal", "confidential", "restricted"}:
@@ -3341,8 +3623,11 @@ def _provider_cache_mode_overlay(
         return parent
     if parent is None:
         return child
-    # A team or actor may make cache controls stricter, but may not re-enable
-    # explicit provider caching after the organization disabled it.
-    if parent == "deny":
+    # A team or actor may make a policy stricter, but never relax a parent.
+    # ``disabled`` requires a reviewed no-cache opt-out and is stronger than
+    # ``deny``, which only rejects known explicit cache controls.
+    if parent == "disabled" or child == "disabled":
+        return "disabled"
+    if parent == "deny" or child == "deny":
         return "deny"
     return child

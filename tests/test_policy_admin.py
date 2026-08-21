@@ -12,6 +12,7 @@ from types import SimpleNamespace
 import tempfile
 import threading
 import unittest
+from datetime import date, timedelta
 from unittest import mock
 
 from hormuz.config import (
@@ -24,6 +25,7 @@ from hormuz.config import (
 from hormuz.cli import main
 from hormuz.policy_projection import policy_projection, policy_projection_sha256
 from hormuz.policy_runtime import PolicyRuntime
+from hormuz.postgres import PostgresStorageError
 from hormuz.postgres_policy_store import ActivePolicy, PolicyAdminError
 
 
@@ -75,6 +77,132 @@ class PolicyProjectionMaterializationTests(unittest.TestCase):
             ),
             projection,
         )
+
+    def test_v4_projection_remains_canonical_without_strict_cache_policy(self) -> None:
+        projection = policy_projection(
+            self.config,
+            self.identity.organization_id,
+            schema="hormuz.policy-projection.v4",
+        )
+        candidate = configuration_from_policy_projection(
+            self.config,
+            projection,
+            organization_id=self.identity.organization_id,
+        )
+
+        self.assertEqual(
+            policy_projection(
+                candidate,
+                self.identity.organization_id,
+                schema="hormuz.policy-projection.v4",
+            ),
+            projection,
+        )
+
+    def test_disabled_provider_cache_requires_a_fresh_reviewed_catalog(self) -> None:
+        raw = json.loads((ROOT / "config.example.json").read_text(encoding="utf-8"))
+        raw["policies"]["organization"]["provider_cache"] = {
+            "mode": "disabled",
+            "capability_max_age_days": 30,
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "config.json"
+            path.write_text(json.dumps(raw), encoding="utf-8")
+            with self.assertRaisesRegex(
+                ConfigError,
+                "requires a capability record",
+            ):
+                GatewayConfig.load(
+                    path,
+                    environ={"HORMUZ_TOKEN": "test-identity-token"},
+                )
+
+            raw["policies"]["provider_cache_capabilities"] = {
+                alias: {
+                    "protocol": route["protocol"],
+                    "upstream_model": route["upstream_model"],
+                    "operations": (
+                        ["/v1/responses"]
+                        if route["protocol"] == "openai"
+                        else ["/v1/messages", "/v1/messages/count_tokens"]
+                    ),
+                    "capability_version": f"{route['protocol']}-test-v1",
+                    "reviewed_at": date.today().isoformat(),
+                    "source_urls": [
+                        "https://developers.openai.com/api/docs/guides/prompt-caching"
+                    ],
+                    "strict_no_cache": (
+                        "openai_explicit_without_breakpoints"
+                        if route["protocol"] == "openai"
+                        else "unsupported"
+                    ),
+                }
+                for alias, route in raw["model_routes"].items()
+            }
+            raw["policies"]["provider_cache_capabilities"]["gpt-5.4"][
+                "upstream_model"
+            ] = "gpt-wrong-route"
+            path.write_text(json.dumps(raw), encoding="utf-8")
+            with self.assertRaisesRegex(
+                ConfigError,
+                "upstream model does not match",
+            ):
+                GatewayConfig.load(
+                    path,
+                    environ={"HORMUZ_TOKEN": "test-identity-token"},
+                )
+            raw["policies"]["provider_cache_capabilities"]["gpt-5.4"][
+                "upstream_model"
+            ] = raw["model_routes"]["gpt-5.4"]["upstream_model"]
+            path.write_text(json.dumps(raw), encoding="utf-8")
+            config = GatewayConfig.load(
+                path,
+                environ={"HORMUZ_TOKEN": "test-identity-token"},
+            )
+            projection = policy_projection(config, "xpounder")
+            self.assertEqual(projection["schema"], "hormuz.policy-projection.v5")
+            self.assertEqual(
+                projection["provider_cache_capabilities"]["gpt-5.4"][
+                    "strict_no_cache"
+                ],
+                "openai_explicit_without_breakpoints",
+            )
+            with self.assertRaisesRegex(
+                PostgresStorageError,
+                "policy_projection_schema_incompatible",
+            ):
+                policy_projection(
+                    config,
+                    "xpounder",
+                    schema="hormuz.policy-projection.v4",
+                )
+
+            forged = copy.deepcopy(projection)
+            forged["provider_cache_capabilities"]["gpt-5.4"][
+                "strict_no_cache"
+            ] = "unsupported"
+            with self.assertRaisesRegex(
+                ConfigError,
+                "not deployment-supported",
+            ):
+                configuration_from_policy_projection(
+                    config,
+                    forged,
+                    organization_id="xpounder",
+                )
+
+            raw["policies"]["provider_cache_capabilities"]["gpt-5.4"][
+                "reviewed_at"
+            ] = (date.today() - timedelta(days=31)).isoformat()
+            path.write_text(json.dumps(raw), encoding="utf-8")
+            with self.assertRaisesRegex(
+                ConfigError,
+                "stale capability",
+            ):
+                GatewayConfig.load(
+                    path,
+                    environ={"HORMUZ_TOKEN": "test-identity-token"},
+                )
 
     def test_scim_group_bindings_are_tenant_qualified_and_policy_owned(self) -> None:
         raw = json.loads((ROOT / "config.example.json").read_text(encoding="utf-8"))
@@ -142,7 +270,7 @@ class PolicyProjectionMaterializationTests(unittest.TestCase):
         )
 
         projection = policy_projection(config, "xpounder")
-        self.assertEqual(projection["schema"], "hormuz.policy-projection.v4")
+        self.assertEqual(projection["schema"], "hormuz.policy-projection.v5")
         self.assertEqual(
             projection["team_bindings"], raw["policies"]["team_bindings"]
         )
@@ -427,7 +555,7 @@ class PolicyAdminCLITests(unittest.TestCase):
             )
         self.assertEqual(result, 0)
         value = json.loads(output.getvalue())
-        self.assertEqual(value["schema"], "hormuz.policy-projection.v4")
+        self.assertEqual(value["schema"], "hormuz.policy-projection.v5")
         self.assertEqual(value["organization_id"], "xpounder")
         self.assertNotIn("test-identity-token", output.getvalue())
 

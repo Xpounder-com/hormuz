@@ -5,7 +5,7 @@
 - Status: **Accepted**
 - Date proposed: 2026-08-15
 - Date accepted: 2026-08-20
-- Provider documentation verified: 2026-08-15
+- Provider documentation last re-verified for the current implementation: 2026-08-21
 - Decision owner: Product owner
 - Tracking issue: [#3](https://github.com/Xpounder-com/hormuz/issues/3)
 - Unblocks after acceptance: [#14](https://github.com/Xpounder-com/hormuz/issues/14), cache portions of [#5](https://github.com/Xpounder-com/hormuz/issues/5) and [#8](https://github.com/Xpounder-com/hormuz/issues/8)
@@ -27,12 +27,19 @@ invalidation gates pass.
 ## Current implementation boundary
 
 The supported Hormuz product no longer includes a Hormuz-owned context-pack
-cache under ADR 0008. The initial provider-native implementation for issue #22
-only gates known client-requested cache controls, preserves permitted controls
-unchanged, and records provider-reported cache token categories. It does not
-inject cache directives and does not claim to disable provider-automatic or
-unknown caching behavior. See [provider-native cache policy](../PROVIDER_CACHE_POLICY.md)
-for the executable contract and its limits.
+cache under ADR 0008. Issue #22 now implements both a bounded `allow`/`deny`
+control for known client-requested directives and a strict `disabled` mode.
+Strict mode requires a fresh, route-bound, content-free provider capability
+record and an exact client-supplied opt-out; unsupported or stale routes deny
+before egress. Hormuz does not inject, remove, or rewrite cache directives.
+The implementation does not claim to infer arbitrary future provider fields or
+replace a customer's provider data-controls agreement. See
+[provider-native cache policy](../PROVIDER_CACHE_POLICY.md) for the executable
+contract and its limits.
+
+The historical context-pack design material below remains part of the decision
+record but is superseded as product scope by ADR 0008; it is not an
+implementation or release claim.
 
 ## Why the distinction matters
 
@@ -68,7 +75,11 @@ The current [Anthropic prompt-caching guide](https://platform.claude.com/docs/en
 - prompt caching is ZDR eligible; raw prompt/response text is not stored for the cache, while KV representations and hashes are held in memory rather than at rest;
 - caches are isolated between organizations and, for the Claude API, between workspaces within an organization.
 
-Hormuz can suppress ordinary Anthropic prompt caching by removing or denying `cache_control` before forwarding. Provider tools and thinking behavior can have additional cache semantics, so the capability catalog must account for the actual endpoint/features in use rather than only the top-level marker.
+Hormuz can deny ordinary Anthropic prompt caching by rejecting `cache_control`
+before forwarding; it does not silently remove the field. Provider tools and
+thinking behavior can have additional cache semantics, so the capability catalog
+must account for the actual endpoint/features in use rather than only the
+top-level marker.
 
 ## Accepted decision
 
@@ -101,7 +112,12 @@ Tenant administrators may make a stricter policy at organization, workspace, pro
 
 ### Provider capability catalog
 
-Hormuz maintains a signed/versioned capability record for every supported provider/model/endpoint combination:
+The target architecture maintains a signed/versioned capability record for every
+supported provider/model/endpoint combination. The current #22 implementation
+uses a deployment-configured, versioned catalog that is immutably carried in a
+v5 policy projection; it records route protocol/model/operation, review date,
+and source URLs, but does not itself attest the provider documentation or a
+customer contract:
 
 - whether caching is automatic, explicit, or technically disableable;
 - cache storage medium and provider isolation boundary;
@@ -142,7 +158,10 @@ The cache key is a keyed digest, not a readable concatenation. Its canonical inp
 
 Actor/team scope is included when visibility or policy differs. No pack can be reused across tenants, principals with insufficient clearance, policy versions, or source revisions even if its text happens to be identical.
 
-For OpenAI, any `prompt_cache_key` Hormuz adds is also an HMAC-derived pseudonymous scope key, never an employee email, repository name, ticket title, or other raw identifier. Provider cache reads/writes remain separately attributed to the request that incurred them.
+Hormuz does not currently add a `prompt_cache_key`. Any future feature that
+does so would require a separate reviewed contract and must not use an employee
+email, repository name, ticket title, or other raw identifier. Provider cache
+reads/writes remain separately attributed to the request that incurred them.
 
 ### Storage, encryption, and invalidation
 

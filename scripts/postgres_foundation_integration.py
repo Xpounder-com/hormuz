@@ -7,7 +7,7 @@ import argparse
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import replace
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 import json
 import os
 from pathlib import Path
@@ -30,6 +30,8 @@ from hormuz.config import (
     Identity,
     ModelRoute,
     Policy,
+    ProviderCacheCapability,
+    ProviderCachePolicy,
     PolicyTeamBinding,
     SecretControls,
     SessionBrokerConfig,
@@ -86,7 +88,7 @@ from hormuz.store import (
 )
 
 
-EVIDENCE_SCHEMA = "hormuz.postgres-policy-administration-integration.v12"
+EVIDENCE_SCHEMA = "hormuz.postgres-policy-administration-integration.v13"
 DEFAULT_IMAGE = (
     "postgres@sha256:"
     "57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777"
@@ -1206,6 +1208,43 @@ def _policy_config(*, changed: bool = False) -> object:
     )
 
 
+def _strict_cache_policy_config() -> GatewayConfig:
+    """Build a real v5 strict-cache config for PostgreSQL materialization."""
+
+    base = _directory_policy_config()
+    capabilities = {
+        alias: ProviderCacheCapability(
+            protocol=route.protocol,
+            upstream_model=route.upstream_model,
+            operations=(
+                ("/v1/responses",)
+                if route.protocol == "openai"
+                else ("/v1/messages", "/v1/messages/count_tokens")
+            ),
+            capability_version=f"integration-{route.protocol}-cache-v1",
+            reviewed_at=date.today(),
+            source_urls=("https://example.invalid/provider-cache-contract",),
+            # This proves catalog persistence and runtime validation, not a
+            # live vendor no-cache assertion.
+            strict_no_cache="unsupported",
+        )
+        for alias, route in base.model_routes.items()
+    }
+    result = replace(
+        base,
+        organization_policy=replace(
+            base.organization_policy,
+            provider_cache=ProviderCachePolicy(
+                mode="disabled",
+                capability_max_age_days=30,
+            ),
+        ),
+        provider_cache_capabilities=capabilities,
+    )
+    result.validate_references()
+    return result
+
+
 def _prove_policy_administration_and_approvals(
     owner_dsn: str,
     runtime_dsn: str,
@@ -1330,6 +1369,51 @@ def _prove_policy_administration_and_approvals(
             ) from None
     else:
         raise PostgresFoundationIntegrationError("policy_version_cross_tenant_visible")
+
+    strict_config = _strict_cache_policy_config()
+    strict_version = policy_stores[0].stage(  # type: ignore[arg-type]
+        identity=policy_admin,
+        config=strict_config,
+    )
+    strict_activation = policy_stores[0].activate(
+        identity=policy_admin,
+        version_id=strict_version.version_id,
+        expected_active_version_id=initial_version.version_id,
+    )
+    strict_runtime = PolicyRuntime(strict_config, policy_stores[1])  # type: ignore[arg-type]
+    strict_resolved = strict_runtime.resolve(policy_admin)
+    if (
+        not strict_activation.changed
+        or strict_activation.activation_sequence != 4
+        or strict_resolved.version_id != strict_version.version_id
+        or not strict_resolved.config.resolved_policy(
+            policy_admin
+        ).provider_cache.strict_no_cache_required
+        or strict_resolved.config.provider_cache_capabilities
+        != strict_config.provider_cache_capabilities
+    ):
+        raise PostgresFoundationIntegrationError(
+            "provider_cache_catalog_v5_materialization_failed"
+        )
+    try:
+        policy_stores[1].activate(
+            identity=_synthetic_identity(
+                "tenant-b",
+                "policy-admin-b",
+                capabilities=("policy_admin",),
+            ),
+            version_id=strict_version.version_id,
+            expected_active_version_id=None,
+        )
+    except PolicyAdminError as error:
+        if error.code != "policy_version_not_found":
+            raise PostgresFoundationIntegrationError(
+                "provider_cache_catalog_cross_tenant_error_invalid"
+            ) from None
+    else:
+        raise PostgresFoundationIntegrationError(
+            "provider_cache_catalog_cross_tenant_visible"
+        )
 
     organizations = ("tenant-a", "tenant-b")
     stores = (
@@ -1493,7 +1577,9 @@ def _prove_policy_administration_and_approvals(
         "rollback_verified": True,
         "policy_admin_capability_verified": True,
         "policy_version_cross_tenant_hidden": True,
-        "active_policy_activation_sequence": 3,
+        "active_policy_activation_sequence": 4,
+        "provider_cache_catalog_v5_verified": True,
+        "provider_cache_catalog_cross_tenant_hidden": True,
         "content_free": True,
     }
 

@@ -31,6 +31,7 @@ _POLICY_PROJECTION_SCHEMAS = frozenset(
         "hormuz.policy-projection.v2",
         "hormuz.policy-projection.v3",
         "hormuz.policy-projection.v4",
+        "hormuz.policy-projection.v5",
     }
 )
 _PROJECTION_SECTIONS = (
@@ -46,6 +47,7 @@ _PROJECTION_SECTIONS = (
     "team_bindings",
     "unbound_scim_group_action",
     "unbound_scim_group_fallback",
+    "provider_cache_capabilities",
 )
 
 

@@ -18,7 +18,7 @@ import time
 import unittest
 import urllib.parse
 from dataclasses import replace
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest import mock
@@ -862,6 +862,112 @@ class GatewayIntegrationTests(unittest.TestCase):
             if path.exists():
                 self.assertNotIn(secret_cache_marker.encode("utf-8"), path.read_bytes())
 
+    def test_provider_cache_disabled_requires_a_reviewed_client_opt_out(self) -> None:
+        config_value = self._config(self.provider.server_port, _free_port())
+        config_value["policies"]["organization"]["provider_cache"] = {
+            "mode": "disabled",
+            "capability_max_age_days": 30,
+        }
+        config_value["policies"]["provider_cache_capabilities"] = (
+            self._provider_cache_capabilities()
+        )
+        self._restart_gateway(config_value)
+        request_content = "strict-cache-request-must-not-persist"
+        before = len(FakeProviderHandler.requests)
+
+        denied, _, denied_body = self._post(
+            "/v1/responses",
+            {
+                "model": "engineering-fast",
+                "input": request_content,
+            },
+        )
+
+        self.assertEqual(denied, 403)
+        self.assertEqual(len(FakeProviderHandler.requests), before)
+        self.assertEqual(
+            json.loads(denied_body)["error"]["code"],
+            "hormuz_provider_cache_disabled",
+        )
+        denied_event = self.gateway.store.audit_events(
+            since="2000-01-01T00:00:00+00:00",
+            kind="usage",
+        )[-1]
+        self.assertEqual(
+            denied_event["policy_action"],
+            "provider_cache_disabled_denied",
+        )
+        self.assertNotIn(request_content, json.dumps(denied_event, sort_keys=True))
+
+        allowed, headers, _ = self._post(
+            "/v1/responses",
+            {
+                "model": "engineering-fast",
+                "input": request_content,
+                "prompt_cache_options": {"mode": "explicit"},
+            },
+        )
+
+        self.assertEqual(allowed, 200)
+        self.assertEqual(
+            headers["x-hormuz-policy-decision"],
+            "allowed+provider-cache-disabled",
+        )
+        upstream = FakeProviderHandler.requests[-1]
+        self.assertEqual(
+            upstream["body"]["prompt_cache_options"],
+            {"mode": "explicit"},
+        )
+        allowed_event = self.gateway.store.audit_events(
+            since="2000-01-01T00:00:00+00:00",
+            kind="usage",
+        )[-1]
+        self.assertEqual(
+            allowed_event["policy_action"],
+            "allowed+provider-cache-disabled",
+        )
+        self.assertNotIn(request_content, json.dumps(allowed_event, sort_keys=True))
+        for path in (
+            self.config.database_path,
+            Path(str(self.config.database_path) + "-wal"),
+        ):
+            if path.exists():
+                self.assertNotIn(request_content.encode("utf-8"), path.read_bytes())
+
+    def test_provider_cache_disabled_denies_unsupported_anthropic_route(self) -> None:
+        config_value = self._config(self.provider.server_port, _free_port())
+        config_value["policies"]["organization"]["provider_cache"] = {
+            "mode": "disabled",
+            "capability_max_age_days": 30,
+        }
+        config_value["policies"]["provider_cache_capabilities"] = (
+            self._provider_cache_capabilities()
+        )
+        self._restart_gateway(config_value)
+        before = len(FakeProviderHandler.requests)
+
+        status, _, response = self._post(
+            "/v1/messages",
+            {
+                "model": "claude-sonnet-5",
+                "messages": [{"role": "user", "content": "ordinary request"}],
+                "max_tokens": 20,
+            },
+            extra_headers={"Anthropic-Version": "2023-06-01"},
+        )
+
+        self.assertEqual(status, 403)
+        self.assertEqual(len(FakeProviderHandler.requests), before)
+        self.assertEqual(
+            json.loads(response)["error"]["type"],
+            "permission_error",
+        )
+        event = self.gateway.store.audit_events(
+            since="2000-01-01T00:00:00+00:00",
+            kind="usage",
+        )[-1]
+        self.assertEqual(event["policy_action"], "provider_cache_disabled_denied")
+
     def test_provider_cache_scopes_restrict_known_controls_monotonically(self) -> None:
         config_value = self._config(self.provider.server_port, _free_port())
         config_value["policies"]["organization"]["provider_cache"] = {
@@ -969,7 +1075,7 @@ class GatewayIntegrationTests(unittest.TestCase):
         version = PolicyVersion(
             version_id=version_id,
             projection_sha256=fingerprint,
-            projection_schema="hormuz.policy-projection.v3",
+            projection_schema="hormuz.policy-projection.v5",
             created_at="2026-08-20T00:00:00+00:00",
             created_by_actor_id="alice",
             created_by_actor_name="Alice",
@@ -7238,6 +7344,44 @@ class GatewayIntegrationTests(unittest.TestCase):
                 },
                 "actors": {},
             },
+        }
+
+    @staticmethod
+    def _provider_cache_capabilities() -> dict[str, dict[str, object]]:
+        reviewed_at = date.today().isoformat()
+        def openai(upstream_model: str) -> dict[str, object]:
+            return {
+                "protocol": "openai",
+                "upstream_model": upstream_model,
+                "operations": ["/v1/responses"],
+                "capability_version": "openai-responses-gpt-5-6-test-v1",
+                "reviewed_at": reviewed_at,
+                "source_urls": [
+                    "https://developers.openai.com/api/docs/guides/prompt-caching"
+                ],
+                "strict_no_cache": "openai_explicit_without_breakpoints",
+            }
+
+        def anthropic(upstream_model: str) -> dict[str, object]:
+            return {
+                "protocol": "anthropic",
+                "upstream_model": upstream_model,
+                "operations": ["/v1/messages", "/v1/messages/count_tokens"],
+                "capability_version": "anthropic-messages-test-v1",
+                "reviewed_at": reviewed_at,
+                "source_urls": [
+                    "https://platform.claude.com/docs/en/build-with-claude/prompt-caching"
+                ],
+                "strict_no_cache": "unsupported",
+            }
+
+        return {
+            "engineering-fast": openai("gpt-test-fast"),
+            "engineering-deep": openai("gpt-test-deep"),
+            "claude-standard": anthropic("claude-test"),
+            "claude-sonnet-5": anthropic("claude-sonnet-5"),
+            "claude-haiku-4-5": anthropic("claude-test-haiku"),
+            "claude-haiku-4-5-20251001": anthropic("claude-test-haiku"),
         }
 
 

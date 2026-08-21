@@ -20,6 +20,7 @@ _POLICY_PROJECTION_SCHEMAS = frozenset(
         "hormuz.policy-projection.v2",
         "hormuz.policy-projection.v3",
         "hormuz.policy-projection.v4",
+        "hormuz.policy-projection.v5",
     }
 )
 

@@ -15,6 +15,7 @@ from .config import (
     GatewayConfig,
     ModelUsageLimit,
     Policy,
+    ProviderCacheCapability,
 )
 from .identity_projection import configured_organization_ids
 from .postgres import (
@@ -54,13 +55,30 @@ def _model_limit(value: ModelUsageLimit) -> dict[str, object]:
     }
 
 
-def _provider_cache(value: Policy) -> dict[str, object]:
-    return {
+def _provider_cache(value: Policy, *, schema: str) -> dict[str, object]:
+    result: dict[str, object] = {
         "mode": value.provider_cache.mode,
         "allowed_clients": _sorted_optional(
             value.provider_cache.allowed_clients
         ),
         "allowed_models": _sorted_optional(value.provider_cache.allowed_models),
+    }
+    if schema == "hormuz.policy-projection.v5":
+        result["capability_max_age_days"] = (
+            value.provider_cache.capability_max_age_days
+        )
+    return result
+
+
+def _provider_cache_capability(value: ProviderCacheCapability) -> dict[str, object]:
+    return {
+        "protocol": value.protocol,
+        "upstream_model": value.upstream_model,
+        "operations": sorted(set(value.operations)),
+        "capability_version": value.capability_version,
+        "reviewed_at": value.reviewed_at.isoformat(),
+        "source_urls": sorted(set(value.source_urls)),
+        "strict_no_cache": value.strict_no_cache,
     }
 
 
@@ -69,9 +87,10 @@ _POLICY_PROJECTION_SCHEMAS = frozenset(
         "hormuz.policy-projection.v2",
         "hormuz.policy-projection.v3",
         "hormuz.policy-projection.v4",
+        "hormuz.policy-projection.v5",
     }
 )
-DEFAULT_POLICY_PROJECTION_SCHEMA = "hormuz.policy-projection.v4"
+DEFAULT_POLICY_PROJECTION_SCHEMA = "hormuz.policy-projection.v5"
 
 
 def _policy(value: Policy, *, schema: str) -> dict[str, object]:
@@ -89,8 +108,12 @@ def _policy(value: Policy, *, schema: str) -> dict[str, object]:
             for alias, limit in sorted(value.model_limits.items())
         },
     }
-    if schema in {"hormuz.policy-projection.v3", "hormuz.policy-projection.v4"}:
-        result["provider_cache"] = _provider_cache(value)
+    if schema in {
+        "hormuz.policy-projection.v3",
+        "hormuz.policy-projection.v4",
+        "hormuz.policy-projection.v5",
+    }:
+        result["provider_cache"] = _provider_cache(value, schema=schema)
     return result
 
 
@@ -164,8 +187,14 @@ def policy_projection(
         *(identity.team_id for identity in identities),
         *(profile.team_id for profile in profiles.values()),
     }
+    projected_policies = (
+        config.organization_policy,
+        *(config.team_policies[team_id] for team_id in team_ids & set(config.team_policies)),
+        *(config.actor_policies[actor_id] for actor_id in actor_ids & set(config.actor_policies)),
+        *(profile.policy for profile in profiles.values()),
+    )
     if (
-        schema != "hormuz.policy-projection.v4"
+        schema not in {"hormuz.policy-projection.v4", "hormuz.policy-projection.v5"}
         and (
             profiles
             or any(binding.organization_id == organization_id for binding in team_bindings)
@@ -180,6 +209,14 @@ def policy_projection(
                 ].organization_id
                 == organization_id
             )
+        )
+    ):
+        raise PostgresStorageError("policy_projection_schema_incompatible")
+    if (
+        schema != "hormuz.policy-projection.v5"
+        and any(
+            policy.provider_cache.strict_no_cache_required
+            for policy in projected_policies
         )
     ):
         raise PostgresStorageError("policy_projection_schema_incompatible")
@@ -234,7 +271,7 @@ def policy_projection(
             for actor_id in sorted(actor_ids & set(config.actor_dlp_overlays))
         },
     }
-    if schema == "hormuz.policy-projection.v4":
+    if schema in {"hormuz.policy-projection.v4", "hormuz.policy-projection.v5"}:
         fallback = unbound_scim_group_fallback
         fallback_for_organization = (
             fallback
@@ -286,6 +323,13 @@ def policy_projection(
                 ),
             }
         )
+    if schema == "hormuz.policy-projection.v5":
+        result["provider_cache_capabilities"] = {
+            alias: _provider_cache_capability(capability)
+            for alias, capability in sorted(
+                getattr(config, "provider_cache_capabilities", {}).items()
+            )
+        }
     return result
 
 

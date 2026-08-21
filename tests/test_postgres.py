@@ -125,7 +125,7 @@ class PostgresFoundationTests(unittest.TestCase):
 
         value = policy_projection(config, "tenant-a")
         serialized = json.dumps(value, sort_keys=True)
-        self.assertEqual(value["schema"], "hormuz.policy-projection.v4")
+        self.assertEqual(value["schema"], "hormuz.policy-projection.v5")
         self.assertNotIn("context_injection", serialized)
         self.assertEqual(
             policy_projection_sha256(value),
@@ -866,7 +866,11 @@ class PostgresFoundationTests(unittest.TestCase):
         )
         self.assertEqual(
             policy_administration["active_policy_activation_sequence"],
-            3,
+            4,
+        )
+        self.assertTrue(policy_administration["provider_cache_catalog_v5_verified"])
+        self.assertTrue(
+            policy_administration["provider_cache_catalog_cross_tenant_hidden"]
         )
         self.assertEqual(value["isolation"]["missing_context_rows"], 0)
         self.assertEqual(value["isolation"]["cleared_context_rows"], 0)

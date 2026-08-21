@@ -51,17 +51,26 @@ known, client-requested provider prompt-cache controls:
 }
 ```
 
-`mode` is `allow` (the default) or `deny`. `deny` rejects a request containing
-a documented explicit provider cache field before egress; it does not remove
-or rewrite that field. Client and model lists restrict explicit cache requests
-to their intersection across organization, team, and actor scopes. A lower
-scope cannot change a higher-scope `deny` back to `allow`.
+`mode` is `allow` (the default), `deny`, or `disabled`. `deny` rejects a
+request containing a documented explicit provider cache field before egress; it
+does not remove or rewrite that field. Client and model lists restrict explicit
+cache requests to their intersection across organization, team, and actor
+scopes. A lower scope cannot change a higher-scope `deny` back to `allow`.
 
-This is not a universal no-cache switch. Hormuz does not inject cache options,
-and it does not claim to control provider-automatic, future, or otherwise
-unknown cache behavior. See [provider-native cache policy](PROVIDER_CACHE_POLICY.md)
-for the recognized OpenAI/Anthropic fields, accounting, privacy, and strict
-no-cache limitations.
+`disabled` is a strict no-provider-cache requirement. It cannot have client or
+model exceptions and requires `capability_max_age_days` plus a fresh
+`policies.provider_cache_capabilities` record for every configured route. A
+record binds the Hormuz alias to its provider protocol, exact upstream model,
+supported egress operation, review date, HTTPS evidence URL, and strict
+strategy. A route without a verified opt-out uses
+`"strict_no_cache": "unsupported"` and is denied before egress rather than
+silently downgraded.
+
+This is not a universal magic switch. Hormuz does not inject cache options and
+does not claim to infer provider-automatic, future, or otherwise undocumented
+cache behavior. See [provider-native cache policy](PROVIDER_CACHE_POLICY.md)
+for the full catalog schema, OpenAI/Anthropic boundary, accounting, and privacy
+limits.
 
 ## Billing reconciliation policy
 
