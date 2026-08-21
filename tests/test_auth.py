@@ -147,6 +147,36 @@ class OIDCAuthenticationTests(unittest.TestCase):
             },
         }
 
+    @staticmethod
+    def _gateway_request(
+        gateway: GatewayServer,
+        *,
+        method: str,
+        path: str,
+        token: str,
+        value: dict[str, object] | None = None,
+    ) -> tuple[int, dict[str, object]]:
+        body = json.dumps(value).encode("utf-8") if value is not None else None
+        headers = {"Authorization": f"Bearer {token}"}
+        if body is not None:
+            headers.update(
+                {
+                    "Content-Type": "application/json",
+                    "Content-Length": str(len(body)),
+                }
+            )
+        connection = http.client.HTTPConnection(
+            "127.0.0.1",
+            gateway.server_address[1],
+            timeout=5,
+        )
+        try:
+            connection.request(method, path, body=body, headers=headers)
+            response = connection.getresponse()
+            return response.status, json.loads(response.read())
+        finally:
+            connection.close()
+
     def test_valid_token_uses_discovery_and_maps_subject(self) -> None:
         authenticator = Authenticator(self.config)
         identity = authenticator.authenticate(self._token())
@@ -229,6 +259,66 @@ class OIDCAuthenticationTests(unittest.TestCase):
         self.assertEqual(value["authentication_source"], f"oidc:{self.issuer}")
         self.assertNotIn("token", value)
         self.assertNotIn("subject", value)
+
+    def test_expired_workload_token_cannot_reach_gateway_or_admin_paths(self) -> None:
+        value = self._config_value()
+        subject = value["authentication"]["oidc"]["issuers"][0]["subjects"][0]  # type: ignore[index]
+        subject.update(
+            {
+                "subject": "ci:release",
+                "actor_id": "ci-release",
+                "actor_name": "Release CI",
+                "identity_type": "ci",
+                "capabilities": ["policy_admin", "dlp_approver"],
+            }
+        )
+        self.config_path.write_text(json.dumps(value), encoding="utf-8")
+        config = GatewayConfig.load(self.config_path)
+        gateway = GatewayServer(replace(config, listen=ListenConfig("127.0.0.1", 0)))
+        thread = serve_in_thread(gateway)
+        try:
+            status, identity = self._gateway_request(
+                gateway,
+                method="GET",
+                path="/v1/gateway/whoami",
+                token=self._token(subject="ci:release"),
+            )
+            self.assertEqual(status, 200)
+            self.assertEqual(identity["identity_type"], "ci")
+
+            expired_token = self._token(
+                subject="ci:release",
+                expires_at=int(time.time()) - 10,
+            )
+            denied_requests = (
+                ("POST", "/v1/responses", {"model": "gpt-test", "input": "blocked"}),
+                ("GET", "/v1/admin/policy-active", None),
+                (
+                    "POST",
+                    "/v1/admin/policy-activations",
+                    {"version_id": "hpv_v1_" + "0" * 64, "expected_active_version_id": None},
+                ),
+                (
+                    "POST",
+                    "/v1/dlp/approval-requests/apr_" + "0" * 32 + "/decisions",
+                    {"decision": "approve"},
+                ),
+            )
+            for method, path, request_value in denied_requests:
+                with self.subTest(method=method, path=path):
+                    status, response = self._gateway_request(
+                        gateway,
+                        method=method,
+                        path=path,
+                        token=expired_token,
+                        value=request_value,
+                    )
+                    self.assertEqual(status, 401)
+                    self.assertEqual(response["error"]["code"], "unauthorized")
+        finally:
+            gateway.shutdown()
+            gateway.server_close()
+            thread.join(timeout=5)
 
     def test_workload_oidc_identity_reaches_lifecycle_connector_only_with_promoter_capability(self) -> None:
         value = self._config_value()
