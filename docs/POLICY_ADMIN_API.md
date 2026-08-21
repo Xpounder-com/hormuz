@@ -5,12 +5,14 @@ rollback when the gateway uses PostgreSQL persistence. The caller must have the
 `policy_admin` capability. Organization scope always comes from the
 authenticated identity; it is never accepted in an activation request.
 
-The administrable document is `hormuz.policy-projection.v2`. It contains model
-routes and rate cards, organization/team/person model and budget policy,
-secret-control mode, DLP rule metadata, and DLP overlays. It contains no
-provider or employee credential, resolved custom-secret value, dictionary
-value, approval fingerprint key, prompt, response, filename, or source
-content.
+The current administrable document is `hormuz.policy-projection.v3`. It
+contains model routes and rate cards, organization/team/person model, budget,
+and provider-cache policy, secret-control mode, DLP rule metadata, and DLP
+overlays. It contains no provider or employee credential, resolved
+custom-secret value, dictionary value, approval fingerprint key, prompt,
+response, filename, cache key, or source content. Existing immutable
+`hormuz.policy-projection.v2` versions remain readable and canonical; version
+3 is emitted for new exports and stages.
 
 Deployment-owned state cannot be introduced through this API. A staged
 projection may use only provider protocols, identities, teams, custom-secret
@@ -110,7 +112,7 @@ immutable history or compare-and-swap contract.
 ## Operator deploy, verify, and rollback runbook
 
 1. Back up PostgreSQL according to the organization's database procedure, then
-   install the candidate package and apply schema version 6 with the owner DSN:
+   install the candidate package and apply schema version 8 with the owner DSN:
 
    ```bash
    hormuz --config /etc/hormuz/hormuz.json storage migrate

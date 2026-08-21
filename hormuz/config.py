@@ -363,6 +363,49 @@ class ModelUsageLimit:
 
 
 @dataclass(frozen=True)
+class ProviderCachePolicy:
+    """Govern known explicit provider cache controls without rewriting them.
+
+    ``mode`` applies only to static, documented request fields identified by
+    :mod:`hormuz.provider_cache`. It intentionally does not claim to disable
+    provider-automatic or unknown cache behavior.
+    """
+
+    mode: str | None = None
+    allowed_clients: tuple[str, ...] | None = None
+    allowed_models: tuple[str, ...] | None = None
+
+    def overlaid(
+        self,
+        other: "ProviderCachePolicy | None",
+    ) -> "ProviderCachePolicy":
+        if other is None:
+            return self
+        return ProviderCachePolicy(
+            mode=_provider_cache_mode_overlay(self.mode, other.mode),
+            allowed_clients=_intersection(
+                self.allowed_clients,
+                other.allowed_clients,
+            ),
+            allowed_models=_intersection(
+                self.allowed_models,
+                other.allowed_models,
+            ),
+        )
+
+    @property
+    def explicit_requests_allowed(self) -> bool:
+        return self.mode != "deny"
+
+    def allows(self, *, client: str, model_alias: str) -> bool:
+        return (
+            self.explicit_requests_allowed
+            and (self.allowed_clients is None or client in self.allowed_clients)
+            and (self.allowed_models is None or model_alias in self.allowed_models)
+        )
+
+
+@dataclass(frozen=True)
 class Policy:
     allowed_clients: tuple[str, ...] | None = None
     allowed_models: tuple[str, ...] | None = None
@@ -373,6 +416,9 @@ class Policy:
     monthly_budget_usd: float | None = None
     per_actor_monthly_budget_usd: float | None = None
     model_limits: dict[str, ModelUsageLimit] = field(default_factory=dict)
+    provider_cache: ProviderCachePolicy = field(
+        default_factory=ProviderCachePolicy
+    )
     context_injection: ContextInjectionPolicy = field(
         default_factory=ContextInjectionPolicy
     )
@@ -400,6 +446,7 @@ class Policy:
                 self.model_limits,
                 other.model_limits,
             ),
+            provider_cache=self.provider_cache.overlaid(other.provider_cache),
             context_injection=self.context_injection.overlaid(
                 other.context_injection
             ),
@@ -1070,6 +1117,11 @@ class GatewayConfig:
                     raise ConfigError(
                         f"Context injection policy references unknown model alias: {alias}"
                     )
+            for alias in policy.provider_cache.allowed_models or ():
+                if alias not in self.model_routes:
+                    raise ConfigError(
+                        f"Provider-cache policy references unknown model alias: {alias}"
+                    )
         limits_require_request_bound = any(
             policy.monthly_token_limit is not None
             or policy.monthly_budget_usd is not None
@@ -1277,7 +1329,10 @@ def configuration_from_policy_projection(
     }
     if set(item) != expected_fields:
         raise ConfigError("Policy projection fields are invalid")
-    if item.get("schema") != "hormuz.policy-projection.v2":
+    if item.get("schema") not in {
+        "hormuz.policy-projection.v2",
+        "hormuz.policy-projection.v3",
+    }:
         raise ConfigError("Policy projection schema is unsupported")
     if item.get("organization_id") != organization_id:
         raise ConfigError("Policy projection organization does not match the administrator")
@@ -1618,6 +1673,7 @@ def _policy(
             "monthly_budget_usd",
             "per_actor_monthly_budget_usd",
             "model_limits",
+            "provider_cache",
             "context_injection",
         },
         path,
@@ -1636,6 +1692,10 @@ def _policy(
         model_limits=_model_usage_limits(
             item.get("model_limits", {}),
             f"{path}.model_limits",
+        ),
+        provider_cache=_provider_cache_policy(
+            item.get("provider_cache", {}),
+            f"{path}.provider_cache",
         ),
         context_injection=_context_injection_policy(
             item.get("context_injection", {}),
@@ -1695,6 +1755,29 @@ def _model_usage_limits(value: Any, path: str) -> dict[str, ModelUsageLimit]:
             raise ConfigError(f"{limit_path} must configure at least one limit")
         limits[alias] = limit
     return limits
+
+
+def _provider_cache_policy(value: Any, path: str) -> ProviderCachePolicy:
+    item = _object(value, path)
+    _reject_unknown_fields(
+        item,
+        {"mode", "allowed_clients", "allowed_models"},
+        path,
+    )
+    mode = _optional_string(item.get("mode"), f"{path}.mode")
+    if mode not in {None, "allow", "deny"}:
+        raise ConfigError(f"{path}.mode must be allow or deny")
+    return ProviderCachePolicy(
+        mode=mode,
+        allowed_clients=_optional_string_tuple(
+            item.get("allowed_clients"),
+            f"{path}.allowed_clients",
+        ),
+        allowed_models=_optional_string_tuple(
+            item.get("allowed_models"),
+            f"{path}.allowed_models",
+        ),
+    )
 
 
 def _context_injection_policy(
@@ -2792,4 +2875,21 @@ def _context_injection_mode_overlay(
         return "off"
     if parent == "required":
         return "required"
+    return child
+
+
+def _provider_cache_mode_overlay(
+    parent: str | None,
+    child: str | None,
+) -> str | None:
+    """Keep explicit-cache controls monotonic across policy scopes."""
+
+    if child is None:
+        return parent
+    if parent is None:
+        return child
+    # A team or actor may make cache controls stricter, but may not re-enable
+    # explicit provider caching after the organization disabled it.
+    if parent == "deny":
+        return "deny"
     return child

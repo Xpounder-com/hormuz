@@ -52,6 +52,28 @@ class PolicyProjectionMaterializationTests(unittest.TestCase):
             projection,
         )
 
+    def test_v2_projection_remains_canonical_for_existing_active_policies(self) -> None:
+        projection = policy_projection(
+            self.config,
+            self.identity.organization_id,
+            schema="hormuz.policy-projection.v2",
+        )
+        candidate = configuration_from_policy_projection(
+            self.config,
+            projection,
+            organization_id=self.identity.organization_id,
+        )
+
+        self.assertNotIn("provider_cache", projection["organization_policy"])
+        self.assertEqual(
+            policy_projection(
+                candidate,
+                self.identity.organization_id,
+                schema="hormuz.policy-projection.v2",
+            ),
+            projection,
+        )
+
     def test_projection_cannot_cross_tenants_or_add_secret_sources(self) -> None:
         projection = policy_projection(
             self.config,
@@ -151,6 +173,32 @@ class PolicyProjectionMaterializationTests(unittest.TestCase):
         )
         self.assertIs(first.config, second.config)
         self.assertEqual(store.active.call_count, 2)
+
+    def test_runtime_accepts_an_existing_v2_active_projection(self) -> None:
+        projection = policy_projection(
+            self.config,
+            self.identity.organization_id,
+            schema="hormuz.policy-projection.v2",
+        )
+        fingerprint = policy_projection_sha256(projection)
+        active = ActivePolicy(
+            version_id="hpv_v1_" + fingerprint,
+            projection_sha256=fingerprint,
+            projection=projection,
+            activated_at="2026-08-20T00:00:00+00:00",
+            activated_by_actor_id="admin",
+            activated_by_actor_name="Admin",
+            activation_sequence=1,
+        )
+        runtime = PolicyRuntime(
+            self.config,
+            SimpleNamespace(active=lambda **_: active),  # type: ignore[arg-type]
+        )
+
+        resolved = runtime.resolve(self.identity)
+
+        self.assertEqual(resolved.version_id, active.version_id)
+        self.assertTrue(resolved.config.resolved_policy(self.identity).provider_cache.explicit_requests_allowed)
 
     def test_runtime_fails_closed_for_noncanonical_active_projection(self) -> None:
         projection = policy_projection(
@@ -280,7 +328,7 @@ class PolicyAdminCLITests(unittest.TestCase):
             )
         self.assertEqual(result, 0)
         value = json.loads(output.getvalue())
-        self.assertEqual(value["schema"], "hormuz.policy-projection.v2")
+        self.assertEqual(value["schema"], "hormuz.policy-projection.v3")
         self.assertEqual(value["organization_id"], "xpounder")
         self.assertNotIn("test-identity-token", output.getvalue())
 

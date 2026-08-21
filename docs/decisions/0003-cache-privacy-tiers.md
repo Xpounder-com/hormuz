@@ -24,6 +24,16 @@ final-answer caching on 2026-08-20. Acceptance authorizes implementation but
 does not activate caching before its storage, authorization, encryption, and
 invalidation gates pass.
 
+## Current implementation boundary
+
+The supported Hormuz product no longer includes a Hormuz-owned context-pack
+cache under ADR 0008. The initial provider-native implementation for issue #22
+only gates known client-requested cache controls, preserves permitted controls
+unchanged, and records provider-reported cache token categories. It does not
+inject cache directives and does not claim to disable provider-automatic or
+unknown caching behavior. See [provider-native cache policy](../PROVIDER_CACHE_POLICY.md)
+for the executable contract and its limits.
+
 ## Why the distinction matters
 
 A provider prompt cache does not store or return a previous answer. It reuses an exact prompt-prefix representation and still generates a fresh response. A Hormuz pack cache reuses the result of authorization, retrieval, ranking, and rendering. A final-answer cache skips inference and has different correctness, freshness, and attribution risks.

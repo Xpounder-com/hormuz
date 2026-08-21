@@ -36,6 +36,33 @@ The alias is the policy and accounting identity after fallback routing, not an u
 
 Every configured model-limit entry must contain at least one limit, must reference an existing route, and requires an effective `max_output_tokens` so Hormuz can reserve a conservative upper bound before provider work. `hormuz policy-check` returns each applicable model-capacity scope without making a provider request.
 
+## Provider-native cache policy
+
+Each organization, team, or actor policy may add a `provider_cache` block for
+known, client-requested provider prompt-cache controls:
+
+```json
+{
+  "provider_cache": {
+    "mode": "allow",
+    "allowed_clients": ["codex", "claude-code"],
+    "allowed_models": ["gpt-5.4", "claude-sonnet-5"]
+  }
+}
+```
+
+`mode` is `allow` (the default) or `deny`. `deny` rejects a request containing
+a documented explicit provider cache field before egress; it does not remove
+or rewrite that field. Client and model lists restrict explicit cache requests
+to their intersection across organization, team, and actor scopes. A lower
+scope cannot change a higher-scope `deny` back to `allow`.
+
+This is not a universal no-cache switch. Hormuz does not inject cache options,
+and it does not claim to control provider-automatic, future, or otherwise
+unknown cache behavior. See [provider-native cache policy](PROVIDER_CACHE_POLICY.md)
+for the recognized OpenAI/Anthropic fields, accounting, privacy, and strict
+no-cache limitations.
+
 ## Billing reconciliation policy
 
 `billing_reconciliation` classifies aggregate provider-versus-gateway

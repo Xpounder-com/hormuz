@@ -23,7 +23,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest import mock
 
-from hormuz.config import GatewayConfig, ModelUsageLimit, Policy
+from hormuz.config import (
+    GatewayConfig,
+    ModelUsageLimit,
+    Policy,
+    ProviderCachePolicy,
+)
 from hormuz.context import ContextArtifact, ContextLifecycleSnapshot, ContextRecord
 from hormuz.context_lifecycle_client import ContextLifecycleClient
 from hormuz.context_store import ContextStoreError
@@ -769,6 +774,191 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertEqual(latency["provider"]["count"], 1)
         self.assertEqual(latency["context"]["count"], 0)
 
+    def test_openai_explicit_cache_controls_pass_unchanged_when_allowed(self) -> None:
+        cache_key = "cache-key-must-not-persist"
+        request_content = "request-content-must-not-persist"
+
+        status, headers, _ = self._post(
+            "/v1/responses",
+            {
+                "model": "engineering-fast",
+                "input": request_content,
+                "prompt_cache_key": cache_key,
+                "prompt_cache_options": {"mode": "explicit"},
+            },
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(
+            headers["x-hormuz-policy-decision"],
+            "allowed+provider-cache-explicit",
+        )
+        upstream = FakeProviderHandler.requests[-1]
+        self.assertEqual(upstream["body"]["prompt_cache_key"], cache_key)
+        self.assertEqual(
+            upstream["body"]["prompt_cache_options"],
+            {"mode": "explicit"},
+        )
+        event = self.gateway.store.audit_events(
+            since="2000-01-01T00:00:00+00:00",
+            kind="usage",
+        )[-1]
+        self.assertEqual(event["policy_action"], "allowed+provider-cache-explicit")
+        self.assertNotIn(cache_key, json.dumps(event, sort_keys=True))
+        self.assertNotIn(request_content, json.dumps(event, sort_keys=True))
+        for path in (
+            self.config.database_path,
+            Path(str(self.config.database_path) + "-wal"),
+        ):
+            if path.exists():
+                usage_bytes = path.read_bytes()
+                self.assertNotIn(cache_key.encode("utf-8"), usage_bytes)
+                self.assertNotIn(request_content.encode("utf-8"), usage_bytes)
+
+    def test_known_anthropic_cache_controls_are_denied_without_rewrite(self) -> None:
+        config_value = self._config(self.provider.server_port, _free_port())
+        config_value["policies"]["organization"]["provider_cache"] = {
+            "mode": "deny"
+        }
+        self._restart_gateway(config_value)
+        before = len(FakeProviderHandler.requests)
+        secret_cache_marker = "cache-control-must-not-persist"
+
+        status, _, response = self._post(
+            "/v1/messages",
+            {
+                "model": "claude-sonnet-5",
+                "system": [
+                    {
+                        "type": "text",
+                        "text": secret_cache_marker,
+                        "cache_control": {"type": "ephemeral"},
+                    }
+                ],
+                "messages": [{"role": "user", "content": "hello"}],
+                "max_tokens": 20,
+            },
+            extra_headers={"Anthropic-Version": "2023-06-01"},
+        )
+
+        self.assertEqual(status, 403)
+        self.assertEqual(len(FakeProviderHandler.requests), before)
+        self.assertEqual(
+            json.loads(response)["error"]["type"],
+            "permission_error",
+        )
+        event = self.gateway.store.audit_events(
+            since="2000-01-01T00:00:00+00:00",
+            kind="usage",
+        )[-1]
+        self.assertEqual(event["policy_action"], "provider_cache_explicit_denied")
+        self.assertEqual(event["status"], "denied")
+        self.assertNotIn(secret_cache_marker, json.dumps(event, sort_keys=True))
+        self.assertNotIn("ephemeral", json.dumps(event, sort_keys=True))
+        for path in (
+            self.config.database_path,
+            Path(str(self.config.database_path) + "-wal"),
+        ):
+            if path.exists():
+                self.assertNotIn(secret_cache_marker.encode("utf-8"), path.read_bytes())
+
+    def test_provider_cache_scopes_restrict_known_controls_monotonically(self) -> None:
+        config_value = self._config(self.provider.server_port, _free_port())
+        config_value["policies"]["organization"]["provider_cache"] = {
+            "mode": "allow",
+            "allowed_clients": ["codex"],
+            "allowed_models": ["engineering-fast"],
+        }
+        config_value["policies"]["teams"]["engineering"]["provider_cache"] = {
+            "mode": "deny"
+        }
+        config_value["policies"]["actors"]["alice"] = {
+            "provider_cache": {"mode": "allow"}
+        }
+        self._restart_gateway(config_value)
+        before = len(FakeProviderHandler.requests)
+
+        status, _, response = self._post(
+            "/v1/responses",
+            {
+                "model": "engineering-fast",
+                "input": "ordinary request",
+                "prompt_cache_key": "not-persisted",
+            },
+        )
+
+        self.assertEqual(status, 403)
+        self.assertEqual(len(FakeProviderHandler.requests), before)
+        self.assertEqual(
+            json.loads(response)["error"]["code"],
+            "hormuz_provider_cache_denied",
+        )
+        self.assertFalse(
+            self.config.resolved_policy(
+                self.config.identity_for_token(GATEWAY_TOKEN)  # type: ignore[arg-type]
+            ).provider_cache.explicit_requests_allowed
+        )
+
+    def test_provider_cache_scope_denies_known_controls_for_other_client_or_model(self) -> None:
+        config_value = self._config(self.provider.server_port, _free_port())
+        config_value["policies"]["organization"]["provider_cache"] = {
+            "mode": "allow",
+            "allowed_clients": ["codex"],
+            "allowed_models": ["engineering-fast"],
+        }
+        self._restart_gateway(config_value)
+        before = len(FakeProviderHandler.requests)
+
+        status, _, response = self._post(
+            "/v1/messages",
+            {
+                "model": "claude-sonnet-5",
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "hello",
+                                "cache_control": {"type": "ephemeral"},
+                            }
+                        ],
+                    }
+                ],
+                "max_tokens": 20,
+            },
+            extra_headers={"Anthropic-Version": "2023-06-01"},
+        )
+
+        self.assertEqual(status, 403)
+        self.assertEqual(len(FakeProviderHandler.requests), before)
+        self.assertEqual(
+            json.loads(response)["error"]["type"],
+            "permission_error",
+        )
+
+    def test_provider_cache_policy_rejects_unknown_models(self) -> None:
+        config_value = self._config(self.provider.server_port, _free_port())
+        config_value["policies"]["organization"]["provider_cache"] = {
+            "allowed_models": ["not-a-route"]
+        }
+        self.config_path.write_text(json.dumps(config_value), encoding="utf-8")
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "Provider-cache policy references unknown model alias",
+        ):
+            GatewayConfig.load(self.config_path)
+
+    def test_provider_cache_overlay_cannot_reenable_a_denied_control(self) -> None:
+        effective = Policy(
+            provider_cache=ProviderCachePolicy(mode="deny")
+        ).overlaid(
+            Policy(provider_cache=ProviderCachePolicy(mode="allow"))
+        )
+
+        self.assertFalse(effective.provider_cache.explicit_requests_allowed)
+
     def test_policy_admin_routes_are_capability_gated_and_use_cas_contracts(self) -> None:
         config_value = self._config(self.provider.server_port, _free_port())
         config_value["identities"][0]["capabilities"] = ["policy_admin"]
@@ -779,7 +969,7 @@ class GatewayIntegrationTests(unittest.TestCase):
         version = PolicyVersion(
             version_id=version_id,
             projection_sha256=fingerprint,
-            projection_schema="hormuz.policy-projection.v2",
+            projection_schema="hormuz.policy-projection.v3",
             created_at="2026-08-20T00:00:00+00:00",
             created_by_actor_id="alice",
             created_by_actor_name="Alice",

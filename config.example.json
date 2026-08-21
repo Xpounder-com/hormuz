@@ -230,6 +230,17 @@
           "per_actor_monthly_budget_usd": 200
         }
       },
+      "provider_cache": {
+        "mode": "allow",
+        "allowed_clients": ["codex", "claude-code"],
+        "allowed_models": [
+          "gpt-5.4-mini",
+          "gpt-5.4",
+          "gpt-5.5",
+          "claude-sonnet-5",
+          "claude-opus-5"
+        ]
+      },
       "context_injection": {
         "mode": "off",
         "allowed_repositories": [],

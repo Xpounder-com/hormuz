@@ -15,6 +15,9 @@ MAX_POLICY_PROJECTION_BYTES = 1_048_576
 _MAX_RESPONSE_BYTES = 2 * 1_048_576
 _VERSION_ID = re.compile(r"hpv_v1_[0-9a-f]{64}\Z")
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
+_POLICY_PROJECTION_SCHEMAS = frozenset(
+    {"hormuz.policy-projection.v2", "hormuz.policy-projection.v3"}
+)
 
 
 class PolicyAdminClientError(RuntimeError):
@@ -206,7 +209,7 @@ def _valid_policy_version(value: object) -> bool:
         and isinstance(value.get("projection_sha256"), str)
         and _SHA256.fullmatch(value["projection_sha256"]) is not None
         and value.get("version_id") == "hpv_v1_" + value["projection_sha256"]
-        and value.get("projection_schema") == "hormuz.policy-projection.v2"
+        and value.get("projection_schema") in _POLICY_PROJECTION_SCHEMAS
         and _valid_timestamp(value.get("created_at"))
         and _valid_text(value.get("created_by_actor_id"), 256)
         and _valid_text(value.get("created_by_actor_name"), 256)
@@ -235,7 +238,7 @@ def _valid_active_policy(value: object) -> bool:
         and _SHA256.fullmatch(value["projection_sha256"]) is not None
         and value.get("version_id") == "hpv_v1_" + value["projection_sha256"]
         and isinstance(projection, dict)
-        and projection.get("schema") == "hormuz.policy-projection.v2"
+        and projection.get("schema") in _POLICY_PROJECTION_SCHEMAS
         and _projection_fingerprint(projection) == value["projection_sha256"]
         and _valid_timestamp(value.get("activated_at"))
         and _valid_text(value.get("activated_by_actor_id"), 256)

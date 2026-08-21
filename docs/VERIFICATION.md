@@ -2102,6 +2102,40 @@ SCIM deprovisioning workflow, workforce-performance system, immutable audit
 service, or complete provider-account telemetry. Those remain separate issue
 #6/#7 and operational gates.
 
+### Provider-native prompt-cache policy slice
+
+The first bounded issue #22 implementation slice was exercised locally on
+August 20, 2026:
+
+- organization, team, and actor policy may allow or deny only the recognized,
+  client-requested OpenAI and Anthropic cache-control fields, with client/model
+  eligibility and monotonic overlays. A narrower scope can restrict but cannot
+  re-enable a broader denial;
+- a permitted request preserves its provider-native cache directive exactly as
+  supplied. A known explicit directive denied by policy returns
+  `403 hormuz_provider_cache_denied` before provider egress; Hormuz does not
+  inject, remove, or rewrite cache controls;
+- DLP and secret redaction runs before the cache policy check. Focused tests
+  verify cache-control values and prompt markers are absent from the audit,
+  SQLite database, and WAL files; usage retains only bounded token categories
+  such as cache-read and cache-write when the provider reports them;
+- policy projection v3 carries only content-free cache-policy metadata.
+  PostgreSQL migration 8 accepts immutable v2 and v3 policy documents, so an
+  existing active v2 version remains canonical during a rolling replacement;
+- the digest-pinned PostgreSQL 16.14 integration reapplied migrations 1
+  through 8 and emitted the checked-in content-free artifact at
+  `evidence/postgres-foundation-integration-2026-08-20.json`; and
+- the focused cache and policy suites, the real loopback gateway checks, and
+  the complete local source suite passed. The final complete run reported 570
+  tests in 154.584 seconds with 3 documented opt-in client/profile skips.
+
+This proves a deliberately narrow enforcement contract: known explicit
+directives are allowed unchanged or denied before egress. It does **not** prove
+a universal no-cache guarantee, provider-automatic cache control, a cache
+savings metric, an invoice amount, live provider behavior for every model
+family, or a complete tenant deployment. Those remain issue #22 gates and the
+reason the issue stays open.
+
 ## Automated publication gate
 
 Ordinary GitHub CI runs seven independent gate families without provider credentials:

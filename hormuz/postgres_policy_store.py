@@ -26,6 +26,9 @@ from .postgres import (
 
 _VERSION_ID = re.compile(r"hpv_v1_[0-9a-f]{64}\Z")
 _SUMMARY_SCHEMA = "hormuz.policy-change-summary.v1"
+_POLICY_PROJECTION_SCHEMAS = frozenset(
+    {"hormuz.policy-projection.v2", "hormuz.policy-projection.v3"}
+)
 _PROJECTION_SECTIONS = (
     "model_routes",
     "organization_policy",
@@ -249,6 +252,12 @@ class PostgresPolicyStore:
         except PostgresStorageError as error:
             raise PolicyAdminError(error.code) from None
         fingerprint = policy_projection_sha256(projection)
+        projection_schema = projection.get("schema")
+        if (
+            not isinstance(projection_schema, str)
+            or projection_schema not in _POLICY_PROJECTION_SCHEMAS
+        ):
+            raise PolicyAdminError("policy_projection_schema_unsupported")
         version_id = "hpv_v1_" + fingerprint
         serialized = json.dumps(
             projection,
@@ -283,7 +292,7 @@ class PostgresPolicyStore:
                         organization_id,
                         version_id,
                         fingerprint,
-                        "hormuz.policy-projection.v2",
+                        projection_schema,
                         serialized,
                         now,
                         identity.actor_id,
@@ -327,7 +336,7 @@ class PostgresPolicyStore:
                     existing_projection = _json_object(existing[2])
                     if (
                         str(existing[0]) != fingerprint
-                        or str(existing[1]) != "hormuz.policy-projection.v2"
+                        or str(existing[1]) != projection_schema
                         or existing_projection != projection
                         or policy_projection_sha256(existing_projection) != fingerprint
                     ):
@@ -339,7 +348,7 @@ class PostgresPolicyStore:
         return PolicyVersion(
             version_id=version_id,
             projection_sha256=fingerprint,
-            projection_schema="hormuz.policy-projection.v2",
+            projection_schema=projection_schema,
             created_at=_iso(created_at),
             created_by_actor_id=created_by_actor_id,
             created_by_actor_name=created_by_actor_name,
@@ -490,7 +499,7 @@ class PostgresPolicyStore:
             return None
         projection = _json_object(row[2])
         if (
-            projection.get("schema") != "hormuz.policy-projection.v2"
+            projection.get("schema") not in _POLICY_PROJECTION_SCHEMAS
             or projection.get("organization_id") != organization_id
             or policy_projection_sha256(projection) != str(row[1])
             or version_id_from_sha256(str(row[1])) != str(row[0])

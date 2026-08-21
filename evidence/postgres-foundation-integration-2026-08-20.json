@@ -14,7 +14,7 @@
     "usage_rows_per_tenant": 1
   },
   "content_free": true,
-  "generated_at": "2026-08-21T00:54:03.216480Z",
+  "generated_at": "2026-08-21T01:12:29.433848Z",
   "identity_sessions": {
     "atomic_refresh_competitors": 2,
     "atomic_refresh_replay_denied": 1,
@@ -46,7 +46,8 @@
       4,
       5,
       6,
-      7
+      7,
+      8
     ],
     "checksums_verified": true,
     "forced_rls_verified": true,
@@ -54,7 +55,7 @@
     "policy_definitions_verified": true,
     "privileges_verified": true,
     "runtime_role_verified": true,
-    "target_version": 7,
+    "target_version": 8,
     "trigger_definition_verified": true
   },
   "policy_administration": {

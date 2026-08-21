@@ -72,6 +72,7 @@ from .directory import (
     SQLiteDirectoryStore,
 )
 from .policy import PolicyDecision, PolicyEngine
+from .provider_cache import inspect_explicit_cache_controls
 from .identity_projection import configured_organization_ids, verify_runtime_identity_projection
 from .postgres import PostgresStorageError, postgres_dsn_from_env
 from .postgres_policy_store import PolicyAdminError, PostgresPolicyStore
@@ -3822,6 +3823,64 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             )
             return
 
+        # DLP/secret processing runs before this check, so no unredacted value
+        # can reach a provider cache.  Hormuz observes only static field names
+        # and never removes, adds, or rewrites provider cache directives.
+        cache_inspection = inspect_explicit_cache_controls(
+            protocol,
+            redaction.value,
+        )
+        cache_policy = runtime_config.resolved_policy(identity).provider_cache
+        resolved_alias = decision.resolved_alias or decision.requested_model
+        cache_policy_is_restrictive = (
+            not cache_policy.explicit_requests_allowed
+            or cache_policy.allowed_clients is not None
+            or cache_policy.allowed_models is not None
+        )
+        cache_request_denied = (
+            cache_inspection.requested
+            and not cache_policy.allows(
+                client=client,
+                model_alias=resolved_alias,
+            )
+        ) or (not cache_inspection.complete and cache_policy_is_restrictive)
+        if cache_request_denied:
+            if account_usage:
+                self._record_timed_usage(
+                    policy_latency_milliseconds=policy_latency_milliseconds,
+                    identity=identity,
+                    client=client,
+                    protocol=protocol,
+                    requested_model=decision.requested_model,
+                    resolved_alias=decision.resolved_alias,
+                    upstream_model=decision.route.upstream_model,
+                    policy_action="provider_cache_explicit_denied",
+                    status="denied",
+                    cost_basis="not_applicable",
+                    currency=decision.route.currency,
+                    rate_card_version=decision.route.rate_card_version,
+                    redaction_count=redaction.redaction_count,
+                    redaction_rules=redaction_rules,
+                    context_lineage=context_lineage,
+                )
+            LOGGER.info(
+                "provider_cache_explicit_denied actor=%s team=%s client=%s protocol=%s requested_model=%s routed_model=%s inspection_complete=%s",
+                identity.actor_id,
+                identity.team_id,
+                client,
+                protocol,
+                decision.requested_model,
+                decision.route.upstream_model,
+                cache_inspection.complete,
+            )
+            self._send_protocol_error(
+                protocol,
+                "Organization policy does not allow explicit provider prompt-cache controls for this client or model.",
+                HTTPStatus.FORBIDDEN,
+                code="hormuz_provider_cache_denied",
+            )
+            return
+
         upstream = self.server.config.upstreams[protocol]
         is_responses_create = protocol == "openai" and operation == "/v1/responses"
         if (
@@ -3872,6 +3931,10 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             policy_action = f"{policy_action}+redacted"
         if approval_authorized:
             policy_action = f"{policy_action}+dlp-approved"
+        if cache_inspection.requested:
+            policy_action = f"{policy_action}+provider-cache-explicit"
+        elif not cache_inspection.complete:
+            policy_action = f"{policy_action}+provider-cache-unknown"
         body = json.dumps(redaction.value, separators=(",", ":")).encode("utf-8")
         reservation_id: str | None = None
         if account_usage:

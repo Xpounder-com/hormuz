@@ -54,8 +54,24 @@ def _model_limit(value: ModelUsageLimit) -> dict[str, object]:
     }
 
 
-def _policy(value: Policy) -> dict[str, object]:
+def _provider_cache(value: Policy) -> dict[str, object]:
     return {
+        "mode": value.provider_cache.mode,
+        "allowed_clients": _sorted_optional(
+            value.provider_cache.allowed_clients
+        ),
+        "allowed_models": _sorted_optional(value.provider_cache.allowed_models),
+    }
+
+
+_POLICY_PROJECTION_SCHEMAS = frozenset(
+    {"hormuz.policy-projection.v2", "hormuz.policy-projection.v3"}
+)
+DEFAULT_POLICY_PROJECTION_SCHEMA = "hormuz.policy-projection.v3"
+
+
+def _policy(value: Policy, *, schema: str) -> dict[str, object]:
+    result: dict[str, object] = {
         "allowed_clients": _sorted_optional(value.allowed_clients),
         "allowed_models": _sorted_optional(value.allowed_models),
         "fallback_model": value.fallback_model,
@@ -69,6 +85,9 @@ def _policy(value: Policy) -> dict[str, object]:
             for alias, limit in sorted(value.model_limits.items())
         },
     }
+    if schema == DEFAULT_POLICY_PROJECTION_SCHEMA:
+        result["provider_cache"] = _provider_cache(value)
+    return result
 
 
 def _rule(value: DLPRuleConfig) -> dict[str, object]:
@@ -91,7 +110,14 @@ def _overlay(value: DLPPolicyOverlay) -> dict[str, object]:
     }
 
 
-def policy_projection(config: GatewayConfig, organization_id: str) -> dict[str, object]:
+def policy_projection(
+    config: GatewayConfig,
+    organization_id: str,
+    *,
+    schema: str = DEFAULT_POLICY_PROJECTION_SCHEMA,
+) -> dict[str, object]:
+    if schema not in _POLICY_PROJECTION_SCHEMAS:
+        raise PostgresStorageError("policy_projection_schema_unsupported")
     organizations = configured_organization_ids(config)
     if organization_id not in organizations:
         raise PostgresStorageError("policy_projection_tenant_not_configured")
@@ -103,7 +129,7 @@ def policy_projection(config: GatewayConfig, organization_id: str) -> dict[str, 
     actor_ids = {identity.actor_id for identity in identities}
     team_ids = {identity.team_id for identity in identities}
     return {
-        "schema": "hormuz.policy-projection.v2",
+        "schema": schema,
         "organization_id": organization_id,
         "model_routes": {
             alias: {
@@ -118,13 +144,13 @@ def policy_projection(config: GatewayConfig, organization_id: str) -> dict[str, 
             }
             for alias, route in sorted(config.model_routes.items())
         },
-        "organization_policy": _policy(config.organization_policy),
+        "organization_policy": _policy(config.organization_policy, schema=schema),
         "team_policies": {
-            team_id: _policy(config.team_policies[team_id])
+            team_id: _policy(config.team_policies[team_id], schema=schema)
             for team_id in sorted(team_ids & set(config.team_policies))
         },
         "actor_policies": {
-            actor_id: _policy(config.actor_policies[actor_id])
+            actor_id: _policy(config.actor_policies[actor_id], schema=schema)
             for actor_id in sorted(actor_ids & set(config.actor_policies))
         },
         "secret_controls": {

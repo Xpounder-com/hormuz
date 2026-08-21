@@ -15,7 +15,7 @@ The current draft-PR line has executable evidence for:
 - generic OIDC validation, browser authorization-code + PKCE login, rotating Hormuz sessions, secure-store client custody, scoped session administration, and immediate revocation;
 - structured secret/DLP controls, exact-request approval grants, content-free security evidence, and pre-provider enforcement;
 - SQLite development storage plus opt-in PostgreSQL usage, cost, identity projection, immutable policy administration, session, approval, and security repositories with tenant keys, forced row-level security, and two-tenant integration evidence;
-- provider-native usage normalization, estimated cost, versioned rate cards, offline/authenticated cost-report ingestion, and aggregate reconciliation; and
+- provider-native usage normalization, bounded explicit-cache policy enforcement with automatic/unknown behavior observed-only, estimated cost, versioned rate cards, offline/authenticated cost-report ingestion, and aggregate reconciliation; and
 - strict configuration parsing, deployment digest binding, connection/request/provider deadlines, health/readiness, graceful draining, reproducible package checks, OCI release-contract evidence, compatibility evidence, threat evidence, and incident regressions.
 
 These are scoped engineering checkpoints, not a production-enterprise claim. Real IdP proof, full tenant/RBAC completion, SCIM, production policy-rollout operations, representative DLP evaluation, final provider invoice reconciliation, KMS/BYOK, immutable retention, TLS/HA/backup/restore, production operations, and independent review remain open.

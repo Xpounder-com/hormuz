@@ -59,7 +59,14 @@ class PolicyRuntime:
                 active.projection,
                 organization_id=identity.organization_id,
             )
-            canonical = policy_projection(candidate, identity.organization_id)
+            active_schema = active.projection.get("schema")
+            if not isinstance(active_schema, str):
+                raise PolicyAdminError("active_policy_invalid")
+            canonical = policy_projection(
+                candidate,
+                identity.organization_id,
+                schema=active_schema,
+            )
             fingerprint = policy_projection_sha256(canonical)
         except Exception as error:
             if isinstance(error, PolicyAdminError):

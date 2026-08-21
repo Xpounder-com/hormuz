@@ -101,12 +101,17 @@ responses, matched values, filenames, and source content. Runtime access is
 read-only, and a PostgreSQL-backed gateway fails startup with
 `policy_projection_stale` when any configured tenant does not match.
 
-ADR 0008 changes the canonical document from
-`hormuz.policy-projection.v1` to `hormuz.policy-projection.v2`. Version 2 omits
-deprecated built-in context-injection configuration. Deployments upgrading
-from version 1 must run `hormuz policies sync` through the schema-owner path
-before starting the replacement runtime; the expected startup failure before
-that sync is `policy_projection_stale`. The database schema does not change.
+ADR 0008 changed the canonical document from
+`hormuz.policy-projection.v1` to `hormuz.policy-projection.v2`. Version 2
+omits deprecated built-in context-injection configuration. The provider-native
+cache-policy slice advances new exports to
+`hormuz.policy-projection.v3`; version 3 adds only content-free
+provider-cache policy metadata. PostgreSQL migration 8 permits both immutable
+v2 and v3 policy versions, so a running replacement can still validate an
+existing v2 active pointer. Apply migration 8 before deploying a runtime that
+stages v3 documents, then run `hormuz policies sync` through the schema-owner
+path. The expected startup failure before the required projection sync is
+`policy_projection_stale`.
 
 The live gateway never receives schema-owner credentials. Identity and policy
 projection tables are read-only, while the previously accepted tenant-scoped
