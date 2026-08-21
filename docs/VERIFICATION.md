@@ -299,6 +299,35 @@ Observed local result:
 
 No `OPENAI_ADMIN_KEY` or `ANTHROPIC_ADMIN_KEY` was present in the verification environment. No live organization billing endpoint was called, and no inference credential was substituted. This checkpoint therefore proves the fixed authenticated request, pagination, parsing, secret-handling, persistence, and packaging behavior under deterministic official-contract transports. A customer-account live read, scheduled collection, secure hosted credential custody/rotation, Claude Enterprise Analytics support, Anthropic Priority Tier accounting, invoice/credit ingestion, finance exception workflow, shared tenant storage/RBAC, retention, HA, KMS, and independent review remain open. Issue #8 remains open, and aggregate provider cost remains ineligible for silent final team or employee allocation.
 
+### Provider-total organization allocation
+
+The `billing allocate` CLI allocation path was exercised on August 21, 2026.
+It uses a stored provider cost import as the authoritative organization total and
+the metadata-only, request-time usage ledger as the allocation input.
+
+- The allocation returns separate `teams`, `people`, and `unattributed`
+  results. Both team-plus-unattributed and person-plus-unattributed totals are
+  asserted to equal the exact provider decimal.
+- Tests cover human team/person attribution, historic team transfers for the
+  same person, service account/CI/missing identity handling, no captured
+  successful request, signed credits, deterministic largest-remainder rounding
+  at one trillionth of a USD, and a large valid decimal total.
+- The SQLite CLI path and the tenant-scoped PostgreSQL query shape are covered;
+  the PostgreSQL test verifies a tenant-bound, successful-request-only query
+  without claiming a live PostgreSQL deployment.
+- 53 focused billing and PostgreSQL-path tests passed. The complete
+  loopback-enabled suite passed 630 tests with 4 intentional skips. Source and
+  wheel builds passed, and an installed temporary Python 3.12 wheel exposed
+  `hormuz billing allocate --help` from `site-packages`.
+
+The report is a deterministic provider-total allocation, not a provider-final
+cost for an individual request, employee, or team. It keeps nonhuman, missing,
+unpriced, legacy-unbound, and unexplained provider amount visible according to
+its output contract. No customer provider billing account was read for this
+checkpoint, and provider project/workspace mappings, remote billing RBAC,
+hosted finance review, invoice finalization, KMS, HA/DR, and independent review
+remain open.
+
 ### Structured DLP detector and enforcement subset
 
 The versioned rule configuration, recursive detector, additive security-ledger migration, OpenAI and Anthropic egress paths, and metadata-only evidence boundary were exercised on August 15, 2026.

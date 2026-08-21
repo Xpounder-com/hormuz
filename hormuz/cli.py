@@ -569,7 +569,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     billing = subparsers.add_parser(
         "billing",
-        help="Import and reconcile provider-reported organization costs",
+        help="Import, reconcile, and allocate provider-reported organization costs",
     )
     billing_subparsers = billing.add_subparsers(dest="billing_command", required=True)
     billing_import = billing_subparsers.add_parser(
@@ -631,6 +631,24 @@ def build_parser() -> argparse.ArgumentParser:
         "--fail-on-review",
         action="store_true",
         help="Exit 3 after output when configured thresholds require finance review",
+    )
+    billing_allocate = billing_subparsers.add_parser(
+        "allocate",
+        help="Allocate one provider-reported organization total by team, person, and unattributed traffic",
+    )
+    billing_allocate.add_argument(
+        "--organization",
+        required=True,
+        help="Configured organization ID",
+    )
+    billing_allocate.add_argument(
+        "--provider",
+        required=True,
+        choices=["openai", "anthropic"],
+    )
+    billing_allocate.add_argument(
+        "--import-id",
+        help="Exact pci_ import ID; defaults to the latest import for the provider",
     )
 
     policy = subparsers.add_parser("policy-check", help="Evaluate a request without sending it upstream")
@@ -1934,6 +1952,14 @@ def _billing_command(config: GatewayConfig, args: argparse.Namespace) -> int:
                     "gateway bypass or provide actual per-person cost."
                 )
             return 3 if args.fail_on_review and result["exception_status"] == "review_required" else 0
+        if args.billing_command == "allocate":
+            result = gateway_store(config).allocate_provider_costs(
+                organization_id=args.organization,
+                provider=args.provider,
+                import_id=args.import_id,
+            )
+            print(json.dumps(result, indent=2))
+            return 0
     except ProviderBillingClientError as error:
         print(f"billing fetch failed: {error.code}", file=sys.stderr)
         return 1

@@ -4,8 +4,8 @@ import hashlib
 import json
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
-from decimal import Decimal, InvalidOperation, localcontext
-from typing import Mapping, Sequence
+from decimal import Decimal, InvalidOperation, ROUND_DOWN, localcontext
+from typing import Iterable, Mapping, Sequence
 
 
 MAX_REPORT_PAGES = 1_000
@@ -16,6 +16,11 @@ MAX_REPORT_TOTAL_BYTES = 32 * 1024 * 1024
 MAX_AMOUNT_USD = Decimal("1000000000000")
 MAX_AMOUNT_DECIMAL_PLACES = 12
 MAX_RECONCILIATION_AMOUNT_USD = MAX_AMOUNT_USD * MAX_REPORT_ITEMS
+_ALLOCATION_UNIT_USD = Decimal("0.000000000001")
+_ALLOCATION_METHOD_VERSION = "provider_total_normalized_v1"
+_ALLOCATION_BASIS = (
+    "request_time_estimated_cost_with_unattributed_provider_remainder_v1"
+)
 
 _AUTHENTICATED_SOURCE_CONTRACTS = {
     "openai": (
@@ -31,6 +36,22 @@ _AUTHENTICATED_SOURCE_CONTRACTS = {
 
 class ProviderBillingError(ValueError):
     pass
+
+
+@dataclass
+class _AllocationBucket:
+    """One content-free allocation target derived from immutable usage facts."""
+
+    kind: str
+    key: tuple[str, ...]
+    actor_id: str | None = None
+    actor_name: str | None = None
+    team_id: str | None = None
+    team_name: str | None = None
+    reason: str | None = None
+    successful_requests: int = 0
+    unpriced_successful_requests: int = 0
+    allocation_weight_usd: Decimal = Decimal(0)
 
 
 @dataclass(frozen=True)
@@ -219,8 +240,8 @@ def evaluate_reconciliation(
     with localcontext() as context:
         context.prec = 80
         variance = provider_cost - gateway_estimated_cost
-        absolute_variance = abs(variance)
-        provider_cost_denominator = abs(provider_cost)
+        absolute_variance = variance.copy_abs()
+        provider_cost_denominator = provider_cost.copy_abs()
         relative_numerator = absolute_variance * Decimal(10_000)
         if provider_cost_denominator == 0:
             variance_basis_points = Decimal(0) if absolute_variance == 0 else None
@@ -304,6 +325,440 @@ def evaluate_reconciliation(
         }
     )
     return result
+
+
+def build_provider_cost_allocation(
+    reconciliation: Mapping[str, object],
+    successful_requests: Sequence[Mapping[str, object]],
+) -> dict[str, object]:
+    """Allocate one provider-reported organization total without inventing per-request facts.
+
+    The provider amount remains the authoritative organization total.  Immutable
+    request-time identity and team snapshots determine *where* a captured
+    successful request belongs; immutable request-time estimated cost determines
+    its relative allocation weight.  A positive amount that the captured priced
+    requests do not explain is deliberately placed in ``unattributed`` instead
+    of increasing employee allocations.
+    """
+
+    if (
+        not isinstance(reconciliation, Mapping)
+        or isinstance(reconciliation.get("schema_version"), bool)
+        or reconciliation.get("schema_version") != 1
+        or isinstance(successful_requests, (str, bytes, bytearray))
+        or not isinstance(successful_requests, Sequence)
+    ):
+        raise ProviderBillingError("Billing allocation facts are invalid")
+
+    provider_cost = _reconciliation_decimal(reconciliation, "provider_cost_usd")
+    organization_id = _allocation_required_text(
+        reconciliation.get("organization_id"),
+        field="organization ID",
+    )
+    provider = _allocation_required_text(
+        reconciliation.get("provider"),
+        field="provider",
+    )
+    if provider not in {"openai", "anthropic"}:
+        raise ProviderBillingError("Billing allocation facts are invalid")
+    import_id = _allocation_required_text(
+        reconciliation.get("import_id"),
+        field="provider cost import ID",
+    )
+    report_start = _allocation_required_text(
+        reconciliation.get("report_start"),
+        field="report start",
+    )
+    report_end = _allocation_required_text(
+        reconciliation.get("report_end"),
+        field="report end",
+    )
+    gateway_requests = _reconciliation_count(reconciliation, "gateway_requests")
+    gateway_succeeded = _reconciliation_count(reconciliation, "gateway_succeeded")
+    legacy_unbound = _reconciliation_count(
+        reconciliation,
+        "legacy_unattributed_gateway_requests",
+    )
+
+    people: dict[tuple[str, str, str, str], _AllocationBucket] = {}
+    unattributed: dict[str, _AllocationBucket] = {}
+    price_weighted_requests = 0
+    unpriced_successful_requests = 0
+    attributed_successful_requests = 0
+    unattributed_successful_requests = 0
+
+    for request in successful_requests:
+        if not isinstance(request, Mapping):
+            raise ProviderBillingError("Billing allocation request facts are invalid")
+        actor_id = _allocation_event_text(request.get("actor_id"))
+        actor_name = _allocation_event_text(request.get("actor_name")) or actor_id
+        team_id = _allocation_event_text(request.get("team_id"))
+        team_name = _allocation_event_text(request.get("team_name")) or team_id
+        identity_type = _allocation_event_text(request.get("identity_type"))
+        cost_basis = _allocation_event_text(request.get("cost_basis"))
+        cost_microusd = _allocation_nonnegative_int(
+            request.get("cost_microusd"),
+            field="request cost",
+        )
+        is_price_weighted = cost_basis.startswith("estimated") and cost_microusd > 0
+        weight = (
+            Decimal(cost_microusd) / Decimal(1_000_000)
+            if is_price_weighted
+            else Decimal(0)
+        )
+        is_unpriced = cost_basis == "not_available"
+        if is_price_weighted:
+            price_weighted_requests += 1
+        if is_unpriced:
+            unpriced_successful_requests += 1
+
+        if identity_type == "human" and actor_id and team_id:
+            key = (team_id, team_name, actor_id, actor_name)
+            bucket = people.get(key)
+            if bucket is None:
+                bucket = _AllocationBucket(
+                    kind="person",
+                    key=("person", *key),
+                    actor_id=actor_id,
+                    actor_name=actor_name,
+                    team_id=team_id,
+                    team_name=team_name,
+                )
+                people[key] = bucket
+            attributed_successful_requests += 1
+        else:
+            reason = _unattributed_reason(
+                identity_type=identity_type,
+                actor_id=actor_id,
+                team_id=team_id,
+            )
+            bucket = unattributed.get(reason)
+            if bucket is None:
+                bucket = _AllocationBucket(
+                    kind="unattributed",
+                    key=("unattributed", reason),
+                    reason=reason,
+                )
+                unattributed[reason] = bucket
+            unattributed_successful_requests += 1
+        bucket.successful_requests += 1
+        bucket.unpriced_successful_requests += int(is_unpriced)
+        bucket.allocation_weight_usd += weight
+
+    priced_request_weight = _sum_allocation_decimals(
+        (bucket.allocation_weight_usd for bucket in (*people.values(), *unattributed.values())),
+    )
+    with localcontext() as context:
+        context.prec = 96
+        unattributed_provider_remainder = (
+            provider_cost - priced_request_weight
+            if provider_cost > 0 and provider_cost > priced_request_weight
+            else Decimal(0)
+        )
+    if unattributed_provider_remainder > 0 and priced_request_weight > 0:
+        remainder = unattributed.get("provider_amount_not_explained_by_priced_gateway_requests")
+        if remainder is None:
+            remainder = _AllocationBucket(
+                kind="unattributed",
+                key=(
+                    "unattributed",
+                    "provider_amount_not_explained_by_priced_gateway_requests",
+                ),
+                reason="provider_amount_not_explained_by_priced_gateway_requests",
+            )
+            unattributed[remainder.reason] = remainder
+        remainder.allocation_weight_usd += unattributed_provider_remainder
+
+    all_buckets = [*people.values(), *unattributed.values()]
+    total_weight = _sum_allocation_decimals(
+        (bucket.allocation_weight_usd for bucket in all_buckets),
+    )
+    if provider_cost != 0 and total_weight == 0:
+        reason = (
+            "no_successful_gateway_requests"
+            if not successful_requests
+            else "no_priceable_successful_requests"
+        )
+        fallback = unattributed.get(reason)
+        if fallback is None:
+            fallback = _AllocationBucket(
+                kind="unattributed",
+                key=("unattributed", reason),
+                reason=reason,
+            )
+            unattributed[reason] = fallback
+            all_buckets.append(fallback)
+        fallback.allocation_weight_usd += provider_cost.copy_abs()
+
+    allocated = _normalized_allocations(
+        provider_cost,
+        [(bucket.key, bucket.allocation_weight_usd) for bucket in all_buckets],
+    )
+    person_rows = [
+        {
+            "team_id": bucket.team_id,
+            "team_name": bucket.team_name,
+            "actor_id": bucket.actor_id,
+            "actor_name": bucket.actor_name,
+            "successful_requests": bucket.successful_requests,
+            "unpriced_successful_requests": bucket.unpriced_successful_requests,
+            "allocation_weight_usd": _decimal_text(bucket.allocation_weight_usd),
+            "allocated_cost_usd": _decimal_text(allocated[bucket.key]),
+        }
+        for bucket in people.values()
+    ]
+    person_rows.sort(
+        key=lambda row: (
+            str(row["team_id"]),
+            str(row["team_name"]),
+            str(row["actor_id"]),
+            str(row["actor_name"]),
+        )
+    )
+
+    teams: dict[tuple[str, str], dict[str, object]] = {}
+    for person in person_rows:
+        team_key = (str(person["team_id"]), str(person["team_name"]))
+        team = teams.setdefault(
+            team_key,
+            {
+                "team_id": person["team_id"],
+                "team_name": person["team_name"],
+                "successful_requests": 0,
+                "unpriced_successful_requests": 0,
+                "allocation_weight_usd": Decimal(0),
+                "allocated_cost_usd": Decimal(0),
+            },
+        )
+        team["successful_requests"] = int(team["successful_requests"]) + int(
+            person["successful_requests"]
+        )
+        team["unpriced_successful_requests"] = int(
+            team["unpriced_successful_requests"]
+        ) + int(person["unpriced_successful_requests"])
+        team["allocation_weight_usd"] = _sum_allocation_decimals(
+            (
+                Decimal(str(team["allocation_weight_usd"])),
+                Decimal(str(person["allocation_weight_usd"])),
+            )
+        )
+        team["allocated_cost_usd"] = _sum_allocation_decimals(
+            (
+                Decimal(str(team["allocated_cost_usd"])),
+                Decimal(str(person["allocated_cost_usd"])),
+            )
+        )
+    team_rows = [
+        {
+            "team_id": team["team_id"],
+            "team_name": team["team_name"],
+            "successful_requests": team["successful_requests"],
+            "unpriced_successful_requests": team["unpriced_successful_requests"],
+            "allocation_weight_usd": _decimal_text(
+                Decimal(str(team["allocation_weight_usd"]))
+            ),
+            "allocated_cost_usd": _decimal_text(
+                Decimal(str(team["allocated_cost_usd"]))
+            ),
+        }
+        for team in teams.values()
+    ]
+    team_rows.sort(key=lambda row: (str(row["team_id"]), str(row["team_name"])))
+
+    unattributed_reasons = [
+        {
+            "reason": bucket.reason,
+            "successful_requests": bucket.successful_requests,
+            "unpriced_successful_requests": bucket.unpriced_successful_requests,
+            "allocation_weight_usd": _decimal_text(bucket.allocation_weight_usd),
+            "allocated_cost_usd": _decimal_text(allocated[bucket.key]),
+        }
+        for bucket in unattributed.values()
+    ]
+    unattributed_reasons.sort(key=lambda row: str(row["reason"]))
+
+    person_total = _sum_allocation_decimals(
+        (Decimal(str(row["allocated_cost_usd"])) for row in person_rows),
+    )
+    team_total = _sum_allocation_decimals(
+        (Decimal(str(row["allocated_cost_usd"])) for row in team_rows),
+    )
+    unattributed_total = _sum_allocation_decimals(
+        (Decimal(str(row["allocated_cost_usd"])) for row in unattributed_reasons),
+    )
+    person_plus_unattributed = _sum_allocation_decimals(
+        (person_total, unattributed_total)
+    )
+    team_plus_unattributed = _sum_allocation_decimals(
+        (team_total, unattributed_total)
+    )
+    if (
+        person_plus_unattributed != provider_cost
+        or team_plus_unattributed != provider_cost
+    ):
+        raise ProviderBillingError("Billing allocation does not preserve provider total")
+
+    result: dict[str, object] = {
+        "schema_version": 1,
+        "organization_id": organization_id,
+        "provider": provider,
+        "import_id": import_id,
+        "report_start": report_start,
+        "report_end": report_end,
+        "provider_cost_basis": "provider_reported",
+        "provider_cost_usd": _decimal_text(provider_cost),
+        "allocation_method_version": _ALLOCATION_METHOD_VERSION,
+        "allocation_basis": _ALLOCATION_BASIS,
+        "request_final_cost_available": False,
+        "unattributed_provider_remainder_usd": _decimal_text(
+            unattributed_provider_remainder
+        ),
+        "coverage": {
+            "gateway_captured_requests": gateway_requests,
+            "gateway_captured_successful_requests": len(successful_requests),
+            "reported_gateway_succeeded_requests": gateway_succeeded,
+            "attributed_human_successful_requests": attributed_successful_requests,
+            "unattributed_successful_requests": unattributed_successful_requests,
+            "price_weighted_successful_requests": price_weighted_requests,
+            "zero_weight_successful_requests": len(successful_requests)
+            - price_weighted_requests,
+            "unpriced_successful_requests": unpriced_successful_requests,
+            "excluded_non_successful_gateway_requests": max(
+                gateway_requests - gateway_succeeded,
+                0,
+            ),
+            "excluded_legacy_unbound_gateway_requests": legacy_unbound,
+            "coverage": "gateway_captured_requests_plus_explicit_unattributed_provider_remainder",
+        },
+        "teams": team_rows,
+        "people": person_rows,
+        "unattributed": {
+            "successful_requests": unattributed_successful_requests,
+            "unpriced_successful_requests": sum(
+                int(row["unpriced_successful_requests"])
+                for row in unattributed_reasons
+            ),
+            "allocation_weight_usd": _decimal_text(
+                _sum_allocation_decimals(
+                    (
+                        Decimal(str(row["allocation_weight_usd"]))
+                        for row in unattributed_reasons
+                    ),
+                )
+            ),
+            "allocated_cost_usd": _decimal_text(unattributed_total),
+            "reasons": unattributed_reasons,
+        },
+        "totals": {
+            "provider_organization_cost_usd": _decimal_text(provider_cost),
+            "team_allocated_cost_usd": _decimal_text(team_total),
+            "person_allocated_cost_usd": _decimal_text(person_total),
+            "unattributed_cost_usd": _decimal_text(unattributed_total),
+            "team_plus_unattributed_cost_usd": _decimal_text(team_plus_unattributed),
+            "person_plus_unattributed_cost_usd": _decimal_text(person_plus_unattributed),
+        },
+    }
+    for field in (
+        "imported_at",
+        "source_sha256",
+        "provider_report_completeness",
+        "coverage_status",
+        "provider_source_kind",
+        "provider_api_contract",
+        "query_start",
+        "query_end",
+        "query_scope",
+    ):
+        if field in reconciliation:
+            result[field] = reconciliation[field]
+    return result
+
+
+def _normalized_allocations(
+    provider_cost: Decimal,
+    weighted_buckets: Sequence[tuple[tuple[str, ...], Decimal]],
+) -> dict[tuple[str, ...], Decimal]:
+    """Use largest-remainder rounding so allocated currency totals stay exact."""
+
+    if not weighted_buckets:
+        if provider_cost == 0:
+            return {}
+        raise ProviderBillingError("Billing allocation has no allocation targets")
+    if any(weight < 0 or not weight.is_finite() for _, weight in weighted_buckets):
+        raise ProviderBillingError("Billing allocation weights are invalid")
+    if len({key for key, _ in weighted_buckets}) != len(weighted_buckets):
+        raise ProviderBillingError("Billing allocation targets are not unique")
+    if provider_cost == 0:
+        return {key: Decimal(0) for key, _ in weighted_buckets}
+
+    total_weight = _sum_allocation_decimals(weight for _, weight in weighted_buckets)
+    if total_weight <= 0:
+        raise ProviderBillingError("Billing allocation has no positive weights")
+    with localcontext() as context:
+        context.prec = 96
+        absolute_cost = provider_cost.copy_abs()
+        units_decimal = absolute_cost / _ALLOCATION_UNIT_USD
+        units = int(units_decimal.to_integral_value())
+        if Decimal(units) != units_decimal:
+            raise ProviderBillingError("Billing allocation total exceeds supported precision")
+        base_units: dict[tuple[str, ...], int] = {}
+        remainders: list[tuple[Decimal, tuple[str, ...]]] = []
+        for key, weight in weighted_buckets:
+            raw_units = absolute_cost * weight / total_weight / _ALLOCATION_UNIT_USD
+            base = int(raw_units.to_integral_value(rounding=ROUND_DOWN))
+            base_units[key] = base
+            remainders.append((raw_units - Decimal(base), key))
+        remaining = units - sum(base_units.values())
+        if remaining < 0 or remaining > len(remainders):
+            raise ProviderBillingError("Billing allocation rounding is invalid")
+        for _, key in sorted(remainders, key=lambda item: (-item[0], item[1]))[:remaining]:
+            base_units[key] += 1
+        sign = Decimal(-1) if provider_cost < 0 else Decimal(1)
+        return {
+            key: sign * Decimal(base_units[key]) * _ALLOCATION_UNIT_USD
+            for key, _ in weighted_buckets
+        }
+
+
+def _sum_allocation_decimals(values: Iterable[Decimal]) -> Decimal:
+    with localcontext() as context:
+        context.prec = 96
+        return sum(values, Decimal(0))
+
+
+def _allocation_required_text(value: object, *, field: str) -> str:
+    if (
+        not isinstance(value, str)
+        or not value
+        or len(value.encode("utf-8")) > 512
+        or any(character in value for character in ("\n", "\r", "\x00"))
+    ):
+        raise ProviderBillingError(f"Billing allocation {field} is invalid")
+    return value
+
+
+def _allocation_event_text(value: object) -> str:
+    if not isinstance(value, str):
+        return ""
+    return value[:512]
+
+
+def _allocation_nonnegative_int(value: object, *, field: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ProviderBillingError(f"Billing allocation {field} is invalid")
+    return value
+
+
+def _unattributed_reason(*, identity_type: str, actor_id: str, team_id: str) -> str:
+    if identity_type in {"service_account", "ci", "connector"}:
+        return identity_type
+    if identity_type != "human":
+        return "unknown_identity_type"
+    if not actor_id and not team_id:
+        return "missing_actor_and_team"
+    if not actor_id:
+        return "missing_actor"
+    return "missing_team"
 
 
 def decode_provider_cost_page(payload: bytes) -> dict[str, object]:
@@ -553,7 +1008,7 @@ def _parse_anthropic_bucket(
 def _amount_usd(value: Decimal) -> str:
     if not value.is_finite():
         raise ProviderBillingError("Provider cost amount must be finite")
-    if abs(value) > MAX_AMOUNT_USD:
+    if value.copy_abs() > MAX_AMOUNT_USD:
         raise ProviderBillingError("Provider cost amount exceeds the supported bound")
     exponent = value.as_tuple().exponent
     if exponent < -MAX_AMOUNT_DECIMAL_PLACES:
@@ -592,7 +1047,7 @@ def _reconciliation_decimal(
         raise ProviderBillingError("Billing reconciliation facts are invalid") from error
     if (
         not parsed.is_finite()
-        or abs(parsed) > MAX_RECONCILIATION_AMOUNT_USD
+        or parsed.copy_abs() > MAX_RECONCILIATION_AMOUNT_USD
         or parsed.as_tuple().exponent < -MAX_AMOUNT_DECIMAL_PLACES
     ):
         raise ProviderBillingError("Billing reconciliation facts are invalid")

@@ -9,14 +9,18 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, localcontext
 import hashlib
 import json
 import uuid
 from typing import Iterator
 
 from .audit_access import AuditAccessError, authorize_audit_read
-from .billing import ProviderCostReport, ProviderCostSource
+from .billing import (
+    ProviderCostReport,
+    ProviderCostSource,
+    build_provider_cost_allocation,
+)
 from .config import Identity, is_model_identifier
 from .postgres import (
     DEFAULT_POSTGRES_RUNTIME_ROLE,
@@ -1104,9 +1108,13 @@ class PostgresUsageStore:
                 raise InvalidOperation
         except InvalidOperation as error:
             raise ValueError("Provider billing store contains an invalid amount") from error
-        provider_cost = sum(provider_amounts, Decimal(0))
-        estimated_cost = Decimal(int(gateway["estimated_cost_microusd"])) / Decimal(1_000_000)
-        variance = provider_cost - estimated_cost
+        with localcontext() as context:
+            context.prec = 96
+            provider_cost = sum(provider_amounts, Decimal(0))
+            estimated_cost = Decimal(int(gateway["estimated_cost_microusd"])) / Decimal(
+                1_000_000
+            )
+            variance = provider_cost - estimated_cost
         authenticated = source_row["source_kind"] == "authenticated_api"
         unscoped = sum(1 for row in cost_rows if row["provider_scope_kind"] == "unscoped")
         return {
@@ -1159,6 +1167,47 @@ class PostgresUsageStore:
             "raw_payload_retained": False,
             "credential_retained": False,
         }
+
+    def allocate_provider_costs(
+        self,
+        *,
+        organization_id: str,
+        provider: str,
+        import_id: str | None = None,
+    ) -> dict[str, object]:
+        """Allocate a provider total using tenant-isolated request-time facts."""
+
+        reconciliation = self.reconcile_provider_costs(
+            organization_id=organization_id,
+            provider=provider,
+            import_id=import_id,
+        )
+        organization = self._organization(str(reconciliation["organization_id"]))
+        with self._transaction(organization, client_id="billing-allocation") as connection:
+            with self._dict_cursor(connection) as cursor:
+                try:
+                    cursor.execute(
+                        """
+                        SELECT actor_id, actor_name, identity_type, team_id, team_name,
+                          cost_microusd, cost_basis
+                        FROM gateway_usage_events
+                        WHERE tenant_id = %s AND protocol = %s AND status = 'succeeded'
+                          AND occurred_at >= %s AND occurred_at < %s
+                        ORDER BY occurred_at, id
+                        """,
+                        (
+                            organization,
+                            reconciliation["provider"],
+                            reconciliation["report_start"],
+                            reconciliation["report_end"],
+                        ),
+                    )
+                    rows = cursor.fetchall()
+                except Exception:
+                    raise PostgresStorageError(
+                        "provider_cost_allocation_usage_read_failed"
+                    ) from None
+        return build_provider_cost_allocation(reconciliation, rows)
 
     def audit_events(
         self,

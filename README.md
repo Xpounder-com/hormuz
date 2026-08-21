@@ -229,13 +229,21 @@ python3 -m hormuz --config hormuz.json billing reconcile \
   --provider openai \
   --json \
   --fail-on-review
+
+python3 -m hormuz --config hormuz.json billing allocate \
+  --organization xpounder \
+  --provider openai
 ```
 
 `--fail-on-review` exits `3` after emitting the complete result when the
 versioned organization policy detects excessive variance, unpriced or
 unattributed traffic, unscoped provider items, an unauthenticated source, or an
 undefined relative-variance basis. Provider cost remains aggregate evidence,
-not a universal final cost per request, employee, or team. See
+not a universal final cost per request, employee, or team. `billing allocate`
+uses that authoritative organization total plus immutable request-time identity
+and cost weights to return a clear team/person/unattributed breakdown; it keeps
+unexplained provider amount and nonhuman traffic explicit rather than charging
+employees by default. See
 [docs/BILLING_RECONCILIATION.md](docs/BILLING_RECONCILIATION.md) for the
 official report contracts, exact-decimal thresholds, coverage labels, and
 remaining invoice boundary.

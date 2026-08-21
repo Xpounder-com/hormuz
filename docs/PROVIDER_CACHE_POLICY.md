@@ -167,9 +167,10 @@ not prove savings unless the provider accounting semantics and every applicable
 base/cache price are known for that exact rate-card version.
 
 `hormuz billing fetch`, `billing import`, and `billing reconcile` compare
-request-time estimates with provider aggregate cost reports. They preserve
-provider cache dimensions when supplied, but they do not turn a request,
-employee, or team allocation into a final invoice. See
+request-time estimates with provider aggregate cost reports. `billing allocate`
+uses those estimates as relative weights for a provider-total team/person/
+unattributed breakdown. None of those commands turns a request, employee, or
+team allocation into a final invoice. See
 [billing reconciliation](BILLING_RECONCILIATION.md).
 
 ## Retention and privacy boundary

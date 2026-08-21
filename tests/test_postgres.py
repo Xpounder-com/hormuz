@@ -311,6 +311,58 @@ class PostgresFoundationTests(unittest.TestCase):
         self.assertIn("actual_model_reported", query)
         self.assertIn("status IN ('failed', 'rate_limited')", query)
 
+    def test_postgres_provider_allocation_reads_only_tenant_scoped_successes(self) -> None:
+        store = PostgresUsageStore(
+            "postgresql://runtime:not-used@127.0.0.1/hormuz",
+            organization_ids=("tenant-a",),
+        )
+        reconciliation = {
+            "schema_version": 1,
+            "organization_id": "tenant-a",
+            "provider": "openai",
+            "import_id": "pci_allocation",
+            "report_start": "2026-08-01T00:00:00+00:00",
+            "report_end": "2026-08-02T00:00:00+00:00",
+            "provider_cost_usd": "1",
+            "gateway_requests": 1,
+            "gateway_succeeded": 1,
+            "legacy_unattributed_gateway_requests": 0,
+        }
+        cursor = mock.MagicMock()
+        cursor.fetchall.return_value = [
+            {
+                "actor_id": "alice",
+                "actor_name": "Alice",
+                "identity_type": "human",
+                "team_id": "engineering",
+                "team_name": "Engineering",
+                "cost_microusd": 1_000_000,
+                "cost_basis": "estimated",
+            }
+        ]
+        transaction = mock.MagicMock()
+        transaction.return_value.__enter__.return_value = object()
+        cursor_context = mock.MagicMock()
+        cursor_context.__enter__.return_value = cursor
+
+        with (
+            mock.patch.object(store, "reconcile_provider_costs", return_value=reconciliation),
+            mock.patch.object(store, "_transaction", transaction),
+            mock.patch.object(store, "_dict_cursor", return_value=cursor_context),
+        ):
+            result = store.allocate_provider_costs(
+                organization_id="tenant-a",
+                provider="openai",
+                import_id="pci_allocation",
+            )
+
+        self.assertEqual(result["teams"][0]["allocated_cost_usd"], "1")
+        transaction.assert_called_once_with("tenant-a", client_id="billing-allocation")
+        query = str(cursor.execute.call_args.args[0])
+        self.assertIn("tenant_id = %s", query)
+        self.assertIn("status = 'succeeded'", query)
+        self.assertIn("ORDER BY occurred_at, id", query)
+
     def test_postgres_usage_audit_rechecks_scope_before_database_io(self) -> None:
         store = PostgresUsageStore(
             "postgresql://runtime:not-used@127.0.0.1/hormuz",

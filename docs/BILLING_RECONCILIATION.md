@@ -1,6 +1,6 @@
-# Provider cost import and reconciliation
+# Provider cost import, reconciliation, and allocation
 
-Hormuz can fetch or import complete cost-report API responses from OpenAI and Anthropic, preserve their normalized billing dimensions in the local usage database, and compare one immutable provider snapshot with request-time Hormuz estimates for the same provider, organization, and time window.
+Hormuz can fetch or import complete cost-report API responses from OpenAI and Anthropic, preserve their normalized billing dimensions in the local usage database, compare one immutable provider snapshot with request-time Hormuz estimates for the same provider, organization, and time window, and allocate that provider-reported organization total across teams, people, and explicit unattributed traffic.
 
 The authenticated fetch path is an operator-run ingestion checkpoint, not a hosted billing service or final-invoice workflow. It binds the stored evidence to the exact fixed provider endpoint, date window, grouping, and completed cursor chain used by Hormuz. It does not prove provider data freshness, include every external billing adjustment, or turn aggregate provider cost into a final per-person charge.
 
@@ -100,6 +100,52 @@ hormuz --config hormuz.json billing reconcile \
 
 Omit `--import-id` to use the latest imported snapshot for that organization and provider.
 
+## Allocate an authoritative organization total
+
+Use the imported provider total to answer team and person consumption questions:
+
+```bash
+hormuz --config hormuz.json billing allocate \
+  --organization xpounder \
+  --provider openai \
+  --import-id pci_0123456789abcdef0123456789abcdef
+```
+
+The JSON result is an organization cost breakdown with `teams`, `people`, and
+one `unattributed` bucket. Its `provider_cost_usd` is the authoritative,
+provider-reported organization total. The `totals` object guarantees both
+`team_plus_unattributed_cost_usd` and
+`person_plus_unattributed_cost_usd` equal that exact provider total.
+
+Hormuz allocates using the immutable identity and team snapshots captured on
+each successful gateway request:
+
+- A successful `human` request with both actor and team IDs contributes to that
+  person and their request-time team. A later IdP membership change does not
+  rewrite prior usage.
+- Service accounts, CI, connectors, unknown identity types, and a missing actor
+  or team remain in `unattributed`; they are never silently charged to an
+  employee.
+- Request-time estimated cost supplies the relative allocation weight. A
+  successful but unpriced request remains visible with a zero dollar weight;
+  Hormuz does not invent a price for it.
+- If the provider total is greater than the captured, priced request weights,
+  the positive difference is an explicit
+  `provider_amount_not_explained_by_priced_gateway_requests` entry inside
+  `unattributed`. Hormuz does not inflate employee allocations to absorb that
+  amount.
+- If signed credits, discounts, or other provider adjustments make the provider
+  total lower than captured weights, the captured team/person/unattributed
+  allocation is scaled proportionally down. Exact-decimal largest-remainder
+  rounding at `0.000000000001 USD` preserves the provider total exactly.
+
+`allocation_basis` records the deterministic method version for auditability.
+It is an allocation of one authoritative aggregate total, not a claim that a
+provider issued a final invoice line for an individual request or employee.
+Provider project/workspace mappings are not required for this core allocation
+method. They may later improve coverage analysis, but Hormuz does not need them
+to return the organization, team, person, and unattributed breakdown.
+
 ## Versioned exception policy
 
 The optional `billing_reconciliation` configuration evaluates each aggregate
@@ -130,8 +176,9 @@ discarding evidence. It exits `2` if requested while the policy is disabled.
 This is deterministic exception classification, not a persistent finance case
 manager. A reviewer identity, acknowledgements, resolution notes, invoice
 finalization, notifications, and organization-scoped remote billing RBAC remain
-open. The CLI does not infer that a variance proves bypass, and it does not
-allocate aggregate provider cost to a team or employee.
+open. The CLI does not infer that a variance proves bypass. `billing allocate`
+is a separate, deterministic allocation report; it is not a final per-request
+provider charge or a finance-case resolution.
 
 ## Accounting semantics
 
@@ -141,7 +188,7 @@ allocate aggregate provider cost to a team or employee.
 - Gateway succeeded, failed, denied, and unpriced request counts remain separate. A failed or rate-limited request is not assumed to be free or billable without provider evidence.
 - `provider_cost_usd` has basis `provider_reported`; `gateway_estimated_cost_usd` has basis `request_time_estimated`. Their signed difference is `variance_usd`.
 - A positive variance is labeled possible unobserved or adjusted cost. It does not by itself prove traffic bypassed Hormuz: filters, delayed data, credits, tool fees, rounding, provider-side adjustments, and unsupported traffic can also explain a difference.
-- Provider cost reports do not universally map a billed amount to a Hormuz request, employee, or team. Per-person and per-team costs remain estimates unless the organization isolates provider projects or workspaces at that exact accounting boundary and records an explicit mapping.
+- Provider cost reports do not universally map a billed amount to a Hormuz request, employee, or team. `billing allocate` nevertheless returns a clear organization breakdown by applying its versioned allocation basis to the provider total and request-time weights. It does not label any individual allocation as a provider-final request charge.
 - Pre-migration usage rows without a trustworthy organization binding are excluded from the organization comparison and counted as `legacy_unattributed_gateway_requests`.
 
 For an offline import, `provider_report_completeness` is `not_verifiable_from_response` and `coverage_status` is `partial_unverified_provider_scope`. For an authenticated fetch, they become `authenticated_query_pagination_complete` and `partial_authenticated_provider_endpoint_scope`. The latter proves the completed fixed Hormuz query, not final invoice completeness, provider freshness, or coverage outside the endpoint's documented scope. Do not present either result as a final invoice.

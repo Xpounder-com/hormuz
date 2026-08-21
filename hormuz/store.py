@@ -8,10 +8,15 @@ import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, localcontext
 from pathlib import Path
 
-from .billing import ProviderBillingError, ProviderCostReport, ProviderCostSource
+from .billing import (
+    ProviderBillingError,
+    ProviderCostReport,
+    ProviderCostSource,
+    build_provider_cost_allocation,
+)
 from .audit_access import AuditAccessError, authorize_audit_read
 from .config import Identity, is_model_identifier
 from .content_free import ContentFreeSchemaError, validate_content_free_schema
@@ -1098,10 +1103,14 @@ class UsageStore:
                 provider_amounts.append(amount)
         except InvalidOperation as error:
             raise ValueError("Provider billing store contains an invalid amount") from error
-        provider_cost = sum(provider_amounts, Decimal(0))
-        estimated_cost = Decimal(int(gateway["estimated_cost_microusd"])) / Decimal(1_000_000)
-        variance = provider_cost - estimated_cost
-        positive_unexplained = max(variance, Decimal(0))
+        with localcontext() as context:
+            context.prec = 96
+            provider_cost = sum(provider_amounts, Decimal(0))
+            estimated_cost = Decimal(int(gateway["estimated_cost_microusd"])) / Decimal(
+                1_000_000
+            )
+            variance = provider_cost - estimated_cost
+            positive_unexplained = max(variance, Decimal(0))
         unscoped_items = sum(
             1 for row in cost_rows if row["provider_scope_kind"] == "unscoped"
         )
@@ -1178,6 +1187,47 @@ class UsageStore:
             "raw_payload_retained": False,
             "credential_retained": False,
         }
+
+    def allocate_provider_costs(
+        self,
+        *,
+        organization_id: str,
+        provider: str,
+        import_id: str | None = None,
+    ) -> dict[str, object]:
+        """Return a deterministic organization allocation for one immutable import.
+
+        The source event rows carry identity and team snapshots captured when the
+        request succeeded, so current directory changes cannot rewrite the team
+        assigned to historic usage.
+        """
+
+        reconciliation = self.reconcile_provider_costs(
+            organization_id=organization_id,
+            provider=provider,
+            import_id=import_id,
+        )
+        with self._lock, self._connection() as connection:
+            rows = connection.execute(
+                """
+                SELECT actor_id, actor_name, identity_type, team_id, team_name,
+                       cost_microusd, cost_basis
+                FROM gateway_usage_events
+                WHERE organization_id = ? AND protocol = ? AND status = 'succeeded'
+                  AND occurred_at >= ? AND occurred_at < ?
+                ORDER BY occurred_at, id
+                """,
+                (
+                    reconciliation["organization_id"],
+                    reconciliation["provider"],
+                    reconciliation["report_start"],
+                    reconciliation["report_end"],
+                ),
+            ).fetchall()
+        return build_provider_cost_allocation(
+            reconciliation,
+            [dict(row) for row in rows],
+        )
 
     def record_secret_event(
         self,

@@ -19,6 +19,7 @@ from hormuz.billing import (
     BillingReconciliationPolicy,
     ProviderBillingError,
     ProviderCostSource,
+    build_provider_cost_allocation,
     evaluate_reconciliation,
     parse_provider_cost_pages,
 )
@@ -193,6 +194,23 @@ def _reconciliation_facts(**overrides: object) -> dict[str, object]:
     return values
 
 
+def _allocation_facts(**overrides: object) -> dict[str, object]:
+    values: dict[str, object] = {
+        "schema_version": 1,
+        "organization_id": "org-a",
+        "provider": "openai",
+        "import_id": "pci_allocation",
+        "report_start": "2026-08-01T00:00:00+00:00",
+        "report_end": "2026-08-02T00:00:00+00:00",
+        "provider_cost_usd": "12",
+        "gateway_requests": 4,
+        "gateway_succeeded": 4,
+        "legacy_unattributed_gateway_requests": 0,
+    }
+    values.update(overrides)
+    return values
+
+
 class BillingReconciliationPolicyTests(unittest.TestCase):
     def test_exact_thresholds_are_versioned_and_boundary_is_clear(self) -> None:
         policy = BillingReconciliationPolicy(
@@ -312,6 +330,266 @@ class BillingReconciliationPolicyTests(unittest.TestCase):
             )
         with self.assertRaisesRegex(ValueError, "at least one rule"):
             BillingReconciliationPolicy(enabled=True)
+
+
+class ProviderCostAllocationTests(unittest.TestCase):
+    def test_provider_total_is_preserved_with_human_and_unattributed_traffic(self) -> None:
+        result = build_provider_cost_allocation(
+            _allocation_facts(),
+            [
+                {
+                    "actor_id": "alice",
+                    "actor_name": "Alice",
+                    "identity_type": "human",
+                    "team_id": "engineering",
+                    "team_name": "Engineering",
+                    "cost_microusd": 1_000_000,
+                    "cost_basis": "estimated",
+                },
+                {
+                    "actor_id": "bob",
+                    "actor_name": "Bob",
+                    "identity_type": "human",
+                    "team_id": "engineering",
+                    "team_name": "Engineering",
+                    "cost_microusd": 3_000_000,
+                    "cost_basis": "estimated",
+                },
+                {
+                    "actor_id": "automation",
+                    "actor_name": "Automation",
+                    "identity_type": "service_account",
+                    "team_id": "engineering",
+                    "team_name": "Engineering",
+                    "cost_microusd": 2_000_000,
+                    "cost_basis": "estimated",
+                },
+                {
+                    "actor_id": "unbound",
+                    "actor_name": "Unbound",
+                    "identity_type": "human",
+                    "team_id": "",
+                    "team_name": "",
+                    "cost_microusd": 0,
+                    "cost_basis": "not_available",
+                },
+            ],
+        )
+
+        self.assertEqual(result["provider_cost_basis"], "provider_reported")
+        self.assertEqual(
+            result["allocation_basis"],
+            "request_time_estimated_cost_with_unattributed_provider_remainder_v1",
+        )
+        self.assertEqual(result["unattributed_provider_remainder_usd"], "6")
+        self.assertEqual(
+            result["teams"],
+            [
+                {
+                    "team_id": "engineering",
+                    "team_name": "Engineering",
+                    "successful_requests": 2,
+                    "unpriced_successful_requests": 0,
+                    "allocation_weight_usd": "4",
+                    "allocated_cost_usd": "4",
+                }
+            ],
+        )
+        self.assertEqual(
+            [person["allocated_cost_usd"] for person in result["people"]],
+            ["1", "3"],
+        )
+        self.assertEqual(result["unattributed"]["allocated_cost_usd"], "8")
+        self.assertEqual(
+            {
+                reason["reason"]: reason["allocated_cost_usd"]
+                for reason in result["unattributed"]["reasons"]
+            },
+            {
+                "missing_team": "0",
+                "provider_amount_not_explained_by_priced_gateway_requests": "6",
+                "service_account": "2",
+            },
+        )
+        self.assertEqual(result["totals"]["team_plus_unattributed_cost_usd"], "12")
+        self.assertEqual(result["totals"]["person_plus_unattributed_cost_usd"], "12")
+        self.assertEqual(
+            result["coverage"]["unattributed_successful_requests"],
+            2,
+        )
+
+    def test_event_time_team_snapshots_are_not_collapsed_after_membership_changes(self) -> None:
+        result = build_provider_cost_allocation(
+            _allocation_facts(
+                provider_cost_usd="5",
+                gateway_requests=3,
+                gateway_succeeded=3,
+            ),
+            [
+                {
+                    "actor_id": "alice",
+                    "actor_name": "Alice",
+                    "identity_type": "human",
+                    "team_id": "engineering",
+                    "team_name": "Engineering",
+                    "cost_microusd": 1_000_000,
+                    "cost_basis": "estimated",
+                },
+                {
+                    "actor_id": "alice",
+                    "actor_name": "Alice",
+                    "identity_type": "human",
+                    "team_id": "marketing",
+                    "team_name": "Marketing",
+                    "cost_microusd": 3_000_000,
+                    "cost_basis": "estimated",
+                },
+                {
+                    "actor_id": "ci",
+                    "actor_name": "Build",
+                    "identity_type": "ci",
+                    "team_id": "engineering",
+                    "team_name": "Engineering",
+                    "cost_microusd": 1_000_000,
+                    "cost_basis": "estimated",
+                },
+            ],
+        )
+
+        self.assertEqual(
+            [(row["team_id"], row["allocated_cost_usd"]) for row in result["teams"]],
+            [("engineering", "1"), ("marketing", "3")],
+        )
+        self.assertEqual(
+            [
+                (row["actor_id"], row["team_id"], row["allocated_cost_usd"])
+                for row in result["people"]
+            ],
+            [
+                ("alice", "engineering", "1"),
+                ("alice", "marketing", "3"),
+            ],
+        )
+        self.assertEqual(result["unattributed"]["allocated_cost_usd"], "1")
+        self.assertEqual(result["unattributed"]["reasons"][0]["reason"], "ci")
+
+    def test_unpriced_human_request_remains_visible_without_an_invented_price(self) -> None:
+        result = build_provider_cost_allocation(
+            _allocation_facts(
+                provider_cost_usd="1",
+                gateway_requests=2,
+                gateway_succeeded=2,
+            ),
+            [
+                {
+                    "actor_id": "alice",
+                    "actor_name": "Alice",
+                    "identity_type": "human",
+                    "team_id": "engineering",
+                    "team_name": "Engineering",
+                    "cost_microusd": 1_000_000,
+                    "cost_basis": "estimated",
+                },
+                {
+                    "actor_id": "bob",
+                    "actor_name": "Bob",
+                    "identity_type": "human",
+                    "team_id": "engineering",
+                    "team_name": "Engineering",
+                    "cost_microusd": 0,
+                    "cost_basis": "not_available",
+                },
+            ],
+        )
+
+        self.assertEqual(
+            [(row["actor_id"], row["allocated_cost_usd"]) for row in result["people"]],
+            [("alice", "1"), ("bob", "0")],
+        )
+        self.assertEqual(result["coverage"]["unpriced_successful_requests"], 1)
+        self.assertEqual(result["coverage"]["zero_weight_successful_requests"], 1)
+        self.assertEqual(result["unattributed"]["allocated_cost_usd"], "0")
+
+    def test_exact_rounding_is_deterministic_and_credits_preserve_totals(self) -> None:
+        requests = [
+            {
+                "actor_id": actor,
+                "actor_name": actor.title(),
+                "identity_type": "human",
+                "team_id": "engineering",
+                "team_name": "Engineering",
+                "cost_microusd": 1,
+                "cost_basis": "estimated",
+            }
+            for actor in ("carol", "alice", "bob")
+        ]
+        tiny = _allocation_facts(
+            provider_cost_usd="0.000000000001",
+            gateway_requests=3,
+            gateway_succeeded=3,
+        )
+        forward = build_provider_cost_allocation(tiny, requests)
+        reversed_result = build_provider_cost_allocation(tiny, list(reversed(requests)))
+        self.assertEqual(forward["people"], reversed_result["people"])
+        self.assertEqual(
+            forward["totals"]["person_plus_unattributed_cost_usd"],
+            "0.000000000001",
+        )
+
+        credit = build_provider_cost_allocation(
+            _allocation_facts(
+                provider_cost_usd="-1",
+                gateway_requests=2,
+                gateway_succeeded=2,
+            ),
+            requests[:2],
+        )
+        self.assertEqual(
+            [person["allocated_cost_usd"] for person in credit["people"]],
+            ["-0.5", "-0.5"],
+        )
+        self.assertEqual(credit["totals"]["team_plus_unattributed_cost_usd"], "-1")
+
+        large_total = "499999999999999999.999999999999"
+        large = build_provider_cost_allocation(
+            _allocation_facts(
+                provider_cost_usd=large_total,
+                gateway_requests=2,
+                gateway_succeeded=2,
+            ),
+            requests[:2],
+        )
+        self.assertEqual(large["provider_cost_usd"], large_total)
+        self.assertEqual(
+            large["totals"]["team_plus_unattributed_cost_usd"],
+            large_total,
+        )
+
+    def test_no_captured_successful_request_keeps_provider_total_unattributed(self) -> None:
+        result = build_provider_cost_allocation(
+            _allocation_facts(
+                provider_cost_usd="2.5",
+                gateway_requests=0,
+                gateway_succeeded=0,
+            ),
+            [],
+        )
+
+        self.assertEqual(result["teams"], [])
+        self.assertEqual(result["people"], [])
+        self.assertEqual(result["unattributed"]["allocated_cost_usd"], "2.5")
+        self.assertEqual(
+            result["unattributed"]["reasons"],
+            [
+                {
+                    "reason": "no_successful_gateway_requests",
+                    "successful_requests": 0,
+                    "unpriced_successful_requests": 0,
+                    "allocation_weight_usd": "2.5",
+                    "allocated_cost_usd": "2.5",
+                }
+            ],
+        )
 
 
 class ProviderCostStoreTests(unittest.TestCase):
@@ -787,6 +1065,49 @@ class ProviderCostCLITests(unittest.TestCase):
                     "provider_source_not_authenticated",
                     "relative_variance_exceeded",
                 ],
+            )
+
+            identity = next(iter(config.identities_by_actor.values()))
+            UsageStore(config.database_path).record(
+                identity=identity,
+                client="codex",
+                protocol="openai",
+                requested_model="gpt-fast",
+                resolved_alias="gpt-fast",
+                upstream_model="gpt-upstream",
+                policy_action="allowed",
+                status="succeeded",
+                input_tokens=100,
+                output_tokens=20,
+                cost_microusd=1_250_000,
+                cost_basis="estimated",
+                rate_card_version="rates-v1",
+            )
+            allocate_args = build_parser().parse_args(
+                [
+                    "billing",
+                    "allocate",
+                    "--organization",
+                    organization,
+                    "--provider",
+                    "openai",
+                    "--import-id",
+                    imported["import_id"],
+                ]
+            )
+            output = io.StringIO()
+            with redirect_stdout(output):
+                self.assertEqual(_billing_command(config, allocate_args), 0)
+            allocation = json.loads(output.getvalue())
+            self.assertEqual(allocation["provider_cost_usd"], "1.25")
+            self.assertEqual(
+                allocation["totals"]["team_plus_unattributed_cost_usd"],
+                "1.25",
+            )
+            self.assertEqual(len(allocation["teams"]), 1)
+            self.assertEqual(
+                allocation["teams"][0]["allocated_cost_usd"],
+                "1.25",
             )
 
             fail_args = build_parser().parse_args(

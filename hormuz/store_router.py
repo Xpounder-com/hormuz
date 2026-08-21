@@ -16,6 +16,7 @@ _ACCOUNTING_METHODS = {
     "record",
     "import_provider_cost_report",
     "reconcile_provider_costs",
+    "allocate_provider_costs",
     "reserve_budget",
     "release_budget_reservation",
     "refresh_budget_reservation",
