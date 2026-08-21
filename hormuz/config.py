@@ -233,6 +233,7 @@ class Identity:
     organization_id: str = "organization"
     clearance: str = "internal"
     authentication_source: str = "static"
+    identity_type: str = "human"
 
 
 @dataclass(frozen=True)
@@ -269,6 +270,20 @@ class SessionBrokerConfig:
     absolute_ttl_seconds: int = 43_200
     enrollment_ttl_seconds: int = 300
     allow_insecure_http: bool = False
+
+
+@dataclass(frozen=True)
+class DirectoryConfig:
+    """Opt-in local SCIM directory boundary for the first lifecycle milestone.
+
+    The directory is deliberately separate from the legacy usage/security and
+    deprecated context databases.  PostgreSQL shared-directory support is a
+    follow-on; this explicit sqlite boundary is useful for a single gateway
+    process or single host without pretending to be a multi-instance service.
+    """
+
+    enabled: bool = False
+    database_path: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -408,6 +423,7 @@ class GatewayConfig:
     )
     context_service: ContextServiceConfig = field(default_factory=ContextServiceConfig)
     session_broker: SessionBrokerConfig = field(default_factory=SessionBrokerConfig)
+    directory: DirectoryConfig = field(default_factory=DirectoryConfig)
     oidc_issuers: dict[str, OIDCIssuerConfig] = field(default_factory=dict)
     identities_by_subject: dict[tuple[str, str], Identity] = field(default_factory=dict)
     secret_controls: SecretControls = field(default_factory=SecretControls)
@@ -622,6 +638,7 @@ class GatewayConfig:
                     "capabilities",
                     "organization_id",
                     "clearance",
+                    "identity_type",
                 },
                 prefix,
             )
@@ -647,14 +664,22 @@ class GatewayConfig:
                 ),
                 organization_id=_string(item.get("organization_id", "organization"), f"{prefix}.organization_id"),
                 clearance=_classification(item.get("clearance", "internal"), f"{prefix}.clearance"),
+                identity_type=_identity_type(
+                    item.get("identity_type", "human"),
+                    f"{prefix}.identity_type",
+                ),
             )
             identities_by_token[token] = identity
 
         authentication_raw = _object(raw.get("authentication", {}), "authentication")
         _reject_unknown_fields(
             authentication_raw,
-            {"oidc", "session_broker"},
+            {"oidc", "session_broker", "directory"},
             "authentication",
+        )
+        directory = _directory_config(
+            authentication_raw.get("directory", {}),
+            source_path=source_path,
         )
         oidc_raw = _object(authentication_raw.get("oidc", {}), "authentication.oidc")
         _reject_unknown_fields(oidc_raw, {"issuers"}, "authentication.oidc")
@@ -748,7 +773,7 @@ class GatewayConfig:
             subjects_raw = item.get("subjects", [])
             if not isinstance(subjects_raw, list):
                 raise ConfigError(f"{prefix}.subjects must be an array")
-            if not subjects_raw:
+            if not subjects_raw and not directory.enabled:
                 raise ConfigError(f"{prefix}.subjects must contain at least one subject mapping")
             for subject_index, subject_value in enumerate(subjects_raw):
                 subject_prefix = f"{prefix}.subjects[{subject_index}]"
@@ -765,6 +790,7 @@ class GatewayConfig:
                         "capabilities",
                         "organization_id",
                         "clearance",
+                        "identity_type",
                     },
                     subject_prefix,
                 )
@@ -796,6 +822,10 @@ class GatewayConfig:
                         f"{subject_prefix}.clearance",
                     ),
                     authentication_source=f"oidc:{issuer}",
+                    identity_type=_identity_type(
+                        subject_item.get("identity_type", "human"),
+                        f"{subject_prefix}.identity_type",
+                    ),
                 )
         session_broker = _session_broker_config(
             authentication_raw.get("session_broker", {}),
@@ -809,12 +839,24 @@ class GatewayConfig:
             raise ConfigError(
                 "authentication.session_broker requires at least one OIDC issuer with login configuration"
             )
+        if directory.enabled and not oidc_issuers:
+            raise ConfigError(
+                "authentication.directory requires at least one configured OIDC issuer"
+            )
         if (
             session_broker.backend == "sqlite"
             and session_broker.database_path in {database_path, context_database_path}
         ):
             raise ConfigError(
                 "authentication.session_broker.database must be separate from usage and context databases"
+            )
+        if directory.enabled and directory.database_path in {
+            database_path,
+            context_database_path,
+            session_broker.database_path,
+        }:
+            raise ConfigError(
+                "authentication.directory.database must be separate from usage, context, and session databases"
             )
         if not identities_by_token and not identities_by_subject:
             raise ConfigError("At least one static identity or OIDC subject mapping is required")
@@ -989,6 +1031,7 @@ class GatewayConfig:
             billing_reconciliation=billing_reconciliation,
             context_service=context_service,
             session_broker=session_broker,
+            directory=directory,
             oidc_issuers=oidc_issuers,
             identities_by_subject=identities_by_subject,
             secret_controls=secret_controls,
@@ -1874,6 +1917,22 @@ def _session_broker_config(
     )
 
 
+def _directory_config(value: Any, *, source_path: Path) -> DirectoryConfig:
+    path = "authentication.directory"
+    item = _object(value, path)
+    _reject_unknown_fields(item, {"enabled", "database"}, path)
+    enabled = _boolean(item.get("enabled", False), f"{path}.enabled")
+    if not enabled:
+        if "database" in item:
+            raise ConfigError(f"{path}.database is only valid when enabled")
+        return DirectoryConfig()
+    database_value = _string(item.get("database"), f"{path}.database")
+    database_path = Path(database_value).expanduser()
+    if not database_path.is_absolute():
+        database_path = (source_path.parent / database_path).resolve()
+    return DirectoryConfig(enabled=True, database_path=database_path)
+
+
 def _secret_controls(value: Any, env: dict[str, str]) -> SecretControls:
     item = _object(value, "egress_controls.secrets")
     _reject_unknown_fields(
@@ -2435,6 +2494,7 @@ def _identity_capabilities(value: Any, path: str) -> tuple[str, ...]:
         "context_promoter",
         "dlp_approver",
         "policy_admin",
+        "identity_admin",
         "session_admin",
         "usage_finance_viewer",
         "usage_organization_viewer",
@@ -2527,6 +2587,15 @@ def _classification(value: Any, path: str) -> str:
     return result
 
 
+def _identity_type(value: Any, path: str) -> str:
+    result = _string(value, path)
+    if result not in {"human", "service_account", "ci", "connector"}:
+        raise ConfigError(
+            f"{path} must be human, service_account, ci, or connector"
+        )
+    return result
+
+
 def _validate_oidc_transport(
     *,
     issuer: str,
@@ -2581,6 +2650,7 @@ def _validate_identity_consistency(identities: tuple[Identity, ...]) -> None:
             "capabilities",
             "organization_id",
             "clearance",
+            "identity_type",
         )
         if any(getattr(existing, name) != getattr(identity, name) for name in fields):
             raise ConfigError(

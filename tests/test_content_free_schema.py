@@ -50,7 +50,7 @@ class ContentFreeSchemaTests(unittest.TestCase):
 
             self.assertEqual(
                 CONTENT_FREE_SCHEMA_VERSION,
-                "hormuz.content-free-schema.v3",
+                "hormuz.content-free-schema.v4",
             )
 
     def test_usage_store_refuses_unreviewed_telemetry_columns_on_restart(self) -> None:

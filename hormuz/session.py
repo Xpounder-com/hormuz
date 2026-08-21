@@ -82,14 +82,10 @@ class SessionBroker:
             issuer = self.config.oidc_issuers.get(issuer_name)
             if issuer is None or issuer.login is None:
                 raise SessionBrokerError("login_issuer_unavailable")
-        organizations = sorted(
-            {
-                identity.organization_id
-                for (configured_issuer, _subject), identity
-                in self.config.identities_by_subject.items()
-                if configured_issuer == issuer.issuer
-            }
-        )
+        try:
+            organizations = list(self.authenticator.organizations_for_issuer(issuer.issuer))
+        except AuthenticationError as error:
+            raise SessionBrokerError(error.code) from None
         if organization_id is None:
             if len(organizations) != 1:
                 raise SessionBrokerError("organization_required")
@@ -203,8 +199,8 @@ class SessionBroker:
                 issuer_name=flow.issuer,
                 nonce=flow.nonce,
             )
-            identity = self.config.identity_for_subject(flow.issuer, subject)
-            if identity is None or (
+            identity = self.authenticator.identity_for_subject(flow.issuer, subject)
+            if (
                 identity.allowed_clients and flow.client_name not in identity.allowed_clients
             ):
                 raise AuthenticationError("client_not_allowed_for_subject")
@@ -328,12 +324,36 @@ class SessionBroker:
         except SessionStoreError as error:
             raise SessionBrokerError(error.code) from error
 
+    def revoke_for_directory(
+        self,
+        *,
+        administrator: Identity,
+        actor_ids: tuple[str, ...],
+    ) -> int:
+        """Invalidate current opaque sessions after an authorized directory mutation."""
+
+        revoked = 0
+        try:
+            for actor_id in sorted(set(actor_ids)):
+                revoked += self.store.revoke_administratively(
+                    organization_id=administrator.organization_id,
+                    decision_actor_id=administrator.actor_id,
+                    reason_code="access_change",
+                    actor_id=actor_id,
+                )
+        except SessionStoreError as error:
+            raise SessionBrokerError(error.code) from error
+        return revoked
+
     def authenticate(self, access_token: str) -> Identity:
         try:
             principal = self.store.authenticate_access(access_token)
         except SessionStoreError as error:
             raise AuthenticationError(error.code) from error
-        identity = self.config.identity_for_subject(principal.issuer, principal.subject)
+        try:
+            identity = self.authenticator.identity_for_subject(principal.issuer, principal.subject)
+        except AuthenticationError:
+            identity = None
         if identity is None or (
             identity.allowed_clients and principal.client_name not in identity.allowed_clients
         ) or (

@@ -17,7 +17,7 @@ import re
 from typing import Any, Callable, Iterator, Protocol
 
 
-POSTGRES_SCHEMA_VERSION = 6
+POSTGRES_SCHEMA_VERSION = 7
 DEFAULT_POSTGRES_DSN_ENV = "HORMUZ_POSTGRES_DSN"
 DEFAULT_POSTGRES_SCHEMA = "hormuz"
 DEFAULT_POSTGRES_RUNTIME_ROLE = "hormuz_runtime"
@@ -113,7 +113,7 @@ ACCOUNTING_TABLE_COLUMNS = {
         "context_repository_revision", "context_estimated_tokens",
         "context_assembly_milliseconds", "context_reuse_status",
         "gateway_latency_milliseconds", "policy_latency_milliseconds",
-        "provider_latency_milliseconds", "governance_policy_version",
+        "provider_latency_milliseconds", "governance_policy_version", "identity_type",
     ),
     "gateway_budget_reservations": (
         "tenant_id", "id", "created_at", "expires_at", "actor_id", "team_id",

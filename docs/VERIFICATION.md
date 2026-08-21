@@ -2046,13 +2046,14 @@ The second issue #21 implementation slice was exercised locally on August 20,
   controls, approval policy, and budgets against that exact version. Failure to
   read or materialize an active version fails closed before a provider call;
 - each usage record and content-free accounting audit carries the exact
-  `governance_policy_version`. The content-free manifest is version 3 and the
-  accounting audit event schema is version 3;
-- packaged PostgreSQL migration 6 adds the non-null usage lineage column. The
-  digest-pinned PostgreSQL `16.14` integration applied migrations 1 through 6,
+  `governance_policy_version`. The content-free manifest is version 4 and the
+  accounting audit event schema is version 4;
+- packaged PostgreSQL migration 6 adds the non-null usage lineage column and
+  migration 7 adds the controlled identity type. The digest-pinned PostgreSQL
+  `16.14` integration applies migrations 1 through 7,
   exercised staged and active versions across independent repositories, and
   emitted schema
-  `hormuz.postgres-policy-administration-integration.v6` with exact-version
+  `hormuz.postgres-policy-administration-integration.v7` with exact-version
   accounting proof;
 - policy-store outage, active-version enforcement, exact usage lineage,
   administration authorization, CLI transport, rollback input, configuration

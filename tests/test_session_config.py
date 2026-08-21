@@ -197,6 +197,43 @@ class SessionConfigurationTests(unittest.TestCase):
         )
         self.assertEqual(store.create_enrollment.call_args.kwargs["organization_id"], "xpounder")
 
+    def test_directory_requires_an_oidc_issuer_and_a_separate_database(self) -> None:
+        self.raw["authentication"]["directory"] = {
+            "enabled": True,
+            "database": "./directory.sqlite3",
+        }
+        config = self._load()
+        self.assertTrue(config.directory.enabled)
+        self.assertEqual(
+            config.directory.database_path,
+            (self.root / "directory.sqlite3").resolve(),
+        )
+        self.raw["authentication"]["oidc"]["issuers"][0]["subjects"] = []
+        config = self._load()
+        self.assertEqual(config.identities_by_subject, {})
+
+        self.raw["authentication"]["directory"]["database"] = "./usage.sqlite3"
+        with self.assertRaisesRegex(ConfigError, "must be separate"):
+            self._load()
+
+        self.raw["authentication"]["directory"]["database"] = "./directory.sqlite3"
+        self.raw["authentication"].pop("session_broker")
+        self.raw["authentication"]["oidc"]["issuers"] = []
+        with self.assertRaisesRegex(ConfigError, "requires at least one configured OIDC issuer"):
+            self._load()
+
+    def test_configured_oidc_identity_type_is_explicit_and_checked(self) -> None:
+        subject = self.raw["authentication"]["oidc"]["issuers"][0]["subjects"][0]
+        subject["identity_type"] = "ci"
+        self.raw["identities"][0]["identity_type"] = "ci"
+        config = self._load()
+        identity = config.identities_by_subject[("https://identity.example", "stable-alice")]
+        self.assertEqual(identity.identity_type, "ci")
+
+        subject["identity_type"] = "unknown"
+        with self.assertRaisesRegex(ConfigError, "identity_type must be human"):
+            self._load()
+
     def test_authorization_endpoint_query_is_preserved_without_reserved_override(self) -> None:
         url = _build_authorization_url(
             "https://identity.example/authorize?tenant=company",

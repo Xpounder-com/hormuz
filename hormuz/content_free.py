@@ -4,7 +4,7 @@ import sqlite3
 from types import MappingProxyType
 
 
-CONTENT_FREE_SCHEMA_VERSION = "hormuz.content-free-schema.v3"
+CONTENT_FREE_SCHEMA_VERSION = "hormuz.content-free-schema.v4"
 
 
 _USAGE_TABLE_COLUMNS = {
@@ -14,6 +14,7 @@ _USAGE_TABLE_COLUMNS = {
         "organization_id",
         "actor_id",
         "actor_name",
+        "identity_type",
         "team_id",
         "team_name",
         "client",

@@ -128,6 +128,60 @@ class UsageStoreMigrationTests(unittest.TestCase):
             )[0]
             self.assertEqual(event["provider_request_id"], "req_safe-123_ABC")
 
+    def test_usage_events_keep_human_and_workload_identity_types_distinct(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            store = UsageStore(Path(temporary) / "usage.sqlite3")
+            for identity_type in ("human", "service_account", "ci", "connector"):
+                store.record(
+                    identity=Identity(
+                        token_env="",
+                        token="",
+                        actor_id=f"{identity_type}-actor",
+                        actor_name=identity_type,
+                        team_id="engineering",
+                        team_name="Engineering",
+                        organization_id="org-a",
+                        identity_type=identity_type,
+                    ),
+                    client="codex",
+                    protocol="openai",
+                    requested_model="gpt-test",
+                    resolved_alias="gpt-test",
+                    upstream_model="gpt-test",
+                    policy_action="allowed",
+                    status="succeeded",
+                )
+
+            observed = store.audit_events(
+                since="2000-01-01T00:00:00+00:00",
+                kind="usage",
+            )
+            self.assertEqual(
+                {str(item["identity_type"]) for item in observed},
+                {"human", "service_account", "ci", "connector"},
+            )
+            self.assertTrue(all(item["schema_version"] == 4 for item in observed))
+            with self.assertRaisesRegex(ValueError, "Usage identity type"):
+                store.record(
+                    identity=Identity(
+                        token_env="",
+                        token="",
+                        actor_id="invalid-actor",
+                        actor_name="Invalid",
+                        team_id="engineering",
+                        team_name="Engineering",
+                        organization_id="org-a",
+                        identity_type="unknown",
+                    ),
+                    client="codex",
+                    protocol="openai",
+                    requested_model="gpt-test",
+                    resolved_alias="gpt-test",
+                    upstream_model="gpt-test",
+                    policy_action="allowed",
+                    status="succeeded",
+                )
+
     def test_usage_context_lineage_is_metadata_only_and_exported_explicitly(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             store = UsageStore(Path(temporary) / "usage.sqlite3")
@@ -171,7 +225,7 @@ class UsageStoreMigrationTests(unittest.TestCase):
                 kind="usage",
             )[0]
 
-            self.assertEqual(event["schema_version"], 3)
+            self.assertEqual(event["schema_version"], 4)
             self.assertEqual(event["context_injection_mode"], "optional")
             self.assertEqual(event["context_injection_outcome"], "injected")
             self.assertEqual(event["context_pack_id"], "ctxpack_0123456789abcdef01234567")
@@ -610,6 +664,7 @@ class UsageStoreMigrationTests(unittest.TestCase):
             row = connection.execute(
                 """
                 SELECT actual_model, billable_tokens, cost_basis, currency, rate_card_version,
+                    identity_type,
                     provider_usage_json
                 FROM gateway_usage_events
                 WHERE id = 'legacy-anthropic'
@@ -628,6 +683,7 @@ class UsageStoreMigrationTests(unittest.TestCase):
                 "cost_basis": "estimated_legacy",
                 "currency": "USD",
                 "rate_card_version": "unversioned",
+                "identity_type": "human",
                 "provider_usage_json": "{}",
             })
             self.assertIn("gateway_dlp_approval_requests", tables)
@@ -735,7 +791,7 @@ class UsageStoreMigrationTests(unittest.TestCase):
                 audit[0]["provider_usage"],
                 {"input_tokens": 100, "output_tokens": 20},
             )
-            self.assertEqual(audit[0]["schema_version"], 3)
+            self.assertEqual(audit[0]["schema_version"], 4)
             self.assertEqual(audit[0]["context_injection_mode"], "off")
             self.assertEqual(audit[0]["context_injection_outcome"], "not_evaluated")
             self.assertEqual(audit[0]["context_record_ids"], [])

@@ -42,6 +42,7 @@ from .store import (
     _sqlite_nonnegative,
     _validated_context_lineage,
     _validated_governance_policy_version,
+    _validated_identity_type,
     _validated_optional_latency,
     _validate_provider_cost_report_storage,
     _validate_provider_cost_source,
@@ -191,6 +192,7 @@ class PostgresUsageStore:
         normalized_governance_policy_version = _validated_governance_policy_version(
             governance_policy_version
         )
+        normalized_identity_type = _validated_identity_type(identity.identity_type)
         input_count = _sqlite_nonnegative(input_tokens)
         output_count = _sqlite_nonnegative(output_tokens)
         cache_read_count = _sqlite_nonnegative(cache_read_tokens)
@@ -213,6 +215,7 @@ class PostgresUsageStore:
             datetime.now(timezone.utc),
             identity.actor_id,
             identity.actor_name,
+            normalized_identity_type,
             identity.team_id,
             identity.team_name,
             client,
@@ -263,7 +266,7 @@ class PostgresUsageStore:
                 cursor.execute(
                     """
                     INSERT INTO gateway_usage_events (
-                      tenant_id, id, occurred_at, actor_id, actor_name, team_id, team_name,
+                      tenant_id, id, occurred_at, actor_id, actor_name, identity_type, team_id, team_name,
                       client, protocol, requested_model, resolved_alias, upstream_model,
                       actual_model, policy_action, status, input_tokens, output_tokens,
                       cache_read_tokens, cache_write_tokens, reasoning_tokens, billable_tokens,
@@ -279,7 +282,7 @@ class PostgresUsageStore:
                     ) VALUES (
                       %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                       %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                      %s, %s, %s, %s::jsonb, %s, %s, %s::jsonb, %s, %s,
+                      %s, %s, %s, %s, %s::jsonb, %s, %s, %s::jsonb, %s, %s,
                       %s, %s, %s::jsonb, %s, %s, %s, %s, %s, %s, %s,
                       %s, %s, %s, %s
                     )
@@ -1004,7 +1007,7 @@ class PostgresUsageStore:
                         cursor.execute(
                             """
                             SELECT id, occurred_at, tenant_id AS organization_id, actor_id,
-                              actor_name, team_id, team_name, client, protocol, requested_model,
+                              actor_name, identity_type, team_id, team_name, client, protocol, requested_model,
                               resolved_alias, upstream_model, actual_model, policy_action, status,
                               input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
                               reasoning_tokens, billable_tokens, cost_microusd, cost_basis,
@@ -1027,7 +1030,7 @@ class PostgresUsageStore:
                             event["occurred_at"] = _iso(event["occurred_at"])
                             event["provider_usage"] = event.pop("provider_usage_json")
                             event["context_record_ids"] = event.pop("context_record_ids_json")
-                            events.append({"schema_version": 3, "event_type": "usage", **event})
+                            events.append({"schema_version": 4, "event_type": "usage", **event})
                     if kind in {"all", "security"}:
                         cursor.execute(
                             """

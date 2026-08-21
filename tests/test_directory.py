@@ -1,0 +1,404 @@
+from __future__ import annotations
+
+import tempfile
+from pathlib import Path
+import http.client
+import json
+import unittest
+
+from hormuz.auth import AuthenticationError
+from hormuz.config import (
+    DirectoryConfig,
+    GatewayConfig,
+    Identity,
+    ListenConfig,
+    ModelRoute,
+    OIDCIssuerConfig,
+    Policy,
+    UpstreamConfig,
+)
+from hormuz.directory import (
+    HORMUZ_GROUP_EXTENSION,
+    HORMUZ_USER_EXTENSION,
+    SCIM_GROUP_SCHEMA,
+    SCIM_USER_SCHEMA,
+    DirectoryError,
+    SQLiteDirectoryStore,
+)
+from hormuz.server import _apply_scim_patch
+from hormuz.server import GatewayServer, serve_in_thread
+
+
+ISSUER = "https://identity.example"
+
+
+class DirectoryStoreTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.root = tempfile.TemporaryDirectory()
+        self.addCleanup(self.root.cleanup)
+        self.admin = Identity(
+            token_env="",
+            token="",
+            actor_id="directory-admin",
+            actor_name="Directory Admin",
+            team_id="security",
+            team_name="Security",
+            organization_id="acme",
+            clearance="restricted",
+            capabilities=("identity_admin",),
+        )
+        self.store = SQLiteDirectoryStore(
+            Path(self.root.name) / "directory.sqlite3",
+            trusted_issuers=(ISSUER,),
+        )
+
+    def _user(self, external_id: str = "alice-id", *, active: bool = True) -> dict[str, object]:
+        return {
+            "schemas": [SCIM_USER_SCHEMA, HORMUZ_USER_EXTENSION],
+            "externalId": external_id,
+            "userName": "alice@example.test",
+            "displayName": "Alice",
+            "active": active,
+            HORMUZ_USER_EXTENSION: {"issuer": ISSUER, "subject": external_id},
+        }
+
+    @staticmethod
+    def _group(member_id: str, *, team_id: str = "engineering") -> dict[str, object]:
+        return {
+            "schemas": [SCIM_GROUP_SCHEMA, HORMUZ_GROUP_EXTENSION],
+            "externalId": team_id,
+            "displayName": team_id.title(),
+            "members": [{"value": member_id}],
+            HORMUZ_GROUP_EXTENSION: {
+                "teamId": team_id,
+                "teamName": team_id.title(),
+                "clearance": "internal",
+                "allowedClients": ["codex", "claude-code"],
+                "capabilities": [],
+            },
+        }
+
+    def test_scim_user_group_membership_resolves_a_human_identity(self) -> None:
+        user = self.store.create_user(administrator=self.admin, value=self._user())
+        self.assertTrue(user.changed)
+        repeated_user = self.store.create_user(administrator=self.admin, value=self._user())
+        self.assertFalse(repeated_user.changed)
+        group = self.store.create_group(
+            administrator=self.admin,
+            value=self._group(str(user.resource["id"])),
+        )
+        self.assertTrue(group.changed)
+
+        identity = self.store.identity_for_subject(ISSUER, "alice-id")
+        self.assertIsNotNone(identity)
+        assert identity is not None
+        self.assertEqual(identity.identity_type, "human")
+        self.assertEqual(identity.actor_id, user.resource["id"])
+        self.assertEqual(identity.team_id, "engineering")
+        self.assertEqual(identity.allowed_clients, ("claude-code", "codex"))
+
+    def test_group_member_removal_immediately_removes_dynamic_authorization(self) -> None:
+        user = self.store.create_user(administrator=self.admin, value=self._user())
+        group = self.store.create_group(
+            administrator=self.admin,
+            value=self._group(str(user.resource["id"])),
+        )
+        group_id = str(group.resource["id"])
+        update = self._group(str(user.resource["id"]))
+        update["members"] = []
+        replaced = self.store.replace_group(
+            administrator=self.admin,
+            resource_id=group_id,
+            value=update,
+            if_match=str(group.resource["meta"]["version"]),  # type: ignore[index]
+        )
+        self.assertTrue(replaced.changed)
+        self.assertEqual(replaced.affected_actor_ids, (str(user.resource["id"]),))
+        with self.assertRaisesRegex(DirectoryError, "directory_subject_unassigned"):
+            self.store.identity_for_subject(ISSUER, "alice-id")
+
+    def test_group_deactivation_and_reactivation_change_authorization(self) -> None:
+        user = self.store.create_user(administrator=self.admin, value=self._user())
+        group = self.store.create_group(
+            administrator=self.admin,
+            value=self._group(str(user.resource["id"])),
+        )
+        deactivated = self.store.deactivate(
+            administrator=self.admin,
+            resource_type="Group",
+            resource_id=str(group.resource["id"]),
+            if_match=str(group.resource["meta"]["version"]),  # type: ignore[index]
+        )
+        self.assertTrue(deactivated.changed)
+        with self.assertRaisesRegex(DirectoryError, "directory_subject_unassigned"):
+            self.store.identity_for_subject(ISSUER, "alice-id")
+
+        reactivated = self.store.replace_group(
+            administrator=self.admin,
+            resource_id=str(group.resource["id"]),
+            value=self._group(str(user.resource["id"])),
+            if_match=str(deactivated.resource["meta"]["version"]),  # type: ignore[index]
+        )
+        self.assertTrue(reactivated.changed)
+        self.assertEqual(
+            self.store.identity_for_subject(ISSUER, "alice-id").team_id,  # type: ignore[union-attr]
+            "engineering",
+        )
+
+    def test_user_deactivation_is_idempotent_and_denies_the_subject(self) -> None:
+        user = self.store.create_user(administrator=self.admin, value=self._user())
+        self.store.create_group(
+            administrator=self.admin,
+            value=self._group(str(user.resource["id"])),
+        )
+        resource_id = str(user.resource["id"])
+        first = self.store.deactivate(
+            administrator=self.admin,
+            resource_type="User",
+            resource_id=resource_id,
+            if_match=str(user.resource["meta"]["version"]),  # type: ignore[index]
+        )
+        self.assertTrue(first.changed)
+        with self.assertRaisesRegex(DirectoryError, "directory_identity_inactive"):
+            self.store.identity_for_subject(ISSUER, "alice-id")
+        repeated = self.store.deactivate(
+            administrator=self.admin,
+            resource_type="User",
+            resource_id=resource_id,
+            if_match=str(first.resource["meta"]["version"]),  # type: ignore[index]
+        )
+        self.assertFalse(repeated.changed)
+
+        reactivated = self.store.replace_user(
+            administrator=self.admin,
+            resource_id=resource_id,
+            value=self._user(),
+            if_match=str(first.resource["meta"]["version"]),  # type: ignore[index]
+        )
+        self.assertTrue(reactivated.changed)
+        self.assertEqual(
+            self.store.identity_for_subject(ISSUER, "alice-id").actor_id,  # type: ignore[union-attr]
+            resource_id,
+        )
+
+    def test_workload_is_federated_and_distinct_from_a_human(self) -> None:
+        workload = self.store.create_workload(
+            administrator=self.admin,
+            value={
+                "externalId": "github-actions-production",
+                "displayName": "GitHub Actions",
+                "identityType": "ci",
+                "active": True,
+                "issuer": ISSUER,
+                "subject": "repo:acme/hormuz:environment:production",
+                "teamId": "engineering",
+                "teamName": "Engineering",
+                "clearance": "internal",
+                "allowedClients": ["codex"],
+                "capabilities": [],
+            },
+        )
+        identity = self.store.identity_for_subject(
+            ISSUER,
+            "repo:acme/hormuz:environment:production",
+        )
+        self.assertIsNotNone(identity)
+        assert identity is not None
+        self.assertEqual(identity.identity_type, "ci")
+        self.assertEqual(identity.actor_id, workload.resource["id"])
+        self.assertEqual(identity.allowed_clients, ("codex",))
+
+    def test_patch_operations_are_deterministic_and_versioned(self) -> None:
+        user = self.store.create_user(administrator=self.admin, value=self._user())
+        current = user.resource
+        patched = _apply_scim_patch(
+            "User",
+            current,
+            {
+                "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+                "Operations": [
+                    {"op": "replace", "path": "displayName", "value": "Alice Renamed"}
+                ],
+            },
+        )
+        updated = self.store.replace_user(
+            administrator=self.admin,
+            resource_id=str(current["id"]),
+            value=patched,
+            if_match=str(current["meta"]["version"]),  # type: ignore[index]
+        )
+        self.assertTrue(updated.changed)
+        self.assertEqual(updated.resource["displayName"], "Alice Renamed")
+        with self.assertRaisesRegex(DirectoryError, "scim_version_conflict"):
+            self.store.replace_user(
+                administrator=self.admin,
+                resource_id=str(current["id"]),
+                value=patched,
+                if_match=str(current["meta"]["version"]),  # type: ignore[index]
+            )
+
+    def test_cross_team_groups_fail_closed_instead_of_guessing_policy_scope(self) -> None:
+        user = self.store.create_user(administrator=self.admin, value=self._user())
+        self.store.create_group(
+            administrator=self.admin,
+            value=self._group(str(user.resource["id"]), team_id="engineering"),
+        )
+        self.store.create_group(
+            administrator=self.admin,
+            value=self._group(str(user.resource["id"]), team_id="marketing"),
+        )
+        with self.assertRaisesRegex(DirectoryError, "directory_subject_team_ambiguous"):
+            self.store.identity_for_subject(ISSUER, "alice-id")
+
+    def test_team_transfer_is_versioned_and_replaces_the_policy_scope(self) -> None:
+        user = self.store.create_user(administrator=self.admin, value=self._user())
+        group = self.store.create_group(
+            administrator=self.admin,
+            value=self._group(str(user.resource["id"])),
+        )
+        transferred = self._group(str(user.resource["id"]))
+        extension = transferred[HORMUZ_GROUP_EXTENSION]
+        assert isinstance(extension, dict)
+        extension["teamId"] = "marketing"
+        extension["teamName"] = "Marketing"
+        updated = self.store.replace_group(
+            administrator=self.admin,
+            resource_id=str(group.resource["id"]),
+            value=transferred,
+            if_match=str(group.resource["meta"]["version"]),  # type: ignore[index]
+        )
+        self.assertTrue(updated.changed)
+        identity = self.store.identity_for_subject(ISSUER, "alice-id")
+        self.assertEqual(identity.team_id, "marketing")  # type: ignore[union-attr]
+
+
+class DirectoryHTTPTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.root = tempfile.TemporaryDirectory()
+        self.addCleanup(self.root.cleanup)
+        root = Path(self.root.name)
+        self.token = "directory-admin-token-" + "a" * 32
+        admin = Identity(
+            token_env="HORMUZ_DIRECTORY_ADMIN",
+            token=self.token,
+            actor_id="directory-admin",
+            actor_name="Directory Admin",
+            team_id="security",
+            team_name="Security",
+            organization_id="acme",
+            clearance="restricted",
+            capabilities=("identity_admin",),
+        )
+        self.config = GatewayConfig(
+            source_path=root / "hormuz.json",
+            listen=ListenConfig(host="127.0.0.1", port=0),
+            database_path=root / "usage.sqlite3",
+            context_database_path=root / "context.sqlite3",
+            upstreams={
+                "openai": UpstreamConfig("http://127.0.0.1:1", "OPENAI_API_KEY"),
+                "anthropic": UpstreamConfig("http://127.0.0.1:1", "ANTHROPIC_API_KEY"),
+            },
+            identities_by_token={self.token: admin},
+            model_routes={
+                "gpt-test": ModelRoute("gpt-test", "openai", "gpt-test"),
+            },
+            organization_policy=Policy(allowed_models=("gpt-test",)),
+            source_sha256="a" * 64,
+            directory=DirectoryConfig(enabled=True, database_path=root / "directory.sqlite3"),
+            oidc_issuers={ISSUER: OIDCIssuerConfig(issuer=ISSUER, audiences=("hormuz",))},
+        )
+        self.gateway = GatewayServer(self.config)
+        self.thread = serve_in_thread(self.gateway)
+        self.addCleanup(self._close_gateway)
+
+    def _close_gateway(self) -> None:
+        self.gateway.shutdown()
+        self.gateway.server_close()
+        self.thread.join(timeout=5)
+
+    def _request(
+        self,
+        method: str,
+        path: str,
+        value: dict[str, object] | None = None,
+        *,
+        headers: dict[str, str] | None = None,
+    ) -> tuple[int, dict[str, str], dict[str, object]]:
+        body = json.dumps(value).encode("utf-8") if value is not None else None
+        request_headers = {"Authorization": "Bearer " + self.token}
+        if body is not None:
+            request_headers.update({"Content-Type": "application/scim+json", "Content-Length": str(len(body))})
+        request_headers.update(headers or {})
+        connection = http.client.HTTPConnection(
+            "127.0.0.1",
+            self.gateway.server_address[1],
+            timeout=5,
+        )
+        try:
+            connection.request(method, path, body=body, headers=request_headers)
+            response = connection.getresponse()
+            parsed = json.loads(response.read())
+            return response.status, {key.lower(): value for key, value in response.getheaders()}, parsed
+        finally:
+            connection.close()
+
+    def test_scim_http_provisions_and_deprovisions_the_identity_used_by_authentication(self) -> None:
+        user_payload = {
+            "schemas": [SCIM_USER_SCHEMA, HORMUZ_USER_EXTENSION],
+            "externalId": "alice-id",
+            "userName": "alice@example.test",
+            "displayName": "Alice",
+            "active": True,
+            HORMUZ_USER_EXTENSION: {"issuer": ISSUER, "subject": "alice-id"},
+        }
+        status, headers, user = self._request("POST", "/v1/admin/scim/v2/Users", user_payload)
+        self.assertEqual(status, 201)
+        self.assertEqual(headers["content-type"], "application/scim+json")
+        self.assertIn("etag", headers)
+        user_id = str(user["id"])
+        status, _headers, retried_user = self._request(
+            "POST", "/v1/admin/scim/v2/Users", user_payload
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(retried_user["id"], user_id)
+        status, _headers, missing = self._request(
+            "GET", "/v1/admin/scim/v2/Users/usr_" + "x" * 32
+        )
+        self.assertEqual(status, 404)
+        self.assertEqual(missing["scimType"], "scim_resource_not_found")
+        group_payload = {
+            "schemas": [SCIM_GROUP_SCHEMA, HORMUZ_GROUP_EXTENSION],
+            "externalId": "engineering",
+            "displayName": "Engineering",
+            "members": [{"value": user_id}],
+            HORMUZ_GROUP_EXTENSION: {
+                "teamId": "engineering",
+                "teamName": "Engineering",
+                "clearance": "internal",
+                "allowedClients": ["codex"],
+                "capabilities": [],
+            },
+        }
+        status, _headers, group = self._request("POST", "/v1/admin/scim/v2/Groups", group_payload)
+        self.assertEqual(status, 201)
+        identity = self.gateway.authenticator.identity_for_subject(ISSUER, "alice-id")
+        self.assertEqual(identity.actor_id, user_id)
+        self.assertEqual(identity.identity_type, "human")
+
+        status, _headers, patched = self._request(
+            "PATCH",
+            "/v1/admin/scim/v2/Groups/" + str(group["id"]),
+            {
+                "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+                "Operations": [{"op": "replace", "path": "members", "value": []}],
+            },
+            headers={"If-Match": str(group["meta"]["version"])},  # type: ignore[index]
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(patched["members"], [])
+        with self.assertRaisesRegex(AuthenticationError, "directory_subject_unassigned"):
+            self.gateway.authenticator.identity_for_subject(ISSUER, "alice-id")
+
+
+if __name__ == "__main__":
+    unittest.main()

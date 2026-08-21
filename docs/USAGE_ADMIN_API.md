@@ -176,4 +176,4 @@ Pre-authentication failures, unaccounted administration routes, proxy/TLS time,
 traffic bypassing Hormuz, and provider-side work after the connection closes
 are not included.
 
-This is a verified single-node SQLite boundary. It does not accept ADR 0002 or claim shared hosted storage, PostgreSQL row security, SIEM delivery, externally immutable audit, SCIM, or complete provider-account coverage.
+This usage-report surface is a verified single-node SQLite boundary. It does not itself administer SCIM; the separate local lifecycle is documented in [SCIM.md](SCIM.md). Neither surface claims shared hosted storage, PostgreSQL row security, SIEM delivery, externally immutable audit, or complete provider-account coverage.

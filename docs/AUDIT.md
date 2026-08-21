@@ -105,7 +105,7 @@ The governed-context repository itself is intentionally content-bearing. Its pri
 
 ## Content-free storage manifest
 
-`hormuz.content-free-schema.v3` is the structural allowlist for routine observability. It names the exact permitted columns in the usage, secret/DLP, approval, budget, administrative-access, provider-cost, session-security, and governed-context audit tables. Version 3 adds only the exact immutable governance-policy version to usage events; it does not add prompt, response, request, policy document, or source content. Each local store validates its applicable tables after creation or supported migration and refuses startup with the fixed `content_free_schema_incompatible` error when a column is missing or added. A schema migration therefore cannot add a content-bearing telemetry field without an explicit manifest and privacy-contract change.
+`hormuz.content-free-schema.v4` is the structural allowlist for routine observability. It names the exact permitted columns in the usage, secret/DLP, approval, budget, administrative-access, provider-cost, session-security, and governed-context audit tables. Version 4 adds only the controlled identity type (`human`, `service_account`, `ci`, or `connector`) to usage events; it does not add prompt, response, request, policy document, or source content. Each local store validates its applicable tables after creation or supported migration and refuses startup with the fixed `content_free_schema_incompatible` error when a column is missing or added. A schema migration therefore cannot add a content-bearing telemetry field without an explicit manifest and privacy-contract change.
 
 The manifest is a structural backstop, not a claim that every Hormuz table is content-free. Canonical governed-context records and lifecycle snapshots are intentionally content-bearing. Session enrollments, human sessions, and consumed-credential state belong to the separate authentication-secret contract. Those tables are excluded rather than mislabeled as telemetry. The audit-export field allowlist remains an independent defense: unknown physical columns are not exported automatically, including before a restarted process detects drift.
 
@@ -113,7 +113,7 @@ The manifest is a structural backstop, not a claim that every Hormuz table is co
 
 Every line is one JSON object containing:
 
-- `schema_version`: usage events are `3`; security and administrative events remain `1`. Usage version 3 adds the exact `governance_policy_version`; nullable gateway/policy/provider latency columns remain available only through the explicit usage-report schema-v3 aggregation.
+- `schema_version`: usage events are `4`; security and administrative events remain `1`. Usage version 4 adds the controlled `identity_type`; nullable gateway/policy/provider latency columns remain available only through the explicit usage-report schema-v3 aggregation.
 - `event_type`: `usage`, `security.secret`, `security.dlp`, `security.dlp.approval`, or `security.admin.usage_read`.
 - `id` and `occurred_at`: the event identifier and UTC occurrence time.
 - event-time organization, actor, team, client, protocol, requested/resolved/routed/actual model, policy, status, normalized token, cost-basis, currency, rate-card-version, provider-request, and redaction metadata when applicable. Pre-organization usage rows retain a null organization rather than receiving a guessed tenant.
@@ -125,6 +125,11 @@ Usage schema version 3 adds `governance_policy_version`, the exact immutable
 `hpv_v1_<sha256>` version used for request policy evaluation. It contains no
 policy document or secret and is distinct from DLP and deprecated context
 policy versions.
+
+Usage schema version 4 adds `identity_type`, restricted to `human`,
+`service_account`, `ci`, or `connector`. It records how the gateway classified
+the authenticated principal at event time; it is not a prompt, response, OIDC
+claim set, or employee-performance signal.
 
 Array fields such as `redaction_rules`, `rules`, and DLP `findings` are emitted as JSON arrays. A finding is restricted to rule ID, category, confidence, action, and count. The `opaque_media` finding therefore records only the `unsupported_media` category and number of provider content blocks; URLs, file IDs, filenames, media types, encoded bytes, and surrounding content are excluded. DLP events also carry the exact routed upstream model and the effective policy version. For an identity with team/person overlays, that version is a deterministic digest of safe layer versions and rule metadata; it contains no dictionary values and binds later approval matching. Approval events record `requested`, `approved`, `consumed`, or post-egress `model_mismatch` transitions with the opaque request ID, event-time employee/team, separate decision actor, provider/model/policy, and rule IDs. They exclude the keyed payload fingerprint as well as all content.
 

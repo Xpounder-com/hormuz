@@ -1,8 +1,8 @@
 # PostgreSQL tenancy foundation
 
 Hormuz has an accepted shared-schema PostgreSQL tenancy contract and an
-executable schema-version-6 accounting, identity-projection, policy-projection,
-policy-version, human-session, and DLP/security backend. A deployment can opt into PostgreSQL
+executable schema-version-7 accounting, identity-projection, policy-projection,
+policy-version, human-session, DLP/security, and identity-type usage backend. A deployment can opt into PostgreSQL
 for usage, cost evidence, usage-read audit, atomic budget reservations,
 multi-instance human sessions, one-time DLP approvals, and security evidence.
 The deprecated built-in context experiment is deliberately excluded from the
@@ -19,7 +19,9 @@ approval-request, approval-event, and security-event tables. Schema version 5
 adds immutable policy snapshots, an atomic per-tenant active-version pointer,
 and append-only policy administration events. Schema version 6 binds every
 usage event to the exact immutable governance policy version evaluated for its
-request.
+request. Schema version 7 adds the controlled event-time identity type used to
+distinguish human, service-account, CI, and connector traffic without storing
+request content.
 Every tenant-owned table has:
 
 - a non-null tenant key in its primary and foreign-key relationships;
@@ -217,17 +219,20 @@ observation is
 
 ## Gates that remain open
 
-Schema v6 is a real accounting, human-session, DLP/security, and policy-version persistence
-slice, not the completed hosted product. The repository currently opens a fresh
-PostgreSQL connection per operation. Configuration remains the desired-state
-identity source and deployment provisioning boundary; SCIM and public
-administrative identity APIs are not implemented. Removing a person
+Schema v7 is a real accounting, human-session, DLP/security, policy-version,
+and identity-type usage persistence slice, not the completed hosted product.
+The repository currently opens a fresh PostgreSQL connection per operation.
+Configuration remains the desired-state identity source and deployment
+provisioning boundary for the shared runtime. The repository also has a
+deliberately separate single-node SQLite SCIM directory and administrative API,
+documented in [SCIM.md](SCIM.md); it does not yet migrate employee-directory
+state into PostgreSQL. Removing a person
 or mapping while retaining its configured organization increments the affected
 authorization version and revokes active sessions. Removing the entire
 organization from configuration is not a deprovisioning operation: the sync
 command intentionally will not discover or scan tenants outside the supplied
 desired state. Keep the organization present while removing its people, and do
-not consider tenant deletion complete until a separately verified explicit
+not consider tenant deletion complete until a separately verified shared
 deprovision/SCIM workflow exists. A keyed routing
 tag lets an opaque credential select one RLS tenant without exposing the raw
 organization ID or querying a global credential index, but production custody

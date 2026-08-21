@@ -8,12 +8,13 @@ import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol
 from urllib.parse import urlparse
 
 import jwt
 
 from .config import GatewayConfig, Identity, OIDCIssuerConfig
+from .directory import DirectoryError
 
 
 LOGGER = logging.getLogger("hormuz.auth")
@@ -44,11 +45,22 @@ class OIDCProviderMetadata:
     token_endpoint: str
 
 
-class Authenticator:
-    """Resolve static or OIDC JWT bearer credentials to configured identities."""
+class DirectoryIdentityResolver(Protocol):
+    def identity_for_subject(self, issuer: str, subject: str) -> Identity | None: ...
 
-    def __init__(self, config: GatewayConfig):
+    def organizations_for_issuer(self, issuer: str) -> tuple[str, ...]: ...
+
+
+class Authenticator:
+    """Resolve static or OIDC JWT bearer credentials to current identities."""
+
+    def __init__(
+        self,
+        config: GatewayConfig,
+        directory: DirectoryIdentityResolver | None = None,
+    ):
         self._config = config
+        self._directory = directory
         self._lock = threading.Lock()
         self._jwks_uris: dict[str, tuple[float, str]] = {}
         self._discovery_documents: dict[str, tuple[float, dict[str, Any]]] = {}
@@ -159,9 +171,35 @@ class Authenticator:
         subject = claims.get("sub")
         if not isinstance(subject, str) or not subject:
             raise AuthenticationError("invalid_subject")
-        if self._config.identity_for_subject(issuer.issuer, subject) is None:
-            raise AuthenticationError("unmapped_subject")
+        self.identity_for_subject(issuer.issuer, subject)
         return subject
+
+    def identity_for_subject(self, issuer: str, subject: str) -> Identity:
+        if self._directory is not None:
+            try:
+                dynamic = self._directory.identity_for_subject(issuer, subject)
+            except DirectoryError as error:
+                raise AuthenticationError(error.code) from None
+            if dynamic is not None:
+                return dynamic
+        configured = self._config.identity_for_subject(issuer, subject)
+        if configured is None:
+            raise AuthenticationError("unmapped_subject")
+        return configured
+
+    def organizations_for_issuer(self, issuer: str) -> tuple[str, ...]:
+        organizations = {
+            identity.organization_id
+            for (configured_issuer, _subject), identity
+            in self._config.identities_by_subject.items()
+            if configured_issuer == issuer
+        }
+        if self._directory is not None:
+            try:
+                organizations.update(self._directory.organizations_for_issuer(issuer))
+            except DirectoryError as error:
+                raise AuthenticationError(error.code) from None
+        return tuple(sorted(organizations))
 
     def _authenticate_oidc(self, token: str) -> Identity:
         if token.count(".") != 2:
@@ -204,10 +242,7 @@ class Authenticator:
         subject = claims.get("sub")
         if not isinstance(subject, str) or not subject:
             raise AuthenticationError("invalid_subject")
-        identity = self._config.identity_for_subject(issuer.issuer, subject)
-        if identity is None:
-            raise AuthenticationError("unmapped_subject")
-        return identity
+        return self.identity_for_subject(issuer.issuer, subject)
 
     def _validate_jwt(
         self,

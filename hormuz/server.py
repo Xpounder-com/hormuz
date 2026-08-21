@@ -61,6 +61,16 @@ from .context_store import (
     SQLiteContextRepository,
 )
 from .dlp_approval import DLPApprovalError, payload_fingerprint
+from .directory import (
+    SCIM_ERROR_SCHEMA,
+    SCIM_GROUP_SCHEMA,
+    SCIM_LIST_SCHEMA,
+    SCIM_PATCH_SCHEMA,
+    SCIM_USER_SCHEMA,
+    DirectoryError,
+    DirectoryMutation,
+    SQLiteDirectoryStore,
+)
 from .policy import PolicyDecision, PolicyEngine
 from .identity_projection import configured_organization_ids, verify_runtime_identity_projection
 from .postgres import PostgresStorageError, postgres_dsn_from_env
@@ -99,6 +109,7 @@ MAX_CONTEXT_REVALIDATION_REQUEST_BYTES = 8 * 1024
 MAX_AUTH_REQUEST_BYTES = 8 * 1024
 MAX_DLP_APPROVAL_REQUEST_BYTES = 2 * 1024
 MAX_POLICY_ADMIN_REQUEST_BYTES = 1_048_576
+MAX_DIRECTORY_REQUEST_BYTES = 1_048_576
 MAX_PROVIDER_QUERY_DECODE_DEPTH = 3
 MAX_PROVIDER_REQUEST_HEADER_BYTES = 1024
 CONNECTION_CAPACITY_LOG_INTERVAL_SECONDS = 5.0
@@ -321,7 +332,15 @@ class GatewayServer(ThreadingHTTPServer):
         self._shutdown_lock = threading.Lock()
         self._shutdown_started = False
         self.config = config
-        self.authenticator = Authenticator(config)
+        self.directory: SQLiteDirectoryStore | None = None
+        if config.directory.enabled:
+            if config.directory.database_path is None:
+                raise DirectoryError("directory_database_path_missing")
+            self.directory = SQLiteDirectoryStore(
+                config.directory.database_path,
+                trusted_issuers=tuple(config.oidc_issuers),
+            )
+        self.authenticator = Authenticator(config, self.directory)
         self.session_broker: SessionBroker | None = None
         if config.session_broker.enabled:
             session_config = config.session_broker
@@ -817,6 +836,17 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         if path == "/v1/admin/policy-active":
             self._get_active_policy(identity)
             return
+        scim_target = _scim_target(path)
+        if scim_target is not None:
+            self._get_scim_resource(identity, scim_target, request_url.query)
+            return
+        if path == "/v1/admin/scim/v2/ServiceProviderConfig":
+            self._get_scim_service_provider_config(identity)
+            return
+        workload_id = _workload_identity_id(path)
+        if path == "/v1/admin/workload-identities" or workload_id is not None:
+            self._get_workload_identity(identity, workload_id, request_url.query)
+            return
         if path == "/v1/gateway/whoami":
             self._send_json(
                 HTTPStatus.OK,
@@ -829,6 +859,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                     "allowed_clients": list(identity.allowed_clients),
                     "capabilities": list(identity.capabilities),
                     "authentication_source": identity.authentication_source,
+                    "identity_type": identity.identity_type,
                 },
             )
             return
@@ -1344,6 +1375,19 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 return
             self._revoke_human_sessions(identity)
             return
+        scim_target = _scim_target(path)
+        if path in {"/v1/admin/scim/v2/Users", "/v1/admin/scim/v2/Groups"}:
+            identity = self._authenticate()
+            if identity is None:
+                return
+            self._create_scim_resource(identity, path)
+            return
+        if path == "/v1/admin/workload-identities":
+            identity = self._authenticate()
+            if identity is None:
+                return
+            self._create_workload_identity(identity)
+            return
         if path in {
             "/v1/admin/policy-versions",
             "/v1/admin/policy-activations",
@@ -1436,6 +1480,20 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         path = urlsplit(self.path).path
         if self._reject_if_unavailable():
             return
+        scim_target = _scim_target(path)
+        if scim_target is not None and scim_target[1] is not None:
+            identity = self._authenticate()
+            if identity is None:
+                return
+            self._replace_scim_resource(identity, scim_target)
+            return
+        workload_id = _workload_identity_id(path)
+        if workload_id is not None:
+            identity = self._authenticate()
+            if identity is None:
+                return
+            self._replace_workload_identity(identity, workload_id)
+            return
         if path != "/v1/context/lifecycle-snapshots":
             self._send_error(
                 "not_found",
@@ -1451,6 +1509,487 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         if policy is None or not self._check_context_rate_limit(identity):
             return
         self._put_context_lifecycle_snapshot(identity, policy)
+
+    def do_PATCH(self) -> None:  # noqa: N802
+        path = urlsplit(self.path).path
+        if self._reject_if_unavailable():
+            return
+        scim_target = _scim_target(path)
+        if scim_target is not None and scim_target[1] is not None:
+            identity = self._authenticate()
+            if identity is None:
+                return
+            self._patch_scim_resource(identity, scim_target)
+            return
+        workload_id = _workload_identity_id(path)
+        if workload_id is not None:
+            identity = self._authenticate()
+            if identity is None:
+                return
+            self._patch_workload_identity(identity, workload_id)
+            return
+        self._send_error("not_found", "Route not found", HTTPStatus.NOT_FOUND, close_connection=True)
+
+    def do_DELETE(self) -> None:  # noqa: N802
+        path = urlsplit(self.path).path
+        if self._reject_if_unavailable():
+            return
+        scim_target = _scim_target(path)
+        if scim_target is not None and scim_target[1] is not None:
+            identity = self._authenticate()
+            if identity is None:
+                return
+            self._deactivate_directory_resource(identity, scim_target)
+            return
+        workload_id = _workload_identity_id(path)
+        if workload_id is not None:
+            identity = self._authenticate()
+            if identity is None:
+                return
+            self._deactivate_directory_resource(identity, ("Workload", workload_id))
+            return
+        self._send_error("not_found", "Route not found", HTTPStatus.NOT_FOUND, close_connection=True)
+
+    def _directory_for_request(self, identity: Identity) -> SQLiteDirectoryStore | None:
+        if "identity_admin" not in identity.capabilities:
+            self._send_scim_error(
+                HTTPStatus.FORBIDDEN,
+                "identity_admin_capability_required",
+                "Identity administrator capability is required",
+            )
+            return None
+        directory = self.server.directory
+        if directory is None:
+            self._send_scim_error(
+                HTTPStatus.NOT_FOUND,
+                "directory_disabled",
+                "Identity directory is not enabled",
+            )
+            return None
+        return directory
+
+    def _get_scim_service_provider_config(self, identity: Identity) -> None:
+        if self._directory_for_request(identity) is None:
+            return
+        self._send_scim_json(
+            HTTPStatus.OK,
+            {
+                "schemas": ["urn:ietf:params:scim:schemas:core:2.0:ServiceProviderConfig"],
+                "patch": {"supported": True},
+                "bulk": {"supported": False, "maxOperations": 0, "maxPayloadSize": 0},
+                "filter": {"supported": False, "maxResults": 0},
+                "changePassword": {"supported": False},
+                "sort": {"supported": False},
+                "etag": {"supported": True},
+                "authenticationSchemes": [
+                    {
+                        "type": "oauthbearertoken",
+                        "name": "Hormuz authenticated identity",
+                        "description": "Use a current Hormuz OIDC workload or human session credential",
+                        "primary": True,
+                    }
+                ],
+            },
+        )
+
+    def _get_scim_resource(
+        self,
+        identity: Identity,
+        target: tuple[str, str | None],
+        query: str,
+    ) -> None:
+        directory = self._directory_for_request(identity)
+        if directory is None:
+            return
+        resource_type, resource_id = target
+        if resource_type == "Workload":
+            self._send_scim_error(HTTPStatus.NOT_FOUND, "scim_resource_not_found", "SCIM resource was not found")
+            return
+        try:
+            if resource_id is not None:
+                if query:
+                    raise DirectoryError("scim_invalid_request")
+                resource = directory.get(
+                    organization_id=identity.organization_id,
+                    resource_type=resource_type,
+                    resource_id=resource_id,
+                )
+                self._send_scim_resource(HTTPStatus.OK, resource)
+                return
+            values = urllib.parse.parse_qs(query, keep_blank_values=True, strict_parsing=True)
+            if set(values) - {"startIndex", "count"} or any(
+                len(item) != 1 or not item[0] for item in values.values()
+            ):
+                raise DirectoryError("scim_invalid_request")
+            start_index = int(values.get("startIndex", ["1"])[0])
+            count = int(values.get("count", ["100"])[0])
+            payload = directory.list(
+                organization_id=identity.organization_id,
+                resource_type=resource_type,
+                start_index=start_index,
+                count=count,
+            )
+            resources = payload.get("Resources")
+            if isinstance(resources, list):
+                for resource in resources:
+                    if isinstance(resource, dict):
+                        self._add_scim_location(resource)
+            self._send_scim_json(HTTPStatus.OK, payload)
+        except DirectoryError as error:
+            self._send_scim_directory_error(error.code)
+        except (ValueError, UnicodeError):
+            self._send_scim_directory_error("scim_invalid_request")
+
+    def _get_workload_identity(
+        self,
+        identity: Identity,
+        resource_id: str | None,
+        query: str,
+    ) -> None:
+        directory = self._directory_for_request(identity)
+        if directory is None:
+            return
+        try:
+            if resource_id is not None:
+                if query:
+                    raise DirectoryError("scim_invalid_request")
+                self._send_scim_resource(
+                    HTTPStatus.OK,
+                    directory.get(
+                        organization_id=identity.organization_id,
+                        resource_type="Workload",
+                        resource_id=resource_id,
+                    ),
+                )
+                return
+            values = urllib.parse.parse_qs(query, keep_blank_values=True, strict_parsing=True)
+            if set(values) - {"startIndex", "count"} or any(
+                len(item) != 1 or not item[0] for item in values.values()
+            ):
+                raise DirectoryError("scim_invalid_request")
+            payload = directory.list(
+                organization_id=identity.organization_id,
+                resource_type="Workload",
+                start_index=int(values.get("startIndex", ["1"])[0]),
+                count=int(values.get("count", ["100"])[0]),
+            )
+            resources = payload.get("Resources")
+            if isinstance(resources, list):
+                for resource in resources:
+                    if isinstance(resource, dict):
+                        self._add_scim_location(resource)
+            self._send_scim_json(HTTPStatus.OK, payload)
+        except DirectoryError as error:
+            self._send_scim_directory_error(error.code)
+        except (ValueError, UnicodeError):
+            self._send_scim_directory_error("scim_invalid_request")
+
+    def _create_scim_resource(self, identity: Identity, path: str) -> None:
+        directory = self._directory_for_request(identity)
+        if directory is None:
+            return
+        resource_type = "User" if path.endswith("/Users") else "Group"
+        body = self._read_json_body(max_bytes=MAX_DIRECTORY_REQUEST_BYTES, strict=True)
+        if body is None:
+            return
+        try:
+            mutation = (
+                directory.create_user(administrator=identity, value=body)
+                if resource_type == "User"
+                else directory.create_group(administrator=identity, value=body)
+            )
+        except DirectoryError as error:
+            self._send_scim_directory_error(error.code)
+            return
+        self._commit_directory_mutation(
+            identity,
+            mutation,
+            HTTPStatus.CREATED if mutation.changed else HTTPStatus.OK,
+        )
+
+    def _replace_scim_resource(
+        self,
+        identity: Identity,
+        target: tuple[str, str | None],
+    ) -> None:
+        directory = self._directory_for_request(identity)
+        if directory is None:
+            return
+        resource_type, resource_id = target
+        if resource_id is None:
+            self._send_scim_error(HTTPStatus.NOT_FOUND, "scim_resource_not_found", "SCIM resource was not found")
+            return
+        body = self._read_json_body(max_bytes=MAX_DIRECTORY_REQUEST_BYTES, strict=True)
+        if body is None:
+            return
+        try:
+            mutation = (
+                directory.replace_user(
+                    administrator=identity,
+                    resource_id=resource_id,
+                    value=body,
+                    if_match=self.headers.get("If-Match"),
+                )
+                if resource_type == "User"
+                else directory.replace_group(
+                    administrator=identity,
+                    resource_id=resource_id,
+                    value=body,
+                    if_match=self.headers.get("If-Match"),
+                )
+            )
+        except DirectoryError as error:
+            self._send_scim_directory_error(error.code)
+            return
+        self._commit_directory_mutation(identity, mutation, HTTPStatus.OK)
+
+    def _patch_scim_resource(
+        self,
+        identity: Identity,
+        target: tuple[str, str | None],
+    ) -> None:
+        directory = self._directory_for_request(identity)
+        if directory is None:
+            return
+        resource_type, resource_id = target
+        if resource_id is None:
+            self._send_scim_error(HTTPStatus.NOT_FOUND, "scim_resource_not_found", "SCIM resource was not found")
+            return
+        body = self._read_json_body(max_bytes=MAX_DIRECTORY_REQUEST_BYTES, strict=True)
+        if body is None:
+            return
+        try:
+            existing = directory.get(
+                organization_id=identity.organization_id,
+                resource_type=resource_type,
+                resource_id=resource_id,
+            )
+            candidate = _apply_scim_patch(resource_type, existing, body)
+            mutation = (
+                directory.replace_user(
+                    administrator=identity,
+                    resource_id=resource_id,
+                    value=candidate,
+                    if_match=self.headers.get("If-Match"),
+                )
+                if resource_type == "User"
+                else directory.replace_group(
+                    administrator=identity,
+                    resource_id=resource_id,
+                    value=candidate,
+                    if_match=self.headers.get("If-Match"),
+                )
+            )
+        except DirectoryError as error:
+            self._send_scim_directory_error(error.code)
+            return
+        self._commit_directory_mutation(identity, mutation, HTTPStatus.OK)
+
+    def _create_workload_identity(self, identity: Identity) -> None:
+        directory = self._directory_for_request(identity)
+        if directory is None:
+            return
+        body = self._read_json_body(max_bytes=MAX_DIRECTORY_REQUEST_BYTES, strict=True)
+        if body is None:
+            return
+        try:
+            mutation = directory.create_workload(administrator=identity, value=body)
+        except DirectoryError as error:
+            self._send_scim_directory_error(error.code)
+            return
+        self._commit_directory_mutation(
+            identity,
+            mutation,
+            HTTPStatus.CREATED if mutation.changed else HTTPStatus.OK,
+        )
+
+    def _replace_workload_identity(self, identity: Identity, resource_id: str) -> None:
+        directory = self._directory_for_request(identity)
+        if directory is None:
+            return
+        body = self._read_json_body(max_bytes=MAX_DIRECTORY_REQUEST_BYTES, strict=True)
+        if body is None:
+            return
+        try:
+            mutation = directory.replace_workload(
+                administrator=identity,
+                resource_id=resource_id,
+                value=body,
+                if_match=self.headers.get("If-Match"),
+            )
+        except DirectoryError as error:
+            self._send_scim_directory_error(error.code)
+            return
+        self._commit_directory_mutation(identity, mutation, HTTPStatus.OK)
+
+    def _patch_workload_identity(self, identity: Identity, resource_id: str) -> None:
+        directory = self._directory_for_request(identity)
+        if directory is None:
+            return
+        body = self._read_json_body(max_bytes=MAX_DIRECTORY_REQUEST_BYTES, strict=True)
+        if body is None:
+            return
+        try:
+            existing = directory.get(
+                organization_id=identity.organization_id,
+                resource_type="Workload",
+                resource_id=resource_id,
+            )
+            candidate = _apply_scim_patch("Workload", existing, body)
+            mutation = directory.replace_workload(
+                administrator=identity,
+                resource_id=resource_id,
+                value=candidate,
+                if_match=self.headers.get("If-Match"),
+            )
+        except DirectoryError as error:
+            self._send_scim_directory_error(error.code)
+            return
+        self._commit_directory_mutation(identity, mutation, HTTPStatus.OK)
+
+    def _deactivate_directory_resource(
+        self,
+        identity: Identity,
+        target: tuple[str, str | None],
+    ) -> None:
+        directory = self._directory_for_request(identity)
+        if directory is None:
+            return
+        resource_type, resource_id = target
+        if resource_id is None:
+            self._send_scim_error(HTTPStatus.NOT_FOUND, "scim_resource_not_found", "SCIM resource was not found")
+            return
+        try:
+            mutation = directory.deactivate(
+                administrator=identity,
+                resource_type=resource_type,
+                resource_id=resource_id,
+                if_match=self.headers.get("If-Match"),
+            )
+        except DirectoryError as error:
+            self._send_scim_directory_error(error.code)
+            return
+        self._commit_directory_mutation(identity, mutation, HTTPStatus.OK)
+
+    def _commit_directory_mutation(
+        self,
+        identity: Identity,
+        mutation: DirectoryMutation,
+        status: HTTPStatus,
+    ) -> None:
+        revoked_sessions = 0
+        if mutation.changed and mutation.affected_actor_ids and self.server.session_broker is not None:
+            try:
+                revoked_sessions = self.server.session_broker.revoke_for_directory(
+                    administrator=identity,
+                    actor_ids=mutation.affected_actor_ids,
+                )
+            except SessionBrokerError as error:
+                # The live directory is checked on every session authentication,
+                # so an inactive or unassigned subject is denied even when the
+                # optional eager cleanup cannot reach its store.  Do not turn a
+                # completed, fail-closed identity change into a retryable write.
+                LOGGER.warning(
+                    "directory_session_revocation_unavailable organization=%s actor=%s affected=%d error=%s",
+                    identity.organization_id,
+                    identity.actor_id,
+                    len(mutation.affected_actor_ids),
+                    type(error).__name__,
+                )
+        LOGGER.info(
+            "directory_mutation organization=%s actor=%s changed=%s affected=%d revoked_sessions=%d",
+            identity.organization_id,
+            identity.actor_id,
+            mutation.changed,
+            len(mutation.affected_actor_ids),
+            revoked_sessions,
+        )
+        self._send_scim_resource(status, mutation.resource)
+
+    def _add_scim_location(self, resource: dict[str, object]) -> str:
+        meta = resource.get("meta")
+        resource_id = resource.get("id")
+        resource_type = None
+        if isinstance(meta, dict):
+            resource_type = meta.get("resourceType")
+        if resource_type not in {"User", "Group", "Workload"} or not isinstance(resource_id, str):
+            raise DirectoryError("directory_record_corrupt")
+        location = _directory_resource_path(str(resource_type), resource_id)
+        if isinstance(meta, dict):
+            meta["location"] = location
+        return location
+
+    def _send_scim_resource(self, status: HTTPStatus, resource: dict[str, object]) -> None:
+        try:
+            location = self._add_scim_location(resource)
+            meta = resource.get("meta")
+            version = meta.get("version") if isinstance(meta, dict) else None
+            headers = {"Location": location}
+            if isinstance(version, str):
+                headers["ETag"] = version
+            self._send_scim_json(status, resource, headers=headers)
+        except DirectoryError:
+            self._send_scim_error(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                "directory_unavailable",
+                "Directory state is temporarily unavailable",
+            )
+
+    def _send_scim_directory_error(self, code: str) -> None:
+        status = HTTPStatus.BAD_REQUEST
+        message = "SCIM request is invalid"
+        if code in {"identity_admin_capability_required"}:
+            status = HTTPStatus.FORBIDDEN
+            message = "Identity administrator capability is required"
+        elif code in {"scim_resource_not_found"}:
+            status = HTTPStatus.NOT_FOUND
+            message = "SCIM resource was not found"
+        elif code in {"scim_external_id_conflict", "directory_subject_conflict"}:
+            status = HTTPStatus.CONFLICT
+            message = "SCIM resource conflicts with current directory state"
+        elif code == "scim_version_conflict":
+            status = HTTPStatus.PRECONDITION_FAILED
+            message = "SCIM resource version does not match"
+        elif code in {
+            "directory_identity_inactive",
+            "directory_subject_unassigned",
+            "directory_subject_team_ambiguous",
+            "directory_subject_ambiguous",
+        }:
+            status = HTTPStatus.CONFLICT
+            message = "SCIM directory mapping cannot authorize the identity"
+        elif code in {"directory_issuer_untrusted", "scim_external_id_immutable"}:
+            status = HTTPStatus.BAD_REQUEST
+            message = "SCIM identity binding is invalid"
+        elif code.startswith("directory_"):
+            status = HTTPStatus.SERVICE_UNAVAILABLE
+            message = "Directory state is temporarily unavailable"
+        self._send_scim_error(status, code, message)
+
+    def _send_scim_error(self, status: HTTPStatus, code: str, message: str) -> None:
+        self._send_scim_json(
+            status,
+            {
+                "schemas": [SCIM_ERROR_SCHEMA],
+                "status": str(int(status)),
+                "scimType": code,
+                "detail": message,
+            },
+        )
+
+    def _send_scim_json(
+        self,
+        status: HTTPStatus,
+        value: dict[str, object],
+        *,
+        headers: dict[str, str] | None = None,
+    ) -> None:
+        self._send_json(
+            status,
+            value,
+            headers=headers,
+            content_type="application/scim+json",
+        )
 
     def _create_login_enrollment(self) -> None:
         broker = self._require_session_broker()
@@ -3943,13 +4482,14 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         value: Any,
         *,
         headers: dict[str, str] | None = None,
+        content_type: str = "application/json",
     ) -> None:
         body = json.dumps(value, separators=(",", ":")).encode("utf-8")
         response_headers = dict(headers or {})
         if urlsplit(self.path).path in _DEPRECATED_BUILTIN_CONTEXT_ROUTES:
             response_headers.setdefault("Deprecation", "@1787184000")
         self.send_response(status)
-        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
         for name, header_value in response_headers.items():
@@ -4047,9 +4587,157 @@ def _set_provider_response_timeout(response: object, timeout_seconds: float) -> 
 
 
 def _content_free_http_method(value: object) -> str:
-    if value in {"GET", "POST", "PUT"}:
+    if value in {"GET", "POST", "PUT", "PATCH", "DELETE"}:
         return str(value)
     return "OTHER"
+
+
+def _scim_target(path: str) -> tuple[str, str | None] | None:
+    prefix = "/v1/admin/scim/v2/"
+    if not path.startswith(prefix):
+        return None
+    remainder = path[len(prefix):]
+    parts = remainder.split("/")
+    if parts[0] == "Users":
+        resource_type = "User"
+    elif parts[0] == "Groups":
+        resource_type = "Group"
+    else:
+        return None
+    if len(parts) == 1:
+        return resource_type, None
+    if len(parts) == 2 and _safe_identifier(parts[1]):
+        return resource_type, parts[1]
+    return None
+
+
+def _workload_identity_id(path: str) -> str | None:
+    prefix = "/v1/admin/workload-identities/"
+    if not path.startswith(prefix):
+        return None
+    value = path[len(prefix):]
+    return value if _safe_identifier(value) else None
+
+
+def _directory_resource_path(resource_type: str, resource_id: str) -> str:
+    if resource_type == "User":
+        return "/v1/admin/scim/v2/Users/" + resource_id
+    if resource_type == "Group":
+        return "/v1/admin/scim/v2/Groups/" + resource_id
+    if resource_type == "Workload":
+        return "/v1/admin/workload-identities/" + resource_id
+    raise DirectoryError("directory_record_corrupt")
+
+
+def _apply_scim_patch(
+    resource_type: str,
+    resource: dict[str, object],
+    value: object,
+) -> dict[str, object]:
+    if not isinstance(value, dict):
+        raise DirectoryError("scim_invalid_request")
+    schemas = value.get("schemas")
+    operations = value.get("Operations")
+    if (
+        not isinstance(schemas, list)
+        or SCIM_PATCH_SCHEMA not in schemas
+        or not isinstance(operations, list)
+        or not operations
+        or len(operations) > 100
+    ):
+        raise DirectoryError("scim_invalid_request")
+    candidate = {
+        key: item
+        for key, item in resource.items()
+        if key not in {"id", "meta", "groups"}
+    }
+    protected = {"schemas", "id", "meta", "groups"}
+    extension = (
+        "urn:hormuz:params:scim:schemas:extension:identity:2.0:User"
+        if resource_type == "User"
+        else "urn:hormuz:params:scim:schemas:extension:policy:2.0:Group"
+        if resource_type == "Group"
+        else None
+    )
+    for operation in operations:
+        if not isinstance(operation, dict):
+            raise DirectoryError("scim_invalid_request")
+        action = operation.get("op")
+        path = operation.get("path")
+        patch_value = operation.get("value")
+        if not isinstance(action, str) or action.casefold() not in {"add", "replace", "remove"}:
+            raise DirectoryError("scim_invalid_request")
+        action = action.casefold()
+        if path is None:
+            if action == "remove" or not isinstance(patch_value, dict):
+                raise DirectoryError("scim_invalid_request")
+            for key, item in patch_value.items():
+                if key not in protected:
+                    candidate[key] = item
+            continue
+        if not isinstance(path, str) or not path:
+            raise DirectoryError("scim_invalid_request")
+        lowered = path.casefold()
+        direct = {
+            "active": "active",
+            "username": "userName",
+            "displayname": "displayName",
+            "externalid": "externalId",
+            "identitytype": "identityType",
+            "issuer": "issuer",
+            "subject": "subject",
+            "teamid": "teamId",
+            "teamname": "teamName",
+            "clearance": "clearance",
+            "allowedclients": "allowedClients",
+            "capabilities": "capabilities",
+        }
+        if lowered == "members" and resource_type == "Group":
+            existing = candidate.get("members", [])
+            if not isinstance(existing, list):
+                raise DirectoryError("directory_record_corrupt")
+            if action == "replace":
+                candidate["members"] = patch_value
+            elif action == "add":
+                additions = patch_value if isinstance(patch_value, list) else [patch_value]
+                candidate["members"] = [*existing, *additions]
+            else:
+                removals = patch_value if isinstance(patch_value, list) else [patch_value]
+                removal_ids = {
+                    item.get("value")
+                    for item in removals
+                    if isinstance(item, dict) and isinstance(item.get("value"), str)
+                }
+                if len(removal_ids) != len(removals):
+                    raise DirectoryError("scim_invalid_request")
+                candidate["members"] = [
+                    item for item in existing
+                    if not isinstance(item, dict) or item.get("value") not in removal_ids
+                ]
+            continue
+        if extension is not None and lowered.startswith(extension.casefold()):
+            suffix = path[len(extension):].lstrip(".")
+            if not suffix:
+                if action == "remove" or not isinstance(patch_value, dict):
+                    raise DirectoryError("scim_invalid_request")
+                current_extension = candidate.get(extension, {})
+                if not isinstance(current_extension, dict):
+                    raise DirectoryError("directory_record_corrupt")
+                candidate[extension] = {**current_extension, **patch_value}
+                continue
+            direct_key = direct.get(suffix.casefold())
+            if direct_key is None or action == "remove":
+                raise DirectoryError("scim_invalid_request")
+            current_extension = candidate.get(extension, {})
+            if not isinstance(current_extension, dict):
+                raise DirectoryError("directory_record_corrupt")
+            candidate[extension] = {**current_extension, direct_key: patch_value}
+            continue
+        direct_key = direct.get(lowered)
+        if direct_key is None or action == "remove":
+            raise DirectoryError("scim_invalid_request")
+        candidate[direct_key] = patch_value
+    return candidate
 
 
 def _content_free_http_route(target: object) -> str:

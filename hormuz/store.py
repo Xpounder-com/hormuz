@@ -255,6 +255,9 @@ class UsageStore:
                     organization_id TEXT,
                     actor_id TEXT NOT NULL,
                     actor_name TEXT NOT NULL,
+                    identity_type TEXT NOT NULL DEFAULT 'human' CHECK (
+                        identity_type IN ('human', 'service_account', 'ci', 'connector')
+                    ),
                     team_id TEXT NOT NULL,
                     team_name TEXT NOT NULL,
                     client TEXT NOT NULL,
@@ -572,6 +575,12 @@ class UsageStore:
                     "ALTER TABLE gateway_usage_events ADD COLUMN "
                     "governance_policy_version TEXT NOT NULL DEFAULT 'bootstrap-legacy-v1'"
                 )
+            if "identity_type" not in columns:
+                connection.execute(
+                    "ALTER TABLE gateway_usage_events ADD COLUMN identity_type "
+                    "TEXT NOT NULL DEFAULT 'human' CHECK (identity_type IN "
+                    "('human', 'service_account', 'ci', 'connector'))"
+                )
             context_columns = {
                 "context_injection_mode": "TEXT NOT NULL DEFAULT 'off'",
                 "context_injection_outcome": "TEXT NOT NULL DEFAULT 'not_evaluated'",
@@ -754,6 +763,7 @@ class UsageStore:
         normalized_governance_policy_version = _validated_governance_policy_version(
             governance_policy_version
         )
+        normalized_identity_type = _validated_identity_type(identity.identity_type)
         normalized_input_tokens = _sqlite_nonnegative(input_tokens)
         normalized_output_tokens = _sqlite_nonnegative(output_tokens)
         normalized_cache_read_tokens = _sqlite_nonnegative(cache_read_tokens)
@@ -787,7 +797,7 @@ class UsageStore:
             connection.execute(
                 """
                 INSERT INTO gateway_usage_events (
-                    id, occurred_at, organization_id, actor_id, actor_name, team_id, team_name,
+                    id, occurred_at, organization_id, actor_id, actor_name, identity_type, team_id, team_name,
                     client, protocol,
                     requested_model, resolved_alias, upstream_model, actual_model,
                     policy_action, status,
@@ -804,7 +814,7 @@ class UsageStore:
                     provider_latency_milliseconds, governance_policy_version
                 ) VALUES (
                     ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                     ?, ?, ?, ?
                 )
                 """,
@@ -814,6 +824,7 @@ class UsageStore:
                     identity.organization_id,
                     identity.actor_id,
                     identity.actor_name,
+                    normalized_identity_type,
                     identity.team_id,
                     identity.team_name,
                     client,
@@ -2176,7 +2187,7 @@ class UsageStore:
                 rows = connection.execute(
                     """
                     SELECT
-                        id, occurred_at, organization_id, actor_id, actor_name, team_id, team_name,
+                        id, occurred_at, organization_id, actor_id, actor_name, identity_type, team_id, team_name,
                         client, protocol, requested_model, resolved_alias, upstream_model,
                         actual_model, policy_action, status, input_tokens, output_tokens,
                         cache_read_tokens, cache_write_tokens, reasoning_tokens,
@@ -2204,7 +2215,7 @@ class UsageStore:
                     )
                     events.append(
                         {
-                            "schema_version": 3,
+                            "schema_version": 4,
                             "event_type": "usage",
                             **event,
                         }
@@ -2323,6 +2334,12 @@ def _validated_governance_policy_version(value: object) -> str:
             "Governance policy version must be a bounded single-line string"
         )
     return value
+
+
+def _validated_identity_type(value: object) -> str:
+    if value not in {"human", "service_account", "ci", "connector"}:
+        raise ValueError("Usage identity type must be human, service_account, ci, or connector")
+    return str(value)
 
 
 def _latency_select_sql() -> str:

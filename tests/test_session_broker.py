@@ -689,6 +689,36 @@ class SessionBrokerIntegrationTests(unittest.TestCase):
         self.assertIsNotNone(row)
         self.assertIsNotNone(row[0])
 
+    def test_directory_lifecycle_revokes_the_affected_actor_session_family(self) -> None:
+        pair = self._login(client="codex")
+        broker = self.gateway.session_broker
+        self.assertIsNotNone(broker)
+        assert broker is not None
+        administrator = replace(
+            self.config.identities_by_token["admin-token-" + "a" * 32],
+            capabilities=("identity_admin", "session_admin"),
+        )
+        self.assertEqual(
+            broker.revoke_for_directory(
+                administrator=administrator,
+                actor_ids=("alice", "alice"),
+            ),
+            1,
+        )
+
+        connection = http.client.HTTPConnection(
+            "127.0.0.1", self.config.listen.port, timeout=5
+        )
+        connection.request(
+            "GET",
+            "/v1/gateway/whoami",
+            headers={"Authorization": "Bearer " + str(pair["access_token"])},
+        )
+        response = connection.getresponse()
+        response.read()
+        connection.close()
+        self.assertEqual(response.status, 401)
+
     def test_cli_login_refresh_and_logout_use_secure_store_profile(self) -> None:
         backend = _MemoryKeyring()
         store = SecureCredentialStore(backend, trust_injected_backend=True)

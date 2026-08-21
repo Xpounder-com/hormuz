@@ -53,7 +53,7 @@ from hormuz.store import (
 )
 
 
-EVIDENCE_SCHEMA = "hormuz.postgres-policy-administration-integration.v6"
+EVIDENCE_SCHEMA = "hormuz.postgres-policy-administration-integration.v7"
 DEFAULT_IMAGE = (
     "postgres@sha256:"
     "57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777"
@@ -428,7 +428,7 @@ def _prove_accounting_store(runtime_dsn: str) -> dict[str, object]:
         or not any(
             event["event_type"] == "usage"
             and event.get("governance_policy_version") == governance_policy_version
-            and event.get("schema_version") == 3
+            and event.get("schema_version") == 4
             for event in audit_events
         )
         or not any(
