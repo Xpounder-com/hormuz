@@ -68,6 +68,7 @@ class FakeProviderHandler(BaseHTTPRequestHandler):
     response_extra_headers: tuple[tuple[str, str], ...] = ()
     response_stream_prefix: bytes = b""
     response_stream_override: bytes | None = None
+    response_status_override: int | None = None
     redirect_url: str | None = None
     request_started: threading.Event | None = None
     release_response: threading.Event | None = None
@@ -97,6 +98,13 @@ class FakeProviderHandler(BaseHTTPRequestHandler):
             self.send_header("Location", self.__class__.redirect_url)
             self.send_header("Content-Length", "0")
             self.end_headers()
+            return
+        if self.__class__.response_status_override is not None:
+            self._send_json(
+                {"error": {"type": "simulated_provider_error"}},
+                status=self.__class__.response_status_override,
+                request_id="req_provider_status_override",
+            )
             return
 
         if request_path.endswith("/responses/compact"):
@@ -694,6 +702,7 @@ class GatewayIntegrationTests(unittest.TestCase):
         FakeProviderHandler.response_extra_headers = ()
         FakeProviderHandler.response_stream_prefix = b""
         FakeProviderHandler.response_stream_override = None
+        FakeProviderHandler.response_status_override = None
         FakeProviderHandler.redirect_url = None
         FakeProviderHandler.request_started = None
         FakeProviderHandler.release_response = None
@@ -2228,6 +2237,38 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertEqual(event["status"], "failed")
         self.assertEqual(event["cost_basis"], "not_available")
         self.assertEqual(event["rate_card_version"], "test-openai-v1")
+
+    def test_upstream_http_429_is_explicit_rate_limited_failure(self) -> None:
+        FakeProviderHandler.response_status_override = 429
+
+        status, _, response = self._post(
+            "/v1/responses",
+            {"model": "engineering-fast", "input": "ordinary request"},
+        )
+
+        self.assertEqual(status, 429)
+        self.assertEqual(
+            json.loads(response)["error"]["type"],
+            "simulated_provider_error",
+        )
+        event = self.gateway.store.audit_events(
+            since="2000-01-01T00:00:00+00:00",
+            kind="usage",
+        )[0]
+        self.assertEqual(event["status"], "rate_limited")
+        self.assertEqual(event["cost_basis"], "not_available")
+        self.assertNotIn("simulated_provider_error", repr(event))
+
+        organization = self.gateway.store.report_rows(group_by="organization")
+        self.assertEqual(organization[0]["requests"], 1)
+        self.assertEqual(organization[0]["failed"], 1)
+        self.assertEqual(organization[0]["succeeded"], 0)
+        statuses = {
+            row["scope_id"]: row
+            for row in self.gateway.store.report_rows(group_by="status")
+        }
+        self.assertEqual(statuses["rate_limited"]["requests"], 1)
+        self.assertEqual(statuses["rate_limited"]["failed"], 1)
 
     def test_upstream_failure_response_and_logs_hide_internal_detail_and_request_content(
         self,

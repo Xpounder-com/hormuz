@@ -620,7 +620,7 @@ class PostgresUsageStore:
           SELECT {', '.join(select_dimensions)},
             COUNT(*) AS requests,
             COALESCE(SUM(CASE WHEN status = 'succeeded' THEN 1 ELSE 0 END), 0) AS succeeded,
-            COALESCE(SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END), 0) AS failed,
+            COALESCE(SUM(CASE WHEN status IN ('failed', 'rate_limited') THEN 1 ELSE 0 END), 0) AS failed,
             COALESCE(SUM(CASE WHEN status = 'denied' THEN 1 ELSE 0 END), 0) AS denied,
             COALESCE(SUM(input_tokens), 0) AS input_tokens,
             COALESCE(SUM(output_tokens), 0) AS output_tokens,
@@ -1077,7 +1077,7 @@ class PostgresUsageStore:
                             """
                             SELECT COUNT(*) AS requests,
                               COALESCE(SUM(CASE WHEN status = 'succeeded' THEN 1 ELSE 0 END), 0) AS succeeded,
-                              COALESCE(SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END), 0) AS failed,
+                              COALESCE(SUM(CASE WHEN status IN ('failed', 'rate_limited') THEN 1 ELSE 0 END), 0) AS failed,
                               COALESCE(SUM(CASE WHEN status = 'denied' THEN 1 ELSE 0 END), 0) AS denied,
                               COALESCE(SUM(CASE WHEN cost_basis LIKE 'estimated%%' THEN cost_microusd ELSE 0 END), 0) AS estimated_cost_microusd,
                               COALESCE(SUM(CASE WHEN cost_basis = 'not_available' THEN 1 ELSE 0 END), 0) AS unpriced_requests,

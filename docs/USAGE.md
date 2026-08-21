@@ -129,6 +129,11 @@ invoice-reconciled cost or proof of total organizational AI use.
 ## Field semantics
 
 - `requests`, `succeeded`, `failed`, and `denied` describe gateway outcomes.
+  `failed` includes the more specific `rate_limited` status so the aggregate
+  remains additive. A `rate_limited` row means Hormuz observed an upstream
+  provider HTTP 429 for a newly recorded attempt; it does not retain the raw
+  provider status, error body, or rate-limit headers. Earlier generic
+  `failed` rows are not retrospectively classified as rate limits.
 - opt-in `latency` contains cumulative fixed-bucket gateway, policy, provider,
   and injected-context measurements. Its count is the number of observed
   timings, which may be lower than `requests`; null historical values and

@@ -272,6 +272,12 @@ actual-model view never substitutes the routed model: a row with
 provider did not return an actual-model identifier. This is a coverage fact,
 not a model or request failure classification.
 
+The `status` view may include `rate_limited`. That value is emitted only when
+Hormuz observed an upstream provider HTTP 429 for a newly recorded attempt;
+it is counted in the aggregate `failed` total. It does not retain a raw
+provider status, error body, or rate-limit header, and historic generic
+`failed` rows are not reclassified.
+
 The first request freezes an exclusive `window.end`; every cursor page reuses
 that window. Rows have the token, request-status, cost-basis, rate-card,
 model/provider/client, redaction, automatic-context, active-actor, and

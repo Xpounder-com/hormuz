@@ -1173,6 +1173,38 @@ class UsageStoreMigrationTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 store.report_rows(group_by="unsupported")
 
+    def test_rate_limited_status_rolls_up_as_failed_without_losing_detail(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            store = UsageStore(Path(temporary) / "usage.sqlite3")
+            identity = Identity(
+                token_env="TEST_TOKEN",
+                token="employee-token-long",
+                actor_id="alice",
+                actor_name="Alice",
+                team_id="engineering",
+                team_name="Engineering",
+            )
+            store.record(
+                identity=identity,
+                client="codex",
+                protocol="openai",
+                requested_model="gpt-fast",
+                resolved_alias="gpt-fast",
+                upstream_model="gpt-upstream",
+                policy_action="allowed",
+                status="rate_limited",
+                cost_basis="not_available",
+            )
+
+            organization = store.report_rows(group_by="organization")
+            self.assertEqual(organization[0]["requests"], 1)
+            self.assertEqual(organization[0]["succeeded"], 0)
+            self.assertEqual(organization[0]["failed"], 1)
+            self.assertEqual(organization[0]["denied"], 0)
+            statuses = {row["scope_id"]: row for row in store.report_rows(group_by="status")}
+            self.assertEqual(statuses["rate_limited"]["requests"], 1)
+            self.assertEqual(statuses["rate_limited"]["failed"], 1)
+
     def test_rate_card_snapshots_keep_historical_estimates_stable(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             store = UsageStore(Path(temporary) / "usage.sqlite3")

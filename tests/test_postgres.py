@@ -309,6 +309,7 @@ class PostgresFoundationTests(unittest.TestCase):
         query = str(cursor.execute.call_args.args[0])
         self.assertIn("COALESCE(actual_model, 'not_reported')", query)
         self.assertIn("actual_model_reported", query)
+        self.assertIn("status IN ('failed', 'rate_limited')", query)
 
     def test_postgres_usage_audit_rechecks_scope_before_database_io(self) -> None:
         store = PostgresUsageStore(

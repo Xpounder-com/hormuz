@@ -372,6 +372,19 @@ class UsageAdminClientTests(unittest.TestCase):
             ):
                 self.assertEqual(self.client.report(group_by=group_by), response)
 
+        rate_limited = _response()
+        rate_limited["group_by"] = "status"
+        rate_limited["rows"][0].update(
+            {
+                "scope_id": "rate_limited",
+                "scope_name": "rate_limited",
+                "succeeded": 0,
+                "failed": 1,
+            }
+        )
+        with mock.patch.object(self.client, "_request", return_value=rate_limited):
+            self.assertEqual(self.client.report(group_by="status"), rate_limited)
+
     def test_constrained_scope_response_is_explicit_and_schema_checked(self) -> None:
         self_view = _response()
         self_view["schema_version"] = 4

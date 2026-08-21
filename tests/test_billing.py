@@ -642,6 +642,26 @@ class ProviderCostStoreTests(unittest.TestCase):
                 identity=Identity(
                     token_env="TOKEN",
                     token="test-token",
+                    actor_id="rate-limit-org-a",
+                    actor_name="Rate Limited",
+                    team_id="engineering",
+                    team_name="Engineering",
+                    organization_id="org-a",
+                ),
+                client="codex",
+                protocol="openai",
+                requested_model="gpt-fast",
+                resolved_alias="gpt-fast",
+                upstream_model="gpt-upstream",
+                policy_action="allowed",
+                status="rate_limited",
+                cost_basis="not_available",
+                rate_card_version="rates-v1",
+            )
+            store.record(
+                identity=Identity(
+                    token_env="TOKEN",
+                    token="test-token",
                     actor_id="legacy",
                     actor_name="Legacy",
                     team_id="engineering",
@@ -674,7 +694,10 @@ class ProviderCostStoreTests(unittest.TestCase):
             self.assertEqual(result["provider_cost_usd"], "1.25")
             self.assertEqual(result["gateway_estimated_cost_usd"], "0.1")
             self.assertEqual(result["variance_usd"], "1.15")
-            self.assertEqual(result["gateway_requests"], 1)
+            self.assertEqual(result["gateway_requests"], 2)
+            self.assertEqual(result["gateway_succeeded"], 1)
+            self.assertEqual(result["gateway_failed"], 1)
+            self.assertEqual(result["gateway_unpriced_requests"], 1)
             self.assertEqual(result["legacy_unattributed_gateway_requests"], 1)
             self.assertEqual(result["gateway_scope_status"], "partial_legacy_unattributed_gateway_window")
             self.assertEqual(result["unscoped_provider_items"], 0)
@@ -689,7 +712,7 @@ class ProviderCostStoreTests(unittest.TestCase):
                 )
                 if event["organization_id"] == "org-a"
             ]
-            self.assertEqual(len(org_a_audit), 1)
+            self.assertEqual(len(org_a_audit), 2)
 
             with self.assertRaisesRegex(ValueError, "not found"):
                 store.reconcile_provider_costs(

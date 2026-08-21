@@ -4839,6 +4839,13 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 )
         if account_usage:
             successful = 200 <= status < 300 and downstream_ok
+            recorded_status = (
+                "succeeded"
+                if successful
+                else "rate_limited"
+                if status == HTTPStatus.TOO_MANY_REQUESTS
+                else "failed"
+            )
             cost = (
                 route.estimate_cost_microusd(
                     input_tokens=usage.input_tokens,
@@ -4860,7 +4867,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 upstream_model=route.upstream_model,
                 actual_model=usage.actual_model,
                 policy_action=policy_action,
-                status="succeeded" if successful else "failed",
+                status=recorded_status,
                 input_tokens=usage.input_tokens,
                 output_tokens=usage.output_tokens,
                 cache_read_tokens=usage.cache_read_tokens,
@@ -4886,7 +4893,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 policy_action,
                 decision.requested_model,
                 route.upstream_model,
-                "succeeded" if successful else "failed",
+                recorded_status,
                 usage.input_tokens,
                 usage.output_tokens,
                 cost,
