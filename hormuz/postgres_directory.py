@@ -17,8 +17,13 @@ import json
 import uuid
 from typing import Any, Iterator
 
-from .config import Identity
+from .config import (
+    Identity,
+    ResolvedSCIMGroupAuthorization,
+    SCIMGroupAuthorizationError,
+)
 from .directory import (
+    DirectoryAuthorizationResolver,
     HORMUZ_GROUP_EXTENSION,
     HORMUZ_USER_EXTENSION,
     SCIM_GROUP_SCHEMA,
@@ -26,7 +31,7 @@ from .directory import (
     SCIM_USER_SCHEMA,
     DirectoryError,
     DirectoryMutation,
-    _CLASSIFICATIONS,
+    _GROUP_STORAGE_SENTINEL,
     _RESOURCE_TYPES,
     _parse_if_match,
     _resource_id,
@@ -88,6 +93,7 @@ def _projection_sha256(
     identity_type: str,
     issuer: str,
     subject: str,
+    authorization_profile_id: str | None = None,
 ) -> str:
     value = {
         "actor_name": actor_name,
@@ -99,6 +105,7 @@ def _projection_sha256(
         "identity_type": identity_type,
         "issuer": issuer,
         "subject": subject,
+        "authorization_profile_id": authorization_profile_id,
     }
     return hashlib.sha256(
         json.dumps(value, sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -116,6 +123,7 @@ class PostgresDirectoryStore:
         *,
         trusted_issuers: tuple[str, ...],
         routing_key: bytes,
+        authorization_resolver: DirectoryAuthorizationResolver,
         schema: str = DEFAULT_POSTGRES_SCHEMA,
         runtime_role: str = DEFAULT_POSTGRES_RUNTIME_ROLE,
         connect: object | None = None,
@@ -126,9 +134,12 @@ class PostgresDirectoryStore:
             raise DirectoryError("directory_oidc_issuer_set_empty")
         if not isinstance(routing_key, bytes) or len(routing_key) != 32:
             raise DirectoryError("directory_routing_key_invalid")
+        if authorization_resolver is None:
+            raise DirectoryError("directory_authorization_resolver_missing")
         self._dsn = dsn
         self._trusted_issuers = frozenset(trusted_issuers)
         self._routing_key = routing_key
+        self._authorization_resolver = authorization_resolver
         self.schema = validate_postgres_identifier(schema, "postgres_schema")
         self.runtime_role = validate_postgres_identifier(runtime_role, "runtime_role")
         self._qualified = '"' + self.schema + '"'
@@ -154,6 +165,11 @@ class PostgresDirectoryStore:
     def _require_admin(identity: Identity) -> None:
         if "identity_admin" not in identity.capabilities:
             raise DirectoryError("identity_admin_capability_required")
+
+    @staticmethod
+    def _require_policy_admin(identity: Identity) -> None:
+        if "policy_admin" not in identity.capabilities:
+            raise DirectoryError("policy_admin_capability_required")
 
     @contextmanager
     def _global_transaction(self) -> Iterator[object]:
@@ -340,8 +356,7 @@ class PostgresDirectoryStore:
     ) -> dict[str, object]:
         cursor.execute(  # type: ignore[attr-defined]
             "SELECT resource.external_id, resource.active, resource.revision, resource.created_at, "
-            "resource.updated_at, entry.display_name, entry.team_id, entry.team_name, "
-            "entry.clearance, entry.allowed_clients_json, entry.capabilities_json "
+            "resource.updated_at, entry.display_name "
             "FROM gateway_directory_resources AS resource JOIN gateway_directory_groups AS entry "
             "ON entry.tenant_id = resource.tenant_id AND entry.resource_id = resource.resource_id "
             "WHERE resource.tenant_id = %s AND resource.resource_type = 'Group' "
@@ -349,7 +364,7 @@ class PostgresDirectoryStore:
             (organization_id, resource_id),
         )
         row = cursor.fetchone()  # type: ignore[attr-defined]
-        if not isinstance(row, (tuple, list)) or len(row) != 11:
+        if not isinstance(row, (tuple, list)) or len(row) != 6:
             raise DirectoryError("scim_resource_not_found")
         members = self._member_ids(cursor, organization_id, resource_id)
         return {
@@ -360,11 +375,6 @@ class PostgresDirectoryStore:
             "members": [{"value": member} for member in members],
             HORMUZ_GROUP_EXTENSION: {
                 "active": bool(row[1]),
-                "teamId": str(row[6]),
-                "teamName": str(row[7]),
-                "clearance": str(row[8]),
-                "allowedClients": list(_tuple_json(row[9])),
-                "capabilities": list(_tuple_json(row[10])),
             },
             "meta": {
                 "resourceType": "Group",
@@ -484,11 +494,6 @@ class PostgresDirectoryStore:
             and members == tuple(candidate["members"])
             and isinstance(extension, dict)
             and extension.get("active") is candidate["active"]
-            and extension.get("teamId") == candidate["team_id"]
-            and extension.get("teamName") == candidate["team_name"]
-            and extension.get("clearance") == candidate["clearance"]
-            and tuple(extension.get("allowedClients", [])) == tuple(candidate["allowed_clients"])
-            and tuple(extension.get("capabilities", [])) == tuple(candidate["capabilities"])
         )
 
     @staticmethod
@@ -507,30 +512,6 @@ class PostgresDirectoryStore:
             and tuple(resource.get("capabilities", [])) == tuple(candidate["capabilities"])
         )
 
-    @staticmethod
-    def _effective_human(group_rows: list[object]) -> tuple[str, str, str, tuple[str, ...], tuple[str, ...]]:
-        active = [row for row in group_rows if bool(row[0])]
-        if not active:
-            raise DirectoryError("directory_subject_unassigned")
-        team_ids = {str(row[1]) for row in active}
-        team_names = {str(row[2]) for row in active}
-        if len(team_ids) != 1 or len(team_names) != 1:
-            raise DirectoryError("directory_subject_team_ambiguous")
-        client_sets = [set(_tuple_json(row[4])) for row in active]
-        restricted = [item for item in client_sets if item]
-        allowed_clients = tuple(sorted(set.intersection(*restricted))) if restricted else ()
-        capabilities = tuple(
-            sorted({capability for row in active for capability in _tuple_json(row[5])})
-        )
-        clearance = min((str(row[3]) for row in active), key=_CLASSIFICATIONS.index)
-        return (
-            next(iter(team_ids)),
-            next(iter(team_names)),
-            clearance,
-            allowed_clients,
-            capabilities,
-        )
-
     def _user_subject(self, cursor: object, organization_id: str, user_id: str) -> tuple[str, str, str, bool]:
         cursor.execute(  # type: ignore[attr-defined]
             "SELECT entry.issuer, entry.subject, entry.display_name, resource.active "
@@ -545,23 +526,49 @@ class PostgresDirectoryStore:
             raise DirectoryError("directory_record_corrupt")
         return str(row[0]), str(row[1]), str(row[2]), bool(row[3])
 
-    def _active_groups_for_user(
+    def _active_group_external_ids_for_user(
         self, cursor: object, organization_id: str, user_id: str
-    ) -> list[object]:
+    ) -> tuple[str, ...]:
         cursor.execute(  # type: ignore[attr-defined]
-            "SELECT group_resource.active, groups.team_id, groups.team_name, groups.clearance, "
-            "groups.allowed_clients_json, groups.capabilities_json "
+            "SELECT group_resource.active, group_resource.external_id "
             "FROM gateway_directory_group_memberships AS membership "
             "JOIN gateway_directory_resources AS group_resource "
             "ON group_resource.tenant_id = membership.tenant_id "
             "AND group_resource.resource_type = 'Group' "
             "AND group_resource.resource_id = membership.group_id "
-            "JOIN gateway_directory_groups AS groups "
-            "ON groups.tenant_id = membership.tenant_id AND groups.resource_id = membership.group_id "
             "WHERE membership.tenant_id = %s AND membership.user_id = %s",
             (organization_id, user_id),
         )
-        return list(cursor.fetchall())  # type: ignore[attr-defined]
+        return tuple(
+            sorted(
+                str(row[1])
+                for row in cursor.fetchall()  # type: ignore[attr-defined]
+                if isinstance(row, (tuple, list)) and len(row) == 2 and bool(row[0])
+            )
+        )
+
+    def _human_authorization(
+        self,
+        cursor: object,
+        *,
+        organization_id: str,
+        user_id: str,
+    ) -> ResolvedSCIMGroupAuthorization:
+        try:
+            return self._authorization_resolver.resolve_scim_group_authorization(
+                organization_id,
+                self._active_group_external_ids_for_user(
+                    cursor,
+                    organization_id,
+                    user_id,
+                ),
+            )
+        except SCIMGroupAuthorizationError as error:
+            raise DirectoryError(error.code) from None
+        except Exception:
+            # Never fall back to the (legacy) group row fields if policy
+            # materialization is unavailable or corrupt.
+            raise DirectoryError("directory_policy_unavailable") from None
 
     @staticmethod
     def _sync_projection(
@@ -615,7 +622,8 @@ class PostgresDirectoryStore:
         organization_id: str,
         user_id: str,
         now: datetime,
-    ) -> None:
+        authorization: ResolvedSCIMGroupAuthorization | None = None,
+    ) -> ResolvedSCIMGroupAuthorization | None:
         issuer, subject, display_name, user_active = self._user_subject(
             cursor, organization_id, user_id
         )
@@ -623,41 +631,46 @@ class PostgresDirectoryStore:
             self._disable_dynamic_principal(
                 cursor, actor_id=user_id
             )
-            return
+            return None
         try:
-            team_id, team_name, clearance, allowed_clients, capabilities = self._effective_human(
-                self._active_groups_for_user(cursor, organization_id, user_id)
-            )
+            if authorization is None:
+                authorization = self._human_authorization(
+                    cursor,
+                    organization_id=organization_id,
+                    user_id=user_id,
+                )
         except DirectoryError:
             self._disable_dynamic_principal(
                 cursor, actor_id=user_id
             )
-            return
+            return None
         digest = _projection_sha256(
             actor_name=display_name,
-            team_id=team_id,
-            team_name=team_name,
-            clearance=clearance,
-            allowed_clients=allowed_clients,
-            capabilities=capabilities,
+            team_id=authorization.team_id,
+            team_name=authorization.team_name,
+            clearance=authorization.clearance,
+            allowed_clients=authorization.allowed_clients,
+            capabilities=authorization.capabilities,
             identity_type="human",
             issuer=issuer,
             subject=subject,
+            authorization_profile_id=authorization.policy_id,
         )
         self._sync_projection(
             cursor,
             principal_id=user_id,
             active=True,
             actor_name=display_name,
-            team_id=team_id,
-            team_name=team_name,
-            clearance=clearance,
-            allowed_clients=allowed_clients,
-            capabilities=capabilities,
+            team_id=authorization.team_id,
+            team_name=authorization.team_name,
+            clearance=authorization.clearance,
+            allowed_clients=authorization.allowed_clients,
+            capabilities=authorization.capabilities,
             issuer=issuer,
             subject=subject,
             projection_sha256=digest,
         )
+        return authorization
 
     def _sync_workload_principal(
         self,
@@ -957,11 +970,11 @@ class PostgresDirectoryStore:
                         organization_id,
                         resource_id,
                         candidate["display_name"],
-                        candidate["team_id"],
-                        candidate["team_name"],
-                        candidate["clearance"],
-                        _json_array(tuple(candidate["allowed_clients"])),
-                        _json_array(tuple(candidate["capabilities"])),
+                        _GROUP_STORAGE_SENTINEL[0],
+                        _GROUP_STORAGE_SENTINEL[1],
+                        _GROUP_STORAGE_SENTINEL[2],
+                        _json_array(_GROUP_STORAGE_SENTINEL[3]),
+                        _json_array(_GROUP_STORAGE_SENTINEL[4]),
                     ),
                 )
                 for member in members:
@@ -1028,11 +1041,11 @@ class PostgresDirectoryStore:
                     "WHERE tenant_id = %s AND resource_id = %s",
                     (
                         candidate["display_name"],
-                        candidate["team_id"],
-                        candidate["team_name"],
-                        candidate["clearance"],
-                        _json_array(tuple(candidate["allowed_clients"])),
-                        _json_array(tuple(candidate["capabilities"])),
+                        _GROUP_STORAGE_SENTINEL[0],
+                        _GROUP_STORAGE_SENTINEL[1],
+                        _GROUP_STORAGE_SENTINEL[2],
+                        _json_array(_GROUP_STORAGE_SENTINEL[3]),
+                        _json_array(_GROUP_STORAGE_SENTINEL[4]),
                         organization_id,
                         resource_id,
                     ),
@@ -1072,7 +1085,7 @@ class PostgresDirectoryStore:
                 )
 
     def create_workload(self, *, administrator: Identity, value: object) -> DirectoryMutation:
-        self._require_admin(administrator)
+        self._require_policy_admin(administrator)
         candidate = parse_workload(value)
         self._check_issuer(str(candidate["issuer"]))
         organization_id = administrator.organization_id
@@ -1157,7 +1170,7 @@ class PostgresDirectoryStore:
         value: object,
         if_match: str | None = None,
     ) -> DirectoryMutation:
-        self._require_admin(administrator)
+        self._require_policy_admin(administrator)
         candidate = parse_workload(value)
         self._check_issuer(str(candidate["issuer"]))
         organization_id = administrator.organization_id
@@ -1241,9 +1254,12 @@ class PostgresDirectoryStore:
         resource_id: str,
         if_match: str | None = None,
     ) -> DirectoryMutation:
-        self._require_admin(administrator)
         if resource_type not in _RESOURCE_TYPES:
             raise DirectoryError("scim_resource_not_found")
+        if resource_type == "Workload":
+            self._require_policy_admin(administrator)
+        else:
+            self._require_admin(administrator)
         organization_id = administrator.organization_id
         now = _now()
         with self._tenant_transaction(organization_id, principal_id=administrator.actor_id) as connection:
@@ -1344,22 +1360,38 @@ class PostgresDirectoryStore:
                 extension = resource.get(HORMUZ_USER_EXTENSION)
                 if not isinstance(extension, dict) or extension.get("issuer") != issuer or extension.get("subject") != subject:
                     raise DirectoryError("directory_record_corrupt")
-                team_id, team_name, clearance, allowed_clients, capabilities = self._effective_human(
-                    self._active_groups_for_user(cursor, organization_id, resource_id)
+                try:
+                    authorization = self._human_authorization(
+                        cursor,
+                        organization_id=organization_id,
+                        user_id=resource_id,
+                    )
+                except DirectoryError:
+                    self._disable_dynamic_principal(cursor, actor_id=resource_id)
+                    raise
+                synchronized = self._sync_human_principal(
+                    cursor,
+                    organization_id=organization_id,
+                    user_id=resource_id,
+                    now=_now(),
+                    authorization=authorization,
                 )
+                if synchronized is None:
+                    raise DirectoryError("directory_policy_unavailable")
                 return Identity(
                     token_env="",
                     token="",
                     actor_id=resource_id,
                     actor_name=str(resource["displayName"]),
-                    team_id=team_id,
-                    team_name=team_name,
-                    allowed_clients=allowed_clients,
-                    capabilities=capabilities,
+                    team_id=authorization.team_id,
+                    team_name=authorization.team_name,
+                    allowed_clients=authorization.allowed_clients,
+                    capabilities=authorization.capabilities,
                     organization_id=organization_id,
-                    clearance=clearance,
+                    clearance=authorization.clearance,
                     authentication_source=f"directory:{issuer}",
                     identity_type="human",
+                    authorization_profile_id=authorization.policy_id,
                 )
 
     def organizations_for_issuer(self, issuer: str) -> tuple[str, ...]:

@@ -8,6 +8,7 @@ import unittest
 
 from hormuz.auth import AuthenticationError
 from hormuz.config import (
+    AuthorizationProfile,
     DirectoryConfig,
     GatewayConfig,
     Identity,
@@ -15,6 +16,9 @@ from hormuz.config import (
     ModelRoute,
     OIDCIssuerConfig,
     Policy,
+    PolicyTeamBinding,
+    ResolvedSCIMGroupAuthorization,
+    SCIMGroupAuthorizationError,
     UpstreamConfig,
 )
 from hormuz.directory import (
@@ -32,6 +36,47 @@ from hormuz.server import GatewayServer, serve_in_thread
 ISSUER = "https://identity.example"
 
 
+class _PolicyResolver:
+    """Small policy-owned resolver used to isolate directory behavior tests."""
+
+    def __init__(self) -> None:
+        self._profiles = {
+            "engineering": ResolvedSCIMGroupAuthorization(
+                team_id="engineering",
+                team_name="Engineering",
+                policy_id="engineering-standard",
+                clearance="internal",
+                allowed_clients=("claude-code", "codex"),
+                capabilities=(),
+            ),
+            "marketing": ResolvedSCIMGroupAuthorization(
+                team_id="marketing",
+                team_name="Marketing",
+                policy_id="marketing-standard",
+                clearance="internal",
+                allowed_clients=("claude-code",),
+                capabilities=(),
+            ),
+        }
+
+    def resolve_scim_group_authorization(
+        self,
+        organization_id: str,
+        scim_group_external_ids: tuple[str, ...],
+    ) -> ResolvedSCIMGroupAuthorization:
+        if organization_id != "acme" or not scim_group_external_ids:
+            raise SCIMGroupAuthorizationError("directory_subject_unassigned")
+        matched = [
+            self._profiles.get(group_id) for group_id in scim_group_external_ids
+        ]
+        if any(profile is None for profile in matched):
+            raise SCIMGroupAuthorizationError("directory_subject_group_unbound")
+        resolved = set(matched)
+        if len(resolved) != 1:
+            raise SCIMGroupAuthorizationError("directory_subject_policy_ambiguous")
+        return next(iter(resolved))
+
+
 class DirectoryStoreTests(unittest.TestCase):
     def setUp(self) -> None:
         self.root = tempfile.TemporaryDirectory()
@@ -45,11 +90,12 @@ class DirectoryStoreTests(unittest.TestCase):
             team_name="Security",
             organization_id="acme",
             clearance="restricted",
-            capabilities=("identity_admin",),
+            capabilities=("identity_admin", "policy_admin"),
         )
         self.store = SQLiteDirectoryStore(
             Path(self.root.name) / "directory.sqlite3",
             trusted_issuers=(ISSUER,),
+            authorization_resolver=_PolicyResolver(),
         )
 
     def _user(self, external_id: str = "alice-id", *, active: bool = True) -> dict[str, object]:
@@ -69,13 +115,7 @@ class DirectoryStoreTests(unittest.TestCase):
             "externalId": team_id,
             "displayName": team_id.title(),
             "members": [{"value": member_id}],
-            HORMUZ_GROUP_EXTENSION: {
-                "teamId": team_id,
-                "teamName": team_id.title(),
-                "clearance": "internal",
-                "allowedClients": ["codex", "claude-code"],
-                "capabilities": [],
-            },
+            HORMUZ_GROUP_EXTENSION: {"active": True},
         }
 
     def test_scim_user_group_membership_resolves_a_human_identity(self) -> None:
@@ -247,29 +287,61 @@ class DirectoryStoreTests(unittest.TestCase):
             administrator=self.admin,
             value=self._group(str(user.resource["id"]), team_id="marketing"),
         )
-        with self.assertRaisesRegex(DirectoryError, "directory_subject_team_ambiguous"):
+        with self.assertRaisesRegex(DirectoryError, "directory_subject_policy_ambiguous"):
             self.store.identity_for_subject(ISSUER, "alice-id")
 
-    def test_team_transfer_is_versioned_and_replaces_the_policy_scope(self) -> None:
+    def test_scim_group_cannot_supply_authorization_fields(self) -> None:
         user = self.store.create_user(administrator=self.admin, value=self._user())
-        group = self.store.create_group(
-            administrator=self.admin,
-            value=self._group(str(user.resource["id"])),
-        )
-        transferred = self._group(str(user.resource["id"]))
-        extension = transferred[HORMUZ_GROUP_EXTENSION]
+        forbidden = self._group(str(user.resource["id"]))
+        extension = forbidden[HORMUZ_GROUP_EXTENSION]
         assert isinstance(extension, dict)
         extension["teamId"] = "marketing"
-        extension["teamName"] = "Marketing"
-        updated = self.store.replace_group(
+        with self.assertRaisesRegex(
+            DirectoryError, "scim_group_authorization_fields_forbidden"
+        ):
+            self.store.create_group(
+                administrator=self.admin,
+                value=forbidden,
+            )
+
+    def test_unbound_group_fails_closed_even_when_a_bound_group_exists(self) -> None:
+        user = self.store.create_user(administrator=self.admin, value=self._user())
+        self.store.create_group(
             administrator=self.admin,
-            resource_id=str(group.resource["id"]),
-            value=transferred,
-            if_match=str(group.resource["meta"]["version"]),  # type: ignore[index]
+            value=self._group(str(user.resource["id"]), team_id="engineering"),
         )
-        self.assertTrue(updated.changed)
-        identity = self.store.identity_for_subject(ISSUER, "alice-id")
-        self.assertEqual(identity.team_id, "marketing")  # type: ignore[union-attr]
+        self.store.create_group(
+            administrator=self.admin,
+            value=self._group(str(user.resource["id"]), team_id="unknown-group"),
+        )
+        with self.assertRaisesRegex(DirectoryError, "directory_subject_group_unbound"):
+            self.store.identity_for_subject(ISSUER, "alice-id")
+
+    def test_identity_admin_cannot_create_a_directly_authorized_workload(self) -> None:
+        identity_only_admin = Identity(
+            token_env="",
+            token="",
+            actor_id="identity-admin",
+            actor_name="Identity Admin",
+            team_id="security",
+            team_name="Security",
+            organization_id="acme",
+            clearance="restricted",
+            capabilities=("identity_admin",),
+        )
+        with self.assertRaisesRegex(DirectoryError, "policy_admin_capability_required"):
+            self.store.create_workload(
+                administrator=identity_only_admin,
+                value={
+                    "externalId": "ci",
+                    "displayName": "CI",
+                    "identityType": "ci",
+                    "issuer": ISSUER,
+                    "subject": "repo:acme/hormuz",
+                    "teamId": "engineering",
+                    "teamName": "Engineering",
+                },
+            )
 
 
 class DirectoryHTTPTests(unittest.TestCase):
@@ -306,6 +378,26 @@ class DirectoryHTTPTests(unittest.TestCase):
             source_sha256="a" * 64,
             directory=DirectoryConfig(enabled=True, database_path=root / "directory.sqlite3"),
             oidc_issuers={ISSUER: OIDCIssuerConfig(issuer=ISSUER, audiences=("hormuz",))},
+            authorization_profiles={
+                "engineering-standard": AuthorizationProfile(
+                    organization_id="acme",
+                    policy_id="engineering-standard",
+                    team_id="engineering",
+                    team_name="Engineering",
+                    clearance="internal",
+                    allowed_clients=("codex",),
+                    capabilities=(),
+                    policy=Policy(allowed_clients=("codex",)),
+                )
+            },
+            team_bindings=(
+                PolicyTeamBinding(
+                    organization_id="acme",
+                    scim_group_external_id="engineering",
+                    team_id="engineering",
+                    policy_id="engineering-standard",
+                ),
+            ),
         )
         self.gateway = GatewayServer(self.config)
         self.thread = serve_in_thread(self.gateway)
@@ -371,13 +463,7 @@ class DirectoryHTTPTests(unittest.TestCase):
             "externalId": "engineering",
             "displayName": "Engineering",
             "members": [{"value": user_id}],
-            HORMUZ_GROUP_EXTENSION: {
-                "teamId": "engineering",
-                "teamName": "Engineering",
-                "clearance": "internal",
-                "allowedClients": ["codex"],
-                "capabilities": [],
-            },
+            HORMUZ_GROUP_EXTENSION: {"active": True},
         }
         status, _headers, group = self._request("POST", "/v1/admin/scim/v2/Groups", group_payload)
         self.assertEqual(status, 201)

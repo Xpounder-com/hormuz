@@ -5,20 +5,29 @@ rollback when the gateway uses PostgreSQL persistence. The caller must have the
 `policy_admin` capability. Organization scope always comes from the
 authenticated identity; it is never accepted in an activation request.
 
-The current administrable document is `hormuz.policy-projection.v3`. It
+The current administrable document is `hormuz.policy-projection.v4`. It
 contains model routes and rate cards, organization/team/person model, budget,
-and provider-cache policy, secret-control mode, DLP rule metadata, and DLP
-overlays. It contains no provider or employee credential, resolved
+provider-cache policy, secret-control mode, DLP rule metadata, DLP overlays,
+and policy-owned SCIM authorization profiles and group bindings. It contains no
+provider or employee credential, resolved
 custom-secret value, dictionary value, approval fingerprint key, prompt,
 response, filename, cache key, or source content. Existing immutable
-`hormuz.policy-projection.v2` versions remain readable and canonical; version
-3 is emitted for new exports and stages.
+`hormuz.policy-projection.v2` and `hormuz.policy-projection.v3` versions remain
+readable and canonical; version 4 is emitted for new exports and stages.
 
 Deployment-owned state cannot be introduced through this API. A staged
 projection may use only provider protocols, identities, teams, custom-secret
 environment names, DLP dictionaries, and an approval key already provisioned
 in the running deployment. Unknown fields, non-canonical JSON, cross-tenant
 scopes, and unprovisioned references fail before a version is stored.
+
+`authorization_profiles` are tenant-owned, pre-approved authorization shapes.
+Each `team_bindings` item is fully qualified by
+`(organization_id, scim_group_external_id)` and must select a profile with the
+same internal `team_id`. SCIM group display names and payload fields cannot
+grant models, budgets, client access, clearance, or capabilities. `policy_admin`
+owns these fields; `identity_admin` remains limited to people and membership
+lifecycle.
 
 ## CLI workflow
 
@@ -112,7 +121,7 @@ immutable history or compare-and-swap contract.
 ## Operator deploy, verify, and rollback runbook
 
 1. Back up PostgreSQL according to the organization's database procedure, then
-   install the candidate package and apply the current schema version 10 with
+   install the candidate package and apply the current schema version 11 with
    the owner DSN:
 
    ```bash

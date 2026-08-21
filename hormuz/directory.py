@@ -21,9 +21,15 @@ from pathlib import Path
 import sqlite3
 import threading
 import uuid
-from typing import Any, Iterator
+from typing import Any, Iterator, Protocol
 
-from .config import ConfigError, Identity, _identity_capabilities
+from .config import (
+    ConfigError,
+    Identity,
+    ResolvedSCIMGroupAuthorization,
+    SCIMGroupAuthorizationError,
+    _identity_capabilities,
+)
 
 
 SCIM_USER_SCHEMA = "urn:ietf:params:scim:schemas:core:2.0:User"
@@ -32,13 +38,19 @@ SCIM_PATCH_SCHEMA = "urn:ietf:params:scim:api:messages:2.0:PatchOp"
 SCIM_LIST_SCHEMA = "urn:ietf:params:scim:api:messages:2.0:ListResponse"
 SCIM_ERROR_SCHEMA = "urn:ietf:params:scim:api:messages:2.0:Error"
 HORMUZ_USER_EXTENSION = "urn:hormuz:params:scim:schemas:extension:identity:2.0:User"
-HORMUZ_GROUP_EXTENSION = "urn:hormuz:params:scim:schemas:extension:policy:2.0:Group"
+# SCIM groups supply only lifecycle membership. Their policy mapping belongs to
+# the tenant policy projection, never to an IdP-controlled group payload.
+HORMUZ_GROUP_EXTENSION = "urn:hormuz:params:scim:schemas:extension:directory:3.0:Group"
+LEGACY_HORMUZ_GROUP_POLICY_EXTENSION = (
+    "urn:hormuz:params:scim:schemas:extension:policy:2.0:Group"
+)
 
 _IDENTITY_TYPES = {"human", "service_account", "ci", "connector"}
 _CLIENTS = {"codex", "claude-code"}
 _CLASSIFICATIONS = ("public", "internal", "confidential", "restricted")
 _RESOURCE_TYPES = {"User", "Group", "Workload"}
 _MAX_MEMBERS = 10_000
+_GROUP_STORAGE_SENTINEL = ("unbound", "Unbound", "restricted", (), ())
 
 
 class DirectoryError(ValueError):
@@ -47,6 +59,16 @@ class DirectoryError(ValueError):
     def __init__(self, code: str):
         super().__init__(code)
         self.code = code
+
+
+class DirectoryAuthorizationResolver(Protocol):
+    """Policy-owned authorization resolver for active SCIM memberships."""
+
+    def resolve_scim_group_authorization(
+        self,
+        organization_id: str,
+        scim_group_external_ids: tuple[str, ...],
+    ) -> ResolvedSCIMGroupAuthorization: ...
 
 
 @dataclass(frozen=True)
@@ -197,10 +219,22 @@ def parse_user(value: object) -> dict[str, object]:
 def parse_group(value: object) -> dict[str, object]:
     item = _object(value)
     _schema_set(item.get("schemas"), SCIM_GROUP_SCHEMA)
+    if LEGACY_HORMUZ_GROUP_POLICY_EXTENSION in item:
+        raise DirectoryError("scim_group_authorization_fields_forbidden")
     extension = _object(item.get(HORMUZ_GROUP_EXTENSION))
-    clearance = _string(extension.get("clearance", "internal"), maximum=32)
-    if clearance not in _CLASSIFICATIONS:
-        raise DirectoryError("scim_invalid_request")
+    if set(extension) - {"active"}:
+        raise DirectoryError("scim_group_authorization_fields_forbidden")
+    if any(
+        field in item
+        for field in {
+            "teamId",
+            "teamName",
+            "clearance",
+            "allowedClients",
+            "capabilities",
+        }
+    ):
+        raise DirectoryError("scim_group_authorization_fields_forbidden")
     return {
         "external_id": _string(item.get("externalId")),
         "display_name": _string(item.get("displayName"), maximum=256),
@@ -209,11 +243,6 @@ def parse_group(value: object) -> dict[str, object]:
             extension.get("active", item.get("active")),
             default=True,
         ),
-        "team_id": _string(extension.get("teamId"), maximum=128),
-        "team_name": _string(extension.get("teamName"), maximum=256),
-        "clearance": clearance,
-        "allowed_clients": _allowed_clients(extension.get("allowedClients", [])),
-        "capabilities": _identity_capability_tuple(extension.get("capabilities", [])),
     }
 
 
@@ -243,12 +272,21 @@ def parse_workload(value: object) -> dict[str, object]:
 class SQLiteDirectoryStore:
     """Atomic local directory state plus metadata-only lifecycle audit events."""
 
-    def __init__(self, path: Path, *, trusted_issuers: tuple[str, ...]):
+    def __init__(
+        self,
+        path: Path,
+        *,
+        trusted_issuers: tuple[str, ...],
+        authorization_resolver: DirectoryAuthorizationResolver,
+    ):
         if not trusted_issuers:
             raise DirectoryError("directory_oidc_issuer_set_empty")
+        if authorization_resolver is None:
+            raise DirectoryError("directory_authorization_resolver_missing")
         self.path = path
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._trusted_issuers = frozenset(trusted_issuers)
+        self._authorization_resolver = authorization_resolver
         self._lock = threading.RLock()
         self._initialize()
 
@@ -426,6 +464,11 @@ class SQLiteDirectoryStore:
             raise DirectoryError("identity_admin_capability_required")
 
     @staticmethod
+    def _require_policy_admin(identity: Identity) -> None:
+        if "policy_admin" not in identity.capabilities:
+            raise DirectoryError("policy_admin_capability_required")
+
+    @staticmethod
     def _same_user(row: sqlite3.Row, candidate: dict[str, object]) -> bool:
         return (
             str(row["external_id"]) == candidate["external_id"]
@@ -447,11 +490,6 @@ class SQLiteDirectoryStore:
             and str(row["display_name"]) == candidate["display_name"]
             and tuple(members) == tuple(candidate["members"])
             and bool(row["active"]) is bool(candidate["active"])
-            and str(row["team_id"]) == candidate["team_id"]
-            and str(row["team_name"]) == candidate["team_name"]
-            and str(row["clearance"]) == candidate["clearance"]
-            and _loaded_tuple(row["allowed_clients_json"]) == tuple(candidate["allowed_clients"])
-            and _loaded_tuple(row["capabilities_json"]) == tuple(candidate["capabilities"])
         )
 
     @staticmethod
@@ -531,7 +569,7 @@ class SQLiteDirectoryStore:
     def _group_resource(self, connection: sqlite3.Connection, organization_id: str, resource_id: str) -> dict[str, object]:
         row = self._resource_row(connection, organization_id, "Group", resource_id)
         group = connection.execute(
-            "SELECT display_name, team_id, team_name, clearance, allowed_clients_json, capabilities_json "
+            "SELECT display_name "
             "FROM directory_groups WHERE organization_id = ? AND resource_id = ?",
             (organization_id, resource_id),
         ).fetchone()
@@ -546,11 +584,6 @@ class SQLiteDirectoryStore:
             "members": [{"value": member} for member in members],
             HORMUZ_GROUP_EXTENSION: {
                 "active": bool(row["active"]),
-                "teamId": str(group["team_id"]),
-                "teamName": str(group["team_name"]),
-                "clearance": str(group["clearance"]),
-                "allowedClients": list(_loaded_tuple(group["allowed_clients_json"])),
-                "capabilities": list(_loaded_tuple(group["capabilities_json"])),
             },
             "meta": {
                 "resourceType": "Group",
@@ -790,7 +823,16 @@ class SQLiteDirectoryStore:
             connection.execute(
                 "INSERT INTO directory_groups (organization_id, resource_id, display_name, team_id, team_name, clearance, allowed_clients_json, capabilities_json) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (organization_id, resource_id, candidate["display_name"], candidate["team_id"], candidate["team_name"], candidate["clearance"], _json_array(tuple(candidate["allowed_clients"])), _json_array(tuple(candidate["capabilities"]))),
+                (
+                    organization_id,
+                    resource_id,
+                    candidate["display_name"],
+                    _GROUP_STORAGE_SENTINEL[0],
+                    _GROUP_STORAGE_SENTINEL[1],
+                    _GROUP_STORAGE_SENTINEL[2],
+                    _json_array(_GROUP_STORAGE_SENTINEL[3]),
+                    _json_array(_GROUP_STORAGE_SENTINEL[4]),
+                ),
             )
             for member in tuple(candidate["members"]):
                 connection.execute(
@@ -860,7 +902,16 @@ class SQLiteDirectoryStore:
             connection.execute(
                 "UPDATE directory_groups SET display_name = ?, team_id = ?, team_name = ?, clearance = ?, "
                 "allowed_clients_json = ?, capabilities_json = ? WHERE organization_id = ? AND resource_id = ?",
-                (candidate["display_name"], candidate["team_id"], candidate["team_name"], candidate["clearance"], _json_array(tuple(candidate["allowed_clients"])), _json_array(tuple(candidate["capabilities"])), organization_id, resource_id),
+                (
+                    candidate["display_name"],
+                    _GROUP_STORAGE_SENTINEL[0],
+                    _GROUP_STORAGE_SENTINEL[1],
+                    _GROUP_STORAGE_SENTINEL[2],
+                    _json_array(_GROUP_STORAGE_SENTINEL[3]),
+                    _json_array(_GROUP_STORAGE_SENTINEL[4]),
+                    organization_id,
+                    resource_id,
+                ),
             )
             connection.execute(
                 "DELETE FROM directory_group_memberships WHERE organization_id = ? AND group_id = ?",
@@ -889,7 +940,7 @@ class SQLiteDirectoryStore:
             )
 
     def create_workload(self, *, administrator: Identity, value: object) -> DirectoryMutation:
-        self._require_admin(administrator)
+        self._require_policy_admin(administrator)
         candidate = parse_workload(value)
         self._check_issuer(str(candidate["issuer"]))
         organization_id = administrator.organization_id
@@ -945,7 +996,7 @@ class SQLiteDirectoryStore:
         value: object,
         if_match: str | None = None,
     ) -> DirectoryMutation:
-        self._require_admin(administrator)
+        self._require_policy_admin(administrator)
         candidate = parse_workload(value)
         self._check_issuer(str(candidate["issuer"]))
         organization_id = administrator.organization_id
@@ -1007,9 +1058,12 @@ class SQLiteDirectoryStore:
         resource_id: str,
         if_match: str | None = None,
     ) -> DirectoryMutation:
-        self._require_admin(administrator)
         if resource_type not in _RESOURCE_TYPES:
             raise DirectoryError("scim_resource_not_found")
+        if resource_type == "Workload":
+            self._require_policy_admin(administrator)
+        else:
+            self._require_admin(administrator)
         organization_id = administrator.organization_id
         with self._transaction() as connection:
             row = self._resource_row(connection, organization_id, resource_type, resource_id)
@@ -1099,43 +1153,43 @@ class SQLiteDirectoryStore:
                     identity_type=str(row["identity_type"]),
                 )
             groups = connection.execute(
-                "SELECT group_resource.active, group_row.team_id, group_row.team_name, group_row.clearance, "
-                "group_row.allowed_clients_json, group_row.capabilities_json FROM directory_group_memberships membership "
+                "SELECT group_resource.active, group_resource.external_id "
+                "FROM directory_group_memberships membership "
                 "JOIN directory_resources group_resource ON group_resource.organization_id = membership.organization_id "
                 "AND group_resource.resource_type = 'Group' AND group_resource.resource_id = membership.group_id "
-                "JOIN directory_groups group_row ON group_row.organization_id = membership.organization_id "
-                "AND group_row.resource_id = membership.group_id WHERE membership.organization_id = ? "
-                "AND membership.user_id = ?",
+                "WHERE membership.organization_id = ? AND membership.user_id = ?",
                 (organization_id, resource_id),
             ).fetchall()
-            active_groups = [group for group in groups if bool(group["active"])]
-            if not active_groups:
-                raise DirectoryError("directory_subject_unassigned")
-            team_ids = {str(group["team_id"]) for group in active_groups}
-            team_names = {str(group["team_name"]) for group in active_groups}
-            if len(team_ids) != 1 or len(team_names) != 1:
-                raise DirectoryError("directory_subject_team_ambiguous")
-            client_sets = [set(_loaded_tuple(group["allowed_clients_json"])) for group in active_groups]
-            restricted_sets = [item for item in client_sets if item]
-            allowed_clients = tuple(sorted(set.intersection(*restricted_sets))) if restricted_sets else ()
-            capabilities = tuple(sorted({capability for group in active_groups for capability in _loaded_tuple(group["capabilities_json"])}))
-            clearance = min(
-                (str(group["clearance"]) for group in active_groups),
-                key=_CLASSIFICATIONS.index,
+            active_group_external_ids = tuple(
+                str(group["external_id"])
+                for group in groups
+                if bool(group["active"])
             )
+            try:
+                authorization = self._authorization_resolver.resolve_scim_group_authorization(
+                    organization_id,
+                    active_group_external_ids,
+                )
+            except SCIMGroupAuthorizationError as error:
+                raise DirectoryError(error.code) from None
+            except Exception:
+                # A corrupt or unavailable policy runtime must never cause the
+                # IdP-provided group fields to become an authorization fallback.
+                raise DirectoryError("directory_policy_unavailable") from None
             return Identity(
                 token_env="",
                 token="",
                 actor_id=resource_id,
                 actor_name=str(row["display_name"]),
-                team_id=next(iter(team_ids)),
-                team_name=next(iter(team_names)),
-                allowed_clients=allowed_clients,
-                capabilities=capabilities,
+                team_id=authorization.team_id,
+                team_name=authorization.team_name,
+                allowed_clients=authorization.allowed_clients,
+                capabilities=authorization.capabilities,
                 organization_id=organization_id,
-                clearance=clearance,
+                clearance=authorization.clearance,
                 authentication_source=f"directory:{issuer}",
                 identity_type="human",
+                authorization_profile_id=authorization.policy_id,
             )
 
     def organizations_for_issuer(self, issuer: str) -> tuple[str, ...]:

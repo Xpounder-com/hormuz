@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 import json
 import os
@@ -21,14 +22,19 @@ from urllib.parse import quote
 
 from hormuz.billing import ProviderCostItem, ProviderCostReport
 from hormuz.config import (
+    AuthorizationProfile,
     DLPApprovalConfig,
     DLPControls,
     DLPRuleConfig,
+    GatewayConfig,
     Identity,
     ModelRoute,
     Policy,
+    PolicyTeamBinding,
     SecretControls,
+    SessionBrokerConfig,
 )
+from hormuz.auth import AuthenticationError, Authenticator
 from hormuz.postgres import (
     POSTGRES_SCHEMA_VERSION,
     PostgresStorageError,
@@ -44,6 +50,7 @@ from hormuz.policy_projection import (
     verify_runtime_policy_projection,
 )
 from hormuz.postgres_policy_store import PolicyAdminError, PostgresPolicyStore
+from hormuz.policy_runtime import PolicyRuntime
 from hormuz.postgres_security_store import PostgresSecurityStore
 from hormuz.postgres_session_store import PostgresSessionStore
 from hormuz.postgres_directory import PostgresDirectoryStore
@@ -54,6 +61,7 @@ from hormuz.directory import (
     SCIM_USER_SCHEMA,
     DirectoryError,
 )
+from hormuz.session import SessionBroker
 from hormuz.session_store import SessionStoreError
 from hormuz.tenant_lifecycle import (
     TenantLifecycleError,
@@ -67,7 +75,7 @@ from hormuz.store import (
 )
 
 
-EVIDENCE_SCHEMA = "hormuz.postgres-policy-administration-integration.v10"
+EVIDENCE_SCHEMA = "hormuz.postgres-policy-administration-integration.v11"
 DEFAULT_IMAGE = (
     "postgres@sha256:"
     "57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777"
@@ -76,6 +84,7 @@ IMAGE_REFERENCE = re.compile(r"postgres@sha256:[0-9a-f]{64}\Z")
 MAX_COMMAND_OUTPUT_BYTES = 1024 * 1024
 FINAL_STARTUP_MARKER = "PostgreSQL init process complete; ready for start up."
 PORT_OUTPUT = re.compile(r"127\.0\.0\.1:([0-9]{1,5})\Z")
+ROOT = Path(__file__).resolve().parents[1]
 
 
 class PostgresFoundationIntegrationError(RuntimeError):
@@ -747,25 +756,107 @@ def _prove_identity_sessions(owner_dsn: str, runtime_dsn: str) -> dict[str, obje
     }
 
 
-def _prove_shared_scim_directory(runtime_dsn: str) -> dict[str, object]:
-    """Prove the generic directory path without retaining source identity data."""
+def _directory_policy_config(*, changed: bool = False) -> GatewayConfig:
+    """Build a real policy runtime configuration for the SCIM proof.
 
-    issuer = "https://directory.integration.example"
-    routing_key = b"directory-routing-key-for-integration"[:32].ljust(32, b"d")
-    store = PostgresDirectoryStore(
-        runtime_dsn,
-        trusted_issuers=(issuer,),
-        routing_key=routing_key,
+    The proof deliberately uses an ordinary ``GatewayConfig`` instead of a
+    resolver double: policy version materialization must validate and select
+    the same profile/binding contract that the gateway uses at request time.
+    """
+
+    base = GatewayConfig.load(
+        ROOT / "config.example.json",
+        environ={"HORMUZ_TOKEN": "integration-directory-config-token"},
     )
     admin_a = _synthetic_identity(
         "tenant-a",
         "directory-admin-a",
-        capabilities=("identity_admin",),
+        capabilities=("identity_admin", "policy_admin"),
     )
     admin_b = _synthetic_identity(
         "tenant-b",
         "directory-admin-b",
-        capabilities=("identity_admin",),
+        capabilities=("identity_admin", "policy_admin"),
+    )
+    team_id = "directory-platform" if changed else "directory-engineering"
+    profile = AuthorizationProfile(
+        organization_id="tenant-a",
+        policy_id="directory-engineering-standard",
+        team_id=team_id,
+        team_name="Directory Platform" if changed else "Directory Engineering",
+        clearance="internal",
+        allowed_clients=("codex",),
+        capabilities=("usage_self_viewer",),
+        policy=Policy(
+            allowed_clients=("codex",),
+            allowed_models=("gpt-5.4" if changed else "gpt-5.4-mini",),
+            max_output_tokens=512,
+        ),
+    )
+    config = replace(
+        base,
+        identities_by_token={
+            "integration-directory-admin-a": admin_a,
+            "integration-directory-admin-b": admin_b,
+        },
+        identities_by_subject={},
+        organization_policy=Policy(
+            allowed_clients=("codex", "claude-code"),
+            allowed_models=("gpt-5.4-mini", "gpt-5.4"),
+            max_output_tokens=1024,
+        ),
+        team_policies={},
+        actor_policies={},
+        team_dlp_overlays={},
+        actor_dlp_overlays={},
+        authorization_profiles={profile.policy_id: profile},
+        team_bindings=(
+            PolicyTeamBinding(
+                organization_id="tenant-a",
+                scim_group_external_id="directory-engineering-a",
+                team_id=profile.team_id,
+                policy_id=profile.policy_id,
+            ),
+        ),
+        unbound_scim_group_action="deny",
+        unbound_scim_group_fallback=None,
+        session_broker=SessionBrokerConfig(
+            enabled=True,
+            backend="postgresql",
+            public_base_url="https://session.integration.example",
+        ),
+    )
+    config.validate_references()
+    return config
+
+
+def _prove_shared_scim_directory(runtime_dsn: str) -> dict[str, object]:
+    """Prove policy-owned SCIM lifecycle resolution against active PostgreSQL state."""
+
+    issuer = "https://directory.integration.example"
+    routing_key = b"directory-routing-key-for-integration"[:32].ljust(32, b"d")
+    config = _directory_policy_config()
+    admin_a = config.identities_by_token["integration-directory-admin-a"]
+    admin_b = config.identities_by_token["integration-directory-admin-b"]
+    policy_store = PostgresPolicyStore(
+        runtime_dsn,
+        organization_ids=("tenant-a", "tenant-b"),
+    )
+    prior = policy_store.active(identity=admin_a)
+    baseline = policy_store.stage(identity=admin_a, config=config)
+    baseline_activation = policy_store.activate(
+        identity=admin_a,
+        version_id=baseline.version_id,
+        expected_active_version_id=(prior.version_id if prior is not None else None),
+    )
+    if not baseline_activation.changed:
+        raise PostgresFoundationIntegrationError("directory_policy_activation_failed")
+    runtime = PolicyRuntime(config, policy_store)
+    store = PostgresDirectoryStore(
+        runtime_dsn,
+        trusted_issuers=(issuer,),
+        routing_key=routing_key,
+        authorization_resolver=runtime,
     )
     user_payload = {
         "schemas": [SCIM_USER_SCHEMA, HORMUZ_USER_EXTENSION],
@@ -783,13 +874,7 @@ def _prove_shared_scim_directory(runtime_dsn: str) -> dict[str, object]:
             "externalId": "directory-engineering-a",
             "displayName": "Directory Engineering A",
             "members": [{"value": user_id}],
-            HORMUZ_GROUP_EXTENSION: {
-                "teamId": "directory-engineering",
-                "teamName": "Directory Engineering",
-                "clearance": "internal",
-                "allowedClients": ["codex", "claude-code"],
-                "capabilities": [],
-            },
+            HORMUZ_GROUP_EXTENSION: {"active": True},
         }
         group = store.create_group(administrator=admin_a, value=group_payload)
         group_id = str(group.resource["id"])
@@ -810,34 +895,39 @@ def _prove_shared_scim_directory(runtime_dsn: str) -> dict[str, object]:
             absolute_ttl_seconds=43_200,
             enrollment_ttl_seconds=300,
         )
-        enrollment = sessions.create_enrollment(
-            issuer=issuer,
-            client_name="codex",
-            enrollment_secret="directory-enrollment-secret-" + "a" * 32,
-            organization_id="tenant-a",
-        )
-        state = sessions.new_authorization_state(enrollment.enrollment_id)
-        browser_cookie = "directory-browser-cookie-" + "b" * 32
-        sessions.begin_authorization(
-            enrollment_id=enrollment.enrollment_id,
-            state=state,
-            browser_cookie=browser_cookie,
-            nonce="directory-oidc-nonce-" + "c" * 32,
-            pkce_verifier="directory-pkce-verifier-" + "d" * 48,
-        )
-        sessions.consume_callback(state=state, browser_cookie=browser_cookie)
-        sessions.authorize_enrollment(
-            enrollment_id=enrollment.enrollment_id,
-            subject="directory-subject-a",
-            organization_id="tenant-a",
-            actor_id=user_id,
-            team_id="directory-engineering",
-            clearance="internal",
-        )
-        pair = sessions.redeem_enrollment(
-            enrollment_id=enrollment.enrollment_id,
-            enrollment_secret="directory-enrollment-secret-" + "a" * 32,
-        )
+
+        def issue_directory_session(label: str, authorized_identity: Identity) -> object:
+            enrollment_secret = "directory-enrollment-" + label + "-" + "a" * 32
+            enrollment = sessions.create_enrollment(
+                issuer=issuer,
+                client_name="codex",
+                enrollment_secret=enrollment_secret,
+                organization_id="tenant-a",
+            )
+            state = sessions.new_authorization_state(enrollment.enrollment_id)
+            browser_cookie = "directory-browser-" + label + "-" + "b" * 32
+            sessions.begin_authorization(
+                enrollment_id=enrollment.enrollment_id,
+                state=state,
+                browser_cookie=browser_cookie,
+                nonce="directory-oidc-" + label + "-" + "c" * 32,
+                pkce_verifier="directory-pkce-" + label + "-" + "d" * 48,
+            )
+            sessions.consume_callback(state=state, browser_cookie=browser_cookie)
+            sessions.authorize_enrollment(
+                enrollment_id=enrollment.enrollment_id,
+                subject="directory-subject-a",
+                organization_id="tenant-a",
+                actor_id=user_id,
+                team_id=authorized_identity.team_id,
+                clearance=authorized_identity.clearance,
+            )
+            return sessions.redeem_enrollment(
+                enrollment_id=enrollment.enrollment_id,
+                enrollment_secret=enrollment_secret,
+            )
+
+        pair = issue_directory_session("before-unassignment", identity)
         if sessions.authenticate_access(pair.access_token).actor_id != user_id:
             raise PostgresFoundationIntegrationError("directory_session_enrollment_failed")
 
@@ -854,6 +944,20 @@ def _prove_shared_scim_directory(runtime_dsn: str) -> dict[str, object]:
             "allowedClients": ["codex"],
             "capabilities": [],
         }
+        identity_only_admin = replace(
+            admin_a,
+            actor_id="directory-identity-only-admin-a",
+            capabilities=("identity_admin",),
+        )
+        try:
+            store.create_workload(administrator=identity_only_admin, value=workload_payload)
+        except DirectoryError as error:
+            if error.code != "policy_admin_capability_required":
+                raise PostgresFoundationIntegrationError(
+                    "directory_workload_authority_error_invalid"
+                ) from None
+        else:
+            raise PostgresFoundationIntegrationError("directory_identity_admin_granted_workload")
         workload = store.create_workload(administrator=admin_b, value=workload_payload)
         if store.identity_for_subject(issuer, "directory-workload-subject-b") is None:
             raise PostgresFoundationIntegrationError("directory_workload_resolution_failed")
@@ -873,7 +977,7 @@ def _prove_shared_scim_directory(runtime_dsn: str) -> dict[str, object]:
 
         removed_group = dict(group_payload)
         removed_group["members"] = []
-        store.replace_group(
+        removed = store.replace_group(
             administrator=admin_a,
             resource_id=group_id,
             value=removed_group,
@@ -895,9 +999,77 @@ def _prove_shared_scim_directory(runtime_dsn: str) -> dict[str, object]:
                 raise PostgresFoundationIntegrationError("directory_session_revocation_error_invalid") from None
         else:
             raise PostgresFoundationIntegrationError("directory_session_not_revoked")
+
+        readded = store.replace_group(
+            administrator=admin_a,
+            resource_id=group_id,
+            value=group_payload,
+            if_match=str(removed.resource["meta"]["version"]),
+        )
+        if not readded.changed:
+            raise PostgresFoundationIntegrationError("directory_reauthorization_not_applied")
+        reauthorized = store.identity_for_subject(issuer, "directory-subject-a")
+        if (
+            reauthorized is None
+            or reauthorized.team_id != "directory-engineering"
+            or reauthorized.authorization_profile_id != "directory-engineering-standard"
+        ):
+            raise PostgresFoundationIntegrationError("directory_reauthorization_failed")
+        profile_change_pair = issue_directory_session(
+            "before-policy-change", reauthorized
+        )
+
+        changed_config = _directory_policy_config(changed=True)
+        changed = policy_store.stage(identity=admin_a, config=changed_config)
+        changed_activation = policy_store.activate(
+            identity=admin_a,
+            version_id=changed.version_id,
+            expected_active_version_id=baseline.version_id,
+        )
+        if not changed_activation.changed:
+            raise PostgresFoundationIntegrationError("directory_policy_change_not_activated")
+        broker = SessionBroker(config, Authenticator(config, store), sessions)
+        try:
+            broker.authenticate(profile_change_pair.access_token)
+        except AuthenticationError as error:
+            if error.code != "session_authorization_removed":
+                raise PostgresFoundationIntegrationError(
+                    "directory_policy_change_session_error_invalid"
+                ) from None
+        else:
+            raise PostgresFoundationIntegrationError("directory_policy_change_session_active")
+        changed_identity = store.identity_for_subject(issuer, "directory-subject-a")
+        if (
+            changed_identity is None
+            or changed_identity.team_id != "directory-platform"
+            or runtime.resolve(changed_identity).config.resolved_policy(changed_identity).allowed_models
+            != ("gpt-5.4",)
+        ):
+            raise PostgresFoundationIntegrationError("directory_active_policy_binding_not_applied")
+        renewed_pair = issue_directory_session("after-policy-change", changed_identity)
+        if broker.authenticate(renewed_pair.access_token).team_id != "directory-platform":
+            raise PostgresFoundationIntegrationError("directory_policy_change_reenrollment_failed")
+
+        unbound_group = {
+            "schemas": [SCIM_GROUP_SCHEMA, HORMUZ_GROUP_EXTENSION],
+            "externalId": "directory-unbound-a",
+            "displayName": "Directory Unbound A",
+            "members": [{"value": user_id}],
+            HORMUZ_GROUP_EXTENSION: {"active": True},
+        }
+        store.create_group(administrator=admin_a, value=unbound_group)
+        try:
+            store.identity_for_subject(issuer, "directory-subject-a")
+        except DirectoryError as error:
+            if error.code != "directory_subject_group_unbound":
+                raise PostgresFoundationIntegrationError(
+                    "directory_unbound_group_error_" + error.code
+                ) from None
+        else:
+            raise PostgresFoundationIntegrationError("directory_unbound_group_allowed")
     except PostgresFoundationIntegrationError:
         raise
-    except (DirectoryError, PostgresStorageError, SessionStoreError) as error:
+    except (DirectoryError, PolicyAdminError, PostgresStorageError, SessionStoreError) as error:
         raise PostgresFoundationIntegrationError(
             "directory_runtime_" + error.code
         ) from None
@@ -920,6 +1092,12 @@ def _prove_shared_scim_directory(runtime_dsn: str) -> dict[str, object]:
         "cross_tenant_subject_collision_denied": True,
         "directory_session_projection_verified": True,
         "directory_unassignment_revokes_session": True,
+        "policy_owned_group_authorization_verified": True,
+        "active_policy_binding_resolution_verified": True,
+        "active_policy_change_revokes_session": True,
+        "active_policy_change_reenrollment_verified": True,
+        "unbound_scim_group_default_denied": True,
+        "identity_admin_direct_workload_denied": True,
     }
 
 
@@ -947,6 +1125,10 @@ def _policy_config(*, changed: bool = False) -> object:
         ),
         team_policies={},
         actor_policies={},
+        authorization_profiles={},
+        team_bindings=(),
+        unbound_scim_group_action="deny",
+        unbound_scim_group_fallback=None,
         secret_controls=SecretControls(mode="redact"),
         dlp_controls=DLPControls(
             policy_version="integration-dlp-v2" if changed else "integration-dlp-v1",
@@ -1565,11 +1747,11 @@ def run_integration(*, image: str = DEFAULT_IMAGE) -> dict[str, object]:
         isolation = _prove_runtime_isolation(runtime_dsn, owner_dsn)
         accounting = _prove_accounting_store(runtime_dsn)
         identity_sessions = _prove_identity_sessions(owner_dsn, runtime_dsn)
-        shared_directory = _prove_shared_scim_directory(runtime_dsn)
         policy_administration = _prove_policy_administration_and_approvals(
             owner_dsn,
             runtime_dsn,
         )
+        shared_directory = _prove_shared_scim_directory(runtime_dsn)
         tamper_detection = _prove_verifier_tamper_detection(admin_dsn, owner_dsn)
         tenant_lifecycle = _prove_tenant_lifecycle(owner_dsn, runtime_dsn)
         evidence = {

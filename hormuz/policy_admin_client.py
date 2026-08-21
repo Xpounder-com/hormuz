@@ -16,7 +16,11 @@ _MAX_RESPONSE_BYTES = 2 * 1_048_576
 _VERSION_ID = re.compile(r"hpv_v1_[0-9a-f]{64}\Z")
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
 _POLICY_PROJECTION_SCHEMAS = frozenset(
-    {"hormuz.policy-projection.v2", "hormuz.policy-projection.v3"}
+    {
+        "hormuz.policy-projection.v2",
+        "hormuz.policy-projection.v3",
+        "hormuz.policy-projection.v4",
+    }
 )
 
 

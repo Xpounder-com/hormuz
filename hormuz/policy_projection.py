@@ -65,9 +65,13 @@ def _provider_cache(value: Policy) -> dict[str, object]:
 
 
 _POLICY_PROJECTION_SCHEMAS = frozenset(
-    {"hormuz.policy-projection.v2", "hormuz.policy-projection.v3"}
+    {
+        "hormuz.policy-projection.v2",
+        "hormuz.policy-projection.v3",
+        "hormuz.policy-projection.v4",
+    }
 )
-DEFAULT_POLICY_PROJECTION_SCHEMA = "hormuz.policy-projection.v3"
+DEFAULT_POLICY_PROJECTION_SCHEMA = "hormuz.policy-projection.v4"
 
 
 def _policy(value: Policy, *, schema: str) -> dict[str, object]:
@@ -85,7 +89,7 @@ def _policy(value: Policy, *, schema: str) -> dict[str, object]:
             for alias, limit in sorted(value.model_limits.items())
         },
     }
-    if schema == DEFAULT_POLICY_PROJECTION_SCHEMA:
+    if schema in {"hormuz.policy-projection.v3", "hormuz.policy-projection.v4"}:
         result["provider_cache"] = _provider_cache(value)
     return result
 
@@ -110,6 +114,22 @@ def _overlay(value: DLPPolicyOverlay) -> dict[str, object]:
     }
 
 
+def _authorization_profile(value: object, *, schema: str) -> dict[str, object]:
+    from .config import AuthorizationProfile
+
+    if not isinstance(value, AuthorizationProfile):  # pragma: no cover - internal guard
+        raise TypeError("authorization profile must be an AuthorizationProfile")
+    return {
+        "organization_id": value.organization_id,
+        "team_id": value.team_id,
+        "team_name": value.team_name,
+        "clearance": value.clearance,
+        "allowed_clients": sorted(set(value.allowed_clients)),
+        "capabilities": sorted(set(value.capabilities)),
+        "policy": _policy(value.policy, schema=schema),
+    }
+
+
 def policy_projection(
     config: GatewayConfig,
     organization_id: str,
@@ -127,8 +147,43 @@ def policy_projection(
         if identity.organization_id == organization_id
     )
     actor_ids = {identity.actor_id for identity in identities}
-    team_ids = {identity.team_id for identity in identities}
-    return {
+    authorization_profiles = getattr(config, "authorization_profiles", {})
+    team_bindings = getattr(config, "team_bindings", ())
+    unbound_scim_group_action = getattr(
+        config, "unbound_scim_group_action", "deny"
+    )
+    unbound_scim_group_fallback = getattr(
+        config, "unbound_scim_group_fallback", None
+    )
+    profiles = {
+        policy_id: profile
+        for policy_id, profile in authorization_profiles.items()
+        if profile.organization_id == organization_id
+    }
+    team_ids = {
+        *(identity.team_id for identity in identities),
+        *(profile.team_id for profile in profiles.values()),
+    }
+    if (
+        schema != "hormuz.policy-projection.v4"
+        and (
+            profiles
+            or any(binding.organization_id == organization_id for binding in team_bindings)
+            or (
+                unbound_scim_group_action == "fallback"
+                and unbound_scim_group_fallback is not None
+                and authorization_profiles.get(
+                    unbound_scim_group_fallback.policy_id
+                ) is not None
+                and authorization_profiles[
+                    unbound_scim_group_fallback.policy_id
+                ].organization_id
+                == organization_id
+            )
+        )
+    ):
+        raise PostgresStorageError("policy_projection_schema_incompatible")
+    result: dict[str, object] = {
         "schema": schema,
         "organization_id": organization_id,
         "model_routes": {
@@ -179,6 +234,59 @@ def policy_projection(
             for actor_id in sorted(actor_ids & set(config.actor_dlp_overlays))
         },
     }
+    if schema == "hormuz.policy-projection.v4":
+        fallback = unbound_scim_group_fallback
+        fallback_for_organization = (
+            fallback
+            if (
+                fallback is not None
+                and unbound_scim_group_action == "fallback"
+                and (profile := authorization_profiles.get(fallback.policy_id))
+                is not None
+                and profile.organization_id == organization_id
+                and profile.team_id == fallback.team_id
+            )
+            else None
+        )
+        result.update(
+            {
+                "authorization_profiles": {
+                    policy_id: _authorization_profile(profile, schema=schema)
+                    for policy_id, profile in sorted(profiles.items())
+                },
+                "team_bindings": [
+                    {
+                        "organization_id": binding.organization_id,
+                        "scim_group_external_id": binding.scim_group_external_id,
+                        "team_id": binding.team_id,
+                        "policy_id": binding.policy_id,
+                    }
+                    for binding in sorted(
+                        (
+                            binding
+                            for binding in team_bindings
+                            if binding.organization_id == organization_id
+                        ),
+                        key=lambda binding: (
+                            binding.organization_id,
+                            binding.scim_group_external_id,
+                        ),
+                    )
+                ],
+                "unbound_scim_group_action": (
+                    "fallback" if fallback_for_organization is not None else "deny"
+                ),
+                "unbound_scim_group_fallback": (
+                    {
+                        "team_id": fallback_for_organization.team_id,
+                        "policy_id": fallback_for_organization.policy_id,
+                    }
+                    if fallback_for_organization is not None
+                    else None
+                ),
+            }
+        )
+    return result
 
 
 def policy_projection_sha256(value: dict[str, object]) -> str:

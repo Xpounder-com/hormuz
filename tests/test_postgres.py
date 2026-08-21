@@ -125,7 +125,7 @@ class PostgresFoundationTests(unittest.TestCase):
 
         value = policy_projection(config, "tenant-a")
         serialized = json.dumps(value, sort_keys=True)
-        self.assertEqual(value["schema"], "hormuz.policy-projection.v3")
+        self.assertEqual(value["schema"], "hormuz.policy-projection.v4")
         self.assertNotIn("context_injection", serialized)
         self.assertEqual(
             policy_projection_sha256(value),
@@ -794,6 +794,12 @@ class PostgresFoundationTests(unittest.TestCase):
         self.assertTrue(value["shared_directory"]["cross_tenant_subject_collision_denied"])
         self.assertTrue(value["shared_directory"]["directory_session_projection_verified"])
         self.assertTrue(value["shared_directory"]["directory_unassignment_revokes_session"])
+        self.assertTrue(value["shared_directory"]["policy_owned_group_authorization_verified"])
+        self.assertTrue(value["shared_directory"]["active_policy_binding_resolution_verified"])
+        self.assertTrue(value["shared_directory"]["active_policy_change_revokes_session"])
+        self.assertTrue(value["shared_directory"]["active_policy_change_reenrollment_verified"])
+        self.assertTrue(value["shared_directory"]["unbound_scim_group_default_denied"])
+        self.assertTrue(value["shared_directory"]["identity_admin_direct_workload_denied"])
         policy_administration = value["policy_administration"]
         self.assertTrue(policy_administration["configuration_projection_verified"])
         self.assertTrue(policy_administration["idempotent_sync_verified"])

@@ -17,6 +17,8 @@ from unittest import mock
 from hormuz.config import (
     ConfigError,
     GatewayConfig,
+    Identity,
+    SCIMGroupAuthorizationError,
     configuration_from_policy_projection,
 )
 from hormuz.cli import main
@@ -72,6 +74,103 @@ class PolicyProjectionMaterializationTests(unittest.TestCase):
                 schema="hormuz.policy-projection.v2",
             ),
             projection,
+        )
+
+    def test_scim_group_bindings_are_tenant_qualified_and_policy_owned(self) -> None:
+        raw = json.loads((ROOT / "config.example.json").read_text(encoding="utf-8"))
+        raw["policies"]["authorization_profiles"] = {
+            "engineering-standard": {
+                "organization_id": "xpounder",
+                "team_id": "engineering",
+                "team_name": "Engineering",
+                "clearance": "internal",
+                "allowed_clients": ["codex"],
+                "capabilities": ["usage_self_viewer"],
+                "policy": {
+                    "allowed_clients": ["codex"],
+                    "allowed_models": ["gpt-5.4"],
+                    "max_output_tokens": 4096,
+                },
+            }
+        }
+        raw["policies"]["team_bindings"] = [
+            {
+                "organization_id": "xpounder",
+                "scim_group_external_id": "engineering-employees",
+                "team_id": "engineering",
+                "policy_id": "engineering-standard",
+            }
+        ]
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "config.json"
+            path.write_text(json.dumps(raw), encoding="utf-8")
+            config = GatewayConfig.load(
+                path,
+                environ={"HORMUZ_TOKEN": "test-identity-token"},
+            )
+
+        authorization = config.resolve_scim_group_authorization(
+            "xpounder", ("engineering-employees",)
+        )
+        self.assertEqual(authorization.policy_id, "engineering-standard")
+        self.assertEqual(authorization.allowed_clients, ("codex",))
+        self.assertEqual(authorization.capabilities, ("usage_self_viewer",))
+        with self.assertRaisesRegex(
+            SCIMGroupAuthorizationError, "directory_subject_group_unbound"
+        ):
+            config.resolve_scim_group_authorization(
+                "xpounder", ("engineering-employees", "unbound-group")
+            )
+
+        dynamic_identity = Identity(
+            token_env="",
+            token="",
+            actor_id="usr_directory_alice",
+            actor_name="Directory Alice",
+            team_id=authorization.team_id,
+            team_name=authorization.team_name,
+            organization_id="xpounder",
+            clearance=authorization.clearance,
+            allowed_clients=authorization.allowed_clients,
+            capabilities=authorization.capabilities,
+            authentication_source="directory:https://identity.example",
+            authorization_profile_id=authorization.policy_id,
+        )
+        self.assertEqual(
+            config.resolved_policy(dynamic_identity).allowed_models,
+            ("gpt-5.4",),
+        )
+
+        projection = policy_projection(config, "xpounder")
+        self.assertEqual(projection["schema"], "hormuz.policy-projection.v4")
+        self.assertEqual(
+            projection["team_bindings"], raw["policies"]["team_bindings"]
+        )
+        candidate = configuration_from_policy_projection(
+            config,
+            projection,
+            organization_id="xpounder",
+        )
+        self.assertEqual(policy_projection(candidate, "xpounder"), projection)
+        fingerprint = policy_projection_sha256(projection)
+        active = ActivePolicy(
+            version_id="hpv_v1_" + fingerprint,
+            projection_sha256=fingerprint,
+            projection=projection,
+            activated_at="2026-08-20T00:00:00+00:00",
+            activated_by_actor_id="policy-admin",
+            activated_by_actor_name="Policy Admin",
+            activation_sequence=1,
+        )
+        runtime = PolicyRuntime(
+            config,
+            SimpleNamespace(active_for_organization=lambda _: active),  # type: ignore[arg-type]
+        )
+        self.assertEqual(
+            runtime.resolve_scim_group_authorization(
+                "xpounder", ("engineering-employees",)
+            ).policy_id,
+            "engineering-standard",
         )
 
     def test_projection_cannot_cross_tenants_or_add_secret_sources(self) -> None:
@@ -328,7 +427,7 @@ class PolicyAdminCLITests(unittest.TestCase):
             )
         self.assertEqual(result, 0)
         value = json.loads(output.getvalue())
-        self.assertEqual(value["schema"], "hormuz.policy-projection.v3")
+        self.assertEqual(value["schema"], "hormuz.policy-projection.v4")
         self.assertEqual(value["organization_id"], "xpounder")
         self.assertNotIn("test-identity-token", output.getvalue())
 

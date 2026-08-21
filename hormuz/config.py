@@ -234,6 +234,9 @@ class Identity:
     clearance: str = "internal"
     authentication_source: str = "static"
     identity_type: str = "human"
+    # Dynamic SCIM identities receive this only from a policy-owned binding.
+    # It is deliberately not a directory-controlled authorization attribute.
+    authorization_profile_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -456,6 +459,56 @@ class Policy:
 
 
 @dataclass(frozen=True)
+class AuthorizationProfile:
+    """A tenant-owned, pre-approved authorization shape for a dynamic identity."""
+
+    organization_id: str
+    policy_id: str
+    team_id: str
+    team_name: str
+    clearance: str
+    allowed_clients: tuple[str, ...]
+    capabilities: tuple[str, ...]
+    policy: Policy
+
+
+@dataclass(frozen=True)
+class PolicyTeamBinding:
+    """Bind an immutable SCIM group externalId to an approved profile."""
+
+    organization_id: str
+    scim_group_external_id: str
+    team_id: str
+    policy_id: str
+
+
+@dataclass(frozen=True)
+class UnboundSCIMGroupFallback:
+    """An explicitly configured alternative to the default deny behavior."""
+
+    team_id: str
+    policy_id: str
+
+
+@dataclass(frozen=True)
+class ResolvedSCIMGroupAuthorization:
+    team_id: str
+    team_name: str
+    policy_id: str
+    clearance: str
+    allowed_clients: tuple[str, ...]
+    capabilities: tuple[str, ...]
+
+
+class SCIMGroupAuthorizationError(ConfigError):
+    """Stable, content-free denial while resolving a SCIM group binding."""
+
+    def __init__(self, code: str):
+        super().__init__(code)
+        self.code = code
+
+
+@dataclass(frozen=True)
 class GatewayConfig:
     source_path: Path
     listen: ListenConfig
@@ -481,6 +534,12 @@ class GatewayConfig:
     actor_dlp_overlays: dict[str, DLPPolicyOverlay] = field(default_factory=dict)
     team_policies: dict[str, Policy] = field(default_factory=dict)
     actor_policies: dict[str, Policy] = field(default_factory=dict)
+    authorization_profiles: dict[str, AuthorizationProfile] = field(
+        default_factory=dict
+    )
+    team_bindings: tuple[PolicyTeamBinding, ...] = ()
+    unbound_scim_group_action: str = "deny"
+    unbound_scim_group_fallback: UnboundSCIMGroupFallback | None = None
     max_request_bytes: int = 25 * 1024 * 1024
     upstream_timeout_seconds: int = 600
 
@@ -688,6 +747,7 @@ class GatewayConfig:
                     "organization_id",
                     "clearance",
                     "identity_type",
+                    "authorization_profile_id",
                 },
                 prefix,
             )
@@ -716,6 +776,10 @@ class GatewayConfig:
                 identity_type=_identity_type(
                     item.get("identity_type", "human"),
                     f"{prefix}.identity_type",
+                ),
+                authorization_profile_id=_optional_scope_id(
+                    item.get("authorization_profile_id"),
+                    f"{prefix}.authorization_profile_id",
                 ),
             )
             identities_by_token[token] = identity
@@ -842,6 +906,7 @@ class GatewayConfig:
                         "organization_id",
                         "clearance",
                         "identity_type",
+                        "authorization_profile_id",
                     },
                     subject_prefix,
                 )
@@ -876,6 +941,10 @@ class GatewayConfig:
                     identity_type=_identity_type(
                         subject_item.get("identity_type", "human"),
                         f"{subject_prefix}.identity_type",
+                    ),
+                    authorization_profile_id=_optional_scope_id(
+                        subject_item.get("authorization_profile_id"),
+                        f"{subject_prefix}.authorization_profile_id",
                     ),
                 )
         session_broker = _session_broker_config(
@@ -1036,7 +1105,15 @@ class GatewayConfig:
         policies_raw = _object(raw.get("policies"), "policies")
         _reject_unknown_fields(
             policies_raw,
-            {"organization", "teams", "actors"},
+            {
+                "organization",
+                "teams",
+                "actors",
+                "authorization_profiles",
+                "team_bindings",
+                "unbound_scim_group_action",
+                "unbound_scim_group_fallback",
+            },
             "policies",
         )
         organization_policy = _policy(
@@ -1053,6 +1130,22 @@ class GatewayConfig:
             scope_id: _policy(value, f"policies.actors.{scope_id}")
             for scope_id, value in _object(policies_raw.get("actors", {}), "policies.actors").items()
         }
+        authorization_profiles = _authorization_profiles(
+            policies_raw.get("authorization_profiles", {}),
+            "policies.authorization_profiles",
+        )
+        team_bindings = _policy_team_bindings(
+            policies_raw.get("team_bindings", []),
+            "policies.team_bindings",
+        )
+        unbound_scim_group_action = _unbound_scim_group_action(
+            policies_raw.get("unbound_scim_group_action", "deny"),
+            "policies.unbound_scim_group_action",
+        )
+        unbound_scim_group_fallback = _unbound_scim_group_fallback(
+            policies_raw.get("unbound_scim_group_fallback"),
+            "policies.unbound_scim_group_fallback",
+        )
 
         config = cls(
             source_path=source_path,
@@ -1091,6 +1184,10 @@ class GatewayConfig:
             actor_dlp_overlays=actor_dlp_overlays,
             team_policies=team_policies,
             actor_policies=actor_policies,
+            authorization_profiles=authorization_profiles,
+            team_bindings=team_bindings,
+            unbound_scim_group_action=unbound_scim_group_action,
+            unbound_scim_group_fallback=unbound_scim_group_fallback,
             max_request_bytes=_integer(raw.get("max_request_bytes", 25 * 1024 * 1024), "max_request_bytes", minimum=1024),
             upstream_timeout_seconds=_integer(raw.get("upstream_timeout_seconds", 600), "upstream_timeout_seconds", minimum=1),
         )
@@ -1098,7 +1195,59 @@ class GatewayConfig:
         return config
 
     def validate_references(self) -> None:
-        policies = [self.organization_policy, *self.team_policies.values(), *self.actor_policies.values()]
+        identities = self.identities_by_actor
+        organization_ids = {
+            identity.organization_id for identity in identities.values()
+        }
+        for policy_id, profile in self.authorization_profiles.items():
+            if profile.policy_id != policy_id:
+                raise ConfigError("Authorization profile identifier is invalid")
+            if profile.organization_id not in organization_ids:
+                raise ConfigError(
+                    "Authorization profiles reference an unknown organization"
+                )
+        for identity in identities.values():
+            profile_id = identity.authorization_profile_id
+            if profile_id is None:
+                continue
+            profile = self.authorization_profiles.get(profile_id)
+            if (
+                profile is None
+                or profile.organization_id != identity.organization_id
+                or profile.team_id != identity.team_id
+            ):
+                raise ConfigError("Identity references an invalid authorization profile")
+        for binding in self.team_bindings:
+            profile = self.authorization_profiles.get(binding.policy_id)
+            if (
+                binding.organization_id not in organization_ids
+                or profile is None
+                or profile.organization_id != binding.organization_id
+                or profile.team_id != binding.team_id
+            ):
+                raise ConfigError("Policy team binding references an invalid authorization profile")
+        fallback = self.unbound_scim_group_fallback
+        if self.unbound_scim_group_action == "deny" and fallback is not None:
+            raise ConfigError(
+                "Unbound SCIM group fallback requires fallback behavior to be enabled"
+            )
+        if self.unbound_scim_group_action == "fallback":
+            if fallback is None:
+                raise ConfigError(
+                    "Unbound SCIM group fallback behavior requires an approved profile"
+                )
+            profile = self.authorization_profiles.get(fallback.policy_id)
+            if profile is None or profile.team_id != fallback.team_id:
+                raise ConfigError(
+                    "Unbound SCIM group fallback references an invalid authorization profile"
+                )
+
+        policies = [
+            self.organization_policy,
+            *self.team_policies.values(),
+            *self.actor_policies.values(),
+            *(profile.policy for profile in self.authorization_profiles.values()),
+        ]
         for policy in policies:
             for alias in policy.allowed_models or ():
                 if alias not in self.model_routes:
@@ -1134,16 +1283,31 @@ class GatewayConfig:
             for policy in policies
         )
         if limits_require_request_bound:
-            for identity in self.identities_by_actor.values():
+            for identity in identities.values():
                 if self.resolved_policy(identity).max_output_tokens is None:
                     raise ConfigError(
                         f"Identity {identity.actor_id} needs an effective max_output_tokens policy "
                         "when monthly token or budget limits are configured"
                     )
+            for profile in self.authorization_profiles.values():
+                effective = (
+                    self.organization_policy
+                    .overlaid(self.team_policies.get(profile.team_id))
+                    .overlaid(profile.policy)
+                )
+                if effective.max_output_tokens is None:
+                    raise ConfigError(
+                        "Authorization profile needs an effective max_output_tokens policy "
+                        "when monthly token or budget limits are configured"
+                    )
         team_organizations: dict[str, set[str]] = {}
-        for identity in self.identities_by_actor.values():
+        for identity in identities.values():
             team_organizations.setdefault(identity.team_id, set()).add(
                 identity.organization_id
+            )
+        for profile in self.authorization_profiles.values():
+            team_organizations.setdefault(profile.team_id, set()).add(
+                profile.organization_id
             )
         if set(self.team_policies) - set(team_organizations):
             raise ConfigError("Policies reference unknown teams")
@@ -1154,7 +1318,7 @@ class GatewayConfig:
             raise ConfigError(
                 "Policy team IDs must identify exactly one organization"
             )
-        if set(self.actor_policies) - set(self.identities_by_actor):
+        if set(self.actor_policies) - set(identities):
             raise ConfigError("Policies reference unknown actors")
         unknown_dlp_teams = sorted(
             set(self.team_dlp_overlays) - set(team_organizations)
@@ -1244,10 +1408,83 @@ class GatewayConfig:
         return self.identities_by_subject.get((issuer, subject))
 
     def resolved_policy(self, identity: Identity) -> Policy:
+        profile_policy: Policy | None = None
+        if identity.authorization_profile_id is not None:
+            profile = self.authorization_profiles.get(identity.authorization_profile_id)
+            if (
+                profile is None
+                or profile.organization_id != identity.organization_id
+                or profile.team_id != identity.team_id
+            ):
+                raise ConfigError("Identity references an invalid authorization profile")
+            profile_policy = profile.policy
         return (
             self.organization_policy
             .overlaid(self.team_policies.get(identity.team_id))
+            .overlaid(profile_policy)
             .overlaid(self.actor_policies.get(identity.actor_id))
+        )
+
+    def resolve_scim_group_authorization(
+        self,
+        organization_id: str,
+        scim_group_external_ids: tuple[str, ...],
+    ) -> ResolvedSCIMGroupAuthorization:
+        """Resolve active SCIM memberships through policy-owned bindings.
+
+        A group is lifecycle data from the identity provider, not an
+        authorization document. Any unbound group fails closed unless this
+        tenant's active policy explicitly selects one approved fallback.
+        """
+
+        group_ids = tuple(sorted(set(scim_group_external_ids)))
+        if not group_ids:
+            raise SCIMGroupAuthorizationError("directory_subject_unassigned")
+        bindings = {
+            binding.scim_group_external_id: binding
+            for binding in self.team_bindings
+            if binding.organization_id == organization_id
+        }
+        selected: set[tuple[str, str]] = set()
+        unbound = False
+        for group_id in group_ids:
+            binding = bindings.get(group_id)
+            if binding is None:
+                unbound = True
+            else:
+                selected.add((binding.team_id, binding.policy_id))
+        if unbound:
+            if (
+                self.unbound_scim_group_action != "fallback"
+                or self.unbound_scim_group_fallback is None
+            ):
+                raise SCIMGroupAuthorizationError("directory_subject_group_unbound")
+            fallback = self.unbound_scim_group_fallback
+            profile = self.authorization_profiles.get(fallback.policy_id)
+            if (
+                profile is None
+                or profile.organization_id != organization_id
+                or profile.team_id != fallback.team_id
+            ):
+                raise SCIMGroupAuthorizationError("directory_subject_group_unbound")
+            selected.add((fallback.team_id, fallback.policy_id))
+        if len(selected) != 1:
+            raise SCIMGroupAuthorizationError("directory_subject_policy_ambiguous")
+        team_id, policy_id = next(iter(selected))
+        profile = self.authorization_profiles.get(policy_id)
+        if (
+            profile is None
+            or profile.organization_id != organization_id
+            or profile.team_id != team_id
+        ):
+            raise SCIMGroupAuthorizationError("directory_subject_group_unbound")
+        return ResolvedSCIMGroupAuthorization(
+            team_id=profile.team_id,
+            team_name=profile.team_name,
+            policy_id=profile.policy_id,
+            clearance=profile.clearance,
+            allowed_clients=profile.allowed_clients,
+            capabilities=profile.capabilities,
         )
 
     def resolved_dlp_controls(
@@ -1319,7 +1556,7 @@ def configuration_from_policy_projection(
 
     _validate_configuration_structure(value)
     item = _object(value, "policy projection")
-    expected_fields = {
+    legacy_expected_fields = {
         "schema",
         "organization_id",
         "model_routes",
@@ -1331,11 +1568,24 @@ def configuration_from_policy_projection(
         "team_dlp_overlays",
         "actor_dlp_overlays",
     }
+    schema = item.get("schema")
+    if schema in {"hormuz.policy-projection.v2", "hormuz.policy-projection.v3"}:
+        expected_fields = legacy_expected_fields
+    elif schema == "hormuz.policy-projection.v4":
+        expected_fields = legacy_expected_fields | {
+            "authorization_profiles",
+            "team_bindings",
+            "unbound_scim_group_action",
+            "unbound_scim_group_fallback",
+        }
+    else:
+        expected_fields = set()
     if set(item) != expected_fields:
         raise ConfigError("Policy projection fields are invalid")
-    if item.get("schema") not in {
+    if schema not in {
         "hormuz.policy-projection.v2",
         "hormuz.policy-projection.v3",
+        "hormuz.policy-projection.v4",
     }:
         raise ConfigError("Policy projection schema is unsupported")
     if item.get("organization_id") != organization_id:
@@ -1350,6 +1600,33 @@ def configuration_from_policy_projection(
         raise ConfigError("Policy projection organization is not configured")
     tenant_actor_ids = {identity.actor_id for identity in tenant_identities}
     tenant_team_ids = {identity.team_id for identity in tenant_identities}
+
+    authorization_profiles: dict[str, AuthorizationProfile] = {}
+    team_bindings: tuple[PolicyTeamBinding, ...] = ()
+    unbound_scim_group_action = "deny"
+    unbound_scim_group_fallback: UnboundSCIMGroupFallback | None = None
+    if schema == "hormuz.policy-projection.v4":
+        authorization_profiles = _authorization_profiles(
+            item["authorization_profiles"],
+            "policy projection authorization_profiles",
+        )
+        team_bindings = _policy_team_bindings(
+            item["team_bindings"],
+            "policy projection team_bindings",
+        )
+        unbound_scim_group_action = _unbound_scim_group_action(
+            item["unbound_scim_group_action"],
+            "policy projection unbound_scim_group_action",
+        )
+        unbound_scim_group_fallback = _unbound_scim_group_fallback(
+            item["unbound_scim_group_fallback"],
+            "policy projection unbound_scim_group_fallback",
+        )
+        tenant_team_ids.update(
+            profile.team_id
+            for profile in authorization_profiles.values()
+            if profile.organization_id == organization_id
+        )
 
     routes_raw = _object(item["model_routes"], "policy projection model_routes")
     if not routes_raw or len(routes_raw) > 10_000:
@@ -1484,6 +1761,10 @@ def configuration_from_policy_projection(
         organization_policy=organization_policy,
         team_policies=team_policies,
         actor_policies=actor_policies,
+        authorization_profiles=authorization_profiles,
+        team_bindings=team_bindings,
+        unbound_scim_group_action=unbound_scim_group_action,
+        unbound_scim_group_fallback=unbound_scim_group_fallback,
         secret_controls=secret_controls,
         dlp_controls=dlp_controls,
         team_dlp_overlays=team_dlp_overlays,
@@ -1707,6 +1988,114 @@ def _policy(
             default_mode=default_context_injection_mode,
             default_allowed_repositories=default_context_allowed_repositories,
         ),
+    )
+
+
+def _authorization_profiles(
+    value: Any,
+    path: str,
+) -> dict[str, AuthorizationProfile]:
+    item = _object(value, path)
+    if len(item) > 10_000:
+        raise ConfigError(f"{path} must contain at most 10000 profiles")
+    result: dict[str, AuthorizationProfile] = {}
+    expected_fields = {
+        "organization_id",
+        "team_id",
+        "team_name",
+        "clearance",
+        "allowed_clients",
+        "capabilities",
+        "policy",
+    }
+    for raw_policy_id, raw_profile in item.items():
+        policy_id = _bounded_scope_id(raw_policy_id, f"{path} policy_id")
+        profile_path = f"{path}.{policy_id}"
+        profile = _object(raw_profile, profile_path)
+        _reject_unknown_fields(profile, expected_fields, profile_path)
+        result[policy_id] = AuthorizationProfile(
+            organization_id=_bounded_scope_id(
+                profile.get("organization_id"),
+                f"{profile_path}.organization_id",
+            ),
+            policy_id=policy_id,
+            team_id=_bounded_scope_id(
+                profile.get("team_id"), f"{profile_path}.team_id"
+            ),
+            team_name=_string(profile.get("team_name"), f"{profile_path}.team_name"),
+            clearance=_classification(
+                profile.get("clearance"), f"{profile_path}.clearance"
+            ),
+            allowed_clients=_string_tuple(
+                profile.get("allowed_clients", []),
+                f"{profile_path}.allowed_clients",
+            ),
+            capabilities=_identity_capabilities(
+                profile.get("capabilities", []),
+                f"{profile_path}.capabilities",
+            ),
+            policy=_policy(profile.get("policy"), f"{profile_path}.policy"),
+        )
+    return result
+
+
+def _policy_team_bindings(value: Any, path: str) -> tuple[PolicyTeamBinding, ...]:
+    if not isinstance(value, list) or len(value) > 10_000:
+        raise ConfigError(f"{path} must be an array of at most 10000 bindings")
+    result: list[PolicyTeamBinding] = []
+    seen: set[tuple[str, str]] = set()
+    for index, raw_binding in enumerate(value):
+        binding_path = f"{path}[{index}]"
+        binding = _object(raw_binding, binding_path)
+        _reject_unknown_fields(
+            binding,
+            {
+                "organization_id",
+                "scim_group_external_id",
+                "team_id",
+                "policy_id",
+            },
+            binding_path,
+        )
+        parsed = PolicyTeamBinding(
+            organization_id=_bounded_scope_id(
+                binding.get("organization_id"), f"{binding_path}.organization_id"
+            ),
+            scim_group_external_id=_bounded_scope_id(
+                binding.get("scim_group_external_id"),
+                f"{binding_path}.scim_group_external_id",
+            ),
+            team_id=_bounded_scope_id(binding.get("team_id"), f"{binding_path}.team_id"),
+            policy_id=_bounded_scope_id(
+                binding.get("policy_id"), f"{binding_path}.policy_id"
+            ),
+        )
+        key = (parsed.organization_id, parsed.scim_group_external_id)
+        if key in seen:
+            raise ConfigError(f"{path} cannot contain duplicate organization/group bindings")
+        seen.add(key)
+        result.append(parsed)
+    return tuple(result)
+
+
+def _unbound_scim_group_action(value: Any, path: str) -> str:
+    action = _string(value, path)
+    if action not in {"deny", "fallback"}:
+        raise ConfigError(f"{path} must be deny or fallback")
+    return action
+
+
+def _unbound_scim_group_fallback(
+    value: Any,
+    path: str,
+) -> UnboundSCIMGroupFallback | None:
+    if value is None:
+        return None
+    item = _object(value, path)
+    _reject_unknown_fields(item, {"team_id", "policy_id"}, path)
+    return UnboundSCIMGroupFallback(
+        team_id=_bounded_scope_id(item.get("team_id"), f"{path}.team_id"),
+        policy_id=_bounded_scope_id(item.get("policy_id"), f"{path}.policy_id"),
     )
 
 
@@ -2790,6 +3179,7 @@ def _validate_identity_consistency(identities: tuple[Identity, ...]) -> None:
             "organization_id",
             "clearance",
             "identity_type",
+            "authorization_profile_id",
         )
         if any(getattr(existing, name) != getattr(identity, name) for name in fields):
             raise ConfigError(
@@ -2807,6 +3197,12 @@ def _optional_string(value: Any, path: str) -> str | None:
     if value is None:
         return None
     return _string(value, path)
+
+
+def _optional_scope_id(value: Any, path: str) -> str | None:
+    if value is None:
+        return None
+    return _bounded_scope_id(value, path)
 
 
 def _string_tuple(value: Any, path: str) -> tuple[str, ...]:

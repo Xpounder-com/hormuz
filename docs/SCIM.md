@@ -1,7 +1,7 @@
 # SCIM identity lifecycle
 
-Hormuz can use a SCIM 2.0-shaped directory to provision people and
-policy-bearing groups without asking employees to adopt a new AI client: a
+Hormuz can use a SCIM 2.0-shaped directory to provision people and group
+memberships without asking employees to adopt a new AI client: a
 successful OIDC login is resolved against the live directory before Hormuz
 applies model, client, DLP, budget, or usage policy.
 
@@ -16,14 +16,20 @@ gates.
 
 ## What is governed
 
-The directory stores only identity and authorization metadata:
+The directory stores only identity and lifecycle metadata:
 
 - stable external and Hormuz resource IDs;
 - display/user names, OIDC issuer and subject;
 - active state and group membership;
-- group-to-team, clearance, client, and capability mapping; and
 - metadata-only lifecycle audit entries (administrator, action, resource ID,
   and revisions).
+
+The tenant's immutable policy version stores the authorization mapping:
+`(organization_id, scim_group_external_id)` selects one pre-approved Hormuz
+authorization profile. A profile supplies the internal team, clearance,
+allowed clients, capabilities, and an additional restrictive model/budget
+policy. This split is intentional: the IdP says who belongs to which stable
+group; Hormuz decides what that membership may do.
 
 It does **not** store prompts, responses, code, provider keys, OIDC bearer
 tokens, or static workload secrets. Directory data is still employee metadata,
@@ -34,7 +40,9 @@ directly and can use only exact-tag security-definer functions.
 
 Dynamic directory identities take precedence over a matching configured
 `(issuer, subject)` mapping. An inactive user, inactive workload, removed group
-member, or ambiguous team mapping fails closed before any provider request.
+member, unbound active group, or conflicting group-policy selection fails
+closed before any provider request. Unbound groups deny by default; an active
+tenant policy may opt into one explicit pre-approved fallback profile.
 Existing Hormuz browser sessions re-resolve their subject on every request and
 are rejected when that mapping changes. When the optional session broker is
 available, a changed directory resource also triggers eager actor-scoped
@@ -44,8 +52,10 @@ session-family revocation.
 
 Use a separate database and retain a tightly controlled bootstrap administrator
 only until a federated identity can administer the directory. The administrator
-needs `identity_admin`; that capability grants no usage-report, policy, or DLP
-approval access by itself.
+that provisions Users and Groups needs `identity_admin`; that capability grants
+no usage-report, policy, DLP approval, model, budget, or client authorization
+access by itself. A separate `policy_admin` stages and activates group bindings
+and authorization profiles.
 
 ```json
 {
@@ -126,9 +136,10 @@ only an existing managed User or Workload in the already-bound tenant.
 
 ## SCIM surface
 
-All routes require a current Hormuz credential whose identity has
-`identity_admin`. Responses use `application/scim+json` and expose an opaque
-ETag in `meta.version`/`ETag`.
+Users and Groups require `identity_admin`. Workload identity routes require
+`policy_admin`, because their current direct fields determine authorization.
+Responses use `application/scim+json` and expose an opaque ETag in
+`meta.version`/`ETag`.
 
 | Resource | Supported routes |
 | --- | --- |
@@ -152,7 +163,7 @@ but provisioning clients should send it to make out-of-order updates explicit.
 
 `DELETE` is a reversible deactivation rather than a physical delete. Reactivate
 a user or workload with `PUT`/`PATCH` and `active: true`. Groups expose their
-activation in the Hormuz group-policy extension and can be reactivated the same
+activation in the Hormuz directory extension and can be reactivated the same
 way. The resource and its audit history remain for deterministic retries and
 forensic review.
 
@@ -177,43 +188,84 @@ Users are standard SCIM Users plus the Hormuz identity extension:
 }
 ```
 
-Groups carry the explicit, versioned policy mapping rather than trusting group,
-team, or role claims from an employee token:
+Groups are lifecycle records. Their `externalId` is the stable key Hormuz uses
+to select a policy-owned authorization profile; `displayName` is never used for
+authorization:
 
 ```json
 {
   "schemas": [
     "urn:ietf:params:scim:schemas:core:2.0:Group",
-    "urn:hormuz:params:scim:schemas:extension:policy:2.0:Group"
+    "urn:hormuz:params:scim:schemas:extension:directory:3.0:Group"
   ],
   "externalId": "engineering",
   "displayName": "Engineering",
   "members": [{"value": "usr_hormuz_resource_id"}],
-  "urn:hormuz:params:scim:schemas:extension:policy:2.0:Group": {
-    "active": true,
-    "teamId": "engineering",
-    "teamName": "Engineering",
-    "clearance": "internal",
-    "allowedClients": ["codex", "claude-code"],
-    "capabilities": []
+  "urn:hormuz:params:scim:schemas:extension:directory:3.0:Group": {
+    "active": true
   }
 }
 ```
 
-For an active user, all active groups must resolve to exactly one team. Hormuz
-unions capabilities, intersects non-empty client allowlists, and chooses the
-most restrictive clearance. A user with no active group, an inactive group, or
-two teams is denied rather than assigned a guessed scope. Moving a group to a
-new team is therefore an optimistic-concurrency update with a new ETag, not a
-silent reassignment.
+For an active user, Hormuz resolves every active group through the active
+tenant policy. Every group must be bound, unless that tenant explicitly chose a
+single fallback profile. All selected bindings must produce the same
+`(team_id, policy_id)` pair; otherwise Hormuz denies the request. The selected
+profile supplies the effective team, clearance, allowed clients, capabilities,
+and an additional restrictive policy overlay.
 
-Group mappings govern the identity's effective team, clearance, client, and
-capability scope immediately. A configuration-owned team policy overlay is
-applied only when that team is already bound to exactly one organization in the
-deployment configuration; otherwise the group receives the organization's
-policy. Hormuz deliberately does not accept an arbitrary new SCIM `teamId` as
-a cross-tenant policy key. Tenant-qualified dynamic team-policy bindings are a
-remaining #7 design and implementation gate.
+In configuration, this lives under the policy system, not under
+`authentication.directory`:
+
+```json
+{
+  "policies": {
+    "authorization_profiles": {
+      "engineering-standard": {
+        "organization_id": "acme",
+        "team_id": "engineering",
+        "team_name": "Engineering",
+        "clearance": "internal",
+        "allowed_clients": ["codex", "claude-code"],
+        "capabilities": [],
+        "policy": {
+          "allowed_models": ["gpt-5.4", "claude-sonnet-5"],
+          "max_output_tokens": 16000
+        }
+      }
+    },
+    "team_bindings": [
+      {
+        "organization_id": "acme",
+        "scim_group_external_id": "engineering-employees",
+        "team_id": "engineering",
+        "policy_id": "engineering-standard"
+      }
+    ],
+    "unbound_scim_group_action": "deny"
+  }
+}
+```
+
+The policy API projects these fields as `authorization_profiles` and
+`team_bindings` in tenant policy projection v4. Thus only `policy_admin` can
+stage, activate, or roll back a new group-to-profile authorization decision;
+an `identity_admin` may add/remove membership but cannot grant a new model,
+budget, client, clearance, or capability. `unbound_scim_group_action` defaults
+to `deny`. The only alternative is `fallback` with an explicit
+`unbound_scim_group_fallback` containing a pre-approved `team_id` and
+`policy_id`.
+
+### SCIM group contract migration
+
+The previous `urn:hormuz:params:scim:schemas:extension:policy:2.0:Group`
+contract is no longer accepted for new or replacement group requests. Its
+`teamId`, `teamName`, `clearance`, `allowedClients`, and `capabilities` fields
+produce `scim_group_authorization_fields_forbidden`. Update the connector to
+send the directory 3.0 extension above while preserving the same stable group
+`externalId`, then stage and activate the v4 policy binding before relying on
+the membership. Existing stored legacy values are ignored for authorization;
+there is no fallback to their former permissions.
 
 ## Federated workload identities
 
@@ -242,7 +294,11 @@ already be configured for Hormuz OIDC verification. The upstream JWT's required
 boundary; this record only authorizes its `(issuer, subject)` after those checks
 pass. Usage events preserve the same identity type so human, service-account,
 CI, and connector traffic can be distinguished without retaining request
-content.
+content. Because this v0.2 workload record still contains direct authorization
+fields, creating, changing, or deactivating it requires `policy_admin`, not
+`identity_admin`. Converging workloads on the same pre-approved profile model
+is a follow-on; this change does not claim that SCIM group bindings govern
+workloads.
 
 Do not create a long-lived static token for a workload. A static configured
 identity is only a documented break-glass exception during rollout; use a
@@ -252,20 +308,22 @@ short-lived OIDC workload token in CI or a connector instead.
 
 1. Choose the local SQLite adapter for one host, or migrate PostgreSQL and set
    its routing-key environment variable for a shared deployment. Keep one
-   least-privileged bootstrap `identity_admin`.
+   least-privileged bootstrap `identity_admin` and one separate `policy_admin`.
 2. Configure and preflight the OIDC issuer; keep its audience and signing
    policy separate from the browser-login client.
-3. Create an empty group mapping first, then users and memberships, and test a
-   `GET /v1/gateway/whoami` with a short-lived token before migrating a team.
+3. Create the pre-approved authorization profile and tenant-qualified group
+   binding, stage/activate the policy version, then create users and group
+   memberships. Test a `GET /v1/gateway/whoami` with a short-lived token before
+   migrating a team.
 4. Use ETags for every update, record external IDs in the IdP/SCIM connector,
    and treat a `409` or `412` as an operator reconciliation event rather than
    retrying blindly.
 5. On departure or incident, set the user/workload/group inactive or remove
    the membership. The next gateway request denies the identity; a session
    broker also eagerly revokes matching browser-session families.
-6. Rotate or remove the bootstrap credential after testing a federated
-   `identity_admin`; audit directory ownership and back it up according to the
-   organization's employee-data policy.
+6. Rotate or remove the bootstrap credential after testing federated
+   `identity_admin` and `policy_admin` identities; audit directory ownership
+   and back it up according to the organization's employee-data policy.
 
 The directory lifecycle log is not an immutable audit sink and does not replace
 IdP, HR, or SIEM records. SCIM vendor testing, service-account token exchange,

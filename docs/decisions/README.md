@@ -23,6 +23,7 @@ An agent, test result, or convenient implementation detail cannot move a decisio
 | [0006](0006-automatic-context-injection.md) | Superseded | Automatic governed-context injection | [#5](https://github.com/Xpounder-com/hormuz/issues/5) |
 | [0007](0007-accepted-task-evaluation.md) | Superseded | Accepted-task economics evaluation | [#15](https://github.com/Xpounder-com/hormuz/issues/15) |
 | [0008](0008-gateway-product-boundary.md) | Accepted | Hormuz gateway product boundary | [#20](https://github.com/Xpounder-com/hormuz/issues/20) |
+| [0009](0009-policy-owned-scim-group-bindings.md) | Accepted | Policy-owned SCIM group bindings | [#7](https://github.com/Xpounder-com/hormuz/issues/7) |
 
 ## Acceptance record
 
@@ -46,3 +47,8 @@ ADR 0008 was accepted by the product owner on 2026-08-20. It supersedes the
 Hormuz-owned memory, retrieval, lifecycle, and accepted-task-quality direction.
 Those implementations remain deprecated experimental compatibility evidence;
 the supported product is the enterprise AI gateway and control plane.
+
+ADR 0009 was accepted by the product owner on 2026-08-20. It separates SCIM
+membership lifecycle from Hormuz AI authorization: group external IDs select
+policy-owned profiles, while policy administration—not the IdP—controls model,
+budget, client, clearance, and capability decisions.

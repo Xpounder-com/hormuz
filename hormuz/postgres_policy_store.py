@@ -27,7 +27,11 @@ from .postgres import (
 _VERSION_ID = re.compile(r"hpv_v1_[0-9a-f]{64}\Z")
 _SUMMARY_SCHEMA = "hormuz.policy-change-summary.v1"
 _POLICY_PROJECTION_SCHEMAS = frozenset(
-    {"hormuz.policy-projection.v2", "hormuz.policy-projection.v3"}
+    {
+        "hormuz.policy-projection.v2",
+        "hormuz.policy-projection.v3",
+        "hormuz.policy-projection.v4",
+    }
 )
 _PROJECTION_SECTIONS = (
     "model_routes",
@@ -38,6 +42,10 @@ _PROJECTION_SECTIONS = (
     "dlp_controls",
     "team_dlp_overlays",
     "actor_dlp_overlays",
+    "authorization_profiles",
+    "team_bindings",
+    "unbound_scim_group_action",
+    "unbound_scim_group_fallback",
 )
 
 
@@ -514,6 +522,30 @@ class PostgresPolicyStore:
             activated_by_actor_id=str(row[4]),
             activated_by_actor_name=str(row[5]),
             activation_sequence=int(row[6]),
+        )
+
+    def active_for_organization(self, organization_id: str) -> ActivePolicy | None:
+        """Internal tenant-qualified active-policy read for directory resolution.
+
+        Directory routing has already resolved the tenant from an opaque
+        subject tag, but it has not yet constructed an end-user identity. This
+        read uses the same forced-RLS transaction as ``active`` and never
+        grants policy-administration authority to the directory caller.
+        """
+
+        organization_id = self._organization(organization_id)
+        return self.active(
+            identity=Identity(
+                token_env="",
+                token="",
+                actor_id="policy-runtime",
+                actor_name="Policy Runtime",
+                team_id="policy-runtime",
+                team_name="Policy Runtime",
+                organization_id=organization_id,
+                clearance="restricted",
+                authentication_source="internal:policy-runtime",
+            )
         )
 
 

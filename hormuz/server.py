@@ -62,6 +62,8 @@ from .context_store import (
 )
 from .dlp_approval import DLPApprovalError, payload_fingerprint
 from .directory import (
+    HORMUZ_GROUP_EXTENSION,
+    HORMUZ_USER_EXTENSION,
     SCIM_ERROR_SCHEMA,
     SCIM_GROUP_SCHEMA,
     SCIM_LIST_SCHEMA,
@@ -336,6 +338,24 @@ class GatewayServer(ThreadingHTTPServer):
         self._shutdown_lock = threading.Lock()
         self._shutdown_started = False
         self.config = config
+        # Policy is the authorization source for directory groups. Construct
+        # it before the directory so SCIM lifecycle data never becomes a
+        # fallback authority for models, budgets, clients, or capabilities.
+        self.policy_store: PostgresPolicyStore | None = None
+        if config.usage_storage.backend == "postgresql":
+            try:
+                dsn = postgres_dsn_from_env(
+                    dsn_env=config.usage_storage.postgres_dsn_env
+                )
+                self.policy_store = PostgresPolicyStore(
+                    dsn,
+                    organization_ids=configured_organization_ids(config),
+                    schema=config.usage_storage.postgres_schema,
+                    runtime_role=config.usage_storage.postgres_runtime_role,
+                )
+            except PostgresStorageError as error:
+                raise PolicyAdminError(error.code) from None
+        self.policy_runtime = PolicyRuntime(config, self.policy_store)
         self.directory: SQLiteDirectoryStore | PostgresDirectoryStore | None = None
         if config.directory.enabled:
             if config.directory.backend == "postgresql":
@@ -345,6 +365,7 @@ class GatewayServer(ThreadingHTTPServer):
                     postgres_dsn_from_env(dsn_env=config.usage_storage.postgres_dsn_env),
                     trusted_issuers=tuple(config.oidc_issuers),
                     routing_key=config.directory.routing_key,
+                    authorization_resolver=self.policy_runtime,
                     schema=config.usage_storage.postgres_schema,
                     runtime_role=config.usage_storage.postgres_runtime_role,
                 )
@@ -354,6 +375,7 @@ class GatewayServer(ThreadingHTTPServer):
                 self.directory = SQLiteDirectoryStore(
                     config.directory.database_path,
                     trusted_issuers=tuple(config.oidc_issuers),
+                    authorization_resolver=self.policy_runtime,
                 )
         self.authenticator = Authenticator(config, self.directory)
         self.tenant_lifecycle_gate: TenantLifecycleRuntimeGate | None = None
@@ -401,21 +423,6 @@ class GatewayServer(ThreadingHTTPServer):
                 )
             self.session_broker = SessionBroker(config, self.authenticator, session_store)
         self.store = gateway_store(config)
-        self.policy_store: PostgresPolicyStore | None = None
-        if config.usage_storage.backend == "postgresql":
-            try:
-                dsn = postgres_dsn_from_env(
-                    dsn_env=config.usage_storage.postgres_dsn_env
-                )
-                self.policy_store = PostgresPolicyStore(
-                    dsn,
-                    organization_ids=configured_organization_ids(config),
-                    schema=config.usage_storage.postgres_schema,
-                    runtime_role=config.usage_storage.postgres_runtime_role,
-                )
-            except PostgresStorageError as error:
-                raise PolicyAdminError(error.code) from None
-        self.policy_runtime = PolicyRuntime(config, self.policy_store)
         # The built-in context repository is a deprecated experimental surface,
         # not a dependency of the supported gateway path. Keep it lazy so an
         # ordinary OpenAI or Anthropic deployment neither opens nor creates a
@@ -1669,12 +1676,34 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             return
         self._send_error("not_found", "Route not found", HTTPStatus.NOT_FOUND, close_connection=True)
 
-    def _directory_for_request(self, identity: Identity) -> SQLiteDirectoryStore | None:
+    def _directory_for_request(
+        self, identity: Identity
+    ) -> SQLiteDirectoryStore | PostgresDirectoryStore | None:
         if "identity_admin" not in identity.capabilities:
             self._send_scim_error(
                 HTTPStatus.FORBIDDEN,
                 "identity_admin_capability_required",
                 "Identity administrator capability is required",
+            )
+            return None
+        directory = self.server.directory
+        if directory is None:
+            self._send_scim_error(
+                HTTPStatus.NOT_FOUND,
+                "directory_disabled",
+                "Identity directory is not enabled",
+            )
+            return None
+        return directory
+
+    def _workload_directory_for_request(
+        self, identity: Identity
+    ) -> SQLiteDirectoryStore | PostgresDirectoryStore | None:
+        if "policy_admin" not in identity.capabilities:
+            self._send_scim_error(
+                HTTPStatus.FORBIDDEN,
+                "policy_admin_capability_required",
+                "Policy administrator capability is required",
             )
             return None
         directory = self.server.directory
@@ -1765,7 +1794,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         resource_id: str | None,
         query: str,
     ) -> None:
-        directory = self._directory_for_request(identity)
+        directory = self._workload_directory_for_request(identity)
         if directory is None:
             return
         try:
@@ -1905,7 +1934,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         self._commit_directory_mutation(identity, mutation, HTTPStatus.OK)
 
     def _create_workload_identity(self, identity: Identity) -> None:
-        directory = self._directory_for_request(identity)
+        directory = self._workload_directory_for_request(identity)
         if directory is None:
             return
         body = self._read_json_body(max_bytes=MAX_DIRECTORY_REQUEST_BYTES, strict=True)
@@ -1923,7 +1952,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         )
 
     def _replace_workload_identity(self, identity: Identity, resource_id: str) -> None:
-        directory = self._directory_for_request(identity)
+        directory = self._workload_directory_for_request(identity)
         if directory is None:
             return
         body = self._read_json_body(max_bytes=MAX_DIRECTORY_REQUEST_BYTES, strict=True)
@@ -1942,7 +1971,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         self._commit_directory_mutation(identity, mutation, HTTPStatus.OK)
 
     def _patch_workload_identity(self, identity: Identity, resource_id: str) -> None:
-        directory = self._directory_for_request(identity)
+        directory = self._workload_directory_for_request(identity)
         if directory is None:
             return
         body = self._read_json_body(max_bytes=MAX_DIRECTORY_REQUEST_BYTES, strict=True)
@@ -1971,10 +2000,14 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         identity: Identity,
         target: tuple[str, str | None],
     ) -> None:
-        directory = self._directory_for_request(identity)
+        resource_type, resource_id = target
+        directory = (
+            self._workload_directory_for_request(identity)
+            if resource_type == "Workload"
+            else self._directory_for_request(identity)
+        )
         if directory is None:
             return
-        resource_type, resource_id = target
         if resource_id is None:
             self._send_scim_error(HTTPStatus.NOT_FOUND, "scim_resource_not_found", "SCIM resource was not found")
             return
@@ -2060,6 +2093,9 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         if code in {"identity_admin_capability_required"}:
             status = HTTPStatus.FORBIDDEN
             message = "Identity administrator capability is required"
+        elif code in {"policy_admin_capability_required"}:
+            status = HTTPStatus.FORBIDDEN
+            message = "Policy administrator capability is required"
         elif code in {"scim_resource_not_found"}:
             status = HTTPStatus.NOT_FOUND
             message = "SCIM resource was not found"
@@ -2072,7 +2108,8 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         elif code in {
             "directory_identity_inactive",
             "directory_subject_unassigned",
-            "directory_subject_team_ambiguous",
+            "directory_subject_group_unbound",
+            "directory_subject_policy_ambiguous",
             "directory_subject_ambiguous",
         }:
             status = HTTPStatus.CONFLICT
@@ -4849,12 +4886,38 @@ def _apply_scim_patch(
     }
     protected = {"schemas", "id", "meta", "groups"}
     extension = (
-        "urn:hormuz:params:scim:schemas:extension:identity:2.0:User"
+        HORMUZ_USER_EXTENSION
         if resource_type == "User"
-        else "urn:hormuz:params:scim:schemas:extension:policy:2.0:Group"
+        else HORMUZ_GROUP_EXTENSION
         if resource_type == "Group"
         else None
     )
+    direct = {
+        "active": "active",
+        "username": "userName",
+        "displayname": "displayName",
+        "externalid": "externalId",
+    }
+    if resource_type == "User":
+        extension_direct = {"issuer": "issuer", "subject": "subject"}
+    elif resource_type == "Group":
+        # A SCIM group may change only lifecycle membership/state. Any model,
+        # budget, client, clearance, or capability assignment is policy-owned.
+        extension_direct = {"active": "active"}
+    else:
+        direct.update(
+            {
+                "identitytype": "identityType",
+                "issuer": "issuer",
+                "subject": "subject",
+                "teamid": "teamId",
+                "teamname": "teamName",
+                "clearance": "clearance",
+                "allowedclients": "allowedClients",
+                "capabilities": "capabilities",
+            }
+        )
+        extension_direct = {}
     for operation in operations:
         if not isinstance(operation, dict):
             raise DirectoryError("scim_invalid_request")
@@ -4874,20 +4937,6 @@ def _apply_scim_patch(
         if not isinstance(path, str) or not path:
             raise DirectoryError("scim_invalid_request")
         lowered = path.casefold()
-        direct = {
-            "active": "active",
-            "username": "userName",
-            "displayname": "displayName",
-            "externalid": "externalId",
-            "identitytype": "identityType",
-            "issuer": "issuer",
-            "subject": "subject",
-            "teamid": "teamId",
-            "teamname": "teamName",
-            "clearance": "clearance",
-            "allowedclients": "allowedClients",
-            "capabilities": "capabilities",
-        }
         if lowered == "members" and resource_type == "Group":
             existing = candidate.get("members", [])
             if not isinstance(existing, list):
@@ -4921,7 +4970,7 @@ def _apply_scim_patch(
                     raise DirectoryError("directory_record_corrupt")
                 candidate[extension] = {**current_extension, **patch_value}
                 continue
-            direct_key = direct.get(suffix.casefold())
+            direct_key = extension_direct.get(suffix.casefold())
             if direct_key is None or action == "remove":
                 raise DirectoryError("scim_invalid_request")
             current_extension = candidate.get(extension, {})

@@ -1,7 +1,7 @@
 # PostgreSQL tenancy foundation
 
 Hormuz has an accepted shared-schema PostgreSQL tenancy contract and an
-executable schema-version-10 accounting, identity-projection, policy-projection,
+executable schema-version-11 accounting, identity-projection, policy-projection,
 policy-version, human-session, DLP/security, identity-type usage,
 tenant-lifecycle, and shared-SCIM-directory backend. A deployment can opt into PostgreSQL
 for usage, cost evidence, usage-read audit, atomic budget reservations,
@@ -34,6 +34,13 @@ OIDC `(issuer, subject)` pair before a tenant RLS context exists. The runtime
 cannot select that table directly; it can invoke exact-tag security-definer
 functions and a projection function constrained to an existing managed
 directory resource.
+Schema version 11 permits immutable policy projection v4 documents, which carry
+policy-owned SCIM authorization profiles and tenant-qualified group bindings.
+It does not make SCIM payload fields an authorization source.
+When a dynamic subject is next resolved after a profile change, the directory
+reconciles its effective principal projection before it is returned. That
+revokes sessions with a changed authorization mapping and lets a new enrollment
+use the current mapping.
 Every tenant-owned table has:
 
 - a non-null tenant key in its primary and foreign-key relationships;
@@ -127,6 +134,13 @@ existing v2 active pointer. Apply migration 8 before deploying a runtime that
 stages v3 documents, then run `hormuz policies sync` through the schema-owner
 path. The expected startup failure before the required projection sync is
 `policy_projection_stale`.
+
+Policy projection v4 adds policy-owned `authorization_profiles` and
+tenant-qualified `team_bindings` for SCIM groups. PostgreSQL migration 11
+permits immutable v2, v3, and v4 versions. A v4 group binding uses the stable
+SCIM group `externalId`; its IdP-controlled display name and payload cannot
+authorize models, budgets, clients, clearance, or capabilities. Apply migration
+11 before staging v4 documents, then activate the reviewed policy version.
 
 ## Tenant lifecycle (owner-only)
 
@@ -298,7 +312,7 @@ observation is
 
 ## Gates that remain open
 
-Schema v10 is a real accounting, human-session, DLP/security, policy-version,
+Schema v11 is a real accounting, human-session, DLP/security, policy-version,
 identity-type usage, tenant-lifecycle, and shared-directory persistence slice,
 not the completed hosted product.
 The repository currently opens a fresh PostgreSQL connection per operation.
