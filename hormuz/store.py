@@ -8,6 +8,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Protocol
 
 from .config import Identity
 from .contracts import (
@@ -16,10 +17,10 @@ from .contracts import (
     AUDIT_EVENT_SCHEMA_VERSION,
     COST_BASIS_CONFIGURED_RATE_CARD_ESTIMATE,
     COVERAGE_GATEWAY_CAPTURED_REQUESTS_ONLY,
-    validate_audit_event,
     validate_policy_action,
     validate_request_status,
 )
+from .evidence import security_audit_event, usage_audit_event
 
 
 @dataclass(frozen=True)
@@ -65,9 +66,52 @@ class ReservationDenied(RuntimeError):
     pass
 
 
+class StorageSchemaError(RuntimeError):
+    """A stable failure for an unsafe or incomplete durable-store transition."""
+
+    def __init__(self, code: str):
+        super().__init__(code)
+        self.code = code
+
+
+class UsageRepository(Protocol):
+    """The narrow metadata-only storage contract used by policy and gateway code."""
+
+    def record(self, **kwargs: object) -> str: ...
+
+    def record_secret_event(self, **kwargs: object) -> str: ...
+
+    def reserve_budget(self, **kwargs: object) -> str | None: ...
+
+    def release_budget_reservation(self, reservation_id: str | None, **kwargs: object) -> None: ...
+
+    def refresh_budget_reservation(self, reservation_id: str | None, **kwargs: object) -> None: ...
+
+    def active_budget_reservations(self, **kwargs: object) -> int: ...
+
+    def monthly_totals(self, **kwargs: object) -> MonthlyTotals: ...
+
+    def monthly_secret_totals(self, **kwargs: object) -> SecretTotals: ...
+
+    def summary_rows(self, **kwargs: object) -> list[dict[str, object]]: ...
+
+    def report_rows(self, **kwargs: object) -> list[dict[str, object]]: ...
+
+    def audit_events(self, **kwargs: object) -> list[dict[str, object]]: ...
+
+
 class UsageStore:
-    def __init__(self, path: Path):
+    """SQLite implementation of the metadata-only usage repository."""
+
+    schema_version = 2
+
+    def __init__(self, path: Path, *, maximum_supported_schema_version: int | None = None):
         self.path = path
+        self.maximum_supported_schema_version = (
+            self.schema_version
+            if maximum_supported_schema_version is None
+            else maximum_supported_schema_version
+        )
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
         self._initialize()
@@ -91,6 +135,11 @@ class UsageStore:
             connection.execute("PRAGMA journal_mode = WAL")
             connection.executescript(
                 """
+                CREATE TABLE IF NOT EXISTS hormuz_schema_migrations (
+                    version INTEGER PRIMARY KEY,
+                    state TEXT NOT NULL,
+                    applied_at TEXT
+                );
                 CREATE TABLE IF NOT EXISTS gateway_usage_events (
                     id TEXT PRIMARY KEY,
                     occurred_at TEXT NOT NULL,
@@ -162,6 +211,7 @@ class UsageStore:
                     id TEXT PRIMARY KEY,
                     created_at TEXT NOT NULL,
                     expires_at TEXT NOT NULL,
+                    organization_id TEXT NOT NULL DEFAULT 'organization',
                     actor_id TEXT NOT NULL,
                     team_id TEXT NOT NULL,
                     reserved_tokens INTEGER NOT NULL,
@@ -175,7 +225,35 @@ class UsageStore:
                     ON gateway_budget_reservations(team_id, expires_at);
                 """
             )
-            self._add_missing_columns(
+            migrations = {
+                int(row["version"]): str(row["state"])
+                for row in connection.execute(
+                    "SELECT version, state FROM hormuz_schema_migrations ORDER BY version"
+                ).fetchall()
+            }
+            if any(state != "applied" for state in migrations.values()):
+                raise StorageSchemaError("storage_schema_partial_upgrade")
+            if migrations and max(migrations) > self.maximum_supported_schema_version:
+                raise StorageSchemaError("storage_schema_newer_than_binary")
+            for version in range(1, self.schema_version + 1):
+                if version in migrations:
+                    continue
+                if version > self.maximum_supported_schema_version:
+                    raise StorageSchemaError("storage_schema_newer_than_binary")
+                connection.execute(
+                    "INSERT INTO hormuz_schema_migrations (version, state) VALUES (?, 'applying')",
+                    (version,),
+                )
+                self._apply_migration(connection, version)
+                connection.execute(
+                    "UPDATE hormuz_schema_migrations SET state = 'applied', applied_at = ? WHERE version = ?",
+                    (datetime.now(timezone.utc).isoformat(), version),
+                )
+
+    @classmethod
+    def _apply_migration(cls, connection: sqlite3.Connection, version: int) -> None:
+        if version == 1:
+            cls._add_missing_columns(
                 connection,
                 "gateway_usage_events",
                 {
@@ -193,7 +271,7 @@ class UsageStore:
                     "redaction_rules": "TEXT NOT NULL DEFAULT '[]'",
                 },
             )
-            self._add_missing_columns(
+            cls._add_missing_columns(
                 connection,
                 "gateway_secret_events",
                 {
@@ -206,6 +284,15 @@ class UsageStore:
                     "coverage": "TEXT NOT NULL DEFAULT 'gateway_captured_requests_only'",
                 },
             )
+            return
+        if version == 2:
+            cls._add_missing_columns(
+                connection,
+                "gateway_budget_reservations",
+                {"organization_id": "TEXT NOT NULL DEFAULT 'organization'"},
+            )
+            return
+        raise StorageSchemaError("storage_schema_migration_unsupported")
 
     @staticmethod
     def _add_missing_columns(
@@ -368,6 +455,7 @@ class UsageStore:
         now = datetime.now(timezone.utc)
         now_value = now.isoformat()
         month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat()
+        organization_id = identity.organization_id
         reservation_id = str(uuid.uuid4())
         with self._lock, self._connection() as connection:
             connection.execute("BEGIN IMMEDIATE")
@@ -376,10 +464,10 @@ class UsageStore:
                 (now_value,),
             )
             for scope in constrained:
-                usage_clauses = ["occurred_at >= ?"]
-                reservation_clauses = ["expires_at > ?"]
-                usage_parameters: list[object] = [month_start]
-                reservation_parameters: list[object] = [now_value]
+                usage_clauses = ["organization_id = ?", "occurred_at >= ?"]
+                reservation_clauses = ["organization_id = ?", "expires_at > ?"]
+                usage_parameters: list[object] = [organization_id, month_start]
+                reservation_parameters: list[object] = [organization_id, now_value]
                 if scope.actor_id is not None:
                     usage_clauses.append("actor_id = ?")
                     reservation_clauses.append("actor_id = ?")
@@ -425,14 +513,15 @@ class UsageStore:
             connection.execute(
                 """
                 INSERT INTO gateway_budget_reservations (
-                    id, created_at, expires_at, actor_id, team_id,
+                    id, created_at, expires_at, organization_id, actor_id, team_id,
                     reserved_tokens, reserved_cost_microusd
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     reservation_id,
                     now_value,
                     (now + timedelta(seconds=max(1, ttl_seconds))).isoformat(),
+                    organization_id,
                     identity.actor_id,
                     identity.team_id,
                     max(0, reserved_tokens),
@@ -441,38 +530,73 @@ class UsageStore:
             )
         return reservation_id
 
-    def release_budget_reservation(self, reservation_id: str | None) -> None:
+    def release_budget_reservation(
+        self,
+        reservation_id: str | None,
+        *,
+        organization_id: str | None = None,
+    ) -> None:
         if reservation_id is None:
             return
         with self._lock, self._connection() as connection:
+            clauses = ["id = ?"]
+            parameters: list[object] = [reservation_id]
+            if organization_id is not None:
+                clauses.append("organization_id = ?")
+                parameters.append(organization_id)
             connection.execute(
-                "DELETE FROM gateway_budget_reservations WHERE id = ?",
-                (reservation_id,),
+                f"DELETE FROM gateway_budget_reservations WHERE {' AND '.join(clauses)}",
+                parameters,
             )
 
-    def refresh_budget_reservation(self, reservation_id: str | None, *, ttl_seconds: int) -> None:
+    def refresh_budget_reservation(
+        self,
+        reservation_id: str | None,
+        *,
+        ttl_seconds: int,
+        organization_id: str | None = None,
+    ) -> None:
         if reservation_id is None:
             return
         expires_at = (datetime.now(timezone.utc) + timedelta(seconds=max(1, ttl_seconds))).isoformat()
         with self._lock, self._connection() as connection:
+            clauses = ["id = ?"]
+            parameters: list[object] = [expires_at, reservation_id]
+            if organization_id is not None:
+                clauses.append("organization_id = ?")
+                parameters.append(organization_id)
             connection.execute(
-                "UPDATE gateway_budget_reservations SET expires_at = ? WHERE id = ?",
-                (expires_at, reservation_id),
+                f"UPDATE gateway_budget_reservations SET expires_at = ? WHERE {' AND '.join(clauses)}",
+                parameters,
             )
 
-    def active_budget_reservations(self) -> int:
+    def active_budget_reservations(self, *, organization_id: str | None = None) -> int:
         now = datetime.now(timezone.utc).isoformat()
         with self._lock, self._connection() as connection:
+            clauses = ["expires_at > ?"]
+            parameters: list[object] = [now]
+            if organization_id is not None:
+                clauses.append("organization_id = ?")
+                parameters.append(organization_id)
             row = connection.execute(
-                "SELECT COUNT(*) AS count FROM gateway_budget_reservations WHERE expires_at > ?",
-                (now,),
+                f"SELECT COUNT(*) AS count FROM gateway_budget_reservations WHERE {' AND '.join(clauses)}",
+                parameters,
             ).fetchone()
         return int(row["count"])
 
-    def monthly_totals(self, *, actor_id: str | None = None, team_id: str | None = None) -> MonthlyTotals:
+    def monthly_totals(
+        self,
+        *,
+        actor_id: str | None = None,
+        team_id: str | None = None,
+        organization_id: str | None = None,
+    ) -> MonthlyTotals:
         start = datetime.now(timezone.utc).replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat()
         clauses = ["occurred_at >= ?"]
         parameters: list[object] = [start]
+        if organization_id is not None:
+            clauses.append("organization_id = ?")
+            parameters.append(organization_id)
         if actor_id is not None:
             clauses.append("actor_id = ?")
             parameters.append(actor_id)
@@ -498,11 +622,16 @@ class UsageStore:
             row = connection.execute(query, parameters).fetchone()
         return MonthlyTotals(**dict(row))
 
-    def summary_rows(self) -> list[dict[str, object]]:
+    def summary_rows(self, *, organization_id: str | None = None) -> list[dict[str, object]]:
         start = datetime.now(timezone.utc).replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat()
+        clauses = ["occurred_at >= ?"]
+        parameters: list[object] = [start]
+        if organization_id is not None:
+            clauses.append("organization_id = ?")
+            parameters.append(organization_id)
         with self._lock, self._connection() as connection:
             rows = connection.execute(
-                """
+                f"""
                 SELECT actor_id, actor_name, team_id, team_name, client, protocol,
                        COUNT(*) AS requests,
                        COALESCE(SUM(input_tokens + output_tokens), 0) AS tokens,
@@ -510,11 +639,11 @@ class UsageStore:
                        SUM(CASE WHEN status = 'denied' THEN 1 ELSE 0 END) AS denied,
                        COALESCE(SUM(redaction_count), 0) AS redactions
                 FROM gateway_usage_events
-                WHERE occurred_at >= ?
+                WHERE {' AND '.join(clauses)}
                 GROUP BY actor_id, actor_name, team_id, team_name, client, protocol
                 ORDER BY cost_microusd DESC, tokens DESC
                 """,
-                (start,),
+                parameters,
             ).fetchall()
         return [dict(row) for row in rows]
 
@@ -524,6 +653,7 @@ class UsageStore:
         group_by: str,
         actor_id: str | None = None,
         team_id: str | None = None,
+        organization_id: str | None = None,
     ) -> list[dict[str, object]]:
         dimensions: dict[str, tuple[list[str], list[str]]] = {
             "organization": (
@@ -568,6 +698,9 @@ class UsageStore:
         start = datetime.now(timezone.utc).replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat()
         clauses = ["occurred_at >= ?"]
         parameters: list[object] = [start]
+        if organization_id is not None:
+            clauses.append("organization_id = ?")
+            parameters.append(organization_id)
         if actor_id is not None:
             clauses.append("actor_id = ?")
             parameters.append(actor_id)
@@ -606,10 +739,14 @@ class UsageStore:
         *,
         actor_id: str | None = None,
         team_id: str | None = None,
+        organization_id: str | None = None,
     ) -> SecretTotals:
         start = datetime.now(timezone.utc).replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat()
         clauses = ["occurred_at >= ?"]
         parameters: list[object] = [start]
+        if organization_id is not None:
+            clauses.append("organization_id = ?")
+            parameters.append(organization_id)
         if actor_id is not None:
             clauses.append("actor_id = ?")
             parameters.append(actor_id)
@@ -629,15 +766,26 @@ class UsageStore:
             row = connection.execute(query, parameters).fetchone()
         return SecretTotals(**dict(row))
 
-    def audit_events(self, *, since: str, kind: str = "all") -> list[dict[str, object]]:
+    def audit_events(
+        self,
+        *,
+        since: str,
+        kind: str = "all",
+        organization_id: str | None = None,
+    ) -> list[dict[str, object]]:
         if kind not in {"all", "usage", "security"}:
             raise ValueError(f"Unsupported audit event kind: {kind}")
         events: list[dict[str, object]] = []
         with self._lock, self._connection() as connection:
             connection.execute("BEGIN")
+            usage_clauses = ["occurred_at >= ?"]
+            usage_parameters: list[object] = [since]
+            if organization_id is not None:
+                usage_clauses.append("organization_id = ?")
+                usage_parameters.append(organization_id)
             if kind in {"all", "usage"}:
                 rows = connection.execute(
-                    """
+                    f"""
                     SELECT
                         id, occurred_at, evidence_schema_id, evidence_schema_version,
                         organization_id, actor_id, actor_name, team_id, team_name,
@@ -649,48 +797,28 @@ class UsageStore:
                         provider_request_id, redaction_count,
                         redaction_rules
                     FROM gateway_usage_events
-                    WHERE occurred_at >= ?
+                    WHERE {' AND '.join(usage_clauses)}
                     ORDER BY occurred_at, id
                     """,
-                    (since,),
+                    usage_parameters,
                 ).fetchall()
                 for row in rows:
-                    stored = dict(row)
-                    stored["redaction_rules"] = json.loads(str(stored["redaction_rules"]))
-                    event = {
-                        "schema_id": stored.pop("evidence_schema_id"),
-                        "schema_version": stored.pop("evidence_schema_version"),
-                        "event_type": "usage",
-                        **stored,
-                        "routed_model": stored["upstream_model"],
-                    }
-                    del event["upstream_model"]
-                    validate_audit_event(event)
-                    events.append(event)
+                    events.append(usage_audit_event(dict(row)))
             if kind in {"all", "security"}:
                 rows = connection.execute(
-                    """
+                    f"""
                     SELECT
                         id, occurred_at, evidence_schema_id, evidence_schema_version,
                         organization_id, actor_id, actor_name, team_id, team_name,
                         identity_type, authentication_source, client, protocol, requested_model,
                         policy_version, coverage, action, detection_count, rules
                     FROM gateway_secret_events
-                    WHERE occurred_at >= ?
+                    WHERE {' AND '.join(usage_clauses)}
                     ORDER BY occurred_at, id
                     """,
-                    (since,),
+                    usage_parameters,
                 ).fetchall()
                 for row in rows:
-                    event = dict(row)
-                    event["rules"] = json.loads(str(event["rules"]))
-                    event = {
-                        "schema_id": event.pop("evidence_schema_id"),
-                        "schema_version": event.pop("evidence_schema_version"),
-                        "event_type": "security.secret",
-                        **event,
-                    }
-                    validate_audit_event(event)
-                    events.append(event)
+                    events.append(security_audit_event(dict(row)))
         events.sort(key=lambda event: (str(event["occurred_at"]), str(event["id"])))
         return events

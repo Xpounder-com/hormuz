@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+import shutil
 import tempfile
 import threading
 import unittest
@@ -8,7 +9,8 @@ from pathlib import Path
 
 from hormuz.config import Identity
 from hormuz.contracts import validate_audit_event
-from hormuz.store import ReservationDenied, ReservationScope, UsageStore
+from hormuz.evidence import EvidenceStorageError
+from hormuz.store import ReservationDenied, ReservationScope, StorageSchemaError, UsageStore
 
 
 class UsageStoreMigrationTests(unittest.TestCase):
@@ -42,6 +44,33 @@ class UsageStoreMigrationTests(unittest.TestCase):
                 )
                 """
             )
+            connection.execute(
+                """
+                INSERT INTO gateway_usage_events (
+                    id, occurred_at, actor_id, actor_name, team_id, team_name,
+                    client, protocol, requested_model, resolved_alias, upstream_model,
+                    policy_action, status, input_tokens, output_tokens, provider_request_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "legacy-usage",
+                    "2026-08-01T00:00:00+00:00",
+                    "legacy-alice",
+                    "Legacy Alice",
+                    "engineering",
+                    "Engineering",
+                    "codex",
+                    "openai",
+                    "gpt-test",
+                    "gpt-test",
+                    "gpt-test",
+                    "allowed",
+                    "succeeded",
+                    12,
+                    3,
+                    "legacy-provider-request",
+                ),
+            )
             connection.commit()
             connection.close()
 
@@ -68,7 +97,8 @@ class UsageStoreMigrationTests(unittest.TestCase):
             )
 
             self.assertEqual(store.monthly_totals().redaction_count, 2)
-            self.assertEqual(store.summary_rows()[0]["redactions"], 2)
+            summary = {row["actor_id"]: row for row in store.summary_rows()}
+            self.assertEqual(summary["alice"]["redactions"], 2)
             store.record_secret_event(
                 identity=identity,
                 client="codex",
@@ -93,17 +123,23 @@ class UsageStoreMigrationTests(unittest.TestCase):
             connection.close()
 
             audit = store.audit_events(since="2000-01-01T00:00:00+00:00")
-            self.assertEqual([event["event_type"] for event in audit], ["usage", "security.secret"])
-            self.assertEqual([event["schema_version"] for event in audit], [2, 2])
+            self.assertEqual(
+                [event["event_type"] for event in audit],
+                ["usage", "usage", "security.secret"],
+            )
+            self.assertEqual([event["schema_version"] for event in audit], [2, 2, 2])
             self.assertEqual(audit[0]["schema_id"], "hormuz.audit-event")
-            self.assertEqual(audit[0]["redaction_rules"], ["openai_api_key"])
-            self.assertEqual(audit[1]["rules"], ["openai_api_key"])
+            self.assertEqual(audit[0]["actor_id"], "legacy-alice")
+            self.assertEqual(audit[0]["redaction_rules"], [])
+            self.assertEqual(audit[1]["redaction_rules"], ["openai_api_key"])
+            self.assertEqual(audit[2]["rules"], ["openai_api_key"])
             self.assertEqual(audit[0]["organization_id"], "organization")
             self.assertEqual(audit[0]["identity_type"], "human")
             self.assertEqual(audit[0]["cost_basis"], "configured_rate_card_estimate")
             self.assertIsNone(audit[0]["provider_reported_model"])
             validate_audit_event(audit[0])
             validate_audit_event(audit[1])
+            validate_audit_event(audit[2])
             connection = sqlite3.connect(path)
             usage_schema = connection.execute(
                 "SELECT evidence_schema_id, evidence_schema_version FROM gateway_usage_events"
@@ -123,7 +159,7 @@ class UsageStoreMigrationTests(unittest.TestCase):
                     since="2000-01-01T00:00:00+00:00",
                     kind="usage",
                 )],
-                ["usage"],
+                ["usage", "usage"],
             )
             self.assertEqual(
                 [event["event_type"] for event in store.audit_events(
@@ -281,6 +317,202 @@ class UsageStoreMigrationTests(unittest.TestCase):
             self.assertEqual(stores[0].active_budget_reservations(), 1)
             stores[0].release_budget_reservation(allowed_id)
             self.assertEqual(stores[1].active_budget_reservations(), 0)
+
+    def test_unsafe_rollback_fails_closed_without_mutating_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "usage.sqlite3"
+            identity = Identity(
+                token_env="TEST_TOKEN",
+                token="employee-token-long",
+                actor_id="alice",
+                actor_name="Alice",
+                team_id="engineering",
+                team_name="Engineering",
+                organization_id="acme",
+            )
+            store = UsageStore(path)
+            store.record(
+                identity=identity,
+                client="codex",
+                protocol="openai",
+                requested_model="gpt-test",
+                resolved_alias="gpt-test",
+                upstream_model="gpt-test",
+                policy_action="allowed",
+                status="succeeded",
+            )
+            before = store.audit_events(since="2000-01-01T00:00:00+00:00")
+
+            with self.assertRaises(StorageSchemaError) as raised:
+                UsageStore(path, maximum_supported_schema_version=1)
+            self.assertEqual(raised.exception.code, "storage_schema_newer_than_binary")
+
+            after = UsageStore(path).audit_events(since="2000-01-01T00:00:00+00:00")
+            self.assertEqual(after, before)
+
+    def test_partial_upgrade_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "usage.sqlite3"
+            connection = sqlite3.connect(path)
+            connection.execute(
+                "CREATE TABLE hormuz_schema_migrations (version INTEGER PRIMARY KEY, state TEXT NOT NULL, applied_at TEXT)"
+            )
+            connection.execute(
+                "INSERT INTO hormuz_schema_migrations (version, state) VALUES (1, 'applying')"
+            )
+            connection.commit()
+            connection.close()
+
+            with self.assertRaises(StorageSchemaError) as raised:
+                UsageStore(path)
+            self.assertEqual(raised.exception.code, "storage_schema_partial_upgrade")
+
+    def test_backup_restore_recovers_from_a_partial_upgrade_without_evidence_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "usage.sqlite3"
+            backup = Path(temporary) / "usage-before-upgrade.sqlite3"
+            identity = Identity(
+                token_env="TEST_TOKEN",
+                token="employee-token-long",
+                actor_id="alice",
+                actor_name="Alice",
+                team_id="engineering",
+                team_name="Engineering",
+                organization_id="acme",
+            )
+            store = UsageStore(path)
+            store.record(
+                identity=identity,
+                client="codex",
+                protocol="openai",
+                requested_model="gpt-test",
+                resolved_alias="gpt-test",
+                upstream_model="gpt-test",
+                policy_action="allowed",
+                status="succeeded",
+            )
+            expected = store.audit_events(since="2000-01-01T00:00:00+00:00")
+            shutil.copy2(path, backup)
+
+            connection = sqlite3.connect(path)
+            connection.execute("UPDATE hormuz_schema_migrations SET state = 'applying' WHERE version = 2")
+            connection.commit()
+            connection.close()
+            with self.assertRaises(StorageSchemaError):
+                UsageStore(path)
+
+            shutil.copy2(backup, path)
+            recovered = UsageStore(path)
+            self.assertEqual(
+                recovered.audit_events(since="2000-01-01T00:00:00+00:00"),
+                expected,
+            )
+
+    def test_tenant_scoped_usage_and_reservations_do_not_mix(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            store = UsageStore(Path(temporary) / "usage.sqlite3")
+            acme = Identity(
+                token_env="ACME_TOKEN",
+                token="acme-employee-token",
+                actor_id="alice",
+                actor_name="Alice",
+                team_id="engineering",
+                team_name="Engineering",
+                organization_id="acme",
+            )
+            beta = Identity(
+                token_env="BETA_TOKEN",
+                token="beta-employee-token",
+                actor_id="alice",
+                actor_name="Alice",
+                team_id="engineering",
+                team_name="Engineering",
+                organization_id="beta",
+            )
+            for identity in (acme, beta):
+                store.record(
+                    identity=identity,
+                    client="codex",
+                    protocol="openai",
+                    requested_model="gpt-test",
+                    resolved_alias="gpt-test",
+                    upstream_model="gpt-test",
+                    policy_action="allowed",
+                    status="succeeded",
+                    input_tokens=100,
+                    cost_microusd=400,
+                )
+            self.assertEqual(store.monthly_totals(organization_id="acme").requests, 1)
+            self.assertEqual(store.monthly_totals(organization_id="beta").requests, 1)
+            self.assertEqual(store.report_rows(group_by="organization", organization_id="acme")[0]["cost_microusd"], 400)
+
+            scope = ReservationScope(name="organization", cost_limit_microusd=1_000)
+            acme_reservation = store.reserve_budget(
+                identity=acme,
+                scopes=(scope,),
+                reserved_tokens=1,
+                reserved_cost_microusd=600,
+                ttl_seconds=60,
+            )
+            beta_reservation = store.reserve_budget(
+                identity=beta,
+                scopes=(scope,),
+                reserved_tokens=1,
+                reserved_cost_microusd=600,
+                ttl_seconds=60,
+            )
+            self.assertIsNotNone(acme_reservation)
+            self.assertIsNotNone(beta_reservation)
+            self.assertEqual(store.active_budget_reservations(organization_id="acme"), 1)
+            self.assertEqual(store.active_budget_reservations(organization_id="beta"), 1)
+            store.release_budget_reservation(acme_reservation, organization_id="beta")
+            self.assertEqual(store.active_budget_reservations(organization_id="acme"), 1)
+
+    def test_historical_v1_and_malformed_evidence_are_handled_without_content_leakage(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "usage.sqlite3"
+            store = UsageStore(path)
+            identity = Identity(
+                token_env="TEST_TOKEN",
+                token="employee-token-long",
+                actor_id="alice",
+                actor_name="Alice",
+                team_id="engineering",
+                team_name="Engineering",
+            )
+            event_id = store.record(
+                identity=identity,
+                client="codex",
+                protocol="openai",
+                requested_model="gpt-test",
+                resolved_alias="gpt-test",
+                upstream_model="gpt-test",
+                policy_action="allowed",
+                status="succeeded",
+            )
+            connection = sqlite3.connect(path)
+            connection.execute(
+                "UPDATE gateway_usage_events SET evidence_schema_version = 1 WHERE id = ?",
+                (event_id,),
+            )
+            connection.commit()
+            connection.close()
+            historical = store.audit_events(since="2000-01-01T00:00:00+00:00")
+            self.assertEqual(historical[0]["schema_version"], 1)
+            self.assertNotIn("schema_id", historical[0])
+            validate_audit_event(historical[0])
+
+            connection = sqlite3.connect(path)
+            connection.execute(
+                "UPDATE gateway_usage_events SET evidence_schema_version = 2, redaction_rules = ? WHERE id = ?",
+                ('["must-not-leak", 1]', event_id),
+            )
+            connection.commit()
+            connection.close()
+            with self.assertRaises(EvidenceStorageError) as raised:
+                store.audit_events(since="2000-01-01T00:00:00+00:00")
+            self.assertEqual(raised.exception.code, "stored_evidence_malformed")
+            self.assertNotIn("must-not-leak", str(raised.exception))
 
 
 if __name__ == "__main__":

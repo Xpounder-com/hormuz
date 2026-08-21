@@ -1,7 +1,8 @@
 # ADR 0002: Enterprise tenancy, authorization, and persistence
 
-- Status: **Proposed — owner approval required**
+- Status: **Accepted**
 - Date proposed: 2026-08-15
+- Date accepted: 2026-08-20
 - Decision owner: Product owner
 - Tracking issue: [#1](https://github.com/Xpounder-com/hormuz/issues/1)
 - Unblocks after acceptance: [#6](https://github.com/Xpounder-com/hormuz/issues/6), [#7](https://github.com/Xpounder-com/hormuz/issues/7), [#4](https://github.com/Xpounder-com/hormuz/issues/4)
@@ -15,7 +16,7 @@ Choose the authorization and persistence topology before Hormuz creates a stable
 3. **Application-filtered shared database.** Simpler initially, but a missed predicate can become a cross-tenant disclosure.
 4. **SQLite as the production store.** Preserve today's local topology and defer shared enterprise semantics.
 
-This ADR proposes option 1. It is not accepted and does not authorize a stable migration contract until the product owner approves it.
+The product owner accepted option 1 on August 20, 2026. The approved direction is recorded in [issue #1](https://github.com/Xpounder-com/hormuz/issues/1#issuecomment-5355712147). Acceptance authorizes the tenancy and persistence direction; the implementation, recovery, and operational evidence listed below remain separate release gates.
 
 ## Background
 
@@ -130,13 +131,13 @@ This reduces database complexity but makes one missing predicate a security inci
 
 This is excellent for local development but does not satisfy the hosted concurrency, migration, HA, restore, or row-security contract. Rejected for enterprise production.
 
-## Consequences if accepted
+## Consequences
 
 - PostgreSQL becomes the production source of truth for control-plane, identity, usage, and audit metadata behind repository interfaces.
 - Every new persistence feature must prove tenant scope across SQL, jobs, exports, and audit.
 - The standard hosted tier can be operated economically, while regulated customers can buy a dedicated boundary without a separate codebase.
 - Tenant-level restore in a shared database requires purpose-built export/replay tooling and drills.
-- The schema and authorization capability model become high-cost-to-change contracts; implementation waits for owner approval.
+- The schema and authorization capability model become high-cost-to-change contracts; implementation must preserve this approved direction or explicitly supersede the ADR.
 
 ## Verification required
 
@@ -153,8 +154,6 @@ Acceptance of this ADR does not prove the implementation. Issue #6 closes only w
 
 ## Owner approval record
 
-Pending. To accept, the product owner must approve either:
+The product owner approved **A — hybrid shared-schema PostgreSQL plus a dedicated database/deployment option** on August 20, 2026. The [recorded approval](https://github.com/Xpounder-com/hormuz/issues/1#issuecomment-5355712147) requires mandatory immutable tenant keys, application-enforced scoping, FORCE ROW LEVEL SECURITY, a non-owner runtime role without BYPASSRLS, and a transaction-local verified tenant context for the shared-schema hosted service. Customers needing stronger isolation or residency may use the same logical schema in a dedicated database and deployment boundary. SQLite remains local single-tenant development/test storage rather than production evidence.
 
-- **A — hybrid shared-schema PostgreSQL plus a dedicated database/deployment option (recommended)**, or
-- **B — database per tenant only**, or
-- another explicitly described topology.
+The approval deliberately does not claim implementation, migration, pooled-connection isolation, backup/PITR, HA, KMS, or independent-review completion. Those remain tracked implementation and production-readiness gates.

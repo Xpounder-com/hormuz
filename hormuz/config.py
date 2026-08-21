@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import hashlib
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -11,6 +12,10 @@ from urllib.parse import urlparse
 
 class ConfigError(ValueError):
     pass
+
+
+_ENVIRONMENT_NAME_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
+_POSTGRES_IDENTIFIER_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 
 
 _DEPRECATED_CONTEXT_CONFIGURATION_KEYS = frozenset(
@@ -54,6 +59,22 @@ class SecretControls:
     builtins: bool = True
     custom_secret_envs: tuple[str, ...] = ()
     custom_secret_values: tuple[tuple[str, str], ...] = field(default=(), repr=False)
+
+
+@dataclass(frozen=True)
+class UsageStorageConfig:
+    """Configuration for the metadata-only usage and audit repository.
+
+    SQLite remains the default local adapter. PostgreSQL is deliberately
+    opt-in and reads its DSNs from process environment variables so a
+    connection credential never needs to appear in the Hormuz JSON file.
+    """
+
+    backend: str = "sqlite"
+    postgres_dsn_env: str = "HORMUZ_POSTGRES_DSN"
+    postgres_migration_dsn_env: str = "HORMUZ_POSTGRES_MIGRATION_DSN"
+    postgres_schema: str = "hormuz"
+    postgres_runtime_role: str = "hormuz_runtime"
 
 
 @dataclass(frozen=True)
@@ -165,6 +186,7 @@ class GatewayConfig:
     actor_policies: dict[str, Policy] = field(default_factory=dict)
     max_request_bytes: int = 25 * 1024 * 1024
     upstream_timeout_seconds: int = 600
+    usage_storage: UsageStorageConfig = field(default_factory=UsageStorageConfig)
 
     @classmethod
     def load(cls, path: str | Path, *, environ: dict[str, str] | None = None) -> "GatewayConfig":
@@ -188,6 +210,46 @@ class GatewayConfig:
         database_path = Path(database_value).expanduser()
         if not database_path.is_absolute():
             database_path = (source_path.parent / database_path).resolve()
+
+        usage_storage_raw = _object(raw.get("usage_storage", {}), "usage_storage")
+        unsupported_storage_fields = set(usage_storage_raw).difference(
+            {
+                "backend",
+                "postgres_dsn_env",
+                "postgres_migration_dsn_env",
+                "postgres_schema",
+                "postgres_runtime_role",
+            }
+        )
+        if unsupported_storage_fields:
+            raise ConfigError(
+                "usage_storage contains unsupported fields: "
+                + ", ".join(sorted(str(field) for field in unsupported_storage_fields))
+            )
+        usage_backend = _string(usage_storage_raw.get("backend", "sqlite"), "usage_storage.backend")
+        if usage_backend not in {"sqlite", "postgresql"}:
+            raise ConfigError("usage_storage.backend must be sqlite or postgresql")
+        postgres_dsn_env = _environment_name(
+            usage_storage_raw.get("postgres_dsn_env", "HORMUZ_POSTGRES_DSN"),
+            "usage_storage.postgres_dsn_env",
+        )
+        postgres_migration_dsn_env = _environment_name(
+            usage_storage_raw.get("postgres_migration_dsn_env", "HORMUZ_POSTGRES_MIGRATION_DSN"),
+            "usage_storage.postgres_migration_dsn_env",
+        )
+        postgres_schema = _postgres_identifier(
+            usage_storage_raw.get("postgres_schema", "hormuz"),
+            "usage_storage.postgres_schema",
+        )
+        postgres_runtime_role = _postgres_identifier(
+            usage_storage_raw.get("postgres_runtime_role", "hormuz_runtime"),
+            "usage_storage.postgres_runtime_role",
+        )
+        if usage_backend == "postgresql" and postgres_dsn_env == postgres_migration_dsn_env:
+            raise ConfigError(
+                "usage_storage.postgres_dsn_env and usage_storage.postgres_migration_dsn_env "
+                "must name separate credentials"
+            )
 
         upstreams_raw = _object(raw.get("upstreams"), "upstreams")
         upstreams: dict[str, UpstreamConfig] = {}
@@ -394,6 +456,13 @@ class GatewayConfig:
             actor_policies=actor_policies,
             max_request_bytes=_integer(raw.get("max_request_bytes", 25 * 1024 * 1024), "max_request_bytes", minimum=1024),
             upstream_timeout_seconds=_integer(raw.get("upstream_timeout_seconds", 600), "upstream_timeout_seconds", minimum=1),
+            usage_storage=UsageStorageConfig(
+                backend=usage_backend,
+                postgres_dsn_env=postgres_dsn_env,
+                postgres_migration_dsn_env=postgres_migration_dsn_env,
+                postgres_schema=postgres_schema,
+                postgres_runtime_role=postgres_runtime_role,
+            ),
         )
         config.validate_references()
         return config
@@ -435,6 +504,19 @@ class GatewayConfig:
         for identity in (*self.identities_by_token.values(), *self.identities_by_subject.values()):
             result.setdefault(identity.actor_id, identity)
         return result
+
+    @property
+    def organization_ids(self) -> tuple[str, ...]:
+        """Return the distinct configured organization IDs in stable order."""
+
+        return tuple(
+            sorted(
+                {
+                    identity.organization_id
+                    for identity in (*self.identities_by_token.values(), *self.identities_by_subject.values())
+                }
+            )
+        )
 
     def identity_for_subject(self, issuer: str, subject: str) -> Identity | None:
         return self.identities_by_subject.get((issuer, subject))
@@ -671,6 +753,20 @@ def _boolean(value: Any, path: str) -> bool:
     if not isinstance(value, bool):
         raise ConfigError(f"{path} must be a boolean")
     return value
+
+
+def _environment_name(value: Any, path: str) -> str:
+    result = _string(value, path)
+    if _ENVIRONMENT_NAME_PATTERN.fullmatch(result) is None:
+        raise ConfigError(f"{path} must be a safe environment variable name")
+    return result
+
+
+def _postgres_identifier(value: Any, path: str) -> str:
+    result = _string(value, path)
+    if _POSTGRES_IDENTIFIER_PATTERN.fullmatch(result) is None:
+        raise ConfigError(f"{path} must be a safe PostgreSQL identifier")
+    return result
 
 
 def _optional_string(value: Any, path: str) -> str | None:

@@ -5,6 +5,7 @@ import hashlib
 import json
 import logging
 import os
+import sqlite3
 import shlex
 import signal
 import sys
@@ -14,6 +15,7 @@ from urllib.parse import urlparse
 
 from .auth import AuthenticationError, Authenticator
 from .config import ConfigError, GatewayConfig
+from .evidence import EvidenceStorageError
 from .contracts import (
     ALLOCATION_BASIS_DIRECT_GATEWAY_REQUEST,
     COST_BASIS_CONFIGURED_RATE_CARD_ESTIMATE,
@@ -24,8 +26,10 @@ from .contracts import (
     contract_manifest,
 )
 from .policy import PolicyEngine
+from .postgres import PostgresStorageError, migrate_postgres
 from .server import GatewayServer
-from .store import UsageStore
+from .store import StorageSchemaError
+from .store_router import create_usage_store, postgres_migration_dsn
 
 
 _DEPRECATED_CONTEXT_COMMANDS = frozenset({"context-pack"})
@@ -92,6 +96,14 @@ def build_parser() -> argparse.ArgumentParser:
     audit.add_argument("--output", default="-", help="Output path or - for stdout (default: -)")
     audit.add_argument("--force", action="store_true", help="Allow replacing an existing output file")
 
+    storage = subparsers.add_parser("storage", help="Verify or migrate the metadata-only usage store")
+    storage_subparsers = storage.add_subparsers(dest="storage_command", required=True)
+    storage_subparsers.add_parser("verify", help="Verify the configured store is safe for this binary")
+    storage_subparsers.add_parser(
+        "migrate",
+        help="Apply bundled PostgreSQL usage-evidence migrations with the operator migration credential",
+    )
+
     return parser
 
 
@@ -130,8 +142,16 @@ def main(argv: list[str] | None = None) -> int:
             )
         if args.command == "audit-export":
             return _audit_export(config, args)
+        if args.command == "storage":
+            return _storage(config, args)
     except ConfigError as error:
         print(f"configuration error: {error}", file=sys.stderr)
+        return 2
+    except (EvidenceStorageError, PostgresStorageError, StorageSchemaError) as error:
+        print(f"storage error: {error.code}", file=sys.stderr)
+        return 2
+    except (OSError, sqlite3.Error):
+        print("storage error: storage_unavailable", file=sys.stderr)
         return 2
     except KeyboardInterrupt:
         return 130
@@ -179,7 +199,7 @@ def _serve(config: GatewayConfig) -> int:
     server = GatewayServer(config)
     print(f"Hormuz listening on http://{config.listen.host}:{config.listen.port}")
     print("Protocols: POST /v1/responses and POST /v1/messages")
-    print(f"Usage database: {config.database_path}")
+    print(f"Usage storage: {config.usage_storage.backend}")
 
     def stop(_signum, _frame):
         server.shutdown()
@@ -201,7 +221,9 @@ def _doctor(config: GatewayConfig) -> int:
     print(f"OIDC subject mappings: {len(config.identities_by_subject)}")
     print(f"model routes: {len(config.model_routes)}")
     print(f"secret egress control: {config.secret_controls.mode}")
-    print(f"usage database: {config.database_path}")
+    print(f"usage storage: {config.usage_storage.backend}")
+    create_usage_store(config)
+    print("usage storage: verified")
     if config.oidc_issuers:
         try:
             metadata = Authenticator(config).validate_metadata()
@@ -220,10 +242,11 @@ def _doctor(config: GatewayConfig) -> int:
 
 
 def _status(config: GatewayConfig, args: argparse.Namespace) -> int:
-    rows = UsageStore(config.database_path).report_rows(
+    rows = create_usage_store(config).report_rows(
         group_by=args.group_by,
         actor_id=args.actor,
         team_id=args.team,
+        organization_id=_required_organization(config),
     )
     report = []
     for row in rows:
@@ -332,7 +355,7 @@ def _policy_check(config: GatewayConfig, args: argparse.Namespace) -> int:
     if identity is None:
         print(f"unknown actor: {args.actor}", file=sys.stderr)
         return 2
-    store = UsageStore(config.database_path)
+    store = create_usage_store(config)
     decision = PolicyEngine(config, store).evaluate(
         identity=identity,
         client=args.client,
@@ -501,7 +524,11 @@ def _audit_export(config: GatewayConfig, args: argparse.Namespace) -> int:
     except ValueError as error:
         print(f"invalid --since: {error}", file=sys.stderr)
         return 2
-    events = UsageStore(config.database_path).audit_events(since=since, kind=args.kind)
+    events = create_usage_store(config).audit_events(
+        since=since,
+        kind=args.kind,
+        organization_id=_required_organization(config),
+    )
     stream = sys.stdout
     should_close = False
     output_path: Path | None = None
@@ -564,6 +591,36 @@ def _missing_upstream_credentials(config: GatewayConfig) -> list[str]:
         for protocol, upstream in config.upstreams.items()
         if not os.environ.get(upstream.api_key_env)
     ]
+
+
+def _required_organization(config: GatewayConfig) -> str:
+    organization_ids = config.organization_ids
+    if len(organization_ids) != 1:
+        raise ConfigError(
+            "usage reporting and audit export require exactly one configured organization; "
+            "use a tenant-scoped configuration"
+        )
+    return organization_ids[0]
+
+
+def _storage(config: GatewayConfig, args: argparse.Namespace) -> int:
+    if args.storage_command == "verify":
+        create_usage_store(config)
+        print(f"usage storage verified: {config.usage_storage.backend}")
+        return 0
+    if args.storage_command == "migrate":
+        if config.usage_storage.backend == "sqlite":
+            create_usage_store(config)
+            print("SQLite usage storage migration is current")
+            return 0
+        status = migrate_postgres(
+            postgres_migration_dsn(config),
+            schema=config.usage_storage.postgres_schema,
+            runtime_role=config.usage_storage.postgres_runtime_role,
+        )
+        print(f"PostgreSQL usage storage migration is current: v{status.version}")
+        return 0
+    raise ConfigError("unsupported storage command")
 
 
 if __name__ == "__main__":

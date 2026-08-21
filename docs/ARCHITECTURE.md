@@ -22,7 +22,7 @@ OpenAI Responses API / Anthropic Messages API
         +--> stream response to the original client
         +--> parse provider usage metadata without retaining content
         v
-SQLite usage ledger
+Usage/evidence repository (SQLite by default; PostgreSQL optional)
 ```
 
 ## Code boundaries
@@ -31,7 +31,7 @@ SQLite usage ledger
 - `hormuz/auth.py` verifies bootstrap or OIDC JWT credentials and resolves them to configured policy identities.
 - `hormuz/config.py` validates configuration and defines identity, route, rate-card, and policy data.
 - `hormuz/policy.py` evaluates access, fallback, caps, and budgets without transport concerns.
-- `hormuz/store.py` owns the SQLite schema and monthly aggregations.
+- `hormuz/store.py` owns the SQLite schema and monthly aggregations; `hormuz/postgres_usage_store.py` implements the same narrow usage/evidence repository with transaction-local organization scope and PostgreSQL RLS.
 - `hormuz/usage.py` parses provider usage metadata without storing response content.
 - `hormuz/redaction.py` transforms provider-bound JSON values using configured secret controls.
 - `hormuz/cli.py` exposes serving, diagnostics, policy checks, client configuration, and usage reporting.

@@ -15,6 +15,7 @@ from pathlib import Path
 from hormuz.config import GatewayConfig, Policy
 from hormuz.contracts import relay_contract_header, validate_audit_event, validate_contract
 from hormuz.policy import PolicyEngine
+from hormuz.postgres import PostgresStorageError
 from hormuz.server import GatewayServer, serve_in_thread
 from hormuz.store import UsageStore
 
@@ -336,8 +337,37 @@ class GatewayIntegrationTests(unittest.TestCase):
             token="wrong-token",
         )
         self.assertEqual(status, 401)
-        self.assertEqual(headers["x-hormuz-contract"], "hormuz.gateway-error;v=1")
+        self.assertEqual(headers["x-hormuz-contract"], "hormuz.gateway-error;v=2")
         validate_contract(json.loads(body))
+
+    def test_storage_interruption_fails_closed_before_provider_egress_without_content_leakage(self) -> None:
+        class UnavailableStore:
+            def monthly_totals(self, **_kwargs):
+                raise PostgresStorageError("storage_unavailable")
+
+        unavailable_store = UnavailableStore()
+        self.gateway.store = unavailable_store
+        self.gateway.policy_engine.store = unavailable_store
+        before = len(FakeProviderHandler.requests)
+        request_content = "company-secret-input-must-not-leak"
+
+        status, headers, body = self._post(
+            "/v1/responses",
+            {"model": "engineering-fast", "input": request_content},
+        )
+        self.assertEqual(status, 503)
+        self.assertEqual(headers["x-hormuz-error-code"], "hormuz_storage_unavailable")
+        response = json.loads(body)
+        self.assertEqual(response["error"]["code"], "hormuz_storage_unavailable")
+        self.assertNotIn(request_content, repr(response))
+        self.assertEqual(len(FakeProviderHandler.requests), before)
+
+        status, headers, body = self._get("/v1/gateway/usage")
+        self.assertEqual(status, 503)
+        self.assertEqual(headers["x-hormuz-contract"], "hormuz.gateway-error;v=2")
+        response = json.loads(body)
+        validate_contract(response)
+        self.assertEqual(response["error"]["code"], "hormuz_storage_unavailable")
 
     def test_provider_rate_limit_is_evidence_not_an_additional_hormuz_denial(self) -> None:
         status, headers, body = self._post(

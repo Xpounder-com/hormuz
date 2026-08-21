@@ -21,11 +21,11 @@ Exit evidence:
 
 ### 2. Stabilize the policy and evidence contract
 
-Current release gate: [#25](https://github.com/Xpounder-com/hormuz/issues/25). After the package boundary is merged, freeze what the core gateway promises before adding operational integrations.
+Completed release gate: [#25](https://github.com/Xpounder-com/hormuz/issues/25), merged in [PR #27](https://github.com/Xpounder-com/hormuz/pull/27). After the package boundary is merged, freeze what the core gateway promises before adding operational integrations.
 
 The contract includes authenticated identity and event-time organization/team/person binding; requested, routed, and provider-reported models; policy version and enforcement outcome; allow/deny/reroute/cap/redact/rate-limit meanings; token and cost bases; allocation and coverage labels; metadata-only audit fields; stable public error codes; and SQLite/PostgreSQL parity.
 
-Every public response and durable evidence format will receive an explicit schema version, strict validation, compatibility fixtures, and documented migration rules. New fields are not casual additions after this point. The following [#26](https://github.com/Xpounder-com/hormuz/issues/26) gate proves upgrades, rollback, SQLite/PostgreSQL parity, and failure paths. A focused, versioned policy-administration implementation follows in [#21](https://github.com/Xpounder-com/hormuz/issues/21); the former implementation lived only in an unmerged integration branch and is not treated as merged-core evidence.
+Every public response and durable evidence format has an explicit schema version, strict validation, compatibility fixtures, and documented migration rules. New fields are not casual additions after this point. The current [#26](https://github.com/Xpounder-com/hormuz/issues/26) gate proves upgrades, rollback, SQLite/PostgreSQL parity, and failure paths. A focused, versioned policy-administration implementation follows in [#21](https://github.com/Xpounder-com/hormuz/issues/21); the former implementation lived only in an unmerged integration branch and is not treated as merged-core evidence.
 
 ### 3. Close production-readiness gates
 

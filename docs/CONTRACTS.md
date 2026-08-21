@@ -28,7 +28,7 @@ The current Hormuz-owned JSON schemas are:
 | `GET /health` | `hormuz.gateway-health` v1 |
 | `GET /v1/gateway/whoami` | `hormuz.gateway-identity` v1 |
 | `GET /v1/gateway/usage` | `hormuz.gateway-usage-summary` v1 |
-| Hormuz-generated HTTP errors | `hormuz.gateway-error` v1 |
+| Hormuz-generated HTTP errors | `hormuz.gateway-error` v2 |
 | `hormuz policy-check` output | `hormuz.policy-decision` v1 |
 | `hormuz status --json` | `hormuz.usage-report` v1 |
 | audit JSONL events | `hormuz.audit-event` v2 |
@@ -79,7 +79,7 @@ No contract in this release permits prompts, responses, secret values, matched d
 
 ## Errors
 
-Hormuz-generated JSON errors use `hormuz.gateway-error` v1 and a stable `error.code`. The current public-code inventory is available in `hormuz contract-manifest`; it includes authentication, request-shape, policy, secret, budget, configuration, and upstream categories. A caller should switch on `error.code`, not an English error message.
+Hormuz-generated JSON errors use `hormuz.gateway-error` v2 and a stable `error.code`. Version 2 adds the content-free `hormuz_storage_unavailable` classification; v1 remains validator-compatible for historical clients and does not silently accept that new code. The current public-code inventory is available in `hormuz contract-manifest`; it includes authentication, request-shape, policy, secret, budget, configuration, upstream, and durable-storage categories. A caller should switch on `error.code`, not an English error message.
 
 Where an OpenAI- or Anthropic-compatible endpoint must preserve a provider-native body, Hormuz supplies the equivalent stable classification through `X-Hormuz-Error-Code`. The provider body is not rewritten.
 
@@ -89,8 +89,9 @@ The release makes two intentional pre-stability changes:
 
 1. Audit exports now emit `hormuz.audit-event` v2. The prior v1 audit shapes remain validator-compatible for historical export fixtures, but new events use v2. `upstream_model` is renamed to `routed_model`, and v2 adds identity source/type, organization, policy version, provider-reported model, cost basis, allocation basis, and coverage.
 2. `hormuz status --json` changes from an unversioned bare array to `hormuz.usage-report` v1 with report metadata and a `rows` array. `hormuz policy-check` uses `routed_model` in place of its former `upstream_model` field and includes `policy_version`.
+3. Gateway-owned errors now emit `hormuz.gateway-error` v2 so storage interruptions have a stable, content-free classification without widening the strict v1 error-code set. Historical v1 error objects remain validator-compatible.
 
-The SQLite migration adds the metadata columns required to emit v2 while retaining existing usage rows. Each persisted usage or secret-evidence row now also carries `evidence_schema_id` and `evidence_schema_version`, so later code cannot silently reinterpret its evidence shape. Historical rows receive explicit legacy defaults where the old database could not know a value. Earlier applications will not understand the v2 export shape; rollback therefore requires retaining or restoring the earlier application/database pair. Issue [#26](https://github.com/Xpounder-com/hormuz/issues/26) is the separate gate for automated upgrade, rollback, SQLite/PostgreSQL parity, and failure-path proof. This issue does not claim those proofs are complete.
+The SQLite migration adds the metadata columns required to emit v2 while retaining existing usage rows, then adds tenant scope to active budget reservations. Each persisted usage or secret-evidence row now also carries `evidence_schema_id` and `evidence_schema_version`, so later code cannot silently reinterpret its evidence shape. Historical rows receive explicit legacy defaults where the old database could not know a value. Earlier applications will not understand the v2 export shape; rollback therefore requires retaining or restoring the earlier application/database pair. The corresponding PostgreSQL adapter is migration-led and uses a distinct operator migration credential and restricted runtime credential. See [STORAGE.md](STORAGE.md) for the upgrade, rollback, recovery, and remaining-operational-gates boundary.
 
 After this contract is released, any new optional field needs a new documented schema version before release. Removed fields, changed types, changed meanings, and newly required fields also require a new version plus migration guidance.
 
@@ -99,6 +100,8 @@ After this contract is released, any new optional field needs a new documented s
 ```bash
 hormuz contract-manifest
 python3 -m unittest -v tests.test_contracts tests.test_cli tests.test_gateway tests.test_store
+HORMUZ_TEST_POSTGRES_DSN='postgresql://operator@host:5432/hormuz_test' \
+  python3 -m unittest -v tests.test_postgres
 ```
 
-The contract tests validate current and legacy audit fixtures, reject unknown fields, verify the gateway preserves provider bodies, and validate the migration-generated audit evidence.
+The contract tests validate current and legacy audit fixtures, reject unknown fields, verify the gateway preserves provider bodies, and validate the migration-generated audit evidence. The PostgreSQL suite additionally proves the same normalized repository outcomes, forced tenant isolation, migration idempotency, partial/newer-schema failure, and content-free malformed-evidence handling against a disposable database.

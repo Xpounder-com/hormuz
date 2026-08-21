@@ -1,0 +1,51 @@
+"""Resolve the configured metadata-only usage repository."""
+
+from __future__ import annotations
+
+import os
+from typing import Mapping
+
+from .config import GatewayConfig
+from .postgres import PostgresStorageError
+from .postgres_usage_store import PostgresUsageStore
+from .store import UsageRepository, UsageStore
+
+
+def create_usage_store(
+    config: GatewayConfig,
+    *,
+    environ: Mapping[str, str] | None = None,
+) -> UsageRepository:
+    """Return the configured store, never placing a PostgreSQL DSN in config."""
+
+    storage = config.usage_storage
+    if storage.backend == "sqlite":
+        return UsageStore(config.database_path)
+    if storage.backend != "postgresql":  # Configuration parsing prevents this path.
+        raise PostgresStorageError("storage_backend_unsupported")
+    environment = os.environ if environ is None else environ
+    dsn = environment.get(storage.postgres_dsn_env, "")
+    if not dsn:
+        raise PostgresStorageError("postgres_dsn_unavailable")
+    return PostgresUsageStore(
+        dsn,
+        organization_ids=config.organization_ids,
+        schema=storage.postgres_schema,
+        runtime_role=storage.postgres_runtime_role,
+    )
+
+
+def postgres_migration_dsn(
+    config: GatewayConfig,
+    *,
+    environ: Mapping[str, str] | None = None,
+) -> str:
+    """Return only the separately configured operator migration DSN."""
+
+    if config.usage_storage.backend != "postgresql":
+        raise PostgresStorageError("storage_backend_unsupported")
+    environment = os.environ if environ is None else environ
+    dsn = environment.get(config.usage_storage.postgres_migration_dsn_env, "")
+    if not dsn:
+        raise PostgresStorageError("postgres_migration_dsn_unavailable")
+    return dsn

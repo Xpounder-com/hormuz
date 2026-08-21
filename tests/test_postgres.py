@@ -1,0 +1,515 @@
+from __future__ import annotations
+
+from contextlib import redirect_stdout
+from dataclasses import replace
+import io
+import json
+import os
+from pathlib import Path
+import sqlite3
+import tempfile
+import threading
+import unittest
+from urllib.parse import quote
+from unittest import mock
+from uuid import uuid4
+
+from hormuz.cli import main
+from hormuz.config import GatewayConfig, Identity, UsageStorageConfig
+from hormuz.evidence import EvidenceStorageError
+from hormuz.postgres import PostgresStorageError, migrate_postgres, verify_postgres_schema
+from hormuz.postgres_usage_store import PostgresUsageStore
+from hormuz.store import ReservationDenied, ReservationScope, UsageStore
+from hormuz.store_router import create_usage_store
+
+
+ROOT = Path(__file__).resolve().parents[1]
+FIXTURES = ROOT / "tests" / "fixtures" / "contracts"
+
+
+@unittest.skipUnless(
+    os.environ.get("HORMUZ_TEST_POSTGRES_DSN"),
+    "Set HORMUZ_TEST_POSTGRES_DSN and install hormuz[postgres] to run PostgreSQL conformance",
+)
+class PostgresUsageStoreTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        try:
+            import psycopg
+            from psycopg import sql
+        except ImportError as error:  # pragma: no cover - skip guard documents the dependency
+            raise unittest.SkipTest("Psycopg is not installed") from error
+        cls.psycopg = psycopg
+        cls.sql = sql
+        cls.owner_dsn = os.environ["HORMUZ_TEST_POSTGRES_DSN"]
+        suffix = uuid4().hex[:12]
+        cls.schema = f"hormuz_test_{suffix}"
+        cls.runtime_role = f"hormuz_runtime_{suffix}"
+        cls.runtime_password = "hormuz-runtime-test-password"
+        cls.runtime_dsn = _runtime_dsn(cls.owner_dsn, cls.runtime_role, cls.runtime_password)
+        cls.addClassCleanup(cls._cleanup_test_resources)
+        with psycopg.connect(cls.owner_dsn, autocommit=True) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    sql.SQL(
+                        "CREATE ROLE {} LOGIN PASSWORD {} NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS"
+                    ).format(sql.Identifier(cls.runtime_role), sql.Literal(cls.runtime_password))
+                )
+        first = migrate_postgres(
+            cls.owner_dsn,
+            schema=cls.schema,
+            runtime_role=cls.runtime_role,
+        )
+        second = migrate_postgres(
+            cls.owner_dsn,
+            schema=cls.schema,
+            runtime_role=cls.runtime_role,
+        )
+        if first != second:
+            raise AssertionError("PostgreSQL migrations are not idempotent")
+
+    @classmethod
+    def _cleanup_test_resources(cls) -> None:
+        if not hasattr(cls, "psycopg"):
+            return
+        with cls.psycopg.connect(cls.owner_dsn, autocommit=True) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(cls.sql.SQL("DROP SCHEMA IF EXISTS {} CASCADE").format(cls.sql.Identifier(cls.schema)))
+                cursor.execute(cls.sql.SQL("DROP ROLE IF EXISTS {}").format(cls.sql.Identifier(cls.runtime_role)))
+
+    def setUp(self) -> None:
+        with self.psycopg.connect(self.owner_dsn, autocommit=True) as connection:
+            with connection.cursor() as cursor:
+                for table in (
+                    "gateway_budget_reservations",
+                    "gateway_secret_events",
+                    "gateway_usage_events",
+                ):
+                    cursor.execute(
+                        self.sql.SQL("TRUNCATE TABLE {}.{}")
+                        .format(self.sql.Identifier(self.schema), self.sql.Identifier(table))
+                    )
+        self.store = PostgresUsageStore(
+            self.runtime_dsn,
+            organization_ids=("acme", "beta"),
+            schema=self.schema,
+            runtime_role=self.runtime_role,
+        )
+
+    def test_migration_is_visible_to_the_restricted_runtime_role(self) -> None:
+        status = verify_postgres_schema(
+            self.runtime_dsn,
+            schema=self.schema,
+            runtime_role=self.runtime_role,
+        )
+        self.assertTrue(status.complete)
+        self.assertEqual(status.version, 1)
+
+    def test_configured_router_uses_only_the_runtime_dsn(self) -> None:
+        config = GatewayConfig.load(
+            ROOT / "config.example.json",
+            environ={"HORMUZ_TOKEN": "test-identity-token"},
+        )
+        config = replace(
+            config,
+            usage_storage=UsageStorageConfig(
+                backend="postgresql",
+                postgres_dsn_env="TEST_POSTGRES_RUNTIME_DSN",
+                postgres_migration_dsn_env="TEST_POSTGRES_MIGRATION_DSN",
+                postgres_schema=self.schema,
+                postgres_runtime_role=self.runtime_role,
+            ),
+        )
+        store = create_usage_store(
+            config,
+            environ={"TEST_POSTGRES_RUNTIME_DSN": self.runtime_dsn},
+        )
+        self.assertIsInstance(store, PostgresUsageStore)
+        self.assertEqual(store.organization_ids, ("xpounder",))
+
+    def test_storage_cli_uses_the_operator_dsn_only_for_migration(self) -> None:
+        config_value = json.loads((ROOT / "config.example.json").read_text(encoding="utf-8"))
+        config_value["usage_storage"] = {
+            "backend": "postgresql",
+            "postgres_dsn_env": "TEST_POSTGRES_RUNTIME_DSN",
+            "postgres_migration_dsn_env": "TEST_POSTGRES_MIGRATION_DSN",
+            "postgres_schema": self.schema,
+            "postgres_runtime_role": self.runtime_role,
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            config_path = Path(temporary) / "gateway.json"
+            config_path.write_text(json.dumps(config_value), encoding="utf-8")
+            environment = {
+                "HORMUZ_TOKEN": "test-identity-token",
+                "TEST_POSTGRES_RUNTIME_DSN": self.runtime_dsn,
+                "TEST_POSTGRES_MIGRATION_DSN": self.owner_dsn,
+            }
+            with mock.patch.dict(os.environ, environment, clear=True):
+                migration = io.StringIO()
+                with redirect_stdout(migration):
+                    self.assertEqual(main(["--config", str(config_path), "storage", "migrate"]), 0)
+                self.assertEqual(migration.getvalue(), "PostgreSQL usage storage migration is current: v1\n")
+
+                verification = io.StringIO()
+                with redirect_stdout(verification):
+                    self.assertEqual(main(["--config", str(config_path), "storage", "verify"]), 0)
+                self.assertEqual(verification.getvalue(), "usage storage verified: postgresql\n")
+
+    def test_runtime_role_fails_closed_without_an_organization_context(self) -> None:
+        self.store.record(
+            identity=_identity("acme"),
+            client="codex",
+            protocol="openai",
+            requested_model="gpt-test",
+            resolved_alias="gpt-test",
+            upstream_model="gpt-upstream",
+            policy_action="allowed",
+            status="succeeded",
+        )
+        with self.psycopg.connect(self.runtime_dsn) as connection:
+            with connection.transaction():
+                with connection.cursor() as cursor:
+                    cursor.execute(self.sql.SQL("SET LOCAL ROLE {}").format(self.sql.Identifier(self.runtime_role)))
+                    cursor.execute(
+                        self.sql.SQL("SET LOCAL search_path TO {}, pg_catalog").format(
+                            self.sql.Identifier(self.schema)
+                        )
+                    )
+                    cursor.execute(
+                        "SELECT COUNT(*) FROM gateway_usage_events"
+                    )
+                    self.assertEqual(cursor.fetchone()[0], 0)
+                    cursor.execute("SELECT set_config('hormuz.organization_id', %s, true)", ("acme",))
+                    cursor.execute("SELECT COUNT(*) FROM gateway_usage_events")
+                    self.assertEqual(cursor.fetchone()[0], 1)
+                    cursor.execute("SELECT set_config('hormuz.organization_id', %s, true)", ("beta",))
+                    cursor.execute("SELECT COUNT(*) FROM gateway_usage_events")
+                    self.assertEqual(cursor.fetchone()[0], 0)
+
+    def test_newer_or_partial_schema_fails_closed_without_mutating_evidence(self) -> None:
+        self.store.record(
+            identity=_identity("acme"),
+            client="codex",
+            protocol="openai",
+            requested_model="gpt-test",
+            resolved_alias="gpt-test",
+            upstream_model="gpt-upstream",
+            policy_action="allowed",
+            status="succeeded",
+        )
+        with self.psycopg.connect(self.owner_dsn) as connection:
+            with connection.transaction():
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        self.sql.SQL(
+                            "SELECT COUNT(*) FROM {}.gateway_usage_events"
+                        ).format(self.sql.Identifier(self.schema))
+                    )
+                    before = cursor.fetchone()[0]
+                    cursor.execute(
+                        self.sql.SQL(
+                            "INSERT INTO {}.hormuz_schema_migrations (version, state) VALUES (2, 'applying')"
+                        ).format(self.sql.Identifier(self.schema))
+                    )
+        with self.assertRaises(PostgresStorageError) as raised:
+            PostgresUsageStore(
+                self.runtime_dsn,
+                organization_ids=("acme", "beta"),
+                schema=self.schema,
+                runtime_role=self.runtime_role,
+            )
+        self.assertEqual(raised.exception.code, "storage_schema_partial_upgrade")
+
+        with self.psycopg.connect(self.owner_dsn) as connection:
+            with connection.transaction():
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        self.sql.SQL(
+                            "UPDATE {}.hormuz_schema_migrations SET state = 'applied' WHERE version = 2"
+                        ).format(self.sql.Identifier(self.schema))
+                    )
+        with self.assertRaises(PostgresStorageError) as raised:
+            PostgresUsageStore(
+                self.runtime_dsn,
+                organization_ids=("acme", "beta"),
+                schema=self.schema,
+                runtime_role=self.runtime_role,
+            )
+        self.assertEqual(raised.exception.code, "storage_schema_newer_than_binary")
+
+        with self.psycopg.connect(self.owner_dsn) as connection:
+            with connection.transaction():
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        self.sql.SQL(
+                            "SELECT COUNT(*) FROM {}.gateway_usage_events"
+                        ).format(self.sql.Identifier(self.schema))
+                    )
+                    self.assertEqual(cursor.fetchone()[0], before)
+                    cursor.execute(
+                        self.sql.SQL(
+                            "DELETE FROM {}.hormuz_schema_migrations WHERE version = 2"
+                        ).format(self.sql.Identifier(self.schema))
+                    )
+
+    def test_sqlite_and_postgres_have_equivalent_normalized_outcomes(self) -> None:
+        identity = _identity("acme")
+        with tempfile.TemporaryDirectory() as temporary:
+            sqlite_store = UsageStore(Path(temporary) / "usage.sqlite3")
+            for store in (sqlite_store, self.store):
+                store.record(
+                    identity=identity,
+                    client="codex",
+                    protocol="openai",
+                    requested_model="gpt-test",
+                    resolved_alias="gpt-test",
+                    upstream_model="gpt-upstream",
+                    provider_reported_model="gpt-provider",
+                    policy_version="policy-v1",
+                    policy_action="allowed+redacted",
+                    status="succeeded",
+                    input_tokens=101,
+                    output_tokens=23,
+                    cache_read_tokens=11,
+                    reasoning_tokens=7,
+                    cost_microusd=1234,
+                    redaction_count=1,
+                    redaction_rules=("openai_api_key",),
+                )
+                store.record_secret_event(
+                    identity=identity,
+                    client="codex",
+                    protocol="openai",
+                    requested_model="gpt-test",
+                    policy_version="policy-v1",
+                    action="redacted",
+                    detection_count=1,
+                    rules=("openai_api_key",),
+                )
+            sqlite_events = sqlite_store.audit_events(
+                since="2000-01-01T00:00:00+00:00",
+                organization_id="acme",
+            )
+            postgres_events = self.store.audit_events(
+                since="2000-01-01T00:00:00+00:00",
+                organization_id="acme",
+            )
+            self.assertEqual(_normalized_events(sqlite_events), _normalized_events(postgres_events))
+            self.assertEqual(
+                sqlite_store.report_rows(group_by="organization", organization_id="acme"),
+                self.store.report_rows(group_by="organization", organization_id="acme"),
+            )
+
+            sqlite_connection = sqlite3.connect(sqlite_store.path)
+            sqlite_connection.execute("UPDATE gateway_usage_events SET evidence_schema_version = 1")
+            sqlite_connection.execute("UPDATE gateway_secret_events SET evidence_schema_version = 1")
+            sqlite_connection.commit()
+            sqlite_connection.close()
+            with self.psycopg.connect(self.owner_dsn) as connection:
+                with connection.transaction():
+                    with connection.cursor() as cursor:
+                        cursor.execute(
+                            self.sql.SQL(
+                                "UPDATE {}.gateway_usage_events SET evidence_schema_version = 1"
+                            ).format(self.sql.Identifier(self.schema))
+                        )
+                        cursor.execute(
+                            self.sql.SQL(
+                                "UPDATE {}.gateway_secret_events SET evidence_schema_version = 1"
+                            ).format(self.sql.Identifier(self.schema))
+                        )
+            self.assertEqual(
+                _normalized_events(
+                    sqlite_store.audit_events(
+                        since="2000-01-01T00:00:00+00:00",
+                        organization_id="acme",
+                    )
+                ),
+                _normalized_events(
+                    self.store.audit_events(
+                        since="2000-01-01T00:00:00+00:00",
+                        organization_id="acme",
+                    )
+                ),
+            )
+
+    def test_contract_fixtures_and_historical_version_are_materialized(self) -> None:
+        fixtures = json.loads((FIXTURES / "valid-v1.json").read_text(encoding="utf-8"))
+        identity = _identity("acme")
+        event_id = self.store.record(
+            identity=identity,
+            client="codex",
+            protocol="openai",
+            requested_model="gpt-test",
+            resolved_alias="gpt-test",
+            upstream_model="gpt-upstream",
+            policy_version="policy-v1",
+            policy_action="allowed",
+            status="succeeded",
+        )
+        self.store.record_secret_event(
+            identity=identity,
+            client="codex",
+            protocol="openai",
+            requested_model="gpt-test",
+            policy_version="policy-v1",
+            action="redacted",
+            detection_count=1,
+            rules=("openai_api_key",),
+        )
+        current = self.store.audit_events(since="2000-01-01T00:00:00+00:00", organization_id="acme")
+        self.assertEqual(set(current[0]), set(fixtures["audit_usage_v2"]))
+        self.assertEqual(set(current[1]), set(fixtures["audit_security_v2"]))
+
+        with self.psycopg.connect(self.owner_dsn) as connection:
+            with connection.transaction():
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        self.sql.SQL(
+                            "UPDATE {}.gateway_usage_events SET evidence_schema_version = 1 WHERE id = %s"
+                        ).format(self.sql.Identifier(self.schema)),
+                        (event_id,),
+                    )
+        historical = self.store.audit_events(since="2000-01-01T00:00:00+00:00", organization_id="acme")
+        self.assertEqual(set(historical[0]), set(fixtures["audit_usage_v1"]))
+
+    def test_malformed_evidence_fails_closed_without_content(self) -> None:
+        event_id = self.store.record(
+            identity=_identity("acme"),
+            client="codex",
+            protocol="openai",
+            requested_model="gpt-test",
+            resolved_alias="gpt-test",
+            upstream_model="gpt-upstream",
+            policy_action="allowed",
+            status="succeeded",
+        )
+        with self.psycopg.connect(self.owner_dsn) as connection:
+            with connection.transaction():
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        self.sql.SQL(
+                            "UPDATE {}.gateway_usage_events SET redaction_rules = %s WHERE id = %s"
+                        ).format(self.sql.Identifier(self.schema)),
+                        ('["must-not-leak", 1]', event_id),
+                    )
+        with self.assertRaises(EvidenceStorageError) as raised:
+            self.store.audit_events(since="2000-01-01T00:00:00+00:00", organization_id="acme")
+        self.assertEqual(raised.exception.code, "stored_evidence_malformed")
+        self.assertNotIn("must-not-leak", str(raised.exception))
+
+    def test_tenant_scope_and_budget_reservation_concurrency_match_sqlite_contract(self) -> None:
+        acme = _identity("acme")
+        beta = _identity("beta")
+        for identity in (acme, beta):
+            self.store.record(
+                identity=identity,
+                client="codex",
+                protocol="openai",
+                requested_model="gpt-test",
+                resolved_alias="gpt-test",
+                upstream_model="gpt-upstream",
+                policy_action="allowed",
+                status="succeeded",
+                cost_microusd=400,
+            )
+        self.assertEqual(self.store.monthly_totals(organization_id="acme").requests, 1)
+        self.assertEqual(self.store.monthly_totals(organization_id="beta").requests, 1)
+        scope = ReservationScope(name="organization", cost_limit_microusd=1_000)
+        first = self.store.reserve_budget(
+            identity=acme,
+            scopes=(scope,),
+            reserved_tokens=1,
+            reserved_cost_microusd=600,
+            ttl_seconds=60,
+        )
+        second = self.store.reserve_budget(
+            identity=beta,
+            scopes=(scope,),
+            reserved_tokens=1,
+            reserved_cost_microusd=600,
+            ttl_seconds=60,
+        )
+        self.assertIsNotNone(first)
+        self.assertIsNotNone(second)
+
+        stores = (
+            PostgresUsageStore(
+                self.runtime_dsn,
+                organization_ids=("acme", "beta"),
+                schema=self.schema,
+                runtime_role=self.runtime_role,
+            ),
+            PostgresUsageStore(
+                self.runtime_dsn,
+                organization_ids=("acme", "beta"),
+                schema=self.schema,
+                runtime_role=self.runtime_role,
+            ),
+        )
+        barrier = threading.Barrier(2)
+        outcomes: list[str] = []
+        outcome_lock = threading.Lock()
+
+        def reserve(store: PostgresUsageStore) -> None:
+            barrier.wait()
+            try:
+                store.reserve_budget(
+                    identity=acme,
+                    scopes=(ReservationScope(name="actor", actor_id="alice", cost_limit_microusd=1_800),),
+                    reserved_tokens=1,
+                    reserved_cost_microusd=600,
+                    ttl_seconds=60,
+                )
+                outcome = "allowed"
+            except ReservationDenied:
+                outcome = "denied"
+            with outcome_lock:
+                outcomes.append(outcome)
+
+        threads = [threading.Thread(target=reserve, args=(store,)) for store in stores]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=10)
+        self.assertEqual(sorted(outcomes), ["allowed", "denied"])
+
+    def test_unknown_organization_fails_closed(self) -> None:
+        with self.assertRaises(PostgresStorageError) as raised:
+            self.store.monthly_totals(organization_id="unknown")
+        self.assertEqual(raised.exception.code, "storage_organization_not_configured")
+
+
+def _identity(organization_id: str) -> Identity:
+    return Identity(
+        token_env="TEST_TOKEN",
+        token="postgres-test-employee-token",
+        actor_id="alice",
+        actor_name="Alice",
+        team_id="engineering",
+        team_name="Engineering",
+        organization_id=organization_id,
+    )
+
+
+def _normalized_events(events: list[dict[str, object]]) -> list[dict[str, object]]:
+    return [
+        {
+            key: value
+            for key, value in event.items()
+            if key not in {"id", "occurred_at"}
+        }
+        for event in events
+    ]
+
+
+def _runtime_dsn(owner_dsn: str, role: str, password: str) -> str:
+    prefix, separator, database = owner_dsn.rpartition("/")
+    if not separator or not database:
+        raise ValueError("HORMUZ_TEST_POSTGRES_DSN must contain a database name")
+    authority = prefix.split("//", 1)[1].rsplit("@", 1)[-1]
+    return f"postgresql://{quote(role, safe='')}:{quote(password, safe='')}@{authority}/{database}"
+
+
+if __name__ == "__main__":
+    unittest.main()

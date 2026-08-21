@@ -8,6 +8,8 @@ from hormuz.contracts import (
     AUDIT_EVENT_SCHEMA_ID,
     AUDIT_EVENT_SCHEMA_VERSION,
     ContractValidationError,
+    ERROR_SCHEMA_ID,
+    ERROR_SCHEMA_VERSION,
     contract_envelope,
     contract_manifest,
     relay_contract_header,
@@ -25,7 +27,7 @@ class PolicyEvidenceContractTests(unittest.TestCase):
     def test_valid_compatibility_fixtures_cover_every_current_json_surface(self) -> None:
         fixtures = json.loads((FIXTURES / "valid-v1.json").read_text(encoding="utf-8"))
 
-        for name in ("health", "identity", "usage_summary", "error", "policy_decision", "usage_report"):
+        for name in ("health", "identity", "usage_summary", "error", "error_v2", "policy_decision", "usage_report"):
             validate_contract(fixtures[name])
         for name in ("audit_usage_v1", "audit_security_v1", "audit_usage_v2", "audit_security_v2"):
             validate_audit_event(fixtures[name])
@@ -33,11 +35,17 @@ class PolicyEvidenceContractTests(unittest.TestCase):
 
     def test_invalid_compatibility_fixtures_fail_closed(self) -> None:
         fixtures = json.loads((FIXTURES / "invalid-v1.json").read_text(encoding="utf-8"))
+        valid = json.loads((FIXTURES / "valid-v1.json").read_text(encoding="utf-8"))
 
         with self.assertRaises(ContractValidationError):
             validate_contract(fixtures["policy_decision_unknown_field"])
         with self.assertRaises(ContractValidationError):
+            validate_contract(fixtures["error_v2_unknown_code"])
+        with self.assertRaises(ContractValidationError):
             validate_audit_event(fixtures["audit_usage_unknown_field"])
+        legacy_storage_error = {**valid["error_v2"], "schema_version": 1}
+        with self.assertRaises(ContractValidationError):
+            validate_contract(legacy_storage_error)
 
     def test_manifest_enumerates_current_contract_versions(self) -> None:
         manifest = contract_manifest()
@@ -46,6 +54,7 @@ class PolicyEvidenceContractTests(unittest.TestCase):
             for item in manifest["schemas"]
         }
         self.assertIn((AUDIT_EVENT_SCHEMA_ID, AUDIT_EVENT_SCHEMA_VERSION), schemas)
+        self.assertIn((ERROR_SCHEMA_ID, ERROR_SCHEMA_VERSION), schemas)
         self.assertIn(("hormuz.policy-decision", 1), schemas)
         self.assertEqual(manifest["schema_id"], "hormuz.policy-evidence-manifest")
         self.assertEqual(manifest["schema_version"], 1)

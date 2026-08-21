@@ -23,8 +23,16 @@ dependencies = [
   "PyJWT[crypto]>=2.13,<3"
 ]
 
+[project.optional-dependencies]
+postgres = [
+  "psycopg[binary]>=3.3.4,<3.4"
+]
+
 [project.scripts]
 hormuz = "hormuz.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["hormuz*"]
+
+[tool.setuptools.package-data]
+"hormuz.migrations.postgresql" = ["*.sql"]

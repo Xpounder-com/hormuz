@@ -12,6 +12,14 @@
     "policy_version": "local-config-0123456789abcdef",
     "unexpected": true
   },
+  "error_v2_unknown_code": {
+    "schema_id": "hormuz.gateway-error",
+    "schema_version": 2,
+    "error": {
+      "code": "must-not-be-a-public-code",
+      "message": "This fixture must fail validation."
+    }
+  },
   "audit_usage_unknown_field": {
     "schema_id": "hormuz.audit-event",
     "schema_version": 2,

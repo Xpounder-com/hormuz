@@ -139,6 +139,71 @@ class ClientConfigTests(unittest.TestCase):
         self.assertEqual(args.actor, "alice")
         self.assertTrue(args.json)
 
+    def test_usage_storage_configuration_is_safe_and_storage_cli_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config_value = json.loads((ROOT / "config.example.json").read_text(encoding="utf-8"))
+            config_value["database"] = str(root / "usage.sqlite3")
+            config_value["usage_storage"] = {
+                "backend": "postgresql",
+                "postgres_dsn_env": "COMPANY_POSTGRES_RUNTIME_DSN",
+                "postgres_migration_dsn_env": "COMPANY_POSTGRES_MIGRATION_DSN",
+                "postgres_schema": "company_hormuz",
+                "postgres_runtime_role": "company_hormuz_runtime",
+            }
+            config_path = root / "postgres.json"
+            config_path.write_text(json.dumps(config_value), encoding="utf-8")
+            config = GatewayConfig.load(
+                config_path,
+                environ={"HORMUZ_TOKEN": "test-identity-token"},
+            )
+            self.assertEqual(config.usage_storage.backend, "postgresql")
+            self.assertEqual(config.usage_storage.postgres_schema, "company_hormuz")
+            self.assertNotIn("postgresql://", config_path.read_text(encoding="utf-8"))
+
+            stderr = io.StringIO()
+            with mock.patch.dict(os.environ, {"HORMUZ_TOKEN": "test-identity-token"}, clear=True):
+                with redirect_stderr(stderr):
+                    self.assertEqual(main(["--config", str(config_path), "storage", "verify"]), 2)
+            self.assertEqual(stderr.getvalue(), "storage error: postgres_dsn_unavailable\n")
+
+            config_value["usage_storage"]["postgres_schema"] = "company;drop"
+            config_path.write_text(json.dumps(config_value), encoding="utf-8")
+            with self.assertRaisesRegex(ConfigError, "safe PostgreSQL identifier"):
+                GatewayConfig.load(config_path, environ={"HORMUZ_TOKEN": "test-identity-token"})
+
+            config_value["usage_storage"] = {"backend": "postgresql", "postgres_dsn": "literal-secret"}
+            config_path.write_text(json.dumps(config_value), encoding="utf-8")
+            with self.assertRaisesRegex(ConfigError, "unsupported fields"):
+                GatewayConfig.load(config_path, environ={"HORMUZ_TOKEN": "test-identity-token"})
+
+            config_value["usage_storage"] = {
+                "backend": "postgresql",
+                "postgres_dsn_env": "COMPANY_POSTGRES_DSN",
+                "postgres_migration_dsn_env": "COMPANY_POSTGRES_DSN",
+            }
+            config_path.write_text(json.dumps(config_value), encoding="utf-8")
+            with self.assertRaisesRegex(ConfigError, "separate credentials"):
+                GatewayConfig.load(config_path, environ={"HORMUZ_TOKEN": "test-identity-token"})
+
+    def test_sqlite_storage_cli_verifies_and_migrates_without_postgres_dependency(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config_value = json.loads((ROOT / "config.example.json").read_text(encoding="utf-8"))
+            config_value["database"] = str(root / "usage.sqlite3")
+            config_path = root / "sqlite.json"
+            config_path.write_text(json.dumps(config_value), encoding="utf-8")
+            with mock.patch.dict(os.environ, {"HORMUZ_TOKEN": "test-identity-token"}, clear=True):
+                verify = io.StringIO()
+                with redirect_stdout(verify):
+                    self.assertEqual(main(["--config", str(config_path), "storage", "verify"]), 0)
+                self.assertEqual(verify.getvalue(), "usage storage verified: sqlite\n")
+
+                migrate = io.StringIO()
+                with redirect_stdout(migrate):
+                    self.assertEqual(main(["--config", str(config_path), "storage", "migrate"]), 0)
+                self.assertEqual(migrate.getvalue(), "SQLite usage storage migration is current\n")
+
     def test_contract_manifest_requires_no_configuration(self) -> None:
         output = io.StringIO()
         with redirect_stdout(output):
