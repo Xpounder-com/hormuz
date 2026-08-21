@@ -8,7 +8,7 @@ This roadmap is evidence-gated. A milestone is not complete because code exists 
 
 ### 1. Separate the deprecated context experiment
 
-Current release gate: [#23](https://github.com/Xpounder-com/hormuz/issues/23).
+Completed release gate: [#23](https://github.com/Xpounder-com/hormuz/issues/23), merged in [PR #24](https://github.com/Xpounder-com/hormuz/pull/24).
 
 Move the former context-pack kernel out of the primary `hormuz` distribution and runtime into a separately buildable experiment in this repository. The core wheel must have no context retrieval, lifecycle, cache, provenance, memory, content-storage, active route, or active CLI implementation. Its only temporary compatibility behavior is a content-free `context_experiment_moved` error for the former CLI command.
 
@@ -21,17 +21,17 @@ Exit evidence:
 
 ### 2. Stabilize the policy and evidence contract
 
-After the package boundary is merged, freeze what the core gateway promises before adding operational integrations.
+Current release gate: [#25](https://github.com/Xpounder-com/hormuz/issues/25). After the package boundary is merged, freeze what the core gateway promises before adding operational integrations.
 
 The contract includes authenticated identity and event-time organization/team/person binding; requested, routed, and provider-reported models; policy version and enforcement outcome; allow/deny/reroute/cap/redact/rate-limit meanings; token and cost bases; allocation and coverage labels; metadata-only audit fields; stable public error codes; and SQLite/PostgreSQL parity.
 
-Every public response and durable evidence format will receive an explicit schema version, strict validation, compatibility fixtures, documented migration rules, and upgrade/rollback/failure-path checks. New fields are not casual additions after this point.
+Every public response and durable evidence format will receive an explicit schema version, strict validation, compatibility fixtures, and documented migration rules. New fields are not casual additions after this point. The following [#26](https://github.com/Xpounder-com/hormuz/issues/26) gate proves upgrades, rollback, SQLite/PostgreSQL parity, and failure paths. A focused, versioned policy-administration implementation follows in [#21](https://github.com/Xpounder-com/hormuz/issues/21); the former implementation lived only in an unmerged integration branch and is not treated as merged-core evidence.
 
 ### 3. Close production-readiness gates
 
 Only after the core contract is stable, the program proceeds through real operational gates:
 
-1. validate generic OIDC against an external identity provider while keeping Hormuz a resource server, not an IdP;
+1. validate generic OIDC against an external identity provider while keeping Hormuz a resource server, not an IdP ([#13](https://github.com/Xpounder-com/hormuz/issues/13));
 2. add KMS/BYOK custody, secret rotation, and tamper-evident audit retention ([#17](https://github.com/Xpounder-com/hormuz/issues/17));
 3. prove TLS deployment, shared PostgreSQL operation, pooling, backup/restore/PITR, multi-instance revocation and coordination, health/readiness/SLOs, alerts, and incident procedures ([#11](https://github.com/Xpounder-com/hormuz/issues/11));
 4. prove container signing, SBOM and vulnerability gates, and independent release review ([#9](https://github.com/Xpounder-com/hormuz/issues/9)).

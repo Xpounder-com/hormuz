@@ -13,6 +13,7 @@ class Usage:
     cache_read_tokens: int = 0
     cache_write_tokens: int = 0
     reasoning_tokens: int = 0
+    provider_reported_model: str | None = None
 
 
 class ResponseUsageParser:
@@ -65,12 +66,19 @@ class ResponseUsageParser:
         if self.protocol == "openai":
             response = value.get("response") if value.get("type") == "response.completed" else value
             if isinstance(response, dict):
+                self._apply_provider_model(response.get("model"))
                 self._apply_openai_usage(response.get("usage"))
         elif self.protocol == "anthropic":
             if value.get("type") == "message_start" and isinstance(value.get("message"), dict):
+                self._apply_provider_model(value["message"].get("model"))
                 self._apply_anthropic_usage(value["message"].get("usage"))
             else:
+                self._apply_provider_model(value.get("model"))
                 self._apply_anthropic_usage(value.get("usage"))
+
+    def _apply_provider_model(self, value: Any) -> None:
+        if isinstance(value, str) and value and len(value) <= 256 and all(character not in value for character in "\r\n\x00"):
+            self.usage.provider_reported_model = value
 
     def _apply_openai_usage(self, value: Any) -> None:
         if not isinstance(value, dict):

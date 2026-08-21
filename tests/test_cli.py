@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import io
+import json
 import os
 import tempfile
 import tomllib
@@ -18,9 +19,13 @@ from hormuz.cli import (
     _auth_token,
     _budget_for_scope,
     _client_config,
+    _status,
     build_parser,
+    main,
 )
 from hormuz.config import ConfigError, GatewayConfig, Identity, OIDCIssuerConfig
+from hormuz.contracts import validate_contract
+from hormuz.store import UsageStore
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -133,6 +138,51 @@ class ClientConfigTests(unittest.TestCase):
         self.assertEqual(args.team, "engineering")
         self.assertEqual(args.actor, "alice")
         self.assertTrue(args.json)
+
+    def test_contract_manifest_requires_no_configuration(self) -> None:
+        output = io.StringIO()
+        with redirect_stdout(output):
+            self.assertEqual(main(["contract-manifest"]), 0)
+        manifest = json.loads(output.getvalue())
+        self.assertEqual(manifest["schema_id"], "hormuz.policy-evidence-manifest")
+        self.assertEqual(manifest["schema_version"], 1)
+
+    def test_status_json_uses_the_versioned_usage_report_envelope(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            config = replace(self.config, database_path=Path(temporary) / "usage.sqlite3")
+            identity = next(iter(config.identities_by_token.values()))
+            UsageStore(config.database_path).record(
+                identity=identity,
+                client="codex",
+                protocol="openai",
+                requested_model="gpt-5.4-mini",
+                resolved_alias="gpt-5.4-mini",
+                upstream_model="gpt-5.4-mini",
+                policy_action="allowed",
+                status="succeeded",
+                input_tokens=10,
+                output_tokens=2,
+            )
+            args = argparse.Namespace(group_by="person", actor=None, team=None, json=True)
+            output = io.StringIO()
+            with redirect_stdout(output):
+                self.assertEqual(_status(config, args), 0)
+            report = json.loads(output.getvalue())
+            validate_contract(report)
+        self.assertEqual(report["schema_id"], "hormuz.usage-report")
+        self.assertEqual(report["rows"][0]["scope_id"], identity.actor_id)
+
+    def test_local_policy_version_excludes_static_credential_value(self) -> None:
+        first = GatewayConfig.load(
+            ROOT / "config.example.json",
+            environ={"HORMUZ_TOKEN": "first-static-credential"},
+        )
+        second = GatewayConfig.load(
+            ROOT / "config.example.json",
+            environ={"HORMUZ_TOKEN": "second-static-credential"},
+        )
+        self.assertEqual(first.policy_version, second.policy_version)
+        self.assertNotIn("first-static-credential", first.policy_version)
 
     def test_usage_report_budget_matches_policy_scope(self) -> None:
         self.assertEqual(

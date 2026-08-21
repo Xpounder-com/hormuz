@@ -9,11 +9,22 @@ import urllib.error
 import urllib.request
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any
+from typing import Any, Mapping
 from urllib.parse import urlsplit
 
 from .auth import AuthenticationError, Authenticator
 from .config import GatewayConfig, Identity, ModelRoute, UpstreamConfig
+from .contracts import (
+    ALLOCATION_BASIS_DIRECT_GATEWAY_REQUEST,
+    COST_BASIS_CONFIGURED_RATE_CARD_ESTIMATE,
+    COVERAGE_GATEWAY_CAPTURED_REQUESTS_ONLY,
+    ERROR_SCHEMA_ID,
+    HEALTH_SCHEMA_ID,
+    IDENTITY_SCHEMA_ID,
+    USAGE_SUMMARY_SCHEMA_ID,
+    contract_envelope,
+    relay_contract_header,
+)
 from .policy import PolicyDecision, PolicyEngine
 from .redaction import RedactionError, SecretRedactor
 from .store import ReservationDenied, UsageStore
@@ -53,8 +64,9 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802
         path = urlsplit(self.path).path
         if path == "/health":
-            self._send_json(
+            self._send_contract_json(
                 HTTPStatus.OK,
+                HEALTH_SCHEMA_ID,
                 {
                     "status": "ok",
                     "service": "hormuz",
@@ -66,14 +78,16 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         if identity is None:
             return
         if path == "/v1/gateway/whoami":
-            self._send_json(
+            self._send_contract_json(
                 HTTPStatus.OK,
+                IDENTITY_SCHEMA_ID,
                 {
                     "actor_id": identity.actor_id,
                     "actor_name": identity.actor_name,
                     "team_id": identity.team_id,
                     "team_name": identity.team_name,
                     "organization_id": identity.organization_id,
+                    "identity_type": identity.identity_type,
                     "allowed_clients": list(identity.allowed_clients),
                     "authentication_source": identity.authentication_source,
                 },
@@ -82,18 +96,23 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         if path == "/v1/gateway/usage":
             totals = self.server.store.monthly_totals(actor_id=identity.actor_id)
             secret_totals = self.server.store.monthly_secret_totals(actor_id=identity.actor_id)
-            self._send_json(
+            self._send_contract_json(
                 HTTPStatus.OK,
+                USAGE_SUMMARY_SCHEMA_ID,
                 {
                     "month": "current",
                     "requests": totals.requests,
                     "denied_requests": totals.denied_requests,
+                    "rate_limited_requests": totals.rate_limited_requests,
                     "input_tokens": totals.input_tokens,
                     "output_tokens": totals.output_tokens,
                     "cache_read_tokens": totals.cache_read_tokens,
                     "cache_write_tokens": totals.cache_write_tokens,
                     "reasoning_tokens": totals.reasoning_tokens,
                     "cost_usd": totals.cost_usd,
+                    "cost_basis": COST_BASIS_CONFIGURED_RATE_CARD_ESTIMATE,
+                    "allocation_basis": ALLOCATION_BASIS_DIRECT_GATEWAY_REQUEST,
+                    "coverage": COVERAGE_GATEWAY_CAPTURED_REQUESTS_ONLY,
                     "redactions": totals.redaction_count,
                     "secret_events": secret_totals.events,
                     "secret_detections": secret_totals.detections,
@@ -174,6 +193,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                     requested_model=requested_model,
                     resolved_alias=None,
                     upstream_model=None,
+                    policy_version=decision.policy_version,
                     policy_action="denied",
                     status="denied",
                 )
@@ -200,6 +220,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                     requested_model=decision.requested_model,
                     resolved_alias=decision.resolved_alias,
                     upstream_model=decision.route.upstream_model,
+                    policy_version=decision.policy_version,
                     policy_action="provider_policy_denied",
                     status="denied",
                 )
@@ -238,6 +259,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 client=client,
                 protocol=protocol,
                 requested_model=decision.requested_model,
+                policy_version=decision.policy_version,
                 action="denied" if self.server.config.secret_controls.mode == "deny" else "redacted",
                 detection_count=redaction.count,
                 rules=redaction.rules,
@@ -252,6 +274,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                     requested_model=decision.requested_model,
                     resolved_alias=decision.resolved_alias,
                     upstream_model=decision.route.upstream_model,
+                    policy_version=decision.policy_version,
                     policy_action="secret_denied",
                     status="denied",
                     redaction_count=redaction.count,
@@ -306,6 +329,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                     requested_model=decision.requested_model,
                     resolved_alias=decision.resolved_alias,
                     upstream_model=decision.route.upstream_model,
+                    policy_version=decision.policy_version,
                     policy_action="budget_reservation_denied",
                     status="denied",
                     redaction_count=redaction.count,
@@ -388,6 +412,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                     requested_model=decision.requested_model,
                     resolved_alias=decision.resolved_alias,
                     upstream_model=route.upstream_model,
+                    policy_version=decision.policy_version,
                     policy_action=policy_action,
                     status="failed",
                     redaction_count=redaction_count,
@@ -411,6 +436,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", content_type)
         self.send_header("Cache-Control", "no-store")
         self.send_header("Connection", "close")
+        self.send_header("X-Hormuz-Contract", relay_contract_header())
         self.send_header("X-Hormuz-Policy-Decision", policy_action)
         self.send_header("X-Hormuz-Requested-Model", decision.requested_model)
         self.send_header("X-Hormuz-Routed-Model", route.upstream_model)
@@ -460,6 +486,12 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         usage = parser.finish()
         if account_usage:
             successful = 200 <= status < 300 and downstream_ok
+            if successful:
+                request_status = "succeeded"
+            elif status == HTTPStatus.TOO_MANY_REQUESTS:
+                request_status = "rate_limited"
+            else:
+                request_status = "failed"
             cost = route.estimate_cost_microusd(
                 input_tokens=usage.input_tokens,
                 output_tokens=usage.output_tokens,
@@ -473,8 +505,10 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 requested_model=decision.requested_model,
                 resolved_alias=decision.resolved_alias,
                 upstream_model=route.upstream_model,
+                provider_reported_model=usage.provider_reported_model,
+                policy_version=decision.policy_version,
                 policy_action=policy_action,
-                status="succeeded" if successful else "failed",
+                status=request_status,
                 input_tokens=usage.input_tokens,
                 output_tokens=usage.output_tokens,
                 cache_read_tokens=usage.cache_read_tokens,
@@ -494,7 +528,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 policy_action,
                 decision.requested_model,
                 route.upstream_model,
-                "succeeded" if successful else "failed",
+                request_status,
                 usage.input_tokens,
                 usage.output_tokens,
                 cost,
@@ -554,7 +588,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         headers = {
             "Content-Type": "application/json",
             "Accept": self.headers.get("Accept", "application/json"),
-            "User-Agent": self.headers.get("User-Agent", "Hormuz/0.2.0"),
+            "User-Agent": self.headers.get("User-Agent", "Hormuz/0.2.1"),
         }
         if protocol == "openai":
             headers["Authorization"] = f"Bearer {upstream_key}"
@@ -582,17 +616,46 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             payload = {"type": "error", "error": {"type": "permission_error" if status == 403 else code, "message": message}}
         else:
             payload = {"error": {"message": message, "type": "policy_error" if status == 403 else code, "code": code}}
-        self._send_json(status, payload)
+        self._send_json(
+            status,
+            payload,
+            contract_header_value=relay_contract_header(),
+            error_code=code,
+        )
 
     def _send_error(self, code: str, message: str, status: HTTPStatus) -> None:
-        self._send_json(status, {"error": {"code": code, "message": message}})
+        self._send_contract_json(status, ERROR_SCHEMA_ID, {"error": {"code": code, "message": message}})
 
-    def _send_json(self, status: HTTPStatus, value: Any) -> None:
+    def _send_contract_json(
+        self,
+        status: HTTPStatus,
+        schema_id: str,
+        value: Mapping[str, Any],
+    ) -> None:
+        payload = contract_envelope(schema_id, value)
+        self._send_json(
+            status,
+            payload,
+            contract_header_value=f"{schema_id};v={payload['schema_version']}",
+        )
+
+    def _send_json(
+        self,
+        status: HTTPStatus,
+        value: Any,
+        *,
+        contract_header_value: str | None = None,
+        error_code: str | None = None,
+    ) -> None:
         body = json.dumps(value, separators=(",", ":")).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        if contract_header_value is not None:
+            self.send_header("X-Hormuz-Contract", contract_header_value)
+        if error_code is not None:
+            self.send_header("X-Hormuz-Error-Code", error_code)
         self.end_headers()
         self.wfile.write(body)
 

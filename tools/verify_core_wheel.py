@@ -41,9 +41,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    _assert_archive_boundary(args.wheel, _wheel_members)
-    _assert_archive_boundary(args.sdist, _sdist_members)
-    _verify_isolated_install(args.wheel, args.config, args.python)
+    wheel = args.wheel.resolve()
+    sdist = args.sdist.resolve()
+    config = args.config.resolve()
+    python = args.python.resolve()
+    _assert_archive_boundary(wheel, _wheel_members)
+    _assert_archive_boundary(sdist, _sdist_members)
+    _verify_isolated_install(wheel, config, python)
     print("verified core wheel boundary: no context implementation or initialization")
     return 0
 
@@ -108,6 +112,26 @@ def _verify_isolated_install(wheel: Path, config_template: Path, base_python: Pa
         )
         if help_result.returncode != 0 or "context-pack" in help_result.stdout:
             raise RuntimeError("installed core wheel exposes the retired context command")
+
+        manifest_result = subprocess.run(
+            [python, "-I", "-m", "hormuz", "contract-manifest"],
+            capture_output=True,
+            check=False,
+            cwd=root,
+            env=environment,
+            text=True,
+        )
+        if manifest_result.returncode != 0:
+            raise RuntimeError("installed core wheel cannot print the policy/evidence manifest")
+        try:
+            manifest = json.loads(manifest_result.stdout)
+        except json.JSONDecodeError as error:
+            raise RuntimeError("installed core wheel emitted an invalid policy/evidence manifest") from error
+        if (
+            manifest.get("schema_id") != "hormuz.policy-evidence-manifest"
+            or manifest.get("schema_version") != 1
+        ):
+            raise RuntimeError("installed core wheel emitted an unsupported policy/evidence manifest")
 
         legacy_result = subprocess.run(
             [python, "-I", "-m", "hormuz", "--config", str(config_path), "context-pack"],

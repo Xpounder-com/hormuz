@@ -13,6 +13,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from hormuz.config import GatewayConfig, Policy
+from hormuz.contracts import relay_contract_header, validate_audit_event, validate_contract
 from hormuz.policy import PolicyEngine
 from hormuz.server import GatewayServer, serve_in_thread
 from hormuz.store import UsageStore
@@ -41,6 +42,14 @@ class FakeProviderHandler(BaseHTTPRequestHandler):
                     "body": body,
                 }
             )
+
+        if body.get("force_rate_limit") is True:
+            self._send_json(
+                {"error": {"message": "Rate limit", "type": "rate_limit_error"}},
+                status=429,
+                request_id="req_rate_limited",
+            )
+            return
 
         if request_path.endswith("/responses"):
             payload = {
@@ -293,6 +302,57 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertEqual(totals.cache_read_tokens, 20)
         self.assertEqual(totals.reasoning_tokens, 7)
         self.assertGreater(totals.cost_microusd, 0)
+
+    def test_policy_and_evidence_contracts_are_versioned_without_mutating_provider_body(self) -> None:
+        status, headers, body = self._get("/health", token=None)
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["x-hormuz-contract"], "hormuz.gateway-health;v=1")
+        validate_contract(json.loads(body))
+
+        status, headers, body = self._get("/v1/gateway/whoami")
+        self.assertEqual(status, 200)
+        identity = json.loads(body)
+        validate_contract(identity)
+        self.assertEqual(identity["identity_type"], "human")
+
+        status, headers, response = self._post(
+            "/v1/responses",
+            {"model": "engineering-fast", "input": "hello"},
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["x-hormuz-contract"], relay_contract_header())
+        self.assertNotIn("schema_id", json.loads(response))
+
+        audit = self.gateway.store.audit_events(since="2000-01-01T00:00:00+00:00")
+        self.assertEqual(len(audit), 1)
+        validate_audit_event(audit[0])
+        self.assertEqual(audit[0]["routed_model"], "gpt-test-fast")
+        self.assertEqual(audit[0]["provider_reported_model"], "gpt-test-fast")
+        self.assertTrue(audit[0]["policy_version"].startswith("local-config-"))
+
+        status, headers, body = self._post(
+            "/v1/responses",
+            {"model": "engineering-fast", "input": "hello"},
+            token="wrong-token",
+        )
+        self.assertEqual(status, 401)
+        self.assertEqual(headers["x-hormuz-contract"], "hormuz.gateway-error;v=1")
+        validate_contract(json.loads(body))
+
+    def test_provider_rate_limit_is_evidence_not_an_additional_hormuz_denial(self) -> None:
+        status, headers, body = self._post(
+            "/v1/responses",
+            {"model": "engineering-fast", "input": "hello", "force_rate_limit": True},
+        )
+        self.assertEqual(status, 429)
+        self.assertEqual(headers["x-hormuz-contract"], relay_contract_header())
+        self.assertNotIn("schema_id", json.loads(body))
+
+        audit = self.gateway.store.audit_events(since="2000-01-01T00:00:00+00:00")
+        self.assertEqual(len(audit), 1)
+        self.assertEqual(audit[0]["policy_action"], "allowed")
+        self.assertEqual(audit[0]["status"], "rate_limited")
+        validate_audit_event(audit[0])
 
     def test_openai_background_mode_is_denied_by_default(self) -> None:
         before = len(FakeProviderHandler.requests)
@@ -633,6 +693,16 @@ class GatewayIntegrationTests(unittest.TestCase):
         }
         headers.update(extra_headers or {})
         connection.request("POST", path, body=json.dumps(body), headers=headers)
+        response = connection.getresponse()
+        data = response.read()
+        response_headers = {name.lower(): value for name, value in response.getheaders()}
+        connection.close()
+        return response.status, response_headers, data
+
+    def _get(self, path: str, *, token: str | None = GATEWAY_TOKEN):
+        connection = http.client.HTTPConnection("127.0.0.1", self.gateway.server_port, timeout=5)
+        headers = {} if token is None else {"Authorization": f"Bearer {token}"}
+        connection.request("GET", path, headers=headers)
         response = connection.getresponse()
         data = response.read()
         response_headers = {name.lower(): value for name, value in response.getheaders()}
