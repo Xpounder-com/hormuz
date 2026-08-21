@@ -145,6 +145,11 @@ jobs:
               tests.test_gateway.GatewayIntegrationTests.test_secret_is_redacted_before_provider_and_audited \
               tests.test_redaction.SecretRedactorTests \
               tests.test_auth.OIDCAuthenticationTests \
+              tests.test_audit_access \
+              tests.test_audit_admin_client \
+              tests.test_postgres.PostgresFoundationTests.test_checked_in_integration_evidence_is_content_free_and_bounded \
+              tests.test_session_broker.SessionBrokerIntegrationTests.test_audit_admin_is_tenant_scoped_paginated_and_self_audited \
+              tests.test_session_broker.SessionBrokerIntegrationTests.test_audit_admin_returns_no_events_when_read_audit_cannot_commit \
               tests.test_cli.ClientConfigTests
           else
             python -m unittest -v
