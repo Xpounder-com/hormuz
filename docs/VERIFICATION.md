@@ -53,19 +53,6 @@ Observed result:
 
 This proves official Claude Code client/protocol compatibility without spending against or exposing a real Anthropic account. A live Anthropic provider call remains pending until `ANTHROPIC_API_KEY` is securely provisioned to the Hormuz service.
 
-### Governed context-pack path
-
-The explicit context-pack kernel was exercised from both the source checkout and a clean installation of `dist/hormuz-0.1.0-py3-none-any.whl`.
-
-Observed result:
-
-- authorization tests excluded wrong-organization, wrong-team, wrong-actor, wrong-repository, wrong-branch, over-clearance, provisional, future, and expired records before ranking;
-- active authorized supersession replaced stale records while an expired superseder correctly left the prior record eligible;
-- record ordering did not change the pack identity, while content, classification, policy version, and budget changes did;
-- an oversized high-scoring record was skipped and a smaller matching record was selected without exceeding the budget;
-- the sample CLI produced a single verified, source-linked 76-token context item and did not call a provider or write to the usage database;
-- the complete source suite passed 37 tests locally after the context change, with the optional Claude Code executable test skipped in that local run.
-
 ### Generic OIDC JWT path
 
 A local standards-shaped issuer served an OIDC discovery document and rotating RSA JWKS to the actual Hormuz authentication and HTTP server path. No external identity provider, employee token, or provider credential was used.
@@ -76,7 +63,6 @@ Observed result:
 - wrong-audience, expired, unmapped-subject, symmetric-algorithm, non-TLS remote-issuer, and inconsistent duplicate-actor configurations failed closed;
 - a new signing key was accepted after one JWKS refresh, while repeated attacker-controlled unknown key IDs were rate-limited from causing repeated metadata fetches;
 - the identity endpoint returned no JWT or OIDC subject;
-- context-pack CLI tests proved a caller cannot request an organization or clearance beyond the configured identity;
 - generated OIDC configurations use Codex command-backed bearer authentication and Claude Code `apiKeyHelper`, while invalid configuration-injection URLs are rejected;
 - the complete local source suite passed 48 tests, with only the opt-in official Claude Code executable test skipped in that run.
 
@@ -102,8 +88,8 @@ Never add real provider or employee credentials to this record.
 
 GitHub Actions runs three independent gates without provider credentials:
 
-- the complete unit, context-governance, and loopback gateway suite on Python 3.11, 3.12, 3.13, and 3.14;
-- source-distribution and wheel builds followed by installation of the wheel in a clean virtual environment;
+- the complete core unit and loopback gateway suite on Python 3.11, 3.12, 3.13, and 3.14;
+- source-distribution and wheel builds followed by a clean-wheel inspection and isolated gateway-start boundary test;
 - installed-client routing through local fake providers using pinned official Codex and Claude Code package versions.
 
 The workflow grants only read access to repository contents, disables persisted checkout credentials, pins every GitHub Action to a reviewed commit SHA, and retains build artifacts for seven days. Dependabot is configured to propose updates to action and Python build dependencies; a client-version bump remains an intentional compatibility change because it can alter the provider protocol.

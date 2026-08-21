@@ -50,20 +50,45 @@ jobs:
           python-version: "3.12"
       - name: Install pinned build frontend
         run: python -m pip install build==1.3.0
-      - name: Build source and wheel distributions
-        run: python -m build
-      - name: Install and run the wheel
+      - name: Build core and experimental distributions
+        run: |
+          python -m build
+          python -m build experiments/context
+      - name: Prove the isolated core wheel boundary
+        run: |
+          python tools/verify_core_wheel.py \
+            --wheel dist/hormuz-*.whl \
+            --sdist dist/hormuz-*.tar.gz \
+            --config config.example.json
+      - name: Install and exercise the separate experiment wheel
         run: |
           python -m venv "$RUNNER_TEMP/hormuz-wheel"
-          "$RUNNER_TEMP/hormuz-wheel/bin/pip" install dist/hormuz-*.whl
+          "$RUNNER_TEMP/hormuz-wheel/bin/pip" install \
+            dist/hormuz-*.whl \
+            experiments/context/dist/hormuz_context_experiment-*.whl
           "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" --help
-          "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" context-pack --help
           "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" auth token --help
+          "$RUNNER_TEMP/hormuz-wheel/bin/hormuz-context-experiment" --help
+          HORMUZ_TOKEN=test-identity-token "$RUNNER_TEMP/hormuz-wheel/bin/hormuz-context-experiment" \
+            --config config.example.json \
+            context-pack \
+            --records experiments/context/examples/context-records.jsonl \
+            --query "How should API retries work?" \
+            --organization xpounder \
+            --actor alice \
+            --repository Xpounder-com/hormuz \
+            --token-budget 2000 \
+            --policy-version engineering-v1 \
+            > "$RUNNER_TEMP/context-pack.json"
+          CONTEXT_PACK_PATH="$RUNNER_TEMP/context-pack.json" "$RUNNER_TEMP/hormuz-wheel/bin/python" -c 'import json, os, pathlib; value = json.loads(pathlib.Path(os.environ["CONTEXT_PACK_PATH"]).read_text()); assert value["schema_version"] == "hormuz.context-pack.v1"; assert value["items"]'
+          "$RUNNER_TEMP/hormuz-wheel/bin/python" -m unittest discover -s experiments/context/tests -v
       - name: Preserve distribution evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: hormuz-distributions
-          path: dist/*
+          path: |
+            dist/*
+            experiments/context/dist/*
           if-no-files-found: error
           retention-days: 7
 

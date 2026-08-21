@@ -1,6 +1,6 @@
 # Secret egress controls
 
-Hormuz inspects JSON string values after identity and model policy evaluation and before the request is serialized to OpenAI or Anthropic. It never changes JSON keys. Prompt text, system instructions, tool outputs, and reusable context all pass through the same boundary when they are represented as JSON strings.
+Hormuz inspects JSON string values after identity and model policy evaluation and before the request is serialized to OpenAI or Anthropic. It never changes JSON keys. Prompt text, system instructions, and tool outputs pass through the same boundary when they are represented as JSON strings.
 
 ## Configuration
 

@@ -15,7 +15,7 @@ Choose how employees authenticate to Hormuz while continuing to use Codex and Cl
 
 This ADR proposes option 1. It is not accepted and does not authorize implementation until the product owner approves it.
 
-## Context
+## Background
 
 Hormuz already validates JWT access tokens using OIDC discovery and JWKS, then resolves the exact `(issuer, subject)` pair to an organization, team, actor, clearance, and client policy. It deliberately rejects ID tokens as API credentials. That path is appropriate for service accounts, CI, and identity providers that can mint a JWT for a custom resource audience.
 

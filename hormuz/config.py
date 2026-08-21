@@ -12,6 +12,27 @@ class ConfigError(ValueError):
     pass
 
 
+_DEPRECATED_CONTEXT_CONFIGURATION_KEYS = frozenset(
+    {
+        "context_cache",
+        "context_database",
+        "context_injection",
+        "context_lifecycle",
+        "context_packs",
+        "context_retrieval",
+        "context_service",
+        "context_storage",
+    }
+)
+_DEPRECATED_CONTEXT_CAPABILITIES = frozenset(
+    {"context_injector", "context_promoter", "context_retriever"}
+)
+_CONTEXT_EXPERIMENT_MOVED_MESSAGE = (
+    "context_experiment_moved: legacy context configuration is not supported by the core gateway; "
+    "migrate it to hormuz-context-experiment"
+)
+
+
 @dataclass(frozen=True)
 class ListenConfig:
     host: str = "127.0.0.1"
@@ -154,6 +175,7 @@ class GatewayConfig:
             raise ConfigError(f"Invalid JSON in {source_path}: {error}") from error
         if not isinstance(raw, dict):
             raise ConfigError("Gateway configuration must be a JSON object")
+        _reject_deprecated_context_configuration(raw)
 
         env = os.environ if environ is None else environ
         listen_raw = _object(raw.get("listen", {}), "listen")
@@ -432,6 +454,23 @@ def _policy(value: Any, path: str) -> Policy:
             item.get("per_actor_monthly_budget_usd"), f"{path}.per_actor_monthly_budget_usd"
         ),
     )
+
+
+def _reject_deprecated_context_configuration(raw: dict[str, Any]) -> None:
+    """Fail closed rather than silently ignoring retired context settings."""
+
+    pending: list[Any] = [raw]
+    while pending:
+        value = pending.pop()
+        if isinstance(value, dict):
+            for key, nested in value.items():
+                if key in _DEPRECATED_CONTEXT_CONFIGURATION_KEYS:
+                    raise ConfigError(_CONTEXT_EXPERIMENT_MOVED_MESSAGE)
+                pending.append(nested)
+        elif isinstance(value, list):
+            pending.extend(value)
+        elif isinstance(value, str) and value in _DEPRECATED_CONTEXT_CAPABILITIES:
+            raise ConfigError(_CONTEXT_EXPERIMENT_MOVED_MESSAGE)
 
 
 def _secret_controls(value: Any, env: dict[str, str]) -> SecretControls:

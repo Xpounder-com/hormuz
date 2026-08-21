@@ -17,13 +17,13 @@ Choose the authorization and persistence topology before Hormuz creates a stable
 
 This ADR proposes option 1. It is not accepted and does not authorize a stable migration contract until the product owner approves it.
 
-## Context
+## Background
 
-The private alpha stores a metadata-only usage ledger in SQLite and loads policy identities from configuration. That is useful for local verification but cannot provide hosted multi-tenant isolation, durable identity/session state, SCIM, governed context, tenant-scoped backup/restore, or concurrent migrations.
+The private alpha stores a metadata-only usage ledger in SQLite and loads policy identities from configuration. That is useful for local verification but cannot provide hosted multi-tenant isolation, durable identity/session state, SCIM, tenant-scoped backup/restore, or concurrent migrations.
 
 PostgreSQL row security can restrict selected and mutated rows and defaults to denying access when row security is enabled without an applicable policy. Table owners and roles with `BYPASSRLS` normally bypass it, so Hormuz must run as a non-owner without that attribute and apply `FORCE ROW LEVEL SECURITY`. See the [current PostgreSQL row-security documentation](https://www.postgresql.org/docs/current/ddl-rowsecurity.html).
 
-Row security is defense in depth, not permission to omit tenant scope from application APIs, keys, indexes, foreign keys, caches, jobs, or object storage.
+Row security is defense in depth, not permission to omit tenant scope from application APIs, keys, indexes, foreign keys, background jobs, or object storage.
 
 ## Proposed decision
 
@@ -46,10 +46,7 @@ Permissions are explicit capabilities, not assumptions encoded in route names. I
 - view own usage;
 - view team usage;
 - view tenant billing aggregates;
-- administer model, budget, DLP, and cache policies;
-- read governed context;
-- propose context;
-- verify/promote/supersede context;
+- administer model, budget, and DLP policies;
 - administer connectors and provider credentials;
 - view/export audit evidence;
 - manage identities, memberships, sessions, and service accounts.
@@ -80,7 +77,7 @@ The enterprise isolation option uses a dedicated PostgreSQL database, and when r
 
 ### Other durable stores
 
-Object storage keys begin with an opaque tenant ID and are authorized before a signed URL is created. Search/vector indexes use a tenant partition or dedicated index and apply authorization before candidate retrieval. Queues include tenant and authorization version in the authenticated job envelope. Cache keys include tenant and access-scope digests. Provider credentials and context encryption keys are tenant-scoped through KMS; their custody is finalized under the later KMS/BYOK gate.
+Durable control-plane records, usage events, and audit evidence carry tenant scope explicitly. Queues include tenant and authorization version in the authenticated job envelope. Provider credentials and any future tenant encryption keys are tenant-scoped through KMS; their custody is finalized under the later KMS/BYOK gate.
 
 SQLite remains supported only for local, single-tenant development and deterministic tests. It implements the same repository interfaces and schema semantics where practical, but it is not production evidence for tenant isolation, concurrency, backup, or migrations.
 
@@ -101,16 +98,16 @@ The migration framework/library is deliberately not selected in this ADR. That c
 - A shared-database single-tenant restore is performed into an isolated recovery environment, validated, and replayed through tenant-scoped import tooling; production-wide rollback is not used for one tenant.
 - Tenant export and deletion traverse every durable store from a registry of tenant-owned data classes and produce auditable completion evidence.
 - A tenant is pinned to an approved region. Replication, backups, analytics, and support workflows cannot move tenant content outside that boundary without explicit policy.
-- Legal hold applies to canonical records and audit evidence. Derived caches are rebuilt from canonical state rather than treated as the legal system of record.
+- Legal hold applies to durable control-plane records and audit evidence.
 
 Recovery point and recovery time objectives are not chosen here; they are commercial/operational decisions for the deployment milestone and must be measured before v1.0.
 
 ## Security invariants
 
-- Tenant resolution happens once from an authenticated principal and cannot be overridden by a request body, header, context record, or provider response.
-- Authorization precedes data retrieval, cache lookup, embedding/search, connector calls, and expensive provider work.
+- Tenant resolution happens once from an authenticated principal and cannot be overridden by a request body, header, or provider response.
+- Authorization precedes durable-record access, provider credential use, and expensive provider work.
 - Cross-tenant identifiers return the same non-disclosing result as nonexistent identifiers.
-- Data access tests use at least two tenants and prove read, write, aggregate, search, cache, queue, export, backup/restore, and migration isolation.
+- Data access tests use at least two tenants and prove read, write, aggregate, queue, export, backup/restore, and migration isolation.
 - Database owners, migration roles, support roles, and runtime roles are distinct and auditable.
 - Referential-integrity and unique-constraint behavior is reviewed for covert cross-tenant existence disclosure because PostgreSQL integrity checks can bypass RLS.
 - No prompt, response, source content, provider credential, or session credential appears in usage metadata or routine audit events.
@@ -135,8 +132,8 @@ This is excellent for local development but does not satisfy the hosted concurre
 
 ## Consequences if accepted
 
-- PostgreSQL becomes the production source of truth for control-plane, identity, usage, and governed-context metadata/content, behind repository interfaces.
-- Every new persistence feature must prove tenant scope across SQL, jobs, caches, indexes, object storage, exports, and audit.
+- PostgreSQL becomes the production source of truth for control-plane, identity, usage, and audit metadata behind repository interfaces.
+- Every new persistence feature must prove tenant scope across SQL, jobs, exports, and audit.
 - The standard hosted tier can be operated economically, while regulated customers can buy a dedicated boundary without a separate codebase.
 - Tenant-level restore in a shared database requires purpose-built export/replay tooling and drills.
 - The schema and authorization capability model become high-cost-to-change contracts; implementation waits for owner approval.
@@ -149,10 +146,10 @@ Acceptance of this ADR does not prove the implementation. Issue #6 closes only w
 - repository contract tests against PostgreSQL and local SQLite;
 - cross-tenant negative tests for every query/mutation class and reused pooled connections;
 - database-role tests proving runtime cannot bypass RLS or own protected tables;
-- concurrency tests for budgets, membership/revocation, and context lifecycle;
+- concurrency tests for budgets, membership/revocation, and policy-version changes;
 - backup/PITR and isolated single-tenant restore drills;
 - shared-to-dedicated tenant portability evidence;
-- logs and exports scanned for credentials and governed content.
+- logs and exports scanned for credentials and content leakage.
 
 ## Owner approval record
 

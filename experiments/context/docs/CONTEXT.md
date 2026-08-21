@@ -1,13 +1,13 @@
-# Governed context packs
+# Context experiment
 
-Hormuz can build an explicit, provider-neutral context pack from content-bearing JSONL records. This first boundary is intentionally separate from the gateway request path: it does not automatically inject context, store context in the metadata-only usage database, call an embedding model, or send record content to OpenAI or Anthropic.
+This deprecated experiment builds an explicit, provider-neutral context pack from content-bearing JSONL records. It is intentionally separate from the Hormuz core gateway request path: it does not automatically inject context, store context in the metadata-only usage database, call an embedding model, or send record content to OpenAI or Anthropic.
 
 ## Build a pack
 
 The actor must exist in `hormuz.json`; Hormuz derives the actor and team scope from that configured identity.
 
 ```bash
-python3 -m hormuz --config hormuz.json context-pack \
+hormuz-context-experiment --config hormuz.json context-pack \
   --records examples/context-records.jsonl \
   --query "How should API retries work?" \
   --organization xpounder \
@@ -74,7 +74,7 @@ The SHA-256 pack identity and `manifest_sha256` cover the query, actor/team/org/
 
 ## Current boundary
 
-This is an executable governance kernel, not the final enterprise context service:
+This is a retained experimental kernel, not a Hormuz core capability or enterprise context service:
 
 - retrieval is lexical; there is no embedding provider or vector index;
 - the JSONL file is caller-managed; Hormuz has not selected SQLite, Postgres, or customer object storage for governed content;
@@ -83,4 +83,4 @@ This is an executable governance kernel, not the final enterprise context servic
 - there is no automatic prompt injection, context-pack cache, encrypted content store, approval workflow, or outcome writeback yet;
 - if a pack is later sent through Hormuz, context injection must happen before the existing secret-egress boundary so the resulting provider request is inspected.
 
-Those remaining choices are material product decisions and should be settled before the context path is connected automatically to Codex or Claude Code.
+Those remaining choices are outside the core Hormuz release path. See the core [migration note](../../../docs/CONTEXT_EXPERIMENT_MIGRATION.md).
