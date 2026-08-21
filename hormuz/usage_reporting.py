@@ -11,6 +11,8 @@ REPORT_DIMENSIONS = {"organization", "team", "person", "model", "client", "provi
 IDENTITY_TYPES = ("human", "service_account", "ci", "connector")
 LATENCY_BUCKETS_MS = (1, 5, 10, 25, 50, 100, 250, 500, 1_000, 10_000, 60_000, 600_000)
 BUDGET_PACING_METHODOLOGY = "calendar_pace_estimate"
+MODEL_MIX_IDENTITY_BASIS = "actual_model_or_routed_fallback"
+MODEL_MIX_REQUEST_BASIS = "all_accounted_gateway_attempts"
 _MICROUSD = Decimal(1_000_000)
 _SECONDS_PER_CALENDAR_DAY = Decimal(86_400)
 
@@ -127,6 +129,131 @@ def build_budget_pacing(
             utilization.quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
         )
     return result
+
+
+def build_model_mix(rows: Iterable[dict[str, object]]) -> dict[str, object]:
+    """Build content-free current-window model consumption shares.
+
+    ``report_rows(group_by="model")`` already applies the caller's tenant and
+    access scope.  This helper deliberately only turns those rows into model
+    shares; it does not infer provider invoices, model quality, or employee
+    performance.  A provider-returned actual model is preferred by the store
+    aggregation, with the routed model used only when the provider omits it.
+    """
+
+    totals = {
+        "requests": 0,
+        "succeeded": 0,
+        "failed": 0,
+        "denied": 0,
+        "total_tokens": 0,
+        "estimated_spend_microusd": 0,
+        "unpriced_requests": 0,
+    }
+    models: list[dict[str, object]] = []
+    seen_models: set[tuple[str, str]] = set()
+    for row in rows:
+        model_id = _model_mix_text(row.get("scope_id"), field="model")
+        provider = _model_mix_text(row.get("protocol"), field="provider")
+        identity = (provider, model_id)
+        if identity in seen_models:
+            raise ValueError("Model mix rows must be unique by provider and model")
+        seen_models.add(identity)
+
+        values = {
+            field: _model_mix_nonnegative_int(row.get(field), field=field)
+            for field in (
+                "requests",
+                "succeeded",
+                "failed",
+                "denied",
+                "total_tokens",
+                "estimated_cost_microusd",
+                "unpriced_requests",
+            )
+        }
+        if values["succeeded"] + values["failed"] + values["denied"] != values["requests"]:
+            raise ValueError("Model mix status counts must equal requests")
+        if values["unpriced_requests"] > values["requests"]:
+            raise ValueError("Model mix unpriced requests cannot exceed requests")
+
+        model = {
+            "model_id": model_id,
+            "provider": provider,
+            "requests": values["requests"],
+            "succeeded": values["succeeded"],
+            "failed": values["failed"],
+            "denied": values["denied"],
+            "total_tokens": values["total_tokens"],
+            "estimated_spend_microusd": values["estimated_cost_microusd"],
+            "estimated_spend_usd": values["estimated_cost_microusd"] / 1_000_000,
+            "unpriced_requests": values["unpriced_requests"],
+            "request_share_percent": None,
+            "token_share_percent": None,
+            "estimated_spend_share_percent": None,
+        }
+        models.append(model)
+        totals["requests"] += values["requests"]
+        totals["succeeded"] += values["succeeded"]
+        totals["failed"] += values["failed"]
+        totals["denied"] += values["denied"]
+        totals["total_tokens"] += values["total_tokens"]
+        totals["estimated_spend_microusd"] += values["estimated_cost_microusd"]
+        totals["unpriced_requests"] += values["unpriced_requests"]
+
+    models.sort(
+        key=lambda model: (
+            -int(model["estimated_spend_microusd"]),
+            -int(model["total_tokens"]),
+            str(model["provider"]),
+            str(model["model_id"]),
+        )
+    )
+    for model in models:
+        model["request_share_percent"] = _model_mix_percentage(
+            int(model["requests"]), totals["requests"]
+        )
+        model["token_share_percent"] = _model_mix_percentage(
+            int(model["total_tokens"]), totals["total_tokens"]
+        )
+        model["estimated_spend_share_percent"] = _model_mix_percentage(
+            int(model["estimated_spend_microusd"]), totals["estimated_spend_microusd"]
+        )
+
+    return {
+        "model_identity_basis": MODEL_MIX_IDENTITY_BASIS,
+        "request_basis": MODEL_MIX_REQUEST_BASIS,
+        "totals": {
+            **totals,
+            "estimated_spend_usd": totals["estimated_spend_microusd"] / 1_000_000,
+            "partial_estimated_spend": totals["unpriced_requests"] > 0,
+        },
+        "models": models,
+    }
+
+
+def _model_mix_nonnegative_int(value: object, *, field: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError(f"Model mix {field} must be a non-negative integer")
+    return value
+
+
+def _model_mix_text(value: object, *, field: str) -> str:
+    if (
+        not isinstance(value, str)
+        or not value
+        or len(value.encode("utf-8")) > 256
+        or any(character in value for character in ("\n", "\r", "\x00"))
+    ):
+        raise ValueError(f"Model mix {field} must be a bounded identifier")
+    return value
+
+
+def _model_mix_percentage(numerator: int, denominator: int) -> float | None:
+    if denominator == 0:
+        return None
+    value = Decimal(numerator) * Decimal(100) / Decimal(denominator)
+    return float(value.quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP))
 
 
 def budget_for_pacing_scope(

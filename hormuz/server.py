@@ -107,6 +107,7 @@ from .usage_reporting import (
     REPORT_DIMENSIONS,
     budget_for_pacing_scope,
     build_budget_pacing,
+    build_model_mix,
     enrich_usage_rows,
     utc_month_bounds,
 )
@@ -146,6 +147,7 @@ _CONTENT_FREE_HTTP_ROUTES = frozenset(
         "/v1/admin/audit-events",
         "/v1/admin/usage",
         "/v1/admin/usage/coverage",
+        "/v1/admin/usage/model-mix",
         "/v1/admin/usage/pacing",
         "/v1/admin/policy-active",
         "/v1/admin/policy-activations",
@@ -931,6 +933,9 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         if path == "/v1/admin/audit-events":
             self._list_audit_events(identity, request_url.query)
             return
+        if path == "/v1/admin/usage/model-mix":
+            self._get_usage_model_mix(identity, request_url.query)
+            return
         if path == "/v1/admin/usage/pacing":
             self._get_usage_pacing(identity, request_url.query)
             return
@@ -1529,6 +1534,104 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 },
                 "coverage": coverage,
             },
+        )
+
+    def _get_usage_model_mix(self, identity: Identity, query: str) -> None:
+        """Return current-month, scoped model consumption shares."""
+
+        if query:
+            self._send_usage_model_mix_error()
+            return
+        try:
+            access = authorize_usage_report(
+                identity,
+                group_by="model",
+                actor_id=None,
+                team_id=None,
+            )
+        except UsageReportAccessError as error:
+            messages = {
+                "usage_viewer_capability_required": "Usage report capability is required",
+                "usage_report_scope_forbidden": "Credential is not authorized for this usage report scope",
+                "usage_report_scope_ambiguous": "Credential has an ambiguous usage report scope",
+            }
+            self._send_error(
+                error.code,
+                messages.get(error.code, "Usage report authorization is invalid"),
+                HTTPStatus.FORBIDDEN,
+            )
+            return
+
+        as_of = datetime.now(timezone.utc)
+        window_start, _ = utc_month_bounds(as_of)
+        try:
+            model_mix = build_model_mix(
+                self.server.store.report_rows(
+                    group_by="model",
+                    organization_id=identity.organization_id,
+                    actor_id=access.actor_id,
+                    team_id=access.team_id,
+                    start=window_start.isoformat(),
+                    end=as_of.isoformat(),
+                )
+            )
+            partial_estimated_spend = bool(
+                model_mix["totals"]["partial_estimated_spend"]  # type: ignore[index]
+            )
+            self.server.store.record_admin_usage_read(
+                administrator=identity,
+                access_scope=access.scope,
+                group_by="model",
+                actor_filter=access.actor_id,
+                team_filter=access.team_id,
+                window_start=window_start.isoformat(),
+                window_end=as_of.isoformat(),
+                result_count=len(model_mix["models"]),  # type: ignore[arg-type]
+            )
+        except (ValueError, sqlite3.Error, SecurityStoreError, PostgresStorageError):
+            self._send_error(
+                "usage_admin_unavailable",
+                "Usage administration is temporarily unavailable",
+                HTTPStatus.SERVICE_UNAVAILABLE,
+            )
+            return
+
+        LOGGER.info(
+            "usage_model_mix_read organization=%s decision_actor=%s scope=%s models=%d partial_estimated_spend=%s",
+            identity.organization_id,
+            identity.actor_id,
+            access.scope,
+            len(model_mix["models"]),  # type: ignore[arg-type]
+            "true" if partial_estimated_spend else "false",
+        )
+        self._send_json(
+            HTTPStatus.OK,
+            {
+                "schema_version": 1,
+                "organization_id": identity.organization_id,
+                "access": {"scope": access.scope},
+                "filters": {"actor_id": access.actor_id, "team_id": access.team_id},
+                "window": {
+                    "start": window_start.isoformat(),
+                    "as_of": as_of.isoformat(),
+                    "timezone": "UTC",
+                },
+                "coverage": {
+                    "scope": "gateway_captured_requests_only",
+                    "legacy_unattributed_rows_excluded": True,
+                    "outside_gateway_traffic_observable": False,
+                    "provider_invoice_reconciled": False,
+                    "partial_estimated_spend": partial_estimated_spend,
+                },
+                "model_mix": model_mix,
+            },
+        )
+
+    def _send_usage_model_mix_error(self) -> None:
+        self._send_error(
+            "invalid_usage_model_mix_request",
+            "Usage model mix query is invalid",
+            HTTPStatus.BAD_REQUEST,
         )
 
     def _get_usage_pacing(self, identity: Identity, query: str) -> None:

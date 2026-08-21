@@ -6,12 +6,15 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
+from decimal import Decimal, ROUND_HALF_UP
 
 from .session_client import validate_session_gateway
 from .usage_reporting import (
     BUDGET_PACING_METHODOLOGY,
     IDENTITY_TYPES,
     LATENCY_BUCKETS_MS,
+    MODEL_MIX_IDENTITY_BASIS,
+    MODEL_MIX_REQUEST_BASIS,
     utc_month_bounds,
 )
 
@@ -218,6 +221,39 @@ class UsageAdminClient:
             raise UsageAdminClientError("invalid_gateway_response")
         return response
 
+    def model_mix(self) -> dict[str, object]:
+        """Read current-month model consumption shares for this credential's scope."""
+
+        response = self._request("/v1/admin/usage/model-mix")
+        required = {
+            "schema_version",
+            "organization_id",
+            "access",
+            "filters",
+            "window",
+            "coverage",
+            "model_mix",
+        }
+        if set(response) != required or response.get("schema_version") != 1:
+            raise UsageAdminClientError("invalid_gateway_response")
+        if not isinstance(response.get("organization_id"), str) or not response["organization_id"]:
+            raise UsageAdminClientError("invalid_gateway_response")
+        if not _valid_pacing_access(response.get("access"), response.get("filters")):
+            raise UsageAdminClientError("invalid_gateway_response")
+        if not _valid_model_mix_window(response.get("window")):
+            raise UsageAdminClientError("invalid_gateway_response")
+        model_mix = response.get("model_mix")
+        if not _valid_model_mix(model_mix):
+            raise UsageAdminClientError("invalid_gateway_response")
+        if not _valid_model_mix_coverage(
+            response.get("coverage"),
+            partial_estimated_spend=bool(
+                model_mix["totals"]["partial_estimated_spend"]  # type: ignore[index]
+            ),
+        ):
+            raise UsageAdminClientError("invalid_gateway_response")
+        return response
+
     def _request(self, path: str) -> dict[str, object]:
         request = urllib.request.Request(
             self.gateway + path,
@@ -378,6 +414,206 @@ def _valid_pacing_coverage(value: object, *, partial_projection: bool) -> bool:
         "partial_projection": partial_projection,
     }
     return value == expected
+
+
+def _valid_model_mix_window(value: object) -> bool:
+    if not isinstance(value, dict) or set(value) != {"start", "as_of", "timezone"}:
+        return False
+    if value.get("timezone") != "UTC" or not all(
+        isinstance(value.get(key), str) for key in ("start", "as_of")
+    ):
+        return False
+    try:
+        start = datetime.fromisoformat(value["start"])
+        as_of = datetime.fromisoformat(value["as_of"])
+        expected_start, expected_end = utc_month_bounds(as_of)
+    except (TypeError, ValueError, OverflowError):
+        return False
+    return (
+        start.tzinfo is not None
+        and start.utcoffset() == timezone.utc.utcoffset(None)
+        and as_of.tzinfo is not None
+        and as_of.utcoffset() == timezone.utc.utcoffset(None)
+        and start == expected_start
+        and start <= as_of < expected_end
+    )
+
+
+def _valid_model_mix_coverage(value: object, *, partial_estimated_spend: bool) -> bool:
+    return value == {
+        "scope": "gateway_captured_requests_only",
+        "legacy_unattributed_rows_excluded": True,
+        "outside_gateway_traffic_observable": False,
+        "provider_invoice_reconciled": False,
+        "partial_estimated_spend": partial_estimated_spend,
+    }
+
+
+def _valid_model_mix(value: object) -> bool:
+    if not isinstance(value, dict) or set(value) != {
+        "model_identity_basis",
+        "request_basis",
+        "totals",
+        "models",
+    }:
+        return False
+    if (
+        value.get("model_identity_basis") != MODEL_MIX_IDENTITY_BASIS
+        or value.get("request_basis") != MODEL_MIX_REQUEST_BASIS
+        or not _valid_model_mix_totals(value.get("totals"))
+    ):
+        return False
+    totals = value["totals"]
+    models = value.get("models")
+    if not isinstance(totals, dict) or not isinstance(models, list):
+        return False
+
+    accumulated = {
+        "requests": 0,
+        "succeeded": 0,
+        "failed": 0,
+        "denied": 0,
+        "total_tokens": 0,
+        "estimated_spend_microusd": 0,
+        "unpriced_requests": 0,
+    }
+    identities: set[tuple[str, str]] = set()
+    for model in models:
+        if not _valid_model_mix_row(model, totals=totals):
+            return False
+        assert isinstance(model, dict)
+        provider = model["provider"]
+        model_id = model["model_id"]
+        assert isinstance(provider, str) and isinstance(model_id, str)
+        identity = (provider, model_id)
+        if identity in identities:
+            return False
+        identities.add(identity)
+        for field in accumulated:
+            accumulated[field] += int(model[field])
+    if any(accumulated[field] != int(totals[field]) for field in accumulated):
+        return False
+    return bool(totals["partial_estimated_spend"]) == (
+        int(totals["unpriced_requests"]) > 0
+    )
+
+
+def _valid_model_mix_totals(value: object) -> bool:
+    required = {
+        "requests",
+        "succeeded",
+        "failed",
+        "denied",
+        "total_tokens",
+        "estimated_spend_microusd",
+        "estimated_spend_usd",
+        "unpriced_requests",
+        "partial_estimated_spend",
+    }
+    if not isinstance(value, dict) or set(value) != required:
+        return False
+    integer_fields = required - {"estimated_spend_usd", "partial_estimated_spend"}
+    if not all(_valid_nonnegative_int(value.get(field)) for field in integer_fields):
+        return False
+    if (
+        value["succeeded"] + value["failed"] + value["denied"] != value["requests"]
+        or value["unpriced_requests"] > value["requests"]
+        or not _valid_micro_usd_value(
+            value.get("estimated_spend_usd"),
+            microusd=int(value["estimated_spend_microusd"]),
+        )
+        or not isinstance(value.get("partial_estimated_spend"), bool)
+    ):
+        return False
+    return True
+
+
+def _valid_model_mix_row(value: object, *, totals: dict[str, object]) -> bool:
+    required = {
+        "model_id",
+        "provider",
+        "requests",
+        "succeeded",
+        "failed",
+        "denied",
+        "total_tokens",
+        "estimated_spend_microusd",
+        "estimated_spend_usd",
+        "unpriced_requests",
+        "request_share_percent",
+        "token_share_percent",
+        "estimated_spend_share_percent",
+    }
+    if not isinstance(value, dict) or set(value) != required:
+        return False
+    for field in ("model_id", "provider"):
+        try:
+            _bounded_value(value[field], max_bytes=256)  # type: ignore[arg-type]
+        except UsageAdminClientError:
+            return False
+    integer_fields = {
+        "requests",
+        "succeeded",
+        "failed",
+        "denied",
+        "total_tokens",
+        "estimated_spend_microusd",
+        "unpriced_requests",
+    }
+    if not all(_valid_nonnegative_int(value.get(field)) for field in integer_fields):
+        return False
+    if (
+        int(value["succeeded"]) + int(value["failed"]) + int(value["denied"])
+        != int(value["requests"])
+        or int(value["unpriced_requests"]) > int(value["requests"])
+        or not _valid_micro_usd_value(
+            value.get("estimated_spend_usd"),
+            microusd=int(value["estimated_spend_microusd"]),
+        )
+    ):
+        return False
+    return all(
+        _valid_model_mix_share(
+            value.get(share_field),
+            numerator=int(value[numerator_field]),
+            denominator=int(totals[denominator_field]),
+        )
+        for share_field, numerator_field, denominator_field in (
+            ("request_share_percent", "requests", "requests"),
+            ("token_share_percent", "total_tokens", "total_tokens"),
+            (
+                "estimated_spend_share_percent",
+                "estimated_spend_microusd",
+                "estimated_spend_microusd",
+            ),
+        )
+    )
+
+
+def _valid_micro_usd_value(value: object, *, microusd: int) -> bool:
+    return _valid_nonnegative_number(value) and math.isclose(
+        float(value),
+        microusd / 1_000_000,
+        rel_tol=0,
+        abs_tol=1e-9,
+    )
+
+
+def _valid_model_mix_share(value: object, *, numerator: int, denominator: int) -> bool:
+    if denominator == 0:
+        return value is None
+    expected = float(
+        (Decimal(numerator) * Decimal(100) / Decimal(denominator)).quantize(
+            Decimal("0.000001"),
+            rounding=ROUND_HALF_UP,
+        )
+    )
+    return _valid_nonnegative_number(value) and float(value) <= 100 and math.isclose(
+        float(value),
+        expected,
+        rel_tol=0,
+        abs_tol=1e-9,
+    )
 
 
 def _valid_budget_pacing(value: object) -> bool:

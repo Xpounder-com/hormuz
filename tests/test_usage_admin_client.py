@@ -212,6 +212,74 @@ def _pacing_response() -> dict[str, object]:
     }
 
 
+def _model_mix_response() -> dict[str, object]:
+    return {
+        "schema_version": 1,
+        "organization_id": "xpounder",
+        "access": {"scope": "organization"},
+        "filters": {"actor_id": None, "team_id": None},
+        "window": {
+            "start": "2026-08-01T00:00:00+00:00",
+            "as_of": "2026-08-16T12:00:00+00:00",
+            "timezone": "UTC",
+        },
+        "coverage": {
+            "scope": "gateway_captured_requests_only",
+            "legacy_unattributed_rows_excluded": True,
+            "outside_gateway_traffic_observable": False,
+            "provider_invoice_reconciled": False,
+            "partial_estimated_spend": True,
+        },
+        "model_mix": {
+            "model_identity_basis": "actual_model_or_routed_fallback",
+            "request_basis": "all_accounted_gateway_attempts",
+            "totals": {
+                "requests": 3,
+                "succeeded": 1,
+                "failed": 1,
+                "denied": 1,
+                "total_tokens": 35,
+                "estimated_spend_microusd": 3_000,
+                "estimated_spend_usd": 0.003,
+                "unpriced_requests": 1,
+                "partial_estimated_spend": True,
+            },
+            "models": [
+                {
+                    "model_id": "gpt-5.4",
+                    "provider": "openai",
+                    "requests": 2,
+                    "succeeded": 1,
+                    "failed": 0,
+                    "denied": 1,
+                    "total_tokens": 12,
+                    "estimated_spend_microusd": 3_000,
+                    "estimated_spend_usd": 0.003,
+                    "unpriced_requests": 0,
+                    "request_share_percent": 66.666667,
+                    "token_share_percent": 34.285714,
+                    "estimated_spend_share_percent": 100.0,
+                },
+                {
+                    "model_id": "claude-sonnet",
+                    "provider": "anthropic",
+                    "requests": 1,
+                    "succeeded": 0,
+                    "failed": 1,
+                    "denied": 0,
+                    "total_tokens": 23,
+                    "estimated_spend_microusd": 0,
+                    "estimated_spend_usd": 0.0,
+                    "unpriced_requests": 1,
+                    "request_share_percent": 33.333333,
+                    "token_share_percent": 65.714286,
+                    "estimated_spend_share_percent": 0.0,
+                },
+            ],
+        },
+    }
+
+
 class UsageAdminClientTests(unittest.TestCase):
     def setUp(self) -> None:
         self.client = UsageAdminClient(
@@ -422,6 +490,30 @@ class UsageAdminClientTests(unittest.TestCase):
         with mock.patch.object(self.client, "_request", return_value=partial_mismatch):
             with self.assertRaisesRegex(UsageAdminClientError, "invalid_gateway_response"):
                 self.client.pacing()
+
+    def test_model_mix_requires_exact_content_free_shares(self) -> None:
+        response = _model_mix_response()
+        with mock.patch.object(self.client, "_request", return_value=response) as request:
+            self.assertEqual(self.client.model_mix(), response)
+        self.assertEqual(request.call_args.args[0], "/v1/admin/usage/model-mix")
+
+        unsafe = _model_mix_response()
+        unsafe["model_mix"]["models"][0]["prompt"] = "must-not-be-accepted"  # type: ignore[index]
+        with mock.patch.object(self.client, "_request", return_value=unsafe):
+            with self.assertRaisesRegex(UsageAdminClientError, "invalid_gateway_response"):
+                self.client.model_mix()
+
+        incorrect_share = _model_mix_response()
+        incorrect_share["model_mix"]["models"][0]["request_share_percent"] = 50.0  # type: ignore[index]
+        with mock.patch.object(self.client, "_request", return_value=incorrect_share):
+            with self.assertRaisesRegex(UsageAdminClientError, "invalid_gateway_response"):
+                self.client.model_mix()
+
+        partial_mismatch = _model_mix_response()
+        partial_mismatch["coverage"]["partial_estimated_spend"] = False  # type: ignore[index]
+        with mock.patch.object(self.client, "_request", return_value=partial_mismatch):
+            with self.assertRaisesRegex(UsageAdminClientError, "invalid_gateway_response"):
+                self.client.model_mix()
 
 
 if __name__ == "__main__":

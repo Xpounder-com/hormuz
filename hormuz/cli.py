@@ -496,6 +496,25 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Allow loopback HTTP for local development only",
     )
+    usage_model_mix = usage_subparsers.add_parser(
+        "model-mix",
+        help="Read current-month model consumption shares for the permitted scope",
+    )
+    usage_model_mix.add_argument("--gateway", required=True, help="Hormuz gateway base URL")
+    usage_model_mix_credential = usage_model_mix.add_mutually_exclusive_group()
+    usage_model_mix_credential.add_argument(
+        "--credential-env",
+        help="Usage viewer credential environment variable (default: HORMUZ_TOKEN)",
+    )
+    usage_model_mix_credential.add_argument(
+        "--profile",
+        help="Saved human-session profile instead of an environment credential",
+    )
+    usage_model_mix.add_argument(
+        "--allow-insecure-http",
+        action="store_true",
+        help="Allow loopback HTTP for local development only",
+    )
 
     audit_admin = subparsers.add_parser(
         "audit",
@@ -2615,6 +2634,8 @@ def _usage_admin_command(args: argparse.Namespace) -> int:
             result = client.coverage()
         elif args.usage_command == "pacing":
             result = client.pacing()
+        elif args.usage_command == "model-mix":
+            result = client.model_mix()
         else:
             return 2
     except (

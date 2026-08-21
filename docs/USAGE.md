@@ -106,6 +106,22 @@ active budget reservations under the active policy can deny a request. See
 [USAGE_ADMIN_API.md](USAGE_ADMIN_API.md) for the exact authenticated contract
 and scope rules.
 
+For a current-month model mix in the same reporting scope, run:
+
+```bash
+hormuz usage model-mix \
+  --gateway https://hormuz.example.com \
+  --profile ai-operations
+```
+
+This is a content-free consumption view, not a model-quality or employee
+performance score. It groups each accounted attempt by the provider-returned
+actual model when available, otherwise by the routed model. It reports request,
+input-plus-output-token, and estimated-spend shares together with succeeded,
+failed, denied, and unpriced-request counts. Estimated-spend shares are marked
+partial when a provider attempt has no configured price, and are never
+invoice-reconciled cost or proof of total organizational AI use.
+
 ## Field semantics
 
 - `requests`, `succeeded`, `failed`, and `denied` describe gateway outcomes.
@@ -122,6 +138,13 @@ and scope rules.
   atomic in-flight reservation failed. Hormuz does not infer the reason for
   generic historical denials that did not persist one.
 - `requested_model`, `resolved_alias`, and `upstream_model` preserve policy/routing intent; `actual_model` is the bounded provider-returned model identifier when present. Model reports prefer the actual model and fall back through those routing fields when the provider omits it.
+- `model_mix` applies that same actual-model-or-routed-fallback basis to the
+  caller's current UTC calendar month. Its request share includes all accounted
+  gateway attempts; status counts make succeeded, failed, and denied attempts
+  explicit. Its token share uses `total_tokens` (input plus output), rather
+  than double-counting provider cache or reasoning subcategories. Its
+  estimated-spend share includes only priceable gateway events and is partial
+  whenever `unpriced_requests` is nonzero.
 - `input_tokens` and `output_tokens` come from the provider response.
 - `cache_read_tokens`, `cache_write_tokens`, and `reasoning_tokens` are shown separately when the provider exposes them. Some are subcategories of input or output, so Hormuz does not add them again to `total_tokens`.
 - Hormuz does not expose a cache-savings metric in this release. Provider-reported cache token categories can support a request-time cost estimate only under the exact configured rate card; neither those estimates nor an allocated person/team amount is a final provider invoice. See [provider-native cache policy](PROVIDER_CACHE_POLICY.md) and [billing reconciliation](BILLING_RECONCILIATION.md).

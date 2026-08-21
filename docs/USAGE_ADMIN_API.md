@@ -52,6 +52,19 @@ Add `--include-outcomes` when the operator needs exact, content-free counts of
 recorded model fallbacks, enforced output caps, and atomic budget-reservation
 denials. The flags can be combined.
 
+For a one-read current UTC-month model mix in the credential's permitted scope:
+
+```bash
+hormuz usage model-mix \
+  --gateway https://hormuz.example.com \
+  --profile ai-operations
+```
+
+This route has no caller-supplied scope filters. It groups recorded attempts by
+provider plus the actual model when available (otherwise the routed model), and
+returns request, input-plus-output-token, and estimated-spend shares alongside
+status and unpriced-request counts.
+
 An organization-scoped administrator can group by `organization`, `team`,
 `person`, `model`, `client`, or `provider`, and can use exact event-time
 `--actor` and `--team` filters. Narrower roles are constrained by the table
@@ -269,9 +282,26 @@ without a coverage object.
 paginate. A storage or mandatory audit-write failure returns
 `503 usage_admin_unavailable` without a budget-pacing object.
 
+`GET /v1/admin/usage/model-mix` likewise rejects every query field with
+`400 invalid_usage_model_mix_request`. Its current UTC-month response does not
+paginate because it is a complete aggregate across the credential's permitted
+scope. It contains no model-quality, employee-performance, or provider-invoice
+claim. A storage or mandatory audit-write failure returns
+`503 usage_admin_unavailable` without a model-mix object.
+
+Its version-1 envelope contains the authenticated `access` scope, derived
+actor/team `filters`, a UTC `start`/`as_of` window, bounded coverage flags, and
+`model_mix`. `model_mix.totals` has request-status counts, `total_tokens`,
+estimated micro-USD/USD spend, unpriced-request count, and an explicit
+`partial_estimated_spend` flag. Each `models` row has a provider plus a
+provider-returned actual model where available (otherwise the routed model),
+the same counts, and request/token/estimated-spend percentage shares. A zero
+token or estimated-spend denominator is represented by `null`, never an
+invented percentage.
+
 ## Audit and interpretation
 
-Every successful report page, coverage read, and budget-pacing read writes
+Every successful report page, coverage read, budget-pacing read, and model-mix read writes
 `security.admin.usage_read` before its result is returned. The event records
 the organization, viewing actor, grouping, frozen window, row count, and
 SHA-256 digests of the effective actor/team filters. It contains no request

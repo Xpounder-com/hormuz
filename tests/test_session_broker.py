@@ -1362,6 +1362,149 @@ class SessionBrokerIntegrationTests(unittest.TestCase):
         self.assertEqual(len(reads), 4)
         self.assertTrue(all(event["action"] == "usage.report.read" for event in reads))
 
+    def test_usage_model_mix_is_scoped_content_free_and_audited(self) -> None:
+        employee = self.config.identities_by_actor["employee"]
+        administrator = self.config.identities_by_actor["security-admin"]
+        for identity, protocol, actual_model, status, tokens, cost, basis in (
+            (employee, "openai", "gpt-5.4", "succeeded", (10, 2), 1_000, "estimated"),
+            (employee, "anthropic", "claude-sonnet", "failed", (20, 3), 0, "not_available"),
+            (administrator, "openai", "gpt-5.4", "denied", (0, 0), 0, "not_applicable"),
+        ):
+            self.gateway.store.record(
+                identity=identity,
+                client="codex" if protocol == "openai" else "claude-code",
+                protocol=protocol,
+                requested_model="policy-model",
+                resolved_alias="policy-model",
+                upstream_model=actual_model,
+                actual_model=actual_model,
+                policy_action="allowed",
+                status=status,
+                input_tokens=tokens[0],
+                output_tokens=tokens[1],
+                billable_tokens=sum(tokens),
+                cost_microusd=cost,
+                cost_basis=basis,
+            )
+
+        with mock.patch.object(self.gateway.store, "reserve_budget") as reserve_budget:
+            status, organization = self._admin_request(
+                "GET",
+                "/v1/admin/usage/model-mix",
+                token="admin-token-" + "a" * 32,
+            )
+        self.assertEqual(status, 200)
+        reserve_budget.assert_not_called()
+        self.assertEqual(organization["schema_version"], 1)
+        self.assertEqual(organization["access"], {"scope": "organization"})
+        self.assertEqual(
+            organization["filters"], {"actor_id": None, "team_id": None}
+        )
+        self.assertEqual(
+            organization["coverage"],
+            {
+                "scope": "gateway_captured_requests_only",
+                "legacy_unattributed_rows_excluded": True,
+                "outside_gateway_traffic_observable": False,
+                "provider_invoice_reconciled": False,
+                "partial_estimated_spend": True,
+            },
+        )
+        self.assertEqual(
+            organization["model_mix"]["totals"],
+            {
+                "requests": 3,
+                "succeeded": 1,
+                "failed": 1,
+                "denied": 1,
+                "total_tokens": 35,
+                "estimated_spend_microusd": 1_000,
+                "unpriced_requests": 1,
+                "estimated_spend_usd": 0.001,
+                "partial_estimated_spend": True,
+            },
+        )
+        self.assertEqual(
+            organization["model_mix"]["models"][0]["model_id"], "gpt-5.4"
+        )
+        self.assertEqual(
+            organization["model_mix"]["models"][0]["request_share_percent"],
+            66.666667,
+        )
+        self.assertEqual(
+            organization["model_mix"]["models"][1]["model_id"], "claude-sonnet"
+        )
+        self.assertEqual(
+            organization["model_mix"]["models"][1]["estimated_spend_share_percent"],
+            0.0,
+        )
+        self.assertEqual(organization["window"]["timezone"], "UTC")
+        self.assertNotIn("Employee", repr(organization))
+
+        status, self_mix = self._admin_request(
+            "GET",
+            "/v1/admin/usage/model-mix",
+            token="employee-token-" + "e" * 32,
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(self_mix["access"], {"scope": "self"})
+        self.assertEqual(
+            self_mix["filters"], {"actor_id": "employee", "team_id": None}
+        )
+        self.assertEqual(self_mix["model_mix"]["totals"]["requests"], 2)
+        self.assertNotIn("Security Admin", repr(self_mix))
+
+        status, team_mix = self._admin_request(
+            "GET",
+            "/v1/admin/usage/model-mix",
+            token="manager-token-" + "m" * 32,
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(team_mix["access"], {"scope": "team"})
+        self.assertEqual(
+            team_mix["filters"], {"actor_id": None, "team_id": "engineering"}
+        )
+        self.assertEqual(team_mix["model_mix"]["totals"]["requests"], 2)
+
+        status, finance_mix = self._admin_request(
+            "GET",
+            "/v1/admin/usage/model-mix",
+            token="finance-token-" + "f" * 32,
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(finance_mix["access"], {"scope": "finance"})
+        self.assertEqual(finance_mix["model_mix"]["totals"]["requests"], 3)
+        self.assertNotIn("Employee", repr(finance_mix))
+
+        status, forbidden = self._admin_request(
+            "GET",
+            "/v1/admin/usage/model-mix",
+            token="policy-admin-token-" + "p" * 32,
+        )
+        self.assertEqual(status, 403)
+        self.assertEqual(forbidden["error"]["code"], "usage_viewer_capability_required")
+
+        status, invalid = self._admin_request(
+            "GET",
+            "/v1/admin/usage/model-mix?actor_id=employee",
+            token="admin-token-" + "a" * 32,
+        )
+        self.assertEqual(status, 400)
+        self.assertEqual(invalid["error"]["code"], "invalid_usage_model_mix_request")
+
+        audit = self.gateway.store.audit_events(
+            since="2000-01-01T00:00:00+00:00",
+            kind="security",
+        )
+        reads = [
+            event
+            for event in audit
+            if event["event_type"] == "security.admin.usage_read"
+        ]
+        self.assertEqual(len(reads), 4)
+        self.assertTrue(all(event["action"] == "usage.report.read" for event in reads))
+        self.assertTrue(all(event["group_by"] == "model" for event in reads))
+
     def test_audit_admin_is_tenant_scoped_paginated_and_self_audited(self) -> None:
         employee = self.config.identities_by_actor["employee"]
         administrator = self.config.identities_by_actor["security-admin"]
@@ -1831,6 +1974,50 @@ class SessionBrokerIntegrationTests(unittest.TestCase):
             "calendar_pace_estimate",
         )
         self.assertTrue(pacing["budget_pacing"]["advisory_only"])
+
+    def test_usage_model_mix_cli_uses_the_authenticated_gateway_contract(self) -> None:
+        identity = self.config.identities_by_actor["employee"]
+        self.gateway.store.record(
+            identity=identity,
+            client="codex",
+            protocol="openai",
+            requested_model="gpt-test",
+            resolved_alias="gpt-test",
+            upstream_model="gpt-test",
+            actual_model="gpt-5.4",
+            policy_action="allowed",
+            status="succeeded",
+            input_tokens=20,
+            output_tokens=4,
+            billable_tokens=24,
+            cost_microusd=1_500,
+            cost_basis="estimated",
+        )
+        output = io.StringIO()
+        with mock.patch.dict(
+            os.environ,
+            {"HORMUZ_ADMIN_TOKEN": "admin-token-" + "a" * 32},
+        ), redirect_stdout(output):
+            result = cli_main(
+                [
+                    "usage",
+                    "model-mix",
+                    "--gateway",
+                    self.gateway_url,
+                    "--credential-env",
+                    "HORMUZ_ADMIN_TOKEN",
+                    "--allow-insecure-http",
+                ]
+            )
+        self.assertEqual(result, 0)
+        model_mix = json.loads(output.getvalue())
+        self.assertEqual(model_mix["schema_version"], 1)
+        self.assertEqual(model_mix["access"], {"scope": "organization"})
+        self.assertEqual(model_mix["model_mix"]["models"][0]["model_id"], "gpt-5.4")
+        self.assertEqual(
+            model_mix["model_mix"]["models"][0]["request_share_percent"],
+            100.0,
+        )
 
     def test_usage_admin_cli_accepts_a_constrained_gateway_contract(self) -> None:
         identity = self.config.identities_by_actor["employee"]
