@@ -104,6 +104,7 @@ GitHub Actions runs independent gates without provider credentials:
 - the complete core unit and loopback gateway suite on Python 3.11, 3.12, 3.13, and 3.14;
 - source-distribution and wheel builds followed by a clean-wheel inspection and isolated gateway-start boundary test;
 - PostgreSQL migration and repository compatibility against the pinned service image;
+- a disposable `pg_dump` custom-format / `pg_restore` recovery drill against digest-pinned source, recovery, and quarantine PostgreSQL containers;
 - non-root OCI reference-runtime smoke testing with externally mounted inputs;
 - CycloneDX SBOM generation and a fix-aware OCI vulnerability gate for the exact local candidate image;
 - installed-client routing through local fake providers using pinned official Codex and Claude Code package versions.
@@ -153,3 +154,30 @@ evidence failure, not a statement that the image is vulnerability-free. The
 scanner binary is pinned, but its advisory database is refreshed at scan time.
 There is no registry publication, signing, attestation, exception workflow, or
 customer-content scanning in this gate.
+
+## PostgreSQL logical backup and restore
+
+The `PostgreSQL logical recovery drill` job invokes:
+
+```bash
+./tools/verify_postgres_backup_restore.sh
+```
+
+It builds no application image and calls no provider. The command creates only
+fixed metadata-only fixture records in disposable source, recovery, and
+quarantine PostgreSQL 16.14 containers selected by immutable image digest. It
+uses `pg_dump` custom format for the source and `pg_restore` from that same
+pinned image. A corrupted archive is restored only into quarantine and must
+fail; a target that cannot be verified from restricted Hormuz roles is never
+promoted. The valid recovery target must exactly match the source metadata
+fingerprint before the tool writes an artifact.
+
+On a successful run, CI retains only the strict, content-free
+`hormuz.postgresql-recovery-drill-summary` v1 `summary.json` for seven days.
+It includes the database image/version, dump hash and size, record counts,
+fingerprints, passed checks, and measured durations; it excludes the archive,
+connection strings, roles, database names, policy documents, records, and
+credentials. A failing run emits no dump or intermediate state artifact. This
+is evidence for a disposable logical exercise only. It does not establish
+PITR, production RPO/RTO, cloud backup, customer-data recovery, encryption,
+HA/failover, automatic promotion, or DR certification.
