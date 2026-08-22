@@ -115,6 +115,7 @@ docker run --detach \
   --env HORMUZ_CONTAINER_TEST_TOKEN=container-test-identity-token \
   --env HORMUZ_CONTAINER_TEST_OPENAI_KEY=container-test-openai-placeholder \
   --env HORMUZ_CONTAINER_TEST_ANTHROPIC_KEY=container-test-anthropic-placeholder \
+  --env HORMUZ_INGRESS_CREDENTIAL=container-test-ingress-credential \
   --publish 127.0.0.1::8787 \
   "${IMAGE_NAME}" >/dev/null
 container_started=1
@@ -148,9 +149,23 @@ set -e
 host_port="$(docker port "${CONTAINER_NAME}" 8787/tcp | awk -F: 'NR == 1 { print $NF }')"
 [[ "${host_port}" =~ ^[0-9]+$ ]] || fail "container did not publish the configured listener"
 
+private_probe() {
+  docker exec "${CONTAINER_NAME}" /opt/hormuz/bin/python -I -c '
+import os
+import sys
+from urllib.request import Request, urlopen
+
+request = Request(
+    "http://127.0.0.1:8787" + sys.argv[1],
+    headers={"X-Hormuz-Ingress-Credential": os.environ["HORMUZ_INGRESS_CREDENTIAL"]},
+)
+print(urlopen(request, timeout=2).read().decode("utf-8"))
+' "$1"
+}
+
 health_payload=""
 for _attempt in $(seq 1 30); do
-  if health_payload="$(curl --fail --silent --max-time 2 "http://127.0.0.1:${host_port}/health")"; then
+  if health_payload="$(private_probe /health)"; then
     break
   fi
   sleep 1
@@ -159,7 +174,12 @@ done
 assert_contract "${health_payload}" "hormuz.gateway-health" "ok" \
   || fail "liveness response did not satisfy its versioned contract"
 
-readiness_payload="$(curl --fail --silent --max-time 2 "http://127.0.0.1:${host_port}/ready")" \
+direct_health_status="$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 2 "http://127.0.0.1:${host_port}/health")" \
+  || fail "direct host liveness probe did not receive an HTTP response"
+[[ "${direct_health_status}" == "401" ]] \
+  || fail "published listener accepted an unauthenticated direct host liveness request"
+
+readiness_payload="$(private_probe /ready)" \
   || fail "readiness endpoint did not report ready"
 assert_contract "${readiness_payload}" "hormuz.gateway-readiness" "ready" \
   || fail "readiness response did not satisfy its versioned contract"
@@ -170,4 +190,4 @@ docker stop --time 10 "${CONTAINER_NAME}" >/dev/null
 [[ "$(docker inspect --format '{{.State.ExitCode}}' "${CONTAINER_NAME}")" == "0" ]] \
   || fail "SIGTERM did not produce a clean graceful gateway exit"
 
-printf 'verified OCI reference runtime: non-root, mounted config, read-only rootfs, probes, and SIGTERM drain\n'
+printf 'verified OCI reference runtime: non-root, mounted config, trusted ingress, read-only rootfs, probes, and SIGTERM drain\n'

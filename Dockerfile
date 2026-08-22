@@ -54,7 +54,7 @@ WORKDIR /var/lib/hormuz
 EXPOSE 8787
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD ["/opt/hormuz/bin/python", "-I", "-c", "from urllib.request import urlopen; raise SystemExit(0 if urlopen('http://127.0.0.1:8787/health', timeout=2).status == 200 else 1)"]
+  CMD ["/opt/hormuz/bin/python", "-I", "-c", "import os; from urllib.request import Request, urlopen; credential=os.environ.get('HORMUZ_INGRESS_CREDENTIAL'); headers={'X-Hormuz-Ingress-Credential': credential} if credential else {}; request=Request('http://127.0.0.1:8787/health', headers=headers); raise SystemExit(0 if urlopen(request, timeout=2).status == 200 else 1)"]
 
 ENTRYPOINT ["hormuz"]
 CMD ["serve"]

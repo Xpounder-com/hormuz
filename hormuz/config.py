@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import ipaddress
 import math
 import os
 import re
@@ -28,6 +29,7 @@ _S3_BUCKET_PATTERN = re.compile(r"[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]\Z")
 MAX_CONFIGURATION_BYTES = 1 * 1024 * 1024
 MAX_CONFIGURATION_DEPTH = 64
 MAX_CONFIGURATION_NODES = 100_000
+MAX_TRUSTED_PROXY_CIDRS = 64
 
 _CONFIGURATION_UNAVAILABLE = "configuration_unavailable"
 _CONFIGURATION_TOO_LARGE = "configuration_too_large"
@@ -65,6 +67,25 @@ _CONTEXT_EXPERIMENT_MOVED_MESSAGE = (
 class ListenConfig:
     host: str = "127.0.0.1"
     port: int = 8787
+
+
+@dataclass(frozen=True)
+class IngressConfig:
+    """The gateway-side boundary for customer-controlled TLS termination.
+
+    ``local`` is intentionally the simple development default.  The external
+    proxy mode never makes Hormuz a TLS terminator: it only accepts an already
+    network-restricted and authenticated proxy hop.
+    """
+
+    mode: str = "local"
+    trusted_proxy_cidrs: tuple[str, ...] = ()
+    trusted_proxy_networks: tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...] = field(
+        default=(),
+        repr=False,
+    )
+    credential_env: str | None = None
+    credential: str = field(default="", repr=False)
 
 
 @dataclass(frozen=True)
@@ -291,6 +312,7 @@ class GatewayConfig:
     identities_by_token: dict[str, Identity]
     model_routes: dict[str, ModelRoute]
     organization_policy: Policy
+    ingress: IngressConfig = field(default_factory=IngressConfig)
     oidc_issuers: dict[str, OIDCIssuerConfig] = field(default_factory=dict)
     identities_by_subject: dict[tuple[str, str], Identity] = field(default_factory=dict)
     secret_controls: SecretControls = field(default_factory=SecretControls)
@@ -313,6 +335,7 @@ class GatewayConfig:
         listen_raw = _object(raw.get("listen", {}), "listen")
         host = _string(listen_raw.get("host", "127.0.0.1"), "listen.host")
         port = _integer(listen_raw.get("port", 8787), "listen.port", minimum=1, maximum=65535)
+        ingress = _ingress_config(raw.get("ingress", {}), listen_host=host)
 
         database_value = _string(raw.get("database", "./hormuz.sqlite3"), "database")
         database_path = Path(database_value).expanduser()
@@ -667,6 +690,7 @@ class GatewayConfig:
         config = cls(
             source_path=source_path,
             listen=ListenConfig(host=host, port=port),
+            ingress=ingress,
             database_path=database_path,
             upstreams=upstreams,
             identities_by_token={
@@ -700,10 +724,16 @@ class GatewayConfig:
             audit_anchor=audit_anchor,
         )
         config.validate_references()
+        _validate_dedicated_ingress_credential_env(config)
         env = os.environ if environ is None else environ
+        identities_by_token = _resolve_static_identity_tokens(tuple(static_identities), env)
+        resolved_ingress = _resolve_ingress_credential(config.ingress, env)
+        if resolved_ingress.credential and resolved_ingress.credential in identities_by_token:
+            raise ConfigError("ingress credential must not equal a static identity token")
         return replace(
             config,
-            identities_by_token=_resolve_static_identity_tokens(tuple(static_identities), env),
+            ingress=resolved_ingress,
+            identities_by_token=identities_by_token,
             secret_controls=_resolve_secret_controls(config.secret_controls, env),
         )
 
@@ -837,6 +867,7 @@ class GatewayConfig:
 _ROOT_CONFIGURATION_FIELDS = frozenset(
     {
         "listen",
+        "ingress",
         "database",
         "upstreams",
         "identities",
@@ -853,6 +884,7 @@ _ROOT_CONFIGURATION_FIELDS = frozenset(
     }
 )
 _LISTEN_FIELDS = frozenset({"host", "port"})
+_INGRESS_FIELDS = frozenset({"mode", "trusted_proxy_cidrs", "credential_env"})
 _UPSTREAM_FIELDS = frozenset(
     {"base_url", "api_key_env", "api_key_envelope", "allow_response_storage", "allow_background"}
 )
@@ -1018,6 +1050,7 @@ def _validate_configuration_schema(raw: dict[str, Any]) -> None:
     _schema_object(raw, _ROOT_CONFIGURATION_FIELDS)
 
     _schema_optional_object(raw, "listen", _LISTEN_FIELDS)
+    _schema_optional_object(raw, "ingress", _INGRESS_FIELDS)
 
     upstreams = _schema_required_object(raw, "upstreams", frozenset({"openai", "anthropic"}))
     for value in upstreams.values():
@@ -1180,6 +1213,121 @@ def _reject_deprecated_context_configuration(raw: dict[str, Any]) -> None:
             pending.extend(value)
         elif isinstance(value, str) and value in _DEPRECATED_CONTEXT_CAPABILITIES:
             raise ConfigError(_CONTEXT_EXPERIMENT_MOVED_MESSAGE)
+
+
+def _ingress_config(value: Any, *, listen_host: str) -> IngressConfig:
+    """Parse the private proxy hop without resolving its credential yet."""
+
+    item = _object(value, "ingress")
+    mode = _string(item.get("mode", "local"), "ingress.mode")
+    if mode not in {"local", "external_tls_proxy"}:
+        raise ConfigError("ingress.mode must be local or external_tls_proxy")
+
+    if mode == "local":
+        if "trusted_proxy_cidrs" in item or "credential_env" in item:
+            raise ConfigError("ingress.trusted_proxy_cidrs and ingress.credential_env require external_tls_proxy mode")
+        if not _is_loopback_listener(listen_host):
+            raise ConfigError("a non-loopback listen.host requires ingress.mode external_tls_proxy")
+        return IngressConfig()
+
+    trusted_proxy_cidrs = _string_tuple(
+        item.get("trusted_proxy_cidrs", []),
+        "ingress.trusted_proxy_cidrs",
+    )
+    if not trusted_proxy_cidrs:
+        raise ConfigError("ingress.trusted_proxy_cidrs must contain at least one network")
+    if len(trusted_proxy_cidrs) > MAX_TRUSTED_PROXY_CIDRS:
+        raise ConfigError(f"ingress.trusted_proxy_cidrs must contain at most {MAX_TRUSTED_PROXY_CIDRS} networks")
+
+    networks: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = []
+    for index, cidr in enumerate(trusted_proxy_cidrs):
+        try:
+            networks.append(ipaddress.ip_network(cidr, strict=True))
+        except ValueError:
+            raise ConfigError(f"ingress.trusted_proxy_cidrs[{index}] must be a canonical CIDR") from None
+    if len(networks) != len(set(networks)):
+        raise ConfigError("ingress.trusted_proxy_cidrs cannot contain duplicate networks")
+    ipv4_networks = [network for network in networks if network.version == 4]
+    ipv6_networks = [network for network in networks if network.version == 6]
+    collapsed_networks = (
+        *tuple(ipaddress.collapse_addresses(ipv4_networks)),
+        *tuple(ipaddress.collapse_addresses(ipv6_networks)),
+    )
+    if any(network.prefixlen == 0 for network in collapsed_networks):
+        raise ConfigError("ingress.trusted_proxy_cidrs must not admit every address")
+
+    return IngressConfig(
+        mode=mode,
+        trusted_proxy_cidrs=trusted_proxy_cidrs,
+        trusted_proxy_networks=collapsed_networks,
+        credential_env=_environment_name(item.get("credential_env"), "ingress.credential_env"),
+    )
+
+
+def _is_loopback_listener(host: str) -> bool:
+    normalized = host.lower().rstrip(".")
+    if normalized == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(normalized).is_loopback
+    except ValueError:
+        return False
+
+
+def _resolve_ingress_credential(ingress: IngressConfig, env: dict[str, str]) -> IngressConfig:
+    """Resolve the proxy credential only after every semantic check succeeds."""
+
+    if ingress.mode == "local":
+        return ingress
+    assert ingress.credential_env is not None
+    credential = env.get(ingress.credential_env, "")
+    if not credential:
+        raise ConfigError(f"Required ingress credential environment variable is not set: {ingress.credential_env}")
+    if len(credential) < 16:
+        raise ConfigError(f"Ingress credential from {ingress.credential_env} must be at least 16 characters")
+    return replace(ingress, credential=credential)
+
+
+def _validate_dedicated_ingress_credential_env(config: GatewayConfig) -> None:
+    """Keep the proxy-hop secret separate from every other configured secret.
+
+    The ingress credential passes through customer-controlled infrastructure,
+    so reusing a provider key, employee token, database DSN, break-glass
+    credential, or redaction secret would accidentally widen access to that
+    other secret.  This is a configuration-time invariant; it does not inspect
+    or expose any environment values.
+    """
+
+    ingress = config.ingress
+    if ingress.mode == "local":
+        return
+    assert ingress.credential_env is not None
+
+    credential_envs = {
+        identity.token_env
+        for identity in config.identities_by_token.values()
+        if identity.token_env
+    }
+    credential_envs.update(
+        upstream.api_key_env
+        for upstream in config.upstreams.values()
+        if upstream.api_key_env is not None
+    )
+    credential_envs.update(config.secret_controls.custom_secret_envs)
+    if config.usage_storage.backend == "postgresql":
+        credential_envs.update(
+            {
+                config.usage_storage.postgres_dsn_env,
+                config.usage_storage.postgres_migration_dsn_env,
+            }
+        )
+    if config.policy_control.mode == "postgresql":
+        credential_envs.add(config.policy_control.postgres_control_dsn_env)
+        if config.policy_control.break_glass.enabled:
+            credential_envs.add(config.policy_control.break_glass.token_env)
+
+    if ingress.credential_env in credential_envs:
+        raise ConfigError("ingress.credential_env must name a credential distinct from all other Hormuz secrets")
 
 
 def _secret_controls(value: Any) -> SecretControls:

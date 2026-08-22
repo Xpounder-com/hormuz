@@ -57,9 +57,11 @@ configuration, credentials, prompts, responses, or gateway audit records.
 Prepare a deployment configuration outside the image. It names environment
 variables such as `OPENAI_API_KEY`; it must not contain their values. For a
 SQLite deployment, set the configuration's database path to
-`/var/lib/hormuz/hormuz.sqlite3` and bind the listener to `0.0.0.0:8787`.
+`/var/lib/hormuz/hormuz.sqlite3`. A `0.0.0.0:8787` listener also requires the
+explicit external TLS proxy ingress configuration and its private-hop
+credential environment variable; see [DEPLOYMENT.md](DEPLOYMENT.md).
 `config.example.json` is a starting point, not a container-ready configuration
-without those two changes.
+without those changes.
 
 Create a data directory that the numeric runtime identity can write. The
 following initialization is a one-time local-volume setup; normal Hormuz
@@ -110,9 +112,10 @@ operator decision.
 
 Use `GET /health` for liveness and `GET /ready` for traffic readiness. Their
 versioned, content-free semantics and graceful shutdown behavior are described
-in [OPERATIONS.md](OPERATIONS.md). The image health check calls only local
-`/health`; it does not test provider availability, policy authorization,
-credentials, TLS, or a remote database.
+in [OPERATIONS.md](OPERATIONS.md). When external proxy mode is enabled, the
+image health check reads the mounted ingress credential environment value and
+uses it only for its local `/health` probe; it does not test provider
+availability, employee authorization, customer TLS, or a remote database.
 
 ## Executable reference proof
 
@@ -129,8 +132,9 @@ runtime inputs, validates `/health` and `/ready`, verifies SQLite lands only on
 the durable mount, and requires `SIGTERM` to exit cleanly. It uses fixed
 placeholder values and never contacts a model provider.
 
-The reference proof and candidate evidence gate do not establish registry
-publication, image signing or provenance attestation, a vulnerability-free
-image, TLS or trusted-proxy configuration, Kubernetes, high availability,
-backup/PITR, multi-instance coordination, customer IdP conformance, or incident
-operations. Those remain separate release gates.
+The reference proof exercises only the generic gateway-side ingress boundary;
+it does not establish customer public TLS, certificate operations, a specific
+proxy/firewall/network policy, registry publication, image signing or
+provenance attestation, a vulnerability-free image, Kubernetes, high
+availability, backup/PITR, multi-instance coordination, customer IdP
+conformance, or incident operations. Those remain separate release gates.

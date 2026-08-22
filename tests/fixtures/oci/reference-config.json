@@ -3,6 +3,11 @@
     "host": "0.0.0.0",
     "port": 8787
   },
+  "ingress": {
+    "mode": "external_tls_proxy",
+    "trusted_proxy_cidrs": ["127.0.0.1/32"],
+    "credential_env": "HORMUZ_INGRESS_CREDENTIAL"
+  },
   "database": "/var/lib/hormuz/hormuz.sqlite3",
   "upstreams": {
     "openai": {
