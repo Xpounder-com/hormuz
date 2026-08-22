@@ -68,3 +68,7 @@ This probe boundary is single-process behavior only. TLS termination, trusted
 proxy configuration, provider reachability, multi-instance draining,
 autoscaling, failover, backup/PITR, recovery objectives, alerts, and incident
 procedures remain separate production-readiness gates.
+
+For the narrowly scoped non-root container reference, see [OCI.md](OCI.md).
+The image health check uses `/health`; the deployment's traffic control must
+still use `/ready` and an adequate termination grace period.

@@ -90,8 +90,13 @@ class GatewayServer(ThreadingHTTPServer):
     def shutdown(self) -> None:
         """Stop advertising readiness before the listener begins draining."""
 
-        self._accepting_requests.clear()
+        self.begin_drain()
         super().shutdown()
+
+    def begin_drain(self) -> None:
+        """Stop advertising readiness without blocking the serving thread."""
+
+        self._accepting_requests.clear()
 
     def server_close(self) -> None:
         self._accepting_requests.clear()
