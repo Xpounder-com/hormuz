@@ -40,7 +40,7 @@ Policy administration (managed PostgreSQL mode)
 - `hormuz/policy.py` evaluates access, fallback, caps, and budgets from exactly one request-bound policy snapshot.
 - `hormuz/policy_runtime.py`, `hormuz/policy_document.py`, and `hormuz/postgres_policy_store.py` read strict immutable policy documents, then resolve and pin the active PostgreSQL version when managed policy control is enabled.
 - `hormuz/policy_control.py` is the narrow authenticated service boundary used by the CLI for bootstrap, administrator changes, staging, activation, rollback, and break-glass recovery.
-- `hormuz/store.py` owns the SQLite schema and monthly aggregations; `hormuz/postgres_usage_store.py` implements the same narrow usage/evidence repository with transaction-local organization scope and PostgreSQL RLS.
+- `hormuz/store.py` owns the SQLite schema and monthly aggregations; `hormuz/postgres_usage_store.py` implements the same narrow usage/evidence repository with transaction-local organization scope and PostgreSQL RLS. In PostgreSQL gateway mode, `hormuz.postgres.PostgresConnectionPool` supplies one bounded runtime pool shared with managed-policy reads; each checkout receives fresh transaction-local role, search-path, and tenant state.
 - `hormuz/custody.py` owns provider-neutral encrypted-envelope and audit-anchor contracts; `hormuz/aws_custody.py` provides the optional AWS KMS and S3 Object Lock reference adapters, while `hormuz/custody_runtime.py` resolves owner-only encrypted provider credentials at gateway startup.
 - `hormuz/usage.py` parses provider usage metadata without storing response content.
 - `hormuz/redaction.py` transforms provider-bound JSON values using configured secret controls.

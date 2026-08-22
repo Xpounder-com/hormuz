@@ -43,6 +43,8 @@ run in a customer-controlled AWS environment and the broader secret migration,
 immutable-history, retention operations, recovery, SIEM, and independent-review
 evidence is complete.
 
+The first separately verifiable #11 slice is [#32](https://github.com/Xpounder-com/hormuz/issues/32): bounded PostgreSQL runtime pooling with tenant-safe checkout reuse. It is intentionally narrower than HA/failover, backup/PITR, shared-replica coordination, and operational recovery evidence.
+
 ## Feature-freeze rule
 
 > A change is current-priority only if it removes deprecated context coupling, stabilizes the policy/evidence contract, fixes a security or correctness defect, or closes a production-readiness gate.

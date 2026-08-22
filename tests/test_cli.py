@@ -167,6 +167,14 @@ class ClientConfigTests(unittest.TestCase):
                 "postgres_migration_dsn_env": "COMPANY_POSTGRES_MIGRATION_DSN",
                 "postgres_schema": "company_hormuz",
                 "postgres_runtime_role": "company_hormuz_runtime",
+                "postgres_pool": {
+                    "min_connections": 2,
+                    "max_connections": 6,
+                    "acquire_timeout_seconds": 4,
+                    "max_waiting": 12,
+                    "max_lifetime_seconds": 1800,
+                    "max_idle_seconds": 120,
+                },
             }
             config_path = root / "postgres.json"
             config_path.write_text(json.dumps(config_value), encoding="utf-8")
@@ -176,6 +184,9 @@ class ClientConfigTests(unittest.TestCase):
             )
             self.assertEqual(config.usage_storage.backend, "postgresql")
             self.assertEqual(config.usage_storage.postgres_schema, "company_hormuz")
+            self.assertEqual(config.usage_storage.postgres_pool.min_connections, 2)
+            self.assertEqual(config.usage_storage.postgres_pool.max_connections, 6)
+            self.assertEqual(config.usage_storage.postgres_pool.max_waiting, 12)
             self.assertNotIn("postgresql://", config_path.read_text(encoding="utf-8"))
 
             stderr = io.StringIO()
@@ -187,6 +198,18 @@ class ClientConfigTests(unittest.TestCase):
             config_value["usage_storage"]["postgres_schema"] = "company;drop"
             config_path.write_text(json.dumps(config_value), encoding="utf-8")
             with self.assertRaisesRegex(ConfigError, "safe PostgreSQL identifier"):
+                GatewayConfig.load(config_path, environ={"HORMUZ_TOKEN": "test-identity-token"})
+
+            config_value["usage_storage"]["postgres_schema"] = "company_hormuz"
+            config_value["usage_storage"]["postgres_pool"]["min_connections"] = 7
+            config_value["usage_storage"]["postgres_pool"]["max_connections"] = 6
+            config_path.write_text(json.dumps(config_value), encoding="utf-8")
+            with self.assertRaisesRegex(ConfigError, "must not exceed"):
+                GatewayConfig.load(config_path, environ={"HORMUZ_TOKEN": "test-identity-token"})
+
+            config_value["usage_storage"]["postgres_pool"] = {"max_waiting": 0}
+            config_path.write_text(json.dumps(config_value), encoding="utf-8")
+            with self.assertRaisesRegex(ConfigError, "max_waiting"):
                 GatewayConfig.load(config_path, environ={"HORMUZ_TOKEN": "test-identity-token"})
 
             config_value["usage_storage"] = {"backend": "postgresql", "postgres_dsn": "literal-secret"}
@@ -201,6 +224,11 @@ class ClientConfigTests(unittest.TestCase):
             }
             config_path.write_text(json.dumps(config_value), encoding="utf-8")
             with self.assertRaisesRegex(ConfigError, "separate credentials"):
+                GatewayConfig.load(config_path, environ={"HORMUZ_TOKEN": "test-identity-token"})
+
+            config_value["usage_storage"] = {"backend": "sqlite", "postgres_pool": {}}
+            config_path.write_text(json.dumps(config_value), encoding="utf-8")
+            with self.assertRaisesRegex(ConfigError, "requires usage_storage.backend postgresql"):
                 GatewayConfig.load(config_path, environ={"HORMUZ_TOKEN": "test-identity-token"})
 
     def test_sqlite_storage_cli_verifies_and_migrates_without_postgres_dependency(self) -> None:

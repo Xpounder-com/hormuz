@@ -7,7 +7,7 @@ from typing import Mapping
 
 from .config import GatewayConfig, Identity
 from .policy_document import PolicyDocumentError, PolicySnapshot, local_policy_snapshot
-from .postgres import PostgresStorageError
+from .postgres import PostgresConnectionPool, PostgresStorageError
 from .postgres_policy_store import PostgresPolicyRuntimeStore
 
 
@@ -19,7 +19,13 @@ class PolicyRuntime:
     immediately after the activation transaction commits.
     """
 
-    def __init__(self, config: GatewayConfig, *, environ: Mapping[str, str] | None = None) -> None:
+    def __init__(
+        self,
+        config: GatewayConfig,
+        *,
+        environ: Mapping[str, str] | None = None,
+        connection_pool: PostgresConnectionPool | None = None,
+    ) -> None:
         self._config = config
         self._store: PostgresPolicyRuntimeStore | None = None
         if config.policy_control.mode == "local":
@@ -35,6 +41,7 @@ class PolicyRuntime:
             config=config,
             schema=config.usage_storage.postgres_schema,
             runtime_role=config.usage_storage.postgres_runtime_role,
+            connection_pool=connection_pool,
         )
 
     def snapshot_for(self, identity: Identity) -> PolicySnapshot:

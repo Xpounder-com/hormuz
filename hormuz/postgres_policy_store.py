@@ -23,7 +23,7 @@ from .policy_repository import (
     PolicyControlStatus,
     PolicyVersionRecord,
 )
-from .postgres import PostgresStorageError, postgres_transaction, verify_postgres_schema
+from .postgres import PostgresConnectionPool, PostgresStorageError, postgres_transaction, verify_postgres_schema
 
 
 def _identity_key(administrator: PolicyAdministrator) -> str:
@@ -48,12 +48,19 @@ class PostgresPolicyRuntimeStore:
         config: GatewayConfig,
         schema: str,
         runtime_role: str,
+        connection_pool: PostgresConnectionPool | None = None,
     ) -> None:
         self._dsn = dsn
         self._config = config
         self._schema = schema
         self._runtime_role = runtime_role
-        verify_postgres_schema(dsn, schema=schema, runtime_role=runtime_role)
+        self._connection_pool = connection_pool
+        verify_postgres_schema(
+            dsn,
+            schema=schema,
+            runtime_role=runtime_role,
+            connection_pool=self._connection_pool,
+        )
 
     def active_version(self, *, organization_id: str) -> PolicyVersionRecord:
         with self._transaction(organization_id) as connection:
@@ -88,6 +95,7 @@ class PostgresPolicyRuntimeStore:
             schema=self._schema,
             runtime_role=self._runtime_role,
             organization_id=organization_id,
+            connection_pool=self._connection_pool,
         )
 
 
@@ -101,12 +109,19 @@ class PostgresPolicyControlStore(PostgresPolicyRuntimeStore):
         config: GatewayConfig,
         schema: str,
         policy_control_role: str,
+        connection_pool: PostgresConnectionPool | None = None,
     ) -> None:
         self._dsn = dsn
         self._config = config
         self._schema = schema
         self._runtime_role = policy_control_role
-        verify_postgres_schema(dsn, schema=schema, runtime_role=policy_control_role)
+        self._connection_pool = connection_pool
+        verify_postgres_schema(
+            dsn,
+            schema=schema,
+            runtime_role=policy_control_role,
+            connection_pool=self._connection_pool,
+        )
 
     def is_initialized(self, *, organization_id: str) -> bool:
         with self._transaction(organization_id) as connection:
