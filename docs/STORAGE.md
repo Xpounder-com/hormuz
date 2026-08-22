@@ -2,7 +2,7 @@
 
 Hormuz stores only the metadata needed to enforce policy and account for governed requests. It does not store prompts, provider response bodies, matched secret values, provider credentials, or context/memory records.
 
-This document describes the storage compatibility gate for the core gateway. It proves the SQLite and PostgreSQL usage/evidence repositories have the same narrow contract. It does **not** by itself establish production PostgreSQL operations, pooling, backup/PITR, HA/DR, KMS/BYOK, immutable audit retention, or multi-instance coordination. Those remain separate release gates in [ROADMAP.md](ROADMAP.md).
+This document describes the storage compatibility gate for the core gateway. It proves the SQLite and PostgreSQL usage/evidence repositories have the same narrow contract and documents one disposable logical backup-and-restore drill. It does **not** establish production PostgreSQL operations, production backup/PITR, HA/DR, KMS/BYOK, immutable audit retention, or multi-instance coordination. Those remain separate release gates in [ROADMAP.md](ROADMAP.md).
 
 ## Supported modes
 
@@ -148,6 +148,48 @@ Hormuz has no automatic destructive down-migration. If an older binary encounter
 
 Rollback means returning to a schema-compatible application version, or restoring the previously tested application/database pair into an isolated recovery environment before an operator-controlled promotion. It does not mean running ad hoc SQL against a live shared database. The compatibility tests verify that an unsafe rollback attempt leaves durable evidence unchanged.
 
+### Disposable PostgreSQL logical recovery drill
+
+The repository contains one reproducible, **disposable** logical recovery
+check:
+
+~~~bash
+python3 -m pip install '.[postgres]'
+./tools/verify_postgres_backup_restore.sh
+~~~
+
+It starts isolated source, recovery, and quarantine PostgreSQL 16.14
+containers from the digest-pinned test image. It creates two non-owner roles,
+applies Hormuz's normal PostgreSQL migrations to the source, and seeds only
+fixed two-tenant metadata: one usage record, one secret-egress record, one
+active budget reservation, and one managed-policy lifecycle per tenant. No
+provider call, customer database, customer role, prompt, response, secret
+value, or provider credential is used.
+
+The source is backed up with `pg_dump` custom format. `pg_restore` first
+attempts a deliberately truncated copy in the separate quarantine database;
+that restore and a subsequent Hormuz verification must fail. The valid archive
+is then restored into a clean recovery database. The verifier uses the
+restricted runtime and policy-control roles to require the migration ledger,
+tenant-scoped repository behavior, active policy versions, active budget
+reservations, and RLS denial without an organization context. It computes a
+SHA-256 state fingerprint over the restored metadata in memory and requires it
+to exactly match the source before writing evidence.
+
+Only `summary.json` is retained. It is schema-versioned as
+`hormuz.postgresql-recovery-drill-summary` v1 and contains the pinned database
+image/version, custom-dump checksum and byte count, content-free state
+fingerprints/counts, passed checks, and measured durations. It contains no
+connection string, role, database name, policy document, event row, or dump.
+The raw dump and intermediate state are removed with the disposable containers.
+
+This is a recovery **exercise**, not an automatic restore or promotion path.
+It does not prove WAL/PITR, a production RPO/RTO, cloud backups, encryption of
+customer backups, live customer restore, HA/failover, retention operations,
+tenant export/delete, or DR certification. Production operators must retain
+and rehearse their database platform's supported backup and recovery procedure
+separately.
+
 ## Failure behavior
 
 Before provider egress, a storage interruption results in a content-free 503 with the stable classification hormuz_storage_unavailable; the provider is not called. The same classification appears in the metadata-only gateway error envelope for control-plane reads.
@@ -169,4 +211,12 @@ HORMUZ_TEST_POSTGRES_DSN='postgresql://operator@host:5432/hormuz_test' \
   python3 -m unittest -v tests.test_postgres
 ~~~
 
-CI runs this PostgreSQL suite separately against a pinned disposable PostgreSQL service. It proves the adapter's migration idempotency, runtime/control-role separation, RLS behavior, tenant isolation, pooled checkout reuse with tenant-state reset, bounded saturation, broken-connection replacement, policy bootstrap/activation/rollback, contract fixtures, malformed-evidence failure, rollback/partial-schema failure, and competing budget reservation behavior. It is not a substitute for a managed-database restore/PITR, HA/failover, credential-rotation, or load drill.
+CI runs this PostgreSQL suite separately against a pinned disposable PostgreSQL service. It proves the adapter's migration idempotency, runtime/control-role separation, RLS behavior, tenant isolation, pooled checkout reuse with tenant-state reset, bounded saturation, broken-connection replacement, policy bootstrap/activation/rollback, contract fixtures, malformed-evidence failure, rollback/partial-schema failure, and competing budget reservation behavior.
+
+A separate PostgreSQL recovery job invokes the disposable logical drill above
+against source, recovery, and quarantine containers from the same digest-pinned
+image. A successful run uploads only the content-free `summary.json` for seven
+days. A failed run may have no summary, but it never uploads a dump or
+intermediate state. Neither gate is a substitute for managed-database PITR,
+HA/failover, credential rotation, load testing, cloud backup, or DR
+certification.

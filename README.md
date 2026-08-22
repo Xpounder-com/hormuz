@@ -28,6 +28,7 @@ Hormuz is alpha software. The local prototype proves routing and policy behavior
 - Bounded, duplicate-free, schema-strict configuration loading before any identity, secret, storage, provider, or listener initialization.
 - A digest-pinned, non-root OCI reference runtime with externally mounted configuration and durable SQLite data; its executable boundary is intentionally narrower than a published or production-certified deployment.
 - Candidate OCI supply-chain evidence: a CycloneDX SBOM and pinned Trivy scan that block only HIGH/CRITICAL findings with a scanner-reported fixed version, while retaining all other findings for review.
+- A digest-pinned, disposable PostgreSQL logical backup-and-restore exercise that verifies metadata-only governed state and retains only a content-free recovery summary.
 
 ## Quick start
 
@@ -107,4 +108,4 @@ The GitHub publication gate also tests Python 3.11 through 3.14, builds and inst
 
 ## Roadmap boundary
 
-The current hardening program focuses on a minimal gateway core: policy enforcement, versioned PostgreSQL policy administration, accounting, deterministic secret egress, metadata-only audit, and OIDC JWT verification. The package boundary and policy/evidence contract are explicit, the SQLite/PostgreSQL compatibility seam is tested, and the non-root OCI reference runtime has a candidate SBOM and fix-aware vulnerability gate. The first AWS KMS/Object Lock custody implementation is available, but before an enterprise release Hormuz still needs live customer-account certification, migration of every secret class, registry publication and image signing/provenance, TLS and deployment hardening, shared PostgreSQL operations, backup/restore evidence, multi-instance coordination, and independent review. It is not building an organizational-memory or workflow product.
+The current hardening program focuses on a minimal gateway core: policy enforcement, versioned PostgreSQL policy administration, accounting, deterministic secret egress, metadata-only audit, and OIDC JWT verification. The package boundary and policy/evidence contract are explicit, the SQLite/PostgreSQL compatibility seam is tested, and the non-root OCI reference runtime has a candidate SBOM and fix-aware vulnerability gate. A disposable logical PostgreSQL backup/restore exercise now proves a narrow recovery path, but it is not production backup/PITR or DR evidence. Before an enterprise release Hormuz still needs live customer-account certification, migration of every secret class, registry publication and image signing/provenance, TLS and deployment hardening, shared PostgreSQL operations, production backup/PITR, multi-instance coordination, and independent review. It is not building an organizational-memory or workflow product.
