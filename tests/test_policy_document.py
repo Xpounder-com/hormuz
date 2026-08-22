@@ -118,7 +118,6 @@ class PolicyDocumentTests(unittest.TestCase):
                 {
                     "organization_id": "xpounder",
                     "actor_id": "alice",
-                    "group": "Engineering",
                 }
             ],
         }
@@ -128,8 +127,9 @@ class PolicyDocumentTests(unittest.TestCase):
             with self.assertRaisesRegex(ConfigError, "policies is not permitted"):
                 GatewayConfig.load(path, environ={"HORMUZ_TOKEN": "test-identity-token"})
             managed.pop("policies")
+            managed["policy_control"]["bootstrap_administrators"][0]["group"] = "Engineering"
             path.write_text(json.dumps(managed), encoding="utf-8")
-            with self.assertRaisesRegex(ConfigError, "organization_id plus actor_id"):
+            with self.assertRaisesRegex(ConfigError, "configuration_unsupported_fields"):
                 GatewayConfig.load(path, environ={"HORMUZ_TOKEN": "test-identity-token"})
 
     def test_managed_policy_configuration_requires_distinct_runtime_and_control_roles(self) -> None:
@@ -159,7 +159,7 @@ class PolicyDocumentTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "invalid-price.json"
             path.write_text(json.dumps(value), encoding="utf-8")
-            with self.assertRaisesRegex(ConfigError, "input_cost_per_million"):
+            with self.assertRaisesRegex(ConfigError, "configuration_nonfinite_number"):
                 GatewayConfig.load(path, environ={"HORMUZ_TOKEN": "test-identity-token"})
 
 

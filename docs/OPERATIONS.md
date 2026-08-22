@@ -25,6 +25,31 @@ credential, or call an AI provider. Configure the load balancer's liveness
 action from `/health` and its traffic-readiness action from `/ready`. Do not
 use either endpoint for provider availability monitoring.
 
+## Configuration input
+
+Hormuz treats its JSON configuration as a deployment control input, not a
+permissive application preference file. Before it resolves an
+environment-backed identity or secret, opens storage, contacts an IdP, resolves
+an upstream credential, or binds a listener, it accepts only one bounded UTF-8
+JSON object with the documented fields.
+
+- The file is limited to 1 MiB, 64 structural levels, and 100,000 JSON nodes.
+- Duplicate object members, `NaN`/`Infinity`, invalid UTF-8, malformed JSON,
+  invalid object/array shape, and unsupported fields fail closed.
+- Raw parser and schema failures use fixed, content-free error codes:
+  `configuration_unavailable`, `configuration_too_large`,
+  `configuration_invalid_encoding`, `configuration_invalid_json`,
+  `configuration_duplicate_member`, `configuration_nonfinite_number`,
+  `configuration_structure_limit`, `configuration_schema_invalid`, and
+  `configuration_unsupported_fields`.
+
+Configuration objects are strict: Hormuz never silently ignores a misspelled
+or forward-version field. Treat adding a configuration field as a documented
+deployment compatibility change. Validate a candidate in a replacement process
+with `hormuz doctor` before draining and replacing a running gateway. Hormuz
+does not claim signed configuration, live reload, a secret manager, or a
+deployment change-approval workflow in this release line.
+
 ## Graceful shutdown
 
 `hormuz serve` handles `SIGTERM` by clearing readiness before it stops the

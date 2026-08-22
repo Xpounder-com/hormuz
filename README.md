@@ -25,6 +25,7 @@ Hormuz is alpha software. The local prototype proves routing and policy behavior
 - Configuration output for installed Codex and Claude Code clients.
 - Generic OIDC discovery/JWKS verification with strict issuer, audience, expiry, asymmetric-algorithm, subject-mapping, and signing-key-rotation enforcement.
 - Versioned unauthenticated liveness and dependency-readiness probes for deployment health checks; readiness never calls a provider and turns unavailable before graceful shutdown drains requests.
+- Bounded, duplicate-free, schema-strict configuration loading before any identity, secret, storage, provider, or listener initialization.
 
 ## Quick start
 
