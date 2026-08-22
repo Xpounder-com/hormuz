@@ -110,3 +110,19 @@ The workflow grants only read access to repository contents, disables persisted 
 A separate weekly canary installs the latest published Codex and Claude Code packages in an ephemeral runner and exercises only the two fake-provider compatibility tests. It has no provider credentials, does not block ordinary pull requests, and is intended to surface upstream protocol drift before an employee upgrade does.
 
 The publication candidate was also checked locally on August 15, 2026 with Codex `0.147.0` and Claude Code `2.1.233`, the then-current npm releases. Both routed successfully through Hormuz, and the complete 29-test suite passed with those executables selected first on `PATH`.
+
+## OCI reference runtime
+
+The executable reference image gate is:
+
+```bash
+./tools/verify_oci_reference.sh
+```
+
+It builds the source candidate, verifies the fixed numeric non-root identity
+and liveness health check, proves a configuration is not embedded, starts the
+gateway under a read-only root filesystem with configuration and SQLite data
+mounted from outside the image, validates the versioned liveness/readiness
+contracts, and requires a clean SIGTERM exit. It uses fixed placeholders and
+does not call a model provider. Its narrow deployment boundary and remaining
+nonclaims are in [OCI.md](OCI.md).

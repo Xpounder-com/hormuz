@@ -4,6 +4,7 @@ import argparse
 import io
 import json
 import os
+import signal
 import tempfile
 import tomllib
 import unittest
@@ -20,6 +21,7 @@ from hormuz.cli import (
     _auth_token,
     _budget_for_scope,
     _client_config,
+    _serve,
     _status,
     build_parser,
     main,
@@ -46,6 +48,40 @@ class _RecordingAuditAnchor:
             head_digest=kwargs["head_digest"],  # type: ignore[arg-type]
             object_version="version-1",
         )
+
+
+class ServeSignalTests(unittest.TestCase):
+    def test_sigterm_marks_drain_and_dispatches_blocking_shutdown_to_a_helper(self) -> None:
+        config = GatewayConfig.load(
+            ROOT / "config.example.json",
+            environ={"HORMUZ_TOKEN": "test-identity-token"},
+        )
+        server = mock.Mock()
+        server.upstream_credentials = {}
+        handlers: dict[int, object] = {}
+        shutdown_thread = mock.Mock()
+
+        def register_handler(signum: int, handler: object) -> None:
+            handlers[signum] = handler
+
+        def serve_forever() -> None:
+            handler = handlers[signal.SIGTERM]
+            handler(signal.SIGTERM, None)  # type: ignore[operator]
+            handler(signal.SIGTERM, None)  # type: ignore[operator]
+
+        server.serve_forever.side_effect = serve_forever
+        with (
+            mock.patch("hormuz.cli.GatewayServer", return_value=server),
+            mock.patch("hormuz.cli.signal.signal", side_effect=register_handler),
+            mock.patch("hormuz.cli.threading.Thread", return_value=shutdown_thread) as thread,
+        ):
+            self.assertEqual(_serve(config), 0)
+
+        self.assertEqual(server.begin_drain.call_count, 2)
+        thread.assert_called_once_with(target=server.shutdown, name="hormuz-sigterm-shutdown", daemon=True)
+        shutdown_thread.start.assert_called_once_with()
+        server.shutdown.assert_not_called()
+        server.server_close.assert_called_once_with()
 
 
 class ClientConfigTests(unittest.TestCase):

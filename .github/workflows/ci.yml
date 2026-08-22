@@ -139,6 +139,18 @@ jobs:
             -p test_postgres.py \
             -v
 
+  oci-reference-runtime:
+    name: OCI reference runtime
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build and smoke-test the non-root OCI reference runtime
+        run: ./tools/verify_oci_reference.sh
+
   client-compatibility:
     name: Codex and Claude Code compatibility
     runs-on: ubuntu-latest

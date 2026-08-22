@@ -10,6 +10,7 @@ import sqlite3
 import shlex
 import signal
 import sys
+import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlparse
@@ -331,8 +332,23 @@ def _serve(config: GatewayConfig) -> int:
     print("Protocols: POST /v1/responses and POST /v1/messages")
     print(f"Usage storage: {config.usage_storage.backend}")
 
+    shutdown_started = threading.Event()
+
     def stop(_signum, _frame):
-        server.shutdown()
+        """Begin an orderly drain without deadlocking the serving thread.
+
+        ``BaseServer.shutdown`` waits for ``serve_forever`` to return. A POSIX
+        signal handler executes in that same main serving thread, so calling
+        it directly from here would deadlock the process rather than draining
+        it. Mark readiness false immediately, then let a helper invoke the
+        blocking shutdown handshake from a distinct thread.
+        """
+
+        server.begin_drain()
+        if shutdown_started.is_set():
+            return
+        shutdown_started.set()
+        threading.Thread(target=server.shutdown, name="hormuz-sigterm-shutdown", daemon=True).start()
 
     signal.signal(signal.SIGTERM, stop)
     try:

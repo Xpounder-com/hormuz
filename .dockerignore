@@ -1,0 +1,11 @@
+# Start from an empty build context. The Dockerfile copies the small explicit
+# allowlist below, so local credentials, configurations, evidence, tests, and
+# the separately packaged context experiment cannot be added to the image by
+# an incidental broad COPY instruction.
+**
+!Dockerfile
+!.dockerignore
+!pyproject.toml
+!README.md
+!hormuz/
+!hormuz/**
