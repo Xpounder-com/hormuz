@@ -214,7 +214,7 @@ class ClientConfigTests(unittest.TestCase):
 
             config_value["usage_storage"] = {"backend": "postgresql", "postgres_dsn": "literal-secret"}
             config_path.write_text(json.dumps(config_value), encoding="utf-8")
-            with self.assertRaisesRegex(ConfigError, "unsupported fields"):
+            with self.assertRaisesRegex(ConfigError, "configuration_unsupported_fields"):
                 GatewayConfig.load(config_path, environ={"HORMUZ_TOKEN": "test-identity-token"})
 
             config_value["usage_storage"] = {
