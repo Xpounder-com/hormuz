@@ -84,6 +84,19 @@ hormuz --config hormuz.json status --json
 
 Never add real provider or employee credentials to this record.
 
+## AWS KMS and S3 Object Lock conformance
+
+The generic custody implementation has local adapter, gateway, package, and
+contract evidence. It is not yet recorded as live AWS-account certification.
+The opt-in `tests/test_aws_custody_live.py` gate requires a customer-controlled
+AWS workload identity, distinct customer-managed KMS keys, and a dedicated
+Object-Lock-enabled test bucket. It verifies real KMS data-key and re-encryption
+operations, then retains one metadata-only `COMPLIANCE` object and checks its
+SSE-KMS and retention metadata. The test is skipped by ordinary CI and requires
+an explicit acknowledgement because the object cannot be cleaned up before its
+retention date. See [CUSTODY.md](CUSTODY.md) for the exact command and safety
+boundary.
+
 ## Automated publication gate
 
 GitHub Actions runs three independent gates without provider credentials:

@@ -170,3 +170,29 @@ are controlled AWS operations. S3 Object Lock `COMPLIANCE` prevents shortening
 retention or deleting a protected object version through normal account
 operations, but it is not a substitute for account-level access controls,
 backup/recovery practice, or independent audit review.
+
+## Live AWS conformance evidence
+
+The repository includes an opt-in test at
+`tests/test_aws_custody_live.py`. It is deliberately skipped in normal CI.
+Run it only against a customer-controlled, non-production AWS test account
+after creating the customer-managed keys and Object-Lock-enabled bucket:
+
+```bash
+python -m pip install '.[aws]'
+export HORMUZ_RUN_AWS_CUSTODY_CONFORMANCE=1
+export HORMUZ_AWS_CUSTODY_CONFIRMATION=I_UNDERSTAND_OBJECT_LOCK_RETENTION
+export HORMUZ_AWS_CUSTODY_REGION=us-east-1
+export HORMUZ_AWS_CUSTODY_BUCKET=your-dedicated-object-lock-test-bucket
+export HORMUZ_AWS_CUSTODY_PROVIDER_KEY=alias/hormuz-test-provider
+export HORMUZ_AWS_CUSTODY_DATA_KEY=alias/hormuz-test-data
+python -m unittest -v tests.test_aws_custody_live
+```
+
+It validates customer-managed key metadata and real tenant-bound KMS data-key
+operations, then writes one metadata-only audit artifact and verifies the
+retained S3 object version, `COMPLIANCE` mode, SSE-KMS, and retention date. The
+test intentionally does **not** delete the object. It requires an explicit
+acknowledgement because the object remains retained for at least one day;
+`HORMUZ_AWS_CUSTODY_RETENTION_DAYS` may increase that period. Use an AWS SSO,
+role, or workload identity—never an access key embedded in source or config.
