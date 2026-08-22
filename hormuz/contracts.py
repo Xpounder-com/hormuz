@@ -21,6 +21,8 @@ AUDIT_ANCHOR_SCHEMA_ID = "hormuz.audit-anchor"
 AUDIT_ANCHOR_SCHEMA_VERSION = 1
 
 HEALTH_SCHEMA_ID = "hormuz.gateway-health"
+READINESS_SCHEMA_ID = "hormuz.gateway-readiness"
+READINESS_SCHEMA_VERSION = 1
 IDENTITY_SCHEMA_ID = "hormuz.gateway-identity"
 USAGE_SUMMARY_SCHEMA_ID = "hormuz.gateway-usage-summary"
 ERROR_SCHEMA_ID = "hormuz.gateway-error"
@@ -58,6 +60,7 @@ PUBLIC_ERROR_CODES = frozenset({*PUBLIC_ERROR_CODES_V1, "hormuz_storage_unavaila
 
 _CURRENT_SCHEMA_VERSIONS = {
     HEALTH_SCHEMA_ID: 1,
+    READINESS_SCHEMA_ID: READINESS_SCHEMA_VERSION,
     IDENTITY_SCHEMA_ID: 1,
     USAGE_SUMMARY_SCHEMA_ID: 1,
     ERROR_SCHEMA_ID: ERROR_SCHEMA_VERSION,
@@ -168,6 +171,13 @@ def contract_manifest() -> dict[str, object]:
                 "response",
                 "hormuz",
                 ["schema_id", "schema_version", "status", "service", "protocols"],
+            ),
+            _manifest_schema(
+                READINESS_SCHEMA_ID,
+                READINESS_SCHEMA_VERSION,
+                "response",
+                "hormuz",
+                ["schema_id", "schema_version", "status", "service", "reason"],
             ),
             _manifest_schema(
                 IDENTITY_SCHEMA_ID,
@@ -497,6 +507,7 @@ def validate_contract(value: Mapping[str, Any]) -> None:
     schema_version = _value_integer(value, "schema_version")
     validator = {
         (HEALTH_SCHEMA_ID, 1): _validate_health,
+        (READINESS_SCHEMA_ID, READINESS_SCHEMA_VERSION): _validate_readiness,
         (IDENTITY_SCHEMA_ID, 1): _validate_identity,
         (USAGE_SUMMARY_SCHEMA_ID, 1): _validate_usage_summary,
         (ERROR_SCHEMA_ID, 1): lambda item: _validate_error(item, PUBLIC_ERROR_CODES_V1),
@@ -666,6 +677,18 @@ def _validate_health(value: Mapping[str, Any]) -> None:
     _value_string(value, "status")
     _value_string(value, "service")
     _value_string_list(value, "protocols")
+
+
+def _validate_readiness(value: Mapping[str, Any]) -> None:
+    _exact_keys(value, {"schema_id", "schema_version", "status", "service", "reason"})
+    status = _value_string(value, "status")
+    _value_string(value, "service")
+    reason = _nullable_string(value, "reason")
+    if status == "ready" and reason is None:
+        return
+    if status == "not_ready" and reason in {"dependency_unavailable", "draining"}:
+        return
+    raise ContractValidationError("readiness status and reason are invalid")
 
 
 def _validate_identity(value: Mapping[str, Any]) -> None:

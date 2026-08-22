@@ -389,6 +389,74 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertEqual(headers["x-hormuz-contract"], "hormuz.gateway-error;v=2")
         validate_contract(json.loads(body))
 
+    def test_liveness_and_readiness_are_unauthenticated_versioned_probes_without_provider_egress(self) -> None:
+        before = len(FakeProviderHandler.requests)
+
+        status, headers, body = self._get("/health", token=None)
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["x-hormuz-contract"], "hormuz.gateway-health;v=1")
+        liveness = json.loads(body)
+        validate_contract(liveness)
+        self.assertEqual(liveness["status"], "ok")
+
+        status, headers, body = self._get("/ready", token=None)
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["x-hormuz-contract"], "hormuz.gateway-readiness;v=1")
+        readiness = json.loads(body)
+        validate_contract(readiness)
+        self.assertEqual(readiness, {
+            "schema_id": "hormuz.gateway-readiness",
+            "schema_version": 1,
+            "status": "ready",
+            "service": "hormuz",
+            "reason": None,
+        })
+        self.assertEqual(len(FakeProviderHandler.requests), before)
+
+    def test_readiness_dependency_failure_and_draining_are_content_free(self) -> None:
+        class UnavailableStore:
+            def verify_ready(self) -> None:
+                raise PostgresStorageError("company-database-host-must-not-leak")
+
+        before = len(FakeProviderHandler.requests)
+        self.gateway.store = UnavailableStore()
+        status, headers, body = self._get("/ready", token=None)
+        self.assertEqual(status, 503)
+        self.assertEqual(headers["x-hormuz-contract"], "hormuz.gateway-readiness;v=1")
+        dependency_unavailable = json.loads(body)
+        validate_contract(dependency_unavailable)
+        self.assertEqual(dependency_unavailable["status"], "not_ready")
+        self.assertEqual(dependency_unavailable["reason"], "dependency_unavailable")
+        self.assertNotIn("company-database-host-must-not-leak", repr(dependency_unavailable))
+        self.assertEqual(len(FakeProviderHandler.requests), before)
+
+        self.gateway._accepting_requests.clear()
+        status, _, body = self._get("/ready", token=None)
+        self.assertEqual(status, 503)
+        draining = json.loads(body)
+        validate_contract(draining)
+        self.assertEqual(draining["reason"], "draining")
+
+    def test_readiness_fails_closed_when_the_active_policy_check_is_unavailable(self) -> None:
+        unavailable_policy_runtime = mock.Mock()
+        unavailable_policy_runtime.verify_active_policies.side_effect = PostgresStorageError("policy-store-unavailable")
+        self.gateway.policy_engine.policy_runtime = unavailable_policy_runtime
+        before = len(FakeProviderHandler.requests)
+
+        status, headers, body = self._get("/ready", token=None)
+
+        self.assertEqual(status, 503)
+        self.assertEqual(headers["x-hormuz-contract"], "hormuz.gateway-readiness;v=1")
+        response = json.loads(body)
+        validate_contract(response)
+        self.assertEqual(response["reason"], "dependency_unavailable")
+        self.assertEqual(len(FakeProviderHandler.requests), before)
+
+    def test_shutdown_marks_the_gateway_draining_before_listener_close(self) -> None:
+        self.gateway.shutdown()
+
+        self.assertEqual(self.gateway.readiness_reason(), "draining")
+
     def test_storage_interruption_fails_closed_before_provider_egress_without_content_leakage(self) -> None:
         class UnavailableStore:
             def monthly_totals(self, **_kwargs):

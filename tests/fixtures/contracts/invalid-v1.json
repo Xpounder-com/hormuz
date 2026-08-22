@@ -20,6 +20,13 @@
       "message": "This fixture must fail validation."
     }
   },
+  "readiness_reason_mismatch": {
+    "schema_id": "hormuz.gateway-readiness",
+    "schema_version": 1,
+    "status": "ready",
+    "service": "hormuz",
+    "reason": "dependency_unavailable"
+  },
   "audit_usage_unknown_field": {
     "schema_id": "hormuz.audit-event",
     "schema_version": 2,

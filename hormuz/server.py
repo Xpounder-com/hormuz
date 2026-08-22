@@ -21,6 +21,7 @@ from .contracts import (
     ERROR_SCHEMA_ID,
     HEALTH_SCHEMA_ID,
     IDENTITY_SCHEMA_ID,
+    READINESS_SCHEMA_ID,
     USAGE_SUMMARY_SCHEMA_ID,
     contract_envelope,
     relay_contract_header,
@@ -50,6 +51,7 @@ class GatewayServer(ThreadingHTTPServer):
 
     def __init__(self, config: GatewayConfig):
         self.config = config
+        self._accepting_requests = threading.Event()
         self.authenticator = Authenticator(config)
         self.postgres_pool = create_postgres_runtime_pool(config)
         try:
@@ -73,6 +75,7 @@ class GatewayServer(ThreadingHTTPServer):
         except Exception:
             self._close_postgres_pool()
             raise
+        self._accepting_requests.set()
         if self.postgres_pool is not None:
             settings = self.postgres_pool.settings
             LOGGER.info(
@@ -84,11 +87,35 @@ class GatewayServer(ThreadingHTTPServer):
                 settings.acquire_timeout_seconds,
             )
 
+    def shutdown(self) -> None:
+        """Stop advertising readiness before the listener begins draining."""
+
+        self._accepting_requests.clear()
+        super().shutdown()
+
     def server_close(self) -> None:
+        self._accepting_requests.clear()
         try:
             super().server_close()
         finally:
             self._close_postgres_pool()
+
+    def readiness_reason(self) -> str | None:
+        """Return a content-free reason when this process must not receive traffic."""
+
+        if not self._accepting_requests.is_set():
+            return "draining"
+        try:
+            self.store.verify_ready()
+            self.policy_engine.policy_runtime.verify_active_policies()
+        except _STORAGE_FAILURES:
+            LOGGER.warning("readiness_dependency_unavailable")
+            return "dependency_unavailable"
+        # A shutdown may have started while the read-only checks ran. Never
+        # report ready after the drain marker is cleared.
+        if not self._accepting_requests.is_set():
+            return "draining"
+        return None
 
     def _close_postgres_pool(self) -> None:
         if self.postgres_pool is None:
@@ -113,6 +140,29 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                     "status": "ok",
                     "service": "hormuz",
                     "protocols": ["openai-responses", "anthropic-messages"],
+                },
+            )
+            return
+        if path == "/ready":
+            reason = self.server.readiness_reason()
+            if reason is None:
+                self._send_contract_json(
+                    HTTPStatus.OK,
+                    READINESS_SCHEMA_ID,
+                    {
+                        "status": "ready",
+                        "service": "hormuz",
+                        "reason": None,
+                    },
+                )
+                return
+            self._send_contract_json(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                READINESS_SCHEMA_ID,
+                {
+                    "status": "not_ready",
+                    "service": "hormuz",
+                    "reason": reason,
                 },
             )
             return
