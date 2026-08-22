@@ -109,6 +109,16 @@ GitHub Actions runs independent gates without provider credentials:
 - CycloneDX SBOM generation and a fix-aware OCI vulnerability gate for the exact local candidate image;
 - installed-client routing through local fake providers using pinned official Codex and Claude Code package versions.
 
+To avoid duplicate and low-signal Actions usage, feature branches run CI only
+through the pull-request event, not an additional branch-push event. Source
+pull requests run the complete core suite on Python 3.12; `main` pushes and
+manual runs retain the full Python 3.11 through 3.14 compatibility matrix.
+Draft pull requests defer the packaging, PostgreSQL, OCI, supply-chain, and
+installed-client gates until they are marked ready for review. Documentation-
+only changes do not start this workflow. Every ready source pull request still
+runs all named release gates, and `main` repeats the complete matrix and gates
+after merge.
+
 The workflow grants only read access to repository contents, disables persisted checkout credentials, pins every GitHub Action to a reviewed commit SHA and the scanner image to an immutable digest, and retains build artifacts for seven days. Dependabot is configured to propose updates to action and Python build dependencies; a client-version bump remains an intentional compatibility change because it can alter the provider protocol.
 
 A separate weekly canary installs the latest published Codex and Claude Code packages in an ephemeral runner and exercises only the two fake-provider compatibility tests. It has no provider credentials, does not block ordinary pull requests, and is intended to surface upstream protocol drift before an employee upgrade does.
