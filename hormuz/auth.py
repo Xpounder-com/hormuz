@@ -38,6 +38,23 @@ class _KeySet:
     keys_by_id: dict[str, jwt.PyJWK]
 
 
+@dataclass(frozen=True)
+class ControlPrincipal:
+    """Credential identity suitable for governed policy-control authorization.
+
+    Runtime gateway authorization still resolves a full configured ``Identity``.
+    The policy service deliberately uses a narrower stable key: a configured
+    static actor, or an OIDC issuer/subject pair. It never derives root policy
+    authority from e-mail, username, group, or arbitrary token claims.
+    """
+
+    authentication_kind: str
+    actor_id: str | None = None
+    organization_id: str | None = None
+    issuer: str | None = None
+    subject: str | None = None
+
+
 class Authenticator:
     """Resolve static or OIDC JWT bearer credentials to configured identities."""
 
@@ -49,14 +66,41 @@ class Authenticator:
         self._unknown_key_refreshes: dict[str, float] = {}
 
     def authenticate(self, token: str) -> Identity:
+        principal = self.authenticate_control(token)
+        if principal.authentication_kind == "static":
+            identity = self._config.identity_for_token(token)
+            if identity is None:  # pragma: no cover - static lookup was just authenticated
+                raise AuthenticationError("invalid_credential")
+            return identity
+        assert principal.issuer is not None and principal.subject is not None
+        identity = self._config.identity_for_subject(principal.issuer, principal.subject)
+        if identity is None:
+            # A verified OIDC token is not automatically a gateway identity.
+            # The runtime policy boundary remains the configured subject map.
+            raise AuthenticationError("unmapped_subject")
+        return identity
+
+    def authenticate_control(self, token: str) -> ControlPrincipal:
+        """Verify a credential for the governed policy-control service.
+
+        OIDC callers are returned as a verified issuer/subject principal even
+        when they have no runtime inference identity. The policy service then
+        resolves root authority from its tenant-scoped PostgreSQL records.
+        """
+
         if not token or len(token.encode("utf-8")) > _MAX_TOKEN_BYTES:
             raise AuthenticationError("invalid_credential")
         for configured_token, identity in self._config.identities_by_token.items():
             if hmac.compare_digest(token, configured_token):
-                return identity
+                return ControlPrincipal(
+                    authentication_kind="static",
+                    actor_id=identity.actor_id,
+                    organization_id=identity.organization_id,
+                )
         if not self._config.oidc_issuers:
             raise AuthenticationError("invalid_credential")
-        return self._authenticate_oidc(token)
+        issuer, subject = self._verify_oidc_subject(token)
+        return ControlPrincipal(authentication_kind="oidc", issuer=issuer, subject=subject)
 
     def validate_metadata(self) -> dict[str, int]:
         """Fetch and validate discovery/JWKS metadata for configured issuers."""
@@ -65,7 +109,7 @@ class Authenticator:
             result[issuer.issuer] = len(self._key_set(issuer, force_refresh=False).keys_by_id)
         return result
 
-    def _authenticate_oidc(self, token: str) -> Identity:
+    def _verify_oidc_subject(self, token: str) -> tuple[str, str]:
         if token.count(".") != 2:
             raise AuthenticationError("malformed_jwt")
         try:
@@ -112,10 +156,7 @@ class Authenticator:
         subject = claims.get("sub")
         if not isinstance(subject, str) or not subject:
             raise AuthenticationError("invalid_subject")
-        identity = self._config.identity_for_subject(issuer.issuer, subject)
-        if identity is None:
-            raise AuthenticationError("unmapped_subject")
-        return identity
+        return issuer.issuer, subject
 
     def _signing_key(self, issuer: OIDCIssuerConfig, key_id: str) -> jwt.PyJWK:
         key_set = self._key_set(issuer, force_refresh=False)

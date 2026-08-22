@@ -14,6 +14,7 @@ Hormuz is alpha software. The local prototype proves routing and policy behavior
 - Anthropic-compatible `POST /v1/messages`, `/v1/messages/count_tokens`, and streaming.
 - Provider model IDs by default, preserving native client model behavior; optional company aliases remain supported.
 - Organization, team, and person policy overlays that can only become more restrictive.
+- Optional PostgreSQL-backed immutable policy documents with one-time authenticated administrator bootstrap, audited activation/rollback, and request-pinned policy versions.
 - Model fallback, output-token caps, monthly token limits, and USD budget limits.
 - Per-person attribution using unique bootstrap tokens or generic OIDC JWT access tokens mapped by issuer and subject.
 - Input, output, cache-read, cache-write, and reasoning-token accounting when providers report them.
@@ -84,7 +85,7 @@ python3 -m hormuz --config hormuz.json audit-export \
 
 The deprecated context-pack experiment is intentionally outside the core gateway. See [docs/CONTEXT_EXPERIMENT_MIGRATION.md](docs/CONTEXT_EXPERIMENT_MIGRATION.md) for the separate package and its temporary compatibility shim.
 
-See [docs/ROADMAP.md](docs/ROADMAP.md) for the evidence-gated enterprise program, [docs/CONTRACTS.md](docs/CONTRACTS.md) for the versioned policy/evidence contract and migration boundary, [docs/STORAGE.md](docs/STORAGE.md) for SQLite/PostgreSQL setup, upgrade, rollback, and recovery boundaries, [docs/decisions/README.md](docs/decisions/README.md) for proposed and accepted architecture decisions, [docs/CLIENTS.md](docs/CLIENTS.md) for Codex and Claude Code setup, [docs/OIDC.md](docs/OIDC.md) for generic enterprise identity, [docs/USAGE.md](docs/USAGE.md) for team/person/model cost and budget reporting, [docs/AUDIT.md](docs/AUDIT.md) for the export contract and limitations, [docs/SECRET_CONTROLS.md](docs/SECRET_CONTROLS.md) for the egress boundary, [docs/VERIFICATION.md](docs/VERIFICATION.md) for executable compatibility evidence, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the request path and current trust boundary.
+See [docs/ROADMAP.md](docs/ROADMAP.md) for the evidence-gated enterprise program, [docs/POLICY_CONTROL.md](docs/POLICY_CONTROL.md) for bootstrap, root-authority, activation, rollback, and recovery boundaries, [docs/CONTRACTS.md](docs/CONTRACTS.md) for the versioned policy/evidence contract and migration boundary, [docs/STORAGE.md](docs/STORAGE.md) for SQLite/PostgreSQL setup, upgrade, rollback, and recovery boundaries, [docs/decisions/README.md](docs/decisions/README.md) for proposed and accepted architecture decisions, [docs/CLIENTS.md](docs/CLIENTS.md) for Codex and Claude Code setup, [docs/OIDC.md](docs/OIDC.md) for generic enterprise identity, [docs/USAGE.md](docs/USAGE.md) for team/person/model cost and budget reporting, [docs/AUDIT.md](docs/AUDIT.md) for the export contract and limitations, [docs/SECRET_CONTROLS.md](docs/SECRET_CONTROLS.md) for the egress boundary, [docs/VERIFICATION.md](docs/VERIFICATION.md) for executable compatibility evidence, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the request path and current trust boundary.
 
 ## Test
 
@@ -102,4 +103,4 @@ The GitHub publication gate also tests Python 3.11 through 3.14, builds and inst
 
 ## Roadmap boundary
 
-The current hardening program focuses on a minimal gateway core: policy enforcement, accounting, deterministic secret egress, metadata-only audit, and OIDC JWT verification. The package boundary and versioned policy/evidence contract are now explicit, and the SQLite/PostgreSQL compatibility seam is tested; before an enterprise release, Hormuz still needs real IdP conformance, KMS and audit retention, TLS and deployment hardening, shared PostgreSQL operations, backup/restore evidence, multi-instance coordination, and independent review. It is not building an organizational-memory or workflow product.
+The current hardening program focuses on a minimal gateway core: policy enforcement, versioned PostgreSQL policy administration, accounting, deterministic secret egress, metadata-only audit, and OIDC JWT verification. The package boundary and policy/evidence contract are explicit, and the SQLite/PostgreSQL compatibility seam is tested; before an enterprise release, Hormuz still needs real IdP conformance, KMS and audit retention, TLS and deployment hardening, shared PostgreSQL operations, backup/restore evidence, multi-instance coordination, and independent review. It is not building an organizational-memory or workflow product.

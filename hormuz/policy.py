@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .config import GatewayConfig, Identity, ModelRoute
+from .policy_document import PolicySnapshot
+from .policy_runtime import PolicyRuntime
 from .store import MonthlyTotals, ReservationScope, UsageRepository
 
 
@@ -16,13 +18,20 @@ class PolicyDecision:
     route: ModelRoute | None
     max_output_tokens: int | None
     policy_version: str
+    snapshot: PolicySnapshot
 
 
 class PolicyEngine:
-    def __init__(self, config: GatewayConfig, store: UsageRepository):
+    def __init__(
+        self,
+        config: GatewayConfig,
+        store: UsageRepository,
+        *,
+        policy_runtime: PolicyRuntime | None = None,
+    ):
         self.config = config
         self.store = store
-        self.policy_version = config.policy_version
+        self.policy_runtime = policy_runtime or PolicyRuntime(config)
 
     def evaluate(
         self,
@@ -33,14 +42,15 @@ class PolicyEngine:
         requested_model: str,
         requested_output_tokens: int | None,
     ) -> PolicyDecision:
-        policy = self.config.resolved_policy(identity)
+        snapshot = self.policy_runtime.snapshot_for(identity)
+        policy = snapshot.effective_policy
 
         if identity.allowed_clients and client not in identity.allowed_clients:
-            return self._deny(requested_model, f"Identity is not authorized to use client {client}.")
+            return self._deny(snapshot, requested_model, f"Identity is not authorized to use client {client}.")
         if policy.allowed_clients is not None and client not in policy.allowed_clients:
-            return self._deny(requested_model, f"Policy does not allow client {client}.")
+            return self._deny(snapshot, requested_model, f"Policy does not allow client {client}.")
 
-        budget_decision = self._check_limits(identity, requested_model)
+        budget_decision = self._check_limits(snapshot, identity, requested_model)
         if budget_decision is not None:
             return budget_decision
 
@@ -58,6 +68,7 @@ class PolicyEngine:
             fallback_allowed = allowed_models is None or fallback in allowed_models
             if fallback_route is None or fallback_route.protocol != protocol or not fallback_allowed:
                 return self._deny(
+                    snapshot,
                     requested_model,
                     f"Model {requested_model} is not allowed for {protocol}, and no compatible fallback is configured.",
                 )
@@ -79,20 +90,22 @@ class PolicyEngine:
             resolved_alias=selected_alias,
             route=route,
             max_output_tokens=output_cap,
-            policy_version=self.policy_version,
+            policy_version=snapshot.policy_version,
+            snapshot=snapshot,
         )
 
     def reserve_budget(
         self,
         *,
         identity: Identity,
+        decision: PolicyDecision,
         reserved_tokens: int,
         reserved_cost_microusd: int,
         ttl_seconds: int,
     ) -> str | None:
-        organization = self.config.organization_policy
-        team = self.config.team_policies.get(identity.team_id)
-        actor = self.config.actor_policies.get(identity.actor_id)
+        organization = decision.snapshot.organization_policy
+        team = decision.snapshot.team_policy
+        actor = decision.snapshot.actor_policy
         per_actor_cost_caps = [
             policy.per_actor_monthly_budget_usd
             for policy in (organization, team, actor)
@@ -133,7 +146,12 @@ class PolicyEngine:
             ttl_seconds=ttl_seconds,
         )
 
-    def _check_limits(self, identity: Identity, requested_model: str) -> PolicyDecision | None:
+    def _check_limits(
+        self,
+        snapshot: PolicySnapshot,
+        identity: Identity,
+        requested_model: str,
+    ) -> PolicyDecision | None:
         actor_totals = self.store.monthly_totals(
             actor_id=identity.actor_id,
             organization_id=identity.organization_id,
@@ -141,11 +159,11 @@ class PolicyEngine:
         scopes: list[tuple[str, object, MonthlyTotals]] = [
             (
                 "organization",
-                self.config.organization_policy,
+                snapshot.organization_policy,
                 self.store.monthly_totals(organization_id=identity.organization_id),
             ),
         ]
-        team_policy = self.config.team_policies.get(identity.team_id)
+        team_policy = snapshot.team_policy
         if team_policy is not None:
             scopes.append(
                 (
@@ -157,23 +175,23 @@ class PolicyEngine:
                     ),
                 )
             )
-        actor_policy = self.config.actor_policies.get(identity.actor_id)
+        actor_policy = snapshot.actor_policy
         if actor_policy is not None:
             scopes.append(("employee", actor_policy, actor_totals))
 
         for scope_name, scope_policy, totals in scopes:
             if scope_policy.monthly_token_limit is not None and totals.total_tokens >= scope_policy.monthly_token_limit:
-                return self._deny(requested_model, f"The {scope_name} monthly token limit has been reached.")
+                return self._deny(snapshot, requested_model, f"The {scope_name} monthly token limit has been reached.")
             if scope_policy.monthly_budget_usd is not None and totals.cost_usd >= scope_policy.monthly_budget_usd:
-                return self._deny(requested_model, f"The {scope_name} monthly AI budget has been reached.")
+                return self._deny(snapshot, requested_model, f"The {scope_name} monthly AI budget has been reached.")
             if (
                 scope_policy.per_actor_monthly_budget_usd is not None
                 and actor_totals.cost_usd >= scope_policy.per_actor_monthly_budget_usd
             ):
-                return self._deny(requested_model, "The employee monthly AI budget has been reached.")
+                return self._deny(snapshot, requested_model, "The employee monthly AI budget has been reached.")
         return None
 
-    def _deny(self, requested_model: str, reason: str) -> PolicyDecision:
+    def _deny(self, snapshot: PolicySnapshot, requested_model: str, reason: str) -> PolicyDecision:
         return PolicyDecision(
             allowed=False,
             action="denied",
@@ -182,7 +200,8 @@ class PolicyEngine:
             resolved_alias=None,
             route=None,
             max_output_tokens=None,
-            policy_version=self.policy_version,
+            policy_version=snapshot.policy_version,
+            snapshot=snapshot,
         )
 
 

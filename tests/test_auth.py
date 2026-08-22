@@ -171,6 +171,18 @@ class OIDCAuthenticationTests(unittest.TestCase):
                     authenticator.authenticate(token)
                 self.assertEqual(raised.exception.code, expected_code)
 
+    def test_control_principal_can_be_verified_without_granting_runtime_identity(self) -> None:
+        authenticator = Authenticator(self.config)
+        token = self._token(subject="unmapped-policy-administrator")
+        principal = authenticator.authenticate_control(token)
+
+        self.assertEqual(principal.authentication_kind, "oidc")
+        self.assertEqual(principal.issuer, self.issuer)
+        self.assertEqual(principal.subject, "unmapped-policy-administrator")
+        with self.assertRaises(AuthenticationError) as raised:
+            authenticator.authenticate(token)
+        self.assertEqual(raised.exception.code, "unmapped_subject")
+
     def test_unknown_key_triggers_one_rotation_refresh(self) -> None:
         authenticator = Authenticator(self.config)
         authenticator.authenticate(self._token())

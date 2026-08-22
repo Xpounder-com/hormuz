@@ -14,10 +14,16 @@ from urllib.parse import quote
 from unittest import mock
 from uuid import uuid4
 
-from hormuz.cli import main
+from hormuz.cli import build_parser, main
 from hormuz.config import GatewayConfig, Identity, UsageStorageConfig
+from hormuz.contracts import validate_contract, validate_policy_control_event
 from hormuz.evidence import EvidenceStorageError
+from hormuz.policy import PolicyEngine
+from hormuz.policy_control import PolicyControlService
+from hormuz.policy_repository import PolicyAdministrator, PolicyControlError
+from hormuz.policy_runtime import PolicyRuntime
 from hormuz.postgres import PostgresStorageError, migrate_postgres, verify_postgres_schema
+from hormuz.postgres_policy_store import PostgresPolicyControlStore
 from hormuz.postgres_usage_store import PostgresUsageStore
 from hormuz.store import ReservationDenied, ReservationScope, UsageStore
 from hormuz.store_router import create_usage_store
@@ -47,6 +53,13 @@ class PostgresUsageStoreTests(unittest.TestCase):
         cls.runtime_role = f"hormuz_runtime_{suffix}"
         cls.runtime_password = "hormuz-runtime-test-password"
         cls.runtime_dsn = _runtime_dsn(cls.owner_dsn, cls.runtime_role, cls.runtime_password)
+        cls.policy_control_role = f"hormuz_policy_control_{suffix}"
+        cls.policy_control_password = "hormuz-policy-control-test-password"
+        cls.policy_control_dsn = _runtime_dsn(
+            cls.owner_dsn,
+            cls.policy_control_role,
+            cls.policy_control_password,
+        )
         cls.addClassCleanup(cls._cleanup_test_resources)
         with psycopg.connect(cls.owner_dsn, autocommit=True) as connection:
             with connection.cursor() as cursor:
@@ -55,15 +68,22 @@ class PostgresUsageStoreTests(unittest.TestCase):
                         "CREATE ROLE {} LOGIN PASSWORD {} NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS"
                     ).format(sql.Identifier(cls.runtime_role), sql.Literal(cls.runtime_password))
                 )
+                cursor.execute(
+                    sql.SQL(
+                        "CREATE ROLE {} LOGIN PASSWORD {} NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS"
+                    ).format(sql.Identifier(cls.policy_control_role), sql.Literal(cls.policy_control_password))
+                )
         first = migrate_postgres(
             cls.owner_dsn,
             schema=cls.schema,
             runtime_role=cls.runtime_role,
+            policy_control_role=cls.policy_control_role,
         )
         second = migrate_postgres(
             cls.owner_dsn,
             schema=cls.schema,
             runtime_role=cls.runtime_role,
+            policy_control_role=cls.policy_control_role,
         )
         if first != second:
             raise AssertionError("PostgreSQL migrations are not idempotent")
@@ -76,24 +96,181 @@ class PostgresUsageStoreTests(unittest.TestCase):
             with connection.cursor() as cursor:
                 cursor.execute(cls.sql.SQL("DROP SCHEMA IF EXISTS {} CASCADE").format(cls.sql.Identifier(cls.schema)))
                 cursor.execute(cls.sql.SQL("DROP ROLE IF EXISTS {}").format(cls.sql.Identifier(cls.runtime_role)))
+                cursor.execute(cls.sql.SQL("DROP ROLE IF EXISTS {}").format(cls.sql.Identifier(cls.policy_control_role)))
 
     def setUp(self) -> None:
         with self.psycopg.connect(self.owner_dsn, autocommit=True) as connection:
             with connection.cursor() as cursor:
-                for table in (
+                tables = (
+                    "policy_control_events",
+                    "policy_active_versions",
+                    "policy_versions",
+                    "policy_administrators",
+                    "policy_tenants",
                     "gateway_budget_reservations",
                     "gateway_secret_events",
                     "gateway_usage_events",
-                ):
-                    cursor.execute(
-                        self.sql.SQL("TRUNCATE TABLE {}.{}")
-                        .format(self.sql.Identifier(self.schema), self.sql.Identifier(table))
+                )
+                cursor.execute(
+                    self.sql.SQL("TRUNCATE TABLE {}")
+                    .format(
+                        self.sql.SQL(", ").join(
+                            self.sql.SQL("{}.{}").format(
+                                self.sql.Identifier(self.schema),
+                                self.sql.Identifier(table),
+                            )
+                            for table in tables
+                        )
                     )
+                )
         self.store = PostgresUsageStore(
             self.runtime_dsn,
             organization_ids=("acme", "beta"),
             schema=self.schema,
             runtime_role=self.runtime_role,
+        )
+
+    def _managed_config(
+        self,
+        *,
+        include_bob: bool = False,
+        bootstrap_bob: bool = False,
+        include_oidc: bool = False,
+        break_glass: bool = False,
+    ) -> tuple[GatewayConfig, dict[str, str], str | None]:
+        """Return an isolated managed-policy config and its process environment."""
+
+        value = json.loads((ROOT / "config.example.json").read_text(encoding="utf-8"))
+        value.pop("policies")
+        value["usage_storage"] = {
+            "backend": "postgresql",
+            "postgres_dsn_env": "TEST_POSTGRES_RUNTIME_DSN",
+            "postgres_migration_dsn_env": "TEST_POSTGRES_MIGRATION_DSN",
+            "postgres_schema": self.schema,
+            "postgres_runtime_role": self.runtime_role,
+        }
+        if include_bob:
+            value["identities"].append(  # type: ignore[index]
+                {
+                    "token_env": "HORMUZ_BOB_TOKEN",
+                    "actor_id": "bob",
+                    "actor_name": "Bob Example",
+                    "team_id": "engineering",
+                    "team_name": "Engineering",
+                    "organization_id": "xpounder",
+                    "identity_type": "human",
+                    "clearance": "confidential",
+                    "allowed_clients": ["codex", "claude-code"],
+                }
+            )
+        issuer: str | None = None
+        if include_oidc:
+            issuer = "http://127.0.0.1:9444"
+            value["authentication"] = {
+                "oidc": {
+                    "issuers": [
+                        {
+                            "issuer": issuer,
+                            "audiences": ["hormuz-api"],
+                            "algorithms": ["RS256"],
+                            "allow_insecure_http": True,
+                            "subjects": [
+                                {
+                                    "subject": "runtime-alice",
+                                    "actor_id": "oidc-runtime-alice",
+                                    "actor_name": "OIDC Runtime Alice",
+                                    "team_id": "engineering",
+                                    "team_name": "Engineering",
+                                    "organization_id": "xpounder",
+                                    "clearance": "confidential",
+                                    "allowed_clients": ["codex", "claude-code"],
+                                }
+                            ],
+                        }
+                    ]
+                }
+            }
+        bootstrap_administrators: list[dict[str, str]] = [
+            {"organization_id": "xpounder", "actor_id": "alice"}
+        ]
+        if bootstrap_bob:
+            bootstrap_administrators.append({"organization_id": "xpounder", "actor_id": "bob"})
+        policy_control: dict[str, object] = {
+            "mode": "postgresql",
+            "postgres_control_dsn_env": "TEST_POSTGRES_POLICY_CONTROL_DSN",
+            "postgres_control_role": self.policy_control_role,
+            "bootstrap_administrators": bootstrap_administrators,
+        }
+        if break_glass:
+            policy_control["break_glass"] = {
+                "enabled": True,
+                "token_env": "HORMUZ_POLICY_BREAK_GLASS_TOKEN",
+            }
+        value["policy_control"] = policy_control
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        path = Path(temporary.name) / "hormuz-managed.json"
+        path.write_text(json.dumps(value), encoding="utf-8")
+        environment = {
+            "HORMUZ_TOKEN": "policy-test-alice-token",
+            "TEST_POSTGRES_RUNTIME_DSN": self.runtime_dsn,
+            "TEST_POSTGRES_MIGRATION_DSN": self.owner_dsn,
+            "TEST_POSTGRES_POLICY_CONTROL_DSN": self.policy_control_dsn,
+            "HORMUZ_POLICY_ADMIN_TOKEN": "policy-test-alice-token",
+        }
+        if include_bob:
+            environment["HORMUZ_BOB_TOKEN"] = "policy-test-bob-token"
+            environment["HORMUZ_POLICY_BOB_TOKEN"] = "policy-test-bob-token"
+        if break_glass:
+            environment["HORMUZ_POLICY_BREAK_GLASS_TOKEN"] = "policy-break-glass-secret-value"
+        return GatewayConfig.load(path, environ=environment), environment, issuer
+
+    def _policy_document(self, *, openai_model: str = "gpt-5.4-mini", actor_blocked: bool = False) -> dict[str, object]:
+        actors: dict[str, object] = {"alice": {"allowed_models": []}} if actor_blocked else {}
+        return {
+            "schema_id": "hormuz.policy-document",
+            "schema_version": 1,
+            "organization_id": "xpounder",
+            "policies": {
+                "organization": {
+                    "allowed_clients": ["codex", "claude-code"],
+                    "allowed_models": [openai_model, "claude-sonnet-5"],
+                    "max_output_tokens": 32000,
+                    "monthly_budget_usd": 10000,
+                    "per_actor_monthly_budget_usd": 500,
+                },
+                "teams": {
+                    "engineering": {
+                        "allowed_models": [openai_model, "claude-sonnet-5"],
+                        "fallback_models": {"openai": openai_model, "anthropic": "claude-sonnet-5"},
+                        "max_output_tokens": 16000,
+                        "monthly_budget_usd": 5000,
+                    }
+                },
+                "actors": actors,
+            },
+            "egress_controls": {
+                "openai": {"allow_response_storage": False, "allow_background": False},
+                "secrets": {"mode": "redact"},
+            },
+        }
+
+    def _stage(
+        self,
+        service: PolicyControlService,
+        *,
+        environment: dict[str, str],
+        document: dict[str, object],
+        credential_env: str = "HORMUZ_POLICY_ADMIN_TOKEN",
+    ):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        path = Path(temporary.name) / "policy.json"
+        path.write_text(json.dumps(document), encoding="utf-8")
+        return service.stage(
+            organization_id="xpounder",
+            credential_env=credential_env,
+            policy_path=path,
         )
 
     def test_migration_is_visible_to_the_restricted_runtime_role(self) -> None:
@@ -103,7 +280,7 @@ class PostgresUsageStoreTests(unittest.TestCase):
             runtime_role=self.runtime_role,
         )
         self.assertTrue(status.complete)
-        self.assertEqual(status.version, 1)
+        self.assertEqual(status.version, 2)
 
     def test_configured_router_uses_only_the_runtime_dsn(self) -> None:
         config = GatewayConfig.load(
@@ -136,6 +313,15 @@ class PostgresUsageStoreTests(unittest.TestCase):
             "postgres_schema": self.schema,
             "postgres_runtime_role": self.runtime_role,
         }
+        config_value.pop("policies")
+        config_value["policy_control"] = {
+            "mode": "postgresql",
+            "postgres_control_dsn_env": "TEST_POSTGRES_POLICY_CONTROL_DSN",
+            "postgres_control_role": self.policy_control_role,
+            "bootstrap_administrators": [
+                {"organization_id": "xpounder", "actor_id": "alice"}
+            ],
+        }
         with tempfile.TemporaryDirectory() as temporary:
             config_path = Path(temporary) / "gateway.json"
             config_path.write_text(json.dumps(config_value), encoding="utf-8")
@@ -143,17 +329,492 @@ class PostgresUsageStoreTests(unittest.TestCase):
                 "HORMUZ_TOKEN": "test-identity-token",
                 "TEST_POSTGRES_RUNTIME_DSN": self.runtime_dsn,
                 "TEST_POSTGRES_MIGRATION_DSN": self.owner_dsn,
+                "TEST_POSTGRES_POLICY_CONTROL_DSN": self.policy_control_dsn,
             }
             with mock.patch.dict(os.environ, environment, clear=True):
                 migration = io.StringIO()
                 with redirect_stdout(migration):
                     self.assertEqual(main(["--config", str(config_path), "storage", "migrate"]), 0)
-                self.assertEqual(migration.getvalue(), "PostgreSQL usage storage migration is current: v1\n")
+                self.assertEqual(migration.getvalue(), "PostgreSQL usage storage migration is current: v2\n")
 
                 verification = io.StringIO()
                 with redirect_stdout(verification):
                     self.assertEqual(main(["--config", str(config_path), "storage", "verify"]), 0)
                 self.assertEqual(verification.getvalue(), "usage storage verified: postgresql\n")
+
+    def test_policy_control_bootstrap_activation_rollback_and_request_pinning(self) -> None:
+        config, environment, _issuer = self._managed_config()
+        service = PolicyControlService(config, environ=environment)
+
+        administrators = service.bootstrap(
+            organization_id="xpounder",
+            credential_env="HORMUZ_POLICY_ADMIN_TOKEN",
+        )
+        self.assertEqual(len(administrators), 1)
+        self.assertEqual(administrators[0].actor_id, "alice")
+
+        first = self._stage(service, environment=environment, document=self._policy_document())
+        first_activation = service.activate(
+            organization_id="xpounder",
+            credential_env="HORMUZ_POLICY_ADMIN_TOKEN",
+            version_id=first.version_id,
+        )
+        self.assertEqual(first_activation.generation, 1)
+
+        runtime_one = PolicyRuntime(config, environ=environment)
+        runtime_two = PolicyRuntime(config, environ=environment)
+        identity = config.identities_by_actor["alice"]
+        with tempfile.TemporaryDirectory() as temporary:
+            evidence_store = UsageStore(Path(temporary) / "usage.sqlite3")
+            engine = PolicyEngine(config, evidence_store, policy_runtime=runtime_one)
+            pinned = engine.evaluate(
+                identity=identity,
+                client="codex",
+                protocol="openai",
+                requested_model="gpt-5.4-mini",
+                requested_output_tokens=100,
+            )
+            self.assertTrue(pinned.allowed)
+            self.assertEqual(pinned.policy_version, first.version_id)
+
+            second = self._stage(
+                service,
+                environment=environment,
+                document=self._policy_document(openai_model="gpt-5.4"),
+            )
+            second_activation = service.activate(
+                organization_id="xpounder",
+                credential_env="HORMUZ_POLICY_ADMIN_TOKEN",
+                version_id=second.version_id,
+            )
+            self.assertEqual(second_activation.generation, 2)
+            self.assertEqual(runtime_one.snapshot_for(identity).policy_version, second.version_id)
+            self.assertEqual(runtime_two.snapshot_for(identity).policy_version, second.version_id)
+            # The decision created before activation holds the exact policy
+            # version used for that request's accounting and reservation path.
+            self.assertEqual(pinned.snapshot.policy_version, first.version_id)
+            evidence_store.record(
+                identity=identity,
+                client="codex",
+                protocol="openai",
+                requested_model="gpt-5.4-mini",
+                resolved_alias="gpt-5.4-mini",
+                upstream_model="gpt-5.4-mini",
+                policy_version=pinned.policy_version,
+                policy_action="allowed",
+                status="succeeded",
+            )
+            self.assertEqual(
+                evidence_store.audit_events(
+                    since="2000-01-01T00:00:00+00:00",
+                    organization_id="xpounder",
+                )[0]["policy_version"],
+                first.version_id,
+            )
+
+        rollback = service.rollback(
+            organization_id="xpounder",
+            credential_env="HORMUZ_POLICY_ADMIN_TOKEN",
+            version_id=first.version_id,
+        )
+        self.assertEqual(rollback.action, "policy_rolled_back")
+        self.assertEqual(rollback.generation, 3)
+        status = service.status(organization_id="xpounder", credential_env="HORMUZ_POLICY_ADMIN_TOKEN")
+        self.assertTrue(status.initialized)
+        self.assertEqual(status.active.version_id if status.active else None, first.version_id)
+        self.assertEqual({version.version_id for version in status.versions}, {first.version_id, second.version_id})
+
+        with self.psycopg.connect(self.owner_dsn) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    self.sql.SQL(
+                        "SELECT event_schema_id, event_schema_version, organization_id, occurred_at, event_type, "
+                        "actor_kind, actor_identity_key, target_identity_key, version_id, generation, reason_code, "
+                        "change_summary "
+                        "FROM {}.policy_control_events ORDER BY occurred_at"
+                    ).format(self.sql.Identifier(self.schema))
+                )
+                events = cursor.fetchall()
+        self.assertEqual(
+            [event[4] for event in events],
+            [
+                "bootstrap_initialized",
+                "policy_staged",
+                "policy_activated",
+                "policy_staged",
+                "policy_activated",
+                "policy_rolled_back",
+            ],
+        )
+        self.assertTrue(all(event[0] == "hormuz.policy-control-event" and event[1] == 1 for event in events))
+        event_fields = (
+            "event_schema_id",
+            "event_schema_version",
+            "organization_id",
+            "occurred_at",
+            "event_type",
+            "actor_kind",
+            "actor_identity_key",
+            "target_identity_key",
+            "version_id",
+            "generation",
+            "reason_code",
+            "change_summary",
+        )
+        for event in events:
+            event_payload = dict(zip(event_fields, event, strict=True))
+            event_payload["occurred_at"] = event_payload["occurred_at"].isoformat()
+            validate_policy_control_event(event_payload)
+        staged_summaries = [event[11] for event in events if event[4] == "policy_staged"]
+        self.assertTrue(all("gpt-5.4" not in summary and "10000" not in summary for summary in staged_summaries))
+
+    def test_policy_cli_uses_the_authenticated_service_boundary(self) -> None:
+        config, environment, _issuer = self._managed_config()
+        with tempfile.TemporaryDirectory() as temporary:
+            policy_path = Path(temporary) / "policy.json"
+            policy_path.write_text(json.dumps(self._policy_document()), encoding="utf-8")
+            with mock.patch.dict(os.environ, environment, clear=True):
+                bootstrap_output = io.StringIO()
+                with redirect_stdout(bootstrap_output):
+                    self.assertEqual(
+                        main(
+                            [
+                                "--config",
+                                str(config.source_path),
+                                "policy",
+                                "bootstrap",
+                                "--organization",
+                                "xpounder",
+                                "--credential-env",
+                                "HORMUZ_POLICY_ADMIN_TOKEN",
+                            ]
+                        ),
+                        0,
+                    )
+                self.assertIn("policy bootstrap initialized", bootstrap_output.getvalue())
+                stage_output = io.StringIO()
+                with redirect_stdout(stage_output):
+                    self.assertEqual(
+                        main(
+                            [
+                                "--config",
+                                str(config.source_path),
+                                "policy",
+                                "stage",
+                                "--organization",
+                                "xpounder",
+                                "--credential-env",
+                                "HORMUZ_POLICY_ADMIN_TOKEN",
+                                "--file",
+                                str(policy_path),
+                            ]
+                        ),
+                        0,
+                    )
+                self.assertIn("policy staged: organization=xpounder version=sha256:", stage_output.getvalue())
+                version_id = stage_output.getvalue().split("version=", 1)[1].split()[0]
+                with redirect_stdout(io.StringIO()):
+                    self.assertEqual(
+                        main(
+                            [
+                                "--config",
+                                str(config.source_path),
+                                "policy",
+                                "activate",
+                                "--organization",
+                                "xpounder",
+                                "--credential-env",
+                                "HORMUZ_POLICY_ADMIN_TOKEN",
+                                "--version",
+                                version_id,
+                            ]
+                        ),
+                        0,
+                    )
+                client_output = io.StringIO()
+                with redirect_stdout(client_output):
+                    self.assertEqual(
+                        main(
+                            [
+                                "--config",
+                                str(config.source_path),
+                                "client-config",
+                                "codex",
+                                "--url",
+                                "https://hormuz.example",
+                            ]
+                        ),
+                        0,
+                    )
+                self.assertIn('model = "gpt-5.4-mini"', client_output.getvalue())
+                status_output = io.StringIO()
+                with redirect_stdout(status_output):
+                    self.assertEqual(
+                        main(
+                            [
+                                "--config",
+                                str(config.source_path),
+                                "policy",
+                                "status",
+                                "--organization",
+                                "xpounder",
+                                "--credential-env",
+                                "HORMUZ_POLICY_ADMIN_TOKEN",
+                                "--json",
+                            ]
+                        ),
+                        0,
+                    )
+        status = json.loads(status_output.getvalue())
+        validate_contract(status)
+        self.assertEqual(status["administrators"][0]["actor_id"], "alice")
+        parsed = build_parser().parse_args(
+            [
+                "policy",
+                "stage",
+                "--organization",
+                "xpounder",
+                "--credential-env",
+                "HORMUZ_POLICY_ADMIN_TOKEN",
+                "--file",
+                "policy.json",
+            ]
+        )
+        self.assertFalse(hasattr(parsed, "actor"))
+
+    def test_policy_bootstrap_cannot_drift_and_non_administrator_cannot_change_policy(self) -> None:
+        config, environment, _issuer = self._managed_config(include_bob=True)
+        service = PolicyControlService(config, environ=environment)
+        service.bootstrap(organization_id="xpounder", credential_env="HORMUZ_POLICY_ADMIN_TOKEN")
+
+        # The initialization marker is the first post-bootstrap authority
+        # lookup. Even a later configuration that no longer describes the
+        # tenant must not be consulted before that database check.
+        original_identity = config.identities_by_token[environment["HORMUZ_POLICY_ADMIN_TOKEN"]]
+        config_without_tenant = replace(
+            config,
+            identities_by_token={
+                environment["HORMUZ_POLICY_ADMIN_TOKEN"]: replace(original_identity, organization_id="moved-tenant")
+            },
+        )
+        with self.assertRaises(PolicyControlError) as raised:
+            PolicyControlService(config_without_tenant, environ=environment).bootstrap(
+                organization_id="xpounder",
+                credential_env="HORMUZ_POLICY_ADMIN_TOKEN",
+            )
+        self.assertEqual(raised.exception.code, "policy_bootstrap_already_initialized")
+
+        with self.assertRaises(PolicyControlError) as raised:
+            self._stage(
+                service,
+                environment=environment,
+                credential_env="HORMUZ_POLICY_BOB_TOKEN",
+                document=self._policy_document(),
+            )
+        self.assertEqual(raised.exception.code, "policy_administrator_required")
+
+        drifted_config, drifted_environment, _issuer = self._managed_config(
+            include_bob=True,
+            bootstrap_bob=True,
+        )
+        drifted_service = PolicyControlService(drifted_config, environ=drifted_environment)
+        with self.assertRaises(PolicyControlError) as raised:
+            drifted_service.bootstrap(
+                organization_id="xpounder",
+                credential_env="HORMUZ_POLICY_BOB_TOKEN",
+            )
+        self.assertEqual(raised.exception.code, "policy_bootstrap_already_initialized")
+        with self.assertRaises(PolicyControlError) as raised:
+            self._stage(
+                drifted_service,
+                environment=drifted_environment,
+                credential_env="HORMUZ_POLICY_BOB_TOKEN",
+                document=self._policy_document(),
+            )
+        self.assertEqual(raised.exception.code, "policy_administrator_required")
+
+        status = service.status(organization_id="xpounder", credential_env="HORMUZ_POLICY_ADMIN_TOKEN")
+        self.assertEqual([(admin.authentication_kind, admin.actor_id) for admin in status.administrators], [("static", "alice")])
+
+    def test_explicit_oidc_administrator_is_separate_from_runtime_entitlement(self) -> None:
+        config, environment, issuer = self._managed_config(include_oidc=True)
+        assert issuer is not None
+        service = PolicyControlService(config, environ=environment)
+        service.bootstrap(organization_id="xpounder", credential_env="HORMUZ_POLICY_ADMIN_TOKEN")
+        granted = service.grant_oidc_administrator(
+            organization_id="xpounder",
+            credential_env="HORMUZ_POLICY_ADMIN_TOKEN",
+            issuer=issuer,
+            subject="unmapped-policy-admin",
+        )
+        self.assertEqual((granted.organization_id, granted.issuer, granted.subject), ("xpounder", issuer, "unmapped-policy-admin"))
+
+        blocked = self._stage(service, environment=environment, document=self._policy_document(actor_blocked=True))
+        service.activate(
+            organization_id="xpounder",
+            credential_env="HORMUZ_POLICY_ADMIN_TOKEN",
+            version_id=blocked.version_id,
+        )
+        identity = config.identities_by_actor["alice"]
+        decision = PolicyEngine(
+            config,
+            UsageStore(Path(tempfile.mkdtemp()) / "usage.sqlite3"),
+            policy_runtime=PolicyRuntime(config, environ=environment),
+        ).evaluate(
+            identity=identity,
+            client="codex",
+            protocol="openai",
+            requested_model="gpt-5.4-mini",
+            requested_output_tokens=100,
+        )
+        self.assertFalse(decision.allowed)
+        self.assertEqual(decision.action, "denied")
+        # Alice remains a policy authority even while the active policy denies
+        # her inference request; authorization roles do not imply entitlement.
+        self._stage(service, environment=environment, document=self._policy_document())
+
+        status = service.status(organization_id="xpounder", credential_env="HORMUZ_POLICY_ADMIN_TOKEN")
+        self.assertIn(
+            ("oidc", issuer, "unmapped-policy-admin"),
+            [(admin.authentication_kind, admin.issuer, admin.subject) for admin in status.administrators],
+        )
+
+    def test_policy_roles_are_separated_and_break_glass_requires_admin_loss(self) -> None:
+        config, environment, issuer = self._managed_config(include_oidc=True, break_glass=True)
+        assert issuer is not None
+        service = PolicyControlService(config, environ=environment)
+        service.bootstrap(organization_id="xpounder", credential_env="HORMUZ_POLICY_ADMIN_TOKEN")
+        version = self._stage(service, environment=environment, document=self._policy_document())
+        service.activate(
+            organization_id="xpounder",
+            credential_env="HORMUZ_POLICY_ADMIN_TOKEN",
+            version_id=version.version_id,
+        )
+
+        with self.psycopg.connect(self.runtime_dsn) as connection:
+            with connection.transaction():
+                with connection.cursor() as cursor:
+                    cursor.execute(self.sql.SQL("SET LOCAL ROLE {}").format(self.sql.Identifier(self.runtime_role)))
+                    cursor.execute(
+                        self.sql.SQL("SET LOCAL search_path TO {}, pg_catalog").format(self.sql.Identifier(self.schema))
+                    )
+                    cursor.execute("SELECT set_config('hormuz.organization_id', %s, true)", ("xpounder",))
+                    cursor.execute("SELECT COUNT(*) FROM policy_active_versions")
+                    self.assertEqual(cursor.fetchone()[0], 1)
+                    with self.assertRaises(self.psycopg.Error):
+                        cursor.execute("SELECT COUNT(*) FROM policy_administrators")
+
+        with self.psycopg.connect(self.policy_control_dsn) as connection:
+            with connection.transaction():
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        self.sql.SQL("SET LOCAL ROLE {}").format(self.sql.Identifier(self.policy_control_role))
+                    )
+                    cursor.execute(
+                        self.sql.SQL("SET LOCAL search_path TO {}, pg_catalog").format(self.sql.Identifier(self.schema))
+                    )
+                    cursor.execute("SELECT set_config('hormuz.organization_id', %s, true)", ("xpounder",))
+                    with self.assertRaises(self.psycopg.Error):
+                        cursor.execute("UPDATE policy_versions SET author_kind = 'oidc'")
+                    with self.assertRaises(self.psycopg.Error):
+                        cursor.execute("UPDATE policy_tenants SET initialized_at = initialized_at")
+
+        with self.assertRaises(PolicyControlError) as raised:
+            service.break_glass_recover(
+                organization_id="xpounder",
+                recovery_secret=environment["HORMUZ_POLICY_BREAK_GLASS_TOKEN"],
+                issuer=issuer,
+                subject="recovery-administrator",
+                reason_code="all_administrators_lost",
+            )
+        self.assertEqual(raised.exception.code, "policy_break_glass_not_required")
+
+        secondary = service.grant_oidc_administrator(
+            organization_id="xpounder",
+            credential_env="HORMUZ_POLICY_ADMIN_TOKEN",
+            issuer=issuer,
+            subject="secondary-administrator",
+        )
+        repository = PostgresPolicyControlStore(
+            self.policy_control_dsn,
+            config=config,
+            schema=self.schema,
+            policy_control_role=self.policy_control_role,
+        )
+        with self.assertRaises(PolicyControlError) as raised:
+            repository.grant_administrator(
+                organization_id="xpounder",
+                caller=PolicyAdministrator(
+                    organization_id="xpounder",
+                    authentication_kind="static",
+                    actor_id="alice",
+                ),
+                administrator=PolicyAdministrator(
+                    organization_id="xpounder",
+                    authentication_kind="static",
+                    actor_id="not-a-new-administrator",
+                ),
+            )
+        self.assertEqual(raised.exception.code, "policy_static_administrator_grant_denied")
+        service.revoke_static_administrator(
+            organization_id="xpounder",
+            credential_env="HORMUZ_POLICY_ADMIN_TOKEN",
+            actor_id="alice",
+        )
+        with self.assertRaises(PolicyControlError) as raised:
+            repository.revoke_administrator(
+                organization_id="xpounder",
+                caller=secondary,
+                administrator=secondary,
+            )
+        self.assertEqual(raised.exception.code, "policy_last_administrator_revoke_denied")
+
+        # This owner-only mutation simulates a real loss of every authority.
+        # Normal policy-control commands cannot perform this mutation because
+        # revoking the final administrator is explicitly rejected.
+        with self.psycopg.connect(self.owner_dsn) as connection:
+            with connection.transaction():
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        self.sql.SQL(
+                            "UPDATE {}.policy_administrators "
+                            "SET active = FALSE, revoked_at = CURRENT_TIMESTAMP, "
+                            "revoked_by_kind = 'oidc', revoked_by_identity_key = 'owner-recovery-simulation'"
+                        ).format(
+                            self.sql.Identifier(self.schema)
+                        )
+                    )
+        recovered = service.break_glass_recover(
+            organization_id="xpounder",
+            recovery_secret=environment["HORMUZ_POLICY_BREAK_GLASS_TOKEN"],
+            issuer=issuer,
+            subject="recovery-administrator",
+            reason_code="all_administrators_lost",
+        )
+        self.assertEqual((recovered.issuer, recovered.subject), (issuer, "recovery-administrator"))
+        recovered_status = repository.status(
+            organization_id="xpounder",
+            caller=PolicyAdministrator(
+                organization_id="xpounder",
+                authentication_kind="oidc",
+                issuer=issuer,
+                subject="recovery-administrator",
+            ),
+        )
+        self.assertEqual(
+            [(administrator.issuer, administrator.subject) for administrator in recovered_status.administrators],
+            [(issuer, "recovery-administrator")],
+        )
+        with self.psycopg.connect(self.owner_dsn) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    self.sql.SQL(
+                        "SELECT event_type, actor_kind, reason_code FROM {}.policy_control_events "
+                        "WHERE event_type = 'break_glass_recovered'"
+                    ).format(self.sql.Identifier(self.schema))
+                )
+                event = cursor.fetchone()
+        self.assertEqual(event, ("break_glass_recovered", "break_glass", "all_administrators_lost"))
 
     def test_runtime_role_fails_closed_without_an_organization_context(self) -> None:
         self.store.record(
@@ -208,7 +869,7 @@ class PostgresUsageStoreTests(unittest.TestCase):
                     before = cursor.fetchone()[0]
                     cursor.execute(
                         self.sql.SQL(
-                            "INSERT INTO {}.hormuz_schema_migrations (version, state) VALUES (2, 'applying')"
+                            "INSERT INTO {}.hormuz_schema_migrations (version, state) VALUES (3, 'applying')"
                         ).format(self.sql.Identifier(self.schema))
                     )
         with self.assertRaises(PostgresStorageError) as raised:
@@ -225,7 +886,7 @@ class PostgresUsageStoreTests(unittest.TestCase):
                 with connection.cursor() as cursor:
                     cursor.execute(
                         self.sql.SQL(
-                            "UPDATE {}.hormuz_schema_migrations SET state = 'applied' WHERE version = 2"
+                            "UPDATE {}.hormuz_schema_migrations SET state = 'applied' WHERE version = 3"
                         ).format(self.sql.Identifier(self.schema))
                     )
         with self.assertRaises(PostgresStorageError) as raised:
@@ -248,7 +909,7 @@ class PostgresUsageStoreTests(unittest.TestCase):
                     self.assertEqual(cursor.fetchone()[0], before)
                     cursor.execute(
                         self.sql.SQL(
-                            "DELETE FROM {}.hormuz_schema_migrations WHERE version = 2"
+                            "DELETE FROM {}.hormuz_schema_migrations WHERE version = 3"
                         ).format(self.sql.Identifier(self.schema))
                     )
 

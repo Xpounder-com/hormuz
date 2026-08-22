@@ -14,7 +14,7 @@ import re
 from typing import Any, Iterator
 
 
-POSTGRES_SCHEMA_VERSION = 1
+POSTGRES_SCHEMA_VERSION = 2
 _IDENTIFIER_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 
 
@@ -43,13 +43,16 @@ def migrate_postgres(
     *,
     schema: str = "hormuz",
     runtime_role: str = "hormuz_runtime",
+    policy_control_role: str = "hormuz_policy_control",
 ) -> PostgresSchemaStatus:
     """Apply all bundled PostgreSQL migrations atomically and idempotently."""
 
     schema = validate_postgres_identifier(schema, "postgres_schema")
     runtime_role = validate_postgres_identifier(runtime_role, "postgres_runtime_role")
+    policy_control_role = validate_postgres_identifier(policy_control_role, "postgres_policy_control_role")
     quoted_schema = _quote_identifier(schema)
     quoted_role = _quote_identifier(runtime_role)
+    quoted_policy_control_role = _quote_identifier(policy_control_role)
     psycopg, sql = _driver()
     try:
         connection = psycopg.connect(dsn)
@@ -90,7 +93,14 @@ def migrate_postgres(
                         ).format(sql.Identifier(schema)),
                         (version,),
                     )
-                    cursor.execute(_migration_sql(version, quoted_schema, quoted_role))
+                    cursor.execute(
+                        _migration_sql(
+                            version,
+                            quoted_schema,
+                            quoted_role,
+                            quoted_policy_control_role,
+                        )
+                    )
                     cursor.execute(
                         sql.SQL(
                             """
@@ -196,18 +206,32 @@ def postgres_transaction(
         connection.close()
 
 
-def _migration_sql(version: int, quoted_schema: str, quoted_role: str) -> str:
-    if version != 1:
+def _migration_sql(
+    version: int,
+    quoted_schema: str,
+    quoted_runtime_role: str,
+    quoted_policy_control_role: str,
+) -> str:
+    filenames = {
+        1: "0001_usage_evidence.sql",
+        2: "0002_policy_control.sql",
+    }
+    filename = filenames.get(version)
+    if filename is None:
         raise PostgresStorageError("storage_schema_migration_unsupported")
     try:
         template = (
             resources.files("hormuz.migrations.postgresql")
-            .joinpath("0001_usage_evidence.sql")
+            .joinpath(filename)
             .read_text(encoding="utf-8")
         )
     except (FileNotFoundError, ModuleNotFoundError):
         raise PostgresStorageError("storage_schema_migration_unavailable") from None
-    return template.format(schema=quoted_schema, runtime_role=quoted_role)
+    return template.format(
+        schema=quoted_schema,
+        runtime_role=quoted_runtime_role,
+        policy_control_role=quoted_policy_control_role,
+    )
 
 
 def _driver() -> tuple[Any, Any]:

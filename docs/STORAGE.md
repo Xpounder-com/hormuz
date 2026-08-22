@@ -9,7 +9,7 @@ This document describes the storage compatibility gate for the core gateway. It 
 | Mode | Intended use | Default |
 | --- | --- | --- |
 | SQLite | Local single-tenant development and deterministic tests | Yes |
-| PostgreSQL | Explicitly configured usage/evidence repository with transaction-local organization isolation | No |
+| PostgreSQL | Explicitly configured usage/evidence repository; optional shared immutable policy control with transaction-local organization isolation | No |
 
 SQLite remains the simplest CLI-first setup. PostgreSQL is optional so the core wheel and normal local installation do not need a database driver or server.
 
@@ -31,16 +31,33 @@ Keep connection strings out of the JSON configuration. Configure only environmen
     "postgres_migration_dsn_env": "HORMUZ_POSTGRES_MIGRATION_DSN",
     "postgres_schema": "hormuz",
     "postgres_runtime_role": "hormuz_runtime"
+  },
+  "policy_control": {
+    "mode": "postgresql",
+    "postgres_control_dsn_env": "HORMUZ_POLICY_CONTROL_DSN",
+    "postgres_control_role": "hormuz_policy_control",
+    "bootstrap_administrators": [
+      {"organization_id": "xpounder", "actor_id": "alice"}
+    ]
   }
 }
 ~~~
 
-HORMUZ_POSTGRES_MIGRATION_DSN is an operator credential that can create or update the Hormuz schema. HORMUZ_POSTGRES_DSN is the long-running gateway credential. They must be different credentials in an operational deployment. Put both in the deployment secret manager, not the configuration file, command history, or client environment.
+HORMUZ_POSTGRES_MIGRATION_DSN is an operator credential that can create or update the Hormuz schema. HORMUZ_POSTGRES_DSN is the long-running gateway credential. HORMUZ_POLICY_CONTROL_DSN is the service credential used for administration. They must name different credentials in an operational deployment. Put all three in the deployment secret manager, not the configuration file, command history, or client environment.
 
-Before the first migration, an operator creates the restricted runtime role. It must be a non-owner role with no superuser, database-creation, role-creation, inheritance, or BYPASSRLS capability. The migration grants that role only schema usage, table data access, and read-only access to the migration ledger.
+Before the first migration, an operator creates the restricted runtime and policy-control roles. Both must be non-owner roles with no superuser, database-creation, role-creation, inheritance, or BYPASSRLS capability, and they must be different roles. The migration grants the runtime role only the usage/evidence surface plus read-only active-policy access. It grants the policy-control role only the policy-administration tables and migration ledger; it cannot update tenant initialization state, immutable policy versions, or control events. An existing schema-v1 deployment must create its configured policy-control role before applying the schema-v2 migration, because migrations grant permissions to that pre-existing restricted role rather than creating database principals.
 
 ~~~sql
 CREATE ROLE hormuz_runtime
+  LOGIN
+  NOSUPERUSER
+  NOCREATEDB
+  NOCREATEROLE
+  NOINHERIT
+  NOBYPASSRLS
+  PASSWORD 'managed-out-of-band-secret';
+
+CREATE ROLE hormuz_policy_control
   LOGIN
   NOSUPERUSER
   NOCREATEDB
@@ -59,13 +76,14 @@ An operator applies migrations explicitly; a gateway process only verifies the c
 ~~~bash
 export HORMUZ_POSTGRES_MIGRATION_DSN='stored-by-your-secret-manager'
 export HORMUZ_POSTGRES_DSN='stored-by-your-secret-manager'
+export HORMUZ_POLICY_CONTROL_DSN='stored-by-your-secret-manager'
 
 hormuz --config hormuz.json storage migrate
 hormuz --config hormuz.json storage verify
 hormuz --config hormuz.json doctor
 ~~~
 
-The current PostgreSQL migration creates the usage-events, secret-events, and active budget-reservations tables; organization/time indexes; forced row-level security policies; and a versioned migration ledger. Every runtime repository operation:
+The current PostgreSQL migration creates the usage-events, secret-events, active budget-reservations, policy-tenant, policy-administrator, immutable policy-version, active-policy-pointer, and policy-control-event tables; organization/time indexes; forced row-level security policies; and a versioned migration ledger. Every runtime repository operation:
 
 1. sets the restricted runtime role locally;
 2. sets the configured schema search path locally;
@@ -73,6 +91,8 @@ The current PostgreSQL migration creates the usage-events, secret-events, and ac
 4. applies an explicit organization predicate as well as PostgreSQL row-level security.
 
 An absent organization context therefore sees no tenant rows. A configured organization ID that the repository does not recognize fails closed before querying.
+
+When `policy_control.mode` is `postgresql`, a gateway or `hormuz doctor` also fails closed until every configured tenant has an active immutable policy version. Run the one-time bootstrap, stage a policy document, and activate it through the governed CLI service; do not insert or modify policy rows manually. See [POLICY_CONTROL.md](POLICY_CONTROL.md).
 
 SQLite upgrades happen on normal store initialization. Its ledger records the same supported migration state and refuses a partial or newer-than-binary schema.
 
@@ -111,4 +131,4 @@ HORMUZ_TEST_POSTGRES_DSN='postgresql://operator@host:5432/hormuz_test' \
   python3 -m unittest -v tests.test_postgres
 ~~~
 
-CI runs this PostgreSQL suite separately against a pinned disposable PostgreSQL service. It proves the adapter's migration idempotency, runtime-role access, RLS behavior, tenant isolation, contract fixtures, malformed-evidence failure, rollback/partial-schema failure, and competing budget reservation behavior. It is not a substitute for a managed-database restore/PITR or HA drill.
+CI runs this PostgreSQL suite separately against a pinned disposable PostgreSQL service. It proves the adapter's migration idempotency, runtime/control-role separation, RLS behavior, tenant isolation, policy bootstrap/activation/rollback, contract fixtures, malformed-evidence failure, rollback/partial-schema failure, and competing budget reservation behavior. It is not a substitute for a managed-database restore/PITR or HA drill.

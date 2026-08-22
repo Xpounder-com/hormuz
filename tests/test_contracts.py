@@ -16,6 +16,7 @@ from hormuz.contracts import (
     validate_audit_event,
     validate_contract,
     validate_contract_manifest,
+    validate_policy_control_event,
 )
 
 
@@ -27,10 +28,20 @@ class PolicyEvidenceContractTests(unittest.TestCase):
     def test_valid_compatibility_fixtures_cover_every_current_json_surface(self) -> None:
         fixtures = json.loads((FIXTURES / "valid-v1.json").read_text(encoding="utf-8"))
 
-        for name in ("health", "identity", "usage_summary", "error", "error_v2", "policy_decision", "usage_report"):
+        for name in (
+            "health",
+            "identity",
+            "usage_summary",
+            "error",
+            "error_v2",
+            "policy_decision",
+            "policy_control_status",
+            "usage_report",
+        ):
             validate_contract(fixtures[name])
         for name in ("audit_usage_v1", "audit_security_v1", "audit_usage_v2", "audit_security_v2"):
             validate_audit_event(fixtures[name])
+        validate_policy_control_event(fixtures["policy_control_event"])
         self.assertEqual(fixtures["relay_contract_header"], relay_contract_header())
 
     def test_invalid_compatibility_fixtures_fail_closed(self) -> None:
@@ -43,6 +54,10 @@ class PolicyEvidenceContractTests(unittest.TestCase):
             validate_contract(fixtures["error_v2_unknown_code"])
         with self.assertRaises(ContractValidationError):
             validate_audit_event(fixtures["audit_usage_unknown_field"])
+        invalid_event = json.loads(json.dumps(valid["policy_control_event"]))
+        invalid_event["change_summary"]["scopes"]["organization"]["fields"] = ["do-not-store-content"]
+        with self.assertRaises(ContractValidationError):
+            validate_policy_control_event(invalid_event)
         legacy_storage_error = {**valid["error_v2"], "schema_version": 1}
         with self.assertRaises(ContractValidationError):
             validate_contract(legacy_storage_error)
@@ -56,6 +71,9 @@ class PolicyEvidenceContractTests(unittest.TestCase):
         self.assertIn((AUDIT_EVENT_SCHEMA_ID, AUDIT_EVENT_SCHEMA_VERSION), schemas)
         self.assertIn((ERROR_SCHEMA_ID, ERROR_SCHEMA_VERSION), schemas)
         self.assertIn(("hormuz.policy-decision", 1), schemas)
+        self.assertIn(("hormuz.policy-control-status", 1), schemas)
+        self.assertIn(("hormuz.policy-document", 1), schemas)
+        self.assertIn(("hormuz.policy-control-event", 1), schemas)
         self.assertEqual(manifest["schema_id"], "hormuz.policy-evidence-manifest")
         self.assertEqual(manifest["schema_version"], 1)
         validate_contract_manifest(manifest)

@@ -54,6 +54,8 @@ Hormuz derives `https://identity.example.com/.well-known/openid-configuration` w
 
 Subject mapping uses the pair `(issuer, sub)`, not an email address or a caller-provided team claim. The mapping is the authorization boundary that assigns the employee to an actor, team, organization, clearance, and allowed clients. If the same actor has both static and OIDC credentials, all of those authorization fields must match.
 
+That runtime identity mapping is not a `policy_admin` grant. In PostgreSQL managed-policy mode, a policy administrator is a separately persisted tenant-qualified `(organization_id, issuer, subject)` record created by an existing policy administrator. Neither an OIDC claim nor an IdP/SCIM group becomes root policy authority automatically. A policy administrator may have no inference entitlement, and an employee runtime identity may have no policy-administration authority. See [POLICY_CONTROL.md](POLICY_CONTROL.md).
+
 Supported verification algorithms are `RS256`, `RS384`, `RS512`, `PS256`, `PS384`, `PS512`, `ES256`, `ES384`, and `ES512`. Symmetric JWT algorithms are rejected because an OIDC resource server must not share an HMAC signing secret with token issuers.
 
 ## Client connection

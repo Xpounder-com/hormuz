@@ -23,14 +23,23 @@ OpenAI Responses API / Anthropic Messages API
         +--> parse provider usage metadata without retaining content
         v
 Usage/evidence repository (SQLite by default; PostgreSQL optional)
+
+Policy administration (managed PostgreSQL mode)
+        |
+        +--> authenticated CLI -> PolicyControlService
+        +--> tenant-qualified root policy administrators
+        +--> immutable policy documents -> atomic active-version pointer
+        +--> gateway reads and pins one active version at request start
 ```
 
 ## Code boundaries
 
 - `hormuz/server.py` owns HTTP compatibility, authentication, upstream forwarding, streaming, and protocol-shaped errors.
-- `hormuz/auth.py` verifies bootstrap or OIDC JWT credentials and resolves them to configured policy identities.
-- `hormuz/config.py` validates configuration and defines identity, route, rate-card, and policy data.
-- `hormuz/policy.py` evaluates access, fallback, caps, and budgets without transport concerns.
+- `hormuz/auth.py` verifies bootstrap or OIDC JWT credentials. Runtime identity mapping and policy-administration authority are deliberately separate decisions.
+- `hormuz/config.py` validates routes, identity facts, local policies, and one-time managed-policy bootstrap identities.
+- `hormuz/policy.py` evaluates access, fallback, caps, and budgets from exactly one request-bound policy snapshot.
+- `hormuz/policy_runtime.py`, `hormuz/policy_document.py`, and `hormuz/postgres_policy_store.py` read strict immutable policy documents, then resolve and pin the active PostgreSQL version when managed policy control is enabled.
+- `hormuz/policy_control.py` is the narrow authenticated service boundary used by the CLI for bootstrap, administrator changes, staging, activation, rollback, and break-glass recovery.
 - `hormuz/store.py` owns the SQLite schema and monthly aggregations; `hormuz/postgres_usage_store.py` implements the same narrow usage/evidence repository with transaction-local organization scope and PostgreSQL RLS.
 - `hormuz/usage.py` parses provider usage metadata without storing response content.
 - `hormuz/redaction.py` transforms provider-bound JSON values using configured secret controls.
@@ -47,3 +56,7 @@ Hormuz implements the provider endpoints required by Codex and Claude Code rathe
 ## Identity boundary
 
 OIDC authentication is currently a resource-server path for JWT access tokens. Discovery and JWKS metadata are cached, an unknown signing-key ID triggers one refresh, and authorization attributes come only from the configured `(issuer, subject)` mapping. Hormuz does not trust caller-provided group or team claims. Browser login, refresh-token custody, opaque-token introspection, SCIM, and active revocation remain separate enterprise milestones; see [OIDC.md](OIDC.md).
+
+## Root-authority boundary
+
+`policy_admin` is not a model entitlement; it is root authority to change a tenant's policy. In managed mode, configuration may seed tenant-qualified bootstrap identities only before that tenant is initialized. PostgreSQL then becomes the source of truth for authority. The runtime database role cannot read administrators or mutate policies; the policy-control role cannot alter immutable version/event history. A CLI caller is authenticated from a credential and routed through `PolicyControlService`, never through a direct database command or a self-asserted actor. See [POLICY_CONTROL.md](POLICY_CONTROL.md).
