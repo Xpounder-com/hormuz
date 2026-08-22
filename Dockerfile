@@ -31,7 +31,17 @@ ENV PATH="/opt/hormuz/bin:${PATH}" \
     PYTHONUNBUFFERED=1 \
     HORMUZ_CONFIG=/etc/hormuz/hormuz.json
 
-RUN install --directory --owner=65532 --group=65532 --mode=0750 /var/lib/hormuz \
+# The runtime uses the isolated /opt/hormuz virtual environment. Remove the
+# unused global installer and its bundled dependencies so they are not shipped
+# or scanned as reachable application packages.
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get upgrade --yes \
+    && rm -rf /var/lib/apt/lists/* \
+    && rm -rf /usr/local/bin/pip /usr/local/bin/pip3 /usr/local/bin/pip3.14 \
+        /usr/local/lib/python3.14/ensurepip \
+        /usr/local/lib/python3.14/site-packages/pip \
+        /usr/local/lib/python3.14/site-packages/pip-*.dist-info \
+    && install --directory --owner=65532 --group=65532 --mode=0750 /var/lib/hormuz \
     && install --directory --owner=root --group=root --mode=0755 /etc/hormuz
 
 COPY --from=builder /opt/hormuz /opt/hormuz

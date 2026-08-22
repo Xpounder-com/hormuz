@@ -99,13 +99,16 @@ boundary.
 
 ## Automated publication gate
 
-GitHub Actions runs three independent gates without provider credentials:
+GitHub Actions runs independent gates without provider credentials:
 
 - the complete core unit and loopback gateway suite on Python 3.11, 3.12, 3.13, and 3.14;
 - source-distribution and wheel builds followed by a clean-wheel inspection and isolated gateway-start boundary test;
+- PostgreSQL migration and repository compatibility against the pinned service image;
+- non-root OCI reference-runtime smoke testing with externally mounted inputs;
+- CycloneDX SBOM generation and a fix-aware OCI vulnerability gate for the exact local candidate image;
 - installed-client routing through local fake providers using pinned official Codex and Claude Code package versions.
 
-The workflow grants only read access to repository contents, disables persisted checkout credentials, pins every GitHub Action to a reviewed commit SHA, and retains build artifacts for seven days. Dependabot is configured to propose updates to action and Python build dependencies; a client-version bump remains an intentional compatibility change because it can alter the provider protocol.
+The workflow grants only read access to repository contents, disables persisted checkout credentials, pins every GitHub Action to a reviewed commit SHA and the scanner image to an immutable digest, and retains build artifacts for seven days. Dependabot is configured to propose updates to action and Python build dependencies; a client-version bump remains an intentional compatibility change because it can alter the provider protocol.
 
 A separate weekly canary installs the latest published Codex and Claude Code packages in an ephemeral runner and exercises only the two fake-provider compatibility tests. It has no provider credentials, does not block ordinary pull requests, and is intended to surface upstream protocol drift before an employee upgrade does.
 
@@ -126,3 +129,27 @@ mounted from outside the image, validates the versioned liveness/readiness
 contracts, and requires a clean SIGTERM exit. It uses fixed placeholders and
 does not call a model provider. Its narrow deployment boundary and remaining
 nonclaims are in [OCI.md](OCI.md).
+
+## OCI supply-chain evidence
+
+The `OCI supply-chain evidence` job invokes:
+
+```bash
+./tools/verify_oci_supply_chain.sh
+```
+
+It builds its own local reference-image candidate, generates a CycloneDX SBOM,
+and scans that same candidate with Trivy `0.74.0` pinned by immutable OCI image
+digest. The job uploads the SBOM, raw Trivy JSON, and a versioned normalized
+summary for seven days whether the gate passes or fails. The summary binds the
+candidate image ID, pinned scanner identity, and SHA-256 hashes of both raw
+artifacts.
+
+The command fails only if a `HIGH` or `CRITICAL` vulnerability includes a
+scanner-reported non-empty `FixedVersion`. Lower-severity and unfixed findings
+remain in the raw report as review evidence. Missing, malformed, unsupported,
+or candidate-mismatched scanner/SBOM data fails closed; this is a scanner
+evidence failure, not a statement that the image is vulnerability-free. The
+scanner binary is pinned, but its advisory database is refreshed at scan time.
+There is no registry publication, signing, attestation, exception workflow, or
+customer-content scanning in this gate.

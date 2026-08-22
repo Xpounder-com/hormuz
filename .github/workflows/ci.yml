@@ -151,6 +151,28 @@ jobs:
       - name: Build and smoke-test the non-root OCI reference runtime
         run: ./tools/verify_oci_reference.sh
 
+  oci-supply-chain:
+    name: OCI supply-chain evidence
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build candidate and enforce the fix-aware vulnerability policy
+        env:
+          HORMUZ_OCI_SUPPLY_CHAIN_EVIDENCE_DIR: ${{ runner.temp }}/hormuz-oci-supply-chain
+        run: ./tools/verify_oci_supply_chain.sh
+      - name: Preserve OCI supply-chain evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hormuz-oci-supply-chain
+          path: ${{ runner.temp }}/hormuz-oci-supply-chain/*
+          if-no-files-found: warn
+          retention-days: 7
+
   client-compatibility:
     name: Codex and Claude Code compatibility
     runs-on: ubuntu-latest

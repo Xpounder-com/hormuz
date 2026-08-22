@@ -7,10 +7,11 @@ credentials, usage data, audit evidence, or the separately packaged context
 experiment.
 
 The image uses digest-pinned Dockerfile frontend and Python 3.14 slim bases
-named in [`Dockerfile`](../Dockerfile). The bases are pinned to make the
-runtime inputs explicit; Hormuz does **not** claim a published image, signed
-image, SBOM, vulnerability attestation, registry policy, or fully reproducible
-dependency build in this release line.
+named in [`Dockerfile`](../Dockerfile). The runtime stage also applies available
+Debian package upgrades during its build, so a candidate is not a fully
+reproducible dependency build; its exact resolved package state is captured by
+the SBOM described below. Hormuz does **not** claim a published image, signed
+image, registry policy, or a vulnerability-free image.
 
 ## Build
 
@@ -22,6 +23,34 @@ docker build --tag hormuz:local .
 only `pyproject.toml`, `README.md`, and `hormuz/`, so a local `hormuz.json`,
 `.env` file, SQLite database, test suite, and `experiments/context/` cannot be
 copied into the image by the build.
+
+## Supply-chain evidence
+
+Run the candidate evidence gate from the repository root:
+
+```bash
+HORMUZ_OCI_SUPPLY_CHAIN_EVIDENCE_DIR="$(mktemp -d)" \
+  ./tools/verify_oci_supply_chain.sh
+```
+
+The gate builds one local candidate image, generates a CycloneDX JSON SBOM,
+scans that same local image with Trivy `0.74.0` pinned by immutable image
+digest, and writes these review artifacts to the selected directory:
+
+- `hormuz.cdx.json` — package-level CycloneDX SBOM;
+- `trivy-vulnerabilities.json` — raw scanner report, including lower-severity
+  and unfixed observations;
+- `summary.json` — versioned candidate identity, scanner identity, artifact
+  checksums, coverage label, finding counts, and the policy verdict.
+
+The verifier rejects missing, malformed, or candidate-mismatched artifacts. It
+fails the command only when Trivy reports a `HIGH` or `CRITICAL` finding with a
+non-empty `FixedVersion`; lower-severity findings and HIGH/CRITICAL findings
+without a scanner-reported fix remain visible in the report but do not deny the
+candidate. The scanner image is pinned, while its vulnerability database is
+intentionally refreshed at scan time, so a newly published advisory can change
+the result. These artifacts contain image and package metadata, not runtime
+configuration, credentials, prompts, responses, or gateway audit records.
 
 ## Run with explicit runtime inputs
 
@@ -100,7 +129,8 @@ runtime inputs, validates `/health` and `/ready`, verifies SQLite lands only on
 the durable mount, and requires `SIGTERM` to exit cleanly. It uses fixed
 placeholder values and never contacts a model provider.
 
-This proof does not establish registry publication, image signing, SBOM or
-vulnerability policy, TLS or trusted-proxy configuration, Kubernetes, high
-availability, backup/PITR, multi-instance coordination, customer IdP
-conformance, or incident operations. Those remain separate release gates.
+The reference proof and candidate evidence gate do not establish registry
+publication, image signing or provenance attestation, a vulnerability-free
+image, TLS or trusted-proxy configuration, Kubernetes, high availability,
+backup/PITR, multi-instance coordination, customer IdP conformance, or incident
+operations. Those remain separate release gates.
