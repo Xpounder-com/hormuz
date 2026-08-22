@@ -1,0 +1,15 @@
+{
+  "SchemaVersion": 2,
+  "ArtifactName": "hormuz:ci-candidate",
+  "Results": [
+    {
+      "Vulnerabilities": [
+        {
+          "VulnerabilityID": "CVE-2026-0003",
+          "PkgName": "example-malformed",
+          "Severity": "SEVERE"
+        }
+      ]
+    }
+  ]
+}

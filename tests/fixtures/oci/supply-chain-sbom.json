@@ -1,0 +1,35 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.7",
+  "metadata": {
+    "component": {
+      "type": "container",
+      "name": "hormuz:ci-candidate",
+      "properties": [
+        {
+          "name": "aquasecurity:trivy:ImageID",
+          "value": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+          "name": "aquasecurity:trivy:Reference",
+          "value": "hormuz:ci-candidate"
+        }
+      ]
+    },
+    "tools": {
+      "components": [
+        {
+          "name": "trivy",
+          "version": "0.74.0"
+        }
+      ]
+    }
+  },
+  "components": [
+    {
+      "type": "operating-system",
+      "name": "debian",
+      "version": "13.6"
+    }
+  ]
+}
