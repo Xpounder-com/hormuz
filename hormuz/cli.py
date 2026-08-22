@@ -328,7 +328,12 @@ def _serve(config: GatewayConfig) -> int:
             "warning: requests for these providers will fail until credentials are set: " + ", ".join(missing),
             file=sys.stderr,
         )
-    print(f"Hormuz listening on http://{config.listen.host}:{config.listen.port}")
+    if config.ingress.mode == "external_tls_proxy":
+        print(f"Hormuz private listener on http://{config.listen.host}:{config.listen.port}")
+        print("Ingress: customer-controlled TLS proxy required")
+    else:
+        print(f"Hormuz listening on http://{config.listen.host}:{config.listen.port}")
+        print("Ingress: local loopback mode")
     print("Protocols: POST /v1/responses and POST /v1/messages")
     print(f"Usage storage: {config.usage_storage.backend}")
 
@@ -361,6 +366,10 @@ def _serve(config: GatewayConfig) -> int:
 def _doctor(config: GatewayConfig) -> int:
     print(f"configuration: {config.source_path}")
     print(f"listener: http://{config.listen.host}:{config.listen.port}")
+    if config.ingress.mode == "external_tls_proxy":
+        print(f"ingress: external TLS proxy ({len(config.ingress.trusted_proxy_cidrs)} trusted network(s))")
+    else:
+        print("ingress: local loopback")
     print(f"actors: {len(config.identities_by_actor)}")
     print(f"static identities: {len(config.identities_by_token)}")
     print(f"OIDC issuers: {len(config.oidc_issuers)}")

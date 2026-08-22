@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hmac
+import ipaddress
 import json
 import logging
 import sqlite3
@@ -39,6 +41,7 @@ from .usage import ResponseUsageParser
 
 LOGGER = logging.getLogger("hormuz")
 _STORAGE_FAILURES = (sqlite3.Error, EvidenceStorageError, PostgresStorageError, StorageSchemaError)
+_INGRESS_CREDENTIAL_HEADER = "X-Hormuz-Ingress-Credential"
 
 
 class GatewayServer(ThreadingHTTPServer):
@@ -134,6 +137,43 @@ class GatewayServer(ThreadingHTTPServer):
 class GatewayRequestHandler(BaseHTTPRequestHandler):
     server: GatewayServer
     protocol_version = "HTTP/1.1"
+
+    def parse_request(self) -> bool:
+        """Reject an untrusted proxy hop before any route-specific behavior.
+
+        This happens after Python has parsed the HTTP request but before it
+        dispatches *any* method.  It therefore covers health checks and
+        unknown methods as well as the employee-facing API routes.
+        """
+
+        if not super().parse_request():
+            return False
+        ingress = self.server.config.ingress
+        if ingress.mode == "local":
+            return True
+
+        try:
+            peer = ipaddress.ip_address(self.client_address[0])
+        except ValueError:
+            reason = "peer_address_invalid"
+        else:
+            if not any(peer in network for network in ingress.trusted_proxy_networks):
+                reason = "peer_not_trusted"
+            else:
+                credentials = self.headers.get_all(_INGRESS_CREDENTIAL_HEADER, [])
+                if len(credentials) != 1 or not hmac.compare_digest(credentials[0], ingress.credential):
+                    reason = "credential_rejected"
+                else:
+                    return True
+
+        LOGGER.info("ingress_denied reason=%s method=%s", reason, self.command)
+        self.close_connection = True
+        self._send_error(
+            "unauthorized",
+            "Missing or invalid Hormuz ingress credential",
+            HTTPStatus.UNAUTHORIZED,
+        )
+        return False
 
     def do_GET(self) -> None:  # noqa: N802
         path = urlsplit(self.path).path

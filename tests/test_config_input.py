@@ -109,6 +109,9 @@ class ConfigurationInputTests(unittest.TestCase):
         def mutate_listen(value: dict[str, object]) -> None:
             value["listen"]["operator_secret_never_expose"] = "never-expose"  # type: ignore[index]
 
+        def mutate_ingress(value: dict[str, object]) -> None:
+            value["ingress"] = {"operator_secret_never_expose": "never-expose"}
+
         def mutate_upstreams(value: dict[str, object]) -> None:
             value["upstreams"]["unsupported"] = {}  # type: ignore[index]
 
@@ -197,6 +200,7 @@ class ConfigurationInputTests(unittest.TestCase):
         mutations = (
             mutate_root,
             mutate_listen,
+            mutate_ingress,
             mutate_upstreams,
             mutate_upstream,
             mutate_identity,
@@ -240,6 +244,97 @@ class ConfigurationInputTests(unittest.TestCase):
             environ=_EnvironmentMustNotBeRead(),
         )
         self.assertNotIn("upstreams", str(error))
+
+    def test_external_tls_proxy_ingress_is_strict_and_resolves_only_its_credential(self) -> None:
+        raw = self._valid_configuration()
+        raw["listen"] = {"host": "0.0.0.0", "port": 8787}
+        raw["ingress"] = {
+            "mode": "external_tls_proxy",
+            "trusted_proxy_cidrs": ["10.42.0.0/16", "127.0.0.1/32", "fd00:42::/64"],
+            "credential_env": "HORMUZ_TEST_INGRESS_CREDENTIAL",
+        }
+        environment = {
+            **TEST_ENVIRONMENT,
+            "HORMUZ_TEST_INGRESS_CREDENTIAL": "test-ingress-credential-with-sufficient-length",
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "hormuz.json"
+            path.write_text(json.dumps(raw), encoding="utf-8")
+            config = GatewayConfig.load(path, environ=environment)
+
+        self.assertEqual(config.ingress.mode, "external_tls_proxy")
+        self.assertEqual(config.ingress.credential_env, "HORMUZ_TEST_INGRESS_CREDENTIAL")
+        self.assertEqual(config.ingress.trusted_proxy_cidrs, ("10.42.0.0/16", "127.0.0.1/32", "fd00:42::/64"))
+        self.assertEqual(len(config.ingress.trusted_proxy_networks), 3)
+        self.assertEqual(len(config.ingress.credential), len(environment["HORMUZ_TEST_INGRESS_CREDENTIAL"]))
+        self.assertNotIn(environment["HORMUZ_TEST_INGRESS_CREDENTIAL"], repr(config))
+
+    def test_external_tls_proxy_ingress_rejects_unsafe_or_incomplete_configuration(self) -> None:
+        base = self._valid_configuration()
+
+        cases: tuple[tuple[str, dict[str, object], dict[str, str], str], ...] = (
+            (
+                "public listener without proxy mode",
+                {**base, "listen": {"host": "0.0.0.0", "port": 8787}},
+                TEST_ENVIRONMENT,
+                "a non-loopback listen.host requires ingress.mode external_tls_proxy",
+            ),
+            (
+                "missing proxy credential environment value",
+                {
+                    **base,
+                    "ingress": {
+                        "mode": "external_tls_proxy",
+                        "trusted_proxy_cidrs": ["127.0.0.1/32"],
+                        "credential_env": "HORMUZ_TEST_INGRESS_CREDENTIAL",
+                    },
+                },
+                TEST_ENVIRONMENT,
+                "Required ingress credential environment variable is not set: HORMUZ_TEST_INGRESS_CREDENTIAL",
+            ),
+            (
+                "uncanonical proxy network",
+                {
+                    **base,
+                    "ingress": {
+                        "mode": "external_tls_proxy",
+                        "trusted_proxy_cidrs": ["10.42.0.1/16"],
+                        "credential_env": "HORMUZ_TEST_INGRESS_CREDENTIAL",
+                    },
+                },
+                {**TEST_ENVIRONMENT, "HORMUZ_TEST_INGRESS_CREDENTIAL": "test-ingress-credential-with-sufficient-length"},
+                "ingress.trusted_proxy_cidrs[0] must be a canonical CIDR",
+            ),
+            (
+                "all addresses network",
+                {
+                    **base,
+                    "ingress": {
+                        "mode": "external_tls_proxy",
+                        "trusted_proxy_cidrs": ["0.0.0.0/0"],
+                        "credential_env": "HORMUZ_TEST_INGRESS_CREDENTIAL",
+                    },
+                },
+                {**TEST_ENVIRONMENT, "HORMUZ_TEST_INGRESS_CREDENTIAL": "test-ingress-credential-with-sufficient-length"},
+                "ingress.trusted_proxy_cidrs must not admit every address",
+            ),
+            (
+                "reused provider credential environment",
+                {
+                    **base,
+                    "ingress": {
+                        "mode": "external_tls_proxy",
+                        "trusted_proxy_cidrs": ["127.0.0.1/32"],
+                        "credential_env": "OPENAI_API_KEY",
+                    },
+                },
+                TEST_ENVIRONMENT,
+                "ingress.credential_env must name a credential distinct from all other Hormuz secrets",
+            ),
+        )
+        for name, raw, environment, expected in cases:
+            with self.subTest(name=name):
+                self._assert_load_error(json.dumps(raw).encode("utf-8"), expected, environ=environment)
 
     def test_semantic_configuration_validation_precedes_environment_resolution(self) -> None:
         raw = self._valid_configuration()

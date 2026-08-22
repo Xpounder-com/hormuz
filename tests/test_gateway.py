@@ -952,6 +952,173 @@ class GatewayIntegrationTests(unittest.TestCase):
         }
 
 
+class ExternalProxyIngressIntegrationTests(unittest.TestCase):
+    """Exercise the customer-controlled TLS proxy boundary at the HTTP edge."""
+
+    ingress_credential = "customer-proxy-credential-with-sufficient-length"
+
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary.name)
+        FakeProviderHandler.requests = []
+        self.provider = ThreadingHTTPServer(("127.0.0.1", 0), FakeProviderHandler)
+        self.provider_thread = threading.Thread(target=self.provider.serve_forever, daemon=True)
+        self.provider_thread.start()
+
+        os.environ["TEST_GATEWAY_TOKEN"] = GATEWAY_TOKEN
+        os.environ["TEST_CLAUDE_ONLY_TOKEN"] = CLAUDE_ONLY_TOKEN
+        os.environ["TEST_OPENAI_KEY"] = OPENAI_KEY
+        os.environ["TEST_ANTHROPIC_KEY"] = ANTHROPIC_KEY
+        os.environ["TEST_INGRESS_CREDENTIAL"] = self.ingress_credential
+
+        self.config_path = self.root / "gateway.json"
+        self.config_value = GatewayIntegrationTests._config(self, self.provider.server_port, _free_port())
+        self.config_value["ingress"] = {
+            "mode": "external_tls_proxy",
+            "trusted_proxy_cidrs": ["127.0.0.1/32"],
+            "credential_env": "TEST_INGRESS_CREDENTIAL",
+        }
+        self._start_gateway()
+
+    def tearDown(self) -> None:
+        self.gateway.shutdown()
+        self.gateway.server_close()
+        self.provider.shutdown()
+        self.provider.server_close()
+        os.environ.pop("TEST_INGRESS_CREDENTIAL", None)
+        self.temporary.cleanup()
+
+    def test_every_route_rejects_missing_or_wrong_ingress_before_side_effects(self) -> None:
+        before = len(FakeProviderHandler.requests)
+        cases = (
+            ("GET", "/health", None),
+            ("GET", "/ready", None),
+            ("OPTIONS", "/v1/responses", None),
+            ("POST", "/v1/responses", {"model": "engineering-fast", "input": "blocked"}),
+            ("DELETE", "/v1/unknown", None),
+        )
+        for method, path, body in cases:
+            with self.subTest(method=method, path=path):
+                status, headers, response = self._request(method, path, body=body)
+                self._assert_ingress_denied(status, headers, response)
+
+                status, headers, response = self._request(
+                    method,
+                    path,
+                    body=body,
+                    headers={"X-Hormuz-Ingress-Credential": "wrong-proxy-credential"},
+                )
+                self._assert_ingress_denied(status, headers, response)
+
+        self.assertEqual(len(FakeProviderHandler.requests), before)
+        self.assertEqual(self.gateway.store.monthly_totals(actor_id="alice").requests, 0)
+
+    def test_untrusted_source_is_denied_even_with_the_proxy_credential(self) -> None:
+        self.config_value["ingress"]["trusted_proxy_cidrs"] = ["10.42.0.0/16"]
+        self._restart_gateway()
+
+        status, headers, response = self._request(
+            "POST",
+            "/v1/responses",
+            body={"model": "engineering-fast", "input": "blocked"},
+            headers={
+                "Authorization": f"Bearer {GATEWAY_TOKEN}",
+                "X-Hormuz-Ingress-Credential": self.ingress_credential,
+            },
+        )
+
+        self._assert_ingress_denied(status, headers, response)
+        self.assertEqual(FakeProviderHandler.requests, [])
+        self.assertEqual(self.gateway.store.monthly_totals(actor_id="alice").requests, 0)
+
+    def test_duplicate_ingress_credentials_fail_closed(self) -> None:
+        connection = http.client.HTTPConnection("127.0.0.1", self.gateway.server_port, timeout=5)
+        connection.putrequest("GET", "/health")
+        connection.putheader("X-Hormuz-Ingress-Credential", self.ingress_credential)
+        connection.putheader("X-Hormuz-Ingress-Credential", self.ingress_credential)
+        connection.endheaders()
+        response = connection.getresponse()
+        body = response.read()
+        headers = {name.lower(): value for name, value in response.getheaders()}
+        connection.close()
+
+        self._assert_ingress_denied(response.status, headers, body)
+        self.assertEqual(FakeProviderHandler.requests, [])
+
+    def test_trusted_proxy_request_is_allowed_and_does_not_forward_proxy_headers(self) -> None:
+        status, _, response = self._request(
+            "POST",
+            "/v1/responses",
+            body={"model": "engineering-fast", "input": "allowed"},
+            headers={
+                "Authorization": f"Bearer {GATEWAY_TOKEN}",
+                "X-Hormuz-Ingress-Credential": self.ingress_credential,
+                "Forwarded": "for=203.0.113.40;proto=https",
+                "X-Forwarded-For": "203.0.113.40",
+                "X-Forwarded-Proto": "https",
+                "X-Real-IP": "203.0.113.40",
+            },
+        )
+
+        self.assertEqual(status, 200, response)
+        self.assertEqual(self.gateway.store.monthly_totals(actor_id="alice").requests, 1)
+        self.assertEqual(len(FakeProviderHandler.requests), 1)
+        upstream_headers = FakeProviderHandler.requests[0]["headers"]
+        assert isinstance(upstream_headers, dict)
+        for name in (
+            "x-hormuz-ingress-credential",
+            "forwarded",
+            "x-forwarded-for",
+            "x-forwarded-proto",
+            "x-real-ip",
+        ):
+            self.assertNotIn(name, upstream_headers)
+
+        status, _, response = self._request(
+            "GET",
+            "/health",
+            headers={"X-Hormuz-Ingress-Credential": self.ingress_credential},
+        )
+        self.assertEqual(status, 200, response)
+
+    def _start_gateway(self) -> None:
+        self.config_path.write_text(json.dumps(self.config_value), encoding="utf-8")
+        self.config = GatewayConfig.load(self.config_path)
+        self.gateway = GatewayServer(self.config)
+        self.gateway_thread = serve_in_thread(self.gateway)
+
+    def _restart_gateway(self) -> None:
+        self.gateway.shutdown()
+        self.gateway.server_close()
+        self._start_gateway()
+
+    def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        body: dict | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> tuple[int, dict[str, str], bytes]:
+        connection = http.client.HTTPConnection("127.0.0.1", self.gateway.server_port, timeout=5)
+        request_headers = dict(headers or {})
+        if body is not None:
+            request_headers.setdefault("Content-Type", "application/json")
+        connection.request(method, path, body=None if body is None else json.dumps(body), headers=request_headers)
+        response = connection.getresponse()
+        response_body = response.read()
+        response_headers = {name.lower(): value for name, value in response.getheaders()}
+        connection.close()
+        return response.status, response_headers, response_body
+
+    def _assert_ingress_denied(self, status: int, headers: dict[str, str], response: bytes) -> None:
+        self.assertEqual(status, 401, response)
+        self.assertEqual(headers["x-hormuz-contract"], "hormuz.gateway-error;v=2")
+        payload = json.loads(response)
+        validate_contract(payload)
+        self.assertEqual(payload["error"], {"code": "unauthorized", "message": "Missing or invalid Hormuz ingress credential"})
+
+
 def _free_port() -> int:
     with socket.socket() as sock:
         sock.bind(("127.0.0.1", 0))

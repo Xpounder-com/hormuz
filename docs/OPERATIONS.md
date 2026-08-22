@@ -1,10 +1,12 @@
 # Operational probes and graceful shutdown
 
-Hormuz exposes two unauthenticated deployment probes. They are intentionally
-small, content-free, and unsuitable as an employee or administration API. Put
-them behind the deployment network boundary that your platform uses for health
-checks; they do not identify a tenant, employee, policy, model, provider key,
-or database location.
+Hormuz exposes two deployment probes. They are intentionally small,
+content-free, and unsuitable as an employee or administration API. In local
+mode they are unauthenticated. In external TLS proxy mode, the customer proxy
+must supply the configured private-hop ingress credential before either probe
+is dispatched; the probes still do not identify a tenant, employee, policy,
+model, provider key, or database location. See [DEPLOYMENT.md](DEPLOYMENT.md)
+for the customer-controlled TLS boundary.
 
 | Endpoint | Healthy response | What it proves | What it deliberately does not prove |
 | --- | --- | --- | --- |
@@ -64,10 +66,11 @@ connection-drain time. A platform that force-kills the process sooner can still
 interrupt an in-flight provider relay; Hormuz does not claim to make forced
 termination lossless.
 
-This probe boundary is single-process behavior only. TLS termination, trusted
-proxy configuration, provider reachability, multi-instance draining,
-autoscaling, failover, backup/PITR, recovery objectives, alerts, and incident
-procedures remain separate production-readiness gates.
+This probe boundary is single-process behavior only. The gateway-side trusted
+proxy contract does not prove customer TLS termination, certificate operations,
+proxy/firewall configuration, provider reachability, multi-instance draining,
+autoscaling, failover, backup/PITR, recovery objectives, alerts, or incident
+procedures. Those remain separate production-readiness gates.
 
 For the narrowly scoped non-root container reference, see [OCI.md](OCI.md).
 The image health check uses `/health`; the deployment's traffic control must

@@ -51,6 +51,12 @@ Policy administration (managed PostgreSQL mode)
 
 Hormuz is trusted with plaintext requests and responses because it must inspect and relay them. The usage store is deliberately metadata-only. Redaction runs after authentication and policy selection but before upstream serialization. The core has no context retrieval, lifecycle, cache, provenance, memory, or content-storage path; the separately packaged experiment is not imported by normal gateway operation. See [CONTEXT_EXPERIMENT_MIGRATION.md](CONTEXT_EXPERIMENT_MIGRATION.md).
 
+For an enterprise-facing listener, customer-controlled infrastructure terminates
+public TLS. Hormuz accepts only a network-restricted and separately
+authenticated private proxy hop; this ingress credential is not an employee
+identity and cannot authorize policy or provider access. Forwarded headers are
+not a source of identity or tenant facts. See [DEPLOYMENT.md](DEPLOYMENT.md).
+
 ## Compatibility boundary
 
 Hormuz implements the provider endpoints required by Codex and Claude Code rather than inventing a new employee-facing client. Provider protocol changes are compatibility risks and require executable conformance tests.
