@@ -6,6 +6,20 @@
     "service": "hormuz",
     "protocols": ["openai-responses", "anthropic-messages"]
   },
+  "readiness_ready": {
+    "schema_id": "hormuz.gateway-readiness",
+    "schema_version": 1,
+    "status": "ready",
+    "service": "hormuz",
+    "reason": null
+  },
+  "readiness_not_ready": {
+    "schema_id": "hormuz.gateway-readiness",
+    "schema_version": 1,
+    "status": "not_ready",
+    "service": "hormuz",
+    "reason": "dependency_unavailable"
+  },
   "identity": {
     "schema_id": "hormuz.gateway-identity",
     "schema_version": 1,

@@ -78,6 +78,11 @@ handler threads to finish, and only then closes its owned pool. This is
 single-process pool safety, not evidence of coordinated replica draining,
 database failover, or credential rotation.
 
+`GET /ready` performs its PostgreSQL evidence check through that same bounded
+runtime pool, then verifies the active managed policy when managed policy
+control is enabled. It performs no provider request and returns only a
+content-free readiness result; see [OPERATIONS.md](OPERATIONS.md).
+
 Before the first migration, an operator creates the restricted runtime and policy-control roles. Both must be non-owner roles with no superuser, database-creation, role-creation, inheritance, or BYPASSRLS capability, and they must be different roles. The migration grants the runtime role only the usage/evidence surface plus read-only active-policy access. It grants the policy-control role only the policy-administration tables and migration ledger; it cannot update tenant initialization state, immutable policy versions, or control events. An existing schema-v1 deployment must create its configured policy-control role before applying the schema-v2 migration, because migrations grant permissions to that pre-existing restricted role rather than creating database principals.
 
 ~~~sql

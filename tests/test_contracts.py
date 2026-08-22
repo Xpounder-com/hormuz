@@ -12,6 +12,8 @@ from hormuz.contracts import (
     ContractValidationError,
     ERROR_SCHEMA_ID,
     ERROR_SCHEMA_VERSION,
+    READINESS_SCHEMA_ID,
+    READINESS_SCHEMA_VERSION,
     contract_envelope,
     contract_manifest,
     relay_contract_header,
@@ -32,6 +34,8 @@ class PolicyEvidenceContractTests(unittest.TestCase):
 
         for name in (
             "health",
+            "readiness_ready",
+            "readiness_not_ready",
             "identity",
             "usage_summary",
             "error",
@@ -56,6 +60,8 @@ class PolicyEvidenceContractTests(unittest.TestCase):
         with self.assertRaises(ContractValidationError):
             validate_contract(fixtures["error_v2_unknown_code"])
         with self.assertRaises(ContractValidationError):
+            validate_contract(fixtures["readiness_reason_mismatch"])
+        with self.assertRaises(ContractValidationError):
             validate_audit_event(fixtures["audit_usage_unknown_field"])
         invalid_event = json.loads(json.dumps(valid["policy_control_event"]))
         invalid_event["change_summary"]["scopes"]["organization"]["fields"] = ["do-not-store-content"]
@@ -78,6 +84,7 @@ class PolicyEvidenceContractTests(unittest.TestCase):
         self.assertIn((AUDIT_EVENT_SCHEMA_ID, AUDIT_EVENT_SCHEMA_VERSION), schemas)
         self.assertIn((AUDIT_ANCHOR_SCHEMA_ID, AUDIT_ANCHOR_SCHEMA_VERSION), schemas)
         self.assertIn((ERROR_SCHEMA_ID, ERROR_SCHEMA_VERSION), schemas)
+        self.assertIn((READINESS_SCHEMA_ID, READINESS_SCHEMA_VERSION), schemas)
         self.assertIn(("hormuz.policy-decision", 1), schemas)
         self.assertIn(("hormuz.policy-control-status", 1), schemas)
         self.assertIn(("hormuz.policy-document", 1), schemas)

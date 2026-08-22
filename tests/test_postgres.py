@@ -1178,6 +1178,7 @@ class PostgresUsageStoreTests(unittest.TestCase):
                 policy_action="allowed",
                 status="succeeded",
             )
+        store.verify_ready()
 
         observations: list[tuple[int, str, int]] = []
         for organization_id in ("acme", "beta"):

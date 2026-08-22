@@ -26,6 +26,7 @@ The current Hormuz-owned JSON schemas are:
 | Surface | Schema |
 | --- | --- |
 | `GET /health` | `hormuz.gateway-health` v1 |
+| `GET /ready` | `hormuz.gateway-readiness` v1 |
 | `GET /v1/gateway/whoami` | `hormuz.gateway-identity` v1 |
 | `GET /v1/gateway/usage` | `hormuz.gateway-usage-summary` v1 |
 | Hormuz-generated HTTP errors | `hormuz.gateway-error` v2 |
@@ -107,13 +108,14 @@ Where an OpenAI- or Anthropic-compatible endpoint must preserve a provider-nativ
 
 ## Migration and compatibility
 
-The release makes two intentional pre-stability changes:
+The release line has these intentional pre-stability changes:
 
 1. Audit exports now emit `hormuz.audit-event` v2. The prior v1 audit shapes remain validator-compatible for historical export fixtures, but new events use v2. `upstream_model` is renamed to `routed_model`, and v2 adds identity source/type, organization, policy version, provider-reported model, cost basis, allocation basis, and coverage.
 2. `hormuz status --json` changes from an unversioned bare array to `hormuz.usage-report` v1 with report metadata and a `rows` array. `hormuz policy-check` uses `routed_model` in place of its former `upstream_model` field and includes `policy_version`.
 3. Gateway-owned errors now emit `hormuz.gateway-error` v2 so storage interruptions have a stable, content-free classification without widening the strict v1 error-code set. Historical v1 error objects remain validator-compatible.
 4. PostgreSQL schema v2 adds the governed policy-control tables. Every staged policy stores `hormuz.policy-document` v1 in immutable canonical form; every policy-control event stores `hormuz.policy-control-event` v1. There is no down-migration. An older binary fails closed on the newer schema rather than reinterpreting versioned policy state.
 5. Immutable audit anchors use `hormuz.audit-anchor` v1. The schema is added to the manifest with a compatibility fixture; its cryptographic chain verifier is separate from structural JSON validation so an operator can verify a retained artifact before trusting it.
+6. `GET /ready` adds `hormuz.gateway-readiness` v1 without changing the existing dependency-free `GET /health` liveness contract. A ready response is HTTP 200; an unavailable dependency or an in-progress drain is HTTP 503 with a content-free reason in the same strict readiness schema. See [OPERATIONS.md](OPERATIONS.md).
 
 The SQLite migration adds the metadata columns required to emit v2 while retaining existing usage rows, then adds tenant scope to active budget reservations. Each persisted usage or secret-evidence row now also carries `evidence_schema_id` and `evidence_schema_version`, so later code cannot silently reinterpret its evidence shape. Historical rows receive explicit legacy defaults where the old database could not know a value. Earlier applications will not understand the v2 export shape; rollback therefore requires retaining or restoring the earlier application/database pair. The corresponding PostgreSQL adapter is migration-led and uses a distinct operator migration credential and restricted runtime credential. See [STORAGE.md](STORAGE.md) for the upgrade, rollback, recovery, and remaining-operational-gates boundary.
 

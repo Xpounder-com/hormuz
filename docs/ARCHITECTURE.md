@@ -35,6 +35,7 @@ Policy administration (managed PostgreSQL mode)
 ## Code boundaries
 
 - `hormuz/server.py` owns HTTP compatibility, authentication, upstream forwarding, streaming, and protocol-shaped errors.
+- `hormuz/server.py` also owns dependency-free liveness and content-free dependency readiness. Readiness verifies only the local policy/evidence path and turns false before graceful shutdown drains active handlers; it never probes a model provider.
 - `hormuz/auth.py` verifies bootstrap or OIDC JWT credentials. Runtime identity mapping and policy-administration authority are deliberately separate decisions.
 - `hormuz/config.py` validates routes, identity facts, local policies, and one-time managed-policy bootstrap identities.
 - `hormuz/policy.py` evaluates access, fallback, caps, and budgets from exactly one request-bound policy snapshot.

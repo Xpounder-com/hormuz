@@ -43,7 +43,7 @@ run in a customer-controlled AWS environment and the broader secret migration,
 immutable-history, retention operations, recovery, SIEM, and independent-review
 evidence is complete.
 
-The first separately verifiable #11 slice is [#32](https://github.com/Xpounder-com/hormuz/issues/32): bounded PostgreSQL runtime pooling with tenant-safe checkout reuse. It is intentionally narrower than HA/failover, backup/PITR, shared-replica coordination, and operational recovery evidence.
+The first separately verifiable #11 slice, [#32](https://github.com/Xpounder-com/hormuz/issues/32), is completed in [PR #33](https://github.com/Xpounder-com/hormuz/pull/33): bounded PostgreSQL runtime pooling with tenant-safe checkout reuse. It remains intentionally narrower than HA/failover, backup/PITR, shared-replica coordination, and operational recovery evidence. The next scoped slice is [#34](https://github.com/Xpounder-com/hormuz/issues/34): a versioned liveness/readiness contract that checks only Hormuz's local policy/evidence dependencies and graceful-drain state.
 
 ## Feature-freeze rule
 

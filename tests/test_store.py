@@ -14,6 +14,31 @@ from hormuz.store import ReservationDenied, ReservationScope, StorageSchemaError
 
 
 class UsageStoreMigrationTests(unittest.TestCase):
+    def test_readiness_check_is_read_only_and_detects_a_tampered_migration_ledger(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "usage.sqlite3"
+            store = UsageStore(path)
+            store.verify_ready()
+
+            connection = sqlite3.connect(path)
+            before = connection.execute(
+                "SELECT version, state FROM hormuz_schema_migrations ORDER BY version"
+            ).fetchall()
+            connection.close()
+            store.verify_ready()
+            connection = sqlite3.connect(path)
+            after = connection.execute(
+                "SELECT version, state FROM hormuz_schema_migrations ORDER BY version"
+            ).fetchall()
+            connection.execute("UPDATE hormuz_schema_migrations SET state = 'applying' WHERE version = 2")
+            connection.commit()
+            connection.close()
+            self.assertEqual(after, before)
+
+            with self.assertRaises(StorageSchemaError) as raised:
+                store.verify_ready()
+            self.assertEqual(raised.exception.code, "storage_schema_partial_upgrade")
+
     def test_existing_usage_database_gains_redaction_metadata_columns(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "usage.sqlite3"
