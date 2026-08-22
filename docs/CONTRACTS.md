@@ -30,8 +30,11 @@ The current Hormuz-owned JSON schemas are:
 | `GET /v1/gateway/usage` | `hormuz.gateway-usage-summary` v1 |
 | Hormuz-generated HTTP errors | `hormuz.gateway-error` v2 |
 | `hormuz policy-check` output | `hormuz.policy-decision` v1 |
+| `hormuz policy status --json` | `hormuz.policy-control-status` v1 |
 | `hormuz status --json` | `hormuz.usage-report` v1 |
 | audit JSONL events | `hormuz.audit-event` v2 |
+| immutable staged policy document | `hormuz.policy-document` v1 |
+| PostgreSQL policy-control event row | `hormuz.policy-control-event` v1 |
 
 OpenAI and Anthropic response bodies remain provider-owned. Hormuz does not add a schema wrapper or fields to those bodies, because doing so would break Codex and Claude Code compatibility. Instead, a relayed provider response carries:
 
@@ -50,7 +53,9 @@ Every durable v2 event snapshots the authenticated identity at request time:
 - `authentication_source` (for example, static bootstrap or OIDC);
 - `policy_version`.
 
-The currently emitted `policy_version` is a deterministic, content-free fingerprint of the local policy-relevant configuration, prefixed `local-config-`. It deliberately contains no credential value or request content. Issue [#21](https://github.com/Xpounder-com/hormuz/issues/21) will replace this local baseline with immutable policy-administration versions; consumers must not mistake the current fingerprint for that future control-plane capability.
+In local mode, `policy_version` is a deterministic content-free fingerprint of the policy-relevant configuration, prefixed `local-config-`. In managed PostgreSQL mode it is the exact immutable staged-policy digest, prefixed `sha256:`. A gateway reads and pins the active managed version when a request begins; activation cannot rewrite an in-flight request or its durable evidence. Neither form contains a credential value or request content.
+
+Managed policy control has two additional strict contracts. `hormuz.policy-document` v1 accepts only allowlisted routing, cap, budget, and egress-control fields. `hormuz.policy-control-status` v1 returns administration metadata for a current policy administrator: the active digest/generation, immutable version metadata, structural redacted change summaries, and stable administrator keys. PostgreSQL `hormuz.policy-control-event` v1 records bootstrap, administrator, stage, activation, rollback, and break-glass events. It stores both an explicit durable schema ID/version and opaque actor identity keys plus structural metadata only; Hormuz validates the exact event shape before it inserts the row, and the compatibility fixture exercises that durable schema. See [POLICY_CONTROL.md](POLICY_CONTROL.md) for authorization and lifecycle semantics.
 
 Model fields have distinct meanings:
 
@@ -90,6 +95,7 @@ The release makes two intentional pre-stability changes:
 1. Audit exports now emit `hormuz.audit-event` v2. The prior v1 audit shapes remain validator-compatible for historical export fixtures, but new events use v2. `upstream_model` is renamed to `routed_model`, and v2 adds identity source/type, organization, policy version, provider-reported model, cost basis, allocation basis, and coverage.
 2. `hormuz status --json` changes from an unversioned bare array to `hormuz.usage-report` v1 with report metadata and a `rows` array. `hormuz policy-check` uses `routed_model` in place of its former `upstream_model` field and includes `policy_version`.
 3. Gateway-owned errors now emit `hormuz.gateway-error` v2 so storage interruptions have a stable, content-free classification without widening the strict v1 error-code set. Historical v1 error objects remain validator-compatible.
+4. PostgreSQL schema v2 adds the governed policy-control tables. Every staged policy stores `hormuz.policy-document` v1 in immutable canonical form; every policy-control event stores `hormuz.policy-control-event` v1. There is no down-migration. An older binary fails closed on the newer schema rather than reinterpreting versioned policy state.
 
 The SQLite migration adds the metadata columns required to emit v2 while retaining existing usage rows, then adds tenant scope to active budget reservations. Each persisted usage or secret-evidence row now also carries `evidence_schema_id` and `evidence_schema_version`, so later code cannot silently reinterpret its evidence shape. Historical rows receive explicit legacy defaults where the old database could not know a value. Earlier applications will not understand the v2 export shape; rollback therefore requires retaining or restoring the earlier application/database pair. The corresponding PostgreSQL adapter is migration-led and uses a distinct operator migration credential and restricted runtime credential. See [STORAGE.md](STORAGE.md) for the upgrade, rollback, recovery, and remaining-operational-gates boundary.
 
@@ -104,4 +110,4 @@ HORMUZ_TEST_POSTGRES_DSN='postgresql://operator@host:5432/hormuz_test' \
   python3 -m unittest -v tests.test_postgres
 ```
 
-The contract tests validate current and legacy audit fixtures, reject unknown fields, verify the gateway preserves provider bodies, and validate the migration-generated audit evidence. The PostgreSQL suite additionally proves the same normalized repository outcomes, forced tenant isolation, migration idempotency, partial/newer-schema failure, and content-free malformed-evidence handling against a disposable database.
+The contract tests validate current and legacy audit fixtures, reject unknown fields, verify the gateway preserves provider bodies, validate strict policy documents, and validate the migration-generated audit evidence. The PostgreSQL suite additionally proves the same normalized repository outcomes, forced tenant isolation, policy-admin bootstrap/activation/rollback, role separation, migration idempotency, partial/newer-schema failure, and content-free malformed-evidence handling against a disposable database.

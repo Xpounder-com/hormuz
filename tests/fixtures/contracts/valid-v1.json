@@ -67,6 +67,67 @@
     "max_output_tokens": 16000,
     "policy_version": "local-config-0123456789abcdef"
   },
+  "policy_control_status": {
+    "schema_id": "hormuz.policy-control-status",
+    "schema_version": 1,
+    "organization_id": "xpounder",
+    "initialized": true,
+    "active": {
+      "version_id": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "generation": 2,
+      "activated_at": "2026-08-21T00:00:00+00:00",
+      "activated_by_kind": "oidc",
+      "activated_by_identity_key": "oidc:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    },
+    "versions": [
+      {
+        "version_id": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "content_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "created_at": "2026-08-21T00:00:00+00:00",
+        "author_kind": "oidc",
+        "author_identity_key": "oidc:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "change_summary": {
+          "summary_version": 1,
+          "scopes": {
+            "organization": {"fields": ["allowed_models", "max_output_tokens"]},
+            "teams": {"count": 1, "fields": ["allowed_models"]},
+            "actors": {"count": 0, "fields": []}
+          },
+          "egress_fields": ["openai.allow_background", "openai.allow_response_storage", "secrets.mode"]
+        }
+      }
+    ],
+    "administrators": [
+      {
+        "authentication_kind": "oidc",
+        "actor_id": null,
+        "issuer": "https://identity.example.com",
+        "subject": "stable-subject-123"
+      }
+    ]
+  },
+  "policy_control_event": {
+    "event_schema_id": "hormuz.policy-control-event",
+    "event_schema_version": 1,
+    "organization_id": "xpounder",
+    "occurred_at": "2026-08-21T00:00:00+00:00",
+    "event_type": "policy_staged",
+    "actor_kind": "oidc",
+    "actor_identity_key": "oidc:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    "target_identity_key": null,
+    "version_id": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    "generation": null,
+    "reason_code": null,
+    "change_summary": {
+      "summary_version": 1,
+      "scopes": {
+        "organization": {"fields": ["allowed_models", "max_output_tokens"]},
+        "teams": {"count": 1, "fields": ["allowed_models"]},
+        "actors": {"count": 0, "fields": []}
+      },
+      "egress_fields": ["openai.allow_background", "openai.allow_response_storage", "secrets.mode"]
+    }
+  },
   "usage_report": {
     "schema_id": "hormuz.usage-report",
     "schema_version": 1,

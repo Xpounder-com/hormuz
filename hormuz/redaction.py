@@ -49,8 +49,17 @@ class SecretRedactor:
         self.controls = controls
         self.protected_values = controls.custom_secret_values + protected_values
 
-    def inspect(self, value: dict[str, Any]) -> RedactionResult:
-        if self.controls.mode == "off":
+    def inspect(self, value: dict[str, Any], *, mode: str | None = None) -> RedactionResult:
+        """Inspect a request with an optional immutable policy action override.
+
+        Detector configuration and protected values remain process-local; the
+        active managed policy can only select the allowlisted enforcement mode.
+        """
+
+        effective_mode = self.controls.mode if mode is None else mode
+        if effective_mode not in {"off", "redact", "deny"}:
+            raise RedactionError("Secret enforcement mode is unsupported")
+        if effective_mode == "off":
             return RedactionResult(value=value)
         transformed, count, rules = self._transform(value, depth=0)
         assert isinstance(transformed, dict)

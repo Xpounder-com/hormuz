@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import getpass
 import hashlib
 import json
 import logging
@@ -20,12 +21,17 @@ from .contracts import (
     ALLOCATION_BASIS_DIRECT_GATEWAY_REQUEST,
     COST_BASIS_CONFIGURED_RATE_CARD_ESTIMATE,
     COVERAGE_GATEWAY_CAPTURED_REQUESTS_ONLY,
+    POLICY_CONTROL_STATUS_SCHEMA_ID,
     POLICY_DECISION_SCHEMA_ID,
     USAGE_REPORT_SCHEMA_ID,
     contract_envelope,
     contract_manifest,
 )
 from .policy import PolicyEngine
+from .policy_control import PolicyControlService
+from .policy_document import PolicyDocumentError
+from .policy_repository import PolicyActivation, PolicyControlError, PolicyControlStatus, PolicyVersionRecord
+from .policy_runtime import PolicyRuntime
 from .postgres import PostgresStorageError, migrate_postgres
 from .server import GatewayServer
 from .store import StorageSchemaError
@@ -70,6 +76,64 @@ def build_parser() -> argparse.ArgumentParser:
     policy.add_argument("--model", required=True, help="Company model alias")
     policy.add_argument("--max-output-tokens", type=int)
 
+    policy_control = subparsers.add_parser(
+        "policy",
+        help="Bootstrap and administer immutable tenant policy versions",
+    )
+    policy_control_subparsers = policy_control.add_subparsers(dest="policy_control_command", required=True)
+
+    bootstrap = policy_control_subparsers.add_parser(
+        "bootstrap",
+        help="Persist one-time configuration-seeded policy administrators",
+    )
+    _policy_control_auth_arguments(bootstrap)
+
+    stage = policy_control_subparsers.add_parser("stage", help="Validate and stage an immutable policy document")
+    _policy_control_auth_arguments(stage)
+    stage.add_argument("--file", required=True, help="Policy-document JSON path")
+
+    activate = policy_control_subparsers.add_parser("activate", help="Atomically activate a staged policy version")
+    _policy_control_auth_arguments(activate)
+    activate.add_argument("--version", required=True, help="Immutable sha256 policy version")
+
+    rollback = policy_control_subparsers.add_parser("rollback", help="Reactivate a previously active policy version")
+    _policy_control_auth_arguments(rollback)
+    rollback.add_argument("--version", required=True, help="Previously active sha256 policy version")
+
+    policy_status = policy_control_subparsers.add_parser("status", help="Show tenant policy-control metadata")
+    _policy_control_auth_arguments(policy_status)
+    policy_status.add_argument("--json", action="store_true", help="Emit machine-readable metadata-only JSON")
+
+    administrator = policy_control_subparsers.add_parser("administrator", help="Manage governed policy administrators")
+    administrator_subparsers = administrator.add_subparsers(dest="policy_administrator_command", required=True)
+    for action in ("grant", "revoke"):
+        command = administrator_subparsers.add_parser(action, help=f"{action.title()} an OIDC policy administrator")
+        _policy_control_auth_arguments(command)
+        command.add_argument("--issuer", required=True, help="Configured OIDC issuer URL")
+        command.add_argument("--subject", required=True, help="Stable OIDC subject")
+    revoke_static = administrator_subparsers.add_parser(
+        "revoke-static",
+        help="Retire a persisted static bootstrap policy administrator",
+    )
+    _policy_control_auth_arguments(revoke_static)
+    revoke_static.add_argument("--actor-id", required=True, help="Persisted static bootstrap actor ID")
+
+    break_glass = policy_control_subparsers.add_parser(
+        "break-glass",
+        help="Recover OIDC policy authority only after every administrator is lost",
+    )
+    break_glass_subparsers = break_glass.add_subparsers(dest="policy_break_glass_command", required=True)
+    recover = break_glass_subparsers.add_parser("recover", help="Recover one OIDC administrator under break-glass controls")
+    recover.add_argument("--organization", required=True, help="Tenant organization ID")
+    recover.add_argument("--issuer", required=True, help="Configured OIDC issuer URL")
+    recover.add_argument("--subject", required=True, help="Stable OIDC subject")
+    recover.add_argument(
+        "--reason-code",
+        required=True,
+        choices=["all_administrators_lost", "administrator_store_recovered"],
+        help="Controlled recovery reason",
+    )
+
     connect = subparsers.add_parser("client-config", help="Print client configuration for this gateway")
     connect.add_argument("client", choices=["codex", "claude"])
     connect.add_argument("--url", help="Externally reachable gateway URL; defaults to configured listener")
@@ -107,6 +171,15 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _policy_control_auth_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--organization", required=True, help="Tenant organization ID")
+    parser.add_argument(
+        "--credential-env",
+        default="HORMUZ_POLICY_ADMIN_TOKEN",
+        help="Environment variable holding an authenticated policy-admin credential",
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     raw_argv = list(sys.argv[1:] if argv is None else argv)
     if _is_deprecated_context_command(raw_argv):
@@ -131,6 +204,8 @@ def main(argv: list[str] | None = None) -> int:
             return _status(config, args)
         if args.command == "policy-check":
             return _policy_check(config, args)
+        if args.command == "policy":
+            return _policy_control(config, args)
         if args.command == "client-config":
             return _client_config(
                 config,
@@ -149,6 +224,9 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     except (EvidenceStorageError, PostgresStorageError, StorageSchemaError) as error:
         print(f"storage error: {error.code}", file=sys.stderr)
+        return 2
+    except (PolicyControlError, PolicyDocumentError) as error:
+        print(f"policy control error: {error.code}", file=sys.stderr)
         return 2
     except (OSError, sqlite3.Error):
         print("storage error: storage_unavailable", file=sys.stderr)
@@ -224,6 +302,8 @@ def _doctor(config: GatewayConfig) -> int:
     print(f"usage storage: {config.usage_storage.backend}")
     create_usage_store(config)
     print("usage storage: verified")
+    PolicyRuntime(config).verify_active_policies()
+    print(f"policy control: {config.policy_control.mode} verified")
     if config.oidc_issuers:
         try:
             metadata = Authenticator(config).validate_metadata()
@@ -242,6 +322,7 @@ def _doctor(config: GatewayConfig) -> int:
 
 
 def _status(config: GatewayConfig, args: argparse.Namespace) -> int:
+    policy_runtime = PolicyRuntime(config)
     rows = create_usage_store(config).report_rows(
         group_by=args.group_by,
         actor_id=args.actor,
@@ -257,6 +338,7 @@ def _status(config: GatewayConfig, args: argparse.Namespace) -> int:
             row,
             actor_filter=args.actor,
             team_filter=args.team,
+            policy_runtime=policy_runtime,
         )
         report.append(
             {
@@ -314,7 +396,17 @@ def _budget_for_scope(
     *,
     actor_filter: str | None = None,
     team_filter: str | None = None,
+    policy_runtime: PolicyRuntime | None = None,
 ) -> float | None:
+    if config.policy_control.mode == "postgresql":
+        return _managed_budget_for_scope(
+            config,
+            group_by,
+            row,
+            actor_filter=actor_filter,
+            team_filter=team_filter,
+            policy_runtime=policy_runtime or PolicyRuntime(config),
+        )
     scope_id = str(row["scope_id"])
     if group_by == "organization":
         if actor_filter is not None or team_filter is not None:
@@ -343,6 +435,62 @@ def _budget_for_scope(
     actor_policy = config.actor_policies.get(identity.actor_id)
     if actor_policy is not None and actor_policy.monthly_budget_usd is not None:
         caps.append(actor_policy.monthly_budget_usd)
+    return min(caps) if caps else None
+
+
+def _managed_budget_for_scope(
+    config: GatewayConfig,
+    group_by: str,
+    row: dict[str, object],
+    *,
+    actor_filter: str | None,
+    team_filter: str | None,
+    policy_runtime: PolicyRuntime,
+) -> float | None:
+    """Report current budget metadata from the active immutable policy.
+
+    Historical request evidence remains pinned to its recorded policy version;
+    the status budget column is intentionally the currently active cap, just
+    as it was for configuration-backed local mode.
+    """
+
+    scope_id = str(row["scope_id"])
+    if group_by == "organization":
+        if actor_filter is not None or team_filter is not None:
+            return None
+        identity = next(
+            (item for item in config.identities_by_actor.values() if item.organization_id == scope_id),
+            None,
+        )
+        return (
+            policy_runtime.snapshot_for(identity).organization_policy.monthly_budget_usd
+            if identity is not None
+            else None
+        )
+    if group_by == "team":
+        if actor_filter is not None:
+            return None
+        identity = next(
+            (item for item in config.identities_by_actor.values() if item.team_id == scope_id),
+            None,
+        )
+        if identity is None:
+            return None
+        team_policy = policy_runtime.snapshot_for(identity).team_policy
+        return team_policy.monthly_budget_usd if team_policy is not None else None
+    if group_by != "person":
+        return None
+    identity = config.identities_by_actor.get(scope_id)
+    if identity is None:
+        return None
+    snapshot = policy_runtime.snapshot_for(identity)
+    caps = [
+        policy.per_actor_monthly_budget_usd
+        for policy in (snapshot.organization_policy, snapshot.team_policy, snapshot.actor_policy)
+        if policy is not None and policy.per_actor_monthly_budget_usd is not None
+    ]
+    if snapshot.actor_policy is not None and snapshot.actor_policy.monthly_budget_usd is not None:
+        caps.append(snapshot.actor_policy.monthly_budget_usd)
     return min(caps) if caps else None
 
 
@@ -382,6 +530,153 @@ def _policy_check(config: GatewayConfig, args: argparse.Namespace) -> int:
         )
     )
     return 0 if decision.allowed else 3
+
+
+def _policy_control(config: GatewayConfig, args: argparse.Namespace) -> int:
+    """Run a CLI command through the authenticated policy-control service."""
+
+    service = PolicyControlService(config)
+    command = args.policy_control_command
+    if command == "bootstrap":
+        administrators = service.bootstrap(
+            organization_id=args.organization,
+            credential_env=args.credential_env,
+        )
+        print(f"policy bootstrap initialized: organization={args.organization} administrators={len(administrators)}")
+        return 0
+    if command == "stage":
+        version = service.stage(
+            organization_id=args.organization,
+            credential_env=args.credential_env,
+            policy_path=args.file,
+        )
+        _print_policy_version("policy staged", version)
+        return 0
+    if command == "activate":
+        activation = service.activate(
+            organization_id=args.organization,
+            credential_env=args.credential_env,
+            version_id=args.version,
+        )
+        _print_policy_activation("policy activated", activation)
+        return 0
+    if command == "rollback":
+        activation = service.rollback(
+            organization_id=args.organization,
+            credential_env=args.credential_env,
+            version_id=args.version,
+        )
+        _print_policy_activation("policy rolled back", activation)
+        return 0
+    if command == "status":
+        status = service.status(
+            organization_id=args.organization,
+            credential_env=args.credential_env,
+        )
+        _print_policy_status(status, as_json=args.json)
+        return 0
+    if command == "administrator":
+        if args.policy_administrator_command == "grant":
+            administrator = service.grant_oidc_administrator(
+                organization_id=args.organization,
+                credential_env=args.credential_env,
+                issuer=args.issuer,
+                subject=args.subject,
+            )
+            print(
+                "policy administrator granted: "
+                f"organization={administrator.organization_id} issuer={administrator.issuer} subject={administrator.subject}"
+            )
+            return 0
+        if args.policy_administrator_command == "revoke":
+            service.revoke_oidc_administrator(
+                organization_id=args.organization,
+                credential_env=args.credential_env,
+                issuer=args.issuer,
+                subject=args.subject,
+            )
+            print(f"policy administrator revoked: organization={args.organization} issuer={args.issuer} subject={args.subject}")
+            return 0
+        if args.policy_administrator_command == "revoke-static":
+            service.revoke_static_administrator(
+                organization_id=args.organization,
+                credential_env=args.credential_env,
+                actor_id=args.actor_id,
+            )
+            print(f"static policy administrator revoked: organization={args.organization} actor_id={args.actor_id}")
+            return 0
+    if command == "break-glass" and args.policy_break_glass_command == "recover":
+        try:
+            recovery_secret = getpass.getpass("Hormuz break-glass recovery secret: ")
+        except (EOFError, OSError):
+            raise PolicyControlError("policy_break_glass_credential_unavailable") from None
+        administrator = service.break_glass_recover(
+            organization_id=args.organization,
+            recovery_secret=recovery_secret,
+            issuer=args.issuer,
+            subject=args.subject,
+            reason_code=args.reason_code,
+        )
+        print(
+            "policy break-glass recovery completed: "
+            f"organization={administrator.organization_id} issuer={administrator.issuer} subject={administrator.subject}"
+        )
+        return 0
+    raise ConfigError("unsupported policy control command")
+
+
+def _print_policy_version(prefix: str, version: PolicyVersionRecord) -> None:
+    print(
+        f"{prefix}: organization={version.organization_id} version={version.version_id} "
+        f"sha256={version.content_sha256} created_at={version.created_at.isoformat()}"
+    )
+
+
+def _print_policy_activation(prefix: str, activation: PolicyActivation) -> None:
+    print(
+        f"{prefix}: organization={activation.organization_id} version={activation.version_id} "
+        f"generation={activation.generation} activated_at={activation.activated_at.isoformat()}"
+    )
+
+
+def _print_policy_status(status: PolicyControlStatus, *, as_json: bool) -> None:
+    payload = {
+        "organization_id": status.organization_id,
+        "initialized": status.initialized,
+        "active": (
+            {
+                "version_id": status.active.version_id,
+                "generation": status.active.generation,
+                "activated_at": status.active.activated_at.isoformat(),
+                "activated_by_kind": status.active.activated_by_kind,
+                "activated_by_identity_key": status.active.activated_by_identity_key,
+            }
+            if status.active is not None
+            else None
+        ),
+        "versions": [
+            {
+                "version_id": version.version_id,
+                "content_sha256": version.content_sha256,
+                "created_at": version.created_at.isoformat(),
+                "author_kind": version.author_kind,
+                "author_identity_key": version.author_identity_key,
+                "change_summary": version.change_summary,
+            }
+            for version in status.versions
+        ],
+        "administrators": [administrator.audit_ref() for administrator in status.administrators],
+    }
+    if as_json:
+        print(json.dumps(contract_envelope(POLICY_CONTROL_STATUS_SCHEMA_ID, payload), indent=2, sort_keys=True))
+        return
+    active = payload["active"]
+    print(f"organization: {status.organization_id}")
+    print(f"initialized: {str(status.initialized).lower()}")
+    print(f"active policy: {active['version_id'] if isinstance(active, dict) else '-'}")
+    print(f"active generation: {active['generation'] if isinstance(active, dict) else '-'}")
+    print(f"policy versions: {len(status.versions)}")
+    print(f"active policy administrators: {len(status.administrators)}")
 
 
 def _client_config(
@@ -432,7 +727,7 @@ def _client_config(
     if not env_name or not env_name.replace("_", "A").isalnum() or env_name[0].isdigit():
         raise ConfigError("credential environment variable must contain only letters, digits, and underscores")
     if client == "codex":
-        policy = config.resolved_policy(selected_identity)
+        policy = PolicyRuntime(config).snapshot_for(selected_identity).effective_policy
         allowed_models = set(policy.allowed_models) if policy.allowed_models is not None else None
         default_model = next(
             (
@@ -617,6 +912,7 @@ def _storage(config: GatewayConfig, args: argparse.Namespace) -> int:
             postgres_migration_dsn(config),
             schema=config.usage_storage.postgres_schema,
             runtime_role=config.usage_storage.postgres_runtime_role,
+            policy_control_role=config.policy_control.postgres_control_role,
         )
         print(f"PostgreSQL usage storage migration is current: v{status.version}")
         return 0

@@ -1,0 +1,35 @@
+{
+  "schema_id": "hormuz.policy-document",
+  "schema_version": 1,
+  "organization_id": "xpounder",
+  "policies": {
+    "organization": {
+      "allowed_clients": ["codex", "claude-code"],
+      "allowed_models": ["gpt-5.4-mini", "gpt-5.4", "claude-sonnet-5"],
+      "max_output_tokens": 32000,
+      "monthly_budget_usd": 10000,
+      "per_actor_monthly_budget_usd": 500
+    },
+    "teams": {
+      "engineering": {
+        "allowed_models": ["gpt-5.4-mini", "gpt-5.4", "claude-sonnet-5"],
+        "fallback_models": {
+          "openai": "gpt-5.4-mini",
+          "anthropic": "claude-sonnet-5"
+        },
+        "max_output_tokens": 16000,
+        "monthly_budget_usd": 5000
+      }
+    },
+    "actors": {}
+  },
+  "egress_controls": {
+    "openai": {
+      "allow_response_storage": false,
+      "allow_background": false
+    },
+    "secrets": {
+      "mode": "redact"
+    }
+  }
+}

@@ -48,6 +48,7 @@ class GatewayServer(ThreadingHTTPServer):
         self.authenticator = Authenticator(config)
         self.store: UsageRepository = create_usage_store(config)
         self.policy_engine = PolicyEngine(config, self.store)
+        self.policy_engine.policy_runtime.verify_active_policies()
         protected_values = [
             ("hormuz_identity_token", identity.token)
             for identity in config.identities_by_token.values()
@@ -230,7 +231,11 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
 
         upstream = self.server.config.upstreams[protocol]
         is_responses_create = protocol == "openai" and urlsplit(self.path).path == "/v1/responses"
-        if is_responses_create and request_body.get("background") is True and not upstream.allow_background:
+        if (
+            is_responses_create
+            and request_body.get("background") is True
+            and not decision.snapshot.openai_egress.allow_background
+        ):
             if account_usage:
                 self.server.store.record(
                     identity=identity,
@@ -258,7 +263,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 code="hormuz_provider_policy_denied",
             )
             return
-        if is_responses_create and not upstream.allow_response_storage:
+        if is_responses_create and not decision.snapshot.openai_egress.allow_response_storage:
             request_body["store"] = False
 
         request_body["model"] = decision.route.upstream_model
@@ -267,7 +272,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             if current_output is None or current_output > decision.max_output_tokens:
                 request_body[output_field] = decision.max_output_tokens
         try:
-            redaction = self.server.secret_redactor.inspect(request_body)
+            redaction = self.server.secret_redactor.inspect(request_body, mode=decision.snapshot.secret_mode)
         except RedactionError as error:
             self._send_protocol_error(protocol, str(error), HTTPStatus.BAD_REQUEST)
             return
@@ -279,12 +284,12 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 protocol=protocol,
                 requested_model=decision.requested_model,
                 policy_version=decision.policy_version,
-                action="denied" if self.server.config.secret_controls.mode == "deny" else "redacted",
+                action="denied" if decision.snapshot.secret_mode == "deny" else "redacted",
                 detection_count=redaction.count,
                 rules=redaction.rules,
             )
 
-        if redaction.count and self.server.config.secret_controls.mode == "deny":
+        if redaction.count and decision.snapshot.secret_mode == "deny":
             if account_usage:
                 self.server.store.record(
                     identity=identity,
@@ -336,6 +341,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             try:
                 reservation_id = self.server.policy_engine.reserve_budget(
                     identity=identity,
+                    decision=decision,
                     reserved_tokens=reserved_input_tokens + max(0, reserved_output_tokens),
                     reserved_cost_microusd=reserved_cost_microusd,
                     ttl_seconds=self.server.config.upstream_timeout_seconds + 60,
