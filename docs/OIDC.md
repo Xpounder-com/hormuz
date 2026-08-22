@@ -105,6 +105,13 @@ Authentication logs contain only a stable failure code. Hormuz does not log toke
 
 `hormuz doctor` fetches and validates every configured discovery/JWKS path and reports the number of usable signing keys. Run it from the same network boundary as the service before deployment.
 
+## External-provider reference proof
+
+For a bounded, content-free proof against a real external provider, use
+[`OIDC_PROVIDER_CONFORMANCE.md`](OIDC_PROVIDER_CONFORMANCE.md). Its temporary
+native-client PKCE exchange exists only to obtain one test access token for the
+resource-server verifier; it does not add browser-session behavior to Hormuz.
+
 ## Current boundary
 
 The implemented path works with identity providers that issue JWT access tokens for a Hormuz audience. Hormuz does not yet include its own browser authorization-code/PKCE flow, refresh-token custody, opaque-token introspection, SCIM provisioning, or revocation endpoint. [Proposed ADR 0001](decisions/0001-oidc-login-and-session-architecture.md) specifies the session-broker recommendation and its security boundary. It remains non-binding until the product owner explicitly approves issue #2.

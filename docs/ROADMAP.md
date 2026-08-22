@@ -31,7 +31,7 @@ Every public response and durable evidence format has an explicit schema version
 
 Only after the core contract is stable, the program proceeds through real operational gates:
 
-1. validate generic OIDC against an external identity provider while keeping Hormuz a resource server, not an IdP ([#13](https://github.com/Xpounder-com/hormuz/issues/13));
+1. validate generic OIDC resource-server behavior against an external identity provider, without claiming browser SSO or a Hormuz session broker ([#13](https://github.com/Xpounder-com/hormuz/issues/13));
 2. add KMS/BYOK custody, secret rotation, and tamper-evident audit retention ([#17](https://github.com/Xpounder-com/hormuz/issues/17));
 3. prove TLS deployment, shared PostgreSQL operation, pooling, backup/restore/PITR, multi-instance revocation and coordination, health/readiness/SLOs, alerts, and incident procedures ([#11](https://github.com/Xpounder-com/hormuz/issues/11));
 4. prove container signing, SBOM and vulnerability gates, and independent release review ([#9](https://github.com/Xpounder-com/hormuz/issues/9)).
