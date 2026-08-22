@@ -30,7 +30,15 @@ Keep connection strings out of the JSON configuration. Configure only environmen
     "postgres_dsn_env": "HORMUZ_POSTGRES_DSN",
     "postgres_migration_dsn_env": "HORMUZ_POSTGRES_MIGRATION_DSN",
     "postgres_schema": "hormuz",
-    "postgres_runtime_role": "hormuz_runtime"
+    "postgres_runtime_role": "hormuz_runtime",
+    "postgres_pool": {
+      "min_connections": 1,
+      "max_connections": 8,
+      "acquire_timeout_seconds": 5,
+      "max_waiting": 16,
+      "max_lifetime_seconds": 3600,
+      "max_idle_seconds": 300
+    }
   },
   "policy_control": {
     "mode": "postgresql",
@@ -44,6 +52,31 @@ Keep connection strings out of the JSON configuration. Configure only environmen
 ~~~
 
 HORMUZ_POSTGRES_MIGRATION_DSN is an operator credential that can create or update the Hormuz schema. HORMUZ_POSTGRES_DSN is the long-running gateway credential. HORMUZ_POLICY_CONTROL_DSN is the service credential used for administration. They must name different credentials in an operational deployment. Put all three in the deployment secret manager, not the configuration file, command history, or client environment.
+
+### Runtime-pool boundary
+
+`hormuz serve` opens exactly one bounded Psycopg pool for the runtime DSN in a
+process. The usage/evidence repository and managed-policy **read** path share
+that pool; migration and policy-control credentials do not. Startup waits for
+the configured `min_connections`, `max_connections` is the hard connection
+ceiling, and `max_waiting` is a hard queue ceiling. A checkout waits at most
+`acquire_timeout_seconds`; saturation, a closed pool, a missing pool driver,
+or a broken database connection fail closed as content-free storage failures.
+
+The defaults above are conservative rather than workload-sizing advice. Every
+value is strictly bounded; `max_waiting: 0` is rejected because an unbounded
+queue can turn database pressure into unbounded request latency. Connections
+above the minimum may be retired after `max_idle_seconds` and all connections
+are rotated no later than `max_lifetime_seconds`.
+
+Pool reuse never carries a tenant setting from one request into another. Each
+repository operation opens a new transaction and applies the restricted role,
+configured search path, and organization ID with `SET LOCAL`; PostgreSQL
+resets those values when that transaction commits or rolls back. On graceful
+shutdown, the listener stops accepting new requests, waits for its active
+handler threads to finish, and only then closes its owned pool. This is
+single-process pool safety, not evidence of coordinated replica draining,
+database failover, or credential rotation.
 
 Before the first migration, an operator creates the restricted runtime and policy-control roles. Both must be non-owner roles with no superuser, database-creation, role-creation, inheritance, or BYPASSRLS capability, and they must be different roles. The migration grants the runtime role only the usage/evidence surface plus read-only active-policy access. It grants the policy-control role only the policy-administration tables and migration ledger; it cannot update tenant initialization state, immutable policy versions, or control events. An existing schema-v1 deployment must create its configured policy-control role before applying the schema-v2 migration, because migrations grant permissions to that pre-existing restricted role rather than creating database principals.
 
@@ -131,4 +164,4 @@ HORMUZ_TEST_POSTGRES_DSN='postgresql://operator@host:5432/hormuz_test' \
   python3 -m unittest -v tests.test_postgres
 ~~~
 
-CI runs this PostgreSQL suite separately against a pinned disposable PostgreSQL service. It proves the adapter's migration idempotency, runtime/control-role separation, RLS behavior, tenant isolation, policy bootstrap/activation/rollback, contract fixtures, malformed-evidence failure, rollback/partial-schema failure, and competing budget reservation behavior. It is not a substitute for a managed-database restore/PITR or HA drill.
+CI runs this PostgreSQL suite separately against a pinned disposable PostgreSQL service. It proves the adapter's migration idempotency, runtime/control-role separation, RLS behavior, tenant isolation, pooled checkout reuse with tenant-state reset, bounded saturation, broken-connection replacement, policy bootstrap/activation/rollback, contract fixtures, malformed-evidence failure, rollback/partial-schema failure, and competing budget reservation behavior. It is not a substitute for a managed-database restore/PITR, HA/failover, credential-rotation, or load drill.

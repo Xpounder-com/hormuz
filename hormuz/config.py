@@ -81,6 +81,24 @@ class UsageStorageConfig:
     postgres_migration_dsn_env: str = "HORMUZ_POSTGRES_MIGRATION_DSN"
     postgres_schema: str = "hormuz"
     postgres_runtime_role: str = "hormuz_runtime"
+    postgres_pool: "PostgresPoolConfig" = field(default_factory=lambda: PostgresPoolConfig())
+
+
+@dataclass(frozen=True)
+class PostgresPoolConfig:
+    """Bounded runtime-pool settings for the optional PostgreSQL adapter.
+
+    These settings apply only to long-running gateway runtime connections. The
+    migration credential intentionally remains a one-shot operator connection,
+    and the policy-control credential remains a distinct service boundary.
+    """
+
+    min_connections: int = 1
+    max_connections: int = 8
+    acquire_timeout_seconds: int = 5
+    max_waiting: int = 16
+    max_lifetime_seconds: int = 3600
+    max_idle_seconds: int = 300
 
 
 @dataclass(frozen=True)
@@ -299,6 +317,7 @@ class GatewayConfig:
                 "postgres_migration_dsn_env",
                 "postgres_schema",
                 "postgres_runtime_role",
+                "postgres_pool",
             }
         )
         if unsupported_storage_fields:
@@ -325,11 +344,14 @@ class GatewayConfig:
             usage_storage_raw.get("postgres_runtime_role", "hormuz_runtime"),
             "usage_storage.postgres_runtime_role",
         )
+        postgres_pool = _postgres_pool_config(usage_storage_raw.get("postgres_pool", {}))
         if usage_backend == "postgresql" and postgres_dsn_env == postgres_migration_dsn_env:
             raise ConfigError(
                 "usage_storage.postgres_dsn_env and usage_storage.postgres_migration_dsn_env "
                 "must name separate credentials"
             )
+        if usage_backend != "postgresql" and "postgres_pool" in usage_storage_raw:
+            raise ConfigError("usage_storage.postgres_pool requires usage_storage.backend postgresql")
 
         key_custody = _key_custody(raw.get("key_custody"))
         audit_anchor = _audit_anchor(raw.get("audit_anchor"), key_custody=key_custody)
@@ -660,6 +682,7 @@ class GatewayConfig:
                 postgres_migration_dsn_env=postgres_migration_dsn_env,
                 postgres_schema=postgres_schema,
                 postgres_runtime_role=postgres_runtime_role,
+                postgres_pool=postgres_pool,
             ),
             policy_control=PolicyControlConfig(
                 mode=policy_control_mode,
@@ -1131,6 +1154,72 @@ def _postgres_identifier(value: Any, path: str) -> str:
     if _POSTGRES_IDENTIFIER_PATTERN.fullmatch(result) is None:
         raise ConfigError(f"{path} must be a safe PostgreSQL identifier")
     return result
+
+
+def _postgres_pool_config(value: Any) -> PostgresPoolConfig:
+    raw = _object(value, "usage_storage.postgres_pool")
+    allowed = {
+        "min_connections",
+        "max_connections",
+        "acquire_timeout_seconds",
+        "max_waiting",
+        "max_lifetime_seconds",
+        "max_idle_seconds",
+    }
+    unsupported = set(raw).difference(allowed)
+    if unsupported:
+        raise ConfigError(
+            "usage_storage.postgres_pool contains unsupported fields: "
+            + ", ".join(sorted(str(field) for field in unsupported))
+        )
+    min_connections = _integer(
+        raw.get("min_connections", 1),
+        "usage_storage.postgres_pool.min_connections",
+        minimum=1,
+        maximum=100,
+    )
+    max_connections = _integer(
+        raw.get("max_connections", 8),
+        "usage_storage.postgres_pool.max_connections",
+        minimum=1,
+        maximum=1000,
+    )
+    if min_connections > max_connections:
+        raise ConfigError(
+            "usage_storage.postgres_pool.min_connections must not exceed max_connections"
+        )
+    acquire_timeout_seconds = _integer(
+        raw.get("acquire_timeout_seconds", 5),
+        "usage_storage.postgres_pool.acquire_timeout_seconds",
+        minimum=1,
+        maximum=120,
+    )
+    max_waiting = _integer(
+        raw.get("max_waiting", 16),
+        "usage_storage.postgres_pool.max_waiting",
+        minimum=1,
+        maximum=10000,
+    )
+    max_lifetime_seconds = _integer(
+        raw.get("max_lifetime_seconds", 3600),
+        "usage_storage.postgres_pool.max_lifetime_seconds",
+        minimum=60,
+        maximum=7 * 24 * 60 * 60,
+    )
+    max_idle_seconds = _integer(
+        raw.get("max_idle_seconds", 300),
+        "usage_storage.postgres_pool.max_idle_seconds",
+        minimum=1,
+        maximum=max_lifetime_seconds,
+    )
+    return PostgresPoolConfig(
+        min_connections=min_connections,
+        max_connections=max_connections,
+        acquire_timeout_seconds=acquire_timeout_seconds,
+        max_waiting=max_waiting,
+        max_lifetime_seconds=max_lifetime_seconds,
+        max_idle_seconds=max_idle_seconds,
+    )
 
 
 def _optional_string(value: Any, path: str) -> str | None:

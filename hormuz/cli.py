@@ -48,10 +48,10 @@ from .policy_control import PolicyControlService
 from .policy_document import PolicyDocumentError
 from .policy_repository import PolicyActivation, PolicyControlError, PolicyControlStatus, PolicyVersionRecord
 from .policy_runtime import PolicyRuntime
-from .postgres import PostgresStorageError, migrate_postgres
+from .postgres import PostgresConnectionPool, PostgresStorageError, migrate_postgres
 from .server import GatewayServer
 from .store import StorageSchemaError
-from .store_router import create_usage_store, postgres_migration_dsn
+from .store_router import create_postgres_runtime_pool, create_usage_store, postgres_migration_dsn
 
 
 _DEPRECATED_CONTEXT_COMMANDS = frozenset({"context-pack"})
@@ -352,10 +352,14 @@ def _doctor(config: GatewayConfig) -> int:
     print(f"model routes: {len(config.model_routes)}")
     print(f"secret egress control: {config.secret_controls.mode}")
     print(f"usage storage: {config.usage_storage.backend}")
-    create_usage_store(config)
-    print("usage storage: verified")
-    PolicyRuntime(config).verify_active_policies()
-    print(f"policy control: {config.policy_control.mode} verified")
+    runtime_pool = create_postgres_runtime_pool(config)
+    try:
+        create_usage_store(config, connection_pool=runtime_pool)
+        print("usage storage: verified")
+        PolicyRuntime(config, connection_pool=runtime_pool).verify_active_policies()
+        print(f"policy control: {config.policy_control.mode} verified")
+    finally:
+        _close_runtime_pool(runtime_pool)
     if config.oidc_issuers:
         try:
             metadata = Authenticator(config).validate_metadata()
@@ -1063,8 +1067,12 @@ def _required_organization(config: GatewayConfig) -> str:
 
 def _storage(config: GatewayConfig, args: argparse.Namespace) -> int:
     if args.storage_command == "verify":
-        create_usage_store(config)
-        print(f"usage storage verified: {config.usage_storage.backend}")
+        runtime_pool = create_postgres_runtime_pool(config)
+        try:
+            create_usage_store(config, connection_pool=runtime_pool)
+            print(f"usage storage verified: {config.usage_storage.backend}")
+        finally:
+            _close_runtime_pool(runtime_pool)
         return 0
     if args.storage_command == "migrate":
         if config.usage_storage.backend == "sqlite":
@@ -1080,6 +1088,13 @@ def _storage(config: GatewayConfig, args: argparse.Namespace) -> int:
         print(f"PostgreSQL usage storage migration is current: v{status.version}")
         return 0
     raise ConfigError("unsupported storage command")
+
+
+def _close_runtime_pool(pool: PostgresConnectionPool | None) -> None:
+    """Close a one-shot diagnostic pool after its final verification query."""
+
+    if pool is not None:
+        pool.close()
 
 
 if __name__ == "__main__":

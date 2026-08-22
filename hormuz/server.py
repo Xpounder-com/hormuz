@@ -28,10 +28,11 @@ from .contracts import (
 from .custody_runtime import resolve_upstream_credentials
 from .evidence import EvidenceStorageError
 from .policy import PolicyDecision, PolicyEngine
+from .policy_runtime import PolicyRuntime
 from .postgres import PostgresStorageError
 from .redaction import RedactionError, SecretRedactor
 from .store import ReservationDenied, StorageSchemaError, UsageRepository
-from .store_router import create_usage_store
+from .store_router import create_postgres_runtime_pool, create_usage_store
 from .usage import ResponseUsageParser
 
 
@@ -40,28 +41,62 @@ _STORAGE_FAILURES = (sqlite3.Error, EvidenceStorageError, PostgresStorageError, 
 
 
 class GatewayServer(ThreadingHTTPServer):
-    daemon_threads = True
+    # ThreadingMixIn joins non-daemon handler threads from ``server_close``.
+    # Keep that default so a graceful listener shutdown cannot close the
+    # runtime pool between a provider response and its final evidence write.
+    daemon_threads = False
+    block_on_close = True
     allow_reuse_address = True
 
     def __init__(self, config: GatewayConfig):
         self.config = config
         self.authenticator = Authenticator(config)
-        self.store: UsageRepository = create_usage_store(config)
-        self.policy_engine = PolicyEngine(config, self.store)
-        self.policy_engine.policy_runtime.verify_active_policies()
-        self.upstream_credentials = resolve_upstream_credentials(config)
-        protected_values = [
-            ("hormuz_identity_token", identity.token)
-            for identity in config.identities_by_token.values()
-            if identity.token
-        ]
-        protected_values.extend(
-            ("provider_credential", value)
-            for value in self.upstream_credentials.values()
-            if len(value) >= 8
-        )
-        self.secret_redactor = SecretRedactor(config.secret_controls, tuple(protected_values))
-        super().__init__((config.listen.host, config.listen.port), GatewayRequestHandler)
+        self.postgres_pool = create_postgres_runtime_pool(config)
+        try:
+            self.store: UsageRepository = create_usage_store(config, connection_pool=self.postgres_pool)
+            policy_runtime = PolicyRuntime(config, connection_pool=self.postgres_pool)
+            self.policy_engine = PolicyEngine(config, self.store, policy_runtime=policy_runtime)
+            self.policy_engine.policy_runtime.verify_active_policies()
+            self.upstream_credentials = resolve_upstream_credentials(config)
+            protected_values = [
+                ("hormuz_identity_token", identity.token)
+                for identity in config.identities_by_token.values()
+                if identity.token
+            ]
+            protected_values.extend(
+                ("provider_credential", value)
+                for value in self.upstream_credentials.values()
+                if len(value) >= 8
+            )
+            self.secret_redactor = SecretRedactor(config.secret_controls, tuple(protected_values))
+            super().__init__((config.listen.host, config.listen.port), GatewayRequestHandler)
+        except Exception:
+            self._close_postgres_pool()
+            raise
+        if self.postgres_pool is not None:
+            settings = self.postgres_pool.settings
+            LOGGER.info(
+                "postgres_pool_started min_connections=%d max_connections=%d max_waiting=%d "
+                "acquire_timeout_seconds=%d",
+                settings.min_connections,
+                settings.max_connections,
+                settings.max_waiting,
+                settings.acquire_timeout_seconds,
+            )
+
+    def server_close(self) -> None:
+        try:
+            super().server_close()
+        finally:
+            self._close_postgres_pool()
+
+    def _close_postgres_pool(self) -> None:
+        if self.postgres_pool is None:
+            return
+        try:
+            self.postgres_pool.close()
+        except PostgresStorageError:
+            LOGGER.error("postgres_pool_close_failed")
 
 
 class GatewayRequestHandler(BaseHTTPRequestHandler):
