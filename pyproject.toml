@@ -20,12 +20,16 @@ classifiers = [
   "Topic :: Security"
 ]
 dependencies = [
-  "PyJWT[crypto]>=2.13,<3"
+  "PyJWT[crypto]>=2.13,<3",
+  "cryptography>=42"
 ]
 
 [project.optional-dependencies]
 postgres = [
   "psycopg[binary]>=3.3.4,<3.4"
+]
+aws = [
+  "boto3>=1.34,<2"
 ]
 
 [project.scripts]

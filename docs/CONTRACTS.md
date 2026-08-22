@@ -33,6 +33,7 @@ The current Hormuz-owned JSON schemas are:
 | `hormuz policy status --json` | `hormuz.policy-control-status` v1 |
 | `hormuz status --json` | `hormuz.usage-report` v1 |
 | audit JSONL events | `hormuz.audit-event` v2 |
+| immutable audit-anchor artifact | `hormuz.audit-anchor` v1 |
 | immutable staged policy document | `hormuz.policy-document` v1 |
 | PostgreSQL policy-control event row | `hormuz.policy-control-event` v1 |
 
@@ -82,6 +83,22 @@ This is a gateway-recorded estimate from the active model-rate configuration. It
 
 No contract in this release permits prompts, responses, secret values, matched detector values, filenames, source files, or other source content. Audit JSONL is intentionally an allowlisted export, so an accidental future content-bearing database column cannot become public evidence automatically.
 
+## Immutable audit-anchor artifact
+
+`hormuz audit-anchor` can package current v2 audit events for one tenant into
+`hormuz.audit-anchor` v1. The durable artifact has a random `artifact_id`, its
+creation time, the ordered events, and a SHA-256 predecessor chain ending in a
+`head_digest`. Strict contract validation rejects unknown fields, legacy audit
+events, mixed tenants, duplicate event identifiers, and malformed chain
+structure. The custody verifier additionally recomputes every chain digest
+before the artifact is retained by its configured immutable sink.
+
+The artifact is metadata-only evidence, not a local database journal or a
+statement of complete organization-wide activity. An external Object Lock
+anchor protects the artifact after it is made; it does not prove that a mutable
+source store contained every event before that point. See [CUSTODY.md](CUSTODY.md)
+for the retention boundary.
+
 ## Errors
 
 Hormuz-generated JSON errors use `hormuz.gateway-error` v2 and a stable `error.code`. Version 2 adds the content-free `hormuz_storage_unavailable` classification; v1 remains validator-compatible for historical clients and does not silently accept that new code. The current public-code inventory is available in `hormuz contract-manifest`; it includes authentication, request-shape, policy, secret, budget, configuration, upstream, and durable-storage categories. A caller should switch on `error.code`, not an English error message.
@@ -96,6 +113,7 @@ The release makes two intentional pre-stability changes:
 2. `hormuz status --json` changes from an unversioned bare array to `hormuz.usage-report` v1 with report metadata and a `rows` array. `hormuz policy-check` uses `routed_model` in place of its former `upstream_model` field and includes `policy_version`.
 3. Gateway-owned errors now emit `hormuz.gateway-error` v2 so storage interruptions have a stable, content-free classification without widening the strict v1 error-code set. Historical v1 error objects remain validator-compatible.
 4. PostgreSQL schema v2 adds the governed policy-control tables. Every staged policy stores `hormuz.policy-document` v1 in immutable canonical form; every policy-control event stores `hormuz.policy-control-event` v1. There is no down-migration. An older binary fails closed on the newer schema rather than reinterpreting versioned policy state.
+5. Immutable audit anchors use `hormuz.audit-anchor` v1. The schema is added to the manifest with a compatibility fixture; its cryptographic chain verifier is separate from structural JSON validation so an operator can verify a retained artifact before trusting it.
 
 The SQLite migration adds the metadata columns required to emit v2 while retaining existing usage rows, then adds tenant scope to active budget reservations. Each persisted usage or secret-evidence row now also carries `evidence_schema_id` and `evidence_schema_version`, so later code cannot silently reinterpret its evidence shape. Historical rows receive explicit legacy defaults where the old database could not know a value. Earlier applications will not understand the v2 export shape; rollback therefore requires retaining or restoring the earlier application/database pair. The corresponding PostgreSQL adapter is migration-led and uses a distinct operator migration credential and restricted runtime credential. See [STORAGE.md](STORAGE.md) for the upgrade, rollback, recovery, and remaining-operational-gates boundary.
 

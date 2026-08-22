@@ -14,6 +14,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from hormuz.cli import (
+    _audit_anchor,
     _audit_export,
     _audit_since,
     _auth_token,
@@ -23,12 +24,28 @@ from hormuz.cli import (
     build_parser,
     main,
 )
-from hormuz.config import ConfigError, GatewayConfig, Identity, OIDCIssuerConfig
+from hormuz.config import AuditAnchorConfig, ConfigError, GatewayConfig, Identity, KeyCustodyConfig, OIDCIssuerConfig
 from hormuz.contracts import validate_contract
+from hormuz.custody import AuditAnchorReceipt, parse_audit_anchor_artifact
 from hormuz.store import UsageStore
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+class _RecordingAuditAnchor:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def anchor(self, artifact: bytes, **kwargs: object) -> AuditAnchorReceipt:
+        self.calls.append({"artifact": artifact, **kwargs})
+        return AuditAnchorReceipt(
+            backend="test-anchor",
+            artifact_id=kwargs["artifact_id"],  # type: ignore[arg-type]
+            artifact_sha256="a" * 64,
+            head_digest=kwargs["head_digest"],  # type: ignore[arg-type]
+            object_version="version-1",
+        )
 
 
 class ClientConfigTests(unittest.TestCase):
@@ -324,6 +341,70 @@ class ClientConfigTests(unittest.TestCase):
         )
         with self.assertRaises(ValueError):
             _audit_since("not-a-timestamp")
+
+    def test_audit_anchor_emits_a_verified_metadata_only_artifact(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            config = replace(
+                self.config,
+                database_path=Path(temporary) / "usage.sqlite3",
+                key_custody=KeyCustodyConfig(
+                    backend="aws-kms",
+                    region="us-east-1",
+                    key_references={
+                        "provider_credential": "alias/provider",
+                        "data_encryption": "alias/data",
+                    },
+                ),
+                audit_anchor=AuditAnchorConfig(
+                    backend="aws-s3-object-lock",
+                    region="us-east-1",
+                    bucket="hormuz-audit-bucket",
+                    prefix="immutable/audit",
+                    retention_days=365,
+                    legal_hold=False,
+                ),
+            )
+            identity = next(iter(config.identities_by_token.values()))
+            UsageStore(config.database_path).record(
+                identity=identity,
+                client="codex",
+                protocol="openai",
+                requested_model="gpt-5.4-mini",
+                resolved_alias="gpt-5.4-mini",
+                upstream_model="gpt-5.4-mini",
+                policy_action="allowed",
+                status="succeeded",
+            )
+            sink = _RecordingAuditAnchor()
+            stderr = io.StringIO()
+            args = argparse.Namespace(kind="all", since="2026-08-01T00:00:00Z")
+            with mock.patch("hormuz.cli.create_audit_anchor_sink", return_value=sink), redirect_stderr(stderr):
+                self.assertEqual(_audit_anchor(config, args), 0)
+            artifact = parse_audit_anchor_artifact(sink.calls[0]["artifact"])  # type: ignore[arg-type]
+            self.assertEqual(artifact["event_count"], 1)
+            self.assertNotIn("prompt", repr(artifact))
+            self.assertIn("audit_anchor=test-anchor", stderr.getvalue())
+            self.assertIn(f"artifact_id={artifact['artifact_id']}", stderr.getvalue())
+            self.assertNotIn("Alice Example", stderr.getvalue())
+
+    def test_custody_and_audit_anchor_commands_are_explicit(self) -> None:
+        seal = build_parser().parse_args(
+            [
+                "custody",
+                "seal",
+                "--purpose",
+                "provider_credential",
+                "--input-env",
+                "COMPANY_OPENAI_KEY",
+                "--output",
+                "/etc/hormuz/openai.envelope",
+            ]
+        )
+        self.assertEqual(seal.command, "custody")
+        self.assertEqual(seal.custody_command, "seal")
+        anchor = build_parser().parse_args(["audit-anchor", "--kind", "security"])
+        self.assertEqual(anchor.command, "audit-anchor")
+        self.assertEqual(anchor.kind, "security")
 
 if __name__ == "__main__":
     unittest.main()
