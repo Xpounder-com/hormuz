@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import sqlite3
 import threading
 import time
@@ -26,6 +25,7 @@ from .contracts import (
     contract_envelope,
     relay_contract_header,
 )
+from .custody_runtime import resolve_upstream_credentials
 from .evidence import EvidenceStorageError
 from .policy import PolicyDecision, PolicyEngine
 from .postgres import PostgresStorageError
@@ -49,6 +49,7 @@ class GatewayServer(ThreadingHTTPServer):
         self.store: UsageRepository = create_usage_store(config)
         self.policy_engine = PolicyEngine(config, self.store)
         self.policy_engine.policy_runtime.verify_active_policies()
+        self.upstream_credentials = resolve_upstream_credentials(config)
         protected_values = [
             ("hormuz_identity_token", identity.token)
             for identity in config.identities_by_token.values()
@@ -56,8 +57,8 @@ class GatewayServer(ThreadingHTTPServer):
         ]
         protected_values.extend(
             ("provider_credential", value)
-            for upstream in config.upstreams.values()
-            if len(value := os.environ.get(upstream.api_key_env, "")) >= 8
+            for value in self.upstream_credentials.values()
+            if len(value) >= 8
         )
         self.secret_redactor = SecretRedactor(config.secret_controls, tuple(protected_values))
         super().__init__((config.listen.host, config.listen.port), GatewayRequestHandler)
@@ -414,11 +415,11 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         route = decision.route
         assert route is not None
         upstream = self.server.config.upstreams[protocol]
-        upstream_key = os.environ.get(upstream.api_key_env, "")
+        upstream_key = self.server.upstream_credentials.get(protocol, "")
         if not upstream_key:
             self._send_protocol_error(
                 protocol,
-                f"Gateway upstream credential is unavailable: {upstream.api_key_env}",
+                "Gateway upstream credential is unavailable",
                 HTTPStatus.SERVICE_UNAVAILABLE,
                 code="gateway_upstream_not_configured",
             )

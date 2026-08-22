@@ -47,4 +47,10 @@ Version 1 files remain readable by the contract validator for historical compati
 
 The checksum detects accidental or deliberate changes only when a trusted copy of the checksum is retained elsewhere. Hormuz does not yet sign exports, make the local SQLite database append-only, send the export to WORM storage, record who ran an export, or enforce audit-reader RBAC. Production deployments should ship events to an organization-controlled append-only destination and apply retention, legal-hold, access-review, and deletion policies there.
 
+An explicit AWS Object Lock anchor is now available for a configured deployment;
+see [CUSTODY.md](CUSTODY.md). It creates and verifies a strict hash-chained,
+metadata-only snapshot before writing a compliance-retained SSE-KMS object.
+It does not make the source database append-only or prove source completeness
+before the snapshot is created.
+
 The export covers only requests that passed through Hormuz. Provider-invoice reconciliation and gateway-bypass detection are separate enterprise milestones; this file must not be represented as complete organization-wide usage until those controls exist.

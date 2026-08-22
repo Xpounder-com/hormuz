@@ -11,9 +11,12 @@ import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from unittest import mock
 
 from hormuz.config import GatewayConfig, Policy
 from hormuz.contracts import relay_contract_header, validate_audit_event, validate_contract
+from hormuz.custody import KEY_PURPOSE_PROVIDER_CREDENTIAL, EnvelopeCipher, GeneratedDataKey
+from hormuz.custody_runtime import write_envelope_file
 from hormuz.policy import PolicyEngine
 from hormuz.postgres import PostgresStorageError
 from hormuz.server import GatewayServer, serve_in_thread
@@ -303,6 +306,52 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertEqual(totals.cache_read_tokens, 20)
         self.assertEqual(totals.reasoning_tokens, 7)
         self.assertGreater(totals.cost_microusd, 0)
+
+    def test_gateway_uses_an_encrypted_provider_credential_at_startup(self) -> None:
+        """The runtime must prefer the sealed source over any plaintext env value."""
+
+        self.gateway.shutdown()
+        self.gateway.server_close()
+        envelope_path = self.root / "openai.envelope"
+        data_key = b"K" * 32
+        provider = mock.Mock()
+        provider.generate_data_key.return_value = GeneratedDataKey(
+            key_reference="alias/hormuz-provider",
+            plaintext=data_key,
+            encrypted=b"test-wrapped-data-key",
+        )
+        provider.decrypt_data_key.return_value = data_key
+        envelope = EnvelopeCipher(provider).seal(
+            OPENAI_KEY.encode("utf-8"),
+            organization_id="organization",
+            purpose=KEY_PURPOSE_PROVIDER_CREDENTIAL,
+            key_reference="alias/hormuz-provider",
+        )
+        write_envelope_file(envelope_path, envelope)
+
+        config_value = self._config(self.provider.server_port, _free_port())
+        config_value["key_custody"] = {
+            "backend": "aws-kms",
+            "region": "us-east-1",
+            "key_references": {"provider_credential": "alias/hormuz-provider"},
+        }
+        config_value["upstreams"]["openai"] = {
+            "base_url": f"http://127.0.0.1:{self.provider.server_port}",
+            "api_key_envelope": "./openai.envelope",
+        }
+        self.config_path.write_text(json.dumps(config_value), encoding="utf-8")
+        # A fallback bug would make this different value reach the upstream.
+        os.environ["TEST_OPENAI_KEY"] = "unexpected-plaintext-fallback"
+        with mock.patch("hormuz.custody_runtime.create_data_key_provider", return_value=provider):
+            self.config = GatewayConfig.load(self.config_path)
+            self.gateway = GatewayServer(self.config)
+        self.gateway_thread = serve_in_thread(self.gateway)
+
+        status, _, _ = self._post("/v1/responses", {"model": "engineering-fast", "input": "hello"})
+        self.assertEqual(status, 200)
+        self.assertEqual(FakeProviderHandler.requests[-1]["headers"]["authorization"], f"Bearer {OPENAI_KEY}")
+        self.assertEqual(provider.decrypt_data_key.call_count, 1)
+        self.assertNotIn(OPENAI_KEY.encode("utf-8"), envelope_path.read_bytes())
 
     def test_policy_and_evidence_contracts_are_versioned_without_mutating_provider_body(self) -> None:
         status, headers, body = self._get("/health", token=None)

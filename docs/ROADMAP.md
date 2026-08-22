@@ -36,6 +36,13 @@ Only after the core contract is stable, the program proceeds through real operat
 3. prove TLS deployment, shared PostgreSQL operation, pooling, backup/restore/PITR, multi-instance revocation and coordination, health/readiness/SLOs, alerts, and incident procedures ([#11](https://github.com/Xpounder-com/hormuz/issues/11));
 4. prove container signing, SBOM and vulnerability gates, and independent release review ([#9](https://github.com/Xpounder-com/hormuz/issues/9)).
 
+PR [#31](https://github.com/Xpounder-com/hormuz/pull/31) supplies the generic
+custody contract and AWS KMS/S3 Object Lock reference implementation for #17,
+including an opt-in live conformance gate. #17 remains open until that gate is
+run in a customer-controlled AWS environment and the broader secret migration,
+immutable-history, retention operations, recovery, SIEM, and independent-review
+evidence is complete.
+
 ## Feature-freeze rule
 
 > A change is current-priority only if it removes deprecated context coupling, stabilizes the policy/evidence contract, fixes a security or correctness defect, or closes a production-readiness gate.

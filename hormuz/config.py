@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+from .custody import KEY_PURPOSES, KEY_PURPOSE_DATA_ENCRYPTION, KEY_PURPOSE_PROVIDER_CREDENTIAL
+
 
 class ConfigError(ValueError):
     pass
@@ -17,6 +19,8 @@ class ConfigError(ValueError):
 
 _ENVIRONMENT_NAME_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 _POSTGRES_IDENTIFIER_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
+_AWS_REGION_PATTERN = re.compile(r"[a-z]{2}(?:-gov)?-[a-z0-9-]+-\d+\Z")
+_S3_BUCKET_PATTERN = re.compile(r"[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]\Z")
 
 
 _DEPRECATED_CONTEXT_CONFIGURATION_KEYS = frozenset(
@@ -49,7 +53,8 @@ class ListenConfig:
 @dataclass(frozen=True)
 class UpstreamConfig:
     base_url: str
-    api_key_env: str
+    api_key_env: str | None = None
+    api_key_envelope_path: Path | None = None
     allow_response_storage: bool = False
     allow_background: bool = False
 
@@ -76,6 +81,37 @@ class UsageStorageConfig:
     postgres_migration_dsn_env: str = "HORMUZ_POSTGRES_MIGRATION_DSN"
     postgres_schema: str = "hormuz"
     postgres_runtime_role: str = "hormuz_runtime"
+
+
+@dataclass(frozen=True)
+class KeyCustodyConfig:
+    """A configured external envelope-key service with purpose-separated keys.
+
+    Key references are identifiers only.  AWS workload credentials come from
+    the ambient SDK chain and must never be written into Hormuz JSON.
+    """
+
+    backend: str
+    region: str
+    key_references: dict[str, str]
+
+    def key_reference_for(self, purpose: str) -> str:
+        try:
+            return self.key_references[purpose]
+        except KeyError:
+            raise ConfigError(f"key_custody.key_references lacks required purpose: {purpose}") from None
+
+
+@dataclass(frozen=True)
+class AuditAnchorConfig:
+    """An explicit external immutable-retention target for audit snapshots."""
+
+    backend: str
+    region: str
+    bucket: str
+    prefix: str
+    retention_days: int
+    legal_hold: bool
 
 
 @dataclass(frozen=True)
@@ -229,6 +265,8 @@ class GatewayConfig:
     upstream_timeout_seconds: int = 600
     usage_storage: UsageStorageConfig = field(default_factory=UsageStorageConfig)
     policy_control: PolicyControlConfig = field(default_factory=PolicyControlConfig)
+    key_custody: KeyCustodyConfig | None = None
+    audit_anchor: AuditAnchorConfig | None = None
 
     @classmethod
     def load(cls, path: str | Path, *, environ: dict[str, str] | None = None) -> "GatewayConfig":
@@ -292,6 +330,9 @@ class GatewayConfig:
                 "usage_storage.postgres_dsn_env and usage_storage.postgres_migration_dsn_env "
                 "must name separate credentials"
             )
+
+        key_custody = _key_custody(raw.get("key_custody"))
+        audit_anchor = _audit_anchor(raw.get("audit_anchor"), key_custody=key_custody)
 
         policy_control_raw = _object(raw.get("policy_control", {}), "policy_control")
         unsupported_policy_control_fields = set(policy_control_raw).difference(
@@ -365,13 +406,47 @@ class GatewayConfig:
         upstreams: dict[str, UpstreamConfig] = {}
         for protocol in ("openai", "anthropic"):
             item = _object(upstreams_raw.get(protocol), f"upstreams.{protocol}")
+            unsupported_upstream_fields = set(item).difference(
+                {
+                    "base_url",
+                    "api_key_env",
+                    "api_key_envelope",
+                    "allow_response_storage",
+                    "allow_background",
+                }
+            )
+            if unsupported_upstream_fields:
+                raise ConfigError(
+                    f"upstreams.{protocol} contains unsupported fields: "
+                    + ", ".join(sorted(str(field) for field in unsupported_upstream_fields))
+                )
             base_url = _string(item.get("base_url"), f"upstreams.{protocol}.base_url").rstrip("/")
             parsed = urlparse(base_url)
             if parsed.scheme not in {"http", "https"} or not parsed.netloc:
                 raise ConfigError(f"upstreams.{protocol}.base_url must be an HTTP(S) URL")
+            api_key_env_value = item.get("api_key_env")
+            api_key_envelope_value = item.get("api_key_envelope")
+            if (api_key_env_value is None) == (api_key_envelope_value is None):
+                raise ConfigError(
+                    f"upstreams.{protocol} must configure exactly one of api_key_env or api_key_envelope"
+                )
+            api_key_env: str | None = None
+            api_key_envelope_path: Path | None = None
+            if api_key_env_value is not None:
+                api_key_env = _environment_name(api_key_env_value, f"upstreams.{protocol}.api_key_env")
+            else:
+                if key_custody is None:
+                    raise ConfigError(f"upstreams.{protocol}.api_key_envelope requires key_custody")
+                key_custody.key_reference_for(KEY_PURPOSE_PROVIDER_CREDENTIAL)
+                api_key_envelope_path = _configured_path(
+                    api_key_envelope_value,
+                    f"upstreams.{protocol}.api_key_envelope",
+                    source_path.parent,
+                )
             upstreams[protocol] = UpstreamConfig(
                 base_url=base_url,
-                api_key_env=_string(item.get("api_key_env"), f"upstreams.{protocol}.api_key_env"),
+                api_key_env=api_key_env,
+                api_key_envelope_path=api_key_envelope_path,
                 allow_response_storage=_boolean(
                     item.get("allow_response_storage", False),
                     f"upstreams.{protocol}.allow_response_storage",
@@ -593,11 +668,19 @@ class GatewayConfig:
                 postgres_control_role=policy_control_role,
                 break_glass=break_glass,
             ),
+            key_custody=key_custody,
+            audit_anchor=audit_anchor,
         )
         config.validate_references()
         return config
 
     def validate_references(self) -> None:
+        if any(upstream.api_key_envelope_path is not None for upstream in self.upstreams.values()):
+            if len(self.organization_ids) != 1:
+                raise ConfigError(
+                    "encrypted upstream credentials require exactly one configured organization; "
+                    "use a tenant-scoped gateway configuration"
+                )
         policies = [self.organization_policy, *self.team_policies.values(), *self.actor_policies.values()]
         for policy in policies:
             for alias in policy.allowed_models or ():
@@ -801,6 +884,78 @@ def _secret_controls(value: Any, env: dict[str, str]) -> SecretControls:
     )
 
 
+def _key_custody(value: Any) -> KeyCustodyConfig | None:
+    """Parse an opt-in external key-custody profile without credentials."""
+
+    if value is None:
+        return None
+    item = _object(value, "key_custody")
+    unsupported = set(item).difference({"backend", "region", "key_references"})
+    if unsupported:
+        raise ConfigError("key_custody contains unsupported fields: " + ", ".join(sorted(unsupported)))
+    backend = _string(item.get("backend"), "key_custody.backend")
+    if backend != "aws-kms":
+        raise ConfigError("key_custody.backend must be aws-kms")
+    region = _aws_region(item.get("region"), "key_custody.region")
+    raw_references = _object(item.get("key_references"), "key_custody.key_references")
+    if not raw_references:
+        raise ConfigError("key_custody.key_references must contain at least one purpose")
+    key_references: dict[str, str] = {}
+    for purpose, raw_reference in raw_references.items():
+        if not isinstance(purpose, str) or purpose not in KEY_PURPOSES:
+            raise ConfigError(
+                "key_custody.key_references keys must be one of: " + ", ".join(sorted(KEY_PURPOSES))
+            )
+        reference = _string(raw_reference, f"key_custody.key_references.{purpose}")
+        if len(reference) > 2048 or any(character in reference for character in "\x00\r\n"):
+            raise ConfigError(f"key_custody.key_references.{purpose} must be a safe KMS key reference")
+        key_references[purpose] = reference
+    if len(key_references) != len(set(key_references.values())):
+        raise ConfigError("key_custody.key_references must use distinct keys for distinct purposes")
+    return KeyCustodyConfig(backend=backend, region=region, key_references=key_references)
+
+
+def _audit_anchor(value: Any, *, key_custody: KeyCustodyConfig | None) -> AuditAnchorConfig | None:
+    """Parse an explicit S3 Object Lock target with no accidental default."""
+
+    if value is None:
+        return None
+    item = _object(value, "audit_anchor")
+    unsupported = set(item).difference({"backend", "region", "bucket", "prefix", "retention_days", "legal_hold"})
+    if unsupported:
+        raise ConfigError("audit_anchor contains unsupported fields: " + ", ".join(sorted(unsupported)))
+    backend = _string(item.get("backend"), "audit_anchor.backend")
+    if backend != "aws-s3-object-lock":
+        raise ConfigError("audit_anchor.backend must be aws-s3-object-lock")
+    if key_custody is None:
+        raise ConfigError("audit_anchor requires key_custody for SSE-KMS encryption")
+    key_custody.key_reference_for(KEY_PURPOSE_DATA_ENCRYPTION)
+    region = _aws_region(item.get("region"), "audit_anchor.region")
+    if region != key_custody.region:
+        raise ConfigError("audit_anchor.region must equal key_custody.region for SSE-KMS")
+    bucket = _string(item.get("bucket"), "audit_anchor.bucket")
+    if _S3_BUCKET_PATTERN.fullmatch(bucket) is None or ".." in bucket or ".-" in bucket or "-." in bucket:
+        raise ConfigError("audit_anchor.bucket must be a valid lower-case S3 bucket name")
+    prefix = _string(item.get("prefix", "hormuz/audit"), "audit_anchor.prefix").strip("/")
+    if (
+        not prefix
+        or len(prefix) > 512
+        or any(character in prefix for character in "\x00\r\n")
+        or any(part in {"", ".", ".."} for part in prefix.split("/"))
+    ):
+        raise ConfigError("audit_anchor.prefix must be a safe non-empty object-key prefix")
+    retention_days = _integer(item.get("retention_days"), "audit_anchor.retention_days", minimum=1, maximum=36500)
+    legal_hold = _boolean(item.get("legal_hold", False), "audit_anchor.legal_hold")
+    return AuditAnchorConfig(
+        backend=backend,
+        region=region,
+        bucket=bucket,
+        prefix=prefix,
+        retention_days=retention_days,
+        legal_hold=legal_hold,
+    )
+
+
 def _bootstrap_administrators(
     value: list[Any],
     *,
@@ -954,6 +1109,21 @@ def _environment_name(value: Any, path: str) -> str:
     if _ENVIRONMENT_NAME_PATTERN.fullmatch(result) is None:
         raise ConfigError(f"{path} must be a safe environment variable name")
     return result
+
+
+def _aws_region(value: Any, path: str) -> str:
+    result = _string(value, path)
+    if _AWS_REGION_PATTERN.fullmatch(result) is None:
+        raise ConfigError(f"{path} must be a valid AWS region identifier")
+    return result
+
+
+def _configured_path(value: Any, path: str, base_directory: Path) -> Path:
+    result = _string(value, path)
+    if any(character in result for character in "\x00\r\n"):
+        raise ConfigError(f"{path} must be a safe file path")
+    configured = Path(result).expanduser()
+    return configured.resolve() if configured.is_absolute() else (base_directory / configured).resolve()
 
 
 def _postgres_identifier(value: Any, path: str) -> str:

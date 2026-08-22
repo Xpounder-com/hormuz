@@ -10,12 +10,28 @@ import sqlite3
 import shlex
 import signal
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
 from .auth import AuthenticationError, Authenticator
 from .config import ConfigError, GatewayConfig
+from .custody import (
+    KEY_PURPOSES,
+    CustodyError,
+    EnvelopeCipher,
+    audit_anchor_summary,
+    build_audit_anchor_artifact,
+    serialize_envelope,
+    serialize_audit_anchor_artifact,
+)
+from .custody_runtime import (
+    create_audit_anchor_sink,
+    create_data_key_provider,
+    read_envelope_file,
+    resolve_upstream_credentials,
+    write_envelope_file,
+)
 from .evidence import EvidenceStorageError
 from .contracts import (
     ALLOCATION_BASIS_DIRECT_GATEWAY_REQUEST,
@@ -160,6 +176,35 @@ def build_parser() -> argparse.ArgumentParser:
     audit.add_argument("--output", default="-", help="Output path or - for stdout (default: -)")
     audit.add_argument("--force", action="store_true", help="Allow replacing an existing output file")
 
+    audit_anchor = subparsers.add_parser(
+        "audit-anchor",
+        help="Hash-chain and immutably retain metadata-only audit evidence",
+    )
+    audit_anchor.add_argument("--kind", choices=["all", "usage", "security"], default="all")
+    audit_anchor.add_argument("--since", help="UTC ISO-8601 lower bound (default: start of current month)")
+
+    custody = subparsers.add_parser("custody", help="Operate configured encrypted credential custody")
+    custody_subparsers = custody.add_subparsers(dest="custody_command", required=True)
+    custody_subparsers.add_parser(
+        "verify",
+        help="Exercise AWS KMS keys and verify S3 Object Lock readiness without writing an audit object",
+    )
+    seal = custody_subparsers.add_parser(
+        "seal",
+        help="Seal a value from an environment variable into an owner-only encrypted envelope",
+    )
+    seal.add_argument("--purpose", choices=sorted(KEY_PURPOSES), required=True)
+    seal.add_argument("--input-env", required=True, help="Environment variable containing the value to seal")
+    seal.add_argument("--output", required=True, help="Owner-only encrypted envelope output path")
+    seal.add_argument("--force", action="store_true", help="Allow replacing an existing envelope path")
+    rewrap = custody_subparsers.add_parser(
+        "rewrap",
+        help="Move an encrypted data key to the current key for its existing purpose",
+    )
+    rewrap.add_argument("--input", required=True, help="Existing encrypted envelope path")
+    rewrap.add_argument("--output", required=True, help="Owner-only rewrapped envelope output path")
+    rewrap.add_argument("--force", action="store_true", help="Allow replacing an existing envelope path")
+
     storage = subparsers.add_parser("storage", help="Verify or migrate the metadata-only usage store")
     storage_subparsers = storage.add_subparsers(dest="storage_command", required=True)
     storage_subparsers.add_parser("verify", help="Verify the configured store is safe for this binary")
@@ -217,6 +262,10 @@ def main(argv: list[str] | None = None) -> int:
             )
         if args.command == "audit-export":
             return _audit_export(config, args)
+        if args.command == "audit-anchor":
+            return _audit_anchor(config, args)
+        if args.command == "custody":
+            return _custody(config, args)
         if args.command == "storage":
             return _storage(config, args)
     except ConfigError as error:
@@ -224,6 +273,9 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     except (EvidenceStorageError, PostgresStorageError, StorageSchemaError) as error:
         print(f"storage error: {error.code}", file=sys.stderr)
+        return 2
+    except CustodyError as error:
+        print(f"custody error: {error.code}", file=sys.stderr)
         return 2
     except (PolicyControlError, PolicyDocumentError) as error:
         print(f"policy control error: {error.code}", file=sys.stderr)
@@ -268,13 +320,13 @@ def _context_experiment_moved() -> int:
 
 
 def _serve(config: GatewayConfig) -> int:
-    missing = _missing_upstream_credentials(config)
+    server = GatewayServer(config)
+    missing = [protocol for protocol, value in server.upstream_credentials.items() if not value]
     if missing:
         print(
             "warning: requests for these providers will fail until credentials are set: " + ", ".join(missing),
             file=sys.stderr,
         )
-    server = GatewayServer(config)
     print(f"Hormuz listening on http://{config.listen.host}:{config.listen.port}")
     print("Protocols: POST /v1/responses and POST /v1/messages")
     print(f"Usage storage: {config.usage_storage.backend}")
@@ -311,11 +363,12 @@ def _doctor(config: GatewayConfig) -> int:
             print(f"OIDC metadata: unavailable ({error.code})")
             return 1
         print(f"OIDC signing keys: {sum(metadata.values())} usable across {len(metadata)} issuer(s)")
-    missing = _missing_upstream_credentials(config)
+    credentials = resolve_upstream_credentials(config)
+    missing = [protocol for protocol, value in credentials.items() if not value]
     if missing:
         print("missing upstream credentials:")
         for protocol in missing:
-            print(f"  - {protocol}: {config.upstreams[protocol].api_key_env}")
+            print(f"  - {protocol}")
         return 1
     print("upstream credentials: configured")
     return 0
@@ -871,6 +924,124 @@ def _audit_export(config: GatewayConfig, args: argparse.Namespace) -> int:
     return 0
 
 
+def _audit_anchor(config: GatewayConfig, args: argparse.Namespace) -> int:
+    """Create and externally retain one verified, metadata-only audit snapshot."""
+
+    try:
+        since = _audit_since(args.since)
+    except ValueError as error:
+        print(f"invalid --since: {error}", file=sys.stderr)
+        return 2
+    organization_id = _required_organization(config)
+    events = create_usage_store(config).audit_events(
+        since=since,
+        kind=args.kind,
+        organization_id=organization_id,
+    )
+    artifact = build_audit_anchor_artifact(events, organization_id=organization_id)
+    artifact_id, head_digest, event_count = audit_anchor_summary(artifact)
+    serialized = serialize_audit_anchor_artifact(artifact)
+    anchor_config = config.audit_anchor
+    if anchor_config is None:
+        raise CustodyError("audit_anchor_unconfigured")
+    retention_until = datetime.now(timezone.utc) + timedelta(days=anchor_config.retention_days)
+    receipt = create_audit_anchor_sink(config).anchor(
+        serialized,
+        artifact_id=artifact_id,
+        organization_id=organization_id,
+        head_digest=head_digest,
+        retention_until=retention_until,
+        legal_hold=anchor_config.legal_hold,
+    )
+    version = f" object_version={receipt.object_version}" if receipt.object_version else ""
+    print(
+        f"audit_anchor={receipt.backend} artifact_id={receipt.artifact_id} events={event_count} "
+        f"artifact_sha256={receipt.artifact_sha256} "
+        f"head_digest={receipt.head_digest}{version}",
+        file=sys.stderr,
+    )
+    return 0
+
+
+def _custody(config: GatewayConfig, args: argparse.Namespace) -> int:
+    if args.custody_command == "verify":
+        return _custody_verify(config)
+    if args.custody_command == "seal":
+        return _custody_seal(config, args)
+    if args.custody_command == "rewrap":
+        return _custody_rewrap(config, args)
+    raise CustodyError("custody_command_unsupported")
+
+
+def _custody_verify(config: GatewayConfig) -> int:
+    """Exercise the AWS key profile and verify Object Lock without an audit write."""
+
+    from .aws_custody import AWSKMSKeyCustodian, S3ObjectLockAuditAnchorSink, verify_aws_kms_profile
+
+    key_custody = config.key_custody
+    anchor_config = config.audit_anchor
+    if key_custody is None or anchor_config is None:
+        raise CustodyError("custody_profile_unconfigured")
+    provider = create_data_key_provider(config)
+    if not isinstance(provider, AWSKMSKeyCustodian):
+        raise CustodyError("custody_profile_backend_unsupported")
+    statuses = verify_aws_kms_profile(
+        provider,
+        key_custody.key_references,
+        organization_id=_required_organization(config),
+    )
+    sink = create_audit_anchor_sink(config)
+    if not isinstance(sink, S3ObjectLockAuditAnchorSink):
+        raise CustodyError("custody_profile_backend_unsupported")
+    sink.verify_configuration()
+    print(
+        f"key_custody=aws-kms verified_purposes={len(statuses)} data_key_round_trip=passed "
+        "audit_anchor=aws-s3-object-lock object_lock=enabled versioning=enabled",
+    )
+    return 0
+
+
+def _custody_seal(config: GatewayConfig, args: argparse.Namespace) -> int:
+    source = os.environ.get(args.input_env, "")
+    if not source:
+        raise CustodyError("custody_input_unavailable")
+    if "\x00" in source or "\r" in source or "\n" in source:
+        raise CustodyError("custody_input_invalid")
+    key_custody = config.key_custody
+    if key_custody is None:
+        raise CustodyError("key_custody_unconfigured")
+    organization_id = _required_organization(config)
+    envelope = EnvelopeCipher(create_data_key_provider(config)).seal(
+        source.encode("utf-8"),
+        organization_id=organization_id,
+        purpose=args.purpose,
+        key_reference=key_custody.key_reference_for(args.purpose),
+    )
+    write_envelope_file(Path(args.output).expanduser().absolute(), envelope, force=args.force)
+    print(
+        f"sealed_envelope={envelope.purpose} sha256={hashlib.sha256(serialize_envelope(envelope)).hexdigest()}",
+    )
+    return 0
+
+
+def _custody_rewrap(config: GatewayConfig, args: argparse.Namespace) -> int:
+    key_custody = config.key_custody
+    if key_custody is None:
+        raise CustodyError("key_custody_unconfigured")
+    envelope = read_envelope_file(Path(args.input).expanduser().absolute())
+    if envelope.organization_id != _required_organization(config):
+        raise CustodyError("encrypted_envelope_organization_invalid")
+    rewrapped = EnvelopeCipher(create_data_key_provider(config)).rewrap(
+        envelope,
+        destination_key_reference=key_custody.key_reference_for(envelope.purpose),
+    )
+    write_envelope_file(Path(args.output).expanduser().absolute(), rewrapped, force=args.force)
+    print(
+        f"rewrapped_envelope={rewrapped.purpose} sha256={hashlib.sha256(serialize_envelope(rewrapped)).hexdigest()}",
+    )
+    return 0
+
+
 def _audit_since(value: str | None) -> str:
     if value is None:
         return datetime.now(timezone.utc).replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat()
@@ -880,19 +1051,11 @@ def _audit_since(value: str | None) -> str:
     return parsed.astimezone(timezone.utc).isoformat()
 
 
-def _missing_upstream_credentials(config: GatewayConfig) -> list[str]:
-    return [
-        protocol
-        for protocol, upstream in config.upstreams.items()
-        if not os.environ.get(upstream.api_key_env)
-    ]
-
-
 def _required_organization(config: GatewayConfig) -> str:
     organization_ids = config.organization_ids
     if len(organization_ids) != 1:
         raise ConfigError(
-            "usage reporting and audit export require exactly one configured organization; "
+            "usage reporting, audit export, and encrypted custody commands require exactly one configured organization; "
             "use a tenant-scoped configuration"
         )
     return organization_ids[0]
