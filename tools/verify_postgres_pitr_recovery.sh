@@ -162,6 +162,19 @@ prepare_recovery_data() {
     ' bash "/pitr/$relative_data_directory" "$archive_directory" "$recovery_target" >/dev/null
 }
 
+copy_disposable_base_backup() {
+  local source_directory="$1"
+  local destination_directory="$2"
+  docker run --rm --user root --entrypoint bash --volume "$WORK_DIR:/pitr:rw" "$POSTGRES_IMAGE" \
+    -ceu '
+      source_directory="$1"
+      destination_directory="$2"
+      test -f "$source_directory/PG_VERSION"
+      test ! -e "$destination_directory"
+      cp -a "$source_directory" "$destination_directory"
+    ' bash "/pitr/$source_directory" "/pitr/$destination_directory" >/dev/null
+}
+
 start_recovery() {
   local container="$1"
   local relative_data_directory="$2"
@@ -199,6 +212,7 @@ duration_ms() {
 require_explicit_opt_in
 if [[ -z "$EVIDENCE_DIR" ]]; then EVIDENCE_DIR="$(mktemp -d /tmp/hormuz-postgres-pitr-evidence.XXXXXX)"; fi
 WORK_DIR="$(mktemp -d /tmp/hormuz-postgres-pitr.XXXXXX)"
+chmod 0711 "$WORK_DIR"
 SOURCE_STATE="$WORK_DIR/source-state.json"
 RECOVERY_STATE="$WORK_DIR/recovery-state.json"
 BASE_BACKUP="$WORK_DIR/base-backup"
@@ -209,7 +223,7 @@ WAL_ARCHIVE="$WORK_DIR/wal-archive"
 EMPTY_WAL_ARCHIVE="$WORK_DIR/empty-wal-archive"
 mkdir -p "$EVIDENCE_DIR" "$WAL_ARCHIVE" "$EMPTY_WAL_ARCHIVE"
 chmod 0700 "$EVIDENCE_DIR"
-chmod 0777 "$WAL_ARCHIVE" "$EMPTY_WAL_ARCHIVE"
+chmod 0733 "$WAL_ARCHIVE" "$EMPTY_WAL_ARCHIVE"
 cd "$REPOSITORY_ROOT"
 
 total_started_seconds=$SECONDS
@@ -230,7 +244,7 @@ seed_ms="$(duration_ms "$seed_started_seconds")"
 
 base_backup_started_seconds=$SECONDS
 mkdir -p "$BASE_BACKUP"
-chmod 0777 "$BASE_BACKUP"
+chmod 0733 "$BASE_BACKUP"
 docker exec --env PGPASSWORD="$DATABASE_PASSWORD" "$SOURCE_CONTAINER"   pg_basebackup --host=127.0.0.1 --username=postgres --pgdata=/pitr/base-backup   --format=plain --wal-method=stream --progress >/dev/null
 if [[ ! -f "$BASE_BACKUP/PG_VERSION" ]]; then failure 'physical_base_backup_missing'; fi
 base_backup_ms="$(duration_ms "$base_backup_started_seconds")"
@@ -251,7 +265,7 @@ wal_archive_ms="$(duration_ms "$wal_archive_started_seconds")"
 
 docker stop --time 15 "$SOURCE_CONTAINER" >/dev/null
 
-cp -a "$BASE_BACKUP" "$RECOVERY_BASE_BACKUP"
+copy_disposable_base_backup "$(basename "$BASE_BACKUP")" "$(basename "$RECOVERY_BASE_BACKUP")"
 prepare_recovery_data "$(basename "$RECOVERY_BASE_BACKUP")" "/pitr/wal-archive" "$PITR_TARGET"
 restore_started_seconds=$SECONDS
 start_recovery "$RECOVERY_CONTAINER" "$(basename "$RECOVERY_BASE_BACKUP")"
@@ -273,12 +287,12 @@ verify_started_seconds=$SECONDS
 run_recovery_tool verify --runtime-dsn "$recovery_runtime_dsn"   --policy-control-dsn "$recovery_policy_control_dsn" --schema "$SCHEMA"   --runtime-role "$RUNTIME_ROLE" --policy-control-role "$POLICY_CONTROL_ROLE"   --expected-state "$SOURCE_STATE" --state-output "$RECOVERY_STATE" >/dev/null
 verify_ms="$(duration_ms "$verify_started_seconds")"
 
-cp -a "$BASE_BACKUP" "$UNREACHABLE_BASE_BACKUP"
+copy_disposable_base_backup "$(basename "$BASE_BACKUP")" "$(basename "$UNREACHABLE_BASE_BACKUP")"
 prepare_recovery_data "$(basename "$UNREACHABLE_BASE_BACKUP")" "/pitr/wal-archive" "$UNREACHABLE_TARGET"
 start_negative_recovery "$UNREACHABLE_CONTAINER" "$(basename "$UNREACHABLE_BASE_BACKUP")"
 wait_for_failed_recovery "$UNREACHABLE_CONTAINER"
 
-cp -a "$BASE_BACKUP" "$MISSING_WAL_BASE_BACKUP"
+copy_disposable_base_backup "$(basename "$BASE_BACKUP")" "$(basename "$MISSING_WAL_BASE_BACKUP")"
 prepare_recovery_data "$(basename "$MISSING_WAL_BASE_BACKUP")" "/pitr/empty-wal-archive" "$PITR_TARGET"
 start_negative_recovery "$MISSING_WAL_CONTAINER" "$(basename "$MISSING_WAL_BASE_BACKUP")"
 wait_for_failed_recovery "$MISSING_WAL_CONTAINER"
