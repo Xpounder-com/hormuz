@@ -181,3 +181,31 @@ credentials. A failing run emits no dump or intermediate state artifact. This
 is evidence for a disposable logical exercise only. It does not establish
 PITR, production RPO/RTO, cloud backup, customer-data recovery, encryption,
 HA/failover, automatic promotion, or DR certification.
+
+## PostgreSQL interruption and pool recovery
+
+The same `PostgreSQL recovery drills` CI job also invokes:
+
+```bash
+./tools/verify_postgres_interruption_recovery.sh
+```
+
+The opt-in wrapper creates one specifically named and Docker-labelled
+disposable PostgreSQL 16.14 container from the pinned image and fixes one
+loopback host port to it for the container lifetime. The verifier rejects any
+other target before it can issue an interruption command. It runs
+one managed-policy gateway with restricted runtime and policy-control roles,
+confirms a governed request, abruptly stops the database, and requires both a
+content-free not-ready response and pre-egress governed-request failure. It
+then restarts the same container and requires the same gateway process and
+open `PostgresConnectionPool` to become ready and relay a **new** request
+without provider replay. The fixture also checks retained usage evidence and
+an empty second tenant after recovery.
+
+CI retains only `hormuz.postgresql-interruption-recovery` v1 `summary.json`
+for seven days. Its strict schema contains the pinned database identity,
+boolean checks, and durations; it excludes container names, connection
+strings, credentials, fixture policy, request/response content, and provider
+payloads. This proves one single-instance, disposable stop/restart behavior.
+It does not establish PostgreSQL HA/failover, multi-instance recovery,
+production RPO/RTO, automatic provider replay, or incident-response readiness.

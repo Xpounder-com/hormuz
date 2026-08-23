@@ -13,7 +13,7 @@ from unittest import mock
 
 from hormuz.cli import _doctor, _storage
 from hormuz.config import GatewayConfig, ListenConfig, PostgresPoolConfig
-from hormuz.postgres import PostgresConnectionPool, PostgresStorageError
+from hormuz.postgres import PostgresConnectionPool, PostgresStorageError, _rearm_pool_after_reconnect_failure
 from hormuz.server import GatewayRequestHandler, GatewayServer, serve_in_thread
 from hormuz.store import ReservationDenied
 
@@ -53,7 +53,9 @@ class _FakePoolModule:
             self.kwargs = kwargs
             self.open_calls: list[tuple[bool, int]] = []
             self.close_calls: list[int] = []
+            self.check_calls = 0
             self.connection_timeouts: list[int] = []
+            self.stats = {"pool_available": 0, "connections_lost": 0, "connections_errors": 0}
             self.connection_value = object()
             self.__class__.instances.append(self)
 
@@ -71,6 +73,12 @@ class _FakePoolModule:
 
         def close(self, *, timeout: int) -> None:
             self.close_calls.append(timeout)
+
+        def check(self) -> None:
+            self.check_calls += 1
+
+        def get_stats(self) -> dict[str, int]:
+            return dict(self.stats)
 
 
 class PostgresPoolUnitTests(unittest.TestCase):
@@ -112,7 +120,8 @@ class PostgresPoolUnitTests(unittest.TestCase):
                 "max_waiting": 9,
                 "max_lifetime": 1800,
                 "max_idle": 300,
-                "reconnect_timeout": 7,
+                "reconnect_timeout": 15,
+                "reconnect_failed": _rearm_pool_after_reconnect_failure,
                 "check": _FakePoolModule.ConnectionPool.check_connection,
                 "name": "hormuz-runtime",
                 "num_workers": 1,
@@ -120,6 +129,13 @@ class PostgresPoolUnitTests(unittest.TestCase):
             },
         )
         self.assertEqual(fake.open_calls, [(True, 7)])
+        callback = fake.kwargs["reconnect_failed"]
+        self.assertIs(callback, _rearm_pool_after_reconnect_failure)
+        callback(fake)
+        self.assertEqual(fake.check_calls, 1)
+        fake.check = mock.Mock(side_effect=RuntimeError("pool still unavailable"))
+        callback(fake)
+        fake.check.assert_called_once_with()
         with pool.connection() as connection:
             self.assertIs(connection, fake.connection_value)
         self.assertEqual(fake.connection_timeouts, [7])
@@ -138,12 +154,14 @@ class PostgresPoolUnitTests(unittest.TestCase):
 
         _FakePoolModule.ConnectionPool.open_error = None
         pool = self._pool()
+        fake = _FakePoolModule.ConnectionPool.instances[-1]
         _FakePoolModule.ConnectionPool.checkout_error = _FakePoolModule.TooManyRequests(secret_dsn_fragment)
         with self.assertRaises(PostgresStorageError) as raised:
             with pool.connection():
                 self.fail("a saturated pool must not yield a connection")
         self.assertEqual(raised.exception.code, "storage_pool_exhausted")
         self.assertNotIn(secret_dsn_fragment, str(raised.exception))
+        self.assertEqual(fake.check_calls, 0)
 
         _FakePoolModule.ConnectionPool.checkout_error = _FakePoolModule.PoolClosed(secret_dsn_fragment)
         with self.assertRaises(PostgresStorageError) as raised:
@@ -151,6 +169,7 @@ class PostgresPoolUnitTests(unittest.TestCase):
                 self.fail("a closed pool must not yield a connection")
         self.assertEqual(raised.exception.code, "storage_pool_closed")
         self.assertNotIn(secret_dsn_fragment, str(raised.exception))
+        self.assertEqual(fake.check_calls, 0)
         pool.close()
 
     def test_domain_errors_from_a_pooled_transaction_are_not_reclassified_as_storage_failures(self) -> None:
@@ -184,6 +203,7 @@ class GatewayPostgresPoolOwnershipTests(unittest.TestCase):
         pool = mock.Mock()
         pool.settings = PostgresPoolConfig()
         store = mock.Mock()
+        store.sweep_stale_request_attempts.return_value = 0
         runtime = mock.Mock()
         engine = mock.Mock(policy_runtime=runtime)
         with (
