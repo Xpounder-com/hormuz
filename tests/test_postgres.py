@@ -2,14 +2,17 @@ from __future__ import annotations
 
 from contextlib import redirect_stdout
 from dataclasses import replace
+import http.client
 import io
 import json
 import os
 from pathlib import Path
 import sqlite3
+import socket
 import tempfile
 import threading
 import unittest
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import quote
 from unittest import mock
 from uuid import uuid4
@@ -31,12 +34,72 @@ from hormuz.postgres import (
 )
 from hormuz.postgres_policy_store import PostgresPolicyControlStore
 from hormuz.postgres_usage_store import PostgresUsageStore
+from hormuz.server import GatewayServer, serve_in_thread
 from hormuz.store import ReservationDenied, ReservationScope, UsageStore
 from hormuz.store_router import create_usage_store
 
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests" / "fixtures" / "contracts"
+
+
+class _BlockingReplicaBudgetProviderHandler(BaseHTTPRequestHandler):
+    """Hold one provider response so another gateway observes its reservation."""
+
+    protocol_version = "HTTP/1.1"
+    first_request_started = threading.Event()
+    release_first_response = threading.Event()
+    request_count = 0
+    request_lock = threading.Lock()
+
+    @classmethod
+    def reset(cls) -> None:
+        cls.first_request_started = threading.Event()
+        cls.release_first_response = threading.Event()
+        cls.request_count = 0
+
+    def do_POST(self) -> None:  # noqa: N802
+        length = int(self.headers.get("Content-Length", "0"))
+        payload = json.loads(self.rfile.read(length))
+        with self.request_lock:
+            type(self).request_count += 1
+            ordinal = type(self).request_count
+
+        if ordinal != 1:
+            self._send_json({"error": "unexpected provider admission"}, status=500)
+            return
+
+        type(self).first_request_started.set()
+        if not type(self).release_first_response.wait(timeout=10):
+            self._send_json({"error": "provider release timed out"}, status=503)
+            return
+
+        self._send_json(
+            {
+                "id": "resp_replica_budget",
+                "object": "response",
+                "status": "completed",
+                "model": payload["model"],
+                "output": [],
+                "usage": {
+                    "input_tokens": 1,
+                    "output_tokens": 0,
+                    "total_tokens": 1,
+                },
+            }
+        )
+
+    def _send_json(self, value: dict[str, object], *, status: int = 200) -> None:
+        body = json.dumps(value, separators=(",", ":")).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("x-request-id", "req_replica_budget")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, format: str, *args: object) -> None:
+        pass
 
 
 @unittest.skipUnless(
@@ -1151,6 +1214,165 @@ class PostgresUsageStoreTests(unittest.TestCase):
             thread.join(timeout=10)
         self.assertEqual(sorted(outcomes), ["allowed", "denied"])
 
+    def test_two_gateway_instances_share_atomic_organization_budget_reservations(self) -> None:
+        """A durable reservation made through one gateway constrains the other.
+
+        The lower-level store test above proves the advisory-lock algorithm.
+        This test deliberately exercises the full request path through two
+        independently constructed gateway servers and their separate runtime
+        pools: authentication, policy evaluation, reservation, provider
+        admission, evidence accounting, and reservation release.
+        """
+
+        _BlockingReplicaBudgetProviderHandler.reset()
+        provider = ThreadingHTTPServer(("127.0.0.1", 0), _BlockingReplicaBudgetProviderHandler)
+        provider_thread = threading.Thread(target=provider.serve_forever, daemon=True)
+        provider_thread.start()
+
+        gateways: list[GatewayServer] = []
+        gateway_threads: list[threading.Thread] = []
+        first_request_thread: threading.Thread | None = None
+        try:
+            request_body = {"model": "gpt-5.4-mini", "input": "replica budget probe"}
+            max_output_tokens = 1
+            reserved_body = {**request_body, "store": False, "max_output_tokens": max_output_tokens}
+            reserved_cost_microusd = len(
+                json.dumps(reserved_body, separators=(",", ":")).encode("utf-8")
+            ) * 1_000_000
+            organization_budget_usd = reserved_cost_microusd * 1.5 / 1_000_000
+            self.assertGreater(reserved_cost_microusd, 0)
+            self.assertLessEqual(reserved_cost_microusd, round(organization_budget_usd * 1_000_000))
+            self.assertGreater(reserved_cost_microusd * 2, round(organization_budget_usd * 1_000_000))
+
+            with tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                config_value = json.loads((ROOT / "config.example.json").read_text(encoding="utf-8"))
+                config_value["usage_storage"] = {
+                    "backend": "postgresql",
+                    "postgres_dsn_env": "TEST_POSTGRES_RUNTIME_DSN",
+                    "postgres_migration_dsn_env": "TEST_POSTGRES_MIGRATION_DSN",
+                    "postgres_schema": self.schema,
+                    "postgres_runtime_role": self.runtime_role,
+                }
+                config_value["upstreams"]["openai"] = {
+                    "base_url": f"http://127.0.0.1:{provider.server_port}/v1",
+                    "api_key_env": "TEST_REPLICA_OPENAI_KEY",
+                    "allow_response_storage": False,
+                    "allow_background": False,
+                }
+                config_value["upstreams"]["anthropic"][
+                    "api_key_env"
+                ] = "TEST_REPLICA_ANTHROPIC_KEY"
+                config_value["model_routes"]["gpt-5.4-mini"] = {
+                    "protocol": "openai",
+                    "upstream_model": "gpt-5.4-mini",
+                    "input_cost_per_million": 1_000_000,
+                    "cache_read_cost_per_million": 0,
+                    "cache_write_cost_per_million": 0,
+                    "output_cost_per_million": 0,
+                }
+                config_value["policies"]["organization"]["max_output_tokens"] = max_output_tokens
+                config_value["policies"]["teams"]["engineering"]["max_output_tokens"] = max_output_tokens
+                config_value["policies"]["organization"]["monthly_budget_usd"] = organization_budget_usd
+
+                environment = {
+                    "HORMUZ_TOKEN": "replica-budget-employee-token",
+                    "TEST_POSTGRES_RUNTIME_DSN": self.runtime_dsn,
+                    "TEST_POSTGRES_MIGRATION_DSN": self.owner_dsn,
+                    "TEST_REPLICA_OPENAI_KEY": "replica-budget-provider-key",
+                    "TEST_REPLICA_ANTHROPIC_KEY": "replica-budget-anthropic-key",
+                }
+                configs: list[GatewayConfig] = []
+                for index in range(2):
+                    config_value["listen"]["port"] = _free_port()
+                    config_path = root / f"gateway-{index}.json"
+                    config_path.write_text(json.dumps(config_value), encoding="utf-8")
+                    configs.append(GatewayConfig.load(config_path, environ=environment))
+                with mock.patch.dict(os.environ, environment, clear=False):
+                    for config in configs:
+                        gateways.append(GatewayServer(config))
+
+            for gateway in gateways:
+                gateway_threads.append(serve_in_thread(gateway))
+
+            def send_request(gateway: GatewayServer) -> tuple[int, bytes]:
+                connection = http.client.HTTPConnection("127.0.0.1", gateway.server_port, timeout=5)
+                try:
+                    connection.request(
+                        "POST",
+                        "/v1/responses",
+                        body=json.dumps(request_body),
+                        headers={
+                            "Authorization": "Bearer replica-budget-employee-token",
+                            "Content-Type": "application/json",
+                        },
+                    )
+                    response = connection.getresponse()
+                    return response.status, response.read()
+                finally:
+                    connection.close()
+
+            first_outcome: list[tuple[int, bytes] | BaseException] = []
+
+            def send_first_request() -> None:
+                try:
+                    first_outcome.append(send_request(gateways[0]))
+                except BaseException as error:  # pragma: no cover - reported by the assertion below
+                    first_outcome.append(error)
+
+            first_request_thread = threading.Thread(target=send_first_request, daemon=True)
+            first_request_thread.start()
+            self.assertTrue(_BlockingReplicaBudgetProviderHandler.first_request_started.wait(timeout=5))
+
+            denied_status, denied_body = send_request(gateways[1])
+            self.assertEqual(denied_status, 403, denied_body)
+            self.assertEqual(json.loads(denied_body)["error"]["code"], "hormuz_budget_denied")
+            self.assertEqual(_BlockingReplicaBudgetProviderHandler.request_count, 1)
+
+            _BlockingReplicaBudgetProviderHandler.release_first_response.set()
+            first_request_thread.join(timeout=10)
+            self.assertFalse(first_request_thread.is_alive())
+            self.assertEqual(len(first_outcome), 1)
+            self.assertNotIsInstance(first_outcome[0], BaseException)
+            first_status, first_body = first_outcome[0]
+            self.assertEqual(first_status, 200, first_body)
+            self.assertEqual(_BlockingReplicaBudgetProviderHandler.request_count, 1)
+
+            totals = gateways[0].store.monthly_totals(organization_id="xpounder")
+            self.assertEqual((totals.requests, totals.denied_requests), (2, 1))
+            self.assertEqual((totals.input_tokens, totals.output_tokens), (1, 0))
+            self.assertEqual(totals.cost_microusd, 1_000_000)
+            self.assertEqual(gateways[1].store.active_budget_reservations(organization_id="xpounder"), 0)
+            events = gateways[0].store.audit_events(
+                since="2000-01-01T00:00:00+00:00",
+                organization_id="xpounder",
+            )
+            self.assertEqual(
+                {(event["status"], event["policy_action"]) for event in events},
+                {("succeeded", "allowed"), ("denied", "budget_reservation_denied")},
+            )
+
+            shared_store = PostgresUsageStore(
+                self.runtime_dsn,
+                organization_ids=("xpounder", "beta"),
+                schema=self.schema,
+                runtime_role=self.runtime_role,
+            )
+            self.assertEqual(shared_store.monthly_totals(organization_id="beta").requests, 0)
+        finally:
+            _BlockingReplicaBudgetProviderHandler.release_first_response.set()
+            if first_request_thread is not None:
+                first_request_thread.join(timeout=10)
+            for gateway in gateways[: len(gateway_threads)]:
+                gateway.shutdown()
+            for gateway in gateways:
+                gateway.server_close()
+            for thread in gateway_threads:
+                thread.join(timeout=10)
+            provider.shutdown()
+            provider.server_close()
+            provider_thread.join(timeout=10)
+
     def test_runtime_pool_reuses_connections_without_tenant_state_leakage(self) -> None:
         pool = self._runtime_pool(
             min_connections=1,
@@ -1319,6 +1541,12 @@ def _normalized_events(events: list[dict[str, object]]) -> list[dict[str, object
         }
         for event in events
     ]
+
+
+def _free_port() -> int:
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        return listener.getsockname()[1]
 
 
 def _runtime_dsn(owner_dsn: str, role: str, password: str) -> str:

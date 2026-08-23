@@ -15,6 +15,7 @@ from hormuz.cli import _doctor, _storage
 from hormuz.config import GatewayConfig, ListenConfig, PostgresPoolConfig
 from hormuz.postgres import PostgresConnectionPool, PostgresStorageError
 from hormuz.server import GatewayRequestHandler, GatewayServer, serve_in_thread
+from hormuz.store import ReservationDenied
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -150,6 +151,17 @@ class PostgresPoolUnitTests(unittest.TestCase):
                 self.fail("a closed pool must not yield a connection")
         self.assertEqual(raised.exception.code, "storage_pool_closed")
         self.assertNotIn(secret_dsn_fragment, str(raised.exception))
+        pool.close()
+
+    def test_domain_errors_from_a_pooled_transaction_are_not_reclassified_as_storage_failures(self) -> None:
+        pool = self._pool()
+        denial = ReservationDenied("organization budget exceeded")
+
+        with self.assertRaises(ReservationDenied) as raised:
+            with pool.connection():
+                raise denial
+
+        self.assertIs(raised.exception, denial)
         pool.close()
 
     def test_invalid_programmatic_pool_settings_fail_before_any_driver_call(self) -> None:
