@@ -8,6 +8,7 @@
 set -euo pipefail
 
 readonly REPOSITORY_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "${REPOSITORY_ROOT}/tools/_verification_runtime.sh"
 # PostgreSQL 16.14 multi-platform image index, inspected 2026-08-22.
 readonly POSTGRES_IMAGE="postgres@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777"
 readonly POSTGRES_VERSION="16.14"
@@ -16,6 +17,7 @@ readonly EVIDENCE_DIR="${HORMUZ_POSTGRES_RECOVERY_EVIDENCE_DIR:-$(mktemp -d "${T
 readonly WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/hormuz-postgres-recovery.XXXXXX")"
 readonly RUN_ID="${RANDOM}${RANDOM}$$"
 readonly NETWORK="hormuz-postgres-recovery-${RUN_ID}"
+readonly DISPOSABLE_LABEL="io.hormuz.disposable-backup-restore"
 readonly SOURCE_CONTAINER="hormuz-postgres-source-${RUN_ID}"
 readonly RECOVERY_CONTAINER="hormuz-postgres-target-${RUN_ID}"
 readonly SOURCE_DATABASE="hormuz_recovery_source"
@@ -35,9 +37,9 @@ readonly CORRUPT_DUMP_PATH="${WORK_DIR}/hormuz.corrupt.dump"
 
 cleanup() {
   local status=$?
-  docker rm --force "${SOURCE_CONTAINER}" >/dev/null 2>&1 || true
-  docker rm --force "${RECOVERY_CONTAINER}" >/dev/null 2>&1 || true
-  docker network rm "${NETWORK}" >/dev/null 2>&1 || true
+  hormuz_remove_disposable_container "${SOURCE_CONTAINER}" "${DISPOSABLE_LABEL}"
+  hormuz_remove_disposable_container "${RECOVERY_CONTAINER}" "${DISPOSABLE_LABEL}"
+  hormuz_remove_disposable_network "${NETWORK}" "${DISPOSABLE_LABEL}"
   rm -rf "${WORK_DIR}"
   exit "${status}"
 }
@@ -72,7 +74,9 @@ host_port() {
 }
 
 run_recovery_tool() {
-  PYTHONSAFEPATH=1 "${RECOVERY_PYTHON}" "${REPOSITORY_ROOT}/tools/verify_postgres_backup_restore.py" "$@"
+  PYTHONPATH="${REPOSITORY_ROOT}/tools${PYTHONPATH:+:${PYTHONPATH}}" \
+    PYTHONSAFEPATH=1 \
+    "${RECOVERY_PYTHON}" "${REPOSITORY_ROOT}/tools/verify_postgres_backup_restore.py" "$@"
 }
 
 expect_recovery_tool_failure() {
@@ -96,9 +100,10 @@ mkdir -p "${EVIDENCE_DIR}"
 cd "${REPOSITORY_ROOT}"
 
 total_started_seconds=${SECONDS}
-docker network create "${NETWORK}" >/dev/null
+docker network create --label "${DISPOSABLE_LABEL}=true" "${NETWORK}" >/dev/null
 docker run --detach --rm \
   --name "${SOURCE_CONTAINER}" \
+  --label "${DISPOSABLE_LABEL}=true" \
   --network "${NETWORK}" \
   --network-alias source \
   --publish 127.0.0.1::5432 \
@@ -107,6 +112,7 @@ docker run --detach --rm \
   "${POSTGRES_IMAGE}" >/dev/null
 docker run --detach --rm \
   --name "${RECOVERY_CONTAINER}" \
+  --label "${DISPOSABLE_LABEL}=true" \
   --network "${NETWORK}" \
   --network-alias recovery \
   --publish 127.0.0.1::5432 \

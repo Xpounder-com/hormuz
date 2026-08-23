@@ -6,8 +6,10 @@
 set -euo pipefail
 
 readonly REPOSITORY_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "${REPOSITORY_ROOT}/tools/_verification_runtime.sh"
 readonly IMAGE_NAME="${HORMUZ_OCI_TEST_IMAGE:-hormuz:oci-reference-test}"
 readonly CONTAINER_NAME="hormuz-oci-reference-${RANDOM}-${RANDOM}"
+readonly DISPOSABLE_LABEL="io.hormuz.disposable-oci-reference"
 readonly FIXTURE_PATH="${REPOSITORY_ROOT}/tests/fixtures/oci/reference-config.json"
 
 temporary_root=""
@@ -17,7 +19,7 @@ cleanup() {
   local exit_status=$?
   trap - EXIT
   if [[ "${container_started}" -eq 1 ]]; then
-    docker rm --force "${CONTAINER_NAME}" >/dev/null 2>&1 || true
+    hormuz_remove_disposable_container "${CONTAINER_NAME}" "${DISPOSABLE_LABEL}"
   fi
   if [[ -n "${temporary_root}" && -d "${temporary_root}" ]]; then
     rm -rf "${temporary_root}"
@@ -106,6 +108,7 @@ chmod 0777 "${config_directory}" "${data_directory}"
 
 docker run --detach \
   --name "${CONTAINER_NAME}" \
+  --label "${DISPOSABLE_LABEL}=true" \
   --read-only \
   --tmpfs /tmp:mode=1777 \
   --cap-drop=ALL \

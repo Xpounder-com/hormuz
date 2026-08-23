@@ -18,7 +18,6 @@ import os
 import re
 import subprocess
 import sys
-import tempfile
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -37,6 +36,19 @@ from hormuz.custody import (
 )
 from hormuz.openbao_custody import OpenBaoTransitDataKeyProvider, verify_openbao_transit_profile
 from hormuz.self_hosted_custody import create_s3_compatible_object_lock_anchor_sink
+
+try:
+    from tools._verification_runtime import (
+        is_sha256_digest,
+        run_container_command,
+        write_private_json_evidence,
+    )
+except ModuleNotFoundError:  # Direct execution resolves helpers beside this script.
+    from _verification_runtime import (  # type: ignore[no-redef]
+        is_sha256_digest,
+        run_container_command,
+        write_private_json_evidence,
+    )
 
 
 SCHEMA_ID = "hormuz.ceph-rgw-custody-conformance"
@@ -200,14 +212,10 @@ def _command_output(command: Sequence[str]) -> str:
     """Run a fixed local-Docker read command without exposing its stderr."""
 
     try:
-        completed = subprocess.run(
-            list(command),
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        completed = run_container_command(command, timeout_seconds=30)
+    except (OSError, subprocess.SubprocessError, ValueError):
+        raise ConformanceFailure("candidate_attestation_unavailable") from None
+    if completed.returncode != 0:
         raise ConformanceFailure("candidate_attestation_unavailable") from None
     return completed.stdout.strip()
 
@@ -295,7 +303,7 @@ def attest_runner_from_environment(environ: Mapping[str, str] | None = None) -> 
     source = os.environ if environ is None else environ
     image_digest = source.get("HORMUZ_CEPH_RGW_RUNNER_IMAGE_DIGEST", "")
     platform = source.get("HORMUZ_CEPH_RGW_RUNNER_PLATFORM", "")
-    if not isinstance(image_digest, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", image_digest):
+    if not is_sha256_digest(image_digest):
         raise ConformanceFailure("runner_attestation_invalid")
     if platform != "linux/amd64":
         raise ConformanceFailure("runner_platform_invalid")
@@ -660,8 +668,7 @@ def validate_evidence(evidence: Mapping[str, object]) -> None:
         runner = _require_mapping(evidence.get("runner"), "evidence_invalid")
         if (
             set(runner) != {"image_digest", "platform"}
-            or not isinstance(runner.get("image_digest"), str)
-            or not re.fullmatch(r"sha256:[0-9a-f]{64}", runner["image_digest"])
+            or not is_sha256_digest(runner.get("image_digest"))
             or runner.get("platform") != "linux/amd64"
         ):
             raise ConformanceFailure("evidence_invalid")
@@ -699,18 +706,7 @@ def write_evidence(path: Path, evidence: Mapping[str, object]) -> None:
     """Atomically write a private, content-free JSON evidence record."""
 
     validate_evidence(evidence)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    encoded = (json.dumps(dict(evidence), sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
-    with tempfile.NamedTemporaryFile(dir=path.parent, prefix=f".{path.name}.", delete=False) as temporary:
-        temporary_path = Path(temporary.name)
-        os.chmod(temporary.fileno(), 0o600)
-        temporary.write(encoded)
-    try:
-        os.replace(temporary_path, path)
-        os.chmod(path, 0o600)
-    finally:
-        if temporary_path.exists():
-            temporary_path.unlink()
+    write_private_json_evidence(path, evidence)
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:

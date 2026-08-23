@@ -8,6 +8,7 @@
 set -euo pipefail
 
 readonly REPOSITORY_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "${REPOSITORY_ROOT}/tools/_verification_runtime.sh"
 # PostgreSQL 16.14 multi-platform image index, inspected 2026-08-22.
 readonly POSTGRES_IMAGE="postgres@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777"
 readonly POSTGRES_VERSION="16.14"
@@ -17,6 +18,7 @@ readonly EVIDENCE_DIR="${HORMUZ_POSTGRES_INTERRUPTION_EVIDENCE_DIR:-$(mktemp -d 
 # PostgreSQL role identifiers valid on short-lived CI processes too.
 readonly RUN_ID="$(printf '%05d%05d%05d' "${RANDOM}" "${RANDOM}" "$$")"
 readonly CONTAINER="hormuz-postgres-interruption-${RUN_ID}"
+readonly DISPOSABLE_LABEL="io.hormuz.disposable-interruption"
 readonly DATABASE="hormuz_interruption"
 readonly DATABASE_PASSWORD="hormuz-interruption-ephemeral-password"
 readonly RUNTIME_ROLE="hormuz_interrupt_runtime_${RUN_ID}"
@@ -26,7 +28,7 @@ readonly POLICY_CONTROL_PASSWORD="hormuz-interruption-control-password"
 
 cleanup() {
   local status=$?
-  docker rm --force "${CONTAINER}" >/dev/null 2>&1 || true
+  hormuz_remove_disposable_container "${CONTAINER}" "${DISPOSABLE_LABEL}"
   exit "${status}"
 }
 trap cleanup EXIT
@@ -78,14 +80,14 @@ start_disposable_postgres() {
     host_port="$(select_loopback_port)"
     if docker run --detach \
       --name "${CONTAINER}" \
-      --label io.hormuz.disposable-interruption=true \
+      --label "${DISPOSABLE_LABEL}=true" \
       --publish "127.0.0.1:${host_port}:5432" \
       --env POSTGRES_DB="${DATABASE}" \
       --env POSTGRES_PASSWORD="${DATABASE_PASSWORD}" \
       "${POSTGRES_IMAGE}" >/dev/null; then
       return 0
     fi
-    docker rm --force "${CONTAINER}" >/dev/null 2>&1 || true
+    hormuz_remove_disposable_container "${CONTAINER}" "${DISPOSABLE_LABEL}"
   done
   failure 'disposable PostgreSQL host port could not be reserved'
 }
@@ -113,6 +115,7 @@ HORMUZ_POSTGRES_INTERRUPTION_RUNTIME_ROLE="${RUNTIME_ROLE}" \
 HORMUZ_POSTGRES_INTERRUPTION_RUNTIME_PASSWORD="${RUNTIME_PASSWORD}" \
 HORMUZ_POSTGRES_INTERRUPTION_POLICY_CONTROL_ROLE="${POLICY_CONTROL_ROLE}" \
 HORMUZ_POSTGRES_INTERRUPTION_POLICY_CONTROL_PASSWORD="${POLICY_CONTROL_PASSWORD}" \
+PYTHONPATH="${REPOSITORY_ROOT}/tools${PYTHONPATH:+:${PYTHONPATH}}" \
 PYTHONSAFEPATH=1 \
 "${INTERRUPTION_PYTHON}" \
   "${REPOSITORY_ROOT}/tools/verify_postgres_interruption_recovery.py" \

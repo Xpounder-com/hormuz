@@ -11,4 +11,6 @@
 !hormuz/
 !hormuz/**
 !tools/
+!tools/_verification_runtime.py
 !tools/verify_ceph_rgw_custody_conformance.py
+!tools/verify_ceph_rgw_custody_rotation_recovery.py

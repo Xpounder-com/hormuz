@@ -17,7 +17,6 @@ import json
 import os
 import re
 import sys
-import tempfile
 import time
 import uuid
 from dataclasses import dataclass, replace
@@ -44,6 +43,11 @@ from hormuz.openbao_custody import (
     verify_openbao_transit_profile,
 )
 from hormuz.self_hosted_custody import create_s3_compatible_object_lock_anchor_sink
+
+try:
+    from tools._verification_runtime import is_sha256_digest, write_private_json_evidence
+except ModuleNotFoundError:  # Direct execution resolves helpers beside this script.
+    from _verification_runtime import is_sha256_digest, write_private_json_evidence  # type: ignore[no-redef]
 
 
 SCHEMA_ID = "hormuz.ceph-rgw-custody-rotation-recovery"
@@ -230,7 +234,7 @@ def attest_runner_from_environment(environ: Mapping[str, str] | None = None) -> 
     source = os.environ if environ is None else environ
     digest = source.get("HORMUZ_CEPH_RGW_RUNNER_IMAGE_DIGEST", "")
     platform = source.get("HORMUZ_CEPH_RGW_RUNNER_PLATFORM", "")
-    if not isinstance(digest, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", digest):
+    if not is_sha256_digest(digest):
         raise ConformanceFailure("runner_attestation_invalid")
     if platform != RUNNER_PLATFORM:
         raise ConformanceFailure("runner_platform_invalid")
@@ -520,8 +524,7 @@ def validate_evidence(evidence: Mapping[str, object]) -> None:
     if (
         not isinstance(runner, Mapping)
         or set(runner) != {"image_digest", "platform"}
-        or not isinstance(runner.get("image_digest"), str)
-        or not re.fullmatch(r"sha256:[0-9a-f]{64}", runner["image_digest"])
+        or not is_sha256_digest(runner.get("image_digest"))
         or runner.get("platform") != RUNNER_PLATFORM
     ):
         raise ConformanceFailure("evidence_invalid")
@@ -544,32 +547,9 @@ def write_evidence(path: Path, evidence: Mapping[str, object]) -> None:
     if path.exists() or path.is_symlink():
         raise ConformanceFailure("evidence_output_exists")
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+        write_private_json_evidence(path, evidence)
     except OSError:
         raise ConformanceFailure("evidence_write_failed") from None
-    temporary_path = Path(temporary_name)
-    try:
-        os.fchmod(descriptor, 0o600)
-        with os.fdopen(descriptor, "w", encoding="utf-8") as destination:
-            descriptor = -1
-            json.dump(dict(evidence), destination, sort_keys=True, separators=(",", ":"))
-            destination.write("\n")
-            destination.flush()
-            os.fsync(destination.fileno())
-        os.replace(temporary_path, path)
-        temporary_path = None
-        os.chmod(path, 0o600)
-    except OSError:
-        raise ConformanceFailure("evidence_write_failed") from None
-    finally:
-        if descriptor >= 0:
-            os.close(descriptor)
-        if temporary_path is not None:
-            try:
-                temporary_path.unlink()
-            except OSError:
-                pass
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:

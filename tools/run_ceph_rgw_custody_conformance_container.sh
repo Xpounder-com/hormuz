@@ -10,6 +10,7 @@
 set -euo pipefail
 
 readonly REPOSITORY_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "${REPOSITORY_ROOT}/tools/_verification_runtime.sh"
 readonly RUNNER_DOCKERFILE="${REPOSITORY_ROOT}/Dockerfile.ceph-rgw-conformance"
 readonly RUNNER_PLATFORM="linux/amd64"
 readonly RUNNER_IMAGE_TAG="${HORMUZ_CEPH_RGW_RUNNER_IMAGE:-hormuz:ceph-rgw-conformance}"
@@ -66,7 +67,7 @@ umask 077
 mkdir -p "${EVIDENCE_DIRECTORY}"
 image_id_file="$(mktemp "${TMPDIR:-/tmp}/hormuz-ceph-runner-image.XXXXXX")"
 cleanup() {
-  rm -f "${image_id_file}"
+  hormuz_remove_temporary_file "${image_id_file}"
 }
 trap cleanup EXIT
 
@@ -77,7 +78,7 @@ docker build --pull --platform "${RUNNER_PLATFORM}" \
   "${REPOSITORY_ROOT}" >/dev/null
 
 runner_image_digest="$(<"${image_id_file}")"
-if [[ ! "${runner_image_digest}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+if ! hormuz_is_sha256_digest "${runner_image_digest}"; then
   failure 'runner_image_digest_invalid'
 fi
 runner_platform="$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "${runner_image_digest}")"

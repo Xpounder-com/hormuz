@@ -9,19 +9,26 @@ retained evidence artifact after every positive and negative check has passed.
 from __future__ import annotations
 
 import argparse
-import json
-import os
 import re
 import sys
-import tempfile
 from collections.abc import Mapping
 from pathlib import Path
+
+try:
+    from tools._verification_runtime import (
+        is_pinned_image_reference,
+        write_private_json_evidence,
+    )
+except ModuleNotFoundError:  # Direct execution resolves helpers beside this script.
+    from _verification_runtime import (  # type: ignore[no-redef]
+        is_pinned_image_reference,
+        write_private_json_evidence,
+    )
 
 
 SUMMARY_SCHEMA_ID = "hormuz.postgresql-pitr-recovery"
 SUMMARY_SCHEMA_VERSION = 1
 SUMMARY_COVERAGE = "ephemeral_postgresql_wal_pitr_only"
-_POSTGRES_IMAGE_PATTERN = re.compile(r"postgres@sha256:[0-9a-f]{64}\Z")
 _POSTGRES_VERSION_PATTERN = re.compile(r"\d+\.\d+(?:\.\d+)?\Z")
 _CHECK_KEYS = (
     "base_backup_created",
@@ -134,43 +141,17 @@ def write_summary(path: Path, summary: Mapping[str, object]) -> None:
     if path.exists() or path.is_symlink():
         raise PITRRecoveryError("summary_output_exists")
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-    except OSError as error:
-        raise PITRRecoveryError("summary_write_failed") from error
-
-    descriptor = -1
-    temporary_path: Path | None = None
-    try:
-        descriptor, temporary_name = tempfile.mkstemp(
-            prefix=".hormuz-postgresql-pitr-",
-            suffix=".json",
-            dir=path.parent,
+        write_private_json_evidence(
+            path,
+            summary,
+            temporary_prefix=".hormuz-postgresql-pitr-",
         )
-        temporary_path = Path(temporary_name)
-        os.fchmod(descriptor, 0o600)
-        with os.fdopen(descriptor, "w", encoding="utf-8") as destination:
-            descriptor = -1
-            json.dump(summary, destination, sort_keys=True, separators=(",", ":"))
-            destination.write("\n")
-            destination.flush()
-            os.fsync(destination.fileno())
-        os.replace(temporary_path, path)
-        temporary_path = None
-        os.chmod(path, 0o600)
     except OSError as error:
         raise PITRRecoveryError("summary_write_failed") from error
-    finally:
-        if descriptor >= 0:
-            os.close(descriptor)
-        if temporary_path is not None:
-            try:
-                temporary_path.unlink()
-            except OSError:
-                pass
 
 
 def _validate_database_identity(*, database_image: object, database_version: object) -> None:
-    if not isinstance(database_image, str) or _POSTGRES_IMAGE_PATTERN.fullmatch(database_image) is None:
+    if not is_pinned_image_reference(database_image, image_name="postgres"):
         raise PITRRecoveryError("database_image_not_pinned")
     if not isinstance(database_version, str) or _POSTGRES_VERSION_PATTERN.fullmatch(database_version) is None:
         raise PITRRecoveryError("database_version_invalid")

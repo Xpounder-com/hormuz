@@ -11,17 +11,13 @@ as output evidence.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
-import os
 import re
 import sys
 import tempfile
 from collections.abc import Mapping
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any
-from uuid import uuid4
 
 from hormuz.config import GatewayConfig, Identity
 from hormuz.policy_control import PolicyControlService
@@ -38,14 +34,29 @@ from hormuz.postgres import (
 from hormuz.postgres_usage_store import PostgresUsageStore
 from hormuz.store import ReservationScope
 
+try:
+    from tools._verification_runtime import (
+        canonical_json_sha256,
+        file_sha256,
+        is_pinned_image_reference,
+        is_sha256_digest,
+        write_private_json_evidence,
+    )
+except ModuleNotFoundError:  # Direct execution resolves helpers beside this script.
+    from _verification_runtime import (  # type: ignore[no-redef]
+        canonical_json_sha256,
+        file_sha256,
+        is_pinned_image_reference,
+        is_sha256_digest,
+        write_private_json_evidence,
+    )
+
 
 STATE_SCHEMA_ID = "hormuz.postgresql-recovery-drill-state"
 STATE_SCHEMA_VERSION = 1
 SUMMARY_SCHEMA_ID = "hormuz.postgresql-recovery-drill-summary"
 SUMMARY_SCHEMA_VERSION = 1
 SUMMARY_COVERAGE = "ephemeral_logical_backup_restore_only"
-_DIGEST_PATTERN = re.compile(r"sha256:[0-9a-f]{64}\Z")
-_POSTGRES_IMAGE_PATTERN = re.compile(r"postgres@sha256:[0-9a-f]{64}\Z")
 _POSTGRES_VERSION_PATTERN = re.compile(r"\d+\.\d+(?:\.\d+)?\Z")
 _REQUIRED_RECORD_COUNT_KEYS = (
     "organizations",
@@ -1015,11 +1026,10 @@ def _backup_metadata(path: Path) -> dict[str, object]:
     if size <= 0:
         raise RecoveryDrillError("recovery_backup_empty")
     try:
-        with path.open("rb") as source:
-            digest = hashlib.file_digest(source, "sha256").hexdigest()
+        digest = file_sha256(path)
     except OSError as error:
         raise RecoveryDrillError("recovery_backup_unreadable") from error
-    return {"format": "pg_dump_custom", "sha256": f"sha256:{digest}", "bytes": size}
+    return {"format": "pg_dump_custom", "sha256": digest, "bytes": size}
 
 
 def make_corrupt_copy(source: Path, output: Path) -> None:
@@ -1051,7 +1061,7 @@ def build_recovery_summary(
 ) -> dict[str, object]:
     """Create the only retained artifact after every positive and negative check passes."""
 
-    if _POSTGRES_IMAGE_PATTERN.fullmatch(database_image) is None:
+    if not is_pinned_image_reference(database_image, image_name="postgres"):
         raise RecoveryDrillError("recovery_database_image_not_pinned")
     if _POSTGRES_VERSION_PATTERN.fullmatch(database_version) is None:
         raise RecoveryDrillError("recovery_database_version_invalid")
@@ -1120,7 +1130,7 @@ def _validate_summary(value: Mapping[str, object]) -> None:
     database = _mapping(value.get("database"), "recovery_summary_schema_invalid")
     if set(database) != {"image", "version"}:
         raise RecoveryDrillError("recovery_summary_schema_invalid")
-    if not isinstance(database.get("image"), str) or _POSTGRES_IMAGE_PATTERN.fullmatch(database["image"]) is None:
+    if not is_pinned_image_reference(database.get("image"), image_name="postgres"):
         raise RecoveryDrillError("recovery_summary_schema_invalid")
     if not isinstance(database.get("version"), str) or _POSTGRES_VERSION_PATTERN.fullmatch(database["version"]) is None:
         raise RecoveryDrillError("recovery_summary_schema_invalid")
@@ -1175,18 +1185,13 @@ def _load_json(path: Path, label: str) -> dict[str, object]:
 
 def _write_json(path: Path, value: Mapping[str, object]) -> None:
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
-        temporary.write_text(json.dumps(value, sort_keys=True, indent=2) + "\n", encoding="utf-8")
-        os.chmod(temporary, 0o600)
-        temporary.replace(path)
+        write_private_json_evidence(path, value, indent=2)
     except OSError as error:
         raise RecoveryDrillError("recovery_evidence_write_failed") from error
 
 
 def _sha256_json(value: object) -> str:
-    canonical = json.dumps(_normalize(value), sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
-    return f"sha256:{hashlib.sha256(canonical).hexdigest()}"
+    return canonical_json_sha256(_normalize(value))
 
 
 def _normalize(value: object) -> object:
@@ -1208,7 +1213,7 @@ def _mapping(value: object, code: str) -> dict[str, object]:
 
 
 def _require_digest(value: object, code: str) -> None:
-    if not isinstance(value, str) or _DIGEST_PATTERN.fullmatch(value) is None:
+    if not is_sha256_digest(value):
         raise RecoveryDrillError(code)
 
 

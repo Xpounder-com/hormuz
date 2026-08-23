@@ -4,20 +4,30 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
-import re
 import sys
 from collections import Counter
 from pathlib import Path
 from typing import Any
+
+try:
+    from tools._verification_runtime import (
+        file_sha256,
+        is_pinned_image_reference,
+        is_sha256_digest,
+    )
+except ModuleNotFoundError:  # Direct execution resolves helpers beside this script.
+    from _verification_runtime import (  # type: ignore[no-redef]
+        file_sha256,
+        is_pinned_image_reference,
+        is_sha256_digest,
+    )
 
 
 SUMMARY_SCHEMA_ID = "hormuz.oci-supply-chain-summary"
 SUMMARY_SCHEMA_VERSION = 1
 BLOCKING_SEVERITIES = ("HIGH", "CRITICAL")
 KNOWN_SEVERITIES = ("UNKNOWN", "LOW", "MEDIUM", "HIGH", "CRITICAL")
-SHA256_PATTERN = re.compile(r"sha256:[0-9a-f]{64}")
 
 
 class EvidenceError(RuntimeError):
@@ -237,11 +247,7 @@ def _write_json(path: Path, value: dict[str, Any]) -> None:
 
 
 def _file_sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as source:
-        for chunk in iter(lambda: source.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return f"sha256:{digest.hexdigest()}"
+    return file_sha256(path)
 
 
 def _require_property(properties: list[Any], name: str, expected_value: str) -> None:
@@ -273,15 +279,14 @@ def _nonempty_string(value: Any, label: str) -> str:
 
 
 def _sha256(value: str, label: str) -> str:
-    if not SHA256_PATTERN.fullmatch(value):
+    if not is_sha256_digest(value):
         raise EvidenceError(f"{label} must be a sha256 digest")
     return value
 
 
 def _pinned_scanner_image(value: str) -> str:
     value = _nonempty_string(value, "scanner image")
-    name, separator, digest = value.rpartition("@")
-    if not name or not separator or not SHA256_PATTERN.fullmatch(digest):
+    if not is_pinned_image_reference(value):
         raise EvidenceError("scanner image must be pinned by sha256 digest")
     return value
 
