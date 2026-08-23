@@ -125,6 +125,7 @@ class PostgresPITRRecoverySummaryTests(unittest.TestCase):
         self.assertIn("pg_basebackup", source)
         self.assertIn("pg_create_restore_point", source)
         self.assertIn("pg_current_wal_lsn", source)
+        self.assertIn("--command 'SELECT 1'", source)
         self.assertIn("recovery_target_name", source)
         self.assertIn("remove_disposable_container", source)
         self.assertIn("remove_disposable_work_dir", source)

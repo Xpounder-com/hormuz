@@ -100,7 +100,10 @@ wait_for_postgres() {
   local container="$1"
   local attempt
   for attempt in $(seq 1 45); do
-    if docker exec "$container" pg_isready --username=postgres --dbname="$DATABASE" >/dev/null 2>&1; then return 0; fi
+    if docker exec "$container" psql --username=postgres --dbname="$DATABASE" \
+      --set=ON_ERROR_STOP=on --tuples-only --no-align --command 'SELECT 1' >/dev/null 2>&1; then
+      return 0
+    fi
     sleep 1
   done
   failure 'disposable_postgres_not_ready'
