@@ -1,6 +1,7 @@
 include SECURITY.md
 include config.example.json
 include tools/oidc_reference_conformance.py
+include tools/verify_ceph_rgw_custody_conformance.py
 recursive-include docs *.md
 recursive-include tests *.py *.json
 recursive-include hormuz/migrations/postgresql *.sql

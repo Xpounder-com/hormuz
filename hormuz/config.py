@@ -22,6 +22,7 @@ _ENVIRONMENT_NAME_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 _POSTGRES_IDENTIFIER_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 _AWS_REGION_PATTERN = re.compile(r"[a-z]{2}(?:-gov)?-[a-z0-9-]+-\d+\Z")
 _S3_BUCKET_PATTERN = re.compile(r"[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]\Z")
+_OPENBAO_PATH_NAME_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}\Z")
 
 
 # Configuration is a deployment control input. Bound and validate its raw
@@ -143,13 +144,17 @@ class PostgresPoolConfig:
 class KeyCustodyConfig:
     """A configured external envelope-key service with purpose-separated keys.
 
-    Key references are identifiers only.  AWS workload credentials come from
-    the ambient SDK chain and must never be written into Hormuz JSON.
+    Key references are identifiers only. Backends resolve credentials only at
+    runtime: AWS uses its ambient workload chain and OpenBao uses a named
+    process-environment source. No credential value is allowed in Hormuz JSON.
     """
 
     backend: str
-    region: str
+    region: str | None
     key_references: dict[str, str]
+    endpoint_url: str | None = None
+    token_env: str | None = None
+    transit_mount: str | None = None
 
     def key_reference_for(self, purpose: str) -> str:
         try:
@@ -168,6 +173,9 @@ class AuditAnchorConfig:
     prefix: str
     retention_days: int
     legal_hold: bool
+    endpoint_url: str | None = None
+    access_key_env: str | None = None
+    secret_key_env: str | None = None
 
 
 @dataclass(frozen=True)
@@ -971,8 +979,22 @@ _POLICY_CONTROL_FIELDS = frozenset(
 )
 _BREAK_GLASS_FIELDS = frozenset({"enabled", "token_env"})
 _BOOTSTRAP_ADMINISTRATOR_FIELDS = frozenset({"organization_id", "actor_id", "issuer", "subject"})
-_KEY_CUSTODY_FIELDS = frozenset({"backend", "region", "key_references"})
-_AUDIT_ANCHOR_FIELDS = frozenset({"backend", "region", "bucket", "prefix", "retention_days", "legal_hold"})
+_KEY_CUSTODY_FIELDS = frozenset(
+    {"backend", "region", "key_references", "endpoint_url", "token_env", "transit_mount"}
+)
+_AUDIT_ANCHOR_FIELDS = frozenset(
+    {
+        "backend",
+        "region",
+        "bucket",
+        "prefix",
+        "retention_days",
+        "legal_hold",
+        "endpoint_url",
+        "access_key_env",
+        "secret_key_env",
+    }
+)
 
 
 class _ConfigurationInputError(ValueError):
@@ -1388,13 +1410,7 @@ def _key_custody(value: Any) -> KeyCustodyConfig | None:
     if value is None:
         return None
     item = _object(value, "key_custody")
-    unsupported = set(item).difference({"backend", "region", "key_references"})
-    if unsupported:
-        raise ConfigError("key_custody contains unsupported fields: " + ", ".join(sorted(unsupported)))
     backend = _string(item.get("backend"), "key_custody.backend")
-    if backend != "aws-kms":
-        raise ConfigError("key_custody.backend must be aws-kms")
-    region = _aws_region(item.get("region"), "key_custody.region")
     raw_references = _object(item.get("key_references"), "key_custody.key_references")
     if not raw_references:
         raise ConfigError("key_custody.key_references must contain at least one purpose")
@@ -1410,7 +1426,33 @@ def _key_custody(value: Any) -> KeyCustodyConfig | None:
         key_references[purpose] = reference
     if len(key_references) != len(set(key_references.values())):
         raise ConfigError("key_custody.key_references must use distinct keys for distinct purposes")
-    return KeyCustodyConfig(backend=backend, region=region, key_references=key_references)
+    if backend == "aws-kms":
+        unsupported = set(item).difference({"backend", "region", "key_references"})
+        if unsupported:
+            raise ConfigError("key_custody contains unsupported fields: " + ", ".join(sorted(unsupported)))
+        return KeyCustodyConfig(
+            backend=backend,
+            region=_aws_region(item.get("region"), "key_custody.region"),
+            key_references=key_references,
+        )
+    if backend == "openbao-transit":
+        unsupported = set(item).difference({"backend", "endpoint_url", "token_env", "transit_mount", "key_references"})
+        if unsupported:
+            raise ConfigError("key_custody contains unsupported fields: " + ", ".join(sorted(unsupported)))
+        for purpose, reference in key_references.items():
+            if _OPENBAO_PATH_NAME_PATTERN.fullmatch(reference) is None:
+                raise ConfigError(
+                    f"key_custody.key_references.{purpose} must be a safe OpenBao Transit key name"
+                )
+        return KeyCustodyConfig(
+            backend=backend,
+            region=None,
+            key_references=key_references,
+            endpoint_url=_self_hosted_service_url(item.get("endpoint_url"), "key_custody.endpoint_url"),
+            token_env=_environment_name(item.get("token_env"), "key_custody.token_env"),
+            transit_mount=_openbao_path_name(item.get("transit_mount", "transit"), "key_custody.transit_mount"),
+        )
+    raise ConfigError("key_custody.backend must be aws-kms or openbao-transit")
 
 
 def _audit_anchor(value: Any, *, key_custody: KeyCustodyConfig | None) -> AuditAnchorConfig | None:
@@ -1419,18 +1461,10 @@ def _audit_anchor(value: Any, *, key_custody: KeyCustodyConfig | None) -> AuditA
     if value is None:
         return None
     item = _object(value, "audit_anchor")
-    unsupported = set(item).difference({"backend", "region", "bucket", "prefix", "retention_days", "legal_hold"})
-    if unsupported:
-        raise ConfigError("audit_anchor contains unsupported fields: " + ", ".join(sorted(unsupported)))
     backend = _string(item.get("backend"), "audit_anchor.backend")
-    if backend != "aws-s3-object-lock":
-        raise ConfigError("audit_anchor.backend must be aws-s3-object-lock")
     if key_custody is None:
-        raise ConfigError("audit_anchor requires key_custody for SSE-KMS encryption")
+        raise ConfigError("audit_anchor requires key_custody")
     key_custody.key_reference_for(KEY_PURPOSE_DATA_ENCRYPTION)
-    region = _aws_region(item.get("region"), "audit_anchor.region")
-    if region != key_custody.region:
-        raise ConfigError("audit_anchor.region must equal key_custody.region for SSE-KMS")
     bucket = _string(item.get("bucket"), "audit_anchor.bucket")
     if _S3_BUCKET_PATTERN.fullmatch(bucket) is None or ".." in bucket or ".-" in bucket or "-." in bucket:
         raise ConfigError("audit_anchor.bucket must be a valid lower-case S3 bucket name")
@@ -1444,14 +1478,57 @@ def _audit_anchor(value: Any, *, key_custody: KeyCustodyConfig | None) -> AuditA
         raise ConfigError("audit_anchor.prefix must be a safe non-empty object-key prefix")
     retention_days = _integer(item.get("retention_days"), "audit_anchor.retention_days", minimum=1, maximum=36500)
     legal_hold = _boolean(item.get("legal_hold", False), "audit_anchor.legal_hold")
-    return AuditAnchorConfig(
-        backend=backend,
-        region=region,
-        bucket=bucket,
-        prefix=prefix,
-        retention_days=retention_days,
-        legal_hold=legal_hold,
-    )
+    if backend == "aws-s3-object-lock":
+        unsupported = set(item).difference({"backend", "region", "bucket", "prefix", "retention_days", "legal_hold"})
+        if unsupported:
+            raise ConfigError("audit_anchor contains unsupported fields: " + ", ".join(sorted(unsupported)))
+        if key_custody.backend != "aws-kms" or key_custody.region is None:
+            raise ConfigError("audit_anchor.backend aws-s3-object-lock requires key_custody.backend aws-kms")
+        region = _aws_region(item.get("region"), "audit_anchor.region")
+        if region != key_custody.region:
+            raise ConfigError("audit_anchor.region must equal key_custody.region for SSE-KMS")
+        return AuditAnchorConfig(
+            backend=backend,
+            region=region,
+            bucket=bucket,
+            prefix=prefix,
+            retention_days=retention_days,
+            legal_hold=legal_hold,
+        )
+    if backend == "s3-compatible-object-lock":
+        unsupported = set(item).difference(
+            {
+                "backend",
+                "region",
+                "bucket",
+                "prefix",
+                "retention_days",
+                "legal_hold",
+                "endpoint_url",
+                "access_key_env",
+                "secret_key_env",
+            }
+        )
+        if unsupported:
+            raise ConfigError("audit_anchor contains unsupported fields: " + ", ".join(sorted(unsupported)))
+        if key_custody.backend != "openbao-transit":
+            raise ConfigError("audit_anchor.backend s3-compatible-object-lock requires key_custody.backend openbao-transit")
+        access_key_env = _environment_name(item.get("access_key_env"), "audit_anchor.access_key_env")
+        secret_key_env = _environment_name(item.get("secret_key_env"), "audit_anchor.secret_key_env")
+        if access_key_env == secret_key_env:
+            raise ConfigError("audit_anchor access_key_env and secret_key_env must differ")
+        return AuditAnchorConfig(
+            backend=backend,
+            region=_aws_region(item.get("region"), "audit_anchor.region"),
+            bucket=bucket,
+            prefix=prefix,
+            retention_days=retention_days,
+            legal_hold=legal_hold,
+            endpoint_url=_self_hosted_service_url(item.get("endpoint_url"), "audit_anchor.endpoint_url"),
+            access_key_env=access_key_env,
+            secret_key_env=secret_key_env,
+        )
+    raise ConfigError("audit_anchor.backend must be aws-s3-object-lock or s3-compatible-object-lock")
 
 
 def _bootstrap_administrators(
@@ -1537,6 +1614,25 @@ def _url(value: Any, path: str) -> str:
         or parsed.password
     ):
         raise ConfigError(f"{path} must be an HTTP(S) URL without a query or fragment")
+    return result
+
+
+def _self_hosted_service_url(value: Any, path: str) -> str:
+    """Accept a private service origin and allow HTTP only for loopback dev."""
+
+    result = _url(value, path)
+    parsed = urlparse(result)
+    if parsed.path not in {"", "/"}:
+        raise ConfigError(f"{path} must be a service origin without a path")
+    if parsed.scheme == "http" and parsed.hostname not in {"127.0.0.1", "::1", "localhost"}:
+        raise ConfigError(f"{path} requires HTTPS outside loopback development")
+    return result.rstrip("/")
+
+
+def _openbao_path_name(value: Any, path: str) -> str:
+    result = _string(value, path)
+    if _OPENBAO_PATH_NAME_PATTERN.fullmatch(result) is None:
+        raise ConfigError(f"{path} must be a safe OpenBao path name")
     return result
 
 

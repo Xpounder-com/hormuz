@@ -32,6 +32,9 @@ postgres = [
 aws = [
   "boto3>=1.34,<2"
 ]
+self-hosted = [
+  "boto3>=1.34,<2"
+]
 
 [project.scripts]
 hormuz = "hormuz.cli:main"
