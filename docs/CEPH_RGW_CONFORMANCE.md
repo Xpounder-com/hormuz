@@ -2,9 +2,9 @@
 
 ## Status
 
-**Candidate only — not certified.**
+**Certified self-hosted reference — single-host RGW enforcement only.**
 
-Ceph RGW is Hormuz's first self-hosted certification target for the optional,
+Ceph RGW is Hormuz's first certified self-hosted reference for the optional,
 vendor-neutral S3-compatible Object Lock custody interface. Hormuz does not
 require Ceph in its core package, runtime, configuration, or customer
 deployment. An organization may use another S3-compatible Object Lock service
@@ -17,9 +17,16 @@ Ceph release: Tentacle 20.2.3
 Image: quay.io/ceph/ceph@sha256:d195020de02512030118e772cef7859e92904e91eb4cb21acb503f8b94118137
 ```
 
-The target has no certification status until an operator retains a passing
-evidence record from the exact release/digest and attaches it to the relevant
-Hormuz release issue or pull request.
+The certification decision is supported by the content-free schema-v2 live
+evidence record published in [issue #60](https://github.com/Xpounder-com/hormuz/issues/60)
+on 2026-08-23. It attests the exact release/digest above, a `linux/arm64`
+target, a pinned `linux/amd64` runner, and every required check in this
+document. It is not a production storage certification.
+
+Native ARM64 Hormuz runtime conformance is tracked separately in
+[issue #68](https://github.com/Xpounder-com/hormuz/issues/68). It does not
+block this reference certification unless native ARM64 becomes a promised
+launch platform.
 
 ## What the gate proves
 
@@ -43,7 +50,7 @@ tentacle (stable)`. It then uses only explicit OpenBao and RGW credentials to:
 9. write a private, versioned, content-free evidence record only when every
    check passes.
 
-The current evidence JSON is schema v2. It intentionally contains the candidate
+The current evidence JSON is schema v2. It intentionally contains the reference
 release/digest and platform, the pinned `linux/amd64` runner's local
 content-addressed image digest, check names, random artifact IDs, artifact
 hashes, hashes of object versions, and nonclaims. It excludes the endpoint,
