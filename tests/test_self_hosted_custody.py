@@ -14,6 +14,7 @@ from unittest.mock import patch
 from urllib.parse import unquote, urlparse
 from urllib.request import Request
 
+from hormuz.audit_chain import AuditChainHead, build_audit_chain_checkpoint, serialize_audit_chain_checkpoint
 from hormuz.config import ConfigError, GatewayConfig
 from hormuz.cli import _custody_verify
 from hormuz.custody import (
@@ -314,6 +315,30 @@ class SelfHostedAuditAnchorTests(unittest.TestCase):
 
         self.assertEqual(recovery_sink.recover(receipt, organization_id="xpounder"), encoded)
 
+    def test_recovery_accepts_one_exact_commit_time_checkpoint_version(self) -> None:
+        checkpoint = build_audit_chain_checkpoint(
+            AuditChainHead("xpounder", 1, 1, 1, "a" * 64),
+            created_at=datetime(2026, 8, 23, tzinfo=timezone.utc),
+            checkpoint_id="16ab5178-397e-4624-9431-1a40fbf8f09f",
+        )
+        encoded = serialize_audit_chain_checkpoint(checkpoint)
+        receipt = self.sink.anchor(
+            encoded,
+            artifact_id=checkpoint["checkpoint_id"],  # type: ignore[arg-type]
+            organization_id="xpounder",
+            head_digest=checkpoint["head_digest"],  # type: ignore[arg-type]
+            retention_until=datetime.now(timezone.utc) + timedelta(days=30),
+            legal_hold=True,
+        )
+        key = self.sink._object_key(  # noqa: SLF001 - test controls the retained fake version.
+            organization_id="xpounder",
+            artifact_id=receipt.artifact_id,
+        )
+        metadata = self.client.objects[(key, "version-1")]["Metadata"]
+        self.assertEqual(metadata["hormuz-audit-anchor-schema-id"], "hormuz.audit-chain-checkpoint")  # type: ignore[index]
+        self.assertEqual(metadata["hormuz-audit-anchor-schema-version"], "1")  # type: ignore[index]
+        self.assertEqual(self.sink.recover(receipt, organization_id="xpounder"), encoded)
+
     def test_recovery_rejects_corrupted_payload_or_receipt(self) -> None:
         artifact = build_audit_anchor_artifact([_usage_event()], organization_id="xpounder")
         receipt = self.sink.anchor(
@@ -415,6 +440,13 @@ class SelfHostedCustodyConfigurationTests(unittest.TestCase):
         self.assertEqual(config.audit_anchor.backend, "s3-compatible-object-lock")  # type: ignore[union-attr]
         self.assertEqual(config.key_custody.token_env, "HORMUZ_OPENBAO_TOKEN")  # type: ignore[union-attr]
         self.assertEqual(config.audit_anchor.access_key_env, "HORMUZ_AUDIT_S3_ACCESS_KEY")  # type: ignore[union-attr]
+
+        ceph_configuration = self._configuration()
+        ceph_configuration["audit_anchor"]["region"] = "default"  # type: ignore[index]
+        self.assertEqual(
+            self._load(ceph_configuration).audit_anchor.region,  # type: ignore[union-attr]
+            "default",
+        )
 
         provider = create_data_key_provider(
             config,

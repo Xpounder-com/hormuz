@@ -19,6 +19,11 @@ AUDIT_EVENT_SCHEMA_ID = "hormuz.audit-event"
 AUDIT_EVENT_SCHEMA_VERSION = 2
 AUDIT_ANCHOR_SCHEMA_ID = "hormuz.audit-anchor"
 AUDIT_ANCHOR_SCHEMA_VERSION = 1
+AUDIT_CHAIN_VERSION = 1
+AUDIT_CHAIN_ENTRY_SCHEMA_ID = "hormuz.commit-audit-chain-entry"
+AUDIT_CHAIN_ENTRY_SCHEMA_VERSION = 1
+AUDIT_CHAIN_CHECKPOINT_SCHEMA_ID = "hormuz.audit-chain-checkpoint"
+AUDIT_CHAIN_CHECKPOINT_SCHEMA_VERSION = 1
 REQUEST_ATTEMPT_SCHEMA_ID = "hormuz.request-attempt"
 REQUEST_ATTEMPT_SCHEMA_VERSION = 1
 REQUEST_ATTEMPT_EVENT_SCHEMA_ID = "hormuz.request-attempt-event"
@@ -72,6 +77,8 @@ _CURRENT_SCHEMA_VERSIONS = {
     POLICY_CONTROL_STATUS_SCHEMA_ID: 1,
     USAGE_REPORT_SCHEMA_ID: 1,
     AUDIT_ANCHOR_SCHEMA_ID: AUDIT_ANCHOR_SCHEMA_VERSION,
+    AUDIT_CHAIN_ENTRY_SCHEMA_ID: AUDIT_CHAIN_ENTRY_SCHEMA_VERSION,
+    AUDIT_CHAIN_CHECKPOINT_SCHEMA_ID: AUDIT_CHAIN_CHECKPOINT_SCHEMA_VERSION,
 }
 
 _REQUEST_STATUSES = frozenset({"succeeded", "failed", "denied", "rate_limited"})
@@ -408,6 +415,36 @@ def contract_manifest() -> dict[str, object]:
                 ],
             ),
             _manifest_schema(
+                AUDIT_CHAIN_ENTRY_SCHEMA_ID,
+                AUDIT_CHAIN_ENTRY_SCHEMA_VERSION,
+                "durable-evidence",
+                "hormuz",
+                [
+                    "organization_id",
+                    "chain_version",
+                    "chain_epoch",
+                    "sequence",
+                    "previous_digest",
+                    "event_digest",
+                    "complete metadata-only audit event",
+                ],
+            ),
+            _manifest_schema(
+                AUDIT_CHAIN_CHECKPOINT_SCHEMA_ID,
+                AUDIT_CHAIN_CHECKPOINT_SCHEMA_VERSION,
+                "durable-evidence",
+                "hormuz",
+                [
+                    "checkpoint_id",
+                    "organization_id",
+                    "chain_version",
+                    "chain_epoch",
+                    "sequence",
+                    "head_digest",
+                    "created_at",
+                ],
+            ),
+            _manifest_schema(
                 RELAY_METADATA_SCHEMA_ID,
                 RELAY_METADATA_SCHEMA_VERSION,
                 "http-headers",
@@ -557,6 +594,8 @@ def validate_contract(value: Mapping[str, Any]) -> None:
         (POLICY_CONTROL_STATUS_SCHEMA_ID, 1): _validate_policy_control_status,
         (USAGE_REPORT_SCHEMA_ID, 1): _validate_usage_report,
         (AUDIT_ANCHOR_SCHEMA_ID, AUDIT_ANCHOR_SCHEMA_VERSION): _validate_audit_anchor,
+        (AUDIT_CHAIN_ENTRY_SCHEMA_ID, AUDIT_CHAIN_ENTRY_SCHEMA_VERSION): _validate_audit_chain_entry,
+        (AUDIT_CHAIN_CHECKPOINT_SCHEMA_ID, AUDIT_CHAIN_CHECKPOINT_SCHEMA_VERSION): _validate_audit_chain_checkpoint,
     }.get((schema_id, schema_version))
     if validator is None:
         raise ContractValidationError(f"unsupported Hormuz contract: {schema_id} v{schema_version}")
@@ -597,6 +636,18 @@ def validate_audit_anchor(value: Mapping[str, Any]) -> None:
     """
 
     _validate_audit_anchor(value)
+
+
+def validate_audit_chain_entry(value: Mapping[str, Any]) -> None:
+    """Validate one commit-time, per-organization durable chain entry."""
+
+    _validate_audit_chain_entry(value)
+
+
+def validate_audit_chain_checkpoint(value: Mapping[str, Any]) -> None:
+    """Validate the small externally retainable commit-time checkpoint."""
+
+    _validate_audit_chain_checkpoint(value)
 
 
 def validate_request_attempt(value: Mapping[str, Any]) -> None:
@@ -1190,6 +1241,74 @@ def _validate_usage_report_row(value: Mapping[str, Any], *, path: str) -> None:
     for field in optional:
         if field in value:
             _nullable_string(value, field, path=path)
+
+
+def _validate_audit_chain_entry(value: Mapping[str, Any]) -> None:
+    _exact_keys(
+        value,
+        {
+            "schema_id",
+            "schema_version",
+            "organization_id",
+            "chain_version",
+            "chain_epoch",
+            "sequence",
+            "previous_digest",
+            "event_digest",
+            "event",
+        },
+    )
+    if _value_string(value, "schema_id") != AUDIT_CHAIN_ENTRY_SCHEMA_ID:
+        raise ContractValidationError("unsupported audit chain entry schema_id")
+    if _value_integer(value, "schema_version") != AUDIT_CHAIN_ENTRY_SCHEMA_VERSION:
+        raise ContractValidationError("unsupported audit chain entry schema_version")
+    organization_id = _value_string(value, "organization_id")
+    if _value_integer(value, "chain_version", minimum=1) != AUDIT_CHAIN_VERSION:
+        raise ContractValidationError("unsupported audit chain version")
+    _value_integer(value, "chain_epoch", minimum=1)
+    _value_integer(value, "sequence", minimum=1)
+    previous_digest = value.get("previous_digest")
+    if previous_digest is not None:
+        _sha256_digest(_value_string(value, "previous_digest"), "audit chain previous_digest")
+    _sha256_digest(_value_string(value, "event_digest"), "audit chain event_digest")
+    event = _value_mapping(value, "event")
+    validate_audit_event(event)
+    if (
+        event.get("schema_id") != AUDIT_EVENT_SCHEMA_ID
+        or event.get("schema_version") != AUDIT_EVENT_SCHEMA_VERSION
+    ):
+        raise ContractValidationError("audit chain requires current audit evidence")
+    if event.get("organization_id") != organization_id:
+        raise ContractValidationError("audit chain tenant mismatch")
+
+
+def _validate_audit_chain_checkpoint(value: Mapping[str, Any]) -> None:
+    _exact_keys(
+        value,
+        {
+            "schema_id",
+            "schema_version",
+            "checkpoint_id",
+            "organization_id",
+            "chain_version",
+            "chain_epoch",
+            "sequence",
+            "head_digest",
+            "created_at",
+        },
+    )
+    if _value_string(value, "schema_id") != AUDIT_CHAIN_CHECKPOINT_SCHEMA_ID:
+        raise ContractValidationError("unsupported audit chain checkpoint schema_id")
+    if _value_integer(value, "schema_version") != AUDIT_CHAIN_CHECKPOINT_SCHEMA_VERSION:
+        raise ContractValidationError("unsupported audit chain checkpoint schema_version")
+    _value_string(value, "checkpoint_id")
+    _value_string(value, "organization_id")
+    if _value_integer(value, "chain_version", minimum=1) != AUDIT_CHAIN_VERSION:
+        raise ContractValidationError("unsupported audit chain version")
+    _value_integer(value, "chain_epoch", minimum=1)
+    _value_integer(value, "sequence", minimum=1)
+    _sha256_digest(_value_string(value, "head_digest"), "audit chain checkpoint head_digest")
+    _value_string(value, "created_at")
 
 
 def _validate_audit_anchor(value: Mapping[str, Any]) -> None:

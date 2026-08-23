@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import argparse
-import importlib.util
+import importlib.machinery
 import io
 import json
 import socket
@@ -14,6 +14,7 @@ from http.client import HTTPConnection
 from pathlib import Path
 from unittest import mock
 
+import hormuz
 from hormuz.cli import build_parser, main
 from hormuz.config import ConfigError, GatewayConfig
 from hormuz.server import GatewayServer, serve_in_thread
@@ -34,7 +35,11 @@ class CorePackageBoundaryTests(unittest.TestCase):
         return GatewayConfig.load(ROOT / "config.example.json", environ=TEST_ENVIRONMENT)
 
     def test_core_has_no_context_module_or_active_cli_command(self) -> None:
-        self.assertIsNone(importlib.util.find_spec("hormuz.context"))
+        # Restrict the source check to the active Hormuz package. A developer
+        # can have an older editable Hormuz checkout installed elsewhere; its
+        # PEP 660 finder must not make this worktree look as though it shipped
+        # the retired context module.
+        self.assertIsNone(importlib.machinery.PathFinder.find_spec("hormuz.context", hormuz.__path__))
         parser = build_parser()
         subparser_action = next(
             action for action in parser._actions if isinstance(action, argparse._SubParsersAction)

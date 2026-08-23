@@ -10,12 +10,20 @@ import sqlite3
 import shlex
 import signal
 import sys
+import tempfile
 import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
 from .auth import AuthenticationError, Authenticator
+from .audit_chain import (
+    AuditChainError,
+    audit_chain_checkpoint_summary,
+    build_audit_chain_checkpoint,
+    parse_audit_chain_checkpoint,
+    serialize_audit_chain_checkpoint,
+)
 from .config import ConfigError, GatewayConfig
 from .custody import (
     KEY_PURPOSES,
@@ -179,10 +187,46 @@ def build_parser() -> argparse.ArgumentParser:
 
     audit_anchor = subparsers.add_parser(
         "audit-anchor",
-        help="Hash-chain and immutably retain metadata-only audit evidence",
+        help="Export and immutably retain a metadata-only audit snapshot",
     )
     audit_anchor.add_argument("--kind", choices=["all", "usage", "security"], default="all")
     audit_anchor.add_argument("--since", help="UTC ISO-8601 lower bound (default: start of current month)")
+
+    audit_chain = subparsers.add_parser(
+        "audit-chain",
+        help="Operate the per-organization commit-time audit chain",
+    )
+    audit_chain_subparsers = audit_chain.add_subparsers(dest="audit_chain_command", required=True)
+    audit_chain_subparsers.add_parser(
+        "status",
+        help="Show local chain and checkpoint freshness without contacting Object Lock",
+    )
+    audit_chain_anchor = audit_chain_subparsers.add_parser(
+        "anchor",
+        help="Externally retain the current chain checkpoint outside the request path",
+    )
+    audit_chain_anchor.add_argument(
+        "--output",
+        required=True,
+        help="Write the canonical metadata-only checkpoint artifact to this path",
+    )
+    audit_chain_anchor.add_argument("--force", action="store_true", help="Allow replacing an existing checkpoint path")
+    audit_chain_verify = audit_chain_subparsers.add_parser(
+        "verify",
+        help="Verify chain order, event correspondence, and an external checkpoint",
+    )
+    audit_chain_verify.add_argument("--checkpoint", required=True, help="Canonical externally retained checkpoint artifact")
+    audit_chain_epoch = audit_chain_subparsers.add_parser(
+        "epoch",
+        help="Explicitly begin a restore or migration epoch from a trusted checkpoint",
+    )
+    audit_chain_epoch.add_argument("--checkpoint", required=True, help="Trusted canonical checkpoint artifact")
+    audit_chain_epoch.add_argument("--reason", required=True, choices=["restore", "migration"])
+    audit_chain_epoch.add_argument(
+        "--confirm",
+        required=True,
+        help="Type START_NEW_AUDIT_CHAIN_EPOCH to confirm this controlled recovery action",
+    )
 
     custody = subparsers.add_parser("custody", help="Operate configured encrypted credential custody")
     custody_subparsers = custody.add_subparsers(dest="custody_command", required=True)
@@ -265,6 +309,8 @@ def main(argv: list[str] | None = None) -> int:
             return _audit_export(config, args)
         if args.command == "audit-anchor":
             return _audit_anchor(config, args)
+        if args.command == "audit-chain":
+            return _audit_chain(config, args)
         if args.command == "custody":
             return _custody(config, args)
         if args.command == "storage":
@@ -272,7 +318,7 @@ def main(argv: list[str] | None = None) -> int:
     except ConfigError as error:
         print(f"configuration error: {error}", file=sys.stderr)
         return 2
-    except (EvidenceStorageError, PostgresStorageError, StorageSchemaError) as error:
+    except (EvidenceStorageError, PostgresStorageError, StorageSchemaError, AuditChainError) as error:
         print(f"storage error: {error.code}", file=sys.stderr)
         return 2
     except CustodyError as error:
@@ -990,6 +1036,176 @@ def _audit_anchor(config: GatewayConfig, args: argparse.Namespace) -> int:
         file=sys.stderr,
     )
     return 0
+
+
+def _audit_chain(config: GatewayConfig, args: argparse.Namespace) -> int:
+    """Operate commit-time evidence without placing Object Lock on request egress."""
+
+    organization_id = _required_organization(config)
+    store = create_usage_store(config)
+    if args.audit_chain_command == "status":
+        head = store.audit_chain_head(organization_id=organization_id)
+        maximum_age = (
+            config.audit_chain.maximum_anchor_age_seconds
+            if config.audit_chain is not None
+            else None
+        )
+        status = store.audit_chain_anchor_status(
+            organization_id=organization_id,
+            maximum_age_seconds=maximum_age,
+        )
+        checkpoint_at = status.latest_checkpoint_at.isoformat() if status.latest_checkpoint_at is not None else "none"
+        oldest_unanchored = (
+            status.oldest_unanchored_at.isoformat() if status.oldest_unanchored_at is not None else "none"
+        )
+        digest = head.head_digest or "none"
+        print(
+            f"audit_chain=ready organization={organization_id} chain_version={head.chain_version} "
+            f"chain_epoch={head.chain_epoch} sequence={head.sequence} head_digest={digest} "
+            f"latest_checkpoint_at={checkpoint_at} oldest_unanchored_at={oldest_unanchored} "
+            f"anchor_overdue={str(status.overdue).lower()}"
+        )
+        return 0
+    if args.audit_chain_command == "anchor":
+        anchor_config = config.audit_anchor
+        if anchor_config is None:
+            raise CustodyError("audit_anchor_unconfigured")
+        head = store.audit_chain_head(organization_id=organization_id)
+        checkpoint = build_audit_chain_checkpoint(head)
+        serialized = serialize_audit_chain_checkpoint(checkpoint)
+        # Preserve the exact canonical input required by a later recovery
+        # operation before egress.  It contains metadata only, but is still
+        # owner-only by default to avoid casually exposing tenant topology.
+        _write_audit_chain_checkpoint(Path(args.output).expanduser().absolute(), serialized, force=args.force)
+        checkpoint_id, checkpoint_organization, _, sequence, head_digest = audit_chain_checkpoint_summary(checkpoint)
+        if checkpoint_organization != organization_id:
+            raise CustodyError("audit_chain_tenant_mismatch")
+        retention_until = datetime.now(timezone.utc) + timedelta(days=anchor_config.retention_days)
+        receipt = create_audit_anchor_sink(config).anchor(
+            serialized,
+            artifact_id=checkpoint_id,
+            organization_id=organization_id,
+            head_digest=head_digest,
+            retention_until=retention_until,
+            legal_hold=anchor_config.legal_hold,
+        )
+        if (
+            receipt.artifact_id != checkpoint_id
+            or receipt.head_digest != head_digest
+            or not _is_sha256_digest(receipt.artifact_sha256)
+        ):
+            raise CustodyError("audit_chain_anchor_receipt_invalid")
+        store.record_audit_chain_checkpoint(
+            checkpoint=checkpoint,
+            artifact_sha256=receipt.artifact_sha256,
+            anchor_backend=receipt.backend,
+            object_version=receipt.object_version,
+        )
+        version = f" object_version={receipt.object_version}" if receipt.object_version else ""
+        print(
+            f"audit_chain_anchor={receipt.backend} checkpoint_id={checkpoint_id} "
+            f"chain_epoch={head.chain_epoch} sequence={sequence} artifact_sha256={receipt.artifact_sha256} "
+            f"head_digest={head_digest}{version}"
+        )
+        return 0
+    checkpoint = _read_audit_chain_checkpoint(Path(args.checkpoint).expanduser().absolute())
+    if args.audit_chain_command == "verify":
+        head = store.verify_audit_chain(organization_id=organization_id, checkpoint=checkpoint)
+        checkpoint_id, _, _, sequence, head_digest = audit_chain_checkpoint_summary(checkpoint)
+        print(
+            f"audit_chain_verified=true organization={organization_id} checkpoint_id={checkpoint_id} "
+            f"checkpoint_sequence={sequence} checkpoint_head_digest={head_digest} "
+            f"chain_epoch={head.chain_epoch} sequence={head.sequence}"
+        )
+        return 0
+    if args.audit_chain_command == "epoch":
+        if args.confirm != "START_NEW_AUDIT_CHAIN_EPOCH":
+            raise CustodyError("audit_chain_epoch_confirmation_required")
+        _, checkpoint_organization, _, _, _ = audit_chain_checkpoint_summary(checkpoint)
+        if checkpoint_organization != organization_id:
+            raise CustodyError("audit_chain_tenant_mismatch")
+        head = store.begin_audit_chain_epoch(checkpoint=checkpoint, reason_code=args.reason)
+        print(
+            f"audit_chain_epoch_started=true organization={organization_id} reason={args.reason} "
+            f"chain_epoch={head.chain_epoch} sequence={head.sequence} head_digest={head.head_digest}"
+        )
+        return 0
+    raise CustodyError("audit_chain_command_unsupported")
+
+
+def _write_audit_chain_checkpoint(path: Path, serialized: bytes, *, force: bool) -> None:
+    """Publish one canonical checkpoint without exposing a partial target file."""
+
+    descriptor: int | None = None
+    temporary_path: str | None = None
+    try:
+        # Stage in the target directory so the final hard-link or replacement
+        # is atomic. In particular, --force must preserve the prior recovery
+        # artifact if staging fails halfway through a disk write.
+        descriptor, temporary_path = tempfile.mkstemp(
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            dir=str(path.parent),
+        )
+        if hasattr(os, "fchmod"):
+            os.fchmod(descriptor, 0o600)
+        remaining = memoryview(serialized)
+        while remaining:
+            written = os.write(descriptor, remaining)
+            if written <= 0:
+                raise OSError("checkpoint write made no progress")
+            remaining = remaining[written:]
+        os.fsync(descriptor)
+        os.close(descriptor)
+        descriptor = None
+        if force:
+            os.replace(temporary_path, path)
+        else:
+            try:
+                os.link(temporary_path, path)
+            except FileExistsError:
+                raise CustodyError("audit_chain_checkpoint_exists") from None
+        try:
+            os.unlink(temporary_path)
+        except OSError:
+            # The published checkpoint is valid; a private staging remnant is
+            # safe to clean up later rather than converting success to failure.
+            pass
+        temporary_path = None
+    except CustodyError:
+        raise
+    except OSError:
+        raise CustodyError("audit_chain_checkpoint_write_unavailable") from None
+    finally:
+        if descriptor is not None:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+        if temporary_path is not None:
+            try:
+                os.unlink(temporary_path)
+            except OSError:
+                pass
+
+
+def _read_audit_chain_checkpoint(path: Path) -> dict[str, object]:
+    try:
+        artifact = path.read_bytes()
+    except OSError:
+        raise CustodyError("audit_chain_checkpoint_unavailable") from None
+    try:
+        return parse_audit_chain_checkpoint(artifact)
+    except AuditChainError:
+        raise
+
+
+def _is_sha256_digest(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value)
+    )
 
 
 def _custody(config: GatewayConfig, args: argparse.Namespace) -> int:

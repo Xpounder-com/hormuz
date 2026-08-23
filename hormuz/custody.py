@@ -25,9 +25,17 @@ from typing import Any, Mapping, Protocol, Sequence
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
+from .audit_chain import (
+    AuditChainError,
+    audit_chain_checkpoint_summary,
+    parse_audit_chain_checkpoint,
+    serialize_audit_chain_checkpoint,
+)
 from .contracts import (
     AUDIT_ANCHOR_SCHEMA_ID,
     AUDIT_ANCHOR_SCHEMA_VERSION,
+    AUDIT_CHAIN_CHECKPOINT_SCHEMA_ID,
+    AUDIT_CHAIN_CHECKPOINT_SCHEMA_VERSION,
     AUDIT_EVENT_SCHEMA_ID,
     validate_audit_event,
 )
@@ -332,8 +340,19 @@ class AuditAnchorReceipt:
     object_version: str | None = None
 
 
+@dataclass(frozen=True)
+class ImmutableAnchorArtifactSummary:
+    """Safe common metadata for any externally retainable Hormuz artifact."""
+
+    schema_id: str
+    schema_version: int
+    artifact_id: str
+    organization_id: str
+    head_digest: str
+
+
 class AuditAnchorSink(Protocol):
-    """A provider-neutral immutable storage boundary for audit artifacts."""
+    """A provider-neutral immutable storage boundary for validated evidence artifacts."""
 
     def anchor(
         self,
@@ -427,6 +446,85 @@ def parse_audit_anchor_artifact(value: bytes | str) -> dict[str, object]:
     normalized = dict(parsed)
     verify_audit_anchor_artifact(normalized)
     return normalized
+
+
+def parse_immutable_anchor_artifact(value: bytes | str) -> dict[str, object]:
+    """Parse either an export-time audit snapshot or a commit-time checkpoint.
+
+    Object Lock adapters retain bytes, not product-specific policy.  This
+    narrow dispatcher lets the same vendor-neutral sink protect both strict
+    artifact formats while preserving the existing audit-anchor v1 contract.
+    """
+
+    parsed = _strict_json(value, maximum_bytes=_MAX_AUDIT_ARTIFACT_BYTES, code="audit_anchor_malformed")
+    if not isinstance(parsed, Mapping):
+        raise CustodyError("audit_anchor_malformed")
+    schema_id = parsed.get("schema_id")
+    schema_version = parsed.get("schema_version")
+    if schema_id == AUDIT_ANCHOR_SCHEMA_ID and schema_version == AUDIT_ANCHOR_SCHEMA_VERSION:
+        return parse_audit_anchor_artifact(value)
+    if (
+        schema_id == AUDIT_CHAIN_CHECKPOINT_SCHEMA_ID
+        and schema_version == AUDIT_CHAIN_CHECKPOINT_SCHEMA_VERSION
+    ):
+        try:
+            return parse_audit_chain_checkpoint(value)
+        except AuditChainError as error:
+            raise CustodyError(error.code) from None
+    raise CustodyError("audit_anchor_schema_unsupported")
+
+
+def serialize_immutable_anchor_artifact(artifact: Mapping[str, Any]) -> bytes:
+    """Canonically serialize one artifact accepted by an Object Lock sink."""
+
+    schema_id = artifact.get("schema_id")
+    schema_version = artifact.get("schema_version")
+    if schema_id == AUDIT_ANCHOR_SCHEMA_ID and schema_version == AUDIT_ANCHOR_SCHEMA_VERSION:
+        return serialize_audit_anchor_artifact(artifact)
+    if (
+        schema_id == AUDIT_CHAIN_CHECKPOINT_SCHEMA_ID
+        and schema_version == AUDIT_CHAIN_CHECKPOINT_SCHEMA_VERSION
+    ):
+        try:
+            return serialize_audit_chain_checkpoint(artifact)
+        except AuditChainError as error:
+            raise CustodyError(error.code) from None
+    raise CustodyError("audit_anchor_schema_unsupported")
+
+
+def immutable_anchor_summary(artifact: Mapping[str, Any]) -> ImmutableAnchorArtifactSummary:
+    """Return generic receipt metadata after strict format-specific validation."""
+
+    schema_id = artifact.get("schema_id")
+    schema_version = artifact.get("schema_version")
+    if schema_id == AUDIT_ANCHOR_SCHEMA_ID and schema_version == AUDIT_ANCHOR_SCHEMA_VERSION:
+        identifier, head_digest, _ = audit_anchor_summary(artifact)
+        organization_id = artifact.get("organization_id")
+        if not isinstance(organization_id, str):
+            raise CustodyError("audit_anchor_malformed")
+        return ImmutableAnchorArtifactSummary(
+            schema_id=AUDIT_ANCHOR_SCHEMA_ID,
+            schema_version=AUDIT_ANCHOR_SCHEMA_VERSION,
+            artifact_id=identifier,
+            organization_id=organization_id,
+            head_digest=head_digest,
+        )
+    if (
+        schema_id == AUDIT_CHAIN_CHECKPOINT_SCHEMA_ID
+        and schema_version == AUDIT_CHAIN_CHECKPOINT_SCHEMA_VERSION
+    ):
+        try:
+            identifier, organization_id, _, _, head_digest = audit_chain_checkpoint_summary(artifact)
+        except AuditChainError as error:
+            raise CustodyError(error.code) from None
+        return ImmutableAnchorArtifactSummary(
+            schema_id=AUDIT_CHAIN_CHECKPOINT_SCHEMA_ID,
+            schema_version=AUDIT_CHAIN_CHECKPOINT_SCHEMA_VERSION,
+            artifact_id=identifier,
+            organization_id=organization_id,
+            head_digest=head_digest,
+        )
+    raise CustodyError("audit_anchor_schema_unsupported")
 
 
 def verify_audit_anchor_artifact(artifact: Mapping[str, Any]) -> None:

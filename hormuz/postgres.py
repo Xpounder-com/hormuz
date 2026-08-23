@@ -16,7 +16,7 @@ from typing import Any, Iterator, Mapping
 from .config import PostgresPoolConfig
 
 
-POSTGRES_SCHEMA_VERSION = 3
+POSTGRES_SCHEMA_VERSION = 4
 _IDENTIFIER_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 _POOL_RECONNECT_TIMEOUT_SECONDS = 15
 
@@ -478,6 +478,49 @@ def _verify_applied_schema_shape(cursor: Any, *, schema: str, version: int) -> N
             "reason_code",
             "usage_event_id",
         }
+    if version >= 4:
+        required["gateway_audit_chain_epochs"] = {
+            "organization_id",
+            "chain_version",
+            "chain_epoch",
+            "created_at",
+            "reason_code",
+            "predecessor_chain_epoch",
+            "predecessor_sequence",
+            "predecessor_head_digest",
+        }
+        required["gateway_audit_chain_heads"] = {
+            "organization_id",
+            "chain_version",
+            "chain_epoch",
+            "sequence",
+            "head_digest",
+        }
+        required["gateway_audit_chain_entries"] = {
+            "organization_id",
+            "chain_version",
+            "chain_epoch",
+            "sequence",
+            "entry_schema_id",
+            "entry_schema_version",
+            "event_id",
+            "previous_digest",
+            "event_digest",
+            "event_json",
+            "appended_at",
+        }
+        required["gateway_audit_chain_checkpoints"] = {
+            "checkpoint_id",
+            "organization_id",
+            "chain_version",
+            "chain_epoch",
+            "sequence",
+            "head_digest",
+            "artifact_sha256",
+            "anchor_backend",
+            "object_version",
+            "anchored_at",
+        }
     for table, columns in required.items():
         cursor.execute(
             """
@@ -585,6 +628,7 @@ def _migration_sql(
         1: "0001_usage_evidence.sql",
         2: "0002_policy_control.sql",
         3: "0003_request_attempts.sql",
+        4: "0004_commit_audit_chain.sql",
     }
     filename = filenames.get(version)
     if filename is None:

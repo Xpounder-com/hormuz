@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hmac
 import json
 import sqlite3
 import threading
@@ -8,11 +9,22 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Mapping, Protocol
 
+from .audit_chain import (
+    AuditChainAnchorStatus,
+    AuditChainError,
+    AuditChainHead,
+    audit_chain_checkpoint_position,
+    audit_chain_checkpoint_summary,
+    build_audit_chain_entry,
+    canonical_json_text,
+    verify_audit_chain_entry,
+)
 from .config import Identity
 from .contracts import (
     ALLOCATION_BASIS_DIRECT_GATEWAY_REQUEST,
+    AUDIT_CHAIN_VERSION,
     AUDIT_EVENT_SCHEMA_ID,
     AUDIT_EVENT_SCHEMA_VERSION,
     COST_BASIS_CONFIGURED_RATE_CARD_ESTIMATE,
@@ -26,7 +38,7 @@ from .contracts import (
     validate_request_attempt_event,
     validate_request_status,
 )
-from .evidence import security_audit_event, usage_audit_event
+from .evidence import EvidenceStorageError, security_audit_event, usage_audit_event
 
 
 @dataclass(frozen=True)
@@ -127,19 +139,49 @@ class UsageRepository(Protocol):
 
     def audit_events(self, **kwargs: object) -> list[dict[str, object]]: ...
 
+    def audit_chain_head(self, **kwargs: object) -> AuditChainHead: ...
+
+    def audit_chain_anchor_status(self, **kwargs: object) -> AuditChainAnchorStatus: ...
+
+    def record_audit_chain_checkpoint(self, **kwargs: object) -> None: ...
+
+    def begin_audit_chain_epoch(self, **kwargs: object) -> AuditChainHead: ...
+
+    def verify_audit_chain(self, **kwargs: object) -> AuditChainHead: ...
+
 
 class UsageStore:
     """SQLite implementation of the metadata-only usage repository."""
 
-    schema_version = 3
+    schema_version = 4
 
-    def __init__(self, path: Path, *, maximum_supported_schema_version: int | None = None):
+    def __init__(
+        self,
+        path: Path,
+        *,
+        maximum_supported_schema_version: int | None = None,
+        audit_chain_maximum_anchor_age_seconds: int | None = None,
+        audit_chain_organization_ids: tuple[str, ...] = (),
+    ):
         self.path = path
         self.maximum_supported_schema_version = (
             self.schema_version
             if maximum_supported_schema_version is None
             else maximum_supported_schema_version
         )
+        if (
+            audit_chain_maximum_anchor_age_seconds is not None
+            and (
+                isinstance(audit_chain_maximum_anchor_age_seconds, bool)
+                or not isinstance(audit_chain_maximum_anchor_age_seconds, int)
+                or audit_chain_maximum_anchor_age_seconds < 1
+            )
+        ):
+            raise StorageSchemaError("audit_chain_configuration_invalid")
+        self.audit_chain_maximum_anchor_age_seconds = audit_chain_maximum_anchor_age_seconds
+        self.audit_chain_organization_ids = tuple(sorted(set(audit_chain_organization_ids)))
+        if any(not isinstance(organization_id, str) or not organization_id for organization_id in self.audit_chain_organization_ids):
+            raise StorageSchemaError("audit_chain_configuration_invalid")
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
         self._initialize()
@@ -309,6 +351,114 @@ class UsageStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_gateway_attempt_event_organization_attempt
                     ON gateway_request_attempt_events(organization_id, attempt_id, sequence);
+                CREATE TABLE IF NOT EXISTS gateway_audit_chain_epochs (
+                    organization_id TEXT NOT NULL,
+                    chain_version INTEGER NOT NULL,
+                    chain_epoch INTEGER NOT NULL,
+                    created_at TEXT NOT NULL,
+                    reason_code TEXT NOT NULL,
+                    predecessor_chain_epoch INTEGER,
+                    predecessor_sequence INTEGER,
+                    predecessor_head_digest TEXT,
+                    PRIMARY KEY (organization_id, chain_epoch),
+                    CHECK (chain_version = 1),
+                    CHECK (chain_epoch >= 1),
+                    CHECK (reason_code IN ('initial_adoption', 'restore', 'migration')),
+                    CHECK (
+                        (predecessor_chain_epoch IS NULL AND predecessor_sequence IS NULL AND predecessor_head_digest IS NULL)
+                        OR (
+                            predecessor_chain_epoch >= 1
+                            AND predecessor_sequence >= 1
+                            AND predecessor_head_digest IS NOT NULL
+                        )
+                    )
+                );
+                CREATE TABLE IF NOT EXISTS gateway_audit_chain_heads (
+                    organization_id TEXT PRIMARY KEY,
+                    chain_version INTEGER NOT NULL,
+                    chain_epoch INTEGER NOT NULL,
+                    sequence INTEGER NOT NULL,
+                    head_digest TEXT,
+                    FOREIGN KEY (organization_id, chain_epoch)
+                        REFERENCES gateway_audit_chain_epochs (organization_id, chain_epoch),
+                    CHECK (chain_version = 1),
+                    CHECK (chain_epoch >= 1),
+                    CHECK (sequence >= 0),
+                    CHECK (sequence = 0 OR head_digest IS NOT NULL)
+                );
+                CREATE TABLE IF NOT EXISTS gateway_audit_chain_entries (
+                    organization_id TEXT NOT NULL,
+                    chain_version INTEGER NOT NULL,
+                    chain_epoch INTEGER NOT NULL,
+                    sequence INTEGER NOT NULL,
+                    entry_schema_id TEXT NOT NULL,
+                    entry_schema_version INTEGER NOT NULL,
+                    event_id TEXT NOT NULL,
+                    previous_digest TEXT,
+                    event_digest TEXT NOT NULL,
+                    event_json TEXT NOT NULL,
+                    appended_at TEXT NOT NULL,
+                    PRIMARY KEY (organization_id, chain_epoch, sequence),
+                    UNIQUE (organization_id, event_id),
+                    FOREIGN KEY (organization_id, chain_epoch)
+                        REFERENCES gateway_audit_chain_epochs (organization_id, chain_epoch),
+                    CHECK (chain_version = 1),
+                    CHECK (chain_epoch >= 1),
+                    CHECK (sequence >= 1),
+                    CHECK (entry_schema_id = 'hormuz.commit-audit-chain-entry'),
+                    CHECK (entry_schema_version = 1)
+                );
+                CREATE INDEX IF NOT EXISTS idx_gateway_audit_chain_entries_event
+                    ON gateway_audit_chain_entries(organization_id, event_id);
+                CREATE TRIGGER IF NOT EXISTS gateway_audit_chain_epochs_no_update
+                    BEFORE UPDATE ON gateway_audit_chain_epochs
+                    BEGIN
+                        SELECT RAISE(ABORT, 'audit_chain_epoch_immutable');
+                    END;
+                CREATE TRIGGER IF NOT EXISTS gateway_audit_chain_epochs_no_delete
+                    BEFORE DELETE ON gateway_audit_chain_epochs
+                    BEGIN
+                        SELECT RAISE(ABORT, 'audit_chain_epoch_immutable');
+                    END;
+                CREATE TRIGGER IF NOT EXISTS gateway_audit_chain_entries_no_update
+                    BEFORE UPDATE ON gateway_audit_chain_entries
+                    BEGIN
+                        SELECT RAISE(ABORT, 'audit_chain_entry_immutable');
+                    END;
+                CREATE TRIGGER IF NOT EXISTS gateway_audit_chain_entries_no_delete
+                    BEFORE DELETE ON gateway_audit_chain_entries
+                    BEGIN
+                        SELECT RAISE(ABORT, 'audit_chain_entry_immutable');
+                    END;
+                CREATE TABLE IF NOT EXISTS gateway_audit_chain_checkpoints (
+                    checkpoint_id TEXT PRIMARY KEY,
+                    organization_id TEXT NOT NULL,
+                    chain_version INTEGER NOT NULL,
+                    chain_epoch INTEGER NOT NULL,
+                    sequence INTEGER NOT NULL,
+                    head_digest TEXT NOT NULL,
+                    artifact_sha256 TEXT NOT NULL,
+                    anchor_backend TEXT NOT NULL,
+                    object_version TEXT,
+                    anchored_at TEXT NOT NULL,
+                    FOREIGN KEY (organization_id, chain_epoch)
+                        REFERENCES gateway_audit_chain_epochs (organization_id, chain_epoch),
+                    CHECK (chain_version = 1),
+                    CHECK (chain_epoch >= 1),
+                    CHECK (sequence >= 1)
+                );
+                CREATE INDEX IF NOT EXISTS idx_gateway_audit_chain_checkpoint_latest
+                    ON gateway_audit_chain_checkpoints(organization_id, anchored_at DESC);
+                CREATE TRIGGER IF NOT EXISTS gateway_audit_chain_checkpoints_no_update
+                    BEFORE UPDATE ON gateway_audit_chain_checkpoints
+                    BEGIN
+                        SELECT RAISE(ABORT, 'audit_chain_checkpoint_immutable');
+                    END;
+                CREATE TRIGGER IF NOT EXISTS gateway_audit_chain_checkpoints_no_delete
+                    BEFORE DELETE ON gateway_audit_chain_checkpoints
+                    BEGIN
+                        SELECT RAISE(ABORT, 'audit_chain_checkpoint_immutable');
+                    END;
                 """
                 )
             if any(state != "applied" for state in migrations.values()):
@@ -358,6 +508,17 @@ class UsageStore:
                 self._verify_applied_schema_shape(connection, version=max(states))
             if any(states.get(version) != "applied" for version in range(1, self.schema_version + 1)):
                 raise StorageSchemaError("storage_schema_unavailable")
+            if self.audit_chain_maximum_anchor_age_seconds is not None:
+                now = datetime.now(timezone.utc)
+                for organization_id in self.audit_chain_organization_ids:
+                    status = self._audit_chain_anchor_status_in_connection(
+                        connection,
+                        organization_id=organization_id,
+                        maximum_age_seconds=self.audit_chain_maximum_anchor_age_seconds,
+                        now=now,
+                    )
+                    if status.overdue:
+                        raise StorageSchemaError("audit_chain_anchor_overdue")
 
     @staticmethod
     def _verify_applied_schema_shape(connection: sqlite3.Connection, *, version: int) -> None:
@@ -467,12 +628,72 @@ class UsageStore:
                 "reason_code",
                 "usage_event_id",
             }
+        if version >= 4:
+            required["gateway_audit_chain_epochs"] = {
+                "organization_id",
+                "chain_version",
+                "chain_epoch",
+                "created_at",
+                "reason_code",
+                "predecessor_chain_epoch",
+                "predecessor_sequence",
+                "predecessor_head_digest",
+            }
+            required["gateway_audit_chain_heads"] = {
+                "organization_id",
+                "chain_version",
+                "chain_epoch",
+                "sequence",
+                "head_digest",
+            }
+            required["gateway_audit_chain_entries"] = {
+                "organization_id",
+                "chain_version",
+                "chain_epoch",
+                "sequence",
+                "entry_schema_id",
+                "entry_schema_version",
+                "event_id",
+                "previous_digest",
+                "event_digest",
+                "event_json",
+                "appended_at",
+            }
+            required["gateway_audit_chain_checkpoints"] = {
+                "checkpoint_id",
+                "organization_id",
+                "chain_version",
+                "chain_epoch",
+                "sequence",
+                "head_digest",
+                "artifact_sha256",
+                "anchor_backend",
+                "object_version",
+                "anchored_at",
+            }
         for table, columns in required.items():
             observed = {
                 str(row["name"])
                 for row in connection.execute(f"PRAGMA table_info({table})").fetchall()
             }
             if not columns.issubset(observed):
+                raise StorageSchemaError("storage_schema_partial_upgrade")
+        if version >= 4:
+            required_triggers = {
+                "gateway_audit_chain_epochs_no_update",
+                "gateway_audit_chain_epochs_no_delete",
+                "gateway_audit_chain_entries_no_update",
+                "gateway_audit_chain_entries_no_delete",
+                "gateway_audit_chain_checkpoints_no_update",
+                "gateway_audit_chain_checkpoints_no_delete",
+            }
+            observed_triggers = {
+                str(row["name"])
+                for row in connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'trigger'"
+                ).fetchall()
+            }
+            if not required_triggers.issubset(observed_triggers):
                 raise StorageSchemaError("storage_schema_partial_upgrade")
 
     @classmethod
@@ -581,6 +802,143 @@ class UsageStore:
             ):
                 connection.execute(statement)
             return
+        if version == 4:
+            for statement in (
+                """
+                CREATE TABLE IF NOT EXISTS gateway_audit_chain_epochs (
+                    organization_id TEXT NOT NULL,
+                    chain_version INTEGER NOT NULL,
+                    chain_epoch INTEGER NOT NULL,
+                    created_at TEXT NOT NULL,
+                    reason_code TEXT NOT NULL,
+                    predecessor_chain_epoch INTEGER,
+                    predecessor_sequence INTEGER,
+                    predecessor_head_digest TEXT,
+                    PRIMARY KEY (organization_id, chain_epoch),
+                    CHECK (chain_version = 1),
+                    CHECK (chain_epoch >= 1),
+                    CHECK (reason_code IN ('initial_adoption', 'restore', 'migration')),
+                    CHECK (
+                        (predecessor_chain_epoch IS NULL AND predecessor_sequence IS NULL AND predecessor_head_digest IS NULL)
+                        OR (
+                            predecessor_chain_epoch >= 1
+                            AND predecessor_sequence >= 1
+                            AND predecessor_head_digest IS NOT NULL
+                        )
+                    )
+                )
+                """,
+                """
+                CREATE TABLE IF NOT EXISTS gateway_audit_chain_heads (
+                    organization_id TEXT PRIMARY KEY,
+                    chain_version INTEGER NOT NULL,
+                    chain_epoch INTEGER NOT NULL,
+                    sequence INTEGER NOT NULL,
+                    head_digest TEXT,
+                    FOREIGN KEY (organization_id, chain_epoch)
+                        REFERENCES gateway_audit_chain_epochs (organization_id, chain_epoch),
+                    CHECK (chain_version = 1),
+                    CHECK (chain_epoch >= 1),
+                    CHECK (sequence >= 0),
+                    CHECK (sequence = 0 OR head_digest IS NOT NULL)
+                )
+                """,
+                """
+                CREATE TABLE IF NOT EXISTS gateway_audit_chain_entries (
+                    organization_id TEXT NOT NULL,
+                    chain_version INTEGER NOT NULL,
+                    chain_epoch INTEGER NOT NULL,
+                    sequence INTEGER NOT NULL,
+                    entry_schema_id TEXT NOT NULL,
+                    entry_schema_version INTEGER NOT NULL,
+                    event_id TEXT NOT NULL,
+                    previous_digest TEXT,
+                    event_digest TEXT NOT NULL,
+                    event_json TEXT NOT NULL,
+                    appended_at TEXT NOT NULL,
+                    PRIMARY KEY (organization_id, chain_epoch, sequence),
+                    UNIQUE (organization_id, event_id),
+                    FOREIGN KEY (organization_id, chain_epoch)
+                        REFERENCES gateway_audit_chain_epochs (organization_id, chain_epoch),
+                    CHECK (chain_version = 1),
+                    CHECK (chain_epoch >= 1),
+                    CHECK (sequence >= 1),
+                    CHECK (entry_schema_id = 'hormuz.commit-audit-chain-entry'),
+                    CHECK (entry_schema_version = 1)
+                )
+                """,
+                """
+                CREATE INDEX IF NOT EXISTS idx_gateway_audit_chain_entries_event
+                    ON gateway_audit_chain_entries(organization_id, event_id)
+                """,
+                """
+                CREATE TRIGGER IF NOT EXISTS gateway_audit_chain_epochs_no_update
+                    BEFORE UPDATE ON gateway_audit_chain_epochs
+                    BEGIN
+                        SELECT RAISE(ABORT, 'audit_chain_epoch_immutable');
+                    END
+                """,
+                """
+                CREATE TRIGGER IF NOT EXISTS gateway_audit_chain_epochs_no_delete
+                    BEFORE DELETE ON gateway_audit_chain_epochs
+                    BEGIN
+                        SELECT RAISE(ABORT, 'audit_chain_epoch_immutable');
+                    END
+                """,
+                """
+                CREATE TRIGGER IF NOT EXISTS gateway_audit_chain_entries_no_update
+                    BEFORE UPDATE ON gateway_audit_chain_entries
+                    BEGIN
+                        SELECT RAISE(ABORT, 'audit_chain_entry_immutable');
+                    END
+                """,
+                """
+                CREATE TRIGGER IF NOT EXISTS gateway_audit_chain_entries_no_delete
+                    BEFORE DELETE ON gateway_audit_chain_entries
+                    BEGIN
+                        SELECT RAISE(ABORT, 'audit_chain_entry_immutable');
+                    END
+                """,
+                """
+                CREATE TABLE IF NOT EXISTS gateway_audit_chain_checkpoints (
+                    checkpoint_id TEXT PRIMARY KEY,
+                    organization_id TEXT NOT NULL,
+                    chain_version INTEGER NOT NULL,
+                    chain_epoch INTEGER NOT NULL,
+                    sequence INTEGER NOT NULL,
+                    head_digest TEXT NOT NULL,
+                    artifact_sha256 TEXT NOT NULL,
+                    anchor_backend TEXT NOT NULL,
+                    object_version TEXT,
+                    anchored_at TEXT NOT NULL,
+                    FOREIGN KEY (organization_id, chain_epoch)
+                        REFERENCES gateway_audit_chain_epochs (organization_id, chain_epoch),
+                    CHECK (chain_version = 1),
+                    CHECK (chain_epoch >= 1),
+                    CHECK (sequence >= 1)
+                )
+                """,
+                """
+                CREATE INDEX IF NOT EXISTS idx_gateway_audit_chain_checkpoint_latest
+                    ON gateway_audit_chain_checkpoints(organization_id, anchored_at DESC)
+                """,
+                """
+                CREATE TRIGGER IF NOT EXISTS gateway_audit_chain_checkpoints_no_update
+                    BEFORE UPDATE ON gateway_audit_chain_checkpoints
+                    BEGIN
+                        SELECT RAISE(ABORT, 'audit_chain_checkpoint_immutable');
+                    END
+                """,
+                """
+                CREATE TRIGGER IF NOT EXISTS gateway_audit_chain_checkpoints_no_delete
+                    BEFORE DELETE ON gateway_audit_chain_checkpoints
+                    BEGIN
+                        SELECT RAISE(ABORT, 'audit_chain_checkpoint_immutable');
+                    END
+                """,
+            ):
+                connection.execute(statement)
+            return
         raise StorageSchemaError("storage_schema_migration_unsupported")
 
     @staticmethod
@@ -593,6 +951,185 @@ class UsageStore:
         for name, declaration in columns.items():
             if name not in existing:
                 connection.execute(f"ALTER TABLE {table} ADD COLUMN {name} {declaration}")
+
+    def _audit_chain_head_in_connection(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        organization_id: str,
+        create: bool = True,
+    ) -> AuditChainHead | None:
+        """Return the active chain head, lazily creating the initial epoch."""
+
+        if create:
+            now = datetime.now(timezone.utc).isoformat()
+            connection.execute(
+                """
+                INSERT OR IGNORE INTO gateway_audit_chain_epochs (
+                    organization_id, chain_version, chain_epoch, created_at, reason_code,
+                    predecessor_chain_epoch, predecessor_sequence, predecessor_head_digest
+                ) VALUES (?, 1, 1, ?, 'initial_adoption', NULL, NULL, NULL)
+                """,
+                (organization_id, now),
+            )
+            connection.execute(
+                """
+                INSERT OR IGNORE INTO gateway_audit_chain_heads (
+                    organization_id, chain_version, chain_epoch, sequence, head_digest
+                ) VALUES (?, 1, 1, 0, NULL)
+                """,
+                (organization_id,),
+            )
+        row = connection.execute(
+            """
+            SELECT organization_id, chain_version, chain_epoch, sequence, head_digest
+            FROM gateway_audit_chain_heads
+            WHERE organization_id = ?
+            """,
+            (organization_id,),
+        ).fetchone()
+        if row is None and not create:
+            return None
+        if row is None:
+            raise StorageSchemaError("audit_chain_head_unavailable")
+        head_digest = row["head_digest"]
+        if head_digest is not None and not isinstance(head_digest, str):
+            raise StorageSchemaError("audit_chain_head_malformed")
+        return AuditChainHead(
+            organization_id=str(row["organization_id"]),
+            chain_version=int(row["chain_version"]),
+            chain_epoch=int(row["chain_epoch"]),
+            sequence=int(row["sequence"]),
+            head_digest=head_digest,
+        )
+
+    def _append_audit_chain_entry_in_connection(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        event: Mapping[str, object],
+    ) -> AuditChainHead:
+        """Atomically append a canonical event and advance its tenant head."""
+
+        organization_id = event.get("organization_id")
+        event_id = event.get("id")
+        if not isinstance(organization_id, str) or not organization_id or not isinstance(event_id, str) or not event_id:
+            raise StorageSchemaError("audit_chain_event_malformed")
+        head = self._audit_chain_head_in_connection(connection, organization_id=organization_id)
+        if head is None:
+            raise StorageSchemaError("audit_chain_head_unavailable")
+        try:
+            entry = build_audit_chain_entry(
+                event,
+                chain_version=head.chain_version,
+                chain_epoch=head.chain_epoch,
+                sequence=head.sequence + 1,
+                previous_digest=head.head_digest,
+            )
+        except AuditChainError as error:
+            raise StorageSchemaError(error.code) from None
+        event_value = entry["event"]
+        if not isinstance(event_value, Mapping):  # Defensive after strict construction above.
+            raise StorageSchemaError("audit_chain_entry_malformed")
+        cursor = connection.execute(
+            """
+            INSERT INTO gateway_audit_chain_entries (
+                organization_id, chain_version, chain_epoch, sequence,
+                entry_schema_id, entry_schema_version, event_id, previous_digest,
+                event_digest, event_json, appended_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                organization_id,
+                entry["chain_version"],
+                entry["chain_epoch"],
+                entry["sequence"],
+                entry["schema_id"],
+                entry["schema_version"],
+                event_id,
+                entry["previous_digest"],
+                entry["event_digest"],
+                canonical_json_text(dict(event_value)),
+                datetime.now(timezone.utc).isoformat(),
+            ),
+        )
+        if cursor.rowcount != 1:
+            raise StorageSchemaError("audit_chain_entry_unavailable")
+        cursor = connection.execute(
+            """
+            UPDATE gateway_audit_chain_heads
+            SET sequence = ?, head_digest = ?
+            WHERE organization_id = ?
+              AND chain_version = ?
+              AND chain_epoch = ?
+              AND sequence = ?
+              AND head_digest IS ?
+            """,
+            (
+                entry["sequence"],
+                entry["event_digest"],
+                organization_id,
+                head.chain_version,
+                head.chain_epoch,
+                head.sequence,
+                head.head_digest,
+            ),
+        )
+        if cursor.rowcount != 1:
+            raise StorageSchemaError("audit_chain_head_conflict")
+        return AuditChainHead(
+            organization_id=organization_id,
+            chain_version=head.chain_version,
+            chain_epoch=head.chain_epoch,
+            sequence=int(entry["sequence"]),
+            head_digest=str(entry["event_digest"]),
+        )
+
+    @staticmethod
+    def _usage_audit_event_in_connection(connection: sqlite3.Connection, event_id: str) -> dict[str, object]:
+        row = connection.execute(
+            """
+            SELECT
+                id, occurred_at, evidence_schema_id, evidence_schema_version,
+                organization_id, actor_id, actor_name, team_id, team_name,
+                identity_type, authentication_source, client, protocol, requested_model,
+                resolved_alias, upstream_model, provider_reported_model, policy_version,
+                policy_action, status, input_tokens, output_tokens,
+                cache_read_tokens, cache_write_tokens, reasoning_tokens,
+                cost_microusd, cost_basis, allocation_basis, coverage,
+                provider_request_id, redaction_count, redaction_rules
+            FROM gateway_usage_events
+            WHERE id = ?
+            """,
+            (event_id,),
+        ).fetchone()
+        if row is None:
+            raise StorageSchemaError("audit_chain_source_event_missing")
+        try:
+            return usage_audit_event(dict(row))
+        except EvidenceStorageError as error:
+            raise StorageSchemaError(error.code) from None
+
+    @staticmethod
+    def _secret_audit_event_in_connection(connection: sqlite3.Connection, event_id: str) -> dict[str, object]:
+        row = connection.execute(
+            """
+            SELECT
+                id, occurred_at, evidence_schema_id, evidence_schema_version,
+                organization_id, actor_id, actor_name, team_id, team_name,
+                identity_type, authentication_source, client, protocol, requested_model,
+                policy_version, coverage, action, detection_count, rules
+            FROM gateway_secret_events
+            WHERE id = ?
+            """,
+            (event_id,),
+        ).fetchone()
+        if row is None:
+            raise StorageSchemaError("audit_chain_source_event_missing")
+        try:
+            return security_audit_event(dict(row))
+        except EvidenceStorageError as error:
+            raise StorageSchemaError(error.code) from None
 
     def _record_in_connection(
         self,
@@ -675,6 +1212,10 @@ class UsageStore:
                 json.dumps(sorted(set(redaction_rules)), separators=(",", ":")),
             ),
         )
+        self._append_audit_chain_entry_in_connection(
+            connection,
+            event=self._usage_audit_event_in_connection(connection, event_id),
+        )
         return event_id
 
     def record(
@@ -704,6 +1245,10 @@ class UsageStore:
         redaction_rules: tuple[str, ...] = (),
     ) -> str:
         with self._lock, self._connection() as connection:
+            # Serialize head advancement across separate local gateway
+            # processes.  The event insert, immutable entry, and head update
+            # remain one rollback unit.
+            connection.execute("BEGIN IMMEDIATE")
             return self._record_in_connection(
                 connection,
                 identity=identity,
@@ -747,6 +1292,7 @@ class UsageStore:
             raise ValueError("Secret event action must be redacted or denied")
         event_id = str(uuid.uuid4())
         with self._lock, self._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
             connection.execute(
                 """
                 INSERT INTO gateway_secret_events (
@@ -777,6 +1323,10 @@ class UsageStore:
                     max(0, detection_count),
                     json.dumps(sorted(set(rules)), separators=(",", ":")),
                 ),
+            )
+            self._append_audit_chain_entry_in_connection(
+                connection,
+                event=self._secret_audit_event_in_connection(connection, event_id),
             )
         return event_id
 
@@ -1585,6 +2135,508 @@ class UsageStore:
         events.sort(key=lambda event: (str(event["occurred_at"]), str(event["id"])))
         return events
 
+    def audit_chain_head(self, *, organization_id: str) -> AuditChainHead:
+        """Return the active chain position, creating an initial empty epoch if needed."""
+
+        with self._lock, self._connection() as connection:
+            head = self._audit_chain_head_in_connection(connection, organization_id=organization_id)
+        if head is None:
+            raise StorageSchemaError("audit_chain_head_unavailable")
+        return head
+
+    def _audit_chain_anchor_status_in_connection(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        organization_id: str,
+        maximum_age_seconds: int | None,
+        now: datetime,
+    ) -> AuditChainAnchorStatus:
+        head = self._audit_chain_head_in_connection(
+            connection,
+            organization_id=organization_id,
+            create=False,
+        )
+        if head is None:
+            return AuditChainAnchorStatus(
+                organization_id=organization_id,
+                chain_epoch=1,
+                sequence=0,
+                latest_checkpoint_at=None,
+                oldest_unanchored_at=None,
+                overdue=False,
+            )
+        checkpoint = connection.execute(
+            """
+            SELECT sequence, anchored_at
+            FROM gateway_audit_chain_checkpoints
+            WHERE organization_id = ? AND chain_epoch = ?
+            ORDER BY sequence DESC, anchored_at DESC
+            LIMIT 1
+            """,
+            (organization_id, head.chain_epoch),
+        ).fetchone()
+        checkpoint_sequence = 0
+        checkpoint_at: datetime | None = None
+        if checkpoint is not None:
+            checkpoint_sequence = int(checkpoint["sequence"])
+            if checkpoint_sequence > head.sequence:
+                raise StorageSchemaError("audit_chain_checkpoint_mismatch")
+            checkpoint_at = _stored_timestamp(checkpoint["anchored_at"], code="audit_chain_checkpoint_malformed")
+        oldest_unanchored_at: datetime | None = None
+        if head.sequence > checkpoint_sequence:
+            row = connection.execute(
+                """
+                SELECT appended_at
+                FROM gateway_audit_chain_entries
+                WHERE organization_id = ? AND chain_epoch = ? AND sequence > ?
+                ORDER BY sequence ASC
+                LIMIT 1
+                """,
+                (organization_id, head.chain_epoch, checkpoint_sequence),
+            ).fetchone()
+            if row is None:
+                raise StorageSchemaError("audit_chain_head_mismatch")
+            oldest_unanchored_at = _stored_timestamp(row["appended_at"], code="audit_chain_entry_malformed")
+        overdue = bool(
+            maximum_age_seconds is not None
+            and oldest_unanchored_at is not None
+            and (now - oldest_unanchored_at).total_seconds() > maximum_age_seconds
+        )
+        return AuditChainAnchorStatus(
+            organization_id=organization_id,
+            chain_epoch=head.chain_epoch,
+            sequence=head.sequence,
+            latest_checkpoint_at=checkpoint_at,
+            oldest_unanchored_at=oldest_unanchored_at,
+            overdue=overdue,
+        )
+
+    def audit_chain_anchor_status(
+        self,
+        *,
+        organization_id: str,
+        maximum_age_seconds: int | None = None,
+        now: datetime | None = None,
+    ) -> AuditChainAnchorStatus:
+        """Return local anchor freshness only; this method never contacts Object Lock."""
+
+        _validate_anchor_age(maximum_age_seconds)
+        current = now or datetime.now(timezone.utc)
+        if current.tzinfo is None:
+            raise StorageSchemaError("audit_chain_anchor_age_invalid")
+        with self._lock, self._connection() as connection:
+            return self._audit_chain_anchor_status_in_connection(
+                connection,
+                organization_id=organization_id,
+                maximum_age_seconds=maximum_age_seconds,
+                now=current.astimezone(timezone.utc),
+            )
+
+    def record_audit_chain_checkpoint(
+        self,
+        *,
+        checkpoint: Mapping[str, object],
+        artifact_sha256: str,
+        anchor_backend: str,
+        object_version: str | None,
+        anchored_at: datetime | None = None,
+    ) -> None:
+        """Persist a successful external checkpoint without putting it on the request path."""
+
+        try:
+            checkpoint_id, organization_id, epoch, sequence, head_digest = audit_chain_checkpoint_summary(checkpoint)
+        except AuditChainError as error:
+            raise StorageSchemaError(error.code) from None
+        chain_version = checkpoint.get("chain_version")
+        if (
+            not isinstance(chain_version, int)
+            or not _is_sha256_digest(artifact_sha256)
+            or not isinstance(anchor_backend, str)
+            or not anchor_backend
+            or (object_version is not None and not isinstance(object_version, str))
+        ):
+            raise StorageSchemaError("audit_chain_checkpoint_malformed")
+        timestamp = anchored_at or datetime.now(timezone.utc)
+        if timestamp.tzinfo is None:
+            raise StorageSchemaError("audit_chain_checkpoint_malformed")
+        anchored = timestamp.astimezone(timezone.utc).isoformat()
+        with self._lock, self._connection() as connection:
+            entry = connection.execute(
+                """
+                SELECT event_digest
+                FROM gateway_audit_chain_entries
+                WHERE organization_id = ? AND chain_epoch = ? AND sequence = ?
+                """,
+                (organization_id, epoch, sequence),
+            ).fetchone()
+            if entry is None or not isinstance(entry["event_digest"], str):
+                raise StorageSchemaError("audit_chain_checkpoint_missing")
+            if not hmac.compare_digest(str(entry["event_digest"]), head_digest):
+                raise StorageSchemaError("audit_chain_checkpoint_mismatch")
+            connection.execute(
+                """
+                INSERT INTO gateway_audit_chain_checkpoints (
+                    checkpoint_id, organization_id, chain_version, chain_epoch, sequence,
+                    head_digest, artifact_sha256, anchor_backend, object_version, anchored_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(checkpoint_id) DO NOTHING
+                """,
+                (
+                    checkpoint_id,
+                    organization_id,
+                    chain_version,
+                    epoch,
+                    sequence,
+                    head_digest,
+                    artifact_sha256,
+                    anchor_backend,
+                    object_version,
+                    anchored,
+                ),
+            )
+            existing = connection.execute(
+                """
+                SELECT organization_id, chain_version, chain_epoch, sequence, head_digest,
+                       artifact_sha256, anchor_backend, object_version
+                FROM gateway_audit_chain_checkpoints
+                WHERE checkpoint_id = ?
+                """,
+                (checkpoint_id,),
+            ).fetchone()
+            if existing is None or (
+                existing["organization_id"] != organization_id
+                or int(existing["chain_version"]) != chain_version
+                or int(existing["chain_epoch"]) != epoch
+                or int(existing["sequence"]) != sequence
+                or not hmac.compare_digest(str(existing["head_digest"]), head_digest)
+                or not hmac.compare_digest(str(existing["artifact_sha256"]), artifact_sha256)
+                or existing["anchor_backend"] != anchor_backend
+                or existing["object_version"] != object_version
+            ):
+                raise StorageSchemaError("audit_chain_checkpoint_conflict")
+
+    def begin_audit_chain_epoch(
+        self,
+        *,
+        checkpoint: Mapping[str, object],
+        reason_code: str,
+    ) -> AuditChainHead:
+        """Explicitly begin a post-restore or post-migration epoch from a trusted checkpoint."""
+
+        if reason_code not in {"restore", "migration"}:
+            raise StorageSchemaError("audit_chain_epoch_reason_invalid")
+        try:
+            _, organization_id, predecessor_epoch, predecessor_sequence, predecessor_digest = audit_chain_checkpoint_summary(
+                checkpoint
+            )
+        except AuditChainError as error:
+            raise StorageSchemaError(error.code) from None
+        chain_version = checkpoint.get("chain_version")
+        if not isinstance(chain_version, int):
+            raise StorageSchemaError("audit_chain_checkpoint_malformed")
+        new_epoch = predecessor_epoch + 1
+        with self._lock, self._connection() as connection:
+            head = self._audit_chain_head_in_connection(connection, organization_id=organization_id)
+            if head is None:
+                raise StorageSchemaError("audit_chain_head_unavailable")
+            if chain_version != head.chain_version or new_epoch <= head.chain_epoch:
+                raise StorageSchemaError("audit_chain_epoch_predecessor_invalid")
+            connection.execute(
+                """
+                INSERT INTO gateway_audit_chain_epochs (
+                    organization_id, chain_version, chain_epoch, created_at, reason_code,
+                    predecessor_chain_epoch, predecessor_sequence, predecessor_head_digest
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(organization_id, chain_epoch) DO NOTHING
+                """,
+                (
+                    organization_id,
+                    chain_version,
+                    new_epoch,
+                    datetime.now(timezone.utc).isoformat(),
+                    reason_code,
+                    predecessor_epoch,
+                    predecessor_sequence,
+                    predecessor_digest,
+                ),
+            )
+            epoch = connection.execute(
+                """
+                SELECT chain_version, predecessor_chain_epoch, predecessor_sequence, predecessor_head_digest
+                FROM gateway_audit_chain_epochs
+                WHERE organization_id = ? AND chain_epoch = ?
+                """,
+                (organization_id, new_epoch),
+            ).fetchone()
+            if epoch is None or (
+                int(epoch["chain_version"]) != chain_version
+                or int(epoch["predecessor_chain_epoch"]) != predecessor_epoch
+                or int(epoch["predecessor_sequence"]) != predecessor_sequence
+                or not hmac.compare_digest(str(epoch["predecessor_head_digest"]), predecessor_digest)
+            ):
+                raise StorageSchemaError("audit_chain_epoch_conflict")
+            updated = connection.execute(
+                """
+                UPDATE gateway_audit_chain_heads
+                SET chain_epoch = ?, sequence = 0, head_digest = ?
+                WHERE organization_id = ? AND chain_version = ? AND chain_epoch = ?
+                  AND sequence = ? AND head_digest IS ?
+                """,
+                (
+                    new_epoch,
+                    predecessor_digest,
+                    organization_id,
+                    head.chain_version,
+                    head.chain_epoch,
+                    head.sequence,
+                    head.head_digest,
+                ),
+            )
+            if updated.rowcount != 1:
+                raise StorageSchemaError("audit_chain_head_conflict")
+        return AuditChainHead(
+            organization_id=organization_id,
+            chain_version=chain_version,
+            chain_epoch=new_epoch,
+            sequence=0,
+            head_digest=predecessor_digest,
+        )
+
+    def _audit_chain_source_events_in_connection(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        organization_id: str,
+    ) -> dict[str, dict[str, object]]:
+        sources: dict[str, dict[str, object]] = {}
+        usage_rows = connection.execute(
+            """
+            SELECT
+                id, occurred_at, evidence_schema_id, evidence_schema_version,
+                organization_id, actor_id, actor_name, team_id, team_name,
+                identity_type, authentication_source, client, protocol, requested_model,
+                resolved_alias, upstream_model, provider_reported_model, policy_version,
+                policy_action, status, input_tokens, output_tokens,
+                cache_read_tokens, cache_write_tokens, reasoning_tokens,
+                cost_microusd, cost_basis, allocation_basis, coverage,
+                provider_request_id, redaction_count, redaction_rules
+            FROM gateway_usage_events
+            WHERE organization_id = ?
+            """,
+            (organization_id,),
+        ).fetchall()
+        secret_rows = connection.execute(
+            """
+            SELECT
+                id, occurred_at, evidence_schema_id, evidence_schema_version,
+                organization_id, actor_id, actor_name, team_id, team_name,
+                identity_type, authentication_source, client, protocol, requested_model,
+                policy_version, coverage, action, detection_count, rules
+            FROM gateway_secret_events
+            WHERE organization_id = ?
+            """,
+            (organization_id,),
+        ).fetchall()
+        for row in usage_rows:
+            try:
+                event = usage_audit_event(dict(row))
+            except EvidenceStorageError as error:
+                raise StorageSchemaError(error.code) from None
+            event_id = event.get("id")
+            if not isinstance(event_id, str) or event_id in sources:
+                raise StorageSchemaError("audit_chain_source_event_malformed")
+            sources[event_id] = event
+        for row in secret_rows:
+            try:
+                event = security_audit_event(dict(row))
+            except EvidenceStorageError as error:
+                raise StorageSchemaError(error.code) from None
+            event_id = event.get("id")
+            if not isinstance(event_id, str) or event_id in sources:
+                raise StorageSchemaError("audit_chain_source_event_malformed")
+            sources[event_id] = event
+        return sources
+
+    def verify_audit_chain(
+        self,
+        *,
+        organization_id: str,
+        checkpoint: Mapping[str, object] | None = None,
+    ) -> AuditChainHead:
+        """Verify ordered entries, source-event correspondence, and an optional external checkpoint."""
+
+        checkpoint_tuple: tuple[int, int, int, str] | None = None
+        if checkpoint is not None:
+            try:
+                _, checkpoint_organization, checkpoint_version, checkpoint_epoch, checkpoint_sequence, checkpoint_digest = (
+                    audit_chain_checkpoint_position(checkpoint)
+                )
+            except AuditChainError as error:
+                raise StorageSchemaError(error.code) from None
+            if checkpoint_organization != organization_id:
+                raise StorageSchemaError("audit_chain_tenant_mismatch")
+            checkpoint_tuple = (
+                checkpoint_version,
+                checkpoint_epoch,
+                checkpoint_sequence,
+                checkpoint_digest,
+            )
+
+        with self._lock, self._connection() as connection:
+            # Take one SQLite read snapshot. Without an explicit transaction,
+            # a long verification can observe a new head and an older entry
+            # set (or the reverse) while another gateway instance appends.
+            # Verification is off the request path, so this short snapshot is
+            # preferable to a false integrity alarm.
+            connection.execute("BEGIN")
+            head = self._audit_chain_head_in_connection(
+                connection,
+                organization_id=organization_id,
+                create=False,
+            )
+            if head is None:
+                if checkpoint_tuple is not None:
+                    raise StorageSchemaError("audit_chain_checkpoint_mismatch")
+                return AuditChainHead(organization_id, 1, 1, 0, None)
+            epochs = connection.execute(
+                """
+                SELECT chain_version, chain_epoch, reason_code, predecessor_chain_epoch,
+                       predecessor_sequence, predecessor_head_digest
+                FROM gateway_audit_chain_epochs
+                WHERE organization_id = ?
+                ORDER BY chain_epoch ASC
+                """,
+                (organization_id,),
+            ).fetchall()
+            entries = connection.execute(
+                """
+                SELECT chain_version, chain_epoch, sequence, entry_schema_id,
+                       entry_schema_version, event_id, previous_digest, event_digest, event_json
+                FROM gateway_audit_chain_entries
+                WHERE organization_id = ?
+                ORDER BY chain_epoch ASC, sequence ASC
+                """,
+                (organization_id,),
+            ).fetchall()
+            sources = self._audit_chain_source_events_in_connection(connection, organization_id=organization_id)
+        if head.chain_version != AUDIT_CHAIN_VERSION or head.chain_epoch < 1 or head.sequence < 0:
+            raise StorageSchemaError("audit_chain_head_malformed")
+        if head.head_digest is not None and not _is_sha256_digest(head.head_digest):
+            raise StorageSchemaError("audit_chain_head_malformed")
+        if checkpoint_tuple is not None and checkpoint_tuple[0] != head.chain_version:
+            raise StorageSchemaError("audit_chain_checkpoint_mismatch")
+
+        entries_by_epoch: dict[int, list[sqlite3.Row]] = {}
+        for row in entries:
+            entries_by_epoch.setdefault(int(row["chain_epoch"]), []).append(row)
+        verified: dict[tuple[int, int], str] = {}
+        active_epoch_seen = False
+        checkpoint_matched = False
+        previous_epoch_number = 0
+        for epoch in epochs:
+            try:
+                chain_version = int(epoch["chain_version"])
+                epoch_number = int(epoch["chain_epoch"])
+            except (TypeError, ValueError):
+                raise StorageSchemaError("audit_chain_epoch_malformed") from None
+            if (
+                chain_version != head.chain_version
+                or epoch_number < 1
+                or epoch_number <= previous_epoch_number
+                or epoch_number > head.chain_epoch
+            ):
+                raise StorageSchemaError("audit_chain_epoch_malformed")
+            previous_epoch_number = epoch_number
+            reason_code = epoch["reason_code"]
+            predecessor_digest = epoch["predecessor_head_digest"]
+            predecessor_epoch = epoch["predecessor_chain_epoch"]
+            predecessor_sequence = epoch["predecessor_sequence"]
+            if epoch_number == 1:
+                if (
+                    reason_code != "initial_adoption"
+                    or predecessor_epoch is not None
+                    or predecessor_sequence is not None
+                    or predecessor_digest is not None
+                ):
+                    raise StorageSchemaError("audit_chain_epoch_malformed")
+                previous_digest: str | None = None
+            else:
+                if (
+                    reason_code not in {"restore", "migration"}
+                    or isinstance(predecessor_epoch, bool)
+                    or not isinstance(predecessor_epoch, int)
+                    or isinstance(predecessor_sequence, bool)
+                    or not isinstance(predecessor_sequence, int)
+                    or predecessor_epoch < 1
+                    or predecessor_epoch >= epoch_number
+                    or predecessor_sequence < 1
+                    or not _is_sha256_digest(predecessor_digest)
+                ):
+                    raise StorageSchemaError("audit_chain_epoch_malformed")
+                predecessor = verified.get((predecessor_epoch, predecessor_sequence))
+                if predecessor is not None:
+                    if not hmac.compare_digest(predecessor, predecessor_digest):
+                        raise StorageSchemaError("audit_chain_predecessor_invalid")
+                elif checkpoint_tuple is None or checkpoint_tuple != (
+                    chain_version,
+                    predecessor_epoch,
+                    predecessor_sequence,
+                    predecessor_digest,
+                ):
+                    raise StorageSchemaError("audit_chain_checkpoint_required")
+                else:
+                    checkpoint_matched = True
+                previous_digest = predecessor_digest
+            expected_sequence = 1
+            for row in entries_by_epoch.get(epoch_number, []):
+                try:
+                    parsed_event = json.loads(str(row["event_json"]))
+                    if not isinstance(parsed_event, dict):
+                        raise ValueError
+                    entry = {
+                        "schema_id": row["entry_schema_id"],
+                        "schema_version": row["entry_schema_version"],
+                        "organization_id": organization_id,
+                        "chain_version": row["chain_version"],
+                        "chain_epoch": row["chain_epoch"],
+                        "sequence": row["sequence"],
+                        "previous_digest": row["previous_digest"],
+                        "event_digest": row["event_digest"],
+                        "event": parsed_event,
+                    }
+                    event_id = parsed_event.get("id")
+                    if not isinstance(event_id, str) or row["event_id"] != event_id:
+                        raise AuditChainError("audit_chain_entry_malformed")
+                    digest = verify_audit_chain_entry(
+                        entry,
+                        expected_organization_id=organization_id,
+                        expected_chain_version=chain_version,
+                        expected_chain_epoch=epoch_number,
+                        expected_sequence=expected_sequence,
+                        expected_previous_digest=previous_digest,
+                        source_event=sources.get(event_id) if isinstance(event_id, str) else None,
+                    )
+                except (AuditChainError, ValueError, TypeError, json.JSONDecodeError) as error:
+                    code = error.code if isinstance(error, AuditChainError) else "audit_chain_entry_malformed"
+                    raise StorageSchemaError(code) from None
+                verified[(epoch_number, expected_sequence)] = digest
+                previous_digest = digest
+                expected_sequence += 1
+            if epoch_number == head.chain_epoch:
+                active_epoch_seen = True
+                if head.sequence != expected_sequence - 1 or head.head_digest != previous_digest:
+                    raise StorageSchemaError("audit_chain_head_mismatch")
+        if not active_epoch_seen or previous_epoch_number != head.chain_epoch:
+            raise StorageSchemaError("audit_chain_head_mismatch")
+        if set(entries_by_epoch).difference(verified_epoch for verified_epoch, _ in verified):
+            raise StorageSchemaError("audit_chain_epoch_malformed")
+        if checkpoint_tuple is not None and not checkpoint_matched:
+            digest = verified.get((checkpoint_tuple[1], checkpoint_tuple[2]))
+            if digest is None or not hmac.compare_digest(digest, checkpoint_tuple[3]):
+                raise StorageSchemaError("audit_chain_checkpoint_mismatch")
+        return head
+
 
 def _row_optional_string(row: sqlite3.Row, name: str) -> str | None:
     value = row[name]
@@ -1605,3 +2657,30 @@ def _json_string_list(value: object) -> list[str]:
     if not isinstance(decoded, list) or any(not isinstance(item, str) for item in decoded):
         raise StorageSchemaError("request_attempt_evidence_malformed")
     return decoded
+
+
+def _stored_timestamp(value: object, *, code: str) -> datetime:
+    if not isinstance(value, str):
+        raise StorageSchemaError(code)
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        raise StorageSchemaError(code) from None
+    if parsed.tzinfo is None:
+        raise StorageSchemaError(code)
+    return parsed.astimezone(timezone.utc)
+
+
+def _validate_anchor_age(value: int | None) -> None:
+    if value is None:
+        return
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise StorageSchemaError("audit_chain_anchor_age_invalid")
+
+
+def _is_sha256_digest(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value)
+    )

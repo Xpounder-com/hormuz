@@ -251,6 +251,59 @@ before an anchor runs, and it does not provide automated scheduling, legal-hold
 release, retention-policy lifecycle administration, backup/PITR recovery, or
 SIEM delivery. Those are still open release gates.
 
+## Commit-time chain checkpoints
+
+The same vendor-neutral Object Lock interface accepts the small
+`hormuz.audit-chain-checkpoint` v1 artifact in addition to the older export
+snapshot. This lets a scheduled, operator-controlled job anchor the current
+per-organization commit-time chain without putting an S3 call on model-request
+egress.
+
+Opt into a local freshness bound only when an external anchor target is already
+configured:
+
+```json
+{
+  "audit_chain": {
+    "maximum_anchor_age_seconds": 3600
+  }
+}
+```
+
+The value is a minimum of 60 seconds and maximum of 31 days. `GET /ready` and
+`audit-chain status` inspect only local chain entries and successful local
+checkpoint receipts. They never make an Object Lock request. Readiness reports
+an evidence-health failure only when there are unanchored committed events
+older than the bound; an idle tenant with no events is not overdue.
+
+Run a checkpoint on the customer-controlled schedule:
+
+```bash
+hormuz --config /etc/hormuz/hormuz.json audit-chain anchor \
+  --output /var/lib/hormuz/checkpoints/20260823T120000Z.json
+```
+
+The command first writes the exact canonical metadata-only checkpoint with
+owner-only permissions, then performs the Object Lock write, then records the
+receipt in the usage store. It prints only the backend, random checkpoint ID,
+epoch/sequence, digests, and object-version metadata. A failed or ambiguous
+Object Lock call is never retried automatically; inspect the protected store
+before issuing a new checkpoint. The output file is deliberately retained for
+later verification or an explicit restore/migration epoch. Scheduled jobs must
+use a fresh, owner-only output path for every checkpoint; do not silently
+overwrite a recovery artifact.
+
+For a restore or migration epoch, use only the exact checkpoint recovered from
+the protected Object Lock version and preserve its independent receipt/version
+evidence. The local `audit-chain epoch` command validates canonical format and
+chain binding; it does not by itself establish that a supplied local file was
+externally retained.
+
+The Object Lock profile protects a checkpoint tuple, not the request path.
+It does not prove provider traffic that bypassed Hormuz, does not remove the
+anchor-delay window for subsequent events, and does not turn a single-host
+Ceph lab into host-root or production-retention protection.
+
 ## Operational boundaries
 
 Each anchor command is tenant-scoped and rejects mixed-tenant evidence. The

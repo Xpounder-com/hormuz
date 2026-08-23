@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Mapping
 from unittest.mock import patch
 
+from hormuz.audit_chain import AuditChainHead, build_audit_chain_checkpoint, serialize_audit_chain_checkpoint
 from hormuz.aws_custody import AWSKMSKeyCustodian, S3ObjectLockAuditAnchorSink, verify_aws_kms_profile
 from hormuz.config import ConfigError, GatewayConfig
 from hormuz.custody import (
@@ -431,6 +432,35 @@ class AWSCustodyAdapterTests(unittest.TestCase):
         self.assertEqual(request["ServerSideEncryption"], "aws:kms")
         self.assertEqual(request["SSEKMSKeyId"], "arn:aws:kms:us-east-1:111122223333:key/audit-data")
         self.assertNotIn("xpounder", request["Key"])  # type: ignore[operator]
+
+    def test_s3_object_lock_accepts_the_commit_time_checkpoint_contract(self) -> None:
+        client = _FakeS3Client()
+        sink = S3ObjectLockAuditAnchorSink(
+            client,
+            region="us-east-1",
+            bucket="hormuz-audit-bucket",
+            prefix="immutable/audit",
+            encryption_key_reference="arn:aws:kms:us-east-1:111122223333:key/audit-data",
+        )
+        checkpoint = build_audit_chain_checkpoint(
+            AuditChainHead("xpounder", 1, 1, 1, "a" * 64),
+            created_at=datetime(2026, 8, 23, tzinfo=timezone.utc),
+            checkpoint_id="16ab5178-397e-4624-9431-1a40fbf8f09f",
+        )
+        encoded = serialize_audit_chain_checkpoint(checkpoint)
+        receipt = sink.anchor(
+            encoded,
+            artifact_id=checkpoint["checkpoint_id"],  # type: ignore[arg-type]
+            organization_id="xpounder",
+            head_digest=checkpoint["head_digest"],  # type: ignore[arg-type]
+            retention_until=datetime.now(timezone.utc) + timedelta(days=30),
+            legal_hold=False,
+        )
+        request = client.puts[0]
+        metadata = request["Metadata"]  # type: ignore[assignment]
+        self.assertEqual(metadata["hormuz-schema-id"], "hormuz.audit-chain-checkpoint")  # type: ignore[index]
+        self.assertEqual(metadata["hormuz-schema-version"], "1")  # type: ignore[index]
+        self.assertEqual(receipt.artifact_id, checkpoint["checkpoint_id"])
 
     def test_s3_without_object_lock_fails_closed(self) -> None:
         client = _FakeS3Client()

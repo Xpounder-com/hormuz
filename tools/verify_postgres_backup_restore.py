@@ -58,6 +58,10 @@ _REQUIRED_RECORD_COUNT_KEYS = (
     "policy_versions",
     "active_policy_versions",
     "policy_control_events",
+    "audit_chain_epochs",
+    "audit_chain_heads",
+    "audit_chain_entries",
+    "audit_chain_checkpoints",
 )
 _EXPECTED_RECORD_COUNTS = {
     "organizations": 2,
@@ -70,11 +74,16 @@ _EXPECTED_RECORD_COUNTS = {
     "policy_versions": 2,
     "active_policy_versions": 2,
     "policy_control_events": 6,
+    "audit_chain_epochs": 2,
+    "audit_chain_heads": 2,
+    "audit_chain_entries": 4,
+    "audit_chain_checkpoints": 0,
 }
 _STATE_CHECK_KEYS = (
     "migration_ledger",
     "tenant_scoped_repository",
     "active_policy_versions",
+    "audit_chain_integrity",
     "rls_without_organization_context",
 )
 _NEGATIVE_CHECK_KEYS = (
@@ -682,6 +691,9 @@ def _capture_state(
             raise RecoveryDrillError("recovery_tenant_repository_check_failed")
         if store.monthly_secret_totals(organization_id=organization_id).events != 1:
             raise RecoveryDrillError("recovery_tenant_repository_check_failed")
+        audit_chain = store.verify_audit_chain(organization_id=organization_id)
+        if audit_chain.sequence != 2 or audit_chain.head_digest is None:
+            raise RecoveryDrillError("recovery_audit_chain_check_failed")
         if store.active_budget_reservations(organization_id=organization_id) != 2:
             raise RecoveryDrillError("recovery_budget_reservation_check_failed")
         with postgres_transaction(
@@ -743,6 +755,10 @@ def _capture_state(
         "policy_versions": len(records["policy_versions"]),
         "active_policy_versions": len(records["policy_active_versions"]),
         "policy_control_events": len(records["policy_control_events"]),
+        "audit_chain_epochs": len(records["gateway_audit_chain_epochs"]),
+        "audit_chain_heads": len(records["gateway_audit_chain_heads"]),
+        "audit_chain_entries": len(records["gateway_audit_chain_entries"]),
+        "audit_chain_checkpoints": len(records["gateway_audit_chain_checkpoints"]),
     }
     if counts != _EXPECTED_RECORD_COUNTS:
         raise RecoveryDrillError("recovery_fixture_state_unexpected")
@@ -761,6 +777,7 @@ def _capture_state(
             "migration_ledger": True,
             "tenant_scoped_repository": True,
             "active_policy_versions": True,
+            "audit_chain_integrity": True,
             "rls_without_organization_context": True,
         },
     }
@@ -793,6 +810,10 @@ def _collect_restricted_records(
         ("gateway_budget_reservations", "id"),
         ("gateway_request_attempts", "attempt_id"),
         ("gateway_request_attempt_events", "attempt_id, sequence"),
+        ("gateway_audit_chain_epochs", "organization_id, chain_epoch"),
+        ("gateway_audit_chain_heads", "organization_id"),
+        ("gateway_audit_chain_entries", "organization_id, chain_epoch, sequence"),
+        ("gateway_audit_chain_checkpoints", "checkpoint_id"),
         ("policy_versions", "organization_id, version_id"),
         ("policy_active_versions", "organization_id"),
     )
@@ -888,6 +909,10 @@ def _verify_rls_without_organization_context(
         (runtime_dsn, "gateway_budget_reservations"),
         (runtime_dsn, "gateway_request_attempts"),
         (runtime_dsn, "gateway_request_attempt_events"),
+        (runtime_dsn, "gateway_audit_chain_epochs"),
+        (runtime_dsn, "gateway_audit_chain_heads"),
+        (runtime_dsn, "gateway_audit_chain_entries"),
+        (runtime_dsn, "gateway_audit_chain_checkpoints"),
         (runtime_dsn, "policy_versions"),
         (runtime_dsn, "policy_active_versions"),
         (policy_control_dsn, "policy_tenants"),

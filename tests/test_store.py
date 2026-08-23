@@ -46,6 +46,19 @@ class UsageStoreMigrationTests(unittest.TestCase):
                 store.verify_ready()
             self.assertEqual(raised.exception.code, "storage_schema_partial_upgrade")
 
+    def test_readiness_fails_if_the_sqlite_append_only_guard_is_removed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "usage.sqlite3"
+            store = UsageStore(path)
+            connection = sqlite3.connect(path)
+            connection.execute("DROP TRIGGER gateway_audit_chain_entries_no_delete")
+            connection.commit()
+            connection.close()
+
+            with self.assertRaises(StorageSchemaError) as raised:
+                store.verify_ready()
+            self.assertEqual(raised.exception.code, "storage_schema_partial_upgrade")
+
     def test_existing_usage_database_gains_redaction_metadata_columns(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "usage.sqlite3"
@@ -207,27 +220,35 @@ class UsageStoreMigrationTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 store.audit_events(since="2000-01-01T00:00:00+00:00", kind="unsupported")
 
-    def test_schema_v2_database_upgrades_to_the_attempt_ledger_without_precreating_v3_objects(self) -> None:
+    def test_schema_v2_database_upgrades_through_the_attempt_ledger_without_precreating_later_objects(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "usage.sqlite3"
             _create_sqlite_v2_fixture(path)
             original_apply_migration = UsageStore._apply_migration
 
             def verify_then_apply(connection: sqlite3.Connection, version: int) -> None:
-                self.assertEqual(version, 3)
                 names = {
                     row[0]
                     for row in connection.execute(
                         "SELECT name FROM sqlite_master WHERE type = 'table'"
                     ).fetchall()
                 }
-                self.assertNotIn("gateway_request_attempts", names)
-                self.assertNotIn("gateway_request_attempt_events", names)
+                if version == 3:
+                    self.assertNotIn("gateway_request_attempts", names)
+                    self.assertNotIn("gateway_request_attempt_events", names)
+                elif version == 4:
+                    self.assertIn("gateway_request_attempts", names)
+                    self.assertNotIn("gateway_audit_chain_epochs", names)
+                    self.assertNotIn("gateway_audit_chain_heads", names)
+                    self.assertNotIn("gateway_audit_chain_entries", names)
+                    self.assertNotIn("gateway_audit_chain_checkpoints", names)
+                else:
+                    self.fail(f"unexpected migration version: {version}")
                 original_apply_migration(connection, version)
 
             with mock.patch.object(UsageStore, "_apply_migration", side_effect=verify_then_apply) as applied:
                 store = UsageStore(path)
-            applied.assert_called_once()
+            self.assertEqual([call.args[1] for call in applied.call_args_list], [3, 4])
             store.verify_ready()
             connection = sqlite3.connect(path)
             reservation_columns = {
@@ -245,7 +266,7 @@ class UsageStoreMigrationTests(unittest.TestCase):
             connection.close()
             self.assertIn("attempt_id", reservation_columns)
             self.assertEqual(tables, {"gateway_request_attempts", "gateway_request_attempt_events"})
-            self.assertEqual(migrations, [(1, "applied"), (2, "applied"), (3, "applied")])
+            self.assertEqual(migrations, [(1, "applied"), (2, "applied"), (3, "applied"), (4, "applied")])
             self.assertEqual(store.active_budget_reservations(organization_id="acme"), 1)
             self.assertEqual(
                 [(event["event_type"], event["requested_model"]) for event in store.audit_events(
@@ -255,11 +276,11 @@ class UsageStoreMigrationTests(unittest.TestCase):
                 [("usage", "gpt-v2"), ("security.secret", "gpt-v2")],
             )
 
-            before = _sqlite_v3_snapshot(path)
+            before = _sqlite_v4_snapshot(path)
             with self.assertRaises(StorageSchemaError) as raised:
                 UsageStore(path, maximum_supported_schema_version=2)
             self.assertEqual(raised.exception.code, "storage_schema_newer_than_binary")
-            self.assertEqual(_sqlite_v3_snapshot(path), before)
+            self.assertEqual(_sqlite_v4_snapshot(path), before)
 
     def test_partial_v3_upgrade_from_schema_v2_fails_before_materializing_ledger_tables(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -290,6 +311,52 @@ class UsageStoreMigrationTests(unittest.TestCase):
                     "SELECT version, state FROM hormuz_schema_migrations ORDER BY version"
                 ).fetchall(),
                 [(1, "applied"), (2, "applied"), (3, "applying")],
+            )
+            connection.close()
+
+    def test_partial_v4_upgrade_from_schema_v3_fails_before_materializing_chain_tables(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "usage.sqlite3"
+            UsageStore(path)
+            connection = sqlite3.connect(path)
+            for table in (
+                "gateway_audit_chain_checkpoints",
+                "gateway_audit_chain_entries",
+                "gateway_audit_chain_heads",
+                "gateway_audit_chain_epochs",
+            ):
+                connection.execute(f"DROP TABLE {table}")
+            connection.execute("DELETE FROM hormuz_schema_migrations WHERE version = 4")
+            connection.execute(
+                "INSERT INTO hormuz_schema_migrations (version, state) VALUES (4, 'applying')"
+            )
+            usage_count = connection.execute("SELECT COUNT(*) FROM gateway_usage_events").fetchone()[0]
+            connection.commit()
+            connection.close()
+
+            with self.assertRaises(StorageSchemaError) as raised:
+                UsageStore(path)
+            self.assertEqual(raised.exception.code, "storage_schema_partial_upgrade")
+
+            connection = sqlite3.connect(path)
+            tables = {
+                row[0]
+                for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
+            }
+            self.assertFalse(
+                {
+                    "gateway_audit_chain_epochs",
+                    "gateway_audit_chain_heads",
+                    "gateway_audit_chain_entries",
+                    "gateway_audit_chain_checkpoints",
+                }.intersection(tables)
+            )
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM gateway_usage_events").fetchone()[0], usage_count)
+            self.assertEqual(
+                connection.execute(
+                    "SELECT version, state FROM hormuz_schema_migrations ORDER BY version"
+                ).fetchall(),
+                [(1, "applied"), (2, "applied"), (3, "applied"), (4, "applying")],
             )
             connection.close()
 
@@ -1026,7 +1093,7 @@ def _create_sqlite_v2_fixture(path: Path) -> None:
         connection.close()
 
 
-def _sqlite_v3_snapshot(path: Path) -> dict[str, list[tuple[object, ...]]]:
+def _sqlite_v4_snapshot(path: Path) -> dict[str, list[tuple[object, ...]]]:
     connection = sqlite3.connect(path)
     try:
         return {
@@ -1038,6 +1105,10 @@ def _sqlite_v3_snapshot(path: Path) -> dict[str, list[tuple[object, ...]]]:
                 "gateway_budget_reservations",
                 "gateway_request_attempts",
                 "gateway_request_attempt_events",
+                "gateway_audit_chain_epochs",
+                "gateway_audit_chain_heads",
+                "gateway_audit_chain_entries",
+                "gateway_audit_chain_checkpoints",
             )
         }
     finally:

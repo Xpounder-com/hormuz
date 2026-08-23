@@ -35,6 +35,8 @@ The current Hormuz-owned JSON schemas are:
 | `hormuz status --json` | `hormuz.usage-report` v1 |
 | audit JSONL events | `hormuz.audit-event` v2 |
 | immutable audit-anchor artifact | `hormuz.audit-anchor` v1 |
+| commit-time audit-chain entry | `hormuz.commit-audit-chain-entry` v1 |
+| externally retainable chain checkpoint | `hormuz.audit-chain-checkpoint` v1 |
 | immutable staged policy document | `hormuz.policy-document` v1 |
 | PostgreSQL policy-control event row | `hormuz.policy-control-event` v1 |
 
@@ -45,6 +47,28 @@ X-Hormuz-Contract: hormuz.relay-metadata;v=1
 ```
 
 The same header names the separately versioned Hormuz relay-metadata contract. Hormuz may also send metadata-only relay headers such as `X-Hormuz-Policy-Decision`, `X-Hormuz-Requested-Model`, `X-Hormuz-Routed-Model`, `X-Hormuz-Redactions`, and, for a Hormuz-classified protocol error, `X-Hormuz-Error-Code`. Provider-native response and error bodies remain unchanged.
+
+## Commit-time audit-chain contract
+
+`hormuz.commit-audit-chain-entry` v1 is durable metadata-only evidence, not a
+provider response. One entry is written atomically with each current v2 usage
+or secret-egress audit event. Its digest is SHA-256 over a canonical object
+containing the organization ID, chain version, epoch, sequence, prior digest,
+and complete canonical audit event. The entry is tenant-qualified; Hormuz does
+not maintain a global chain.
+
+`hormuz.audit-chain-checkpoint` v1 is the compact artifact sent to external
+Object Lock. It contains `checkpoint_id`, `organization_id`, `chain_version`,
+`chain_epoch`, `sequence`, `head_digest`, and `created_at`. The checkpoint has
+no prompt, response, secret, model-input, or credential field. It is valid
+only for a nonempty chain head.
+
+Schema v4 adds the entry, head, epoch, and checkpoint-receipt storage without
+rewriting historical v1/v2 audit events. Existing pre-v4 evidence remains
+readable but is not retroactively covered by the commit-time chain. A
+restore/migration creates a new explicit epoch tied to a trusted checkpoint;
+it never silently restarts a sequence. See [AUDIT.md](AUDIT.md) and
+[STORAGE.md](STORAGE.md) for the verification and operational rules.
 
 ## Policy and identity semantics
 
@@ -118,8 +142,9 @@ The release line has these intentional pre-stability changes:
 6. `GET /ready` adds `hormuz.gateway-readiness` v1 without changing the existing dependency-free `GET /health` liveness contract. A ready response is HTTP 200; an unavailable dependency or an in-progress drain is HTTP 503 with a content-free reason in the same strict readiness schema. See [OPERATIONS.md](OPERATIONS.md).
 7. Gateway configuration is now a bounded, duplicate-free, schema-strict deployment input. Existing configurations must remove unsupported or misspelled fields rather than rely on ignored values; malformed and unknown-field input fails before environment-backed secret resolution. See [OPERATIONS.md](OPERATIONS.md#configuration-input).
 8. PostgreSQL schema v3 and SQLite schema v3 add the append-only `hormuz.request-attempt` v1 and `hormuz.request-attempt-event` v1 durable-evidence contracts. Immediately before provider egress, Hormuz commits an immutable content-free attempt root, its `pending` event, and its conservative budget reservation together. A reliable provider result appends exactly one `succeeded`, `failed`, or `rate_limited` event and atomically materializes the linked usage audit event. An ambiguous transport or interrupted successful stream appends `outcome_unknown` without releasing its estimate. Stale pending attempts become `outcome_unknown` through the recovery sweeper. There is no automatic provider replay, and the provider-owned relay body remains unbuffered and unchanged.
+9. PostgreSQL schema v4 and SQLite schema v4 add `hormuz.commit-audit-chain-entry` v1 and `hormuz.audit-chain-checkpoint` v1. Every new current usage or secret-egress audit event commits with one tenant-qualified chain entry and an updated tenant head. The old event schemas remain unchanged and readable; pre-v4 events are not retroactively represented as commit-time chained evidence. Recovery or migration starts a new explicit epoch linked to a trusted checkpoint, never a silent sequence restart. See [AUDIT.md](AUDIT.md) and [STORAGE.md](STORAGE.md).
 
-The SQLite migrations add the metadata columns required to emit v2 while retaining existing usage rows, add tenant scope to active budget reservations, and add the versioned append-only request-attempt ledger. Each persisted usage, secret-evidence, or request-attempt row carries an explicit schema identifier and version, so later code cannot silently reinterpret its evidence shape. Historical rows receive explicit legacy defaults where the old database could not know a value. Earlier applications will not understand newer schemas; rollback therefore requires retaining or restoring the earlier application/database pair. The corresponding PostgreSQL adapter is migration-led and uses a distinct operator migration credential and restricted runtime credential. See [STORAGE.md](STORAGE.md) for the upgrade, rollback, recovery, and remaining-operational-gates boundary.
+The SQLite migrations add the metadata columns required to emit v2 while retaining existing usage rows, add tenant scope to active budget reservations, add the versioned append-only request-attempt ledger, and add the per-organization commit-time evidence chain. Each persisted usage, secret-evidence, request-attempt, or audit-chain object carries an explicit schema identifier and version where it is a public/durable evidence format, so later code cannot silently reinterpret its evidence shape. Historical rows receive explicit legacy defaults where the old database could not know a value. Earlier applications will not understand newer schemas; rollback therefore requires retaining or restoring the earlier application/database pair. The corresponding PostgreSQL adapter is migration-led and uses a distinct operator migration credential and restricted runtime credential. See [STORAGE.md](STORAGE.md) for the upgrade, rollback, recovery, and remaining-operational-gates boundary.
 
 After this contract is released, any new optional field needs a new documented schema version before release. Removed fields, changed types, changed meanings, and newly required fields also require a new version plus migration guidance.
 

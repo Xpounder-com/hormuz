@@ -43,14 +43,78 @@ Array fields such as `redaction_rules` and `rules` are emitted as JSON arrays. E
 
 Version 1 files remain readable by the contract validator for historical compatibility, but Hormuz no longer emits them. In v2, the old `upstream_model` field is named `routed_model`; v2 also makes the identity, policy-version, provider-reported-model, cost/allocation, and coverage boundaries explicit. See [CONTRACTS.md](CONTRACTS.md) for the manifest, strict validation rules, and migration boundary.
 
+## Commit-time audit chain and external checkpoints
+
+The `audit-export` and `audit-anchor` commands remain useful inspection and
+snapshot tools, but they are not the commit-time evidence contract. New
+metadata-only usage and secret-egress audit events are also appended in the
+same storage transaction to a versioned chain for their organization. Each
+digest binds the complete canonical event, organization, chain version, epoch,
+sequence, and previous digest. There is no global cross-tenant chain.
+
+The core commands are intentionally operational rather than request-path work:
+
+```bash
+# Local chain state only; this never contacts Object Lock.
+hormuz --config /etc/hormuz/hormuz.json audit-chain status
+
+# Write a canonical checkpoint file, anchor the tuple to Object Lock, then
+# record the successful receipt locally.
+hormuz --config /etc/hormuz/hormuz.json audit-chain anchor \
+  --output /var/lib/hormuz/audit-checkpoint.json
+
+# Verify current event correspondence, ordering, and a trusted checkpoint.
+hormuz --config /etc/hormuz/hormuz.json audit-chain verify \
+  --checkpoint /var/lib/hormuz/audit-checkpoint.json
+```
+
+The checkpoint is a small `hormuz.audit-chain-checkpoint` v1 object containing
+only the organization, chain version/epoch/sequence, head digest, timestamp,
+and random checkpoint identifier. The retained Object Lock object is the
+external evidence; the local receipt supports freshness monitoring but is not a
+substitute for the protected object.
+
+After an intentional restore or migration, an operator must start a new epoch
+from a trusted canonical checkpoint. Hormuz never silently resets sequence
+numbers. The command requires an explicit confirmation and has no HTTP route:
+
+```bash
+hormuz --config /etc/hormuz/hormuz.json audit-chain epoch \
+  --reason restore \
+  --checkpoint /secure/recovery/trusted-checkpoint.json \
+  --confirm START_NEW_AUDIT_CHAIN_EPOCH
+```
+
+If retained local history does not contain the predecessor referenced by the
+new epoch, verification requires that checkpoint file. That makes the recovery
+gap explicit rather than turning an older backup into an apparently continuous
+chain.
+
+The `epoch` command validates the canonical checkpoint and its tenant/chain
+binding, but a local file alone is not evidence of external retention. During
+recovery, operators must use the exact checkpoint recovered from the protected
+Object Lock version and retain its independent receipt/version evidence.
+
+The precise claim is:
+
+> Once a chain checkpoint is externally anchored, Hormuz can detect
+> modification, deletion, reordering, or truncation of any committed event in
+> that anchored per-organization history.
+
+Hormuz cannot prove traffic that bypassed it. Events created after the newest
+external checkpoint remain inside an anchor-delay risk window. The chain is
+tamper-evident evidence, not a claim that a database, storage administrator,
+or host root account is physically unable to alter data.
+
 ## Security boundary
 
 The checksum detects accidental or deliberate changes only when a trusted copy of the checksum is retained elsewhere. Hormuz does not yet sign exports, make the local SQLite database append-only, send the export to WORM storage, record who ran an export, or enforce audit-reader RBAC. Production deployments should ship events to an organization-controlled append-only destination and apply retention, legal-hold, access-review, and deletion policies there.
 
-An explicit AWS Object Lock anchor is now available for a configured deployment;
-see [CUSTODY.md](CUSTODY.md). It creates and verifies a strict hash-chained,
-metadata-only snapshot before writing a compliance-retained SSE-KMS object.
-It does not make the source database append-only or prove source completeness
-before the snapshot is created.
+The legacy `audit-anchor` command creates an export-time snapshot. It remains
+separate from the commit-time chain above and does not retroactively protect
+events removed before it runs. The configured Object Lock sink can also retain
+commit-time checkpoint artifacts; see [CUSTODY.md](CUSTODY.md). Neither mode
+makes the source database physically append-only or proves source completeness
+before the relevant commit or anchor.
 
 The export covers only requests that passed through Hormuz. Provider-invoice reconciliation and gateway-bypass detection are separate enterprise milestones; this file must not be represented as complete organization-wide usage until those controls exist.

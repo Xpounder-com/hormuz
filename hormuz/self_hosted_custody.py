@@ -18,7 +18,6 @@ from datetime import datetime, timezone
 from typing import Any, Mapping
 from urllib.parse import urlparse
 
-from .contracts import AUDIT_ANCHOR_SCHEMA_ID, AUDIT_ANCHOR_SCHEMA_VERSION
 from .custody import (
     ENCRYPTED_ENVELOPE_SCHEMA_ID,
     ENCRYPTED_ENVELOPE_SCHEMA_VERSION,
@@ -27,10 +26,11 @@ from .custody import (
     CustodyError,
     DataKeyProvider,
     EnvelopeCipher,
-    audit_anchor_summary,
-    parse_audit_anchor_artifact,
+    ImmutableAnchorArtifactSummary,
+    immutable_anchor_summary,
+    parse_immutable_anchor_artifact,
     parse_envelope,
-    serialize_audit_anchor_artifact,
+    serialize_immutable_anchor_artifact,
     serialize_envelope,
 )
 
@@ -89,7 +89,7 @@ class EncryptedS3ObjectLockAuditAnchorSink:
         retention_until: datetime,
         legal_hold: bool,
     ) -> AuditAnchorReceipt:
-        raw_digest = _validate_anchor_input(
+        raw_digest, summary = _validate_anchor_input(
             artifact,
             artifact_id=artifact_id,
             organization_id=organization_id,
@@ -124,8 +124,8 @@ class EncryptedS3ObjectLockAuditAnchorSink:
             "Metadata": {
                 "hormuz-schema-id": ENCRYPTED_ENVELOPE_SCHEMA_ID,
                 "hormuz-schema-version": str(ENCRYPTED_ENVELOPE_SCHEMA_VERSION),
-                "hormuz-audit-anchor-schema-id": AUDIT_ANCHOR_SCHEMA_ID,
-                "hormuz-audit-anchor-schema-version": str(AUDIT_ANCHOR_SCHEMA_VERSION),
+                "hormuz-audit-anchor-schema-id": summary.schema_id,
+                "hormuz-audit-anchor-schema-version": str(summary.schema_version),
                 "hormuz-artifact-sha256": raw_digest.hex(),
                 "hormuz-head-digest": head_digest,
                 "hormuz-payload-sha256": payload_digest.hex(),
@@ -200,15 +200,20 @@ class EncryptedS3ObjectLockAuditAnchorSink:
         if envelope.organization_id != organization_id or envelope.purpose != KEY_PURPOSE_DATA_ENCRYPTION:
             raise CustodyError("audit_anchor_recovery_metadata_invalid")
         artifact = self._cipher.unseal(envelope)
-        parsed = parse_audit_anchor_artifact(artifact)
-        if not hmac.compare_digest(serialize_audit_anchor_artifact(parsed), artifact):
+        parsed = parse_immutable_anchor_artifact(artifact)
+        if not hmac.compare_digest(serialize_immutable_anchor_artifact(parsed), artifact):
             raise CustodyError("audit_anchor_recovery_payload_invalid")
-        artifact_id, head_digest, _ = audit_anchor_summary(parsed)
+        summary = immutable_anchor_summary(parsed)
         artifact_digest = hashlib.sha256(artifact).hexdigest()
         if (
-            artifact_id != receipt.artifact_id
-            or not hmac.compare_digest(head_digest, receipt.head_digest)
+            summary.artifact_id != receipt.artifact_id
+            or not hmac.compare_digest(summary.head_digest, receipt.head_digest)
             or not hmac.compare_digest(artifact_digest, receipt.artifact_sha256)
+            or not hmac.compare_digest(str(metadata.get("hormuz-audit-anchor-schema-id", "")), summary.schema_id)
+            or not hmac.compare_digest(
+                str(metadata.get("hormuz-audit-anchor-schema-version", "")),
+                str(summary.schema_version),
+            )
         ):
             raise CustodyError("audit_anchor_recovery_payload_invalid")
         return artifact
@@ -270,22 +275,22 @@ def _validate_anchor_input(
     organization_id: str,
     head_digest: str,
     retention_until: datetime,
-) -> bytes:
+) -> tuple[bytes, ImmutableAnchorArtifactSummary]:
     if not isinstance(artifact, bytes) or not artifact:
         raise CustodyError("audit_anchor_artifact_invalid")
     if retention_until.tzinfo is None or retention_until <= datetime.now(timezone.utc):
         raise CustodyError("audit_anchor_retention_invalid")
-    parsed = parse_audit_anchor_artifact(artifact)
-    if not hmac.compare_digest(artifact, serialize_audit_anchor_artifact(parsed)):
+    parsed = parse_immutable_anchor_artifact(artifact)
+    if not hmac.compare_digest(artifact, serialize_immutable_anchor_artifact(parsed)):
         raise CustodyError("audit_anchor_artifact_noncanonical")
-    actual_artifact_id, actual_head_digest, _ = audit_anchor_summary(parsed)
+    summary = immutable_anchor_summary(parsed)
     if (
-        parsed.get("organization_id") != organization_id
-        or actual_artifact_id != artifact_id
-        or actual_head_digest != head_digest
+        summary.organization_id != organization_id
+        or summary.artifact_id != artifact_id
+        or summary.head_digest != head_digest
     ):
         raise CustodyError("audit_anchor_metadata_mismatch")
-    return hashlib.sha256(artifact).digest()
+    return hashlib.sha256(artifact).digest(), summary
 
 
 def _validate_recovery_receipt(receipt: object) -> None:
@@ -311,8 +316,6 @@ def _metadata_matches_receipt(
     expected = {
         "hormuz-schema-id": ENCRYPTED_ENVELOPE_SCHEMA_ID,
         "hormuz-schema-version": str(ENCRYPTED_ENVELOPE_SCHEMA_VERSION),
-        "hormuz-audit-anchor-schema-id": AUDIT_ANCHOR_SCHEMA_ID,
-        "hormuz-audit-anchor-schema-version": str(AUDIT_ANCHOR_SCHEMA_VERSION),
         "hormuz-artifact-sha256": receipt.artifact_sha256,
         "hormuz-head-digest": receipt.head_digest,
         "hormuz-payload-sha256": payload_digest,

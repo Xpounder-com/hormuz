@@ -18,10 +18,10 @@ from .custody import (
     CustodyError,
     GeneratedDataKey,
     RewrappedDataKey,
-    audit_anchor_summary,
+    immutable_anchor_summary,
+    parse_immutable_anchor_artifact,
+    serialize_immutable_anchor_artifact,
     encryption_context,
-    parse_audit_anchor_artifact,
-    serialize_audit_anchor_artifact,
 )
 
 
@@ -206,14 +206,14 @@ class S3ObjectLockAuditAnchorSink:
             raise CustodyError("audit_anchor_artifact_invalid")
         if retention_until.tzinfo is None or retention_until <= datetime.now(timezone.utc):
             raise CustodyError("audit_anchor_retention_invalid")
-        parsed = parse_audit_anchor_artifact(artifact)
-        if not hmac.compare_digest(artifact, serialize_audit_anchor_artifact(parsed)):
+        parsed = parse_immutable_anchor_artifact(artifact)
+        if not hmac.compare_digest(artifact, serialize_immutable_anchor_artifact(parsed)):
             raise CustodyError("audit_anchor_artifact_noncanonical")
-        actual_artifact_id, actual_head_digest, _ = audit_anchor_summary(parsed)
+        summary = immutable_anchor_summary(parsed)
         if (
-            parsed.get("organization_id") != organization_id
-            or actual_artifact_id != artifact_id
-            or actual_head_digest != head_digest
+            summary.organization_id != organization_id
+            or summary.artifact_id != artifact_id
+            or summary.head_digest != head_digest
         ):
             raise CustodyError("audit_anchor_metadata_mismatch")
         self.verify_configuration()
@@ -233,8 +233,8 @@ class S3ObjectLockAuditAnchorSink:
             "ObjectLockRetainUntilDate": retention_until.astimezone(timezone.utc),
             "IfNoneMatch": "*",
             "Metadata": {
-                "hormuz-schema-id": "hormuz.audit-anchor",
-                "hormuz-schema-version": "1",
+                "hormuz-schema-id": summary.schema_id,
+                "hormuz-schema-version": str(summary.schema_version),
                 "hormuz-artifact-sha256": digest.hex(),
                 "hormuz-head-digest": head_digest,
             },

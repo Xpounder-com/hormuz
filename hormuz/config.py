@@ -179,6 +179,13 @@ class AuditAnchorConfig:
 
 
 @dataclass(frozen=True)
+class AuditChainConfig:
+    """Optional local readiness bound for externally anchored chain checkpoints."""
+
+    maximum_anchor_age_seconds: int
+
+
+@dataclass(frozen=True)
 class BootstrapAdministrator:
     """A one-time configuration seed for a tenant policy authority.
 
@@ -332,6 +339,7 @@ class GatewayConfig:
     policy_control: PolicyControlConfig = field(default_factory=PolicyControlConfig)
     key_custody: KeyCustodyConfig | None = None
     audit_anchor: AuditAnchorConfig | None = None
+    audit_chain: AuditChainConfig | None = None
 
     @classmethod
     def load(cls, path: str | Path, *, environ: dict[str, str] | None = None) -> "GatewayConfig":
@@ -396,6 +404,7 @@ class GatewayConfig:
 
         key_custody = _key_custody(raw.get("key_custody"))
         audit_anchor = _audit_anchor(raw.get("audit_anchor"), key_custody=key_custody)
+        audit_chain = _audit_chain(raw.get("audit_chain"), audit_anchor=audit_anchor)
 
         policy_control_raw = _object(raw.get("policy_control", {}), "policy_control")
         unsupported_policy_control_fields = set(policy_control_raw).difference(
@@ -730,6 +739,7 @@ class GatewayConfig:
             ),
             key_custody=key_custody,
             audit_anchor=audit_anchor,
+            audit_chain=audit_chain,
         )
         config.validate_references()
         _validate_dedicated_ingress_credential_env(config)
@@ -889,6 +899,7 @@ _ROOT_CONFIGURATION_FIELDS = frozenset(
         "policy_control",
         "key_custody",
         "audit_anchor",
+        "audit_chain",
     }
 )
 _LISTEN_FIELDS = frozenset({"host", "port"})
@@ -995,6 +1006,7 @@ _AUDIT_ANCHOR_FIELDS = frozenset(
         "secret_key_env",
     }
 )
+_AUDIT_CHAIN_FIELDS = frozenset({"maximum_anchor_age_seconds"})
 
 
 class _ConfigurationInputError(ValueError):
@@ -1128,6 +1140,8 @@ def _validate_configuration_schema(raw: dict[str, Any]) -> None:
 
     if "audit_anchor" in raw and raw["audit_anchor"] is not None:
         _schema_object(raw["audit_anchor"], _AUDIT_ANCHOR_FIELDS)
+    if "audit_chain" in raw and raw["audit_chain"] is not None:
+        _schema_object(raw["audit_chain"], _AUDIT_CHAIN_FIELDS)
 
 
 def _validate_policy_schema(value: object) -> None:
@@ -1519,7 +1533,7 @@ def _audit_anchor(value: Any, *, key_custody: KeyCustodyConfig | None) -> AuditA
             raise ConfigError("audit_anchor access_key_env and secret_key_env must differ")
         return AuditAnchorConfig(
             backend=backend,
-            region=_aws_region(item.get("region"), "audit_anchor.region"),
+            region=_s3_compatible_region(item.get("region"), "audit_anchor.region"),
             bucket=bucket,
             prefix=prefix,
             retention_days=retention_days,
@@ -1529,6 +1543,27 @@ def _audit_anchor(value: Any, *, key_custody: KeyCustodyConfig | None) -> AuditA
             secret_key_env=secret_key_env,
         )
     raise ConfigError("audit_anchor.backend must be aws-s3-object-lock or s3-compatible-object-lock")
+
+
+def _audit_chain(value: Any, *, audit_anchor: AuditAnchorConfig | None) -> AuditChainConfig | None:
+    """Parse opt-in readiness monitoring for asynchronous external checkpoints."""
+
+    if value is None:
+        return None
+    item = _object(value, "audit_chain")
+    unsupported = set(item).difference({"maximum_anchor_age_seconds"})
+    if unsupported:
+        raise ConfigError("audit_chain contains unsupported fields: " + ", ".join(sorted(unsupported)))
+    if audit_anchor is None:
+        raise ConfigError("audit_chain requires audit_anchor")
+    return AuditChainConfig(
+        maximum_anchor_age_seconds=_integer(
+            item.get("maximum_anchor_age_seconds"),
+            "audit_chain.maximum_anchor_age_seconds",
+            minimum=60,
+            maximum=31 * 24 * 60 * 60,
+        )
+    )
 
 
 def _bootstrap_administrators(
@@ -1709,6 +1744,20 @@ def _aws_region(value: Any, path: str) -> str:
     if _AWS_REGION_PATTERN.fullmatch(result) is None:
         raise ConfigError(f"{path} must be a valid AWS region identifier")
     return result
+
+
+def _s3_compatible_region(value: Any, path: str) -> str:
+    """Accept an S3-compatible location without weakening AWS validation.
+
+    AWS profiles retain their normal AWS-region requirement. Ceph RGW's
+    standard single-zone ``default`` location is a meaningful S3-compatible
+    value and is used by Hormuz's documented self-hosted reference profile.
+    """
+
+    result = _string(value, path)
+    if result == "default" or _AWS_REGION_PATTERN.fullmatch(result) is not None:
+        return result
+    raise ConfigError(f"{path} must be a valid S3-compatible region identifier")
 
 
 def _configured_path(value: Any, path: str, base_directory: Path) -> Path:
