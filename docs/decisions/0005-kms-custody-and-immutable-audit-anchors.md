@@ -74,6 +74,37 @@ single-node local composition, once added, proves integration only; it does
 not protect against a host or storage administrator and is not a production
 immutability claim.
 
+## Amendment: first self-hosted certification target (2026-08-23)
+
+The product owner selected **Ceph RGW Tentacle** as the first self-hosted
+certification target. This is an operational reference choice, not a new
+Hormuz storage backend: the supported product contract remains an
+S3-compatible Object Lock interface, and Ceph remains optional for customers.
+
+The target is specifically the Tentacle `20.2.3` immutable image index
+`quay.io/ceph/ceph@sha256:d195020de02512030118e772cef7859e92904e91eb4cb21acb503f8b94118137`.
+It may be called certified only after the opt-in live gate attests the running
+RGW container to that exact release/digest and verifies all of the following:
+
+- Object Lock `COMPLIANCE` retention is present;
+- a protected version cannot be deleted;
+- retention cannot be reduced;
+- a legal hold is present on a separate retained object;
+- a Hormuz-encrypted, metadata-only audit artifact is recoverable and validates;
+- the resulting content-free audit evidence record is retained for release
+  review.
+
+The test credential must also delete an unprotected control version and extend
+the retained version's deadline before the negative checks. Otherwise a denied
+delete or reduction could be an IAM limitation rather than evidence of
+`COMPLIANCE` enforcement.
+
+The first runner intentionally accepts only a disposable single-host local
+lab. A successful run proves RGW-level enforcement only; a root administrator
+can still remove the underlying host disks or volumes. It does not certify
+host-root protection, multi-host durability, backup/recovery, HA, or a
+production deployment.
+
 ## Rejected alternatives
 
 - **Static keys or secret values in Hormuz configuration:** rejected because

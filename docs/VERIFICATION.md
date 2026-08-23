@@ -97,6 +97,29 @@ an explicit acknowledgement because the object cannot be cleaned up before its
 retention date. See [CUSTODY.md](CUSTODY.md) for the exact command and safety
 boundary.
 
+## Ceph RGW self-hosted Object Lock conformance
+
+Ceph RGW Tentacle 20.2.3 is the first **candidate** self-hosted storage target,
+not a completed certification. The opt-in
+`tools/verify_ceph_rgw_custody_conformance.py` harness requires a local,
+operator-provisioned Linux Cephadm lab, loopback RGW/OpenBao endpoints, a
+dedicated Object-Lock-enabled bucket, and an explicitly attested running RGW
+container. It refuses a container whose release or repository digest differs
+from the target documented in [CEPH_RGW_CONFORMANCE.md](CEPH_RGW_CONFORMANCE.md).
+
+After first checking OpenBao data-key operations and Object Lock configuration,
+the harness first proves the credential can delete an unprotected control
+version and extend retention. It then writes two encrypted metadata-only audit
+artifacts, reads one back and verifies the Hormuz audit chain, asserts
+`COMPLIANCE` retention, attempts (and requires denial of) retention reduction
+and version deletion, and checks a separate object has a legal hold. This
+distinguishes RGW enforcement from a merely underprivileged test credential. It
+writes a strict content-free evidence record only if every assertion passes.
+Normal CI tests the harness's validation and evidence shape against fakes; it
+does not claim live Ceph conformance. A single-host pass does not protect
+against a host-root administrator deleting disks or volumes, and does not
+establish HA, recovery, or production immutability.
+
 ## Automated publication gate
 
 GitHub Actions runs independent gates without provider credentials:

@@ -92,9 +92,13 @@ hormuz --config /etc/hormuz/hormuz.json custody verify
 ```
 
 The repository's generic adapter tests do not certify a particular storage
-product. A named self-hosted reference is added only after an opt-in,
-disposable conformance run proves actual COMPLIANCE-mode retention and legal
-hold behavior against that product and version.
+product. Ceph RGW Tentacle is Hormuz's first self-hosted certification target,
+but the target is optional and does not change the S3-compatible Object Lock
+product contract. Its immutable image digest becomes a Hormuz certification
+only after the opt-in live conformance gate proves actual COMPLIANCE-mode
+retention, legal hold, prohibited deletion and retention reduction, encrypted
+artifact recovery, and content-free audit evidence. See
+[CEPH_RGW_CONFORMANCE.md](CEPH_RGW_CONFORMANCE.md).
 
 ## Optional AWS profile
 
@@ -257,6 +261,57 @@ are controlled customer storage operations. S3 Object Lock `COMPLIANCE`
 prevents shortening retention or deleting a protected object version through
 normal account operations, but it is not a substitute for storage-administrator
 access controls, backup/recovery practice, or independent audit review.
+
+For the Ceph RGW reference specifically, a single-host run proves RGW-level
+Object Lock enforcement only. It does **not** protect against a root
+administrator deleting the host's underlying disks, Docker volumes, or Ceph
+data directories. That is an intentional nonclaim of the self-hosted
+conformance target, not a limitation Hormuz hides from an operator.
+
+## Live Ceph RGW self-hosted conformance
+
+The first self-hosted target is **Ceph RGW Tentacle 20.2.3**, attested at
+runtime to this immutable image index:
+
+```text
+quay.io/ceph/ceph@sha256:d195020de02512030118e772cef7859e92904e91eb4cb21acb503f8b94118137
+```
+
+It is a candidate, **not yet a certified Hormuz storage implementation**. The
+operator-provisioned lab must be a disposable, single-host Linux Cephadm
+environment with a loopback RGW endpoint and a local OpenBao Transit service.
+The gate refuses arbitrary remote endpoints and refuses a running RGW container
+whose image digest or Ceph version is not the exact candidate above. It leaves
+two retained objects behind: one to prove COMPLIANCE retention cannot be
+shortened or deleted, and one with a legal hold. It also writes and deletes an
+unprotected control version, and extends retained-object retention, so a later
+denial cannot be explained away as missing RGW permissions. Run it only with a
+disposable Object-Lock-enabled bucket with no default retention:
+
+```bash
+python -m pip install '.[self-hosted]'
+export HORMUZ_RUN_CEPH_RGW_CUSTODY_CONFORMANCE=1
+export HORMUZ_CEPH_RGW_CUSTODY_CONFIRMATION=I_UNDERSTAND_DISPOSABLE_OBJECT_LOCK_RETENTION
+export HORMUZ_CEPH_RGW_ENDPOINT=http://127.0.0.1:7480
+export HORMUZ_CEPH_RGW_REGION=us-east-1
+export HORMUZ_CEPH_RGW_BUCKET=hormuz-ceph-conformance
+export HORMUZ_CEPH_RGW_ACCESS_KEY=... # dedicated RGW credential, not an AWS credential
+export HORMUZ_CEPH_RGW_SECRET_KEY=...
+export HORMUZ_CEPH_RGW_CONTAINER=... # locally running RGW container name or ID
+export HORMUZ_CEPH_OPENBAO_ENDPOINT=http://127.0.0.1:8200
+export HORMUZ_CEPH_OPENBAO_TOKEN=...
+export HORMUZ_CEPH_OPENBAO_PROVIDER_KEY=hormuz-conformance-provider
+export HORMUZ_CEPH_OPENBAO_DATA_KEY=hormuz-conformance-audit
+python tools/verify_ceph_rgw_custody_conformance.py \
+  --evidence-out /secure/path/ceph-rgw-custody-evidence.json
+```
+
+The output record deliberately excludes endpoints, bucket names, organization
+identifiers, credentials, prompts, responses, and object keys. A passing record
+is necessary but not, by itself, a public certification claim: attach it to the
+release issue/PR and review the exact target digest before changing the target
+status. Full environment preparation, evidence semantics, and nonclaims are in
+[CEPH_RGW_CONFORMANCE.md](CEPH_RGW_CONFORMANCE.md).
 
 ## Live AWS conformance evidence
 
