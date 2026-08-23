@@ -18,6 +18,7 @@ from .config import PostgresPoolConfig
 
 POSTGRES_SCHEMA_VERSION = 3
 _IDENTIFIER_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
+_POOL_RECONNECT_TIMEOUT_SECONDS = 15
 
 
 class PostgresStorageError(RuntimeError):
@@ -32,6 +33,23 @@ class PostgresStorageError(RuntimeError):
 class PostgresSchemaStatus:
     version: int
     complete: bool
+
+
+def _rearm_pool_after_reconnect_failure(pool: Any) -> None:
+    """Start a fresh bounded reconnect cycle without making the pool usable.
+
+    Psycopg deliberately stops a single failed connection attempt after its
+    reconnect horizon. The gateway remains fail-closed, but its long-running
+    pool must keep trying in later bounded cycles so a returning database does
+    not require a Hormuz process restart.
+    """
+
+    try:
+        pool.check()
+    except Exception:
+        # The callback runs on Psycopg's maintenance worker. A later checkout
+        # remains fail-closed and may request another recovery check.
+        pass
 
 
 class PostgresConnectionPool:
@@ -68,7 +86,12 @@ class PostgresConnectionPool:
                 max_waiting=settings.max_waiting,
                 max_lifetime=settings.max_lifetime_seconds,
                 max_idle=settings.max_idle_seconds,
-                reconnect_timeout=settings.acquire_timeout_seconds,
+                # Foreground acquisition stays short, while this separate
+                # bounded horizon gives Psycopg time to reconnect after an
+                # abrupt dependency interruption. The callback re-arms a
+                # later bounded cycle if PostgreSQL is still unavailable.
+                reconnect_timeout=_POOL_RECONNECT_TIMEOUT_SECONDS,
+                reconnect_failed=_rearm_pool_after_reconnect_failure,
                 check=pool_module.ConnectionPool.check_connection,
                 name="hormuz-runtime",
                 num_workers=1,

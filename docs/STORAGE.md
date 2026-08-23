@@ -62,6 +62,14 @@ the configured `min_connections`, `max_connections` is the hard connection
 ceiling, and `max_waiting` is a hard queue ceiling. A checkout waits at most
 `acquire_timeout_seconds`; saturation, a closed pool, a missing pool driver,
 or a broken database connection fail closed as content-free storage failures.
+That short foreground deadline is deliberately separate from the pool's fixed
+15-second background reconnect horizon. If that bounded cycle cannot connect,
+Hormuz re-arms a later cycle while remaining unready, so a returning database
+does not require a gateway-process restart.
+
+The reconnect callback is maintenance-only: it never retries, reclassifies, or
+turns a failed governed request into success. A bounded queue rejection remains
+ordinary fail-closed saturation and is not a connection-recovery signal.
 
 The defaults above are conservative rather than workload-sizing advice. Every
 value is strictly bounded; `max_waiting: 0` is rejected because an unbounded
@@ -211,6 +219,45 @@ tenant export/delete, or DR certification. Production operators must retain
 and rehearse their database platform's supported backup and recovery procedure
 separately.
 
+### Disposable PostgreSQL interruption-and-recovery drill
+
+The repository also contains a separate, explicitly opt-in proof of one
+gateway process across one abrupt database interruption:
+
+~~~bash
+python3 -m pip install '.[postgres]'
+./tools/verify_postgres_interruption_recovery.sh
+~~~
+
+The wrapper creates one local PostgreSQL 16.14 container from the same
+digest-pinned image, labels it as disposable, fixes one selected loopback host
+port to that named container for its lifetime, and supplies ephemeral
+operator/runtime/policy-control credentials only through the subprocess
+environment. The Python verifier independently checks both the generated
+container name and the Docker label before it can stop the container. It
+starts a managed-policy gateway and a fixed local provider fixture, confirms
+readiness and one governed request, then abruptly stops that container.
+
+During the interruption, `/ready` must withdraw readiness with the existing
+content-free `dependency_unavailable` contract and a new governed request must
+return the stable `hormuz_storage_unavailable` error before provider egress.
+After the same disposable container restarts, the same live gateway process
+and open `PostgresConnectionPool`—not a replacement process—must regain
+readiness and serve a later, new governed request. The drill verifies that the
+provider saw exactly the two successful requests, that the durable usage
+evidence remains available, and that an empty second tenant remains isolated.
+
+Only an owner-readable `hormuz.postgresql-interruption-recovery` v1
+`summary.json` is retained. It contains the pinned image/version, fixed check
+results, and measured durations; it excludes container names, ports, database
+names, roles, connection strings, credentials, policies, requests, responses,
+and provider payloads. Failure writes no summary.
+
+This is a **single disposable database interruption/restart proof**. It does
+not establish production database failover, HA, automatic promotion,
+multi-instance coordination, production RPO/RTO, customer topology, automatic
+provider replay, or an incident-response program.
+
 ## Failure behavior
 
 Before provider egress, Hormuz atomically persists a content-free `pending` request attempt and its conservative budget reservation. If that transaction cannot commit, the gateway returns a content-free 503 with the stable classification `hormuz_storage_unavailable`; the provider is not called. The same classification appears in the metadata-only gateway error envelope for control-plane reads.
@@ -234,10 +281,10 @@ HORMUZ_TEST_POSTGRES_DSN='postgresql://operator@host:5432/hormuz_test' \
 
 CI runs this PostgreSQL suite separately against a pinned disposable PostgreSQL service. It proves the adapter's migration idempotency, runtime/control-role separation, RLS behavior, tenant isolation, append-only request-attempt evidence, conservative unknown-outcome reservations, pooled checkout reuse with tenant-state reset, bounded saturation, broken-connection replacement, policy bootstrap/activation/rollback, contract fixtures, malformed-evidence failure, rollback/partial-schema failure, and competing budget reservation behavior.
 
-A separate PostgreSQL recovery job invokes the disposable logical drill above
-against source, recovery, and quarantine containers from the same digest-pinned
-image. A successful run uploads only the content-free `summary.json` for seven
-days. A failed run may have no summary, but it never uploads a dump or
-intermediate state. Neither gate is a substitute for managed-database PITR,
-HA/failover, credential rotation, load testing, cloud backup, or DR
-certification.
+A separate PostgreSQL recovery job runs both the disposable logical drill and
+the labelled interruption-and-recovery drill against the same digest-pinned
+image. A successful run uploads only their content-free summaries for seven
+days. A failed run may have no summary, but it never uploads a dump,
+intermediate state, request, response, credential, or database data. Neither
+gate is a substitute for managed-database PITR, HA/failover, credential
+rotation, load testing, cloud backup, or DR certification.

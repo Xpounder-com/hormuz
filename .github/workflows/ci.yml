@@ -140,7 +140,7 @@ jobs:
             -v
 
   postgres-backup-restore:
-    name: PostgreSQL logical recovery drill
+    name: PostgreSQL recovery drills
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -168,12 +168,19 @@ jobs:
           HORMUZ_POSTGRES_RECOVERY_PYTHON: ${{ runner.temp }}/hormuz-postgres-recovery/bin/python
           HORMUZ_POSTGRES_RECOVERY_EVIDENCE_DIR: ${{ runner.temp }}/hormuz-postgres-recovery-evidence
         run: ./tools/verify_postgres_backup_restore.sh
+      - name: Exercise disposable interruption and pool recovery
+        env:
+          HORMUZ_POSTGRES_INTERRUPTION_PYTHON: ${{ runner.temp }}/hormuz-postgres-recovery/bin/python
+          HORMUZ_POSTGRES_INTERRUPTION_EVIDENCE_DIR: ${{ runner.temp }}/hormuz-postgres-interruption-evidence
+        run: ./tools/verify_postgres_interruption_recovery.sh
       - name: Preserve PostgreSQL recovery evidence
         if: ${{ always() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: hormuz-postgres-recovery
-          path: ${{ runner.temp }}/hormuz-postgres-recovery-evidence/summary.json
+          path: |
+            ${{ runner.temp }}/hormuz-postgres-recovery-evidence/summary.json
+            ${{ runner.temp }}/hormuz-postgres-interruption-evidence/summary.json
           if-no-files-found: warn
           retention-days: 7
 
