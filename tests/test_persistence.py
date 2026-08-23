@@ -1,0 +1,180 @@
+from __future__ import annotations
+
+import ast
+import unittest
+from datetime import datetime, timezone
+from pathlib import Path
+
+import hormuz._persistence as persistence
+import hormuz.audit_chain as audit_chain
+from hormuz.config import Identity
+from hormuz.store import (
+    MonthlyTotals,
+    RequestAttempt,
+    RequestAttemptStateError,
+    ReservationDenied,
+    ReservationScope,
+    SecretTotals,
+    UsageRepository,
+)
+
+
+class _StorageError(RuntimeError):
+    def __init__(self, code: str):
+        super().__init__(code)
+        self.code = code
+
+
+class PersistenceContractTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.identity = Identity(
+            token_env="HORMUZ_TOKEN",
+            token="secret",
+            actor_id="alice",
+            actor_name="Alice",
+            team_id="engineering",
+            team_name="Engineering",
+            organization_id="acme",
+            identity_type="human",
+            authentication_source="oidc",
+        )
+        self.now = datetime(2026, 8, 23, 12, 30, tzinfo=timezone.utc)
+
+    def test_store_remains_the_public_compatibility_facade(self) -> None:
+        self.assertIs(MonthlyTotals, persistence.MonthlyTotals)
+        self.assertIs(SecretTotals, persistence.SecretTotals)
+        self.assertIs(ReservationScope, persistence.ReservationScope)
+        self.assertIs(RequestAttempt, persistence.RequestAttempt)
+        self.assertIs(RequestAttemptStateError, persistence.RequestAttemptStateError)
+        self.assertIs(ReservationDenied, persistence.ReservationDenied)
+        self.assertIs(UsageRepository, persistence.UsageRepository)
+
+    def test_request_attempt_builders_preserve_canonical_evidence(self) -> None:
+        root = persistence.build_request_attempt_root(
+            attempt_id="264f8281-8322-4d2f-84be-c94405fa87d5",
+            created_at=self.now,
+            identity=self.identity,
+            organization_id="acme",
+            client="codex",
+            protocol="openai",
+            requested_model="engineering-fast",
+            resolved_alias="engineering-fast",
+            upstream_model="gpt-5.4",
+            policy_version="engineering-v1",
+            policy_action="allowed+redacted",
+            redaction_count=-1,
+            redaction_rules=("openai_api_key", "anthropic_api_key", "openai_api_key"),
+            reserved_tokens=-5,
+            reserved_cost_microusd=-10,
+        )
+        self.assertEqual(root["created_at"], "2026-08-23T12:30:00+00:00")
+        self.assertEqual(root["redaction_count"], 0)
+        self.assertEqual(root["redaction_rules"], ["anthropic_api_key", "openai_api_key"])
+        self.assertEqual(root["reserved_tokens"], 0)
+        self.assertEqual(root["reserved_cost_microusd"], 0)
+
+        event = persistence.build_request_attempt_event(
+            event_id="1c4b36b3-ea41-49e7-954b-e2d6aac9d8ea",
+            attempt_id=str(root["attempt_id"]),
+            organization_id="acme",
+            occurred_at=self.now,
+            sequence=1,
+            state="pending",
+            reason_code=None,
+            usage_event_id=None,
+        )
+        self.assertEqual(event["occurred_at"], root["created_at"])
+        self.assertEqual(event["state"], "pending")
+
+    def test_request_attempt_result_normalizes_sqlite_and_postgres_row_shape(self) -> None:
+        row: dict[str, object] = {
+            "actor_id": "alice",
+            "actor_name": "Alice",
+            "team_id": "engineering",
+            "team_name": "Engineering",
+            "organization_id": "acme",
+            "identity_type": "human",
+            "authentication_source": "oidc",
+            "client": "codex",
+            "protocol": "openai",
+            "requested_model": "engineering-fast",
+            "resolved_alias": None,
+            "upstream_model": "gpt-5.4",
+            "policy_version": "engineering-v1",
+            "policy_action": "allowed",
+            "redaction_count": 2,
+            "redaction_rules": '["anthropic_api_key","openai_api_key"]',
+        }
+        result = persistence.normalize_request_attempt_result(row, error_factory=_StorageError)
+        self.assertEqual(result.identity.organization_id, "acme")
+        self.assertEqual(result.identity.token_env, "REQUEST_ATTEMPT_LEDGER")
+        self.assertEqual(result.resolved_alias, None)
+        self.assertEqual(result.redaction_rules, ("anthropic_api_key", "openai_api_key"))
+
+        row["redaction_rules"] = "not-json"
+        with self.assertRaisesRegex(_StorageError, "request_attempt_evidence_malformed"):
+            persistence.normalize_request_attempt_result(row, error_factory=_StorageError)
+
+    def test_shared_state_and_audit_normalizers_preserve_stable_failures(self) -> None:
+        latest = persistence.normalize_request_attempt_state({"sequence": 2, "state": "succeeded"})
+        self.assertEqual((latest.sequence, latest.state), (2, "succeeded"))
+        persistence.require_terminal_request_attempt_state("rate_limited")
+        persistence.require_pending_request_attempt_state("pending")
+        self.assertFalse(persistence.should_mark_request_attempt_unknown("outcome_unknown"))
+        with self.assertRaisesRegex(RequestAttemptStateError, "request_attempt_not_pending"):
+            persistence.should_mark_request_attempt_unknown("failed")
+
+        head = persistence.normalize_audit_chain_head(
+            {
+                "organization_id": "acme",
+                "chain_version": 1,
+                "chain_epoch": 3,
+                "sequence": 12,
+                "head_digest": "a" * 64,
+            },
+            error_factory=_StorageError,
+        )
+        self.assertEqual((head.organization_id, head.chain_epoch, head.sequence), ("acme", 3, 12))
+        with self.assertRaisesRegex(_StorageError, "audit_chain_head_malformed"):
+            persistence.normalize_audit_chain_head(
+                {
+                    "organization_id": "acme",
+                    "chain_version": 1,
+                    "chain_epoch": 1,
+                    "sequence": 0,
+                    "head_digest": b"not-text",
+                },
+                error_factory=_StorageError,
+            )
+
+    def test_backend_neutral_module_cannot_import_database_adapters(self) -> None:
+        forbidden = {"sqlite3", "psycopg", "psycopg_pool", "store", "postgres_usage_store", "postgres"}
+        for module in (persistence, audit_chain):
+            with self.subTest(module=module.__name__):
+                source = Path(module.__file__).read_text(encoding="utf-8")
+                tree = ast.parse(source)
+                imported = {
+                    node.module or ""
+                    for node in ast.walk(tree)
+                    if isinstance(node, ast.ImportFrom)
+                }
+                imported.update(
+                    alias.name
+                    for node in ast.walk(tree)
+                    if isinstance(node, ast.Import)
+                    for alias in node.names
+                )
+                self.assertTrue(imported.isdisjoint(forbidden), imported.intersection(forbidden))
+
+        postgres_adapter = Path(persistence.__file__).with_name("postgres_usage_store.py")
+        postgres_tree = ast.parse(postgres_adapter.read_text(encoding="utf-8"))
+        postgres_imports = {
+            node.module or ""
+            for node in ast.walk(postgres_tree)
+            if isinstance(node, ast.ImportFrom)
+        }
+        self.assertNotIn("store", postgres_imports)
+
+
+if __name__ == "__main__":
+    unittest.main()

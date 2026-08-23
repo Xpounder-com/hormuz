@@ -6,10 +6,9 @@ import sqlite3
 import threading
 import uuid
 from contextlib import contextmanager
-from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Mapping, Protocol
+from typing import Any, Mapping
 
 from .audit_chain import (
     AuditChainAnchorStatus,
@@ -29,71 +28,31 @@ from .contracts import (
     AUDIT_EVENT_SCHEMA_VERSION,
     COST_BASIS_CONFIGURED_RATE_CARD_ESTIMATE,
     COVERAGE_GATEWAY_CAPTURED_REQUESTS_ONLY,
-    REQUEST_ATTEMPT_EVENT_SCHEMA_ID,
-    REQUEST_ATTEMPT_EVENT_SCHEMA_VERSION,
-    REQUEST_ATTEMPT_SCHEMA_ID,
-    REQUEST_ATTEMPT_SCHEMA_VERSION,
     validate_policy_action,
-    validate_request_attempt,
-    validate_request_attempt_event,
     validate_request_status,
 )
 from .evidence import EvidenceStorageError, security_audit_event, usage_audit_event
-
-
-@dataclass(frozen=True)
-class MonthlyTotals:
-    requests: int = 0
-    denied_requests: int = 0
-    rate_limited_requests: int = 0
-    input_tokens: int = 0
-    output_tokens: int = 0
-    cache_read_tokens: int = 0
-    cache_write_tokens: int = 0
-    reasoning_tokens: int = 0
-    cost_microusd: int = 0
-    redaction_count: int = 0
-
-    @property
-    def total_tokens(self) -> int:
-        return self.input_tokens + self.output_tokens
-
-    @property
-    def cost_usd(self) -> float:
-        return self.cost_microusd / 1_000_000
-
-
-@dataclass(frozen=True)
-class SecretTotals:
-    events: int = 0
-    detections: int = 0
-    redacted_requests: int = 0
-    denied_requests: int = 0
-
-
-@dataclass(frozen=True)
-class ReservationScope:
-    name: str
-    actor_id: str | None = None
-    team_id: str | None = None
-    token_limit: int | None = None
-    cost_limit_microusd: int | None = None
-
-
-@dataclass(frozen=True)
-class RequestAttempt:
-    """One immutable gateway-generated provider-egress attempt identifier."""
-
-    attempt_id: str
-    reservation_id: str
-
-
-class ReservationDenied(RuntimeError):
-    pass
-
-
-class RequestAttemptStateError(RuntimeError):
-    """Raised when an immutable attempt cannot make the requested transition."""
+from ._persistence import (
+    MonthlyTotals,
+    RequestAttempt,
+    RequestAttemptState,
+    RequestAttemptStateError,
+    ReservationDenied,
+    ReservationScope,
+    SecretTotals,
+    UsageRepository,
+    build_request_attempt_event,
+    build_request_attempt_root,
+    is_sha256_digest,
+    normalize_audit_chain_head,
+    normalize_request_attempt_result,
+    normalize_request_attempt_state,
+    require_pending_request_attempt_state,
+    require_terminal_request_attempt_state,
+    should_mark_request_attempt_unknown,
+    stored_utc_timestamp,
+    validate_anchor_age,
+)
 
 
 class StorageSchemaError(RuntimeError):
@@ -102,52 +61,6 @@ class StorageSchemaError(RuntimeError):
     def __init__(self, code: str):
         super().__init__(code)
         self.code = code
-
-
-class UsageRepository(Protocol):
-    """The narrow metadata-only storage contract used by policy and gateway code."""
-
-    def verify_ready(self) -> None: ...
-
-    def record(self, **kwargs: object) -> str: ...
-
-    def record_secret_event(self, **kwargs: object) -> str: ...
-
-    def reserve_budget(self, **kwargs: object) -> str | None: ...
-
-    def begin_request_attempt(self, **kwargs: object) -> RequestAttempt: ...
-
-    def finalize_request_attempt(self, **kwargs: object) -> None: ...
-
-    def mark_request_attempt_outcome_unknown(self, **kwargs: object) -> bool: ...
-
-    def sweep_stale_request_attempts(self, **kwargs: object) -> int: ...
-
-    def release_budget_reservation(self, reservation_id: str | None, **kwargs: object) -> None: ...
-
-    def refresh_budget_reservation(self, reservation_id: str | None, **kwargs: object) -> None: ...
-
-    def active_budget_reservations(self, **kwargs: object) -> int: ...
-
-    def monthly_totals(self, **kwargs: object) -> MonthlyTotals: ...
-
-    def monthly_secret_totals(self, **kwargs: object) -> SecretTotals: ...
-
-    def summary_rows(self, **kwargs: object) -> list[dict[str, object]]: ...
-
-    def report_rows(self, **kwargs: object) -> list[dict[str, object]]: ...
-
-    def audit_events(self, **kwargs: object) -> list[dict[str, object]]: ...
-
-    def audit_chain_head(self, **kwargs: object) -> AuditChainHead: ...
-
-    def audit_chain_anchor_status(self, **kwargs: object) -> AuditChainAnchorStatus: ...
-
-    def record_audit_chain_checkpoint(self, **kwargs: object) -> None: ...
-
-    def begin_audit_chain_epoch(self, **kwargs: object) -> AuditChainHead: ...
-
-    def verify_audit_chain(self, **kwargs: object) -> AuditChainHead: ...
 
 
 class UsageStore:
@@ -992,16 +905,7 @@ class UsageStore:
             return None
         if row is None:
             raise StorageSchemaError("audit_chain_head_unavailable")
-        head_digest = row["head_digest"]
-        if head_digest is not None and not isinstance(head_digest, str):
-            raise StorageSchemaError("audit_chain_head_malformed")
-        return AuditChainHead(
-            organization_id=str(row["organization_id"]),
-            chain_version=int(row["chain_version"]),
-            chain_epoch=int(row["chain_epoch"]),
-            sequence=int(row["sequence"]),
-            head_digest=head_digest,
-        )
+        return normalize_audit_chain_head(row, error_factory=StorageSchemaError)
 
     def _append_audit_chain_entry_in_connection(
         self,
@@ -1390,33 +1294,24 @@ class UsageStore:
         """
 
         now = datetime.now(timezone.utc)
-        now_value = now.isoformat()
         attempt_id = str(uuid.uuid4())
-        root = {
-            "evidence_schema_id": REQUEST_ATTEMPT_SCHEMA_ID,
-            "evidence_schema_version": REQUEST_ATTEMPT_SCHEMA_VERSION,
-            "attempt_id": attempt_id,
-            "created_at": now_value,
-            "organization_id": identity.organization_id,
-            "actor_id": identity.actor_id,
-            "actor_name": identity.actor_name,
-            "team_id": identity.team_id,
-            "team_name": identity.team_name,
-            "identity_type": identity.identity_type,
-            "authentication_source": identity.authentication_source,
-            "client": client,
-            "protocol": protocol,
-            "requested_model": requested_model,
-            "resolved_alias": resolved_alias,
-            "upstream_model": upstream_model,
-            "policy_version": policy_version,
-            "policy_action": policy_action,
-            "redaction_count": max(0, redaction_count),
-            "redaction_rules": sorted(set(redaction_rules)),
-            "reserved_tokens": max(0, reserved_tokens),
-            "reserved_cost_microusd": max(0, reserved_cost_microusd),
-        }
-        validate_request_attempt(root)
+        root = build_request_attempt_root(
+            attempt_id=attempt_id,
+            created_at=now,
+            identity=identity,
+            organization_id=identity.organization_id,
+            client=client,
+            protocol=protocol,
+            requested_model=requested_model,
+            resolved_alias=resolved_alias,
+            upstream_model=upstream_model,
+            policy_version=policy_version,
+            policy_action=policy_action,
+            redaction_count=redaction_count,
+            redaction_rules=redaction_rules,
+            reserved_tokens=reserved_tokens,
+            reserved_cost_microusd=reserved_cost_microusd,
+        )
         with self._lock, self._connection() as connection:
             connection.execute("BEGIN IMMEDIATE")
             self._sweep_stale_request_attempts_in_connection(connection, now=now, organization_id=identity.organization_id)
@@ -1459,7 +1354,7 @@ class UsageStore:
                 connection,
                 attempt_id=attempt_id,
                 organization_id=identity.organization_id,
-                occurred_at=now_value,
+                occurred_at=now,
                 sequence=1,
                 state="pending",
                 reason_code=None,
@@ -1495,26 +1390,24 @@ class UsageStore:
     ) -> None:
         """Finalize a pending attempt once and atomically materialize usage."""
 
-        if status not in {"succeeded", "failed", "rate_limited"}:
-            raise RequestAttemptStateError("request_attempt_terminal_state_unsupported")
+        require_terminal_request_attempt_state(status)
         with self._lock, self._connection() as connection:
             connection.execute("BEGIN IMMEDIATE")
             root = self._request_attempt_root_in_connection(connection, attempt.attempt_id, organization_id)
-            sequence, state = self._latest_request_attempt_state_in_connection(connection, attempt.attempt_id)
-            if state != "pending":
-                raise RequestAttemptStateError("request_attempt_not_pending")
-            identity = self._identity_from_request_attempt(root)
+            latest = self._latest_request_attempt_state_in_connection(connection, attempt.attempt_id)
+            require_pending_request_attempt_state(latest.state)
+            result = normalize_request_attempt_result(root, error_factory=StorageSchemaError)
             usage_event_id = self._record_in_connection(
                 connection,
-                identity=identity,
-                client=str(root["client"]),
-                protocol=str(root["protocol"]),
-                requested_model=str(root["requested_model"]),
-                resolved_alias=_row_optional_string(root, "resolved_alias"),
-                upstream_model=_row_optional_string(root, "upstream_model"),
+                identity=result.identity,
+                client=result.client,
+                protocol=result.protocol,
+                requested_model=result.requested_model,
+                resolved_alias=result.resolved_alias,
+                upstream_model=result.upstream_model,
                 provider_reported_model=provider_reported_model,
-                policy_version=str(root["policy_version"]),
-                policy_action=str(root["policy_action"]),
+                policy_version=result.policy_version,
+                policy_action=result.policy_action,
                 status=status,
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
@@ -1523,15 +1416,15 @@ class UsageStore:
                 reasoning_tokens=reasoning_tokens,
                 cost_microusd=cost_microusd,
                 provider_request_id=provider_request_id,
-                redaction_count=int(root["redaction_count"]),
-                redaction_rules=tuple(_json_string_list(root["redaction_rules"])),
+                redaction_count=result.redaction_count,
+                redaction_rules=result.redaction_rules,
             )
             self._append_request_attempt_event_in_connection(
                 connection,
                 attempt_id=attempt.attempt_id,
                 organization_id=organization_id,
-                occurred_at=datetime.now(timezone.utc).isoformat(),
-                sequence=sequence + 1,
+                occurred_at=datetime.now(timezone.utc),
+                sequence=latest.sequence + 1,
                 state=status,
                 reason_code=None,
                 usage_event_id=usage_event_id,
@@ -1558,17 +1451,15 @@ class UsageStore:
         with self._lock, self._connection() as connection:
             connection.execute("BEGIN IMMEDIATE")
             self._request_attempt_root_in_connection(connection, attempt.attempt_id, organization_id)
-            sequence, state = self._latest_request_attempt_state_in_connection(connection, attempt.attempt_id)
-            if state == "outcome_unknown":
+            latest = self._latest_request_attempt_state_in_connection(connection, attempt.attempt_id)
+            if not should_mark_request_attempt_unknown(latest.state):
                 return False
-            if state != "pending":
-                raise RequestAttemptStateError("request_attempt_not_pending")
             self._append_request_attempt_event_in_connection(
                 connection,
                 attempt_id=attempt.attempt_id,
                 organization_id=organization_id,
-                occurred_at=datetime.now(timezone.utc).isoformat(),
-                sequence=sequence + 1,
+                occurred_at=datetime.now(timezone.utc),
+                sequence=latest.sequence + 1,
                 state="outcome_unknown",
                 reason_code=reason_code,
                 usage_event_id=None,
@@ -1716,15 +1607,15 @@ class UsageStore:
             parameters,
         ).fetchall()
         for row in rows:
-            sequence, state = self._latest_request_attempt_state_in_connection(connection, str(row["attempt_id"]))
-            if state != "pending":
+            latest = self._latest_request_attempt_state_in_connection(connection, str(row["attempt_id"]))
+            if latest.state != "pending":
                 continue
             self._append_request_attempt_event_in_connection(
                 connection,
                 attempt_id=str(row["attempt_id"]),
                 organization_id=str(row["organization_id"]),
-                occurred_at=now.isoformat(),
-                sequence=sequence + 1,
+                occurred_at=now,
+                sequence=latest.sequence + 1,
                 state="outcome_unknown",
                 reason_code="stale_pending",
                 usage_event_id=None,
@@ -1765,7 +1656,7 @@ class UsageStore:
     def _latest_request_attempt_state_in_connection(
         connection: sqlite3.Connection,
         attempt_id: str,
-    ) -> tuple[int, str]:
+    ) -> RequestAttemptState:
         event = connection.execute(
             """
             SELECT sequence, state
@@ -1778,7 +1669,7 @@ class UsageStore:
         ).fetchone()
         if event is None:
             raise StorageSchemaError("request_attempt_event_missing")
-        return int(event["sequence"]), str(event["state"])
+        return normalize_request_attempt_state(event)
 
     @staticmethod
     def _append_request_attempt_event_in_connection(
@@ -1786,25 +1677,21 @@ class UsageStore:
         *,
         attempt_id: str,
         organization_id: str,
-        occurred_at: str,
+        occurred_at: datetime,
         sequence: int,
         state: str,
         reason_code: str | None,
         usage_event_id: str | None,
     ) -> str:
-        event = {
-            "event_schema_id": REQUEST_ATTEMPT_EVENT_SCHEMA_ID,
-            "event_schema_version": REQUEST_ATTEMPT_EVENT_SCHEMA_VERSION,
-            "id": str(uuid.uuid4()),
-            "attempt_id": attempt_id,
-            "organization_id": organization_id,
-            "occurred_at": occurred_at,
-            "sequence": sequence,
-            "state": state,
-            "reason_code": reason_code,
-            "usage_event_id": usage_event_id,
-        }
-        validate_request_attempt_event(event)
+        event = build_request_attempt_event(
+            attempt_id=attempt_id,
+            organization_id=organization_id,
+            occurred_at=occurred_at,
+            sequence=sequence,
+            state=state,
+            reason_code=reason_code,
+            usage_event_id=usage_event_id,
+        )
         connection.execute(
             """
             INSERT INTO gateway_request_attempt_events (
@@ -1827,20 +1714,6 @@ class UsageStore:
             ),
         )
         return str(event["id"])
-
-    @staticmethod
-    def _identity_from_request_attempt(root: sqlite3.Row) -> Identity:
-        return Identity(
-            token_env="REQUEST_ATTEMPT_LEDGER",
-            token="",
-            actor_id=str(root["actor_id"]),
-            actor_name=str(root["actor_name"]),
-            team_id=str(root["team_id"]),
-            team_name=str(root["team_name"]),
-            organization_id=str(root["organization_id"]),
-            identity_type=str(root["identity_type"]),
-            authentication_source=str(root["authentication_source"]),
-        )
 
     def release_budget_reservation(
         self,
@@ -2182,7 +2055,12 @@ class UsageStore:
             checkpoint_sequence = int(checkpoint["sequence"])
             if checkpoint_sequence > head.sequence:
                 raise StorageSchemaError("audit_chain_checkpoint_mismatch")
-            checkpoint_at = _stored_timestamp(checkpoint["anchored_at"], code="audit_chain_checkpoint_malformed")
+            checkpoint_at = stored_utc_timestamp(
+                checkpoint["anchored_at"],
+                code="audit_chain_checkpoint_malformed",
+                error_factory=StorageSchemaError,
+                accept_datetime=False,
+            )
         oldest_unanchored_at: datetime | None = None
         if head.sequence > checkpoint_sequence:
             row = connection.execute(
@@ -2197,7 +2075,12 @@ class UsageStore:
             ).fetchone()
             if row is None:
                 raise StorageSchemaError("audit_chain_head_mismatch")
-            oldest_unanchored_at = _stored_timestamp(row["appended_at"], code="audit_chain_entry_malformed")
+            oldest_unanchored_at = stored_utc_timestamp(
+                row["appended_at"],
+                code="audit_chain_entry_malformed",
+                error_factory=StorageSchemaError,
+                accept_datetime=False,
+            )
         overdue = bool(
             maximum_age_seconds is not None
             and oldest_unanchored_at is not None
@@ -2221,7 +2104,7 @@ class UsageStore:
     ) -> AuditChainAnchorStatus:
         """Return local anchor freshness only; this method never contacts Object Lock."""
 
-        _validate_anchor_age(maximum_age_seconds)
+        validate_anchor_age(maximum_age_seconds, error_factory=StorageSchemaError)
         current = now or datetime.now(timezone.utc)
         if current.tzinfo is None:
             raise StorageSchemaError("audit_chain_anchor_age_invalid")
@@ -2251,7 +2134,7 @@ class UsageStore:
         chain_version = checkpoint.get("chain_version")
         if (
             not isinstance(chain_version, int)
-            or not _is_sha256_digest(artifact_sha256)
+            or not is_sha256_digest(artifact_sha256)
             or not isinstance(anchor_backend, str)
             or not anchor_backend
             or (object_version is not None and not isinstance(object_version, str))
@@ -2522,7 +2405,7 @@ class UsageStore:
             sources = self._audit_chain_source_events_in_connection(connection, organization_id=organization_id)
         if head.chain_version != AUDIT_CHAIN_VERSION or head.chain_epoch < 1 or head.sequence < 0:
             raise StorageSchemaError("audit_chain_head_malformed")
-        if head.head_digest is not None and not _is_sha256_digest(head.head_digest):
+        if head.head_digest is not None and not is_sha256_digest(head.head_digest):
             raise StorageSchemaError("audit_chain_head_malformed")
         if checkpoint_tuple is not None and checkpoint_tuple[0] != head.chain_version:
             raise StorageSchemaError("audit_chain_checkpoint_mismatch")
@@ -2571,7 +2454,7 @@ class UsageStore:
                     or predecessor_epoch < 1
                     or predecessor_epoch >= epoch_number
                     or predecessor_sequence < 1
-                    or not _is_sha256_digest(predecessor_digest)
+                    or not is_sha256_digest(predecessor_digest)
                 ):
                     raise StorageSchemaError("audit_chain_epoch_malformed")
                 predecessor = verified.get((predecessor_epoch, predecessor_sequence))
@@ -2636,51 +2519,3 @@ class UsageStore:
             if digest is None or not hmac.compare_digest(digest, checkpoint_tuple[3]):
                 raise StorageSchemaError("audit_chain_checkpoint_mismatch")
         return head
-
-
-def _row_optional_string(row: sqlite3.Row, name: str) -> str | None:
-    value = row[name]
-    if value is None:
-        return None
-    if not isinstance(value, str):
-        raise StorageSchemaError("request_attempt_evidence_malformed")
-    return value
-
-
-def _json_string_list(value: object) -> list[str]:
-    if not isinstance(value, str):
-        raise StorageSchemaError("request_attempt_evidence_malformed")
-    try:
-        decoded = json.loads(value)
-    except (TypeError, ValueError, json.JSONDecodeError):
-        raise StorageSchemaError("request_attempt_evidence_malformed") from None
-    if not isinstance(decoded, list) or any(not isinstance(item, str) for item in decoded):
-        raise StorageSchemaError("request_attempt_evidence_malformed")
-    return decoded
-
-
-def _stored_timestamp(value: object, *, code: str) -> datetime:
-    if not isinstance(value, str):
-        raise StorageSchemaError(code)
-    try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        raise StorageSchemaError(code) from None
-    if parsed.tzinfo is None:
-        raise StorageSchemaError(code)
-    return parsed.astimezone(timezone.utc)
-
-
-def _validate_anchor_age(value: int | None) -> None:
-    if value is None:
-        return
-    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
-        raise StorageSchemaError("audit_chain_anchor_age_invalid")
-
-
-def _is_sha256_digest(value: object) -> bool:
-    return (
-        isinstance(value, str)
-        and len(value) == 64
-        and all(character in "0123456789abcdef" for character in value)
-    )
