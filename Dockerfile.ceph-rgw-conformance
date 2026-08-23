@@ -1,0 +1,23 @@
+# syntax=docker/dockerfile:1@sha256:ecfaec9ed6d810b56388c508f4121597bfbba70d41a6dfeee4d8cad5f295fc32
+# Python 3.14.7-slim-trixie multi-platform index, inspected 2026-08-21.
+# The launcher explicitly builds and runs this image as linux/amd64.
+ARG PYTHON_BASE=python@sha256:ce40764625a4ff50df3548277632e7f96c4e77fe75fa848aae9885476e7df5a4
+
+FROM ${PYTHON_BASE}
+
+WORKDIR /opt/hormuz
+
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+COPY pyproject.toml README.md ./
+COPY hormuz/ ./hormuz/
+COPY tools/verify_ceph_rgw_custody_conformance.py ./tools/verify_ceph_rgw_custody_conformance.py
+
+RUN python -m pip install --no-cache-dir --only-binary=:all: '.[self-hosted]' \
+    && python -m pip check \
+    && python -c 'import cryptography, jwt, hormuz'
+
+ENTRYPOINT ["python", "/opt/hormuz/tools/verify_ceph_rgw_custody_conformance.py"]

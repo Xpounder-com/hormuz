@@ -4,8 +4,11 @@
 # an incidental broad COPY instruction.
 **
 !Dockerfile
+!Dockerfile.ceph-rgw-conformance
 !.dockerignore
 !pyproject.toml
 !README.md
 !hormuz/
 !hormuz/**
+!tools/
+!tools/verify_ceph_rgw_custody_conformance.py

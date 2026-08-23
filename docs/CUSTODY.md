@@ -97,7 +97,8 @@ but the target is optional and does not change the S3-compatible Object Lock
 product contract. Its immutable image digest becomes a Hormuz certification
 only after the opt-in live conformance gate proves actual COMPLIANCE-mode
 retention, legal hold, prohibited deletion and retention reduction, encrypted
-artifact recovery, and content-free audit evidence. See
+artifact recovery, content-free audit evidence, and the schema-v2 pinned
+`linux/amd64` runner digest. See
 [CEPH_RGW_CONFORMANCE.md](CEPH_RGW_CONFORMANCE.md).
 
 ## Optional AWS profile
@@ -277,23 +278,30 @@ runtime to this immutable image index:
 quay.io/ceph/ceph@sha256:d195020de02512030118e772cef7859e92904e91eb4cb21acb503f8b94118137
 ```
 
-It is a candidate, **not yet a certified Hormuz storage implementation**. The
-operator-provisioned lab must be a disposable, single-host Linux Cephadm
+It is Hormuz's first **certified self-hosted reference** for the constrained
+RGW-level Object Lock scope described here. The content-free schema-v2 live
+record is published in [issue #60](https://github.com/Xpounder-com/hormuz/issues/60).
+The operator-provisioned lab is a disposable, single-host Linux Cephadm
 environment with a loopback RGW endpoint and a local OpenBao Transit service.
 The gate refuses arbitrary remote endpoints and refuses a running RGW container
-whose image digest or Ceph version is not the exact candidate above. It leaves
+whose image digest or Ceph version is not the exact reference above. It leaves
 two retained objects behind: one to prove COMPLIANCE retention cannot be
 shortened or deleted, and one with a legal hold. It also writes and deletes an
 unprotected control version, and extends retained-object retention, so a later
-denial cannot be explained away as missing RGW permissions. Run it only with a
-disposable Object-Lock-enabled bucket with no default retention:
+denial cannot be explained away as missing RGW permissions. Native ARM64
+runtime conformance is separately tracked in
+[issue #68](https://github.com/Xpounder-com/hormuz/issues/68) and does not
+block this reference certification unless it becomes a promised launch platform.
+Run it only with a disposable Object-Lock-enabled bucket with no default
+retention:
 
 ```bash
 python -m pip install '.[self-hosted]'
 export HORMUZ_RUN_CEPH_RGW_CUSTODY_CONFORMANCE=1
 export HORMUZ_CEPH_RGW_CUSTODY_CONFIRMATION=I_UNDERSTAND_DISPOSABLE_OBJECT_LOCK_RETENTION
 export HORMUZ_CEPH_RGW_ENDPOINT=http://127.0.0.1:7480
-export HORMUZ_CEPH_RGW_REGION=us-east-1
+# Match GetBucketLocation; stock single-zone Ceph reports "default".
+export HORMUZ_CEPH_RGW_REGION=default
 export HORMUZ_CEPH_RGW_BUCKET=hormuz-ceph-conformance
 export HORMUZ_CEPH_RGW_ACCESS_KEY=... # dedicated RGW credential, not an AWS credential
 export HORMUZ_CEPH_RGW_SECRET_KEY=...

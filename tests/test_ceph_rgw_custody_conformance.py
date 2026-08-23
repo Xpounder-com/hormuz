@@ -275,6 +275,43 @@ class CephRGWAttestationTests(unittest.TestCase):
             conformance.attest_local_rgw_container("ceph-rgw-0", command_output=command_output)
         self.assertEqual(raised.exception.code, "candidate_release_mismatch")
 
+    def test_pre_attested_target_must_match_the_exact_candidate(self) -> None:
+        environment = {
+            "HORMUZ_CEPH_RGW_TARGET_IMAGE_REFERENCE": conformance.TARGET_IMAGE_REFERENCE,
+            "HORMUZ_CEPH_RGW_TARGET_IMAGE_DIGEST": conformance.TARGET_IMAGE_DIGEST,
+            "HORMUZ_CEPH_RGW_TARGET_RELEASE": conformance.TARGET_RELEASE,
+            "HORMUZ_CEPH_RGW_TARGET_PLATFORM": "linux/arm64",
+        }
+        self.assertEqual(
+            conformance.attest_target_from_environment(environment)["image_digest"], conformance.TARGET_IMAGE_DIGEST
+        )
+
+        environment["HORMUZ_CEPH_RGW_TARGET_RELEASE"] = "20.2.2"
+        with self.assertRaises(conformance.ConformanceFailure) as raised:
+            conformance.attest_target_from_environment(environment)
+        self.assertEqual(raised.exception.code, "pre_attested_target_invalid")
+
+
+class CephRGWRunnerAttestationTests(unittest.TestCase):
+    def test_runner_requires_a_content_addressed_x86_64_image(self) -> None:
+        digest = "sha256:" + "a" * 64
+        runner = conformance.attest_runner_from_environment(
+            {
+                "HORMUZ_CEPH_RGW_RUNNER_IMAGE_DIGEST": digest,
+                "HORMUZ_CEPH_RGW_RUNNER_PLATFORM": "linux/amd64",
+            }
+        )
+        self.assertEqual(runner, {"image_digest": digest, "platform": "linux/amd64"})
+
+        with self.assertRaises(conformance.ConformanceFailure) as raised:
+            conformance.attest_runner_from_environment(
+                {
+                    "HORMUZ_CEPH_RGW_RUNNER_IMAGE_DIGEST": digest,
+                    "HORMUZ_CEPH_RGW_RUNNER_PLATFORM": "linux/arm64",
+                }
+            )
+        self.assertEqual(raised.exception.code, "runner_platform_invalid")
+
 
 class CephRGWLiveHarnessShapeTests(unittest.TestCase):
     def _config(self) -> object:
@@ -307,12 +344,15 @@ class CephRGWLiveHarnessShapeTests(unittest.TestCase):
                 "release": "20.2.3",
                 "platform": "linux/arm64",
             },
+            attest_runner=lambda: {"image_digest": "sha256:" + "b" * 64, "platform": "linux/amd64"},
             runtime_factory=lambda config: conformance.ConformanceRuntime(provider=provider, sink=sink, client=client),
         )
 
         self.assertTrue(sink.verified)
         self.assertEqual(evidence["schema_id"], conformance.SCHEMA_ID)
+        self.assertEqual(evidence["schema_version"], 2)
         self.assertEqual(evidence["status"], "passed")
+        self.assertEqual(evidence["runner"]["platform"], "linux/amd64")
         self.assertEqual(len(evidence["retained_artifacts"]), 2)
         serialized = json.dumps(evidence, sort_keys=True)
         self.assertNotIn("127.0.0.1", serialized)
@@ -335,6 +375,19 @@ class CephRGWLiveHarnessShapeTests(unittest.TestCase):
                 conformance.write_evidence(output, invalid)
             self.assertEqual(raised.exception.code, "evidence_invalid")
 
+            legacy = dict(evidence)
+            legacy["schema_version"] = 1
+            legacy["nonclaims"] = list(conformance._NONCLAIMS)
+            del legacy["runner"]
+            conformance.write_evidence(output, legacy)
+            self.assertEqual(json.loads(output.read_text(encoding="utf-8"))["schema_version"], 1)
+
+            invalid_runner = dict(evidence)
+            invalid_runner["runner"] = {"image_digest": "sha256:" + "b" * 64, "platform": "linux/arm64"}
+            with self.assertRaises(conformance.ConformanceFailure) as raised:
+                conformance.write_evidence(output, invalid_runner)
+            self.assertEqual(raised.exception.code, "evidence_invalid")
+
     def test_negative_retention_checks_require_proven_control_permissions(self) -> None:
         provider = _MemoryDataKeyProvider()
         client = _FakeS3Client()
@@ -346,10 +399,13 @@ class CephRGWLiveHarnessShapeTests(unittest.TestCase):
             "release": "20.2.3",
             "platform": "linux/arm64",
         }
+        runner = lambda: {"image_digest": "sha256:" + "c" * 64, "platform": "linux/amd64"}
 
         with mock.patch.object(client, "delete_object", side_effect=_S3Error("AccessDenied")):
             with self.assertRaises(conformance.ConformanceFailure) as raised:
-                conformance.run_conformance(self._config(), attest=target, runtime_factory=runtime_factory)
+                conformance.run_conformance(
+                    self._config(), attest=target, attest_runner=runner, runtime_factory=runtime_factory
+                )
         self.assertEqual(raised.exception.code, "control_delete_not_permitted")
 
         provider = _MemoryDataKeyProvider()
@@ -358,7 +414,9 @@ class CephRGWLiveHarnessShapeTests(unittest.TestCase):
         runtime_factory = lambda config: conformance.ConformanceRuntime(provider=provider, sink=sink, client=client)
         with mock.patch.object(client, "put_object_retention", side_effect=_S3Error("AccessDenied")):
             with self.assertRaises(conformance.ConformanceFailure) as raised:
-                conformance.run_conformance(self._config(), attest=target, runtime_factory=runtime_factory)
+                conformance.run_conformance(
+                    self._config(), attest=target, attest_runner=runner, runtime_factory=runtime_factory
+                )
         self.assertEqual(raised.exception.code, "retention_extension_not_permitted")
 
 

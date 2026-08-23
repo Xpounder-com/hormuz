@@ -40,7 +40,8 @@ from hormuz.self_hosted_custody import create_s3_compatible_object_lock_anchor_s
 
 
 SCHEMA_ID = "hormuz.ceph-rgw-custody-conformance"
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+_LEGACY_SCHEMA_VERSION = 1
 TARGET_RELEASE = "20.2.3"
 TARGET_IMAGE_DIGEST = "sha256:d195020de02512030118e772cef7859e92904e91eb4cb21acb503f8b94118137"
 TARGET_IMAGE_REFERENCE = f"quay.io/ceph/ceph@{TARGET_IMAGE_DIGEST}"
@@ -78,6 +79,7 @@ _NONCLAIMS = (
     "not_host_root_or_disk_administrator_protection",
     "not_multi_host_availability_or_recovery_certification",
 )
+_CURRENT_NONCLAIMS = _NONCLAIMS + ("not_native_arm64_runtime_conformance",)
 _HEX_DIGEST = re.compile(r"[0-9a-f]{64}$")
 
 
@@ -251,6 +253,53 @@ def attest_local_rgw_container(
         "release": TARGET_RELEASE,
         "platform": platform,
     }
+
+
+def attest_target_from_environment(environ: Mapping[str, str] | None = None) -> dict[str, str]:
+    """Validate content-free target metadata pre-attested by the local launcher."""
+
+    source = os.environ if environ is None else environ
+    target = {
+        "image_reference": source.get("HORMUZ_CEPH_RGW_TARGET_IMAGE_REFERENCE", ""),
+        "image_digest": source.get("HORMUZ_CEPH_RGW_TARGET_IMAGE_DIGEST", ""),
+        "release": source.get("HORMUZ_CEPH_RGW_TARGET_RELEASE", ""),
+        "platform": source.get("HORMUZ_CEPH_RGW_TARGET_PLATFORM", ""),
+    }
+    if (
+        target["image_reference"] != TARGET_IMAGE_REFERENCE
+        or target["image_digest"] != TARGET_IMAGE_DIGEST
+        or target["release"] != TARGET_RELEASE
+        or target["platform"] not in {"linux/amd64", "linux/arm64"}
+    ):
+        raise ConformanceFailure("pre_attested_target_invalid")
+    return target
+
+
+def attest_configured_target(container: str) -> dict[str, str]:
+    """Use host Docker attestation directly or a wrapper-provided attestation."""
+
+    if os.environ.get("HORMUZ_CEPH_RGW_TARGET_ATTESTED") == "1":
+        return attest_target_from_environment()
+    return attest_local_rgw_container(container)
+
+
+def attest_runner_from_environment(environ: Mapping[str, str] | None = None) -> dict[str, str]:
+    """Validate the pinned x86_64 runner metadata injected by the launcher.
+
+    The container launcher derives the image ID after a local, content-addressed
+    image build and passes it only for the current invocation. These values are
+    evidence provenance, not credentials; strict validation prevents an
+    accidental native-ARM run from being labeled as the x86_64 reference.
+    """
+
+    source = os.environ if environ is None else environ
+    image_digest = source.get("HORMUZ_CEPH_RGW_RUNNER_IMAGE_DIGEST", "")
+    platform = source.get("HORMUZ_CEPH_RGW_RUNNER_PLATFORM", "")
+    if not isinstance(image_digest, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", image_digest):
+        raise ConformanceFailure("runner_attestation_invalid")
+    if platform != "linux/amd64":
+        raise ConformanceFailure("runner_platform_invalid")
+    return {"image_digest": image_digest, "platform": platform}
 
 
 def create_runtime(config: ConformanceConfig) -> ConformanceRuntime:
@@ -475,12 +524,14 @@ def _anchor_and_recover(
 def run_conformance(
     config: ConformanceConfig,
     *,
-    attest: Callable[[str], dict[str, str]] = attest_local_rgw_container,
+    attest: Callable[[str], dict[str, str]] = attest_configured_target,
+    attest_runner: Callable[[], dict[str, str]] = attest_runner_from_environment,
     runtime_factory: Callable[[ConformanceConfig], ConformanceRuntime] = create_runtime,
 ) -> dict[str, object]:
     """Run the full live proof and return a strict, content-free record."""
 
     target = attest(config.rgw_container)
+    runner = attest_runner()
     runtime = runtime_factory(config)
     verified_purposes = verify_openbao_transit_profile(
         runtime.provider,
@@ -542,16 +593,18 @@ def run_conformance(
         "executed_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "scope": "single_host_rgw_enforcement_only",
         "target": target,
+        "runner": runner,
         "checks": list(_REQUIRED_CHECKS),
         "retained_artifacts": [compliance_record, legal_hold_record],
         "retention_days": config.retention_days,
-        "nonclaims": list(_NONCLAIMS),
+        "nonclaims": list(_CURRENT_NONCLAIMS),
     }
 
 
 def validate_evidence(evidence: Mapping[str, object]) -> None:
-    """Fail closed unless a record is exactly the successful v1 evidence shape."""
+    """Fail closed unless a record matches the strict v1 or current v2 shape."""
 
+    version = evidence.get("schema_version")
     expected_keys = {
         "schema_id",
         "schema_version",
@@ -564,20 +617,25 @@ def validate_evidence(evidence: Mapping[str, object]) -> None:
         "retention_days",
         "nonclaims",
     }
+    expected_nonclaims = _NONCLAIMS
+    if version == SCHEMA_VERSION:
+        expected_keys.add("runner")
+        expected_nonclaims = _CURRENT_NONCLAIMS
+    elif version != _LEGACY_SCHEMA_VERSION:
+        raise ConformanceFailure("evidence_invalid")
     if set(evidence) != expected_keys:
         raise ConformanceFailure("evidence_invalid")
     checks = evidence.get("checks")
     nonclaims = evidence.get("nonclaims")
     if (
         evidence.get("schema_id") != SCHEMA_ID
-        or evidence.get("schema_version") != SCHEMA_VERSION
         or evidence.get("status") != "passed"
         or evidence.get("scope") != "single_host_rgw_enforcement_only"
         or not isinstance(evidence.get("executed_at"), str)
         or not isinstance(checks, list)
         or checks != list(_REQUIRED_CHECKS)
         or not isinstance(nonclaims, list)
-        or nonclaims != list(_NONCLAIMS)
+        or nonclaims != list(expected_nonclaims)
     ):
         raise ConformanceFailure("evidence_invalid")
     executed_at = str(evidence["executed_at"])
@@ -597,6 +655,16 @@ def validate_evidence(evidence: Mapping[str, object]) -> None:
         or target.get("platform") not in {"linux/amd64", "linux/arm64"}
     ):
         raise ConformanceFailure("evidence_invalid")
+
+    if version == SCHEMA_VERSION:
+        runner = _require_mapping(evidence.get("runner"), "evidence_invalid")
+        if (
+            set(runner) != {"image_digest", "platform"}
+            or not isinstance(runner.get("image_digest"), str)
+            or not re.fullmatch(r"sha256:[0-9a-f]{64}", runner["image_digest"])
+            or runner.get("platform") != "linux/amd64"
+        ):
+            raise ConformanceFailure("evidence_invalid")
 
     retention_days = evidence.get("retention_days")
     if not isinstance(retention_days, int) or isinstance(retention_days, bool) or not 1 <= retention_days <= 36500:
