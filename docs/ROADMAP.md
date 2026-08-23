@@ -56,6 +56,8 @@ The first separately verifiable #11 slice, [#32](https://github.com/Xpounder-com
 
 The ninth, [#48](https://github.com/Xpounder-com/hormuz/issues/48), is completed in [PR #49](https://github.com/Xpounder-com/hormuz/pull/49): an audited immutable policy activation is observed at request start by the other live gateway instance, causes a pre-egress denial, and can reactivate the previous immutable policy without rewriting earlier evidence.
 
+The tenth, [#50](https://github.com/Xpounder-com/hormuz/issues/50), is completed in [PR #51](https://github.com/Xpounder-com/hormuz/pull/51): a gateway whose own bounded PostgreSQL runtime pool is closed becomes unready and fails generation requests closed before provider egress, while an independent sibling continues serving and a newly constructed replacement receives a fresh pool and recovers. This deterministic process-level proof does not claim PostgreSQL database failover, HA, or zero-downtime replacement.
+
 ## Feature-freeze rule
 
 > A change is current-priority only if it removes deprecated context coupling, stabilizes the policy/evidence contract, fixes a security or correctness defect, or closes a production-readiness gate.

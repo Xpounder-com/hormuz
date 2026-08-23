@@ -1563,6 +1563,181 @@ class PostgresUsageStoreTests(unittest.TestCase):
             provider.server_close()
             provider_thread.join(timeout=10)
 
+    def test_failed_replica_fails_closed_while_sibling_and_replacement_remain_usable(self) -> None:
+        """A local pool loss is isolated and a fresh gateway instance recovers.
+
+        This is deliberately a deterministic process-level runtime-pool failure
+        proof. It does not claim database failover or high availability.
+        """
+
+        _ReplicaPolicyProviderHandler.reset()
+        provider = ThreadingHTTPServer(("127.0.0.1", 0), _ReplicaPolicyProviderHandler)
+        provider_thread = threading.Thread(target=provider.serve_forever, daemon=True)
+        provider_thread.start()
+
+        active_gateways: list[GatewayServer] = []
+        gateway_threads: list[threading.Thread] = []
+        failed_gateway: GatewayServer | None = None
+        failed_gateway_thread: threading.Thread | None = None
+        try:
+            config, environment, _issuer = self._managed_config()
+            service = PolicyControlService(config, environ=environment)
+            service.bootstrap(organization_id="xpounder", credential_env="HORMUZ_POLICY_ADMIN_TOKEN")
+            active_policy = self._stage(
+                service,
+                environment=environment,
+                document=self._policy_document(),
+            )
+            service.activate(
+                organization_id="xpounder",
+                credential_env="HORMUZ_POLICY_ADMIN_TOKEN",
+                version_id=active_policy.version_id,
+            )
+
+            upstreams = dict(config.upstreams)
+            upstreams["openai"] = replace(
+                upstreams["openai"],
+                base_url=f"http://127.0.0.1:{provider.server_port}/v1",
+                api_key_env="TEST_REPLICA_RECOVERY_OPENAI_KEY",
+            )
+            upstreams["anthropic"] = replace(
+                upstreams["anthropic"],
+                api_key_env="TEST_REPLICA_RECOVERY_ANTHROPIC_KEY",
+            )
+            environment.update(
+                {
+                    "TEST_REPLICA_RECOVERY_OPENAI_KEY": "replica-recovery-provider-key",
+                    "TEST_REPLICA_RECOVERY_ANTHROPIC_KEY": "replica-recovery-anthropic-key",
+                }
+            )
+            configs = tuple(
+                replace(
+                    config,
+                    listen=replace(config.listen, port=_free_port()),
+                    upstreams=dict(upstreams),
+                )
+                for _ in range(2)
+            )
+            with mock.patch.dict(os.environ, environment, clear=False):
+                active_gateways = [GatewayServer(replica_config) for replica_config in configs]
+
+            self.assertIsNotNone(active_gateways[0].postgres_pool)
+            self.assertIsNotNone(active_gateways[1].postgres_pool)
+            self.assertIsNot(active_gateways[0].postgres_pool, active_gateways[1].postgres_pool)
+            gateway_threads = [serve_in_thread(gateway) for gateway in active_gateways]
+
+            def send_get(gateway: GatewayServer, path: str) -> tuple[int, bytes]:
+                connection = http.client.HTTPConnection("127.0.0.1", gateway.server_port, timeout=5)
+                try:
+                    connection.request("GET", path)
+                    response = connection.getresponse()
+                    return response.status, response.read()
+                finally:
+                    connection.close()
+
+            def send_request(gateway: GatewayServer, *, input_value: str) -> tuple[int, bytes]:
+                connection = http.client.HTTPConnection("127.0.0.1", gateway.server_port, timeout=5)
+                try:
+                    connection.request(
+                        "POST",
+                        "/v1/responses",
+                        body=json.dumps({"model": "gpt-5.4-mini", "input": input_value}),
+                        headers={
+                            "Authorization": "Bearer policy-test-alice-token",
+                            "Content-Type": "application/json",
+                        },
+                    )
+                    response = connection.getresponse()
+                    return response.status, response.read()
+                finally:
+                    connection.close()
+
+            failed_gateway = active_gateways.pop(0)
+            failed_gateway_thread = gateway_threads.pop(0)
+            self.assertIsNotNone(failed_gateway.postgres_pool)
+            failed_gateway.postgres_pool.close()
+
+            failed_ready_status, failed_ready_body = send_get(failed_gateway, "/ready")
+            self.assertEqual(failed_ready_status, 503, failed_ready_body)
+            failed_readiness = json.loads(failed_ready_body)
+            validate_contract(failed_readiness)
+            self.assertEqual(failed_readiness["reason"], "dependency_unavailable")
+
+            secret_input = "replica-local-secret-must-not-leak"
+            failed_status, failed_body = send_request(failed_gateway, input_value=secret_input)
+            self.assertEqual(failed_status, 503, failed_body)
+            failed_response = json.loads(failed_body)
+            self.assertEqual(failed_response["error"]["code"], "hormuz_storage_unavailable")
+            self.assertNotIn(secret_input, repr(failed_response))
+            self.assertEqual(_ReplicaPolicyProviderHandler.request_count, 0)
+
+            healthy_gateway = active_gateways[0]
+            healthy_ready_status, healthy_ready_body = send_get(healthy_gateway, "/ready")
+            self.assertEqual(healthy_ready_status, 200, healthy_ready_body)
+            healthy_status, healthy_body = send_request(healthy_gateway, input_value="healthy sibling probe")
+            self.assertEqual(healthy_status, 200, healthy_body)
+            self.assertEqual(_ReplicaPolicyProviderHandler.request_count, 1)
+
+            failed_gateway.shutdown()
+            failed_gateway.server_close()
+            failed_gateway_thread.join(timeout=10)
+            self.assertFalse(failed_gateway_thread.is_alive())
+            failed_gateway = None
+            failed_gateway_thread = None
+
+            replacement_config = replace(
+                config,
+                listen=replace(config.listen, port=_free_port()),
+                upstreams=dict(upstreams),
+            )
+            with mock.patch.dict(os.environ, environment, clear=False):
+                replacement = GatewayServer(replacement_config)
+            self.assertIsNotNone(replacement.postgres_pool)
+            self.assertIsNot(replacement.postgres_pool, healthy_gateway.postgres_pool)
+            active_gateways.append(replacement)
+            gateway_threads.append(serve_in_thread(replacement))
+
+            replacement_ready_status, replacement_ready_body = send_get(replacement, "/ready")
+            self.assertEqual(replacement_ready_status, 200, replacement_ready_body)
+            replacement_status, replacement_body = send_request(
+                replacement,
+                input_value="replacement recovery probe",
+            )
+            self.assertEqual(replacement_status, 200, replacement_body)
+            self.assertEqual(_ReplicaPolicyProviderHandler.request_count, 2)
+
+            totals = healthy_gateway.store.monthly_totals(organization_id="xpounder")
+            self.assertEqual((totals.requests, totals.denied_requests), (2, 0))
+            events = healthy_gateway.store.audit_events(
+                since="2000-01-01T00:00:00+00:00",
+                organization_id="xpounder",
+            )
+            self.assertEqual(len(events), 2)
+            self.assertEqual({event["status"] for event in events}, {"succeeded"})
+
+            shared_store = PostgresUsageStore(
+                self.runtime_dsn,
+                organization_ids=("xpounder", "beta"),
+                schema=self.schema,
+                runtime_role=self.runtime_role,
+            )
+            self.assertEqual(shared_store.monthly_totals(organization_id="beta").requests, 0)
+        finally:
+            if failed_gateway is not None:
+                failed_gateway.shutdown()
+                failed_gateway.server_close()
+            if failed_gateway_thread is not None:
+                failed_gateway_thread.join(timeout=10)
+            for gateway in active_gateways[: len(gateway_threads)]:
+                gateway.shutdown()
+            for gateway in active_gateways:
+                gateway.server_close()
+            for thread in gateway_threads:
+                thread.join(timeout=10)
+            provider.shutdown()
+            provider.server_close()
+            provider_thread.join(timeout=10)
+
     def test_runtime_pool_reuses_connections_without_tenant_state_leakage(self) -> None:
         pool = self._runtime_pool(
             min_connections=1,
