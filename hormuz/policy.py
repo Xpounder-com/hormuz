@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from .config import GatewayConfig, Identity, ModelRoute
 from .policy_document import PolicySnapshot
 from .policy_runtime import PolicyRuntime
-from .store import MonthlyTotals, ReservationScope, UsageRepository
+from .store import MonthlyTotals, RequestAttempt, ReservationScope, UsageRepository
 
 
 @dataclass(frozen=True)
@@ -103,6 +103,47 @@ class PolicyEngine:
         reserved_cost_microusd: int,
         ttl_seconds: int,
     ) -> str | None:
+        return self.store.reserve_budget(
+            identity=identity,
+            scopes=self.budget_scopes(identity=identity, decision=decision),
+            reserved_tokens=reserved_tokens,
+            reserved_cost_microusd=reserved_cost_microusd,
+            ttl_seconds=ttl_seconds,
+        )
+
+    def begin_request_attempt(
+        self,
+        *,
+        identity: Identity,
+        decision: PolicyDecision,
+        client: str,
+        protocol: str,
+        policy_action: str,
+        redaction_count: int,
+        redaction_rules: tuple[str, ...],
+        reserved_tokens: int,
+        reserved_cost_microusd: int,
+        ttl_seconds: int,
+    ) -> RequestAttempt:
+        return self.store.begin_request_attempt(
+            identity=identity,
+            client=client,
+            protocol=protocol,
+            requested_model=decision.requested_model,
+            resolved_alias=decision.resolved_alias,
+            upstream_model=decision.route.upstream_model if decision.route is not None else None,
+            policy_version=decision.policy_version,
+            policy_action=policy_action,
+            redaction_count=redaction_count,
+            redaction_rules=redaction_rules,
+            scopes=self.budget_scopes(identity=identity, decision=decision),
+            reserved_tokens=reserved_tokens,
+            reserved_cost_microusd=reserved_cost_microusd,
+            ttl_seconds=ttl_seconds,
+        )
+
+    @staticmethod
+    def budget_scopes(*, identity: Identity, decision: PolicyDecision) -> tuple[ReservationScope, ...]:
         organization = decision.snapshot.organization_policy
         team = decision.snapshot.team_policy
         actor = decision.snapshot.actor_policy
@@ -138,13 +179,7 @@ class PolicyEngine:
                 cost_limit_microusd=_usd_to_microusd(actor_cost_limit),
             )
         )
-        return self.store.reserve_budget(
-            identity=identity,
-            scopes=tuple(scopes),
-            reserved_tokens=reserved_tokens,
-            reserved_cost_microusd=reserved_cost_microusd,
-            ttl_seconds=ttl_seconds,
-        )
+        return tuple(scopes)
 
     def _check_limits(
         self,

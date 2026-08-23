@@ -10,7 +10,13 @@ from pathlib import Path
 from hormuz.config import Identity
 from hormuz.contracts import validate_audit_event
 from hormuz.evidence import EvidenceStorageError
-from hormuz.store import ReservationDenied, ReservationScope, StorageSchemaError, UsageStore
+from hormuz.store import (
+    RequestAttemptStateError,
+    ReservationDenied,
+    ReservationScope,
+    StorageSchemaError,
+    UsageStore,
+)
 
 
 class UsageStoreMigrationTests(unittest.TestCase):
@@ -200,6 +206,53 @@ class UsageStoreMigrationTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 store.audit_events(since="2000-01-01T00:00:00+00:00", kind="unsupported")
 
+    def test_schema_v2_reservation_database_upgrades_to_the_attempt_ledger(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "usage.sqlite3"
+            connection = sqlite3.connect(path)
+            connection.execute(
+                "CREATE TABLE hormuz_schema_migrations (version INTEGER PRIMARY KEY, state TEXT NOT NULL, applied_at TEXT)"
+            )
+            connection.executemany(
+                "INSERT INTO hormuz_schema_migrations (version, state) VALUES (?, 'applied')",
+                [(1,), (2,)],
+            )
+            connection.execute(
+                """
+                CREATE TABLE gateway_budget_reservations (
+                    id TEXT PRIMARY KEY,
+                    created_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    organization_id TEXT NOT NULL DEFAULT 'organization',
+                    actor_id TEXT NOT NULL,
+                    team_id TEXT NOT NULL,
+                    reserved_tokens INTEGER NOT NULL,
+                    reserved_cost_microusd INTEGER NOT NULL
+                )
+                """
+            )
+            connection.commit()
+            connection.close()
+
+            UsageStore(path).verify_ready()
+            connection = sqlite3.connect(path)
+            reservation_columns = {
+                row[1] for row in connection.execute("PRAGMA table_info(gateway_budget_reservations)").fetchall()
+            }
+            tables = {
+                row[0]
+                for row in connection.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'gateway_request_attempt%'"
+                ).fetchall()
+            }
+            migrations = connection.execute(
+                "SELECT version, state FROM hormuz_schema_migrations ORDER BY version"
+            ).fetchall()
+            connection.close()
+            self.assertIn("attempt_id", reservation_columns)
+            self.assertEqual(tables, {"gateway_request_attempts", "gateway_request_attempt_events"})
+            self.assertEqual(migrations, [(1, "applied"), (2, "applied"), (3, "applied")])
+
     def test_usage_reports_group_and_filter_without_content_fields(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             store = UsageStore(Path(temporary) / "usage.sqlite3")
@@ -342,6 +395,159 @@ class UsageStoreMigrationTests(unittest.TestCase):
             self.assertEqual(stores[0].active_budget_reservations(), 1)
             stores[0].release_budget_reservation(allowed_id)
             self.assertEqual(stores[1].active_budget_reservations(), 0)
+
+    def test_attempt_ledger_atomically_reserves_then_finalizes_once(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "usage.sqlite3"
+            store = UsageStore(path)
+            identity = Identity(
+                token_env="TEST_TOKEN",
+                token="employee-token-long",
+                actor_id="alice",
+                actor_name="Alice",
+                team_id="engineering",
+                team_name="Engineering",
+                organization_id="acme",
+            )
+            attempt = store.begin_request_attempt(
+                identity=identity,
+                client="codex",
+                protocol="openai",
+                requested_model="gpt-test",
+                resolved_alias="gpt-test",
+                upstream_model="gpt-upstream",
+                policy_version="policy-v1",
+                policy_action="allowed",
+                redaction_count=1,
+                redaction_rules=("test-secret",),
+                scopes=(ReservationScope(name="organization", cost_limit_microusd=1_000),),
+                reserved_tokens=20,
+                reserved_cost_microusd=600,
+                ttl_seconds=60,
+            )
+
+            connection = sqlite3.connect(path)
+            root = connection.execute(
+                """
+                SELECT evidence_schema_id, evidence_schema_version, requested_model,
+                       policy_version, reserved_cost_microusd, redaction_rules
+                FROM gateway_request_attempts WHERE attempt_id = ?
+                """,
+                (attempt.attempt_id,),
+            ).fetchone()
+            states = connection.execute(
+                "SELECT sequence, state, reason_code, usage_event_id FROM gateway_request_attempt_events "
+                "WHERE attempt_id = ? ORDER BY sequence",
+                (attempt.attempt_id,),
+            ).fetchall()
+            reservation = connection.execute(
+                "SELECT id, attempt_id, reserved_cost_microusd FROM gateway_budget_reservations WHERE id = ?",
+                (attempt.reservation_id,),
+            ).fetchone()
+            connection.close()
+            self.assertEqual(root[:5], ("hormuz.request-attempt", 1, "gpt-test", "policy-v1", 600))
+            self.assertEqual(root[5], '["test-secret"]')
+            self.assertEqual(states, [(1, "pending", None, None)])
+            self.assertEqual(reservation, (attempt.attempt_id, attempt.attempt_id, 600))
+
+            store.finalize_request_attempt(
+                attempt=attempt,
+                organization_id="acme",
+                status="succeeded",
+                input_tokens=10,
+                output_tokens=2,
+                cost_microusd=120,
+                provider_request_id="provider-request-id",
+            )
+            self.assertEqual(store.active_budget_reservations(organization_id="acme"), 0)
+            audit = store.audit_events(since="2000-01-01T00:00:00+00:00", organization_id="acme")
+            self.assertEqual([(event["status"], event["cost_microusd"]) for event in audit], [("succeeded", 120)])
+
+            connection = sqlite3.connect(path)
+            states = connection.execute(
+                "SELECT sequence, state, reason_code, usage_event_id FROM gateway_request_attempt_events "
+                "WHERE attempt_id = ? ORDER BY sequence",
+                (attempt.attempt_id,),
+            ).fetchall()
+            connection.close()
+            self.assertEqual(states[0], (1, "pending", None, None))
+            self.assertEqual(states[1][0:3], (2, "succeeded", None))
+            self.assertIsNotNone(states[1][3])
+            with self.assertRaises(RequestAttemptStateError):
+                store.finalize_request_attempt(
+                    attempt=attempt,
+                    organization_id="acme",
+                    status="succeeded",
+                )
+
+    def test_unknown_attempt_holds_its_estimate_after_expiry_and_sweeper_recovery(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "usage.sqlite3"
+            store = UsageStore(path)
+            identity = Identity(
+                token_env="TEST_TOKEN",
+                token="employee-token-long",
+                actor_id="alice",
+                actor_name="Alice",
+                team_id="engineering",
+                team_name="Engineering",
+                organization_id="acme",
+            )
+            scope = ReservationScope(name="organization", cost_limit_microusd=1_000)
+            attempt = store.begin_request_attempt(
+                identity=identity,
+                client="codex",
+                protocol="openai",
+                requested_model="gpt-test",
+                resolved_alias="gpt-test",
+                upstream_model="gpt-upstream",
+                policy_version="policy-v1",
+                policy_action="allowed",
+                redaction_count=0,
+                redaction_rules=(),
+                scopes=(scope,),
+                reserved_tokens=20,
+                reserved_cost_microusd=600,
+                ttl_seconds=60,
+            )
+            connection = sqlite3.connect(path)
+            connection.execute(
+                "UPDATE gateway_budget_reservations SET expires_at = ? WHERE id = ?",
+                ("2000-01-01T00:00:00+00:00", attempt.reservation_id),
+            )
+            connection.commit()
+            connection.close()
+
+            self.assertEqual(store.sweep_stale_request_attempts(organization_id="acme"), 1)
+            self.assertEqual(store.active_budget_reservations(organization_id="acme"), 1)
+            with self.assertRaises(ReservationDenied):
+                store.reserve_budget(
+                    identity=identity,
+                    scopes=(scope,),
+                    reserved_tokens=1,
+                    reserved_cost_microusd=500,
+                    ttl_seconds=60,
+                )
+            with self.assertRaises(RequestAttemptStateError):
+                store.finalize_request_attempt(
+                    attempt=attempt,
+                    organization_id="acme",
+                    status="failed",
+                )
+
+            connection = sqlite3.connect(path)
+            states = connection.execute(
+                "SELECT sequence, state, reason_code, usage_event_id FROM gateway_request_attempt_events "
+                "WHERE attempt_id = ? ORDER BY sequence",
+                (attempt.attempt_id,),
+            ).fetchall()
+            reservation_count = connection.execute(
+                "SELECT COUNT(*) FROM gateway_budget_reservations WHERE attempt_id = ?",
+                (attempt.attempt_id,),
+            ).fetchone()[0]
+            connection.close()
+            self.assertEqual(states, [(1, "pending", None, None), (2, "outcome_unknown", "stale_pending", None)])
+            self.assertEqual(reservation_count, 1)
 
     def test_unsafe_rollback_fails_closed_without_mutating_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

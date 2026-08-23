@@ -52,6 +52,8 @@ _REQUIRED_RECORD_COUNT_KEYS = (
     "usage_events",
     "secret_events",
     "active_budget_reservations",
+    "request_attempts",
+    "request_attempt_events",
     "policy_administrators",
     "policy_versions",
     "active_policy_versions",
@@ -61,7 +63,9 @@ _EXPECTED_RECORD_COUNTS = {
     "organizations": 2,
     "usage_events": 2,
     "secret_events": 2,
-    "active_budget_reservations": 2,
+    "active_budget_reservations": 4,
+    "request_attempts": 2,
+    "request_attempt_events": 4,
     "policy_administrators": 2,
     "policy_versions": 2,
     "active_policy_versions": 2,
@@ -402,6 +406,33 @@ def seed_source_state(
             )
             if reservation is None:
                 raise RecoveryDrillError("source_budget_reservation_missing")
+            attempt = store.begin_request_attempt(
+                identity=identity,
+                client="codex",
+                protocol="openai",
+                requested_model="gpt-5.4-mini",
+                resolved_alias="gpt-5.4-mini",
+                upstream_model="gpt-5.4-mini",
+                policy_version=active.version_id,
+                policy_action="allowed",
+                redaction_count=0,
+                redaction_rules=(),
+                scopes=(
+                    ReservationScope(
+                        name="organization",
+                        token_limit=100_000,
+                        cost_limit_microusd=100_000,
+                    ),
+                ),
+                reserved_tokens=25 + index,
+                reserved_cost_microusd=75 + index,
+                ttl_seconds=3_600,
+            )
+            store.mark_request_attempt_outcome_unknown(
+                attempt=attempt,
+                organization_id=organization_id,
+                reason_code="provider_transport_ambiguous",
+            )
 
         return _capture_state(
             config=config,
@@ -650,8 +681,29 @@ def _capture_state(
             raise RecoveryDrillError("recovery_tenant_repository_check_failed")
         if store.monthly_secret_totals(organization_id=organization_id).events != 1:
             raise RecoveryDrillError("recovery_tenant_repository_check_failed")
-        if store.active_budget_reservations(organization_id=organization_id) != 1:
+        if store.active_budget_reservations(organization_id=organization_id) != 2:
             raise RecoveryDrillError("recovery_budget_reservation_check_failed")
+        with postgres_transaction(
+            runtime_dsn,
+            schema=schema,
+            runtime_role=runtime_role,
+            organization_id=organization_id,
+        ) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT state, reason_code, usage_event_id "
+                    "FROM gateway_request_attempt_events ORDER BY attempt_id, sequence"
+                )
+                attempt_events = [dict(row) for row in cursor.fetchall()]
+        if attempt_events != [
+            {"state": "pending", "reason_code": None, "usage_event_id": None},
+            {
+                "state": "outcome_unknown",
+                "reason_code": "provider_transport_ambiguous",
+                "usage_event_id": None,
+            },
+        ]:
+            raise RecoveryDrillError("recovery_request_attempt_check_failed")
 
         status = service.status(organization_id=organization_id, credential_env=identity.token_env)
         snapshot = runtime.snapshot_for(identity)
@@ -684,6 +736,8 @@ def _capture_state(
         "usage_events": len(records["gateway_usage_events"]),
         "secret_events": len(records["gateway_secret_events"]),
         "active_budget_reservations": len(records["gateway_budget_reservations"]),
+        "request_attempts": len(records["gateway_request_attempts"]),
+        "request_attempt_events": len(records["gateway_request_attempt_events"]),
         "policy_administrators": len(records["policy_administrators"]),
         "policy_versions": len(records["policy_versions"]),
         "active_policy_versions": len(records["policy_active_versions"]),
@@ -736,6 +790,8 @@ def _collect_restricted_records(
         ("gateway_usage_events", "id"),
         ("gateway_secret_events", "id"),
         ("gateway_budget_reservations", "id"),
+        ("gateway_request_attempts", "attempt_id"),
+        ("gateway_request_attempt_events", "attempt_id, sequence"),
         ("policy_versions", "organization_id, version_id"),
         ("policy_active_versions", "organization_id"),
     )
@@ -829,6 +885,8 @@ def _verify_rls_without_organization_context(
         (runtime_dsn, "gateway_usage_events"),
         (runtime_dsn, "gateway_secret_events"),
         (runtime_dsn, "gateway_budget_reservations"),
+        (runtime_dsn, "gateway_request_attempts"),
+        (runtime_dsn, "gateway_request_attempt_events"),
         (runtime_dsn, "policy_versions"),
         (runtime_dsn, "policy_active_versions"),
         (policy_control_dsn, "policy_tenants"),

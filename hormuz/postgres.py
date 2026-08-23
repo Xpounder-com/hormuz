@@ -16,7 +16,7 @@ from typing import Any, Iterator, Mapping
 from .config import PostgresPoolConfig
 
 
-POSTGRES_SCHEMA_VERSION = 2
+POSTGRES_SCHEMA_VERSION = 3
 _IDENTIFIER_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 
 
@@ -413,6 +413,7 @@ def _migration_sql(
     filenames = {
         1: "0001_usage_evidence.sql",
         2: "0002_policy_control.sql",
+        3: "0003_request_attempts.sql",
     }
     filename = filenames.get(version)
     if filename is None:

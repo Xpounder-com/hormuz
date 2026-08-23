@@ -235,6 +235,10 @@ class GatewayPostgresPoolOwnershipTests(unittest.TestCase):
             try:
                 with (
                     mock.patch("hormuz.server.create_postgres_runtime_pool", return_value=pool),
+                    mock.patch(
+                        "hormuz.server.resolve_upstream_credentials",
+                        return_value={"openai": "test-postgres-pool-openai-key", "anthropic": ""},
+                    ),
                     mock.patch.object(GatewayRequestHandler, "_forward", new=blocked_forward),
                 ):
                     server = GatewayServer(config)

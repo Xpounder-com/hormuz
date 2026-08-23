@@ -1,6 +1,6 @@
 # Usage-evidence storage
 
-Hormuz stores only the metadata needed to enforce policy and account for governed requests. It does not store prompts, provider response bodies, matched secret values, provider credentials, or context/memory records.
+Hormuz stores only the metadata needed to enforce policy and account for governed requests. It does not store prompts, provider response bodies, matched secret values, provider credentials, or context/memory records. Before provider egress, it also records a content-free immutable request-attempt root and its reservation so uncertain provider activity cannot be silently dropped.
 
 This document describes the storage compatibility gate for the core gateway. It proves the SQLite and PostgreSQL usage/evidence repositories have the same narrow contract and documents one disposable logical backup-and-restore drill. It does **not** establish production PostgreSQL operations, production backup/PITR, HA/DR, KMS/BYOK, immutable audit retention, or multi-instance coordination. Those remain separate release gates in [ROADMAP.md](ROADMAP.md).
 
@@ -83,7 +83,7 @@ runtime pool, then verifies the active managed policy when managed policy
 control is enabled. It performs no provider request and returns only a
 content-free readiness result; see [OPERATIONS.md](OPERATIONS.md).
 
-Before the first migration, an operator creates the restricted runtime and policy-control roles. Both must be non-owner roles with no superuser, database-creation, role-creation, inheritance, or BYPASSRLS capability, and they must be different roles. The migration grants the runtime role only the usage/evidence surface plus read-only active-policy access. It grants the policy-control role only the policy-administration tables and migration ledger; it cannot update tenant initialization state, immutable policy versions, or control events. An existing schema-v1 deployment must create its configured policy-control role before applying the schema-v2 migration, because migrations grant permissions to that pre-existing restricted role rather than creating database principals.
+Before the first migration, an operator creates the restricted runtime and policy-control roles. Both must be non-owner roles with no superuser, database-creation, role-creation, inheritance, or BYPASSRLS capability, and they must be different roles. The migration grants the runtime role only the usage/evidence surface plus read-only active-policy access. It grants the policy-control role only the policy-administration tables and migration ledger; it cannot update tenant initialization state, immutable policy versions, or control events. The runtime role has only `SELECT, INSERT` on request-attempt roots and events: an advisory lock serializes their append-only transitions without granting rewrite permission. An existing schema-v1 deployment must create its configured policy-control role before applying the schema-v2 migration, because migrations grant permissions to that pre-existing restricted role rather than creating database principals.
 
 ~~~sql
 CREATE ROLE hormuz_runtime
@@ -121,7 +121,7 @@ hormuz --config hormuz.json storage verify
 hormuz --config hormuz.json doctor
 ~~~
 
-The current PostgreSQL migration creates the usage-events, secret-events, active budget-reservations, policy-tenant, policy-administrator, immutable policy-version, active-policy-pointer, and policy-control-event tables; organization/time indexes; forced row-level security policies; and a versioned migration ledger. Every runtime repository operation:
+The current PostgreSQL migrations create the usage-events, secret-events, active budget-reservations, immutable request-attempt roots and events, policy-tenant, policy-administrator, immutable policy-version, active-policy-pointer, and policy-control-event tables; organization/time indexes; forced row-level security policies; and a versioned migration ledger. Every runtime repository operation:
 
 1. sets the restricted runtime role locally;
 2. sets the configured schema search path locally;
@@ -162,7 +162,8 @@ It starts isolated source, recovery, and quarantine PostgreSQL 16.14
 containers from the digest-pinned test image. It creates two non-owner roles,
 applies Hormuz's normal PostgreSQL migrations to the source, and seeds only
 fixed two-tenant metadata: one usage record, one secret-egress record, one
-active budget reservation, and one managed-policy lifecycle per tenant. No
+active budget reservation, one `outcome_unknown` request attempt with its
+retained reservation, and one managed-policy lifecycle per tenant. No
 provider call, customer database, customer role, prompt, response, secret
 value, or provider credential is used.
 
@@ -172,7 +173,8 @@ that restore and a subsequent Hormuz verification must fail. The valid archive
 is then restored into a clean recovery database. The verifier uses the
 restricted runtime and policy-control roles to require the migration ledger,
 tenant-scoped repository behavior, active policy versions, active budget
-reservations, and RLS denial without an organization context. It computes a
+reservations (including uncertain attempt holds), request-attempt event state,
+and RLS denial without an organization context. It computes a
 SHA-256 state fingerprint over the restored metadata in memory and requires it
 to exactly match the source before writing evidence.
 
@@ -192,9 +194,9 @@ separately.
 
 ## Failure behavior
 
-Before provider egress, a storage interruption results in a content-free 503 with the stable classification hormuz_storage_unavailable; the provider is not called. The same classification appears in the metadata-only gateway error envelope for control-plane reads.
+Before provider egress, Hormuz atomically persists a content-free `pending` request attempt and its conservative budget reservation. If that transaction cannot commit, the gateway returns a content-free 503 with the stable classification `hormuz_storage_unavailable`; the provider is not called. The same classification appears in the metadata-only gateway error envelope for control-plane reads.
 
-After a provider-compatible response body has begun, Hormuz never injects a different JSON shape into that response. It logs only a stable storage failure classification and closes the connection. A durable post-relay audit gap therefore remains an operational incident to investigate; it is not silently recast as successful accounting.
+After a provider-compatible response body has begun, Hormuz never injects a different JSON shape into that response or buffers the full body before relaying it. A reliable result atomically appends a terminal attempt event and the linked usage audit event. If that finalization cannot commit, the pre-existing `pending` row remains. A later startup or pre-egress sweep marks expired pending rows `outcome_unknown`; an ambiguous network failure or interrupted successful stream is marked `outcome_unknown` immediately when storage is available. The associated estimated cost remains an uncertain reservation regardless of its original expiry until a later governed reconciliation or administrator-resolution capability is introduced. Hormuz never automatically replays a provider request.
 
 ## Verification
 
@@ -211,7 +213,7 @@ HORMUZ_TEST_POSTGRES_DSN='postgresql://operator@host:5432/hormuz_test' \
   python3 -m unittest -v tests.test_postgres
 ~~~
 
-CI runs this PostgreSQL suite separately against a pinned disposable PostgreSQL service. It proves the adapter's migration idempotency, runtime/control-role separation, RLS behavior, tenant isolation, pooled checkout reuse with tenant-state reset, bounded saturation, broken-connection replacement, policy bootstrap/activation/rollback, contract fixtures, malformed-evidence failure, rollback/partial-schema failure, and competing budget reservation behavior.
+CI runs this PostgreSQL suite separately against a pinned disposable PostgreSQL service. It proves the adapter's migration idempotency, runtime/control-role separation, RLS behavior, tenant isolation, append-only request-attempt evidence, conservative unknown-outcome reservations, pooled checkout reuse with tenant-state reset, bounded saturation, broken-connection replacement, policy bootstrap/activation/rollback, contract fixtures, malformed-evidence failure, rollback/partial-schema failure, and competing budget reservation behavior.
 
 A separate PostgreSQL recovery job invokes the disposable logical drill above
 against source, recovery, and quarantine containers from the same digest-pinned

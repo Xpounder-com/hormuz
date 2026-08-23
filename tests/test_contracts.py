@@ -14,6 +14,10 @@ from hormuz.contracts import (
     ERROR_SCHEMA_VERSION,
     READINESS_SCHEMA_ID,
     READINESS_SCHEMA_VERSION,
+    REQUEST_ATTEMPT_EVENT_SCHEMA_ID,
+    REQUEST_ATTEMPT_EVENT_SCHEMA_VERSION,
+    REQUEST_ATTEMPT_SCHEMA_ID,
+    REQUEST_ATTEMPT_SCHEMA_VERSION,
     contract_envelope,
     contract_manifest,
     relay_contract_header,
@@ -21,6 +25,8 @@ from hormuz.contracts import (
     validate_contract,
     validate_contract_manifest,
     validate_policy_control_event,
+    validate_request_attempt,
+    validate_request_attempt_event,
 )
 
 
@@ -49,6 +55,9 @@ class PolicyEvidenceContractTests(unittest.TestCase):
         for name in ("audit_usage_v1", "audit_security_v1", "audit_usage_v2", "audit_security_v2"):
             validate_audit_event(fixtures[name])
         validate_policy_control_event(fixtures["policy_control_event"])
+        validate_request_attempt(fixtures["request_attempt_v1"])
+        validate_request_attempt_event(fixtures["request_attempt_pending_v1"])
+        validate_request_attempt_event(fixtures["request_attempt_unknown_v1"])
         self.assertEqual(fixtures["relay_contract_header"], relay_contract_header())
 
     def test_invalid_compatibility_fixtures_fail_closed(self) -> None:
@@ -89,6 +98,8 @@ class PolicyEvidenceContractTests(unittest.TestCase):
         self.assertIn(("hormuz.policy-control-status", 1), schemas)
         self.assertIn(("hormuz.policy-document", 1), schemas)
         self.assertIn(("hormuz.policy-control-event", 1), schemas)
+        self.assertIn((REQUEST_ATTEMPT_SCHEMA_ID, REQUEST_ATTEMPT_SCHEMA_VERSION), schemas)
+        self.assertIn((REQUEST_ATTEMPT_EVENT_SCHEMA_ID, REQUEST_ATTEMPT_EVENT_SCHEMA_VERSION), schemas)
         self.assertEqual(manifest["schema_id"], "hormuz.policy-evidence-manifest")
         self.assertEqual(manifest["schema_version"], 1)
         validate_contract_manifest(manifest)
@@ -103,6 +114,72 @@ class PolicyEvidenceContractTests(unittest.TestCase):
     def test_contract_envelope_rejects_unknown_schema(self) -> None:
         with self.assertRaises(ContractValidationError):
             contract_envelope("hormuz.unknown", {})
+
+    def test_request_attempt_evidence_contract_is_strict_and_content_free(self) -> None:
+        attempt = {
+            "evidence_schema_id": REQUEST_ATTEMPT_SCHEMA_ID,
+            "evidence_schema_version": REQUEST_ATTEMPT_SCHEMA_VERSION,
+            "attempt_id": "attempt-123",
+            "created_at": "2026-08-22T00:00:00+00:00",
+            "organization_id": "xpounder",
+            "actor_id": "alice",
+            "actor_name": "Alice Example",
+            "team_id": "engineering",
+            "team_name": "Engineering",
+            "identity_type": "human",
+            "authentication_source": "oidc:https://identity.example",
+            "client": "codex",
+            "protocol": "openai",
+            "requested_model": "engineering-fast",
+            "resolved_alias": "engineering-fast",
+            "upstream_model": "gpt-provider-fast",
+            "policy_version": "policy-v1",
+            "policy_action": "allowed",
+            "redaction_count": 1,
+            "redaction_rules": ["openai_api_key"],
+            "reserved_tokens": 100,
+            "reserved_cost_microusd": 1234,
+        }
+        pending = {
+            "event_schema_id": REQUEST_ATTEMPT_EVENT_SCHEMA_ID,
+            "event_schema_version": REQUEST_ATTEMPT_EVENT_SCHEMA_VERSION,
+            "id": "attempt-event-1",
+            "attempt_id": "attempt-123",
+            "organization_id": "xpounder",
+            "occurred_at": "2026-08-22T00:00:00+00:00",
+            "sequence": 1,
+            "state": "pending",
+            "reason_code": None,
+            "usage_event_id": None,
+        }
+        terminal = {
+            **pending,
+            "id": "attempt-event-2",
+            "sequence": 2,
+            "state": "succeeded",
+            "usage_event_id": "usage-event-1",
+        }
+        unknown = {
+            **pending,
+            "id": "attempt-event-3",
+            "sequence": 2,
+            "state": "outcome_unknown",
+            "reason_code": "provider_transport_ambiguous",
+        }
+        validate_request_attempt(attempt)
+        validate_request_attempt_event(pending)
+        validate_request_attempt_event(terminal)
+        validate_request_attempt_event(unknown)
+
+        malformed = {**attempt, "prompt": "must-not-enter-durable-evidence"}
+        with self.assertRaises(ContractValidationError):
+            validate_request_attempt(malformed)
+        malformed_unknown = {**unknown, "reason_code": None}
+        with self.assertRaises(ContractValidationError):
+            validate_request_attempt_event(malformed_unknown)
+        for malformed_transition in ({**terminal, "sequence": 1}, {**unknown, "sequence": 1}):
+            with self.assertRaises(ContractValidationError):
+                validate_request_attempt_event(malformed_transition)
 
 
 if __name__ == "__main__":

@@ -4,11 +4,13 @@ import http.client
 import json
 import os
 import shutil
+import sqlite3
 import socket
 import subprocess
 import tempfile
 import threading
 import unittest
+import urllib.error
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest import mock
@@ -500,6 +502,123 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertEqual(audit[0]["policy_action"], "allowed")
         self.assertEqual(audit[0]["status"], "rate_limited")
         validate_audit_event(audit[0])
+
+    def test_missing_upstream_credential_fails_before_creating_an_attempt(self) -> None:
+        self.gateway.upstream_credentials["openai"] = ""
+        with mock.patch("hormuz.server.urllib.request.urlopen") as urlopen:
+            status, headers, _ = self._post(
+                "/v1/responses",
+                {"model": "engineering-fast", "input": "must-not-create-an-attempt"},
+            )
+
+        self.assertEqual(status, 503)
+        self.assertEqual(headers["x-hormuz-error-code"], "gateway_upstream_not_configured")
+        urlopen.assert_not_called()
+        self.assertEqual(self.gateway.store.monthly_totals(actor_id="alice").requests, 0)
+        self.assertEqual(self.gateway.store.active_budget_reservations(), 0)
+        connection = sqlite3.connect(self.gateway.store.path)
+        self.assertEqual(connection.execute("SELECT COUNT(*) FROM gateway_request_attempts").fetchone()[0], 0)
+        connection.close()
+
+    def test_ambiguous_provider_transport_keeps_a_conservative_unknown_attempt(self) -> None:
+        before = len(FakeProviderHandler.requests)
+        request_content = "must-not-enter-request-attempt-evidence"
+        with mock.patch(
+            "hormuz.server.urllib.request.urlopen",
+            side_effect=urllib.error.URLError("provider-connection-interrupted"),
+        ):
+            status, headers, body = self._post(
+                "/v1/responses",
+                {"model": "engineering-fast", "input": request_content},
+            )
+
+        self.assertEqual(status, 502)
+        self.assertEqual(headers["x-hormuz-error-code"], "gateway_upstream_error")
+        self.assertEqual(len(FakeProviderHandler.requests), before)
+        self.assertNotIn(request_content, body.decode("utf-8"))
+        self.assertEqual(self.gateway.store.monthly_totals(actor_id="alice").requests, 0)
+        self.assertEqual(self.gateway.store.active_budget_reservations(), 1)
+
+        connection = sqlite3.connect(self.gateway.store.path)
+        root_columns = [row[1] for row in connection.execute("PRAGMA table_info(gateway_request_attempts)").fetchall()]
+        root = connection.execute(
+            "SELECT requested_model, reserved_cost_microusd FROM gateway_request_attempts"
+        ).fetchone()
+        events = connection.execute(
+            "SELECT sequence, state, reason_code, usage_event_id FROM gateway_request_attempt_events ORDER BY sequence"
+        ).fetchall()
+        connection.close()
+        self.assertNotIn("input", root_columns)
+        self.assertEqual(root[0], "engineering-fast")
+        self.assertGreater(root[1], 0)
+        self.assertEqual(
+            events,
+            [(1, "pending", None, None), (2, "outcome_unknown", "provider_transport_ambiguous", None)],
+        )
+
+    def test_interrupted_provider_response_becomes_unknown_without_replay(self) -> None:
+        class InterruptedResponse:
+            status = 200
+            headers = {"Content-Type": "application/json", "x-request-id": "req_truncated"}
+
+            def getcode(self) -> int:
+                return self.status
+
+            def read(self, _size: int) -> bytes:
+                raise http.client.IncompleteRead(b"{\"partial\": true", 1)
+
+            def close(self) -> None:
+                return None
+
+        before = len(FakeProviderHandler.requests)
+        with mock.patch("hormuz.server.urllib.request.urlopen", return_value=InterruptedResponse()):
+            status, headers, body = self._post(
+                "/v1/responses",
+                {"model": "engineering-fast", "input": "interrupted provider response"},
+            )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["content-type"], "application/json")
+        self.assertEqual(body, b"")
+        self.assertEqual(len(FakeProviderHandler.requests), before)
+        self.assertEqual(self.gateway.store.monthly_totals(actor_id="alice").requests, 0)
+        self.assertEqual(self.gateway.store.active_budget_reservations(), 1)
+
+        connection = sqlite3.connect(self.gateway.store.path)
+        events = connection.execute(
+            "SELECT sequence, state, reason_code, usage_event_id FROM gateway_request_attempt_events ORDER BY sequence"
+        ).fetchall()
+        connection.close()
+        self.assertEqual(
+            events,
+            [(1, "pending", None, None), (2, "outcome_unknown", "provider_stream_interrupted", None)],
+        )
+
+    def test_post_relay_finalization_failure_leaves_pending_evidence_without_buffering(self) -> None:
+        before = len(FakeProviderHandler.requests)
+        with mock.patch.object(
+            self.gateway.store,
+            "finalize_request_attempt",
+            side_effect=sqlite3.OperationalError("test-finalization-interruption"),
+        ):
+            status, headers, body = self._post(
+                "/v1/responses",
+                {"model": "engineering-fast", "input": "stream-compatible completion", "stream": True},
+            )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["content-type"], "text/event-stream")
+        self.assertIn("response.completed", body.decode("utf-8"))
+        self.assertEqual(len(FakeProviderHandler.requests), before + 1)
+        self.assertEqual(self.gateway.store.monthly_totals(actor_id="alice").requests, 0)
+        self.assertEqual(self.gateway.store.active_budget_reservations(), 1)
+
+        connection = sqlite3.connect(self.gateway.store.path)
+        events = connection.execute(
+            "SELECT sequence, state, reason_code, usage_event_id FROM gateway_request_attempt_events ORDER BY sequence"
+        ).fetchall()
+        connection.close()
+        self.assertEqual(events, [(1, "pending", None, None)])
 
     def test_openai_background_mode_is_denied_by_default(self) -> None:
         before = len(FakeProviderHandler.requests)

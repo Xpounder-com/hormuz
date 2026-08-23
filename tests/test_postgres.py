@@ -35,7 +35,7 @@ from hormuz.postgres import (
 from hormuz.postgres_policy_store import PostgresPolicyControlStore
 from hormuz.postgres_usage_store import PostgresUsageStore
 from hormuz.server import GatewayServer, serve_in_thread
-from hormuz.store import ReservationDenied, ReservationScope, UsageStore
+from hormuz.store import RequestAttemptStateError, ReservationDenied, ReservationScope, UsageStore
 from hormuz.store_router import create_usage_store
 
 
@@ -223,7 +223,9 @@ class PostgresUsageStoreTests(unittest.TestCase):
                     "policy_versions",
                     "policy_administrators",
                     "policy_tenants",
+                    "gateway_request_attempt_events",
                     "gateway_budget_reservations",
+                    "gateway_request_attempts",
                     "gateway_secret_events",
                     "gateway_usage_events",
                 )
@@ -404,7 +406,7 @@ class PostgresUsageStoreTests(unittest.TestCase):
             runtime_role=self.runtime_role,
         )
         self.assertTrue(status.complete)
-        self.assertEqual(status.version, 2)
+        self.assertEqual(status.version, 3)
 
     def test_configured_router_uses_only_the_runtime_dsn(self) -> None:
         config = GatewayConfig.load(
@@ -459,7 +461,7 @@ class PostgresUsageStoreTests(unittest.TestCase):
                 migration = io.StringIO()
                 with redirect_stdout(migration):
                     self.assertEqual(main(["--config", str(config_path), "storage", "migrate"]), 0)
-                self.assertEqual(migration.getvalue(), "PostgreSQL usage storage migration is current: v2\n")
+                self.assertEqual(migration.getvalue(), "PostgreSQL usage storage migration is current: v3\n")
 
                 verification = io.StringIO()
                 with redirect_stdout(verification):
@@ -993,7 +995,7 @@ class PostgresUsageStoreTests(unittest.TestCase):
                     before = cursor.fetchone()[0]
                     cursor.execute(
                         self.sql.SQL(
-                            "INSERT INTO {}.hormuz_schema_migrations (version, state) VALUES (3, 'applying')"
+                            "INSERT INTO {}.hormuz_schema_migrations (version, state) VALUES (4, 'applying')"
                         ).format(self.sql.Identifier(self.schema))
                     )
         with self.assertRaises(PostgresStorageError) as raised:
@@ -1010,7 +1012,7 @@ class PostgresUsageStoreTests(unittest.TestCase):
                 with connection.cursor() as cursor:
                     cursor.execute(
                         self.sql.SQL(
-                            "UPDATE {}.hormuz_schema_migrations SET state = 'applied' WHERE version = 3"
+                            "UPDATE {}.hormuz_schema_migrations SET state = 'applied' WHERE version = 4"
                         ).format(self.sql.Identifier(self.schema))
                     )
         with self.assertRaises(PostgresStorageError) as raised:
@@ -1033,7 +1035,7 @@ class PostgresUsageStoreTests(unittest.TestCase):
                     self.assertEqual(cursor.fetchone()[0], before)
                     cursor.execute(
                         self.sql.SQL(
-                            "DELETE FROM {}.hormuz_schema_migrations WHERE version = 3"
+                            "DELETE FROM {}.hormuz_schema_migrations WHERE version = 4"
                         ).format(self.sql.Identifier(self.schema))
                     )
 
@@ -1258,6 +1260,160 @@ class PostgresUsageStoreTests(unittest.TestCase):
         for thread in threads:
             thread.join(timeout=10)
         self.assertEqual(sorted(outcomes), ["allowed", "denied"])
+
+    def test_attempt_ledger_is_append_only_tenant_scoped_and_conservative(self) -> None:
+        identity = _identity("acme")
+        scope = ReservationScope(name="organization", cost_limit_microusd=1_000)
+        attempt = self.store.begin_request_attempt(
+            identity=identity,
+            client="codex",
+            protocol="openai",
+            requested_model="gpt-test",
+            resolved_alias="gpt-test",
+            upstream_model="gpt-upstream",
+            policy_version="policy-v1",
+            policy_action="allowed",
+            redaction_count=0,
+            redaction_rules=(),
+            scopes=(scope,),
+            reserved_tokens=20,
+            reserved_cost_microusd=600,
+            ttl_seconds=60,
+        )
+
+        with postgres_transaction(
+            self.runtime_dsn,
+            schema=self.schema,
+            runtime_role=self.runtime_role,
+            organization_id="acme",
+        ) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT attempt_id, reserved_cost_microusd FROM gateway_request_attempts WHERE attempt_id = %s",
+                    (attempt.attempt_id,),
+                )
+                self.assertEqual(dict(cursor.fetchone()), {"attempt_id": attempt.attempt_id, "reserved_cost_microusd": 600})
+                cursor.execute(
+                    "SELECT sequence, state FROM gateway_request_attempt_events WHERE attempt_id = %s",
+                    (attempt.attempt_id,),
+                )
+                self.assertEqual([dict(row) for row in cursor.fetchall()], [{"sequence": 1, "state": "pending"}])
+
+        with postgres_transaction(
+            self.runtime_dsn,
+            schema=self.schema,
+            runtime_role=self.runtime_role,
+            organization_id="beta",
+        ) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT COUNT(*) AS count FROM gateway_request_attempts")
+                self.assertEqual(cursor.fetchone()["count"], 0)
+
+        with self.assertRaises(PostgresStorageError) as raised:
+            with postgres_transaction(
+                self.runtime_dsn,
+                schema=self.schema,
+                runtime_role=self.runtime_role,
+                organization_id="acme",
+            ) as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        "UPDATE gateway_request_attempts SET policy_version = 'rewrite-attempt' WHERE attempt_id = %s",
+                        (attempt.attempt_id,),
+                    )
+        self.assertEqual(raised.exception.code, "storage_access_denied")
+
+        beta_usage_event_id = self.store.record(
+            identity=_identity("beta"),
+            client="codex",
+            protocol="openai",
+            requested_model="gpt-test",
+            resolved_alias="gpt-test",
+            upstream_model="gpt-upstream",
+            policy_action="allowed",
+            status="succeeded",
+        )
+        with self.assertRaises(PostgresStorageError):
+            with postgres_transaction(
+                self.runtime_dsn,
+                schema=self.schema,
+                runtime_role=self.runtime_role,
+                organization_id="acme",
+            ) as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        """
+                        INSERT INTO gateway_request_attempt_events (
+                            id, attempt_id, organization_id, occurred_at,
+                            event_schema_id, event_schema_version, sequence, state,
+                            reason_code, usage_event_id
+                        ) VALUES (%s, %s, %s, now(), %s, %s, %s, %s, %s, %s)
+                        """,
+                        (
+                            str(uuid4()),
+                            attempt.attempt_id,
+                            "acme",
+                            "hormuz.request-attempt-event",
+                            1,
+                            2,
+                            "succeeded",
+                            None,
+                            beta_usage_event_id,
+                        ),
+                    )
+
+        with self.psycopg.connect(self.owner_dsn) as connection:
+            with connection.transaction():
+                with connection.cursor() as cursor:
+                    cursor.execute("SELECT set_config('hormuz.organization_id', %s, true)", ("acme",))
+                    cursor.execute(
+                        self.sql.SQL(
+                            "UPDATE {}.gateway_budget_reservations SET expires_at = %s WHERE id = %s"
+                        ).format(self.sql.Identifier(self.schema)),
+                        ("2000-01-01T00:00:00+00:00", attempt.reservation_id),
+                    )
+
+        self.assertEqual(self.store.sweep_stale_request_attempts(organization_id="acme"), 1)
+        self.assertEqual(self.store.active_budget_reservations(organization_id="acme"), 1)
+        with self.assertRaises(ReservationDenied):
+            self.store.reserve_budget(
+                identity=identity,
+                scopes=(scope,),
+                reserved_tokens=1,
+                reserved_cost_microusd=500,
+                ttl_seconds=60,
+            )
+        with self.assertRaises(RequestAttemptStateError):
+            self.store.finalize_request_attempt(
+                attempt=attempt,
+                organization_id="acme",
+                status="failed",
+            )
+
+        with postgres_transaction(
+            self.runtime_dsn,
+            schema=self.schema,
+            runtime_role=self.runtime_role,
+            organization_id="acme",
+        ) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT sequence, state, reason_code, usage_event_id "
+                    "FROM gateway_request_attempt_events WHERE attempt_id = %s ORDER BY sequence",
+                    (attempt.attempt_id,),
+                )
+                self.assertEqual(
+                    [dict(row) for row in cursor.fetchall()],
+                    [
+                        {"sequence": 1, "state": "pending", "reason_code": None, "usage_event_id": None},
+                        {
+                            "sequence": 2,
+                            "state": "outcome_unknown",
+                            "reason_code": "stale_pending",
+                            "usage_event_id": None,
+                        },
+                    ],
+                )
 
     def test_two_gateway_instances_share_atomic_organization_budget_reservations(self) -> None:
         """A durable reservation made through one gateway constrains the other.
