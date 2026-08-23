@@ -323,9 +323,11 @@ status. Full environment preparation, evidence semantics, and nonclaims are in
 
 ### Self-hosted Transit key-version rotation and artifact recovery
 
-The next bounded self-hosted custody checkpoint is tracked in
-[issue #69](https://github.com/Xpounder-com/hormuz/issues/69). It does not
-change the normal gateway runtime: the runtime's OpenBao token remains a
+The bounded self-hosted custody checkpoint in
+[issue #69](https://github.com/Xpounder-com/hormuz/issues/69) is completed in
+[PR #70](https://github.com/Xpounder-com/hormuz/pull/70). Its final
+content-free live evidence is published with the merged PR. It does not change
+the normal gateway runtime: the runtime's OpenBao token remains a
 data-plane credential and must have no rotation authority. A separately scoped,
 short-lived **lab administrator** token is the only credential permitted to
 rotate the same named Transit key versions.
@@ -362,8 +364,8 @@ plaintext fixture data. Full prerequisites and nonclaims are in
 
 This checkpoint is not OpenBao backend backup, seal/master-key recovery,
 customer RPO/RTO, high availability, production KMS/BYOK certification, or
-host-root/disk-administrator protection. A successful lab run can close only
-its narrowly stated recovery evidence issue; the broader #17 custody gate
+host-root/disk-administrator protection. Its successful lab run closed only
+the narrowly stated recovery evidence issue; the broader #17 custody gate
 remains open.
 
 ## Live AWS conformance evidence

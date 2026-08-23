@@ -65,14 +65,15 @@ protection. Native ARM64 runtime conformance is tracked separately in
 [#68](https://github.com/Xpounder-com/hormuz/issues/68) and does not block the
 reference unless it becomes a promised launch platform.
 
-The current #17 checkpoint, [#69](https://github.com/Xpounder-com/hormuz/issues/69),
-adds a separately credentialed OpenBao Transit key-version rotation and fresh
-artifact-recovery proof for that same self-hosted lab. It must prove that a
-normal data-plane token cannot rotate either named key, then recover a
-pre-rotation provider envelope and exact retained metadata-only audit artifact
-through fresh clients after a rotation-only administrator rotates the same named
-key versions. #69 is not complete until its live, content-free evidence is
-reviewed; it does not claim OpenBao backend recovery, customer RPO/RTO,
+The #17 checkpoint [#69](https://github.com/Xpounder-com/hormuz/issues/69) is
+completed in [PR #70](https://github.com/Xpounder-com/hormuz/pull/70): a
+separately credentialed OpenBao Transit key-version rotation and fresh
+artifact-recovery proof for that same self-hosted lab. The final live run proved
+that a normal data-plane token cannot rotate either named key, while the
+rotation-only administrator has no data-key authority; fresh clients recovered
+a pre-rotation provider envelope and exact retained metadata-only audit artifact
+after same-named key-version rotation. Its content-free evidence is published
+with the PR. It does not claim OpenBao backend recovery, customer RPO/RTO,
 production KMS/BYOK, HA/DR, or host-root protection. The parent #17 gate remains
 open after this checkpoint.
 
