@@ -43,4 +43,5 @@ hormuz = "hormuz.cli:main"
 include = ["hormuz*"]
 
 [tool.setuptools.package-data]
+"hormuz" = ["secret-inventory-v1.json"]
 "hormuz.migrations.postgresql" = ["*.sql"]

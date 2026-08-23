@@ -16,6 +16,13 @@ the profile's live conformance evidence run. This is an explicit operational
 control: it is not enabled by default, does not store prompts or responses,
 and does not automatically migrate existing environment variables.
 
+The versioned active-core ownership inventory distinguishes material managed
+by these custody adapters from credentials that must remain externally
+injected to bootstrap the database, key service, or immutable store. Run
+`python tools/verify_secret_inventory.py` and see
+[SECRET_CUSTODY_INVENTORY.md](SECRET_CUSTODY_INVENTORY.md) for the exact
+content-free classification and its nonclaims.
+
 ## Account-free self-hosted profile
 
 Install the optional S3 wire-protocol adapter into the Hormuz service
