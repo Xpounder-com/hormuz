@@ -134,6 +134,25 @@ When `policy_control.mode` is `postgresql`, a gateway or `hormuz doctor` also fa
 
 SQLite upgrades happen on normal store initialization. Its ledger records the same supported migration state and refuses a partial or newer-than-binary schema.
 
+### Schema v3 request-attempt upgrade
+
+For a supported v2-to-v3 upgrade, retain the existing usage, secret-evidence,
+and budget-reservation records unchanged. Version 3 adds a nullable
+`attempt_id` to reservations and creates the content-free request-attempt root
+and event tables. Existing reservations remain legacy expiry-based holds;
+only reservations linked to a new attempt use the durable
+`pending`/`outcome_unknown` retention rule.
+
+During an SQLite upgrade with an existing v2 ledger, version-3 objects are
+created only after that ledger has recorded v3 as applying. On PostgreSQL, use
+the explicit migration command above with the operator credential. If either
+runtime sees a partial v3 state,
+an applied ledger missing its required durable columns, or a noncontiguous
+migration ledger, the gateway fails closed before provider egress. Do not
+manually add the v3 tables,
+alter the migration ledger, or attempt a down-migration. Restore the tested
+v2 application/database pair if rollback is required.
+
 ## Upgrade, rollback, and recovery
 
 Use a stopped or drained gateway and a tested backup/snapshot as the starting point for every durable-store change:

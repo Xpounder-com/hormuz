@@ -161,13 +161,29 @@ class UsageStore:
     def _initialize(self) -> None:
         with self._connection() as connection:
             connection.execute("PRAGMA journal_mode = WAL")
-            connection.executescript(
+            connection.execute(
                 """
                 CREATE TABLE IF NOT EXISTS hormuz_schema_migrations (
                     version INTEGER PRIMARY KEY,
                     state TEXT NOT NULL,
                     applied_at TEXT
-                );
+                )
+                """
+            )
+            migrations = {
+                int(row["version"]): str(row["state"])
+                for row in connection.execute(
+                    "SELECT version, state FROM hormuz_schema_migrations ORDER BY version"
+                ).fetchall()
+            }
+            if not migrations:
+                # A database with an existing migration ledger must receive
+                # only the versioned changes it lacks. In particular, do not
+                # create v3 attempt tables before recording the v3 migration
+                # as applying: a supported v2-to-v3 upgrade must remain
+                # observable and fail closed as one ledgered transition.
+                connection.executescript(
+                    """
                 CREATE TABLE IF NOT EXISTS gateway_usage_events (
                     id TEXT PRIMARY KEY,
                     occurred_at TEXT NOT NULL,
@@ -294,17 +310,15 @@ class UsageStore:
                 CREATE INDEX IF NOT EXISTS idx_gateway_attempt_event_organization_attempt
                     ON gateway_request_attempt_events(organization_id, attempt_id, sequence);
                 """
-            )
-            migrations = {
-                int(row["version"]): str(row["state"])
-                for row in connection.execute(
-                    "SELECT version, state FROM hormuz_schema_migrations ORDER BY version"
-                ).fetchall()
-            }
+                )
             if any(state != "applied" for state in migrations.values()):
                 raise StorageSchemaError("storage_schema_partial_upgrade")
             if migrations and max(migrations) > self.maximum_supported_schema_version:
                 raise StorageSchemaError("storage_schema_newer_than_binary")
+            if migrations and set(migrations) != set(range(1, max(migrations) + 1)):
+                raise StorageSchemaError("storage_schema_partial_upgrade")
+            if migrations:
+                self._verify_applied_schema_shape(connection, version=max(migrations))
             for version in range(1, self.schema_version + 1):
                 if version in migrations:
                     continue
@@ -333,13 +347,133 @@ class UsageStore:
             rows = connection.execute(
                 "SELECT version, state FROM hormuz_schema_migrations ORDER BY version"
             ).fetchall()
-        states = {int(row["version"]): str(row["state"]) for row in rows}
-        if any(state != "applied" for state in states.values()):
-            raise StorageSchemaError("storage_schema_partial_upgrade")
-        if states and max(states) > self.maximum_supported_schema_version:
-            raise StorageSchemaError("storage_schema_newer_than_binary")
-        if any(states.get(version) != "applied" for version in range(1, self.schema_version + 1)):
-            raise StorageSchemaError("storage_schema_unavailable")
+            states = {int(row["version"]): str(row["state"]) for row in rows}
+            if any(state != "applied" for state in states.values()):
+                raise StorageSchemaError("storage_schema_partial_upgrade")
+            if states and max(states) > self.maximum_supported_schema_version:
+                raise StorageSchemaError("storage_schema_newer_than_binary")
+            if states and set(states) != set(range(1, max(states) + 1)):
+                raise StorageSchemaError("storage_schema_partial_upgrade")
+            if states:
+                self._verify_applied_schema_shape(connection, version=max(states))
+            if any(states.get(version) != "applied" for version in range(1, self.schema_version + 1)):
+                raise StorageSchemaError("storage_schema_unavailable")
+
+    @staticmethod
+    def _verify_applied_schema_shape(connection: sqlite3.Connection, *, version: int) -> None:
+        """Reject a ledger whose claimed schema objects are incomplete.
+
+        The migration ledger is authoritative only when its corresponding
+        durable objects exist. This prevents a damaged v2 database from being
+        advanced to v3 merely because its ledger rows were retained.
+        """
+
+        required = {
+            "gateway_usage_events": {
+                "id",
+                "occurred_at",
+                "evidence_schema_id",
+                "evidence_schema_version",
+                "organization_id",
+                "actor_id",
+                "actor_name",
+                "team_id",
+                "team_name",
+                "identity_type",
+                "authentication_source",
+                "client",
+                "protocol",
+                "requested_model",
+                "policy_version",
+                "policy_action",
+                "status",
+                "input_tokens",
+                "output_tokens",
+                "cache_read_tokens",
+                "cache_write_tokens",
+                "reasoning_tokens",
+                "cost_microusd",
+                "cost_basis",
+                "allocation_basis",
+                "coverage",
+                "redaction_count",
+                "redaction_rules",
+            },
+            "gateway_secret_events": {
+                "id",
+                "occurred_at",
+                "evidence_schema_id",
+                "evidence_schema_version",
+                "organization_id",
+                "actor_id",
+                "actor_name",
+                "team_id",
+                "team_name",
+                "identity_type",
+                "authentication_source",
+                "client",
+                "protocol",
+                "requested_model",
+                "policy_version",
+                "coverage",
+                "action",
+                "detection_count",
+                "rules",
+            },
+            "gateway_budget_reservations": {
+                "id",
+                "created_at",
+                "expires_at",
+                "organization_id",
+                "actor_id",
+                "team_id",
+                "reserved_tokens",
+                "reserved_cost_microusd",
+            },
+        }
+        if version >= 3:
+            required["gateway_budget_reservations"].add("attempt_id")
+            required["gateway_request_attempts"] = {
+                "attempt_id",
+                "created_at",
+                "evidence_schema_id",
+                "evidence_schema_version",
+                "organization_id",
+                "actor_id",
+                "actor_name",
+                "team_id",
+                "team_name",
+                "identity_type",
+                "authentication_source",
+                "client",
+                "protocol",
+                "requested_model",
+                "policy_version",
+                "policy_action",
+                "redaction_count",
+                "redaction_rules",
+                "reserved_tokens",
+                "reserved_cost_microusd",
+            }
+            required["gateway_request_attempt_events"] = {
+                "id",
+                "attempt_id",
+                "organization_id",
+                "occurred_at",
+                "event_schema_id",
+                "event_schema_version",
+                "sequence",
+                "state",
+                "reason_code",
+                "usage_event_id",
+            }
+        for table, columns in required.items():
+            observed = {
+                str(row["name"])
+                for row in connection.execute(f"PRAGMA table_info({table})").fetchall()
+            }
+            if not columns.issubset(observed):
+                raise StorageSchemaError("storage_schema_partial_upgrade")
 
     @classmethod
     def _apply_migration(cls, connection: sqlite3.Connection, version: int) -> None:
