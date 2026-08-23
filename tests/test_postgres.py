@@ -474,6 +474,24 @@ class PostgresUsageStoreTests(unittest.TestCase):
         self.assertTrue(status.complete)
         self.assertEqual(status.version, 3)
 
+    def test_policy_control_role_verifies_only_the_shared_migration_ledger(self) -> None:
+        with self.assertRaises(PostgresStorageError) as raised:
+            verify_postgres_schema(
+                self.policy_control_dsn,
+                schema=self.schema,
+                runtime_role=self.policy_control_role,
+            )
+        self.assertEqual(raised.exception.code, "storage_schema_partial_upgrade")
+
+        status = verify_postgres_schema(
+            self.policy_control_dsn,
+            schema=self.schema,
+            runtime_role=self.policy_control_role,
+            verify_runtime_schema=False,
+        )
+        self.assertTrue(status.complete)
+        self.assertEqual(status.version, 3)
+
     def test_schema_v2_upgrade_preserves_evidence_and_rejects_an_old_reader(self) -> None:
         schema = self._create_schema_v2_fixture()
         v2_store = PostgresUsageStore(

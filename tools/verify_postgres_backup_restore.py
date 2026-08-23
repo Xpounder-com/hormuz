@@ -640,6 +640,7 @@ def _capture_state(
         policy_control_dsn,
         schema=schema,
         runtime_role=policy_control_role,
+        verify_runtime_schema=False,
     )
     if (
         not runtime_status.complete
