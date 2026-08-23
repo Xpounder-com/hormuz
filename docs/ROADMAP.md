@@ -58,6 +58,8 @@ The ninth, [#48](https://github.com/Xpounder-com/hormuz/issues/48), is completed
 
 The tenth, [#50](https://github.com/Xpounder-com/hormuz/issues/50), is completed in [PR #51](https://github.com/Xpounder-com/hormuz/pull/51): a gateway whose own bounded PostgreSQL runtime pool is closed becomes unready and fails generation requests closed before provider egress, while an independent sibling continues serving and a newly constructed replacement receives a fresh pool and recovers. This deterministic process-level proof does not claim PostgreSQL database failover, HA, or zero-downtime replacement.
 
+The eleventh, [#52](https://github.com/Xpounder-com/hormuz/issues/52), is completed in [PR #53](https://github.com/Xpounder-com/hormuz/pull/53): terminating one live replica's idle PostgreSQL backend connection causes its bounded pool to replace that connection before the next readiness check and governed request, while an independent sibling remains usable. This bounded connection-churn proof does not claim a PostgreSQL database outage, automatic failover, HA, credential rotation, or zero-downtime deployment.
+
 ## Feature-freeze rule
 
 > A change is current-priority only if it removes deprecated context coupling, stabilizes the policy/evidence contract, fixes a security or correctness defect, or closes a production-readiness gate.
