@@ -9,6 +9,9 @@ import sys
 import threading
 import time
 import unittest
+import urllib.error
+import urllib.request
+from email.message import Message
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
@@ -112,6 +115,42 @@ class OIDCReferenceConformanceToolTests(unittest.TestCase):
         with mock.patch.object(oidc_reference, "_fetch_json", return_value=document):
             with self.assertRaisesRegex(oidc_reference.ConformanceError, "form_post_unsupported"):
                 oidc_reference._discover("https://identity.example")
+
+    def test_oidc_metadata_and_token_exchange_reject_redirects(self) -> None:
+        request = urllib.request.Request("https://identity.example/endpoint")
+        handler = oidc_reference._RejectRedirectHandler()
+        for status in (301, 302, 303, 307, 308):
+            with self.subTest(status=status):
+                method = getattr(handler, f"http_error_{status}")
+                with self.assertRaises(urllib.error.HTTPError) as raised:
+                    method(request, None, status, "redirect", Message())
+                self.assertEqual(raised.exception.code, status)
+
+        redirect_error = urllib.error.HTTPError(
+            "https://identity.example/endpoint",
+            307,
+            "redirect",
+            Message(),
+            None,
+        )
+        with mock.patch.object(oidc_reference._NO_REDIRECT_OPENER, "open", side_effect=redirect_error):
+            with self.assertRaisesRegex(oidc_reference.ConformanceError, "oidc_metadata_unavailable"):
+                oidc_reference._fetch_json("https://identity.example/metadata", "oidc_metadata_unavailable")
+            with self.assertRaisesRegex(oidc_reference.ConformanceError, "token_exchange_failed"):
+                oidc_reference._exchange_code(
+                    metadata=oidc_reference.ProviderMetadata(
+                        issuer="https://identity.example",
+                        authorization_endpoint="https://identity.example/authorize",
+                        token_endpoint="https://identity.example/token",
+                        jwks_uri="https://identity.example/jwks",
+                        id_token_algorithms=("RS256",),
+                        response_modes=("form_post",),
+                    ),
+                    client_id="public-client-id",
+                    redirect_uri="http://127.0.0.1:8765/callback",
+                    verifier="A" * 64,
+                    code="authorization-code",
+                )
 
     def test_form_post_callback_accepts_expected_state(self) -> None:
         callback = oidc_reference._CallbackServer(

@@ -43,6 +43,29 @@ _DEFAULT_REDIRECT_URI = "http://127.0.0.1:8765/callback"
 _DEFAULT_TIMEOUT_SECONDS = 180
 
 
+class _RejectRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Never follow a redirect for OIDC metadata or authorization-code traffic."""
+
+    def _reject(
+        self,
+        request: urllib.request.Request,
+        response: object,
+        code: int,
+        message: str,
+        headers: object,
+    ) -> object:
+        raise urllib.error.HTTPError(request.full_url, code, message, headers, response)
+
+    http_error_301 = _reject
+    http_error_302 = _reject
+    http_error_303 = _reject
+    http_error_307 = _reject
+    http_error_308 = _reject
+
+
+_NO_REDIRECT_OPENER = urllib.request.build_opener(_RejectRedirectHandler())
+
+
 class ConformanceError(ValueError):
     """A content-free external-provider conformance failure."""
 
@@ -375,7 +398,7 @@ def _fetch_json(url: str, failure_code: str) -> dict[str, Any]:
         method="GET",
     )
     try:
-        with urllib.request.urlopen(request, timeout=10) as response:
+        with _NO_REDIRECT_OPENER.open(request, timeout=10) as response:
             _https_url(response.geturl(), failure_code)
             body = response.read(_MAX_METADATA_BYTES + 1)
     except urllib.error.HTTPError as error:
@@ -472,7 +495,7 @@ def _exchange_code(
         method="POST",
     )
     try:
-        with urllib.request.urlopen(request, timeout=10) as response:
+        with _NO_REDIRECT_OPENER.open(request, timeout=10) as response:
             _https_url(response.geturl(), "token_exchange_failed")
             body = response.read(_MAX_METADATA_BYTES + 1)
     except urllib.error.HTTPError as error:
