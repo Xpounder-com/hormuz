@@ -293,7 +293,8 @@ python -m pip install '.[self-hosted]'
 export HORMUZ_RUN_CEPH_RGW_CUSTODY_CONFORMANCE=1
 export HORMUZ_CEPH_RGW_CUSTODY_CONFIRMATION=I_UNDERSTAND_DISPOSABLE_OBJECT_LOCK_RETENTION
 export HORMUZ_CEPH_RGW_ENDPOINT=http://127.0.0.1:7480
-export HORMUZ_CEPH_RGW_REGION=us-east-1
+# Match GetBucketLocation; stock single-zone Ceph reports "default".
+export HORMUZ_CEPH_RGW_REGION=default
 export HORMUZ_CEPH_RGW_BUCKET=hormuz-ceph-conformance
 export HORMUZ_CEPH_RGW_ACCESS_KEY=... # dedicated RGW credential, not an AWS credential
 export HORMUZ_CEPH_RGW_SECRET_KEY=...

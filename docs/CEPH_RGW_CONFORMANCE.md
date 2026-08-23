@@ -61,6 +61,21 @@ The credential must be able to delete an unprotected version and extend
 retention; otherwise the runner cannot distinguish an authorization denial from
 actual `COMPLIANCE` enforcement.
 
+For a Ceph account/IAM user, grant only the operations the gate needs on the
+test bucket: `s3:GetBucketLocation`, `s3:GetBucketVersioning`, and
+`s3:GetBucketObjectLockConfiguration` on the bucket; plus `s3:PutObject`,
+`s3:GetObject`, `s3:GetObjectVersion`, `s3:DeleteObject`,
+`s3:DeleteObjectVersion`, `s3:GetObjectRetention`,
+`s3:PutObjectRetention`, `s3:GetObjectLegalHold`, and
+`s3:PutObjectLegalHold` on its objects. Do not grant account-wide listing or
+bucket creation. Ceph evaluates versioned `HeadObject` through
+`s3:GetObjectVersion`, so that action is required even when ordinary
+`s3:GetObject` is present.
+
+The one-OSD lab may report undersized/degraded placement groups when its
+default replica count is two. That is an expected single-host limitation, not
+evidence of redundant or production-ready storage.
+
 Run a local OpenBao Transit service on the same host (or a loopback port) and
 create two separate keys: one for `provider_credential`, one for
 `data_encryption`. Use a short-lived token limited to those keys. The runner
@@ -79,7 +94,8 @@ python -m pip install '.[self-hosted]'
 export HORMUZ_RUN_CEPH_RGW_CUSTODY_CONFORMANCE=1
 export HORMUZ_CEPH_RGW_CUSTODY_CONFIRMATION=I_UNDERSTAND_DISPOSABLE_OBJECT_LOCK_RETENTION
 export HORMUZ_CEPH_RGW_ENDPOINT=http://127.0.0.1:7480
-export HORMUZ_CEPH_RGW_REGION=us-east-1
+# Match the S3 LocationConstraint reported by this RGW. Stock single-zone Ceph uses "default".
+export HORMUZ_CEPH_RGW_REGION=default
 export HORMUZ_CEPH_RGW_BUCKET=hormuz-ceph-conformance
 export HORMUZ_CEPH_RGW_ACCESS_KEY=...
 export HORMUZ_CEPH_RGW_SECRET_KEY=...
@@ -97,6 +113,10 @@ objects retained for `HORMUZ_CEPH_RGW_RETENTION_DAYS` (one day by default).
 Do not set the test bucket or endpoint to a production custody location. Never
 place any secret value in a shell command, source file, configuration file, or
 issue/PR comment.
+
+`HORMUZ_CEPH_RGW_REGION` is the exact S3 location returned by
+`GetBucketLocation`, not an inferred AWS geography. Use `us-east-1` only when
+that is what the target RGW returns.
 
 ## Certification procedure
 

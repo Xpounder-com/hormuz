@@ -21,7 +21,7 @@ classifiers = [
 ]
 dependencies = [
   "PyJWT[crypto]>=2.13,<3",
-  "cryptography>=42"
+  "cryptography>=42,<47"
 ]
 
 [project.optional-dependencies]
