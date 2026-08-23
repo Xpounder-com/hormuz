@@ -50,7 +50,7 @@ cleanup() {
   remove_disposable_container "$UNREACHABLE_CONTAINER"
   remove_disposable_container "$MISSING_WAL_CONTAINER"
   remove_disposable_network
-  if [[ -n "$WORK_DIR" ]]; then rm -rf "$WORK_DIR"; fi
+  remove_disposable_work_dir
   exit "$status"
 }
 trap cleanup EXIT
@@ -71,6 +71,13 @@ remove_disposable_network() {
   local label
   label="$(docker network inspect --format "{{ index .Labels \"$DISPOSABLE_LABEL\" }}" "$NETWORK" 2>/dev/null || true)"
   if [[ "$label" == "true" ]]; then docker network rm "$NETWORK" >/dev/null 2>&1 || true; fi
+}
+
+remove_disposable_work_dir() {
+  if [[ -z "$WORK_DIR" ]]; then return; fi
+  docker run --rm --user root --entrypoint bash --volume "$WORK_DIR:/pitr:rw" "$POSTGRES_IMAGE" \
+    -ceu 'shopt -s dotglob nullglob; rm -rf /pitr/*' >/dev/null 2>&1 || true
+  rm -rf "$WORK_DIR" >/dev/null 2>&1 || true
 }
 
 require_explicit_opt_in() {
@@ -228,12 +235,14 @@ base_backup_ms="$(duration_ms "$base_backup_started_seconds")"
 wal_archive_started_seconds=$SECONDS
 source_sql "CREATE TABLE hormuz_pitr_markers (marker TEXT PRIMARY KEY); INSERT INTO hormuz_pitr_markers (marker) VALUES ('$PRE_TARGET_MARKER');" >/dev/null
 source_sql "SELECT pg_create_restore_point('$PITR_TARGET');" >/dev/null
-target_wal_file="$(source_sql 'SELECT pg_walfile_name(pg_switch_wal())')"
+target_wal_file="$(source_sql 'SELECT pg_walfile_name(pg_current_wal_lsn())')"
 target_wal_file="$(printf '%s' "$target_wal_file" | tr -d '\r\n')"
+source_sql 'SELECT pg_switch_wal()' >/dev/null
 wait_for_archived_wal "$target_wal_file"
 source_sql "INSERT INTO hormuz_pitr_markers (marker) VALUES ('$POST_TARGET_MARKER');" >/dev/null
-post_target_wal_file="$(source_sql 'SELECT pg_walfile_name(pg_switch_wal())')"
+post_target_wal_file="$(source_sql 'SELECT pg_walfile_name(pg_current_wal_lsn())')"
 post_target_wal_file="$(printf '%s' "$post_target_wal_file" | tr -d '\r\n')"
+source_sql 'SELECT pg_switch_wal()' >/dev/null
 wait_for_archived_wal "$post_target_wal_file"
 wal_archive_ms="$(duration_ms "$wal_archive_started_seconds")"
 

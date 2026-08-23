@@ -124,8 +124,11 @@ class PostgresPITRRecoverySummaryTests(unittest.TestCase):
         self.assertIn("postgres@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777", source)
         self.assertIn("pg_basebackup", source)
         self.assertIn("pg_create_restore_point", source)
+        self.assertIn("pg_current_wal_lsn", source)
         self.assertIn("recovery_target_name", source)
         self.assertIn("remove_disposable_container", source)
+        self.assertIn("remove_disposable_work_dir", source)
+        self.assertIn("--entrypoint bash", source)
         self.assertIn('docker network create --label "$DISPOSABLE_LABEL=true"', source)
         self.assertIn('require_explicit_opt_in\nif [[ -z "$EVIDENCE_DIR" ]]', source)
 
