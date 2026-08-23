@@ -17,7 +17,13 @@ from .contracts import (
     AUDIT_EVENT_SCHEMA_VERSION,
     COST_BASIS_CONFIGURED_RATE_CARD_ESTIMATE,
     COVERAGE_GATEWAY_CAPTURED_REQUESTS_ONLY,
+    REQUEST_ATTEMPT_EVENT_SCHEMA_ID,
+    REQUEST_ATTEMPT_EVENT_SCHEMA_VERSION,
+    REQUEST_ATTEMPT_SCHEMA_ID,
+    REQUEST_ATTEMPT_SCHEMA_VERSION,
     validate_policy_action,
+    validate_request_attempt,
+    validate_request_attempt_event,
     validate_request_status,
 )
 from .evidence import security_audit_event, usage_audit_event
@@ -62,8 +68,20 @@ class ReservationScope:
     cost_limit_microusd: int | None = None
 
 
+@dataclass(frozen=True)
+class RequestAttempt:
+    """One immutable gateway-generated provider-egress attempt identifier."""
+
+    attempt_id: str
+    reservation_id: str
+
+
 class ReservationDenied(RuntimeError):
     pass
+
+
+class RequestAttemptStateError(RuntimeError):
+    """Raised when an immutable attempt cannot make the requested transition."""
 
 
 class StorageSchemaError(RuntimeError):
@@ -85,6 +103,14 @@ class UsageRepository(Protocol):
 
     def reserve_budget(self, **kwargs: object) -> str | None: ...
 
+    def begin_request_attempt(self, **kwargs: object) -> RequestAttempt: ...
+
+    def finalize_request_attempt(self, **kwargs: object) -> None: ...
+
+    def mark_request_attempt_outcome_unknown(self, **kwargs: object) -> bool: ...
+
+    def sweep_stale_request_attempts(self, **kwargs: object) -> int: ...
+
     def release_budget_reservation(self, reservation_id: str | None, **kwargs: object) -> None: ...
 
     def refresh_budget_reservation(self, reservation_id: str | None, **kwargs: object) -> None: ...
@@ -105,7 +131,7 @@ class UsageRepository(Protocol):
 class UsageStore:
     """SQLite implementation of the metadata-only usage repository."""
 
-    schema_version = 2
+    schema_version = 3
 
     def __init__(self, path: Path, *, maximum_supported_schema_version: int | None = None):
         self.path = path
@@ -217,7 +243,8 @@ class UsageStore:
                     actor_id TEXT NOT NULL,
                     team_id TEXT NOT NULL,
                     reserved_tokens INTEGER NOT NULL,
-                    reserved_cost_microusd INTEGER NOT NULL
+                    reserved_cost_microusd INTEGER NOT NULL,
+                    attempt_id TEXT
                 );
                 CREATE INDEX IF NOT EXISTS idx_gateway_reservation_expires_at
                     ON gateway_budget_reservations(expires_at);
@@ -225,6 +252,47 @@ class UsageStore:
                     ON gateway_budget_reservations(actor_id, expires_at);
                 CREATE INDEX IF NOT EXISTS idx_gateway_reservation_team
                     ON gateway_budget_reservations(team_id, expires_at);
+                CREATE TABLE IF NOT EXISTS gateway_request_attempts (
+                    attempt_id TEXT PRIMARY KEY,
+                    created_at TEXT NOT NULL,
+                    evidence_schema_id TEXT NOT NULL,
+                    evidence_schema_version INTEGER NOT NULL,
+                    organization_id TEXT NOT NULL,
+                    actor_id TEXT NOT NULL,
+                    actor_name TEXT NOT NULL,
+                    team_id TEXT NOT NULL,
+                    team_name TEXT NOT NULL,
+                    identity_type TEXT NOT NULL,
+                    authentication_source TEXT NOT NULL,
+                    client TEXT NOT NULL,
+                    protocol TEXT NOT NULL,
+                    requested_model TEXT NOT NULL,
+                    resolved_alias TEXT,
+                    upstream_model TEXT,
+                    policy_version TEXT NOT NULL,
+                    policy_action TEXT NOT NULL,
+                    redaction_count INTEGER NOT NULL,
+                    redaction_rules TEXT NOT NULL,
+                    reserved_tokens INTEGER NOT NULL,
+                    reserved_cost_microusd INTEGER NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_gateway_attempt_organization_created
+                    ON gateway_request_attempts(organization_id, created_at);
+                CREATE TABLE IF NOT EXISTS gateway_request_attempt_events (
+                    id TEXT PRIMARY KEY,
+                    attempt_id TEXT NOT NULL,
+                    organization_id TEXT NOT NULL,
+                    occurred_at TEXT NOT NULL,
+                    event_schema_id TEXT NOT NULL,
+                    event_schema_version INTEGER NOT NULL,
+                    sequence INTEGER NOT NULL,
+                    state TEXT NOT NULL,
+                    reason_code TEXT,
+                    usage_event_id TEXT,
+                    UNIQUE(attempt_id, sequence)
+                );
+                CREATE INDEX IF NOT EXISTS idx_gateway_attempt_event_organization_attempt
+                    ON gateway_request_attempt_events(organization_id, attempt_id, sequence);
                 """
             )
             migrations = {
@@ -315,6 +383,70 @@ class UsageStore:
                 {"organization_id": "TEXT NOT NULL DEFAULT 'organization'"},
             )
             return
+        if version == 3:
+            cls._add_missing_columns(
+                connection,
+                "gateway_budget_reservations",
+                {"attempt_id": "TEXT"},
+            )
+            for statement in (
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_gateway_reservation_attempt
+                    ON gateway_budget_reservations(attempt_id)
+                    WHERE attempt_id IS NOT NULL
+                """,
+                """
+                CREATE TABLE IF NOT EXISTS gateway_request_attempts (
+                    attempt_id TEXT PRIMARY KEY,
+                    created_at TEXT NOT NULL,
+                    evidence_schema_id TEXT NOT NULL,
+                    evidence_schema_version INTEGER NOT NULL,
+                    organization_id TEXT NOT NULL,
+                    actor_id TEXT NOT NULL,
+                    actor_name TEXT NOT NULL,
+                    team_id TEXT NOT NULL,
+                    team_name TEXT NOT NULL,
+                    identity_type TEXT NOT NULL,
+                    authentication_source TEXT NOT NULL,
+                    client TEXT NOT NULL,
+                    protocol TEXT NOT NULL,
+                    requested_model TEXT NOT NULL,
+                    resolved_alias TEXT,
+                    upstream_model TEXT,
+                    policy_version TEXT NOT NULL,
+                    policy_action TEXT NOT NULL,
+                    redaction_count INTEGER NOT NULL,
+                    redaction_rules TEXT NOT NULL,
+                    reserved_tokens INTEGER NOT NULL,
+                    reserved_cost_microusd INTEGER NOT NULL
+                )
+                """,
+                """
+                CREATE INDEX IF NOT EXISTS idx_gateway_attempt_organization_created
+                    ON gateway_request_attempts(organization_id, created_at)
+                """,
+                """
+                CREATE TABLE IF NOT EXISTS gateway_request_attempt_events (
+                    id TEXT PRIMARY KEY,
+                    attempt_id TEXT NOT NULL,
+                    organization_id TEXT NOT NULL,
+                    occurred_at TEXT NOT NULL,
+                    event_schema_id TEXT NOT NULL,
+                    event_schema_version INTEGER NOT NULL,
+                    sequence INTEGER NOT NULL,
+                    state TEXT NOT NULL,
+                    reason_code TEXT,
+                    usage_event_id TEXT,
+                    UNIQUE(attempt_id, sequence)
+                )
+                """,
+                """
+                CREATE INDEX IF NOT EXISTS idx_gateway_attempt_event_organization_attempt
+                    ON gateway_request_attempt_events(organization_id, attempt_id, sequence)
+                """,
+            ):
+                connection.execute(statement)
+            return
         raise StorageSchemaError("storage_schema_migration_unsupported")
 
     @staticmethod
@@ -327,6 +459,89 @@ class UsageStore:
         for name, declaration in columns.items():
             if name not in existing:
                 connection.execute(f"ALTER TABLE {table} ADD COLUMN {name} {declaration}")
+
+    def _record_in_connection(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        identity: Identity,
+        client: str,
+        protocol: str,
+        requested_model: str,
+        resolved_alias: str | None,
+        upstream_model: str | None,
+        provider_reported_model: str | None = None,
+        policy_version: str = "legacy-unversioned",
+        policy_action: str,
+        status: str,
+        input_tokens: int = 0,
+        output_tokens: int = 0,
+        cache_read_tokens: int = 0,
+        cache_write_tokens: int = 0,
+        reasoning_tokens: int = 0,
+        cost_microusd: int = 0,
+        cost_basis: str = COST_BASIS_CONFIGURED_RATE_CARD_ESTIMATE,
+        allocation_basis: str = ALLOCATION_BASIS_DIRECT_GATEWAY_REQUEST,
+        coverage: str = COVERAGE_GATEWAY_CAPTURED_REQUESTS_ONLY,
+        provider_request_id: str | None = None,
+        redaction_count: int = 0,
+        redaction_rules: tuple[str, ...] = (),
+    ) -> str:
+        """Insert one usage event inside an existing SQLite transaction."""
+
+        validate_policy_action(policy_action)
+        validate_request_status(status)
+        event_id = str(uuid.uuid4())
+        connection.execute(
+            """
+            INSERT INTO gateway_usage_events (
+                id, occurred_at, evidence_schema_id, evidence_schema_version,
+                organization_id, actor_id, actor_name, team_id, team_name,
+                identity_type, authentication_source, client, protocol, requested_model,
+                resolved_alias, upstream_model, provider_reported_model, policy_version,
+                policy_action, status,
+                input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
+                reasoning_tokens, cost_microusd, cost_basis, allocation_basis, coverage,
+                provider_request_id, redaction_count,
+                redaction_rules
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                event_id,
+                datetime.now(timezone.utc).isoformat(),
+                AUDIT_EVENT_SCHEMA_ID,
+                AUDIT_EVENT_SCHEMA_VERSION,
+                identity.organization_id,
+                identity.actor_id,
+                identity.actor_name,
+                identity.team_id,
+                identity.team_name,
+                identity.identity_type,
+                identity.authentication_source,
+                client,
+                protocol,
+                requested_model,
+                resolved_alias,
+                upstream_model,
+                provider_reported_model,
+                policy_version,
+                policy_action,
+                status,
+                max(0, input_tokens),
+                max(0, output_tokens),
+                max(0, cache_read_tokens),
+                max(0, cache_write_tokens),
+                max(0, reasoning_tokens),
+                max(0, cost_microusd),
+                cost_basis,
+                allocation_basis,
+                coverage,
+                provider_request_id,
+                max(0, redaction_count),
+                json.dumps(sorted(set(redaction_rules)), separators=(",", ":")),
+            ),
+        )
+        return event_id
 
     def record(
         self,
@@ -354,60 +569,32 @@ class UsageStore:
         redaction_count: int = 0,
         redaction_rules: tuple[str, ...] = (),
     ) -> str:
-        validate_policy_action(policy_action)
-        validate_request_status(status)
-        event_id = str(uuid.uuid4())
         with self._lock, self._connection() as connection:
-            connection.execute(
-                """
-                INSERT INTO gateway_usage_events (
-                    id, occurred_at, evidence_schema_id, evidence_schema_version,
-                    organization_id, actor_id, actor_name, team_id, team_name,
-                    identity_type, authentication_source, client, protocol, requested_model,
-                    resolved_alias, upstream_model, provider_reported_model, policy_version,
-                    policy_action, status,
-                    input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
-                    reasoning_tokens, cost_microusd, cost_basis, allocation_basis, coverage,
-                    provider_request_id, redaction_count,
-                    redaction_rules
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    event_id,
-                    datetime.now(timezone.utc).isoformat(),
-                    AUDIT_EVENT_SCHEMA_ID,
-                    AUDIT_EVENT_SCHEMA_VERSION,
-                    identity.organization_id,
-                    identity.actor_id,
-                    identity.actor_name,
-                    identity.team_id,
-                    identity.team_name,
-                    identity.identity_type,
-                    identity.authentication_source,
-                    client,
-                    protocol,
-                    requested_model,
-                    resolved_alias,
-                    upstream_model,
-                    provider_reported_model,
-                    policy_version,
-                    policy_action,
-                    status,
-                    max(0, input_tokens),
-                    max(0, output_tokens),
-                    max(0, cache_read_tokens),
-                    max(0, cache_write_tokens),
-                    max(0, reasoning_tokens),
-                    max(0, cost_microusd),
-                    cost_basis,
-                    allocation_basis,
-                    coverage,
-                    provider_request_id,
-                    max(0, redaction_count),
-                    json.dumps(sorted(set(redaction_rules)), separators=(",", ":")),
-                ),
+            return self._record_in_connection(
+                connection,
+                identity=identity,
+                client=client,
+                protocol=protocol,
+                requested_model=requested_model,
+                resolved_alias=resolved_alias,
+                upstream_model=upstream_model,
+                provider_reported_model=provider_reported_model,
+                policy_version=policy_version,
+                policy_action=policy_action,
+                status=status,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                cache_read_tokens=cache_read_tokens,
+                cache_write_tokens=cache_write_tokens,
+                reasoning_tokens=reasoning_tokens,
+                cost_microusd=cost_microusd,
+                cost_basis=cost_basis,
+                allocation_basis=allocation_basis,
+                coverage=coverage,
+                provider_request_id=provider_request_id,
+                redaction_count=redaction_count,
+                redaction_rules=redaction_rules,
             )
-        return event_id
 
     def record_secret_event(
         self,
@@ -476,82 +663,500 @@ class UsageStore:
         if not constrained:
             return None
         now = datetime.now(timezone.utc)
-        now_value = now.isoformat()
-        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat()
-        organization_id = identity.organization_id
         reservation_id = str(uuid.uuid4())
         with self._lock, self._connection() as connection:
             connection.execute("BEGIN IMMEDIATE")
-            connection.execute(
-                "DELETE FROM gateway_budget_reservations WHERE expires_at <= ?",
-                (now_value,),
-            )
-            for scope in constrained:
-                usage_clauses = ["organization_id = ?", "occurred_at >= ?"]
-                reservation_clauses = ["organization_id = ?", "expires_at > ?"]
-                usage_parameters: list[object] = [organization_id, month_start]
-                reservation_parameters: list[object] = [organization_id, now_value]
-                if scope.actor_id is not None:
-                    usage_clauses.append("actor_id = ?")
-                    reservation_clauses.append("actor_id = ?")
-                    usage_parameters.append(scope.actor_id)
-                    reservation_parameters.append(scope.actor_id)
-                if scope.team_id is not None:
-                    usage_clauses.append("team_id = ?")
-                    reservation_clauses.append("team_id = ?")
-                    usage_parameters.append(scope.team_id)
-                    reservation_parameters.append(scope.team_id)
-                usage = connection.execute(
-                    f"""
-                    SELECT
-                        COALESCE(SUM(input_tokens + output_tokens), 0) AS tokens,
-                        COALESCE(SUM(cost_microusd), 0) AS cost_microusd
-                    FROM gateway_usage_events
-                    WHERE {' AND '.join(usage_clauses)}
-                    """,
-                    usage_parameters,
-                ).fetchone()
-                reserved = connection.execute(
-                    f"""
-                    SELECT
-                        COALESCE(SUM(reserved_tokens), 0) AS tokens,
-                        COALESCE(SUM(reserved_cost_microusd), 0) AS cost_microusd
-                    FROM gateway_budget_reservations
-                    WHERE {' AND '.join(reservation_clauses)}
-                    """,
-                    reservation_parameters,
-                ).fetchone()
-                projected_tokens = usage["tokens"] + reserved["tokens"] + max(0, reserved_tokens)
-                projected_cost = usage["cost_microusd"] + reserved["cost_microusd"] + max(
-                    0, reserved_cost_microusd
-                )
-                if scope.token_limit is not None and projected_tokens > scope.token_limit:
-                    raise ReservationDenied(
-                        f"The {scope.name} monthly token limit would be exceeded by this request."
-                    )
-                if scope.cost_limit_microusd is not None and projected_cost > scope.cost_limit_microusd:
-                    raise ReservationDenied(
-                        f"The {scope.name} monthly AI budget would be exceeded by this request."
-                    )
-            connection.execute(
-                """
-                INSERT INTO gateway_budget_reservations (
-                    id, created_at, expires_at, organization_id, actor_id, team_id,
-                    reserved_tokens, reserved_cost_microusd
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    reservation_id,
-                    now_value,
-                    (now + timedelta(seconds=max(1, ttl_seconds))).isoformat(),
-                    organization_id,
-                    identity.actor_id,
-                    identity.team_id,
-                    max(0, reserved_tokens),
-                    max(0, reserved_cost_microusd),
-                ),
+            self._sweep_stale_request_attempts_in_connection(connection, now=now, organization_id=identity.organization_id)
+            self._reserve_budget_in_connection(
+                connection,
+                identity=identity,
+                scopes=constrained,
+                reserved_tokens=reserved_tokens,
+                reserved_cost_microusd=reserved_cost_microusd,
+                ttl_seconds=ttl_seconds,
+                reservation_id=reservation_id,
+                attempt_id=None,
+                now=now,
             )
         return reservation_id
+
+    def begin_request_attempt(
+        self,
+        *,
+        identity: Identity,
+        client: str,
+        protocol: str,
+        requested_model: str,
+        resolved_alias: str | None,
+        upstream_model: str | None,
+        policy_version: str,
+        policy_action: str,
+        redaction_count: int,
+        redaction_rules: tuple[str, ...],
+        scopes: tuple[ReservationScope, ...],
+        reserved_tokens: int,
+        reserved_cost_microusd: int,
+        ttl_seconds: int,
+    ) -> RequestAttempt:
+        """Durably record a pending attempt and its budget hold before egress.
+
+        The root, its initial immutable event, and the reservation commit in
+        one SQLite transaction. A failed reservation check rolls all three
+        writes back, so no provider call can observe a partial attempt.
+        """
+
+        now = datetime.now(timezone.utc)
+        now_value = now.isoformat()
+        attempt_id = str(uuid.uuid4())
+        root = {
+            "evidence_schema_id": REQUEST_ATTEMPT_SCHEMA_ID,
+            "evidence_schema_version": REQUEST_ATTEMPT_SCHEMA_VERSION,
+            "attempt_id": attempt_id,
+            "created_at": now_value,
+            "organization_id": identity.organization_id,
+            "actor_id": identity.actor_id,
+            "actor_name": identity.actor_name,
+            "team_id": identity.team_id,
+            "team_name": identity.team_name,
+            "identity_type": identity.identity_type,
+            "authentication_source": identity.authentication_source,
+            "client": client,
+            "protocol": protocol,
+            "requested_model": requested_model,
+            "resolved_alias": resolved_alias,
+            "upstream_model": upstream_model,
+            "policy_version": policy_version,
+            "policy_action": policy_action,
+            "redaction_count": max(0, redaction_count),
+            "redaction_rules": sorted(set(redaction_rules)),
+            "reserved_tokens": max(0, reserved_tokens),
+            "reserved_cost_microusd": max(0, reserved_cost_microusd),
+        }
+        validate_request_attempt(root)
+        with self._lock, self._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            self._sweep_stale_request_attempts_in_connection(connection, now=now, organization_id=identity.organization_id)
+            connection.execute(
+                """
+                INSERT INTO gateway_request_attempts (
+                    attempt_id, created_at, evidence_schema_id, evidence_schema_version,
+                    organization_id, actor_id, actor_name, team_id, team_name,
+                    identity_type, authentication_source, client, protocol, requested_model,
+                    resolved_alias, upstream_model, policy_version, policy_action,
+                    redaction_count, redaction_rules, reserved_tokens, reserved_cost_microusd
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    root["attempt_id"],
+                    root["created_at"],
+                    root["evidence_schema_id"],
+                    root["evidence_schema_version"],
+                    root["organization_id"],
+                    root["actor_id"],
+                    root["actor_name"],
+                    root["team_id"],
+                    root["team_name"],
+                    root["identity_type"],
+                    root["authentication_source"],
+                    root["client"],
+                    root["protocol"],
+                    root["requested_model"],
+                    root["resolved_alias"],
+                    root["upstream_model"],
+                    root["policy_version"],
+                    root["policy_action"],
+                    root["redaction_count"],
+                    json.dumps(root["redaction_rules"], separators=(",", ":")),
+                    root["reserved_tokens"],
+                    root["reserved_cost_microusd"],
+                ),
+            )
+            self._append_request_attempt_event_in_connection(
+                connection,
+                attempt_id=attempt_id,
+                organization_id=identity.organization_id,
+                occurred_at=now_value,
+                sequence=1,
+                state="pending",
+                reason_code=None,
+                usage_event_id=None,
+            )
+            self._reserve_budget_in_connection(
+                connection,
+                identity=identity,
+                scopes=scopes,
+                reserved_tokens=root["reserved_tokens"],
+                reserved_cost_microusd=root["reserved_cost_microusd"],
+                ttl_seconds=ttl_seconds,
+                reservation_id=attempt_id,
+                attempt_id=attempt_id,
+                now=now,
+            )
+        return RequestAttempt(attempt_id=attempt_id, reservation_id=attempt_id)
+
+    def finalize_request_attempt(
+        self,
+        *,
+        attempt: RequestAttempt,
+        organization_id: str,
+        status: str,
+        provider_reported_model: str | None = None,
+        input_tokens: int = 0,
+        output_tokens: int = 0,
+        cache_read_tokens: int = 0,
+        cache_write_tokens: int = 0,
+        reasoning_tokens: int = 0,
+        cost_microusd: int = 0,
+        provider_request_id: str | None = None,
+    ) -> None:
+        """Finalize a pending attempt once and atomically materialize usage."""
+
+        if status not in {"succeeded", "failed", "rate_limited"}:
+            raise RequestAttemptStateError("request_attempt_terminal_state_unsupported")
+        with self._lock, self._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            root = self._request_attempt_root_in_connection(connection, attempt.attempt_id, organization_id)
+            sequence, state = self._latest_request_attempt_state_in_connection(connection, attempt.attempt_id)
+            if state != "pending":
+                raise RequestAttemptStateError("request_attempt_not_pending")
+            identity = self._identity_from_request_attempt(root)
+            usage_event_id = self._record_in_connection(
+                connection,
+                identity=identity,
+                client=str(root["client"]),
+                protocol=str(root["protocol"]),
+                requested_model=str(root["requested_model"]),
+                resolved_alias=_row_optional_string(root, "resolved_alias"),
+                upstream_model=_row_optional_string(root, "upstream_model"),
+                provider_reported_model=provider_reported_model,
+                policy_version=str(root["policy_version"]),
+                policy_action=str(root["policy_action"]),
+                status=status,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                cache_read_tokens=cache_read_tokens,
+                cache_write_tokens=cache_write_tokens,
+                reasoning_tokens=reasoning_tokens,
+                cost_microusd=cost_microusd,
+                provider_request_id=provider_request_id,
+                redaction_count=int(root["redaction_count"]),
+                redaction_rules=tuple(_json_string_list(root["redaction_rules"])),
+            )
+            self._append_request_attempt_event_in_connection(
+                connection,
+                attempt_id=attempt.attempt_id,
+                organization_id=organization_id,
+                occurred_at=datetime.now(timezone.utc).isoformat(),
+                sequence=sequence + 1,
+                state=status,
+                reason_code=None,
+                usage_event_id=usage_event_id,
+            )
+            deleted = connection.execute(
+                """
+                DELETE FROM gateway_budget_reservations
+                WHERE id = ? AND attempt_id = ? AND organization_id = ?
+                """,
+                (attempt.reservation_id, attempt.attempt_id, organization_id),
+            )
+            if deleted.rowcount != 1:
+                raise StorageSchemaError("request_attempt_reservation_missing")
+
+    def mark_request_attempt_outcome_unknown(
+        self,
+        *,
+        attempt: RequestAttempt,
+        organization_id: str,
+        reason_code: str,
+    ) -> bool:
+        """Append a conservative unknown-outcome event without releasing cost."""
+
+        with self._lock, self._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            self._request_attempt_root_in_connection(connection, attempt.attempt_id, organization_id)
+            sequence, state = self._latest_request_attempt_state_in_connection(connection, attempt.attempt_id)
+            if state == "outcome_unknown":
+                return False
+            if state != "pending":
+                raise RequestAttemptStateError("request_attempt_not_pending")
+            self._append_request_attempt_event_in_connection(
+                connection,
+                attempt_id=attempt.attempt_id,
+                organization_id=organization_id,
+                occurred_at=datetime.now(timezone.utc).isoformat(),
+                sequence=sequence + 1,
+                state="outcome_unknown",
+                reason_code=reason_code,
+                usage_event_id=None,
+            )
+        return True
+
+    def sweep_stale_request_attempts(self, *, organization_id: str | None = None) -> int:
+        """Mark expired pending attempts unknown while retaining their holds."""
+
+        with self._lock, self._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            return self._sweep_stale_request_attempts_in_connection(
+                connection,
+                now=datetime.now(timezone.utc),
+                organization_id=organization_id,
+            )
+
+    def _reserve_budget_in_connection(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        identity: Identity,
+        scopes: tuple[ReservationScope, ...],
+        reserved_tokens: int,
+        reserved_cost_microusd: int,
+        ttl_seconds: int,
+        reservation_id: str,
+        attempt_id: str | None,
+        now: datetime,
+    ) -> None:
+        """Check budget scopes and insert one hold in the current transaction."""
+
+        constrained = tuple(
+            scope
+            for scope in scopes
+            if scope.token_limit is not None or scope.cost_limit_microusd is not None
+        )
+        now_value = now.isoformat()
+        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat()
+        organization_id = identity.organization_id
+        connection.execute(
+            "DELETE FROM gateway_budget_reservations WHERE attempt_id IS NULL AND expires_at <= ?",
+            (now_value,),
+        )
+        for scope in constrained:
+            usage_clauses = ["organization_id = ?", "occurred_at >= ?"]
+            reservation_clauses = ["r.organization_id = ?", self._active_reservation_clause("r")]
+            usage_parameters: list[object] = [organization_id, month_start]
+            reservation_parameters: list[object] = [organization_id, now_value]
+            if scope.actor_id is not None:
+                usage_clauses.append("actor_id = ?")
+                reservation_clauses.append("r.actor_id = ?")
+                usage_parameters.append(scope.actor_id)
+                reservation_parameters.append(scope.actor_id)
+            if scope.team_id is not None:
+                usage_clauses.append("team_id = ?")
+                reservation_clauses.append("r.team_id = ?")
+                usage_parameters.append(scope.team_id)
+                reservation_parameters.append(scope.team_id)
+            usage = connection.execute(
+                f"""
+                SELECT
+                    COALESCE(SUM(input_tokens + output_tokens), 0) AS tokens,
+                    COALESCE(SUM(cost_microusd), 0) AS cost_microusd
+                FROM gateway_usage_events
+                WHERE {' AND '.join(usage_clauses)}
+                """,
+                usage_parameters,
+            ).fetchone()
+            reserved = connection.execute(
+                f"""
+                SELECT
+                    COALESCE(SUM(r.reserved_tokens), 0) AS tokens,
+                    COALESCE(SUM(r.reserved_cost_microusd), 0) AS cost_microusd
+                FROM gateway_budget_reservations AS r
+                WHERE {' AND '.join(reservation_clauses)}
+                """,
+                reservation_parameters,
+            ).fetchone()
+            projected_tokens = int(usage["tokens"]) + int(reserved["tokens"]) + max(0, reserved_tokens)
+            projected_cost = int(usage["cost_microusd"]) + int(reserved["cost_microusd"]) + max(
+                0, reserved_cost_microusd
+            )
+            if scope.token_limit is not None and projected_tokens > scope.token_limit:
+                raise ReservationDenied(f"The {scope.name} monthly token limit would be exceeded by this request.")
+            if scope.cost_limit_microusd is not None and projected_cost > scope.cost_limit_microusd:
+                raise ReservationDenied(f"The {scope.name} monthly AI budget would be exceeded by this request.")
+        connection.execute(
+            """
+            INSERT INTO gateway_budget_reservations (
+                id, created_at, expires_at, organization_id, actor_id, team_id,
+                reserved_tokens, reserved_cost_microusd, attempt_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                reservation_id,
+                now_value,
+                (now + timedelta(seconds=max(1, ttl_seconds))).isoformat(),
+                organization_id,
+                identity.actor_id,
+                identity.team_id,
+                max(0, reserved_tokens),
+                max(0, reserved_cost_microusd),
+                attempt_id,
+            ),
+        )
+
+    @staticmethod
+    def _active_reservation_clause(alias: str) -> str:
+        return f"""
+        (
+            ({alias}.attempt_id IS NULL AND {alias}.expires_at > ?)
+            OR (
+                {alias}.attempt_id IS NOT NULL
+                AND (
+                    SELECT event.state
+                    FROM gateway_request_attempt_events AS event
+                    WHERE event.attempt_id = {alias}.attempt_id
+                    ORDER BY event.sequence DESC
+                    LIMIT 1
+                ) IN ('pending', 'outcome_unknown')
+            )
+        )
+        """
+
+    def _sweep_stale_request_attempts_in_connection(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        now: datetime,
+        organization_id: str | None,
+    ) -> int:
+        clauses = ["r.attempt_id IS NOT NULL", "r.expires_at <= ?", self._active_pending_clause("r")]
+        parameters: list[object] = [now.isoformat()]
+        if organization_id is not None:
+            clauses.append("r.organization_id = ?")
+            parameters.append(organization_id)
+        rows = connection.execute(
+            f"""
+            SELECT r.attempt_id, r.organization_id
+            FROM gateway_budget_reservations AS r
+            WHERE {' AND '.join(clauses)}
+            ORDER BY r.attempt_id
+            """,
+            parameters,
+        ).fetchall()
+        for row in rows:
+            sequence, state = self._latest_request_attempt_state_in_connection(connection, str(row["attempt_id"]))
+            if state != "pending":
+                continue
+            self._append_request_attempt_event_in_connection(
+                connection,
+                attempt_id=str(row["attempt_id"]),
+                organization_id=str(row["organization_id"]),
+                occurred_at=now.isoformat(),
+                sequence=sequence + 1,
+                state="outcome_unknown",
+                reason_code="stale_pending",
+                usage_event_id=None,
+            )
+        return len(rows)
+
+    @staticmethod
+    def _active_pending_clause(alias: str) -> str:
+        return f"""
+        (
+            SELECT event.state
+            FROM gateway_request_attempt_events AS event
+            WHERE event.attempt_id = {alias}.attempt_id
+            ORDER BY event.sequence DESC
+            LIMIT 1
+        ) = 'pending'
+        """
+
+    def _request_attempt_root_in_connection(
+        self,
+        connection: sqlite3.Connection,
+        attempt_id: str,
+        organization_id: str,
+    ) -> sqlite3.Row:
+        root = connection.execute(
+            """
+            SELECT *
+            FROM gateway_request_attempts
+            WHERE attempt_id = ? AND organization_id = ?
+            """,
+            (attempt_id, organization_id),
+        ).fetchone()
+        if root is None:
+            raise RequestAttemptStateError("request_attempt_not_found")
+        return root
+
+    @staticmethod
+    def _latest_request_attempt_state_in_connection(
+        connection: sqlite3.Connection,
+        attempt_id: str,
+    ) -> tuple[int, str]:
+        event = connection.execute(
+            """
+            SELECT sequence, state
+            FROM gateway_request_attempt_events
+            WHERE attempt_id = ?
+            ORDER BY sequence DESC
+            LIMIT 1
+            """,
+            (attempt_id,),
+        ).fetchone()
+        if event is None:
+            raise StorageSchemaError("request_attempt_event_missing")
+        return int(event["sequence"]), str(event["state"])
+
+    @staticmethod
+    def _append_request_attempt_event_in_connection(
+        connection: sqlite3.Connection,
+        *,
+        attempt_id: str,
+        organization_id: str,
+        occurred_at: str,
+        sequence: int,
+        state: str,
+        reason_code: str | None,
+        usage_event_id: str | None,
+    ) -> str:
+        event = {
+            "event_schema_id": REQUEST_ATTEMPT_EVENT_SCHEMA_ID,
+            "event_schema_version": REQUEST_ATTEMPT_EVENT_SCHEMA_VERSION,
+            "id": str(uuid.uuid4()),
+            "attempt_id": attempt_id,
+            "organization_id": organization_id,
+            "occurred_at": occurred_at,
+            "sequence": sequence,
+            "state": state,
+            "reason_code": reason_code,
+            "usage_event_id": usage_event_id,
+        }
+        validate_request_attempt_event(event)
+        connection.execute(
+            """
+            INSERT INTO gateway_request_attempt_events (
+                id, attempt_id, organization_id, occurred_at,
+                event_schema_id, event_schema_version, sequence, state,
+                reason_code, usage_event_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                event["id"],
+                event["attempt_id"],
+                event["organization_id"],
+                event["occurred_at"],
+                event["event_schema_id"],
+                event["event_schema_version"],
+                event["sequence"],
+                event["state"],
+                event["reason_code"],
+                event["usage_event_id"],
+            ),
+        )
+        return str(event["id"])
+
+    @staticmethod
+    def _identity_from_request_attempt(root: sqlite3.Row) -> Identity:
+        return Identity(
+            token_env="REQUEST_ATTEMPT_LEDGER",
+            token="",
+            actor_id=str(root["actor_id"]),
+            actor_name=str(root["actor_name"]),
+            team_id=str(root["team_id"]),
+            team_name=str(root["team_name"]),
+            organization_id=str(root["organization_id"]),
+            identity_type=str(root["identity_type"]),
+            authentication_source=str(root["authentication_source"]),
+        )
 
     def release_budget_reservation(
         self,
@@ -562,7 +1167,7 @@ class UsageStore:
         if reservation_id is None:
             return
         with self._lock, self._connection() as connection:
-            clauses = ["id = ?"]
+            clauses = ["id = ?", "attempt_id IS NULL"]
             parameters: list[object] = [reservation_id]
             if organization_id is not None:
                 clauses.append("organization_id = ?")
@@ -596,13 +1201,13 @@ class UsageStore:
     def active_budget_reservations(self, *, organization_id: str | None = None) -> int:
         now = datetime.now(timezone.utc).isoformat()
         with self._lock, self._connection() as connection:
-            clauses = ["expires_at > ?"]
+            clauses = [self._active_reservation_clause("r")]
             parameters: list[object] = [now]
             if organization_id is not None:
-                clauses.append("organization_id = ?")
+                clauses.append("r.organization_id = ?")
                 parameters.append(organization_id)
             row = connection.execute(
-                f"SELECT COUNT(*) AS count FROM gateway_budget_reservations WHERE {' AND '.join(clauses)}",
+                f"SELECT COUNT(*) AS count FROM gateway_budget_reservations AS r WHERE {' AND '.join(clauses)}",
                 parameters,
             ).fetchone()
         return int(row["count"])
@@ -845,3 +1450,24 @@ class UsageStore:
                     events.append(security_audit_event(dict(row)))
         events.sort(key=lambda event: (str(event["occurred_at"]), str(event["id"])))
         return events
+
+
+def _row_optional_string(row: sqlite3.Row, name: str) -> str | None:
+    value = row[name]
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise StorageSchemaError("request_attempt_evidence_malformed")
+    return value
+
+
+def _json_string_list(value: object) -> list[str]:
+    if not isinstance(value, str):
+        raise StorageSchemaError("request_attempt_evidence_malformed")
+    try:
+        decoded = json.loads(value)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        raise StorageSchemaError("request_attempt_evidence_malformed") from None
+    if not isinstance(decoded, list) or any(not isinstance(item, str) for item in decoded):
+        raise StorageSchemaError("request_attempt_evidence_malformed")
+    return decoded

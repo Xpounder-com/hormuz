@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hmac
+import http.client
 import ipaddress
 import json
 import logging
@@ -34,7 +35,7 @@ from .policy import PolicyDecision, PolicyEngine
 from .policy_runtime import PolicyRuntime
 from .postgres import PostgresStorageError
 from .redaction import RedactionError, SecretRedactor
-from .store import ReservationDenied, StorageSchemaError, UsageRepository
+from .store import RequestAttempt, ReservationDenied, StorageSchemaError, UsageRepository
 from .store_router import create_postgres_runtime_pool, create_usage_store
 from .usage import ResponseUsageParser
 
@@ -62,6 +63,9 @@ class GatewayServer(ThreadingHTTPServer):
             policy_runtime = PolicyRuntime(config, connection_pool=self.postgres_pool)
             self.policy_engine = PolicyEngine(config, self.store, policy_runtime=policy_runtime)
             self.policy_engine.policy_runtime.verify_active_policies()
+            recovered_attempts = self.store.sweep_stale_request_attempts()
+            if recovered_attempts:
+                LOGGER.warning("request_attempts_marked_outcome_unknown count=%d", recovered_attempts)
             self.upstream_credentials = resolve_upstream_credentials(config)
             protected_values = [
                 ("hormuz_identity_token", identity.token)
@@ -360,7 +364,6 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             self._send_protocol_error(protocol, decision.reason, HTTPStatus.FORBIDDEN, code="hormuz_policy_denied")
             return
 
-        upstream = self.server.config.upstreams[protocol]
         is_responses_create = protocol == "openai" and urlsplit(self.path).path == "/v1/responses"
         if (
             is_responses_create
@@ -457,7 +460,16 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         if redaction.count:
             policy_action = f"{policy_action}+redacted"
         body = json.dumps(redaction.value, separators=(",", ":")).encode("utf-8")
-        reservation_id: str | None = None
+        upstream_key = self.server.upstream_credentials.get(protocol, "")
+        if not upstream_key:
+            self._send_protocol_error(
+                protocol,
+                "Gateway upstream credential is unavailable",
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                code="gateway_upstream_not_configured",
+            )
+            return
+        attempt: RequestAttempt | None = None
         if account_usage:
             reserved_output_tokens = redaction.value.get(output_field, 0)
             if not isinstance(reserved_output_tokens, int) or isinstance(reserved_output_tokens, bool):
@@ -470,9 +482,14 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 cache_write_tokens=0,
             )
             try:
-                reservation_id = self.server.policy_engine.reserve_budget(
+                attempt = self.server.policy_engine.begin_request_attempt(
                     identity=identity,
                     decision=decision,
+                    client=client,
+                    protocol=protocol,
+                    policy_action=policy_action,
+                    redaction_count=redaction.count,
+                    redaction_rules=redaction.rules,
                     reserved_tokens=reserved_input_tokens + max(0, reserved_output_tokens),
                     reserved_cost_microusd=reserved_cost_microusd,
                     ttl_seconds=self.server.config.upstream_timeout_seconds + 60,
@@ -507,25 +524,20 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                     code="hormuz_budget_denied",
                 )
                 return
-        try:
-            self._forward(
-                identity=identity,
-                protocol=protocol,
-                client=client,
-                decision=decision,
-                body=body,
-                account_usage=account_usage,
-                policy_action=policy_action,
-                redaction_count=redaction.count,
-                redaction_rules=redaction.rules,
-                reservation_id=reservation_id,
-                reservation_ttl_seconds=self.server.config.upstream_timeout_seconds + 60,
-            )
-        finally:
-            self.server.store.release_budget_reservation(
-                reservation_id,
-                organization_id=identity.organization_id,
-            )
+        self._forward(
+            identity=identity,
+            protocol=protocol,
+            client=client,
+            decision=decision,
+            body=body,
+            account_usage=account_usage,
+            policy_action=policy_action,
+            redaction_count=redaction.count,
+            redaction_rules=redaction.rules,
+            attempt=attempt,
+            upstream_key=upstream_key,
+            reservation_ttl_seconds=self.server.config.upstream_timeout_seconds + 60,
+        )
 
     def _forward(
         self,
@@ -539,21 +551,13 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         policy_action: str,
         redaction_count: int,
         redaction_rules: tuple[str, ...],
-        reservation_id: str | None,
+        attempt: RequestAttempt | None,
+        upstream_key: str,
         reservation_ttl_seconds: int,
     ) -> None:
         route = decision.route
         assert route is not None
         upstream = self.server.config.upstreams[protocol]
-        upstream_key = self.server.upstream_credentials.get(protocol, "")
-        if not upstream_key:
-            self._send_protocol_error(
-                protocol,
-                "Gateway upstream credential is unavailable",
-                HTTPStatus.SERVICE_UNAVAILABLE,
-                code="gateway_upstream_not_configured",
-            )
-            return
         request_url = self._upstream_url(upstream)
         headers = self._upstream_headers(protocol, upstream_key)
         request = urllib.request.Request(request_url, data=body, headers=headers, method="POST")
@@ -562,20 +566,12 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             response = urllib.request.urlopen(request, timeout=self.server.config.upstream_timeout_seconds)
         except urllib.error.HTTPError as error:
             response = error
-        except (urllib.error.URLError, TimeoutError, OSError) as error:
-            if account_usage:
-                self.server.store.record(
-                    identity=identity,
-                    client=client,
-                    protocol=protocol,
-                    requested_model=decision.requested_model,
-                    resolved_alias=decision.resolved_alias,
-                    upstream_model=route.upstream_model,
-                    policy_version=decision.policy_version,
-                    policy_action=policy_action,
-                    status="failed",
-                    redaction_count=redaction_count,
-                    redaction_rules=redaction_rules,
+        except (urllib.error.URLError, http.client.HTTPException, TimeoutError, OSError) as error:
+            if account_usage and attempt is not None:
+                self.server.store.mark_request_attempt_outcome_unknown(
+                    attempt=attempt,
+                    organization_id=identity.organization_id,
+                    reason_code="provider_transport_ambiguous",
                 )
             self._send_protocol_error(
                 protocol,
@@ -618,9 +614,9 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 chunk = response.read(16 * 1024)
                 if not chunk:
                     break
-                if reservation_id is not None and time.monotonic() >= refresh_at:
+                if attempt is not None and time.monotonic() >= refresh_at:
                     self.server.store.refresh_budget_reservation(
-                        reservation_id,
+                        attempt.reservation_id,
                         ttl_seconds=reservation_ttl_seconds,
                         organization_id=identity.organization_id,
                     )
@@ -630,7 +626,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 self.wfile.flush()
         except (BrokenPipeError, ConnectionResetError):
             downstream_ok = False
-        except (TimeoutError, OSError) as error:
+        except (http.client.HTTPException, TimeoutError, OSError) as error:
             downstream_ok = False
             LOGGER.warning(
                 "upstream_stream_failed actor=%s team=%s client=%s protocol=%s requested_model=%s error=%s",
@@ -645,12 +641,27 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             response.close()
 
         usage = parser.finish()
-        if account_usage:
+        if account_usage and attempt is not None:
             successful = 200 <= status < 300 and downstream_ok
             if successful:
                 request_status = "succeeded"
             elif status == HTTPStatus.TOO_MANY_REQUESTS:
                 request_status = "rate_limited"
+            elif 200 <= status < 300:
+                self.server.store.mark_request_attempt_outcome_unknown(
+                    attempt=attempt,
+                    organization_id=identity.organization_id,
+                    reason_code="provider_stream_interrupted",
+                )
+                LOGGER.warning(
+                    "request_outcome_unknown actor=%s team=%s client=%s protocol=%s requested_model=%s reason=provider_stream_interrupted",
+                    identity.actor_id,
+                    identity.team_id,
+                    client,
+                    protocol,
+                    decision.requested_model,
+                )
+                return
             else:
                 request_status = "failed"
             cost = route.estimate_cost_microusd(
@@ -659,17 +670,11 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 cache_read_tokens=usage.cache_read_tokens,
                 cache_write_tokens=usage.cache_write_tokens,
             )
-            self.server.store.record(
-                identity=identity,
-                client=client,
-                protocol=protocol,
-                requested_model=decision.requested_model,
-                resolved_alias=decision.resolved_alias,
-                upstream_model=route.upstream_model,
-                provider_reported_model=usage.provider_reported_model,
-                policy_version=decision.policy_version,
-                policy_action=policy_action,
+            self.server.store.finalize_request_attempt(
+                attempt=attempt,
+                organization_id=identity.organization_id,
                 status=request_status,
+                provider_reported_model=usage.provider_reported_model,
                 input_tokens=usage.input_tokens,
                 output_tokens=usage.output_tokens,
                 cache_read_tokens=usage.cache_read_tokens,
@@ -677,8 +682,6 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 reasoning_tokens=usage.reasoning_tokens,
                 cost_microusd=cost,
                 provider_request_id=provider_request_id,
-                redaction_count=redaction_count,
-                redaction_rules=redaction_rules,
             )
             LOGGER.info(
                 "request_complete actor=%s team=%s client=%s protocol=%s action=%s requested_model=%s routed_model=%s status=%s input_tokens=%d output_tokens=%d cost_microusd=%d redactions=%d",
