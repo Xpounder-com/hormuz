@@ -2354,6 +2354,215 @@ class PostgresUsageStoreTests(unittest.TestCase):
             provider.server_close()
             provider_thread.join(timeout=10)
 
+    def test_rolling_runtime_login_rotation_keeps_ready_replacement_and_tenant_isolation(self) -> None:
+        """A new NOINHERIT login can replace an old runtime login safely.
+
+        The stable restricted ``runtime_role`` remains the authorization role.
+        This exercises the real rolling process boundary: start a ready
+        replacement using a distinct login member, drain the old process, then
+        revoke only the old login. Hormuz deliberately does not hot-reload a
+        DSN in a live process.
+        """
+
+        _ReplicaPolicyProviderHandler.reset()
+        provider = ThreadingHTTPServer(("127.0.0.1", 0), _ReplicaPolicyProviderHandler)
+        provider_thread = threading.Thread(target=provider.serve_forever, daemon=True)
+        provider_thread.start()
+
+        suffix = uuid4().hex[:8]
+        old_login = f"hormuz_runtime_old_{suffix}"
+        replacement_login = f"hormuz_runtime_new_{suffix}"
+        old_dsn = _runtime_dsn(self.owner_dsn, old_login, "hormuz-old-runtime-password")
+        replacement_dsn = _runtime_dsn(
+            self.owner_dsn,
+            replacement_login,
+            "hormuz-new-runtime-password",
+        )
+        gateways: list[GatewayServer] = []
+        gateway_threads: list[threading.Thread] = []
+        try:
+            with self.psycopg.connect(self.owner_dsn, autocommit=True) as connection:
+                with connection.cursor() as cursor:
+                    for login, password in (
+                        (old_login, "hormuz-old-runtime-password"),
+                        (replacement_login, "hormuz-new-runtime-password"),
+                    ):
+                        cursor.execute(
+                            self.sql.SQL(
+                                "CREATE ROLE {} LOGIN PASSWORD {} NOSUPERUSER "
+                                "NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS"
+                            ).format(self.sql.Identifier(login), self.sql.Literal(password))
+                        )
+                        cursor.execute(
+                            self.sql.SQL("GRANT {} TO {}").format(
+                                self.sql.Identifier(self.runtime_role),
+                                self.sql.Identifier(login),
+                            )
+                        )
+
+            config, environment, _issuer = self._managed_config()
+            service = PolicyControlService(config, environ=environment)
+            service.bootstrap(organization_id="xpounder", credential_env="HORMUZ_POLICY_ADMIN_TOKEN")
+            active_policy = self._stage(
+                service,
+                environment=environment,
+                document=self._policy_document(),
+            )
+            service.activate(
+                organization_id="xpounder",
+                credential_env="HORMUZ_POLICY_ADMIN_TOKEN",
+                version_id=active_policy.version_id,
+            )
+
+            upstreams = dict(config.upstreams)
+            upstreams["openai"] = replace(
+                upstreams["openai"],
+                base_url=f"http://127.0.0.1:{provider.server_port}/v1",
+                api_key_env="TEST_RUNTIME_ROTATION_OPENAI_KEY",
+            )
+            upstreams["anthropic"] = replace(
+                upstreams["anthropic"],
+                api_key_env="TEST_RUNTIME_ROTATION_ANTHROPIC_KEY",
+            )
+            old_config = replace(
+                config,
+                listen=replace(config.listen, port=_free_port()),
+                upstreams=upstreams,
+            )
+            replacement_config = replace(
+                config,
+                listen=replace(config.listen, port=_free_port()),
+                upstreams=upstreams,
+            )
+            common_environment = {
+                **environment,
+                "TEST_RUNTIME_ROTATION_OPENAI_KEY": "runtime-rotation-openai-key",
+                "TEST_RUNTIME_ROTATION_ANTHROPIC_KEY": "runtime-rotation-anthropic-key",
+            }
+            old_environment = {
+                **common_environment,
+                "TEST_POSTGRES_RUNTIME_DSN": old_dsn,
+            }
+            replacement_environment = {
+                **common_environment,
+                "TEST_POSTGRES_RUNTIME_DSN": replacement_dsn,
+            }
+
+            with mock.patch.dict(os.environ, old_environment, clear=False):
+                old_gateway = GatewayServer(old_config)
+            gateways.append(old_gateway)
+            old_thread = serve_in_thread(old_gateway)
+            gateway_threads.append(old_thread)
+
+            def send_get(gateway: GatewayServer, path: str) -> tuple[int, bytes]:
+                connection = http.client.HTTPConnection("127.0.0.1", gateway.server_port, timeout=5)
+                try:
+                    connection.request("GET", path)
+                    response = connection.getresponse()
+                    return response.status, response.read()
+                finally:
+                    connection.close()
+
+            def send_request(gateway: GatewayServer, *, input_value: str) -> tuple[int, bytes]:
+                connection = http.client.HTTPConnection("127.0.0.1", gateway.server_port, timeout=5)
+                try:
+                    connection.request(
+                        "POST",
+                        "/v1/responses",
+                        body=json.dumps({"model": "gpt-5.4-mini", "input": input_value}),
+                        headers={
+                            "Authorization": "Bearer policy-test-alice-token",
+                            "Content-Type": "application/json",
+                        },
+                    )
+                    response = connection.getresponse()
+                    return response.status, response.read()
+                finally:
+                    connection.close()
+
+            old_ready_status, old_ready_body = send_get(old_gateway, "/ready")
+            self.assertEqual(old_ready_status, 200, old_ready_body)
+            old_status, old_body = send_request(old_gateway, input_value="old runtime login probe")
+            self.assertEqual(old_status, 200, old_body)
+
+            # The replacement is built from a separately injected runtime
+            # credential. It must become ready before the old login is revoked
+            # or customer traffic is moved.
+            with mock.patch.dict(os.environ, replacement_environment, clear=False):
+                replacement_gateway = GatewayServer(replacement_config)
+            gateways.append(replacement_gateway)
+            replacement_thread = serve_in_thread(replacement_gateway)
+            gateway_threads.append(replacement_thread)
+
+            replacement_ready_status, replacement_ready_body = send_get(replacement_gateway, "/ready")
+            self.assertEqual(replacement_ready_status, 200, replacement_ready_body)
+            replacement_status, replacement_body = send_request(
+                replacement_gateway,
+                input_value="replacement runtime login probe",
+            )
+            self.assertEqual(replacement_status, 200, replacement_body)
+
+            # Draining owns existing work and closes the old pool before the
+            # operator disables the superseded login.
+            old_gateway.shutdown()
+            old_gateway.server_close()
+            old_thread.join(timeout=10)
+            self.assertFalse(old_thread.is_alive())
+            self.assertIsNotNone(old_gateway.postgres_pool)
+            self.assertTrue(old_gateway.postgres_pool.closed)
+
+            with self.psycopg.connect(self.owner_dsn, autocommit=True) as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(self.sql.SQL("ALTER ROLE {} NOLOGIN").format(self.sql.Identifier(old_login)))
+
+            with self.assertRaises(PostgresStorageError):
+                PostgresConnectionPool(
+                    old_dsn,
+                    settings=PostgresPoolConfig(
+                        min_connections=1,
+                        max_connections=1,
+                        acquire_timeout_seconds=1,
+                        max_waiting=1,
+                        max_lifetime_seconds=1800,
+                        max_idle_seconds=120,
+                    ),
+                )
+
+            # The replacement keeps serving through the same stable runtime
+            # authorization role, including transaction-local RLS isolation.
+            replacement_ready_status, replacement_ready_body = send_get(replacement_gateway, "/ready")
+            self.assertEqual(replacement_ready_status, 200, replacement_ready_body)
+            replacement_status, replacement_body = send_request(
+                replacement_gateway,
+                input_value="post-revocation replacement probe",
+            )
+            self.assertEqual(replacement_status, 200, replacement_body)
+            self.assertEqual(_ReplicaPolicyProviderHandler.request_count, 3)
+
+            rotated_store = PostgresUsageStore(
+                replacement_dsn,
+                organization_ids=("xpounder", "beta"),
+                schema=self.schema,
+                runtime_role=self.runtime_role,
+            )
+            self.assertEqual(rotated_store.monthly_totals(organization_id="xpounder").requests, 3)
+            self.assertEqual(rotated_store.monthly_totals(organization_id="beta").requests, 0)
+        finally:
+            for gateway, thread in zip(gateways, gateway_threads):
+                if thread.is_alive():
+                    gateway.shutdown()
+            for gateway in gateways:
+                gateway.server_close()
+            for thread in gateway_threads:
+                thread.join(timeout=10)
+            provider.shutdown()
+            provider.server_close()
+            provider_thread.join(timeout=10)
+            with self.psycopg.connect(self.owner_dsn, autocommit=True) as connection:
+                with connection.cursor() as cursor:
+                    for login in (old_login, replacement_login):
+                        cursor.execute(self.sql.SQL("DROP ROLE IF EXISTS {}").format(self.sql.Identifier(login)))
+
     def test_terminated_idle_backend_connection_is_replaced_before_replica_egress(self) -> None:
         """A replica replaces a stale backend connection without affecting its sibling.
 

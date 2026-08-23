@@ -83,8 +83,36 @@ configured search path, and organization ID with `SET LOCAL`; PostgreSQL
 resets those values when that transaction commits or rolls back. On graceful
 shutdown, the listener stops accepting new requests, waits for its active
 handler threads to finish, and only then closes its owned pool. This is
-single-process pool safety, not evidence of coordinated replica draining,
-database failover, or credential rotation.
+single-process pool safety, not evidence of database failover or production
+HA.
+
+### Runtime credential rotation
+
+Hormuz does not watch, reload, or mutate a PostgreSQL DSN in a running
+process. Rotate the customer-controlled runtime credential with a replacement
+deployment:
+
+1. Keep `postgres_runtime_role` as the stable, restricted database role that
+   receives the Hormuz grants. A rotation-friendly deployment uses a separate
+   `NOINHERIT` login role as the runtime DSN principal and grants it membership
+   in that stable role.
+2. Create a new login and inject its DSN only into a replacement gateway
+   process. Validate its `/ready` endpoint before sending it traffic.
+3. Move traffic through the customer-controlled load balancer or ingress, then
+   drain the old gateway. Its pool closes only after accepted work has finished.
+4. Revoke or disable the old login only after the old process has stopped. If
+   the replacement cannot become ready, keep the old login enabled and roll
+   back the replacement deployment instead.
+
+The restricted role, schema, and transaction-local tenant boundary remain the
+same across both logins. The replacement therefore uses the ordinary policy,
+budget, evidence, and RLS paths; it receives no new authority from rotation.
+Hormuz's PostgreSQL conformance suite proves this sequence with two disposable
+`NOINHERIT` logins: the replacement becomes ready, the old pool drains, the
+old login subsequently fails closed, and the replacement continues to preserve
+tenant isolation. The proof is not a secret-manager integration, automatic
+live reload, coordinated load-balancer rollout, database failover, or customer
+deployment certification.
 
 `GET /ready` performs its PostgreSQL evidence check through that same bounded
 runtime pool, then verifies the active managed policy when managed policy
@@ -112,6 +140,28 @@ CREATE ROLE hormuz_policy_control
   NOBYPASSRLS
   PASSWORD 'managed-out-of-band-secret';
 ~~~
+
+For rolling runtime-credential rotation, retain `hormuz_runtime` as the stable
+restricted role and create a separate login member for each runtime credential:
+
+~~~sql
+CREATE ROLE hormuz_runtime_login_20260823
+  LOGIN
+  NOSUPERUSER
+  NOCREATEDB
+  NOCREATEROLE
+  NOINHERIT
+  NOBYPASSRLS
+  PASSWORD 'managed-out-of-band-secret';
+
+GRANT hormuz_runtime TO hormuz_runtime_login_20260823;
+~~~
+
+Use the login role only in `HORMUZ_POSTGRES_DSN`; keep
+`postgres_runtime_role` set to `hormuz_runtime`. The runtime transaction sets
+that role locally before it can access Hormuz data. Existing deployments that
+use a direct runtime login remain supported, but the separate-login pattern is
+the safer credential-rotation boundary.
 
 The password above is illustrative. Use the deployment's managed-secret mechanism instead of pasting a real value into a shell or checked-in file.
 
@@ -279,12 +329,14 @@ HORMUZ_TEST_POSTGRES_DSN='postgresql://operator@host:5432/hormuz_test' \
   python3 -m unittest -v tests.test_postgres
 ~~~
 
-CI runs this PostgreSQL suite separately against a pinned disposable PostgreSQL service. It proves the adapter's migration idempotency, runtime/control-role separation, RLS behavior, tenant isolation, append-only request-attempt evidence, conservative unknown-outcome reservations, pooled checkout reuse with tenant-state reset, bounded saturation, broken-connection replacement, policy bootstrap/activation/rollback, contract fixtures, malformed-evidence failure, rollback/partial-schema failure, and competing budget reservation behavior.
+CI runs this PostgreSQL suite separately against a pinned disposable PostgreSQL service. It proves the adapter's migration idempotency, runtime/control-role separation, RLS behavior, tenant isolation, append-only request-attempt evidence, conservative unknown-outcome reservations, pooled checkout reuse with tenant-state reset, bounded saturation, broken-connection replacement, rolling replacement with a separately authenticated runtime login, policy bootstrap/activation/rollback, contract fixtures, malformed-evidence failure, rollback/partial-schema failure, and competing budget reservation behavior.
 
-A separate PostgreSQL recovery job runs both the disposable logical drill and
-the labelled interruption-and-recovery drill against the same digest-pinned
-image. A successful run uploads only their content-free summaries for seven
-days. A failed run may have no summary, but it never uploads a dump,
-intermediate state, request, response, credential, or database data. Neither
-gate is a substitute for managed-database PITR, HA/failover, credential
-rotation, load testing, cloud backup, or DR certification.
+A separate PostgreSQL recovery job runs both the disposable logical drill
+(against source, recovery, and quarantine containers) and the labelled
+interruption-and-recovery drill against the same digest-pinned image. A
+successful run uploads only their content-free summaries for seven days. A
+failed run may have no summary, but it never uploads a dump, intermediate
+state, request, response, credential, or database data. Neither gate is a
+substitute for managed-database PITR, HA/failover, credential rotation, load
+testing, cloud backup, customer secret-manager integration, or DR
+certification.

@@ -60,6 +60,8 @@ The tenth, [#50](https://github.com/Xpounder-com/hormuz/issues/50), is completed
 
 The eleventh, [#52](https://github.com/Xpounder-com/hormuz/issues/52), is completed in [PR #53](https://github.com/Xpounder-com/hormuz/pull/53): terminating one live replica's idle PostgreSQL backend connection causes its bounded pool to replace that connection before the next readiness check and governed request, while an independent sibling remains usable. This bounded connection-churn proof does not claim a PostgreSQL database outage, automatic failover, HA, credential rotation, or zero-downtime deployment.
 
+The twelfth, [#61](https://github.com/Xpounder-com/hormuz/issues/61), is in progress: prove an operator-controlled rolling PostgreSQL runtime-login rotation. The planned proof starts a replacement gateway with a distinct `NOINHERIT` login that can assume the stable restricted runtime role, requires its readiness before traffic movement, drains and closes the old pool, then verifies that the disabled old login fails closed while the replacement retains policy, evidence, and tenant-RLS behavior. It will not claim automatic DSN reload, a secret-manager integration, customer load-balancer coordination, database failover, or HA.
+
 ## Feature-freeze rule
 
 > A change is current-priority only if it removes deprecated context coupling, stabilizes the policy/evidence contract, fixes a security or correctness defect, or closes a production-readiness gate.
