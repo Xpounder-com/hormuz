@@ -7,6 +7,10 @@ from pathlib import Path
 from hormuz.contracts import (
     AUDIT_ANCHOR_SCHEMA_ID,
     AUDIT_ANCHOR_SCHEMA_VERSION,
+    AUDIT_CHAIN_CHECKPOINT_SCHEMA_ID,
+    AUDIT_CHAIN_CHECKPOINT_SCHEMA_VERSION,
+    AUDIT_CHAIN_ENTRY_SCHEMA_ID,
+    AUDIT_CHAIN_ENTRY_SCHEMA_VERSION,
     AUDIT_EVENT_SCHEMA_ID,
     AUDIT_EVENT_SCHEMA_VERSION,
     ContractValidationError,
@@ -50,6 +54,8 @@ class PolicyEvidenceContractTests(unittest.TestCase):
             "policy_control_status",
             "usage_report",
             "audit_anchor_v1",
+            "audit_chain_entry_v1",
+            "audit_chain_checkpoint_v1",
         ):
             validate_contract(fixtures[name])
         for name in ("audit_usage_v1", "audit_security_v1", "audit_usage_v2", "audit_security_v2"):
@@ -80,6 +86,10 @@ class PolicyEvidenceContractTests(unittest.TestCase):
         invalid_anchor["unexpected"] = "field"
         with self.assertRaises(ContractValidationError):
             validate_contract(invalid_anchor)
+        invalid_checkpoint = json.loads(json.dumps(valid["audit_chain_checkpoint_v1"]))
+        invalid_checkpoint["unexpected"] = "field"
+        with self.assertRaises(ContractValidationError):
+            validate_contract(invalid_checkpoint)
         legacy_storage_error = {**valid["error_v2"], "schema_version": 1}
         with self.assertRaises(ContractValidationError):
             validate_contract(legacy_storage_error)
@@ -92,6 +102,8 @@ class PolicyEvidenceContractTests(unittest.TestCase):
         }
         self.assertIn((AUDIT_EVENT_SCHEMA_ID, AUDIT_EVENT_SCHEMA_VERSION), schemas)
         self.assertIn((AUDIT_ANCHOR_SCHEMA_ID, AUDIT_ANCHOR_SCHEMA_VERSION), schemas)
+        self.assertIn((AUDIT_CHAIN_ENTRY_SCHEMA_ID, AUDIT_CHAIN_ENTRY_SCHEMA_VERSION), schemas)
+        self.assertIn((AUDIT_CHAIN_CHECKPOINT_SCHEMA_ID, AUDIT_CHAIN_CHECKPOINT_SCHEMA_VERSION), schemas)
         self.assertIn((ERROR_SCHEMA_ID, ERROR_SCHEMA_VERSION), schemas)
         self.assertIn((READINESS_SCHEMA_ID, READINESS_SCHEMA_VERSION), schemas)
         self.assertIn(("hormuz.policy-decision", 1), schemas)

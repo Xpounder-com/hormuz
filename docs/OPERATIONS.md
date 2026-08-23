@@ -22,6 +22,14 @@ Hormuz should not receive new traffic:
 - `reason: draining` means shutdown has started. The process remains live
   until the listener and in-flight work have drained.
 
+When `audit_chain.maximum_anchor_age_seconds` is configured, the durable-store
+check also fails closed if a tenant has committed metadata-only audit events
+older than that bound without a successful local external-checkpoint receipt.
+This is an anchor-age alert, not an Object Lock availability probe: `/ready`
+never contacts S3, AWS, Ceph, or another custody service. Use a separate
+scheduled `hormuz audit-chain anchor` job and monitor its result. An idle
+tenant with no chain entries is not overdue.
+
 Handling either endpoint does not authenticate a caller, resolve an upstream
 credential, or call an AI provider. Configure the load balancer's liveness
 action from `/health` and its traffic-readiness action from `/ready`. Do not

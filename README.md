@@ -20,6 +20,7 @@ Hormuz is alpha software. The local prototype proves routing and policy behavior
 - Input, output, cache-read, cache-write, and reasoning-token accounting when providers report them.
 - Metadata-only usage ledger: SQLite by default, with an optional PostgreSQL adapter for the same narrow usage/evidence contract. Prompts and responses are relayed, not persisted.
 - Metadata-only JSONL audit export for usage and secret-egress evidence, with private file permissions and a SHA-256 checksum.
+- Per-organization commit-time audit chains for new metadata-only usage and secret-egress events, with explicit recovery epochs and optional asynchronous Object Lock checkpoints.
 - Pre-provider secret redaction or denial with built-in detectors, custom environment-provided values, and metadata-only detection evidence.
 - OpenAI response storage and background mode disabled by default as enforceable provider privacy policy.
 - Configuration output for installed Codex and Claude Code clients.
@@ -87,6 +88,13 @@ Export metadata-only audit evidence for the current month:
 python3 -m hormuz --config hormuz.json audit-export \
   --kind all \
   --output hormuz-audit.jsonl
+```
+
+Inspect the current per-organization commit-time chain without contacting an
+external storage service:
+
+```bash
+python3 -m hormuz --config hormuz.json audit-chain status
 ```
 
 The deprecated context-pack experiment is intentionally outside the core gateway. See [docs/CONTEXT_EXPERIMENT_MIGRATION.md](docs/CONTEXT_EXPERIMENT_MIGRATION.md) for the separate package and its temporary compatibility shim.

@@ -18,6 +18,7 @@ from unittest import mock
 from uuid import uuid4
 
 import hormuz.postgres as postgres_module
+from hormuz.audit_chain import build_audit_chain_checkpoint
 from hormuz.cli import build_parser, main
 from hormuz.config import GatewayConfig, Identity, PostgresPoolConfig, UsageStorageConfig
 from hormuz.contracts import validate_contract, validate_policy_control_event
@@ -224,6 +225,10 @@ class PostgresUsageStoreTests(unittest.TestCase):
                     "policy_versions",
                     "policy_administrators",
                     "policy_tenants",
+                    "gateway_audit_chain_checkpoints",
+                    "gateway_audit_chain_entries",
+                    "gateway_audit_chain_heads",
+                    "gateway_audit_chain_epochs",
                     "gateway_request_attempt_events",
                     "gateway_budget_reservations",
                     "gateway_request_attempts",
@@ -297,12 +302,106 @@ class PostgresUsageStoreTests(unittest.TestCase):
         self.addCleanup(self._drop_schema, schema)
         return schema
 
+    def _insert_v2_evidence(self, schema: str) -> None:
+        """Emulate evidence written by the v2 binary before the v4 migration exists."""
+
+        with postgres_transaction(
+            self.runtime_dsn,
+            schema=schema,
+            runtime_role=self.runtime_role,
+            organization_id="acme",
+        ) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    INSERT INTO gateway_usage_events (
+                        id, occurred_at, evidence_schema_id, evidence_schema_version,
+                        organization_id, actor_id, actor_name, team_id, team_name,
+                        identity_type, authentication_source, client, protocol, requested_model,
+                        resolved_alias, upstream_model, provider_reported_model, policy_version,
+                        policy_action, status, input_tokens, output_tokens, cache_read_tokens,
+                        cache_write_tokens, reasoning_tokens, cost_microusd, cost_basis,
+                        allocation_basis, coverage, provider_request_id, redaction_count, redaction_rules
+                    ) VALUES (
+                        %s, TIMESTAMPTZ '2026-01-01T00:00:00+00:00', %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s, %s
+                    )
+                    """,
+                    (
+                        "legacy-usage-v2",
+                        "hormuz.audit-event",
+                        2,
+                        "acme",
+                        "alice",
+                        "Alice",
+                        "engineering",
+                        "Engineering",
+                        "human",
+                        "static",
+                        "codex",
+                        "openai",
+                        "gpt-v2",
+                        "gpt-v2",
+                        "gpt-upstream",
+                        "gpt-upstream",
+                        "policy-v2",
+                        "allowed",
+                        "succeeded",
+                        10,
+                        2,
+                        0,
+                        0,
+                        0,
+                        120,
+                        "configured_rate_card_estimate",
+                        "direct_gateway_request",
+                        "gateway_captured_requests_only",
+                        None,
+                        0,
+                        "[]",
+                    ),
+                )
+                cursor.execute(
+                    """
+                    INSERT INTO gateway_secret_events (
+                        id, occurred_at, evidence_schema_id, evidence_schema_version,
+                        organization_id, actor_id, actor_name, team_id, team_name,
+                        identity_type, authentication_source, client, protocol, requested_model,
+                        policy_version, coverage, action, detection_count, rules
+                    ) VALUES (
+                        %s, TIMESTAMPTZ '2026-01-01T00:00:01+00:00', %s, %s, %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s
+                    )
+                    """,
+                    (
+                        "legacy-secret-v2",
+                        "hormuz.audit-event",
+                        2,
+                        "acme",
+                        "alice",
+                        "Alice",
+                        "engineering",
+                        "Engineering",
+                        "human",
+                        "static",
+                        "codex",
+                        "openai",
+                        "gpt-v2",
+                        "policy-v2",
+                        "gateway_captured_requests_only",
+                        "redacted",
+                        1,
+                        '["openai_api_key"]',
+                    ),
+                )
+
     def _drop_schema(self, schema: str) -> None:
         with self.psycopg.connect(self.owner_dsn, autocommit=True) as connection:
             with connection.cursor() as cursor:
                 cursor.execute(self.sql.SQL("DROP SCHEMA IF EXISTS {} CASCADE").format(self.sql.Identifier(schema)))
 
-    def _schema_v3_snapshot(self, schema: str) -> dict[str, list[tuple[object, ...]]]:
+    def _schema_v4_snapshot(self, schema: str) -> dict[str, list[tuple[object, ...]]]:
         with self.psycopg.connect(self.owner_dsn) as connection:
             with connection.cursor() as cursor:
                 return {
@@ -319,6 +418,10 @@ class PostgresUsageStoreTests(unittest.TestCase):
                         "gateway_budget_reservations",
                         "gateway_request_attempts",
                         "gateway_request_attempt_events",
+                        "gateway_audit_chain_epochs",
+                        "gateway_audit_chain_heads",
+                        "gateway_audit_chain_entries",
+                        "gateway_audit_chain_checkpoints",
                     )
                 }
 
@@ -472,7 +575,7 @@ class PostgresUsageStoreTests(unittest.TestCase):
             runtime_role=self.runtime_role,
         )
         self.assertTrue(status.complete)
-        self.assertEqual(status.version, 3)
+        self.assertEqual(status.version, 4)
 
     def test_policy_control_role_verifies_only_the_shared_migration_ledger(self) -> None:
         with self.assertRaises(PostgresStorageError) as raised:
@@ -490,41 +593,11 @@ class PostgresUsageStoreTests(unittest.TestCase):
             verify_runtime_schema=False,
         )
         self.assertTrue(status.complete)
-        self.assertEqual(status.version, 3)
+        self.assertEqual(status.version, 4)
 
     def test_schema_v2_upgrade_preserves_evidence_and_rejects_an_old_reader(self) -> None:
         schema = self._create_schema_v2_fixture()
-        v2_store = PostgresUsageStore(
-            self.runtime_dsn,
-            organization_ids=("acme", "beta"),
-            schema=schema,
-            runtime_role=self.runtime_role,
-            verify_schema=False,
-        )
-        v2_store.record(
-            identity=_identity("acme"),
-            client="codex",
-            protocol="openai",
-            requested_model="gpt-v2",
-            resolved_alias="gpt-v2",
-            upstream_model="gpt-upstream",
-            policy_version="policy-v2",
-            policy_action="allowed",
-            status="succeeded",
-            input_tokens=10,
-            output_tokens=2,
-            cost_microusd=120,
-        )
-        v2_store.record_secret_event(
-            identity=_identity("acme"),
-            client="codex",
-            protocol="openai",
-            requested_model="gpt-v2",
-            policy_version="policy-v2",
-            action="redacted",
-            detection_count=1,
-            rules=("openai_api_key",),
-        )
+        self._insert_v2_evidence(schema)
         with postgres_transaction(
             self.runtime_dsn,
             schema=schema,
@@ -565,7 +638,7 @@ class PostgresUsageStoreTests(unittest.TestCase):
             runtime_role=self.runtime_role,
             policy_control_role=self.policy_control_role,
         )
-        self.assertEqual(status.version, 3)
+        self.assertEqual(status.version, 4)
         store = PostgresUsageStore(
             self.runtime_dsn,
             organization_ids=("acme", "beta"),
@@ -604,7 +677,7 @@ class PostgresUsageStoreTests(unittest.TestCase):
         )
         self.assertEqual(store.active_budget_reservations(organization_id="acme"), 2)
 
-        before = self._schema_v3_snapshot(schema)
+        before = self._schema_v4_snapshot(schema)
         with mock.patch("hormuz.postgres.POSTGRES_SCHEMA_VERSION", 2):
             with self.assertRaises(PostgresStorageError) as raised:
                 verify_postgres_schema(
@@ -613,27 +686,11 @@ class PostgresUsageStoreTests(unittest.TestCase):
                     runtime_role=self.runtime_role,
                 )
         self.assertEqual(raised.exception.code, "storage_schema_newer_than_binary")
-        self.assertEqual(self._schema_v3_snapshot(schema), before)
+        self.assertEqual(self._schema_v4_snapshot(schema), before)
 
     def test_partial_v3_upgrade_from_schema_v2_fails_before_materializing_ledger_tables(self) -> None:
         schema = self._create_schema_v2_fixture()
-        v2_store = PostgresUsageStore(
-            self.runtime_dsn,
-            organization_ids=("acme", "beta"),
-            schema=schema,
-            runtime_role=self.runtime_role,
-            verify_schema=False,
-        )
-        v2_store.record(
-            identity=_identity("acme"),
-            client="codex",
-            protocol="openai",
-            requested_model="gpt-v2",
-            resolved_alias="gpt-v2",
-            upstream_model="gpt-upstream",
-            policy_action="allowed",
-            status="succeeded",
-        )
+        self._insert_v2_evidence(schema)
         with self.psycopg.connect(self.owner_dsn) as connection:
             with connection.transaction():
                 with connection.cursor() as cursor:
@@ -814,7 +871,7 @@ class PostgresUsageStoreTests(unittest.TestCase):
                 migration = io.StringIO()
                 with redirect_stdout(migration):
                     self.assertEqual(main(["--config", str(config_path), "storage", "migrate"]), 0)
-                self.assertEqual(migration.getvalue(), "PostgreSQL usage storage migration is current: v3\n")
+                self.assertEqual(migration.getvalue(), "PostgreSQL usage storage migration is current: v4\n")
 
                 verification = io.StringIO()
                 with redirect_stdout(verification):
@@ -1348,7 +1405,7 @@ class PostgresUsageStoreTests(unittest.TestCase):
                     before = cursor.fetchone()[0]
                     cursor.execute(
                         self.sql.SQL(
-                            "INSERT INTO {}.hormuz_schema_migrations (version, state) VALUES (4, 'applying')"
+                            "INSERT INTO {}.hormuz_schema_migrations (version, state) VALUES (5, 'applying')"
                         ).format(self.sql.Identifier(self.schema))
                     )
         with self.assertRaises(PostgresStorageError) as raised:
@@ -1365,7 +1422,7 @@ class PostgresUsageStoreTests(unittest.TestCase):
                 with connection.cursor() as cursor:
                     cursor.execute(
                         self.sql.SQL(
-                            "UPDATE {}.hormuz_schema_migrations SET state = 'applied' WHERE version = 4"
+                            "UPDATE {}.hormuz_schema_migrations SET state = 'applied' WHERE version = 5"
                         ).format(self.sql.Identifier(self.schema))
                     )
         with self.assertRaises(PostgresStorageError) as raised:
@@ -1388,7 +1445,7 @@ class PostgresUsageStoreTests(unittest.TestCase):
                     self.assertEqual(cursor.fetchone()[0], before)
                     cursor.execute(
                         self.sql.SQL(
-                            "DELETE FROM {}.hormuz_schema_migrations WHERE version = 4"
+                            "DELETE FROM {}.hormuz_schema_migrations WHERE version = 5"
                         ).format(self.sql.Identifier(self.schema))
                     )
 
@@ -1720,6 +1777,147 @@ class PostgresUsageStoreTests(unittest.TestCase):
         for thread in threads:
             thread.join(timeout=10)
         self.assertEqual(sorted(outcomes), ["allowed", "denied"])
+
+    def test_commit_time_audit_chain_serializes_multi_instance_writes_and_is_tenant_isolated(self) -> None:
+        stores = (
+            PostgresUsageStore(
+                self.runtime_dsn,
+                organization_ids=("acme", "beta"),
+                schema=self.schema,
+                runtime_role=self.runtime_role,
+            ),
+            PostgresUsageStore(
+                self.runtime_dsn,
+                organization_ids=("acme", "beta"),
+                schema=self.schema,
+                runtime_role=self.runtime_role,
+            ),
+        )
+        barrier = threading.Barrier(3)
+        errors: list[BaseException] = []
+
+        def append(store: PostgresUsageStore, actor: str) -> None:
+            try:
+                barrier.wait(timeout=10)
+                store.record(
+                    identity=replace(_identity("acme"), actor_id=actor, actor_name=actor.title()),
+                    client="codex",
+                    protocol="openai",
+                    requested_model="gpt-test",
+                    resolved_alias="gpt-test",
+                    upstream_model="gpt-upstream",
+                    policy_action="allowed",
+                    status="succeeded",
+                )
+            except BaseException as error:  # The assertion below reports a real serialization failure.
+                errors.append(error)
+
+        threads = [
+            threading.Thread(target=append, args=(stores[0], "alice")),
+            threading.Thread(target=append, args=(stores[1], "bob")),
+        ]
+        for thread in threads:
+            thread.start()
+        barrier.wait(timeout=10)
+        for thread in threads:
+            thread.join(timeout=15)
+
+        self.assertFalse(errors, errors)
+        head = self.store.verify_audit_chain(organization_id="acme")
+        self.assertEqual((head.chain_epoch, head.sequence), (1, 2))
+        checkpoint = build_audit_chain_checkpoint(head)
+        self.store.record_audit_chain_checkpoint(
+            checkpoint=checkpoint,
+            artifact_sha256="a" * 64,
+            anchor_backend="test-object-lock",
+            object_version="version-1",
+        )
+        self.assertEqual(self.store.verify_audit_chain(organization_id="acme", checkpoint=checkpoint), head)
+
+        self.store.record(
+            identity=_identity("beta"),
+            client="codex",
+            protocol="openai",
+            requested_model="gpt-test",
+            resolved_alias="gpt-test",
+            upstream_model="gpt-upstream",
+            policy_action="allowed",
+            status="succeeded",
+        )
+        with self.assertRaises(PostgresStorageError) as raised:
+            self.store.verify_audit_chain(organization_id="beta", checkpoint=checkpoint)
+        self.assertEqual(raised.exception.code, "audit_chain_tenant_mismatch")
+
+    def test_commit_time_audit_chain_rolls_back_and_runtime_cannot_rewrite_history(self) -> None:
+        with mock.patch.object(
+            self.store,
+            "_append_audit_chain_entry_in_cursor",
+            side_effect=PostgresStorageError("audit_chain_test_failure"),
+        ):
+            with self.assertRaises(PostgresStorageError) as raised:
+                self.store.record(
+                    identity=_identity("acme"),
+                    client="codex",
+                    protocol="openai",
+                    requested_model="gpt-test",
+                    resolved_alias="gpt-test",
+                    upstream_model="gpt-upstream",
+                    policy_action="allowed",
+                    status="succeeded",
+                )
+        self.assertEqual(raised.exception.code, "audit_chain_test_failure")
+        with self.psycopg.connect(self.owner_dsn) as connection:
+            with connection.cursor() as cursor:
+                counts = {}
+                for table in ("gateway_usage_events", "gateway_audit_chain_epochs", "gateway_audit_chain_entries"):
+                    cursor.execute(
+                        self.sql.SQL("SELECT COUNT(*) FROM {}.{}").format(
+                            self.sql.Identifier(self.schema),
+                            self.sql.Identifier(table),
+                        )
+                    )
+                    counts[table] = cursor.fetchone()[0]
+        self.assertEqual(counts, {table: 0 for table in counts})
+
+        self.store.record(
+            identity=_identity("acme"),
+            client="codex",
+            protocol="openai",
+            requested_model="gpt-test",
+            resolved_alias="gpt-test",
+            upstream_model="gpt-upstream",
+            policy_action="allowed",
+            status="succeeded",
+        )
+        with postgres_transaction(
+            self.runtime_dsn,
+            schema=self.schema,
+            runtime_role=self.runtime_role,
+            organization_id="acme",
+        ) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT has_table_privilege(current_user, %s, 'UPDATE') AS can_update, "
+                    "has_table_privilege(current_user, %s, 'DELETE') AS can_delete",
+                    (
+                        f"{self.schema}.gateway_audit_chain_entries",
+                        f"{self.schema}.gateway_audit_chain_entries",
+                    ),
+                )
+                privileges = cursor.fetchone()
+                self.assertFalse(privileges["can_update"])
+                self.assertFalse(privileges["can_delete"])
+        self.store.verify_ready()
+        with self.assertRaises(PostgresStorageError) as raised:
+            with postgres_transaction(
+                self.runtime_dsn,
+                schema=self.schema,
+                runtime_role=self.runtime_role,
+                organization_id="acme",
+            ) as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute("DELETE FROM gateway_audit_chain_entries WHERE organization_id = %s", ("acme",))
+        self.assertEqual(raised.exception.code, "storage_access_denied")
 
     def test_attempt_ledger_is_append_only_tenant_scoped_and_conservative(self) -> None:
         identity = _identity("acme")

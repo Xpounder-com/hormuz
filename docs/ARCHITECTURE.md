@@ -42,6 +42,7 @@ Policy administration (managed PostgreSQL mode)
 - `hormuz/policy_runtime.py`, `hormuz/policy_document.py`, and `hormuz/postgres_policy_store.py` read strict immutable policy documents, then resolve and pin the active PostgreSQL version when managed policy control is enabled.
 - `hormuz/policy_control.py` is the narrow authenticated service boundary used by the CLI for bootstrap, administrator changes, staging, activation, rollback, and break-glass recovery.
 - `hormuz/store.py` owns the SQLite schema and monthly aggregations; `hormuz/postgres_usage_store.py` implements the same narrow usage/evidence repository with transaction-local organization scope and PostgreSQL RLS. In PostgreSQL gateway mode, `hormuz.postgres.PostgresConnectionPool` supplies one bounded runtime pool shared with managed-policy reads; each checkout receives fresh transaction-local role, search-path, and tenant state.
+- `hormuz/audit_chain.py` owns canonical per-organization commit-time chain and checkpoint primitives. Storage adapters append a chain entry with each durable current audit event; custody adapters retain the compact checkpoint only through an explicit out-of-band operator command.
 - `hormuz/custody.py` owns provider-neutral encrypted-envelope and audit-anchor contracts; `hormuz/aws_custody.py` provides the optional AWS reference adapters, while `hormuz/openbao_custody.py` and `hormuz/self_hosted_custody.py` provide the optional OpenBao and S3-compatible Object Lock adapters. `hormuz/custody_runtime.py` resolves owner-only encrypted provider credentials at gateway startup.
 - `hormuz/usage.py` parses provider usage metadata without storing response content.
 - `hormuz/redaction.py` transforms provider-bound JSON values using configured secret controls.
@@ -80,6 +81,7 @@ before a customer-operated S3-compatible Object Lock service receives it. All
 data-key operations bind the tenant and purpose, and rotation re-encrypts the
 wrapped data key without printing a secret. A named storage implementation is
 only a separately evidenced target; Ceph RGW is the first optional self-hosted
-candidate. Anchoring protects an anchored artifact, not completeness of the
-mutable source database before that artifact is created. See
-[CUSTODY.md](CUSTODY.md).
+candidate. An externally retained per-organization checkpoint makes committed
+history up to that checkpoint tamper-evident; it does not prove gateway-bypass
+traffic or events inside the later anchor-delay window. See [AUDIT.md](AUDIT.md)
+and [CUSTODY.md](CUSTODY.md).

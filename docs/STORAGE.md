@@ -211,6 +211,43 @@ manually add the v3 tables,
 alter the migration ledger, or attempt a down-migration. Restore the tested
 v2 application/database pair if rollback is required.
 
+### Schema v4 commit-time audit-chain upgrade
+
+Version 4 adds four tenant-qualified evidence objects:
+
+- `gateway_audit_chain_epochs`: an initial adoption row or an explicit
+  restore/migration link to a trusted predecessor checkpoint;
+- `gateway_audit_chain_heads`: one current chain version, epoch, sequence, and
+  digest per organization;
+- `gateway_audit_chain_entries`: canonical current audit events and their
+  ordered digest links;
+- `gateway_audit_chain_checkpoints`: local receipts for successful external
+  Object Lock writes.
+
+The usage/secret event insert, chain-entry insert, and chain-head advance are
+one transaction. A failure rolls back all three. PostgreSQL takes a row lock on
+the tenant head so multiple gateway instances serialize the next sequence;
+SQLite obtains its write transaction before it creates the event. Runtime
+database access is intentionally append-only for historical entries: the
+runtime role has `SELECT, INSERT` on chain entries and no direct `UPDATE` or
+`DELETE` privilege. SQLite installs no-update/no-delete triggers for epochs,
+entries, and checkpoint receipts; PostgreSQL uses restricted grants. Those
+guards constrain the normal gateway runtime, not a database owner or a host
+root administrator able to alter the schema or database file. The
+migration/operator role remains distinct from the runtime role.
+
+Existing audit evidence remains available after the migration but is not
+pretended to have been commit-chain protected before v4. A partial v4 ledger,
+missing table, noncontiguous migration ledger, or newer binary/database mismatch
+fails closed. Do not create the tables by hand or edit the migration ledger.
+
+For a restore or migration that resumes from a protected checkpoint, start a
+new explicit epoch with `hormuz audit-chain epoch`; then verify using the same
+canonical checkpoint artifact. A recovered older backup that lacks the
+checkpointed event cannot pass verification without that explicit external
+bridge. This is deliberate evidence of the recovery boundary, not a missing
+fallback behavior.
+
 ## Upgrade, rollback, and recovery
 
 Use a stopped or drained gateway and a tested backup/snapshot as the starting point for every durable-store change:

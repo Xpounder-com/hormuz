@@ -16,6 +16,7 @@ from pathlib import Path
 
 from hormuz.cli import (
     _audit_anchor,
+    _audit_chain,
     _audit_export,
     _audit_since,
     _auth_token,
@@ -23,12 +24,26 @@ from hormuz.cli import (
     _client_config,
     _serve,
     _status,
+    _write_audit_chain_checkpoint,
     build_parser,
     main,
 )
-from hormuz.config import AuditAnchorConfig, ConfigError, GatewayConfig, Identity, KeyCustodyConfig, OIDCIssuerConfig
+from hormuz.config import (
+    AuditAnchorConfig,
+    AuditChainConfig,
+    ConfigError,
+    GatewayConfig,
+    Identity,
+    KeyCustodyConfig,
+    OIDCIssuerConfig,
+)
 from hormuz.contracts import validate_contract
-from hormuz.custody import AuditAnchorReceipt, parse_audit_anchor_artifact
+from hormuz.custody import AuditAnchorReceipt, CustodyError, parse_audit_anchor_artifact
+from hormuz.audit_chain import (
+    build_audit_chain_checkpoint,
+    parse_audit_chain_checkpoint,
+    serialize_audit_chain_checkpoint,
+)
 from hormuz.store import UsageStore
 
 
@@ -451,6 +466,127 @@ class ClientConfigTests(unittest.TestCase):
             self.assertIn(f"artifact_id={artifact['artifact_id']}", stderr.getvalue())
             self.assertNotIn("Alice Example", stderr.getvalue())
 
+    def test_audit_chain_anchor_verify_and_explicit_epoch_use_canonical_checkpoint_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config = replace(
+                self.config,
+                database_path=root / "usage.sqlite3",
+                key_custody=KeyCustodyConfig(
+                    backend="aws-kms",
+                    region="us-east-1",
+                    key_references={
+                        "provider_credential": "alias/provider",
+                        "data_encryption": "alias/data",
+                    },
+                ),
+                audit_anchor=AuditAnchorConfig(
+                    backend="aws-s3-object-lock",
+                    region="us-east-1",
+                    bucket="hormuz-audit-bucket",
+                    prefix="immutable/audit",
+                    retention_days=365,
+                    legal_hold=False,
+                ),
+                audit_chain=AuditChainConfig(maximum_anchor_age_seconds=3600),
+            )
+            identity = next(iter(config.identities_by_token.values()))
+            UsageStore(config.database_path).record(
+                identity=identity,
+                client="codex",
+                protocol="openai",
+                requested_model="gpt-5.4-mini",
+                resolved_alias="gpt-5.4-mini",
+                upstream_model="gpt-5.4-mini",
+                policy_action="allowed",
+                status="succeeded",
+            )
+            checkpoint_path = root / "checkpoint.json"
+            sink = _RecordingAuditAnchor()
+            anchor_args = argparse.Namespace(
+                audit_chain_command="anchor",
+                output=str(checkpoint_path),
+                force=False,
+            )
+            anchor_output = io.StringIO()
+            with mock.patch("hormuz.cli.create_audit_anchor_sink", return_value=sink), redirect_stdout(anchor_output):
+                self.assertEqual(_audit_chain(config, anchor_args), 0)
+            checkpoint = parse_audit_chain_checkpoint(checkpoint_path.read_bytes())
+            self.assertEqual(parse_audit_chain_checkpoint(sink.calls[0]["artifact"]), checkpoint)  # type: ignore[arg-type]
+            self.assertEqual(os.stat(checkpoint_path).st_mode & 0o777, 0o600)
+            self.assertIn("audit_chain_anchor=test-anchor", anchor_output.getvalue())
+            self.assertNotIn("Alice Example", anchor_output.getvalue())
+
+            verify_args = argparse.Namespace(audit_chain_command="verify", checkpoint=str(checkpoint_path))
+            verify_output = io.StringIO()
+            with redirect_stdout(verify_output):
+                self.assertEqual(_audit_chain(config, verify_args), 0)
+            self.assertIn("audit_chain_verified=true", verify_output.getvalue())
+
+            epoch_args = argparse.Namespace(
+                audit_chain_command="epoch",
+                checkpoint=str(checkpoint_path),
+                reason="migration",
+                confirm="START_NEW_AUDIT_CHAIN_EPOCH",
+            )
+            epoch_output = io.StringIO()
+            with redirect_stdout(epoch_output):
+                self.assertEqual(_audit_chain(config, epoch_args), 0)
+            self.assertIn("audit_chain_epoch_started=true", epoch_output.getvalue())
+
+            status_args = argparse.Namespace(audit_chain_command="status")
+            status_output = io.StringIO()
+            with redirect_stdout(status_output):
+                self.assertEqual(_audit_chain(config, status_args), 0)
+            self.assertIn("chain_epoch=2", status_output.getvalue())
+            self.assertIn("anchor_overdue=false", status_output.getvalue())
+
+    def test_audit_chain_epoch_rejects_a_checkpoint_for_another_tenant(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config = replace(self.config, database_path=root / "usage.sqlite3")
+            identity = next(iter(config.identities_by_token.values()))
+            other_identity = replace(identity, organization_id="other-organization")
+            store = UsageStore(config.database_path)
+            store.record(
+                identity=other_identity,
+                client="codex",
+                protocol="openai",
+                requested_model="gpt-5.4-mini",
+                resolved_alias="gpt-5.4-mini",
+                upstream_model="gpt-5.4-mini",
+                policy_action="allowed",
+                status="succeeded",
+            )
+            checkpoint_path = root / "other-checkpoint.json"
+            checkpoint_path.write_bytes(
+                serialize_audit_chain_checkpoint(
+                    build_audit_chain_checkpoint(store.audit_chain_head(organization_id="other-organization"))
+                )
+            )
+            args = argparse.Namespace(
+                audit_chain_command="epoch",
+                checkpoint=str(checkpoint_path),
+                reason="restore",
+                confirm="START_NEW_AUDIT_CHAIN_EPOCH",
+            )
+            with self.assertRaises(CustodyError) as raised:
+                _audit_chain(config, args)
+            self.assertEqual(raised.exception.code, "audit_chain_tenant_mismatch")
+
+    def test_audit_chain_checkpoint_write_failure_preserves_the_existing_artifact(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            checkpoint_path = Path(temporary) / "checkpoint.json"
+            checkpoint_path.write_bytes(b"previous-trusted-checkpoint")
+
+            with mock.patch("hormuz.cli.os.write", side_effect=OSError("disk full")):
+                with self.assertRaises(CustodyError) as raised:
+                    _write_audit_chain_checkpoint(checkpoint_path, b"new-checkpoint", force=True)
+
+            self.assertEqual(raised.exception.code, "audit_chain_checkpoint_write_unavailable")
+            self.assertEqual(checkpoint_path.read_bytes(), b"previous-trusted-checkpoint")
+            self.assertEqual(list(checkpoint_path.parent.glob(".checkpoint.json.*.tmp")), [])
+
     def test_custody_and_audit_anchor_commands_are_explicit(self) -> None:
         seal = build_parser().parse_args(
             [
@@ -469,6 +605,11 @@ class ClientConfigTests(unittest.TestCase):
         anchor = build_parser().parse_args(["audit-anchor", "--kind", "security"])
         self.assertEqual(anchor.command, "audit-anchor")
         self.assertEqual(anchor.kind, "security")
+        chain = build_parser().parse_args(
+            ["audit-chain", "epoch", "--checkpoint", "/secure/checkpoint.json", "--reason", "restore", "--confirm", "START_NEW_AUDIT_CHAIN_EPOCH"]
+        )
+        self.assertEqual(chain.command, "audit-chain")
+        self.assertEqual(chain.audit_chain_command, "epoch")
 
 if __name__ == "__main__":
     unittest.main()

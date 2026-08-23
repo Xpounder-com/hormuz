@@ -6,6 +6,7 @@
   },
   "checks": {
     "active_policy_versions": true,
+    "audit_chain_integrity": true,
     "corrupt_dump_rejected": true,
     "migration_ledger": true,
     "missing_dump_rejected": true,
@@ -29,10 +30,14 @@
   "schema_id": "hormuz.postgresql-recovery-drill-summary",
   "schema_version": 1,
   "state": {
-    "migration_version": 3,
+    "migration_version": 4,
     "record_counts": {
       "active_budget_reservations": 4,
       "active_policy_versions": 2,
+      "audit_chain_checkpoints": 0,
+      "audit_chain_entries": 4,
+      "audit_chain_epochs": 2,
+      "audit_chain_heads": 2,
       "organizations": 2,
       "policy_administrators": 2,
       "policy_control_events": 6,

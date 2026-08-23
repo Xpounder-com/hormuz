@@ -1,14 +1,19 @@
 {
   "checks": {
     "active_policy_versions": true,
+    "audit_chain_integrity": true,
     "migration_ledger": true,
     "rls_without_organization_context": true,
     "tenant_scoped_repository": true
   },
-  "migration_version": 3,
+  "migration_version": 4,
   "record_counts": {
     "active_budget_reservations": 4,
     "active_policy_versions": 2,
+    "audit_chain_checkpoints": 0,
+    "audit_chain_entries": 4,
+    "audit_chain_epochs": 2,
+    "audit_chain_heads": 2,
     "organizations": 2,
     "policy_administrators": 2,
     "policy_control_events": 6,

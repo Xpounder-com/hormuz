@@ -3,12 +3,25 @@
 from __future__ import annotations
 
 import json
+import hmac
 import uuid
 from datetime import datetime, timedelta, timezone
+from typing import Any, Mapping
 
+from .audit_chain import (
+    AuditChainAnchorStatus,
+    AuditChainError,
+    AuditChainHead,
+    audit_chain_checkpoint_position,
+    audit_chain_checkpoint_summary,
+    build_audit_chain_entry,
+    canonical_json_text,
+    verify_audit_chain_entry,
+)
 from .config import Identity
 from .contracts import (
     ALLOCATION_BASIS_DIRECT_GATEWAY_REQUEST,
+    AUDIT_CHAIN_VERSION,
     AUDIT_EVENT_SCHEMA_ID,
     AUDIT_EVENT_SCHEMA_VERSION,
     COST_BASIS_CONFIGURED_RATE_CARD_ESTIMATE,
@@ -22,7 +35,7 @@ from .contracts import (
     validate_request_attempt_event,
     validate_request_status,
 )
-from .evidence import security_audit_event, usage_audit_event
+from .evidence import EvidenceStorageError, security_audit_event, usage_audit_event
 from .postgres import (
     PostgresConnectionPool,
     PostgresStorageError,
@@ -59,6 +72,7 @@ class PostgresUsageStore:
         runtime_role: str = "hormuz_runtime",
         verify_schema: bool = True,
         connection_pool: PostgresConnectionPool | None = None,
+        audit_chain_maximum_anchor_age_seconds: int | None = None,
     ):
         if not isinstance(dsn, str) or not dsn:
             raise PostgresStorageError("postgres_dsn_unavailable")
@@ -69,6 +83,16 @@ class PostgresUsageStore:
         self.organization_ids = normalized_organizations
         self.schema = validate_postgres_identifier(schema, "postgres_schema")
         self.runtime_role = validate_postgres_identifier(runtime_role, "postgres_runtime_role")
+        if (
+            audit_chain_maximum_anchor_age_seconds is not None
+            and (
+                isinstance(audit_chain_maximum_anchor_age_seconds, bool)
+                or not isinstance(audit_chain_maximum_anchor_age_seconds, int)
+                or audit_chain_maximum_anchor_age_seconds < 1
+            )
+        ):
+            raise PostgresStorageError("audit_chain_configuration_invalid")
+        self.audit_chain_maximum_anchor_age_seconds = audit_chain_maximum_anchor_age_seconds
         self._qualified_schema = '"' + self.schema.replace('"', '""') + '"'
         self._connection_pool = connection_pool
         if verify_schema:
@@ -121,6 +145,224 @@ class PostgresUsageStore:
                         """,
                         (organization_id,),
                     )
+                    for table in (
+                        "gateway_audit_chain_epochs",
+                        "gateway_audit_chain_entries",
+                        "gateway_audit_chain_checkpoints",
+                    ):
+                        cursor.execute(
+                            """
+                            SELECT
+                                has_table_privilege(current_user, %s, 'UPDATE') AS can_update,
+                                has_table_privilege(current_user, %s, 'DELETE') AS can_delete
+                            """,
+                            (self._table(table), self._table(table)),
+                        )
+                        privileges = cursor.fetchone()
+                        if (
+                            privileges is None
+                            or bool(privileges["can_update"])
+                            or bool(privileges["can_delete"])
+                        ):
+                            raise PostgresStorageError("audit_chain_runtime_privilege_excess")
+                    if self.audit_chain_maximum_anchor_age_seconds is not None:
+                        status = self._audit_chain_anchor_status_in_cursor(
+                            cursor,
+                            organization_id=organization_id,
+                            maximum_age_seconds=self.audit_chain_maximum_anchor_age_seconds,
+                            now=datetime.now(timezone.utc),
+                        )
+                        if status.overdue:
+                            raise PostgresStorageError("audit_chain_anchor_overdue")
+
+    def _audit_chain_head_in_cursor(
+        self,
+        cursor: Any,
+        *,
+        organization_id: str,
+        create: bool = True,
+        for_update: bool = False,
+        for_share: bool = False,
+    ) -> AuditChainHead | None:
+        """Return one tenant head, lazily creating only an initial empty epoch."""
+
+        if create:
+            cursor.execute(
+                f"""
+                INSERT INTO {self._table('gateway_audit_chain_epochs')} (
+                    organization_id, chain_version, chain_epoch, created_at, reason_code,
+                    predecessor_chain_epoch, predecessor_sequence, predecessor_head_digest
+                ) VALUES (%s, 1, 1, CURRENT_TIMESTAMP, 'initial_adoption', NULL, NULL, NULL)
+                ON CONFLICT (organization_id, chain_epoch) DO NOTHING
+                """,
+                (organization_id,),
+            )
+            cursor.execute(
+                f"""
+                INSERT INTO {self._table('gateway_audit_chain_heads')} (
+                    organization_id, chain_version, chain_epoch, sequence, head_digest
+                ) VALUES (%s, 1, 1, 0, NULL)
+                ON CONFLICT (organization_id) DO NOTHING
+                """,
+                (organization_id,),
+            )
+        if for_update and for_share:
+            raise PostgresStorageError("audit_chain_lock_invalid")
+        lock = " FOR UPDATE" if for_update else " FOR SHARE" if for_share else ""
+        cursor.execute(
+            f"""
+            SELECT organization_id, chain_version, chain_epoch, sequence, head_digest
+            FROM {self._table('gateway_audit_chain_heads')}
+            WHERE organization_id = %s{lock}
+            """,
+            (organization_id,),
+        )
+        row = cursor.fetchone()
+        if row is None:
+            if not create:
+                return None
+            raise PostgresStorageError("audit_chain_head_unavailable")
+        head_digest = row["head_digest"]
+        if head_digest is not None and not isinstance(head_digest, str):
+            raise PostgresStorageError("audit_chain_head_malformed")
+        return AuditChainHead(
+            organization_id=str(row["organization_id"]),
+            chain_version=int(row["chain_version"]),
+            chain_epoch=int(row["chain_epoch"]),
+            sequence=int(row["sequence"]),
+            head_digest=head_digest,
+        )
+
+    def _append_audit_chain_entry_in_cursor(
+        self,
+        cursor: Any,
+        *,
+        event: Mapping[str, object],
+    ) -> AuditChainHead:
+        """Append one event and head update in the caller's existing transaction."""
+
+        organization_id = event.get("organization_id")
+        event_id = event.get("id")
+        if not isinstance(organization_id, str) or not organization_id or not isinstance(event_id, str) or not event_id:
+            raise PostgresStorageError("audit_chain_event_malformed")
+        head = self._audit_chain_head_in_cursor(
+            cursor,
+            organization_id=organization_id,
+            for_update=True,
+        )
+        if head is None:
+            raise PostgresStorageError("audit_chain_head_unavailable")
+        try:
+            entry = build_audit_chain_entry(
+                event,
+                chain_version=head.chain_version,
+                chain_epoch=head.chain_epoch,
+                sequence=head.sequence + 1,
+                previous_digest=head.head_digest,
+            )
+        except AuditChainError as error:
+            raise PostgresStorageError(error.code) from None
+        event_value = entry["event"]
+        if not isinstance(event_value, Mapping):
+            raise PostgresStorageError("audit_chain_entry_malformed")
+        cursor.execute(
+            f"""
+            INSERT INTO {self._table('gateway_audit_chain_entries')} (
+                organization_id, chain_version, chain_epoch, sequence,
+                entry_schema_id, entry_schema_version, event_id, previous_digest,
+                event_digest, event_json, appended_at
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+            """,
+            (
+                organization_id,
+                entry["chain_version"],
+                entry["chain_epoch"],
+                entry["sequence"],
+                entry["schema_id"],
+                entry["schema_version"],
+                event_id,
+                entry["previous_digest"],
+                entry["event_digest"],
+                canonical_json_text(dict(event_value)),
+            ),
+        )
+        if cursor.rowcount != 1:
+            raise PostgresStorageError("audit_chain_entry_unavailable")
+        cursor.execute(
+            f"""
+            UPDATE {self._table('gateway_audit_chain_heads')}
+            SET sequence = %s, head_digest = %s
+            WHERE organization_id = %s
+              AND chain_version = %s
+              AND chain_epoch = %s
+              AND sequence = %s
+              AND head_digest IS NOT DISTINCT FROM %s
+            """,
+            (
+                entry["sequence"],
+                entry["event_digest"],
+                organization_id,
+                head.chain_version,
+                head.chain_epoch,
+                head.sequence,
+                head.head_digest,
+            ),
+        )
+        if cursor.rowcount != 1:
+            raise PostgresStorageError("audit_chain_head_conflict")
+        return AuditChainHead(
+            organization_id=organization_id,
+            chain_version=head.chain_version,
+            chain_epoch=head.chain_epoch,
+            sequence=int(entry["sequence"]),
+            head_digest=str(entry["event_digest"]),
+        )
+
+    def _usage_audit_event_in_cursor(self, cursor: Any, event_id: str) -> dict[str, object]:
+        cursor.execute(
+            f"""
+            SELECT
+                id, occurred_at, evidence_schema_id, evidence_schema_version,
+                organization_id, actor_id, actor_name, team_id, team_name,
+                identity_type, authentication_source, client, protocol, requested_model,
+                resolved_alias, upstream_model, provider_reported_model, policy_version,
+                policy_action, status, input_tokens, output_tokens,
+                cache_read_tokens, cache_write_tokens, reasoning_tokens,
+                cost_microusd, cost_basis, allocation_basis, coverage,
+                provider_request_id, redaction_count, redaction_rules
+            FROM {self._table('gateway_usage_events')}
+            WHERE id = %s
+            """,
+            (event_id,),
+        )
+        row = cursor.fetchone()
+        if row is None:
+            raise PostgresStorageError("audit_chain_source_event_missing")
+        try:
+            return usage_audit_event(dict(row))
+        except EvidenceStorageError as error:
+            raise PostgresStorageError(error.code) from None
+
+    def _secret_audit_event_in_cursor(self, cursor: Any, event_id: str) -> dict[str, object]:
+        cursor.execute(
+            f"""
+            SELECT
+                id, occurred_at, evidence_schema_id, evidence_schema_version,
+                organization_id, actor_id, actor_name, team_id, team_name,
+                identity_type, authentication_source, client, protocol, requested_model,
+                policy_version, coverage, action, detection_count, rules
+            FROM {self._table('gateway_secret_events')}
+            WHERE id = %s
+            """,
+            (event_id,),
+        )
+        row = cursor.fetchone()
+        if row is None:
+            raise PostgresStorageError("audit_chain_source_event_missing")
+        try:
+            return security_audit_event(dict(row))
+        except EvidenceStorageError as error:
+            raise PostgresStorageError(error.code) from None
 
     def _record_in_cursor(
         self,
@@ -206,6 +448,10 @@ class PostgresUsageStore:
                 max(0, redaction_count),
                 json.dumps(sorted(set(redaction_rules)), separators=(",", ":")),
             ),
+        )
+        self._append_audit_chain_entry_in_cursor(
+            cursor,
+            event=self._usage_audit_event_in_cursor(cursor, event_id),
         )
         return event_id
 
@@ -316,6 +562,10 @@ class PostgresUsageStore:
                         max(0, detection_count),
                         json.dumps(sorted(set(rules)), separators=(",", ":")),
                     ),
+                )
+                self._append_audit_chain_entry_in_cursor(
+                    cursor,
+                    event=self._secret_audit_event_in_cursor(cursor, event_id),
                 )
         return event_id
 
@@ -1123,6 +1373,518 @@ class PostgresUsageStore:
         events.sort(key=lambda event: (str(event["occurred_at"]), str(event["id"])))
         return events
 
+    def audit_chain_head(self, *, organization_id: str) -> AuditChainHead:
+        organization = self._organization(organization_id)
+        with self._transaction(organization) as connection:
+            with connection.cursor() as cursor:
+                head = self._audit_chain_head_in_cursor(cursor, organization_id=organization)
+        if head is None:
+            raise PostgresStorageError("audit_chain_head_unavailable")
+        return head
+
+    def _audit_chain_anchor_status_in_cursor(
+        self,
+        cursor: Any,
+        *,
+        organization_id: str,
+        maximum_age_seconds: int | None,
+        now: datetime,
+    ) -> AuditChainAnchorStatus:
+        head = self._audit_chain_head_in_cursor(
+            cursor,
+            organization_id=organization_id,
+            create=False,
+        )
+        if head is None:
+            return AuditChainAnchorStatus(
+                organization_id=organization_id,
+                chain_epoch=1,
+                sequence=0,
+                latest_checkpoint_at=None,
+                oldest_unanchored_at=None,
+                overdue=False,
+            )
+        cursor.execute(
+            f"""
+            SELECT sequence, anchored_at
+            FROM {self._table('gateway_audit_chain_checkpoints')}
+            WHERE organization_id = %s AND chain_epoch = %s
+            ORDER BY sequence DESC, anchored_at DESC
+            LIMIT 1
+            """,
+            (organization_id, head.chain_epoch),
+        )
+        checkpoint = cursor.fetchone()
+        checkpoint_sequence = 0
+        checkpoint_at: datetime | None = None
+        if checkpoint is not None:
+            checkpoint_sequence = int(checkpoint["sequence"])
+            if checkpoint_sequence > head.sequence:
+                raise PostgresStorageError("audit_chain_checkpoint_mismatch")
+            checkpoint_at = _postgres_timestamp(checkpoint["anchored_at"], code="audit_chain_checkpoint_malformed")
+        oldest_unanchored_at: datetime | None = None
+        if head.sequence > checkpoint_sequence:
+            cursor.execute(
+                f"""
+                SELECT appended_at
+                FROM {self._table('gateway_audit_chain_entries')}
+                WHERE organization_id = %s AND chain_epoch = %s AND sequence > %s
+                ORDER BY sequence ASC
+                LIMIT 1
+                """,
+                (organization_id, head.chain_epoch, checkpoint_sequence),
+            )
+            row = cursor.fetchone()
+            if row is None:
+                raise PostgresStorageError("audit_chain_head_mismatch")
+            oldest_unanchored_at = _postgres_timestamp(row["appended_at"], code="audit_chain_entry_malformed")
+        overdue = bool(
+            maximum_age_seconds is not None
+            and oldest_unanchored_at is not None
+            and (now - oldest_unanchored_at).total_seconds() > maximum_age_seconds
+        )
+        return AuditChainAnchorStatus(
+            organization_id=organization_id,
+            chain_epoch=head.chain_epoch,
+            sequence=head.sequence,
+            latest_checkpoint_at=checkpoint_at,
+            oldest_unanchored_at=oldest_unanchored_at,
+            overdue=overdue,
+        )
+
+    def audit_chain_anchor_status(
+        self,
+        *,
+        organization_id: str,
+        maximum_age_seconds: int | None = None,
+        now: datetime | None = None,
+    ) -> AuditChainAnchorStatus:
+        _validate_anchor_age(maximum_age_seconds)
+        current = now or datetime.now(timezone.utc)
+        if current.tzinfo is None:
+            raise PostgresStorageError("audit_chain_anchor_age_invalid")
+        organization = self._organization(organization_id)
+        with self._transaction(organization) as connection:
+            with connection.cursor() as cursor:
+                return self._audit_chain_anchor_status_in_cursor(
+                    cursor,
+                    organization_id=organization,
+                    maximum_age_seconds=maximum_age_seconds,
+                    now=current.astimezone(timezone.utc),
+                )
+
+    def record_audit_chain_checkpoint(
+        self,
+        *,
+        checkpoint: Mapping[str, object],
+        artifact_sha256: str,
+        anchor_backend: str,
+        object_version: str | None,
+        anchored_at: datetime | None = None,
+    ) -> None:
+        try:
+            checkpoint_id, organization_id, epoch, sequence, head_digest = audit_chain_checkpoint_summary(checkpoint)
+        except AuditChainError as error:
+            raise PostgresStorageError(error.code) from None
+        chain_version = checkpoint.get("chain_version")
+        if (
+            not isinstance(chain_version, int)
+            or not _is_sha256_digest(artifact_sha256)
+            or not isinstance(anchor_backend, str)
+            or not anchor_backend
+            or (object_version is not None and not isinstance(object_version, str))
+        ):
+            raise PostgresStorageError("audit_chain_checkpoint_malformed")
+        timestamp = anchored_at or datetime.now(timezone.utc)
+        if timestamp.tzinfo is None:
+            raise PostgresStorageError("audit_chain_checkpoint_malformed")
+        organization = self._organization(organization_id)
+        with self._transaction(organization) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    f"""
+                    SELECT event_digest
+                    FROM {self._table('gateway_audit_chain_entries')}
+                    WHERE organization_id = %s AND chain_epoch = %s AND sequence = %s
+                    """,
+                    (organization, epoch, sequence),
+                )
+                entry = cursor.fetchone()
+                if entry is None or not isinstance(entry["event_digest"], str):
+                    raise PostgresStorageError("audit_chain_checkpoint_missing")
+                if not hmac.compare_digest(str(entry["event_digest"]), head_digest):
+                    raise PostgresStorageError("audit_chain_checkpoint_mismatch")
+                cursor.execute(
+                    f"""
+                    INSERT INTO {self._table('gateway_audit_chain_checkpoints')} (
+                        checkpoint_id, organization_id, chain_version, chain_epoch, sequence,
+                        head_digest, artifact_sha256, anchor_backend, object_version, anchored_at
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (checkpoint_id) DO NOTHING
+                    """,
+                    (
+                        checkpoint_id,
+                        organization,
+                        chain_version,
+                        epoch,
+                        sequence,
+                        head_digest,
+                        artifact_sha256,
+                        anchor_backend,
+                        object_version,
+                        timestamp.astimezone(timezone.utc),
+                    ),
+                )
+                cursor.execute(
+                    f"""
+                    SELECT organization_id, chain_version, chain_epoch, sequence, head_digest,
+                           artifact_sha256, anchor_backend, object_version
+                    FROM {self._table('gateway_audit_chain_checkpoints')}
+                    WHERE checkpoint_id = %s
+                    """,
+                    (checkpoint_id,),
+                )
+                existing = cursor.fetchone()
+                if existing is None or (
+                    existing["organization_id"] != organization
+                    or int(existing["chain_version"]) != chain_version
+                    or int(existing["chain_epoch"]) != epoch
+                    or int(existing["sequence"]) != sequence
+                    or not hmac.compare_digest(str(existing["head_digest"]), head_digest)
+                    or not hmac.compare_digest(str(existing["artifact_sha256"]), artifact_sha256)
+                    or existing["anchor_backend"] != anchor_backend
+                    or existing["object_version"] != object_version
+                ):
+                    raise PostgresStorageError("audit_chain_checkpoint_conflict")
+
+    def begin_audit_chain_epoch(
+        self,
+        *,
+        checkpoint: Mapping[str, object],
+        reason_code: str,
+    ) -> AuditChainHead:
+        if reason_code not in {"restore", "migration"}:
+            raise PostgresStorageError("audit_chain_epoch_reason_invalid")
+        try:
+            _, organization_id, predecessor_epoch, predecessor_sequence, predecessor_digest = audit_chain_checkpoint_summary(
+                checkpoint
+            )
+        except AuditChainError as error:
+            raise PostgresStorageError(error.code) from None
+        chain_version = checkpoint.get("chain_version")
+        if not isinstance(chain_version, int):
+            raise PostgresStorageError("audit_chain_checkpoint_malformed")
+        organization = self._organization(organization_id)
+        new_epoch = predecessor_epoch + 1
+        with self._transaction(organization) as connection:
+            with connection.cursor() as cursor:
+                head = self._audit_chain_head_in_cursor(
+                    cursor,
+                    organization_id=organization,
+                    for_update=True,
+                )
+                if head is None:
+                    raise PostgresStorageError("audit_chain_head_unavailable")
+                if chain_version != head.chain_version or new_epoch <= head.chain_epoch:
+                    raise PostgresStorageError("audit_chain_epoch_predecessor_invalid")
+                cursor.execute(
+                    f"""
+                    INSERT INTO {self._table('gateway_audit_chain_epochs')} (
+                        organization_id, chain_version, chain_epoch, created_at, reason_code,
+                        predecessor_chain_epoch, predecessor_sequence, predecessor_head_digest
+                    ) VALUES (%s, %s, %s, CURRENT_TIMESTAMP, %s, %s, %s, %s)
+                    ON CONFLICT (organization_id, chain_epoch) DO NOTHING
+                    """,
+                    (
+                        organization,
+                        chain_version,
+                        new_epoch,
+                        reason_code,
+                        predecessor_epoch,
+                        predecessor_sequence,
+                        predecessor_digest,
+                    ),
+                )
+                cursor.execute(
+                    f"""
+                    SELECT chain_version, predecessor_chain_epoch, predecessor_sequence, predecessor_head_digest
+                    FROM {self._table('gateway_audit_chain_epochs')}
+                    WHERE organization_id = %s AND chain_epoch = %s
+                    """,
+                    (organization, new_epoch),
+                )
+                epoch = cursor.fetchone()
+                if epoch is None or (
+                    int(epoch["chain_version"]) != chain_version
+                    or int(epoch["predecessor_chain_epoch"]) != predecessor_epoch
+                    or int(epoch["predecessor_sequence"]) != predecessor_sequence
+                    or not hmac.compare_digest(str(epoch["predecessor_head_digest"]), predecessor_digest)
+                ):
+                    raise PostgresStorageError("audit_chain_epoch_conflict")
+                cursor.execute(
+                    f"""
+                    UPDATE {self._table('gateway_audit_chain_heads')}
+                    SET chain_epoch = %s, sequence = 0, head_digest = %s
+                    WHERE organization_id = %s AND chain_version = %s AND chain_epoch = %s
+                      AND sequence = %s AND head_digest IS NOT DISTINCT FROM %s
+                    """,
+                    (
+                        new_epoch,
+                        predecessor_digest,
+                        organization,
+                        head.chain_version,
+                        head.chain_epoch,
+                        head.sequence,
+                        head.head_digest,
+                    ),
+                )
+                if cursor.rowcount != 1:
+                    raise PostgresStorageError("audit_chain_head_conflict")
+        return AuditChainHead(
+            organization_id=organization,
+            chain_version=chain_version,
+            chain_epoch=new_epoch,
+            sequence=0,
+            head_digest=predecessor_digest,
+        )
+
+    def _audit_chain_source_events_in_cursor(
+        self,
+        cursor: Any,
+        *,
+        organization_id: str,
+    ) -> dict[str, dict[str, object]]:
+        sources: dict[str, dict[str, object]] = {}
+        cursor.execute(
+            f"""
+            SELECT
+                id, occurred_at, evidence_schema_id, evidence_schema_version,
+                organization_id, actor_id, actor_name, team_id, team_name,
+                identity_type, authentication_source, client, protocol, requested_model,
+                resolved_alias, upstream_model, provider_reported_model, policy_version,
+                policy_action, status, input_tokens, output_tokens,
+                cache_read_tokens, cache_write_tokens, reasoning_tokens,
+                cost_microusd, cost_basis, allocation_basis, coverage,
+                provider_request_id, redaction_count, redaction_rules
+            FROM {self._table('gateway_usage_events')}
+            WHERE organization_id = %s
+            """,
+            (organization_id,),
+        )
+        usage_rows = cursor.fetchall()
+        cursor.execute(
+            f"""
+            SELECT
+                id, occurred_at, evidence_schema_id, evidence_schema_version,
+                organization_id, actor_id, actor_name, team_id, team_name,
+                identity_type, authentication_source, client, protocol, requested_model,
+                policy_version, coverage, action, detection_count, rules
+            FROM {self._table('gateway_secret_events')}
+            WHERE organization_id = %s
+            """,
+            (organization_id,),
+        )
+        secret_rows = cursor.fetchall()
+        for row in usage_rows:
+            try:
+                event = usage_audit_event(dict(row))
+            except EvidenceStorageError as error:
+                raise PostgresStorageError(error.code) from None
+            event_id = event.get("id")
+            if not isinstance(event_id, str) or event_id in sources:
+                raise PostgresStorageError("audit_chain_source_event_malformed")
+            sources[event_id] = event
+        for row in secret_rows:
+            try:
+                event = security_audit_event(dict(row))
+            except EvidenceStorageError as error:
+                raise PostgresStorageError(error.code) from None
+            event_id = event.get("id")
+            if not isinstance(event_id, str) or event_id in sources:
+                raise PostgresStorageError("audit_chain_source_event_malformed")
+            sources[event_id] = event
+        return sources
+
+    def verify_audit_chain(
+        self,
+        *,
+        organization_id: str,
+        checkpoint: Mapping[str, object] | None = None,
+    ) -> AuditChainHead:
+        organization = self._organization(organization_id)
+        checkpoint_tuple: tuple[int, int, int, str] | None = None
+        if checkpoint is not None:
+            try:
+                _, checkpoint_organization, checkpoint_version, checkpoint_epoch, checkpoint_sequence, checkpoint_digest = (
+                    audit_chain_checkpoint_position(checkpoint)
+                )
+            except AuditChainError as error:
+                raise PostgresStorageError(error.code) from None
+            if checkpoint_organization != organization:
+                raise PostgresStorageError("audit_chain_tenant_mismatch")
+            checkpoint_tuple = (
+                checkpoint_version,
+                checkpoint_epoch,
+                checkpoint_sequence,
+                checkpoint_digest,
+            )
+        with self._transaction(organization) as connection:
+            with connection.cursor() as cursor:
+                # Hold a shared lock on the tenant head for this full
+                # verification snapshot. Appenders acquire FOR UPDATE on the
+                # same row, so the verifier cannot mix an old entry list with
+                # a newly advanced head under PostgreSQL's READ COMMITTED
+                # default.
+                head = self._audit_chain_head_in_cursor(
+                    cursor,
+                    organization_id=organization,
+                    create=False,
+                    for_share=True,
+                )
+                if head is None:
+                    if checkpoint_tuple is not None:
+                        raise PostgresStorageError("audit_chain_checkpoint_mismatch")
+                    return AuditChainHead(organization, 1, 1, 0, None)
+                cursor.execute(
+                    f"""
+                    SELECT chain_version, chain_epoch, reason_code, predecessor_chain_epoch,
+                           predecessor_sequence, predecessor_head_digest
+                    FROM {self._table('gateway_audit_chain_epochs')}
+                    WHERE organization_id = %s
+                    ORDER BY chain_epoch ASC
+                    """,
+                    (organization,),
+                )
+                epochs = cursor.fetchall()
+                cursor.execute(
+                    f"""
+                    SELECT chain_version, chain_epoch, sequence, entry_schema_id,
+                           entry_schema_version, event_id, previous_digest, event_digest, event_json
+                    FROM {self._table('gateway_audit_chain_entries')}
+                    WHERE organization_id = %s
+                    ORDER BY chain_epoch ASC, sequence ASC
+                    """,
+                    (organization,),
+                )
+                entries = cursor.fetchall()
+                sources = self._audit_chain_source_events_in_cursor(cursor, organization_id=organization)
+        if head.chain_version != AUDIT_CHAIN_VERSION or head.chain_epoch < 1 or head.sequence < 0:
+            raise PostgresStorageError("audit_chain_head_malformed")
+        if head.head_digest is not None and not _is_sha256_digest(head.head_digest):
+            raise PostgresStorageError("audit_chain_head_malformed")
+        if checkpoint_tuple is not None and checkpoint_tuple[0] != head.chain_version:
+            raise PostgresStorageError("audit_chain_checkpoint_mismatch")
+
+        entries_by_epoch: dict[int, list[Mapping[str, object]]] = {}
+        for row in entries:
+            entries_by_epoch.setdefault(int(row["chain_epoch"]), []).append(row)
+        verified: dict[tuple[int, int], str] = {}
+        active_epoch_seen = False
+        checkpoint_matched = False
+        previous_epoch_number = 0
+        for epoch in epochs:
+            try:
+                chain_version = int(epoch["chain_version"])
+                epoch_number = int(epoch["chain_epoch"])
+            except (TypeError, ValueError):
+                raise PostgresStorageError("audit_chain_epoch_malformed") from None
+            if (
+                chain_version != head.chain_version
+                or epoch_number < 1
+                or epoch_number <= previous_epoch_number
+                or epoch_number > head.chain_epoch
+            ):
+                raise PostgresStorageError("audit_chain_epoch_malformed")
+            previous_epoch_number = epoch_number
+            reason_code = epoch["reason_code"]
+            predecessor_digest = epoch["predecessor_head_digest"]
+            predecessor_epoch = epoch["predecessor_chain_epoch"]
+            predecessor_sequence = epoch["predecessor_sequence"]
+            if epoch_number == 1:
+                if (
+                    reason_code != "initial_adoption"
+                    or predecessor_epoch is not None
+                    or predecessor_sequence is not None
+                    or predecessor_digest is not None
+                ):
+                    raise PostgresStorageError("audit_chain_epoch_malformed")
+                previous_digest: str | None = None
+            else:
+                if (
+                    reason_code not in {"restore", "migration"}
+                    or isinstance(predecessor_epoch, bool)
+                    or not isinstance(predecessor_epoch, int)
+                    or isinstance(predecessor_sequence, bool)
+                    or not isinstance(predecessor_sequence, int)
+                    or predecessor_epoch < 1
+                    or predecessor_epoch >= epoch_number
+                    or predecessor_sequence < 1
+                    or not _is_sha256_digest(predecessor_digest)
+                ):
+                    raise PostgresStorageError("audit_chain_epoch_malformed")
+                predecessor = verified.get((predecessor_epoch, predecessor_sequence))
+                if predecessor is not None:
+                    if not hmac.compare_digest(predecessor, predecessor_digest):
+                        raise PostgresStorageError("audit_chain_predecessor_invalid")
+                elif checkpoint_tuple is None or checkpoint_tuple != (
+                    chain_version,
+                    predecessor_epoch,
+                    predecessor_sequence,
+                    predecessor_digest,
+                ):
+                    raise PostgresStorageError("audit_chain_checkpoint_required")
+                else:
+                    checkpoint_matched = True
+                previous_digest = predecessor_digest
+            expected_sequence = 1
+            for row in entries_by_epoch.get(epoch_number, []):
+                try:
+                    parsed_event = json.loads(str(row["event_json"]))
+                    if not isinstance(parsed_event, dict):
+                        raise ValueError
+                    entry = {
+                        "schema_id": row["entry_schema_id"],
+                        "schema_version": row["entry_schema_version"],
+                        "organization_id": organization,
+                        "chain_version": row["chain_version"],
+                        "chain_epoch": row["chain_epoch"],
+                        "sequence": row["sequence"],
+                        "previous_digest": row["previous_digest"],
+                        "event_digest": row["event_digest"],
+                        "event": parsed_event,
+                    }
+                    event_id = parsed_event.get("id")
+                    if not isinstance(event_id, str) or row["event_id"] != event_id:
+                        raise AuditChainError("audit_chain_entry_malformed")
+                    digest = verify_audit_chain_entry(
+                        entry,
+                        expected_organization_id=organization,
+                        expected_chain_version=chain_version,
+                        expected_chain_epoch=epoch_number,
+                        expected_sequence=expected_sequence,
+                        expected_previous_digest=previous_digest,
+                        source_event=sources.get(event_id) if isinstance(event_id, str) else None,
+                    )
+                except (AuditChainError, ValueError, TypeError, json.JSONDecodeError) as error:
+                    code = error.code if isinstance(error, AuditChainError) else "audit_chain_entry_malformed"
+                    raise PostgresStorageError(code) from None
+                verified[(epoch_number, expected_sequence)] = digest
+                previous_digest = digest
+                expected_sequence += 1
+            if epoch_number == head.chain_epoch:
+                active_epoch_seen = True
+                if head.sequence != expected_sequence - 1 or head.head_digest != previous_digest:
+                    raise PostgresStorageError("audit_chain_head_mismatch")
+        if not active_epoch_seen or previous_epoch_number != head.chain_epoch:
+            raise PostgresStorageError("audit_chain_head_mismatch")
+        if set(entries_by_epoch).difference(verified_epoch for verified_epoch, _ in verified):
+            raise PostgresStorageError("audit_chain_epoch_malformed")
+        if checkpoint_tuple is not None and not checkpoint_matched:
+            digest = verified.get((checkpoint_tuple[1], checkpoint_tuple[2]))
+            if digest is None or not hmac.compare_digest(digest, checkpoint_tuple[3]):
+                raise PostgresStorageError("audit_chain_checkpoint_mismatch")
+        return head
+
 
 def _month_start() -> datetime:
     return datetime.now(timezone.utc).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
@@ -1147,3 +1909,33 @@ def _json_string_list(value: object) -> list[str]:
     if not isinstance(decoded, list) or any(not isinstance(item, str) for item in decoded):
         raise PostgresStorageError("request_attempt_evidence_malformed")
     return decoded
+
+
+def _postgres_timestamp(value: object, *, code: str) -> datetime:
+    if isinstance(value, datetime):
+        parsed = value
+    elif isinstance(value, str):
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            raise PostgresStorageError(code) from None
+    else:
+        raise PostgresStorageError(code)
+    if parsed.tzinfo is None:
+        raise PostgresStorageError(code)
+    return parsed.astimezone(timezone.utc)
+
+
+def _validate_anchor_age(value: int | None) -> None:
+    if value is None:
+        return
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise PostgresStorageError("audit_chain_anchor_age_invalid")
+
+
+def _is_sha256_digest(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value)
+    )

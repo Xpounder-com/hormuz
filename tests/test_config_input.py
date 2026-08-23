@@ -197,6 +197,9 @@ class ConfigurationInputTests(unittest.TestCase):
         def mutate_audit_anchor(value: dict[str, object]) -> None:
             value["audit_anchor"] = {"operator_secret_never_expose": "never-expose"}
 
+        def mutate_audit_chain(value: dict[str, object]) -> None:
+            value["audit_chain"] = {"operator_secret_never_expose": "never-expose"}
+
         mutations = (
             mutate_root,
             mutate_listen,
@@ -224,6 +227,7 @@ class ConfigurationInputTests(unittest.TestCase):
             mutate_key_custody,
             mutate_key_references,
             mutate_audit_anchor,
+            mutate_audit_chain,
         )
         for mutation in mutations:
             with self.subTest(boundary=mutation.__name__):
@@ -357,6 +361,46 @@ class ConfigurationInputTests(unittest.TestCase):
             environ=_EnvironmentMustNotBeRead(),
         )
         self.assertNotIn("test-identity-token", str(error))
+
+    def test_audit_chain_requires_a_valid_external_anchor_and_has_a_bounded_age(self) -> None:
+        raw = self._valid_configuration()
+        raw["key_custody"] = {
+            "backend": "aws-kms",
+            "region": "us-east-1",
+            "key_references": {
+                "provider_credential": "alias/hormuz-provider",
+                "data_encryption": "alias/hormuz-audit",
+            },
+        }
+        raw["audit_anchor"] = {
+            "backend": "aws-s3-object-lock",
+            "region": "us-east-1",
+            "bucket": "hormuz-audit-bucket",
+            "prefix": "immutable/audit",
+            "retention_days": 365,
+            "legal_hold": False,
+        }
+        raw["audit_chain"] = {"maximum_anchor_age_seconds": 3600}
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "hormuz.json"
+            path.write_text(json.dumps(raw), encoding="utf-8")
+            config = GatewayConfig.load(path, environ=TEST_ENVIRONMENT)
+        self.assertEqual(config.audit_chain.maximum_anchor_age_seconds, 3600)  # type: ignore[union-attr]
+
+        no_anchor = self._valid_configuration()
+        no_anchor["audit_chain"] = {"maximum_anchor_age_seconds": 3600}
+        self._assert_load_error(
+            json.dumps(no_anchor).encode("utf-8"),
+            "audit_chain requires audit_anchor",
+            environ=TEST_ENVIRONMENT,
+        )
+
+        raw["audit_chain"] = {"maximum_anchor_age_seconds": 59}
+        self._assert_load_error(
+            json.dumps(raw).encode("utf-8"),
+            "audit_chain.maximum_anchor_age_seconds must be at least 60 and at most 2678400",
+            environ=TEST_ENVIRONMENT,
+        )
 
     def test_cli_reports_only_fixed_raw_configuration_error_code(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
