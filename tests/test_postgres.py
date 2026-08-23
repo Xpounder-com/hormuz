@@ -1738,6 +1738,159 @@ class PostgresUsageStoreTests(unittest.TestCase):
             provider.server_close()
             provider_thread.join(timeout=10)
 
+    def test_terminated_idle_backend_connection_is_replaced_before_replica_egress(self) -> None:
+        """A replica replaces a stale backend connection without affecting its sibling.
+
+        This is deliberately a bounded connection-churn proof. It does not
+        claim PostgreSQL database outage recovery or high availability.
+        """
+
+        _ReplicaPolicyProviderHandler.reset()
+        provider = ThreadingHTTPServer(("127.0.0.1", 0), _ReplicaPolicyProviderHandler)
+        provider_thread = threading.Thread(target=provider.serve_forever, daemon=True)
+        provider_thread.start()
+
+        gateways: list[GatewayServer] = []
+        gateway_threads: list[threading.Thread] = []
+        try:
+            config, environment, _issuer = self._managed_config()
+            service = PolicyControlService(config, environ=environment)
+            service.bootstrap(organization_id="xpounder", credential_env="HORMUZ_POLICY_ADMIN_TOKEN")
+            active_policy = self._stage(
+                service,
+                environment=environment,
+                document=self._policy_document(),
+            )
+            service.activate(
+                organization_id="xpounder",
+                credential_env="HORMUZ_POLICY_ADMIN_TOKEN",
+                version_id=active_policy.version_id,
+            )
+
+            upstreams = dict(config.upstreams)
+            upstreams["openai"] = replace(
+                upstreams["openai"],
+                base_url=f"http://127.0.0.1:{provider.server_port}/v1",
+                api_key_env="TEST_REPLICA_CHURN_OPENAI_KEY",
+            )
+            upstreams["anthropic"] = replace(
+                upstreams["anthropic"],
+                api_key_env="TEST_REPLICA_CHURN_ANTHROPIC_KEY",
+            )
+            environment.update(
+                {
+                    "TEST_REPLICA_CHURN_OPENAI_KEY": "replica-churn-provider-key",
+                    "TEST_REPLICA_CHURN_ANTHROPIC_KEY": "replica-churn-anthropic-key",
+                }
+            )
+            configs = tuple(
+                replace(
+                    config,
+                    listen=replace(config.listen, port=_free_port()),
+                    upstreams=dict(upstreams),
+                )
+                for _ in range(2)
+            )
+            with mock.patch.dict(os.environ, environment, clear=False):
+                gateways = [GatewayServer(replica_config) for replica_config in configs]
+
+            self.assertIsNotNone(gateways[0].postgres_pool)
+            self.assertIsNotNone(gateways[1].postgres_pool)
+            self.assertIsNot(gateways[0].postgres_pool, gateways[1].postgres_pool)
+            gateway_threads = [serve_in_thread(gateway) for gateway in gateways]
+
+            def send_get(gateway: GatewayServer, path: str) -> tuple[int, bytes]:
+                connection = http.client.HTTPConnection("127.0.0.1", gateway.server_port, timeout=5)
+                try:
+                    connection.request("GET", path)
+                    response = connection.getresponse()
+                    return response.status, response.read()
+                finally:
+                    connection.close()
+
+            def send_request(gateway: GatewayServer, *, input_value: str) -> tuple[int, bytes]:
+                connection = http.client.HTTPConnection("127.0.0.1", gateway.server_port, timeout=5)
+                try:
+                    connection.request(
+                        "POST",
+                        "/v1/responses",
+                        body=json.dumps({"model": "gpt-5.4-mini", "input": input_value}),
+                        headers={
+                            "Authorization": "Bearer policy-test-alice-token",
+                            "Content-Type": "application/json",
+                        },
+                    )
+                    response = connection.getresponse()
+                    return response.status, response.read()
+                finally:
+                    connection.close()
+
+            churned_gateway, sibling_gateway = gateways
+            self.assertIsNotNone(churned_gateway.postgres_pool)
+            with churned_gateway.postgres_pool.connection() as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute("SELECT pg_backend_pid() AS backend_pid")
+                    stale_backend = cursor.fetchone()
+            assert stale_backend is not None
+            stale_backend_pid = int(stale_backend["backend_pid"])
+
+            with self.psycopg.connect(self.owner_dsn, autocommit=True) as owner:
+                with owner.cursor() as cursor:
+                    cursor.execute("SELECT pg_terminate_backend(%s)", (stale_backend_pid,))
+                    self.assertTrue(cursor.fetchone()[0])
+
+            churned_ready_status, churned_ready_body = send_get(churned_gateway, "/ready")
+            self.assertEqual(churned_ready_status, 200, churned_ready_body)
+            with churned_gateway.postgres_pool.connection() as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute("SELECT pg_backend_pid() AS backend_pid")
+                    replacement_backend = cursor.fetchone()
+            assert replacement_backend is not None
+            self.assertNotEqual(stale_backend_pid, int(replacement_backend["backend_pid"]))
+
+            churned_status, churned_body = send_request(
+                churned_gateway,
+                input_value="replacement backend gateway probe",
+            )
+            self.assertEqual(churned_status, 200, churned_body)
+            self.assertEqual(_ReplicaPolicyProviderHandler.request_count, 1)
+
+            sibling_ready_status, sibling_ready_body = send_get(sibling_gateway, "/ready")
+            self.assertEqual(sibling_ready_status, 200, sibling_ready_body)
+            sibling_status, sibling_body = send_request(
+                sibling_gateway,
+                input_value="independent sibling gateway probe",
+            )
+            self.assertEqual(sibling_status, 200, sibling_body)
+            self.assertEqual(_ReplicaPolicyProviderHandler.request_count, 2)
+
+            totals = churned_gateway.store.monthly_totals(organization_id="xpounder")
+            self.assertEqual((totals.requests, totals.denied_requests), (2, 0))
+            events = churned_gateway.store.audit_events(
+                since="2000-01-01T00:00:00+00:00",
+                organization_id="xpounder",
+            )
+            self.assertEqual(len(events), 2)
+            self.assertEqual({event["status"] for event in events}, {"succeeded"})
+
+            shared_store = PostgresUsageStore(
+                self.runtime_dsn,
+                organization_ids=("xpounder", "beta"),
+                schema=self.schema,
+                runtime_role=self.runtime_role,
+            )
+            self.assertEqual(shared_store.monthly_totals(organization_id="beta").requests, 0)
+        finally:
+            for gateway in gateways[: len(gateway_threads)]:
+                gateway.shutdown()
+            for gateway in gateways:
+                gateway.server_close()
+            for thread in gateway_threads:
+                thread.join(timeout=10)
+            provider.shutdown()
+            provider.server_close()
+            provider_thread.join(timeout=10)
+
     def test_runtime_pool_reuses_connections_without_tenant_state_leakage(self) -> None:
         pool = self._runtime_pool(
             min_connections=1,
