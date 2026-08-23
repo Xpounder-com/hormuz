@@ -197,6 +197,10 @@ def migrate_postgres(
                     raise PostgresStorageError("storage_schema_partial_upgrade")
                 if states and max(states) > POSTGRES_SCHEMA_VERSION:
                     raise PostgresStorageError("storage_schema_newer_than_binary")
+                if states and set(states) != set(range(1, max(states) + 1)):
+                    raise PostgresStorageError("storage_schema_partial_upgrade")
+                if states:
+                    _verify_applied_schema_shape(cursor, schema=schema, version=max(states))
                 for version in range(1, POSTGRES_SCHEMA_VERSION + 1):
                     if version in states:
                         continue
@@ -239,12 +243,18 @@ def verify_postgres_schema(
     schema: str = "hormuz",
     runtime_role: str = "hormuz_runtime",
     connection_pool: PostgresConnectionPool | None = None,
+    verify_runtime_schema: bool = True,
 ) -> PostgresSchemaStatus:
-    """Verify a runtime credential sees the complete supported schema only.
+    """Verify a credential sees the complete supported migration ledger.
 
     A long-running gateway supplies its bounded runtime pool so startup schema
     verification does not create an out-of-band runtime connection. One-shot
     operator and compatibility callers continue to use a direct connection.
+
+    By default, this also proves the restricted runtime credential can read
+    every durable evidence object required by the applied schema.  The
+    policy-control role is intentionally not authorized to read request
+    evidence, so its startup check verifies the shared migration ledger only.
     """
 
     schema = validate_postgres_identifier(schema, "postgres_schema")
@@ -258,6 +268,7 @@ def verify_postgres_schema(
                     sql=sql,
                     schema=schema,
                     runtime_role=runtime_role,
+                    verify_runtime_schema=verify_runtime_schema,
                 )
         except PostgresStorageError:
             raise
@@ -274,6 +285,7 @@ def verify_postgres_schema(
             sql=sql,
             schema=schema,
             runtime_role=runtime_role,
+            verify_runtime_schema=verify_runtime_schema,
         )
         return _verified_schema_status(rows)
     except PostgresStorageError:
@@ -290,8 +302,9 @@ def _schema_migration_rows(
     sql: Any,
     schema: str,
     runtime_role: str,
+    verify_runtime_schema: bool = True,
 ) -> list[Any]:
-    """Read the migration ledger under the restricted runtime role."""
+    """Read the migration ledger under a least-privileged product role."""
 
     with connection.transaction():
         with connection.cursor() as cursor:
@@ -301,17 +314,20 @@ def _schema_migration_rows(
                     "SELECT version, state FROM {}.hormuz_schema_migrations ORDER BY version"
                 ).format(sql.Identifier(schema))
             )
-            return cursor.fetchall()
+            rows = cursor.fetchall()
+            states = _schema_states(rows)
+            if (
+                verify_runtime_schema
+                and states
+                and all(state == "applied" for state in states.values())
+                and max(states) <= POSTGRES_SCHEMA_VERSION
+            ):
+                _verify_applied_schema_shape(cursor, schema=schema, version=max(states))
+            return rows
 
 
 def _verified_schema_status(rows: list[Any]) -> PostgresSchemaStatus:
-    states: dict[int, str] = {}
-    for row in rows:
-        if isinstance(row, Mapping):
-            version, state = row["version"], row["state"]
-        else:
-            version, state = row
-        states[int(version)] = str(state)
+    states = _schema_states(rows)
     if any(state != "applied" for state in states.values()):
         raise PostgresStorageError("storage_schema_partial_upgrade")
     if not states:
@@ -319,9 +335,141 @@ def _verified_schema_status(rows: list[Any]) -> PostgresSchemaStatus:
     maximum = max(states)
     if maximum > POSTGRES_SCHEMA_VERSION:
         raise PostgresStorageError("storage_schema_newer_than_binary")
+    if set(states) != set(range(1, maximum + 1)):
+        raise PostgresStorageError("storage_schema_partial_upgrade")
     if maximum != POSTGRES_SCHEMA_VERSION:
         raise PostgresStorageError("storage_schema_unavailable")
     return PostgresSchemaStatus(version=maximum, complete=True)
+
+
+def _schema_states(rows: list[Any]) -> dict[int, str]:
+    states: dict[int, str] = {}
+    for row in rows:
+        if isinstance(row, Mapping):
+            version, state = row["version"], row["state"]
+        else:
+            version, state = row
+        states[int(version)] = str(state)
+    return states
+
+
+def _verify_applied_schema_shape(cursor: Any, *, schema: str, version: int) -> None:
+    """Reject an applied ledger whose required durable objects are missing."""
+
+    required = {
+        "gateway_usage_events": {
+            "id",
+            "occurred_at",
+            "evidence_schema_id",
+            "evidence_schema_version",
+            "organization_id",
+            "actor_id",
+            "actor_name",
+            "team_id",
+            "team_name",
+            "identity_type",
+            "authentication_source",
+            "client",
+            "protocol",
+            "requested_model",
+            "policy_version",
+            "policy_action",
+            "status",
+            "input_tokens",
+            "output_tokens",
+            "cache_read_tokens",
+            "cache_write_tokens",
+            "reasoning_tokens",
+            "cost_microusd",
+            "cost_basis",
+            "allocation_basis",
+            "coverage",
+            "redaction_count",
+            "redaction_rules",
+        },
+        "gateway_secret_events": {
+            "id",
+            "occurred_at",
+            "evidence_schema_id",
+            "evidence_schema_version",
+            "organization_id",
+            "actor_id",
+            "actor_name",
+            "team_id",
+            "team_name",
+            "identity_type",
+            "authentication_source",
+            "client",
+            "protocol",
+            "requested_model",
+            "policy_version",
+            "coverage",
+            "action",
+            "detection_count",
+            "rules",
+        },
+        "gateway_budget_reservations": {
+            "id",
+            "created_at",
+            "expires_at",
+            "organization_id",
+            "actor_id",
+            "team_id",
+            "reserved_tokens",
+            "reserved_cost_microusd",
+        },
+    }
+    if version >= 3:
+        required["gateway_budget_reservations"].add("attempt_id")
+        required["gateway_request_attempts"] = {
+            "attempt_id",
+            "created_at",
+            "evidence_schema_id",
+            "evidence_schema_version",
+            "organization_id",
+            "actor_id",
+            "actor_name",
+            "team_id",
+            "team_name",
+            "identity_type",
+            "authentication_source",
+            "client",
+            "protocol",
+            "requested_model",
+            "policy_version",
+            "policy_action",
+            "redaction_count",
+            "redaction_rules",
+            "reserved_tokens",
+            "reserved_cost_microusd",
+        }
+        required["gateway_request_attempt_events"] = {
+            "id",
+            "attempt_id",
+            "organization_id",
+            "occurred_at",
+            "event_schema_id",
+            "event_schema_version",
+            "sequence",
+            "state",
+            "reason_code",
+            "usage_event_id",
+        }
+    for table, columns in required.items():
+        cursor.execute(
+            """
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = %s AND table_name = %s
+            """,
+            (schema, table),
+        )
+        observed = {
+            str(row["column_name"] if isinstance(row, Mapping) else row[0])
+            for row in cursor.fetchall()
+        }
+        if not columns.issubset(observed):
+            raise PostgresStorageError("storage_schema_partial_upgrade")
 
 
 @contextmanager

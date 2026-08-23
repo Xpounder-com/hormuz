@@ -6,6 +6,7 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from hormuz.config import Identity
 from hormuz.contracts import validate_audit_event
@@ -206,35 +207,28 @@ class UsageStoreMigrationTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 store.audit_events(since="2000-01-01T00:00:00+00:00", kind="unsupported")
 
-    def test_schema_v2_reservation_database_upgrades_to_the_attempt_ledger(self) -> None:
+    def test_schema_v2_database_upgrades_to_the_attempt_ledger_without_precreating_v3_objects(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "usage.sqlite3"
-            connection = sqlite3.connect(path)
-            connection.execute(
-                "CREATE TABLE hormuz_schema_migrations (version INTEGER PRIMARY KEY, state TEXT NOT NULL, applied_at TEXT)"
-            )
-            connection.executemany(
-                "INSERT INTO hormuz_schema_migrations (version, state) VALUES (?, 'applied')",
-                [(1,), (2,)],
-            )
-            connection.execute(
-                """
-                CREATE TABLE gateway_budget_reservations (
-                    id TEXT PRIMARY KEY,
-                    created_at TEXT NOT NULL,
-                    expires_at TEXT NOT NULL,
-                    organization_id TEXT NOT NULL DEFAULT 'organization',
-                    actor_id TEXT NOT NULL,
-                    team_id TEXT NOT NULL,
-                    reserved_tokens INTEGER NOT NULL,
-                    reserved_cost_microusd INTEGER NOT NULL
-                )
-                """
-            )
-            connection.commit()
-            connection.close()
+            _create_sqlite_v2_fixture(path)
+            original_apply_migration = UsageStore._apply_migration
 
-            UsageStore(path).verify_ready()
+            def verify_then_apply(connection: sqlite3.Connection, version: int) -> None:
+                self.assertEqual(version, 3)
+                names = {
+                    row[0]
+                    for row in connection.execute(
+                        "SELECT name FROM sqlite_master WHERE type = 'table'"
+                    ).fetchall()
+                }
+                self.assertNotIn("gateway_request_attempts", names)
+                self.assertNotIn("gateway_request_attempt_events", names)
+                original_apply_migration(connection, version)
+
+            with mock.patch.object(UsageStore, "_apply_migration", side_effect=verify_then_apply) as applied:
+                store = UsageStore(path)
+            applied.assert_called_once()
+            store.verify_ready()
             connection = sqlite3.connect(path)
             reservation_columns = {
                 row[1] for row in connection.execute("PRAGMA table_info(gateway_budget_reservations)").fetchall()
@@ -252,6 +246,108 @@ class UsageStoreMigrationTests(unittest.TestCase):
             self.assertIn("attempt_id", reservation_columns)
             self.assertEqual(tables, {"gateway_request_attempts", "gateway_request_attempt_events"})
             self.assertEqual(migrations, [(1, "applied"), (2, "applied"), (3, "applied")])
+            self.assertEqual(store.active_budget_reservations(organization_id="acme"), 1)
+            self.assertEqual(
+                [(event["event_type"], event["requested_model"]) for event in store.audit_events(
+                    since="2000-01-01T00:00:00+00:00",
+                    organization_id="acme",
+                )],
+                [("usage", "gpt-v2"), ("security.secret", "gpt-v2")],
+            )
+
+            before = _sqlite_v3_snapshot(path)
+            with self.assertRaises(StorageSchemaError) as raised:
+                UsageStore(path, maximum_supported_schema_version=2)
+            self.assertEqual(raised.exception.code, "storage_schema_newer_than_binary")
+            self.assertEqual(_sqlite_v3_snapshot(path), before)
+
+    def test_partial_v3_upgrade_from_schema_v2_fails_before_materializing_ledger_tables(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "usage.sqlite3"
+            _create_sqlite_v2_fixture(path)
+            connection = sqlite3.connect(path)
+            connection.execute(
+                "INSERT INTO hormuz_schema_migrations (version, state) VALUES (3, 'applying')"
+            )
+            usage_count = connection.execute("SELECT COUNT(*) FROM gateway_usage_events").fetchone()[0]
+            connection.commit()
+            connection.close()
+
+            with self.assertRaises(StorageSchemaError) as raised:
+                UsageStore(path)
+            self.assertEqual(raised.exception.code, "storage_schema_partial_upgrade")
+
+            connection = sqlite3.connect(path)
+            table_names = {
+                row[0]
+                for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
+            }
+            self.assertNotIn("gateway_request_attempts", table_names)
+            self.assertNotIn("gateway_request_attempt_events", table_names)
+            self.assertEqual(connection.execute("SELECT COUNT(*) FROM gateway_usage_events").fetchone()[0], usage_count)
+            self.assertEqual(
+                connection.execute(
+                    "SELECT version, state FROM hormuz_schema_migrations ORDER BY version"
+                ).fetchall(),
+                [(1, "applied"), (2, "applied"), (3, "applying")],
+            )
+            connection.close()
+
+    def test_incomplete_schema_v2_fails_before_v3_can_advance_the_ledger(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "usage.sqlite3"
+            _create_sqlite_v2_fixture(path)
+            connection = sqlite3.connect(path)
+            connection.execute("DROP TABLE gateway_usage_events")
+            connection.commit()
+            connection.close()
+
+            with self.assertRaises(StorageSchemaError) as raised:
+                UsageStore(path)
+            self.assertEqual(raised.exception.code, "storage_schema_partial_upgrade")
+
+            connection = sqlite3.connect(path)
+            table_names = {
+                row[0]
+                for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
+            }
+            self.assertNotIn("gateway_request_attempts", table_names)
+            self.assertNotIn("gateway_request_attempt_events", table_names)
+            self.assertEqual(
+                connection.execute(
+                    "SELECT version, state FROM hormuz_schema_migrations ORDER BY version"
+                ).fetchall(),
+                [(1, "applied"), (2, "applied")],
+            )
+            connection.close()
+
+    def test_noncontiguous_v2_migration_ledger_fails_before_v3_can_advance(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "usage.sqlite3"
+            _create_sqlite_v2_fixture(path)
+            connection = sqlite3.connect(path)
+            connection.execute("DELETE FROM hormuz_schema_migrations WHERE version = 1")
+            connection.commit()
+            connection.close()
+
+            with self.assertRaises(StorageSchemaError) as raised:
+                UsageStore(path)
+            self.assertEqual(raised.exception.code, "storage_schema_partial_upgrade")
+
+            connection = sqlite3.connect(path)
+            table_names = {
+                row[0]
+                for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
+            }
+            self.assertNotIn("gateway_request_attempts", table_names)
+            self.assertNotIn("gateway_request_attempt_events", table_names)
+            self.assertEqual(
+                connection.execute(
+                    "SELECT version, state FROM hormuz_schema_migrations ORDER BY version"
+                ).fetchall(),
+                [(2, "applied")],
+            )
+            connection.close()
 
     def test_usage_reports_group_and_filter_without_content_fields(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -744,6 +840,208 @@ class UsageStoreMigrationTests(unittest.TestCase):
                 store.audit_events(since="2000-01-01T00:00:00+00:00")
             self.assertEqual(raised.exception.code, "stored_evidence_malformed")
             self.assertNotIn("must-not-leak", str(raised.exception))
+
+
+def _create_sqlite_v2_fixture(path: Path) -> None:
+    """Create the real pre-v3 durable shape with retained metadata."""
+
+    connection = sqlite3.connect(path)
+    try:
+        connection.executescript(
+            """
+            CREATE TABLE hormuz_schema_migrations (
+                version INTEGER PRIMARY KEY,
+                state TEXT NOT NULL,
+                applied_at TEXT
+            );
+            CREATE TABLE gateway_usage_events (
+                id TEXT PRIMARY KEY,
+                occurred_at TEXT NOT NULL,
+                evidence_schema_id TEXT NOT NULL DEFAULT 'hormuz.audit-event',
+                evidence_schema_version INTEGER NOT NULL DEFAULT 2,
+                organization_id TEXT NOT NULL DEFAULT 'organization',
+                actor_id TEXT NOT NULL,
+                actor_name TEXT NOT NULL,
+                team_id TEXT NOT NULL,
+                team_name TEXT NOT NULL,
+                identity_type TEXT NOT NULL DEFAULT 'human',
+                authentication_source TEXT NOT NULL DEFAULT 'static',
+                client TEXT NOT NULL,
+                protocol TEXT NOT NULL,
+                requested_model TEXT NOT NULL,
+                resolved_alias TEXT,
+                upstream_model TEXT,
+                provider_reported_model TEXT,
+                policy_version TEXT NOT NULL DEFAULT 'legacy-unversioned',
+                policy_action TEXT NOT NULL,
+                status TEXT NOT NULL,
+                input_tokens INTEGER NOT NULL DEFAULT 0,
+                output_tokens INTEGER NOT NULL DEFAULT 0,
+                cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+                cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+                reasoning_tokens INTEGER NOT NULL DEFAULT 0,
+                cost_microusd INTEGER NOT NULL DEFAULT 0,
+                cost_basis TEXT NOT NULL DEFAULT 'configured_rate_card_estimate',
+                allocation_basis TEXT NOT NULL DEFAULT 'direct_gateway_request',
+                coverage TEXT NOT NULL DEFAULT 'gateway_captured_requests_only',
+                provider_request_id TEXT,
+                redaction_count INTEGER NOT NULL DEFAULT 0,
+                redaction_rules TEXT NOT NULL DEFAULT '[]'
+            );
+            CREATE TABLE gateway_secret_events (
+                id TEXT PRIMARY KEY,
+                occurred_at TEXT NOT NULL,
+                evidence_schema_id TEXT NOT NULL DEFAULT 'hormuz.audit-event',
+                evidence_schema_version INTEGER NOT NULL DEFAULT 2,
+                organization_id TEXT NOT NULL DEFAULT 'organization',
+                actor_id TEXT NOT NULL,
+                actor_name TEXT NOT NULL,
+                team_id TEXT NOT NULL,
+                team_name TEXT NOT NULL,
+                identity_type TEXT NOT NULL DEFAULT 'human',
+                authentication_source TEXT NOT NULL DEFAULT 'static',
+                client TEXT NOT NULL,
+                protocol TEXT NOT NULL,
+                requested_model TEXT NOT NULL,
+                policy_version TEXT NOT NULL DEFAULT 'legacy-unversioned',
+                coverage TEXT NOT NULL DEFAULT 'gateway_captured_requests_only',
+                action TEXT NOT NULL,
+                detection_count INTEGER NOT NULL,
+                rules TEXT NOT NULL
+            );
+            CREATE TABLE gateway_budget_reservations (
+                id TEXT PRIMARY KEY,
+                created_at TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                organization_id TEXT NOT NULL DEFAULT 'organization',
+                actor_id TEXT NOT NULL,
+                team_id TEXT NOT NULL,
+                reserved_tokens INTEGER NOT NULL,
+                reserved_cost_microusd INTEGER NOT NULL
+            );
+            """
+        )
+        connection.executemany(
+            "INSERT INTO hormuz_schema_migrations (version, state, applied_at) VALUES (?, 'applied', ?)",
+            [(1, "2026-08-01T00:00:00+00:00"), (2, "2026-08-01T00:00:00+00:00")],
+        )
+        connection.execute(
+            """
+            INSERT INTO gateway_usage_events (
+                id, occurred_at, evidence_schema_id, evidence_schema_version,
+                organization_id, actor_id, actor_name, team_id, team_name,
+                identity_type, authentication_source, client, protocol, requested_model,
+                resolved_alias, upstream_model, provider_reported_model, policy_version,
+                policy_action, status, input_tokens, output_tokens, cache_read_tokens,
+                cache_write_tokens, reasoning_tokens, cost_microusd, cost_basis,
+                allocation_basis, coverage, provider_request_id, redaction_count, redaction_rules
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "legacy-usage-v2",
+                "2026-08-01T00:00:00+00:00",
+                "hormuz.audit-event",
+                2,
+                "acme",
+                "alice",
+                "Alice",
+                "engineering",
+                "Engineering",
+                "human",
+                "static",
+                "codex",
+                "openai",
+                "gpt-v2",
+                "gpt-v2",
+                "gpt-upstream",
+                "gpt-provider",
+                "policy-v2",
+                "allowed",
+                "succeeded",
+                10,
+                2,
+                1,
+                0,
+                0,
+                120,
+                "configured_rate_card_estimate",
+                "direct_gateway_request",
+                "gateway_captured_requests_only",
+                "provider-v2",
+                0,
+                "[]",
+            ),
+        )
+        connection.execute(
+            """
+            INSERT INTO gateway_secret_events (
+                id, occurred_at, evidence_schema_id, evidence_schema_version,
+                organization_id, actor_id, actor_name, team_id, team_name,
+                identity_type, authentication_source, client, protocol, requested_model,
+                policy_version, coverage, action, detection_count, rules
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "legacy-secret-v2",
+                "2026-08-01T00:00:01+00:00",
+                "hormuz.audit-event",
+                2,
+                "acme",
+                "alice",
+                "Alice",
+                "engineering",
+                "Engineering",
+                "human",
+                "static",
+                "codex",
+                "openai",
+                "gpt-v2",
+                "policy-v2",
+                "gateway_captured_requests_only",
+                "redacted",
+                1,
+                "[\"openai_api_key\"]",
+            ),
+        )
+        connection.execute(
+            """
+            INSERT INTO gateway_budget_reservations (
+                id, created_at, expires_at, organization_id, actor_id, team_id,
+                reserved_tokens, reserved_cost_microusd
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "legacy-reservation-v2",
+                "2026-08-01T00:00:00+00:00",
+                "2999-01-01T00:00:00+00:00",
+                "acme",
+                "alice",
+                "engineering",
+                12,
+                120,
+            ),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+
+def _sqlite_v3_snapshot(path: Path) -> dict[str, list[tuple[object, ...]]]:
+    connection = sqlite3.connect(path)
+    try:
+        return {
+            table: connection.execute(f"SELECT * FROM {table} ORDER BY 1").fetchall()
+            for table in (
+                "hormuz_schema_migrations",
+                "gateway_usage_events",
+                "gateway_secret_events",
+                "gateway_budget_reservations",
+                "gateway_request_attempts",
+                "gateway_request_attempt_events",
+            )
+        }
+    finally:
+        connection.close()
 
 
 if __name__ == "__main__":
