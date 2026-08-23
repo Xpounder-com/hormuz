@@ -98,6 +98,75 @@ Record the active RGW container name or ID after Cephadm deploys it. The runner
 will independently attest it, so an incorrect value fails before any retained
 object is written.
 
+## Transit key-version rotation and recovery checkpoint
+
+[Issue #69](https://github.com/Xpounder-com/hormuz/issues/69) adds a separate,
+opt-in proof for the same self-hosted target. It is a recovery checkpoint, not
+an expansion of the existing RGW-level certification claim until its own live
+evidence is reviewed.
+
+The checkpoint requires three distinct named Transit keys:
+
+- one `provider_credential` key, rotated in place;
+- one `data_encryption` key, rotated in place;
+- one unavailable key name used only to demonstrate that recovery fails closed.
+
+It also requires two distinct short-lived OpenBao tokens. The runtime token may
+perform the strictly required named data-key operations and ask OpenBao for its
+own capabilities, but its effective capabilities for both
+`transit/keys/<key>/rotate` paths must be exactly `deny`. The administrator
+token may rotate those two named keys and must have no data-key or gateway role.
+The runner checks both tokens' effective capabilities before it writes the
+retained artifact, so a permissive wildcard policy fails the run.
+
+The proof seals a synthetic in-memory fixture under the named provider key and
+anchors one metadata-only audit artifact under the named data key. After the
+separate administrator token rotates both named key versions, fresh runtime
+clients recover the original envelope and the exact versioned Object Lock
+artifact, rewrap the mutable provider envelope to the current same-named key
+version, and exercise unavailable-key, tenant/context, altered-ciphertext, and
+altered-audit-chain failures. It never automatically replays a provider request
+or rewrites the retained audit object.
+
+Place the following values in a root-readable, mode-`0600` environment file;
+the values themselves must never appear in a command line, source file,
+evidence record, or issue/PR comment:
+
+```text
+HORMUZ_RUN_CEPH_CUSTODY_ROTATION_RECOVERY=1
+HORMUZ_CEPH_CUSTODY_ROTATION_RECOVERY_CONFIRMATION=I_UNDERSTAND_DISPOSABLE_OBJECT_LOCK_RETENTION_AND_TRANSIT_ROTATION
+HORMUZ_CEPH_RGW_ENDPOINT=http://127.0.0.1:7480
+HORMUZ_CEPH_RGW_REGION=<exact GetBucketLocation result>
+HORMUZ_CEPH_RGW_BUCKET=<disposable Object-Lock bucket>
+HORMUZ_CEPH_RGW_ACCESS_KEY=<dedicated RGW access key>
+HORMUZ_CEPH_RGW_SECRET_KEY=<dedicated RGW secret>
+HORMUZ_CEPH_RGW_CONTAINER=<attested local RGW container>
+HORMUZ_CEPH_OPENBAO_ENDPOINT=http://127.0.0.1:8200
+HORMUZ_CEPH_OPENBAO_RUNTIME_TOKEN=<data-plane-only token>
+HORMUZ_CEPH_OPENBAO_ADMIN_TOKEN=<rotation-only administrator token>
+HORMUZ_CEPH_OPENBAO_TRANSIT_MOUNT=transit
+HORMUZ_CEPH_OPENBAO_PROVIDER_KEY=<provider key name>
+HORMUZ_CEPH_OPENBAO_DATA_KEY=<audit-data key name>
+HORMUZ_CEPH_OPENBAO_UNAVAILABLE_KEY=<different absent key name>
+```
+
+Then run the pinned x86_64 wrapper:
+
+```bash
+export HORMUZ_CEPH_CUSTODY_ROTATION_RECOVERY_ENV_FILE=/secure/path/ceph-rotation-recovery.env
+tools/run_ceph_rgw_custody_rotation_recovery_container.sh \
+  --evidence-out /secure/path/ceph-rgw-custody-rotation-recovery.json
+```
+
+The output schema is `hormuz.ceph-rgw-custody-rotation-recovery@1`. It contains
+only the exact target/runner provenance, required check names, duration values,
+retention days, and explicit nonclaims. It excludes fixture content, endpoints,
+bucket/object IDs, organization IDs, credentials, OpenBao tokens, and plaintext
+material. A fresh successful run is required for each evidence review; it is not
+an OpenBao storage-backend backup/PITR or master-key recovery test, a production
+KMS/BYOK certification, customer RPO/RTO, multi-host DR/HA, host-root/disk
+protection, or native ARM64 runtime conformance.
+
 ## Run the gate
 
 Run the gate from the dedicated, pinned `linux/amd64` container, even when the

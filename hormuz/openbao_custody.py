@@ -153,9 +153,19 @@ class OpenBaoTransitDataKeyProvider:
     def _post(self, operation: str, key_reference: str, payload: Mapping[str, str]) -> Mapping[str, Any]:
         if not isinstance(key_reference, str) or not key_reference:
             raise CustodyError("openbao_custody_key_reference_invalid")
+        return self._post_path(
+            f"{quote(self._mount, safe='')}/{quote(operation, safe='/')}/{quote(key_reference, safe='')}",
+            payload,
+        )
+
+    def _post_path(self, api_path: str, payload: Mapping[str, object]) -> Mapping[str, Any]:
+        """Send one bounded authenticated OpenBao request within this origin."""
+
+        if not isinstance(api_path, str) or not api_path or api_path.startswith("/"):
+            raise CustodyError("openbao_custody_request_rejected")
         encoded_payload = json.dumps(dict(payload), sort_keys=True, separators=(",", ":")).encode("utf-8")
         request = Request(
-            self._endpoint(operation=operation, key_reference=key_reference),
+            f"{self._endpoint_url}/v1/{api_path}",
             data=encoded_payload,
             method="POST",
             headers={
@@ -197,12 +207,68 @@ class OpenBaoTransitDataKeyProvider:
             raise CustodyError("openbao_custody_response_invalid")
         return data
 
-    def _endpoint(self, *, operation: str, key_reference: str) -> str:
-        operation_path = quote(operation, safe="/")
-        return (
-            f"{self._endpoint_url}/v1/{quote(self._mount, safe='')}/"
-            f"{operation_path}/{quote(key_reference, safe='')}"
+
+class OpenBaoTransitKeyRotationControl:
+    """A separately credentialed, explicit control for Transit key-version rotation.
+
+    This class is deliberately outside :class:`DataKeyProvider`: a normal
+    Hormuz runtime credential needs data-key operations, never permission to
+    rotate a named Transit key. Recovery or conformance tooling constructs this
+    control only from a separately supplied administrative credential.
+    """
+
+    def __init__(
+        self,
+        *,
+        endpoint_url: str,
+        token: str,
+        mount: str = "transit",
+        timeout_seconds: float = 5,
+        transport: Callable[[Request, float], Any] | None = None,
+    ) -> None:
+        self._client = OpenBaoTransitDataKeyProvider(
+            endpoint_url=endpoint_url,
+            token=token,
+            mount=mount,
+            timeout_seconds=timeout_seconds,
+            transport=transport,
         )
+        self._mount = mount
+
+    def assert_rotation_denied(self, *, key_reference: str) -> None:
+        """Require that this token has no ability to rotate one named key."""
+
+        if self._capabilities(f"{self._mount}/keys/{_validate_key_reference(key_reference)}/rotate") != {"deny"}:
+            raise CustodyError("openbao_custody_runtime_rotation_authorized")
+
+    def assert_rotation_only_administrator(self, *, key_reference: str) -> None:
+        """Require exactly the one rotation capability and no data-key access."""
+
+        key = _validate_key_reference(key_reference)
+        if self._capabilities(f"{self._mount}/keys/{key}/rotate") != {"update"}:
+            raise CustodyError("openbao_custody_rotation_administrator_scope_invalid")
+        for operation in ("datakey/plaintext", "decrypt", "rewrap", "encrypt"):
+            if self._capabilities(f"{self._mount}/{operation}/{key}") != {"deny"}:
+                raise CustodyError("openbao_custody_rotation_administrator_data_plane_authorized")
+
+    def rotate_key_version(self, *, key_reference: str) -> None:
+        """Rotate one named Transit key with the separately scoped admin token."""
+
+        _validate_key_reference(key_reference)
+        self._client._post_path(  # noqa: SLF001 - same-module bounded control path.
+            f"{quote(self._mount, safe='')}/keys/{quote(key_reference, safe='')}/rotate",
+            {},
+        )
+
+    def _capabilities(self, path: str) -> set[str]:
+        data = self._client._post_path(  # noqa: SLF001 - same-module bounded control path.
+            "sys/capabilities-self",
+            {"paths": [path]},
+        )
+        capabilities = data.get("capabilities")
+        if not isinstance(capabilities, list) or any(not isinstance(item, str) for item in capabilities):
+            raise CustodyError("openbao_custody_rotation_capability_invalid")
+        return set(capabilities)
 
 
 def verify_openbao_transit_profile(
@@ -245,6 +311,12 @@ def _encoded_context(value: Mapping[str, str]) -> str:
         normalized[key] = item
     serialized = json.dumps(normalized, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return base64.b64encode(serialized).decode("ascii")
+
+
+def _validate_key_reference(value: object) -> str:
+    if not isinstance(value, str) or not value or "/" in value:
+        raise CustodyError("openbao_custody_key_reference_invalid")
+    return value
 
 
 def _decode_base64(value: object) -> bytes:

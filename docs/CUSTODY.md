@@ -321,6 +321,51 @@ release issue/PR and review the exact target digest before changing the target
 status. Full environment preparation, evidence semantics, and nonclaims are in
 [CEPH_RGW_CONFORMANCE.md](CEPH_RGW_CONFORMANCE.md).
 
+### Self-hosted Transit key-version rotation and artifact recovery
+
+The next bounded self-hosted custody checkpoint is tracked in
+[issue #69](https://github.com/Xpounder-com/hormuz/issues/69). It does not
+change the normal gateway runtime: the runtime's OpenBao token remains a
+data-plane credential and must have no rotation authority. A separately scoped,
+short-lived **lab administrator** token is the only credential permitted to
+rotate the same named Transit key versions.
+
+The opt-in recovery gate creates only a synthetic in-memory provider-credential
+fixture and a metadata-only audit artifact. It then rotates the existing
+provider-credential and data-encryption Transit keys, creates fresh recovery
+clients, and proves that the pre-rotation envelope and exact retained artifact
+remain recoverable. It also proves a same-key provider envelope can be rewrapped
+under the newer key version. The retained audit artifact is never rewritten.
+
+The runtime token must be able to use only the named data-key operations needed
+by the proof and query its own capabilities. For both named keys, its effective
+capabilities for `transit/keys/<key>/rotate` must be exactly `deny`. The separate
+administrator token needs only the two named rotate operations. Do not grant a
+wildcard Transit policy to either credential.
+
+Run it only in the same disposable, loopback-only Ceph/OpenBao lab. It creates
+one additional Object Lock `COMPLIANCE` object retained for at least one day:
+
+```bash
+export HORMUZ_CEPH_CUSTODY_ROTATION_RECOVERY_ENV_FILE=/secure/path/ceph-rotation-recovery.env
+tools/run_ceph_rgw_custody_rotation_recovery_container.sh \
+  --evidence-out /secure/path/ceph-rgw-custody-rotation-recovery.json
+```
+
+The environment file supplies the explicit opt-in/acknowledgement, RGW, and
+OpenBao values, including distinct `HORMUZ_CEPH_OPENBAO_RUNTIME_TOKEN` and
+`HORMUZ_CEPH_OPENBAO_ADMIN_TOKEN`, plus distinct provider, data, and deliberately
+unavailable key names. The result is a private, content-free evidence record;
+it excludes endpoints, bucket/object identifiers, tokens, credentials, and
+plaintext fixture data. Full prerequisites and nonclaims are in
+[CEPH_RGW_CONFORMANCE.md](CEPH_RGW_CONFORMANCE.md).
+
+This checkpoint is not OpenBao backend backup, seal/master-key recovery,
+customer RPO/RTO, high availability, production KMS/BYOK certification, or
+host-root/disk-administrator protection. A successful lab run can close only
+its narrowly stated recovery evidence issue; the broader #17 custody gate
+remains open.
+
 ## Live AWS conformance evidence
 
 The repository includes an opt-in test at

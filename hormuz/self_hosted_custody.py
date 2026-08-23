@@ -13,6 +13,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import uuid
 from datetime import datetime, timezone
 from typing import Any, Mapping
 from urllib.parse import urlparse
@@ -32,6 +33,9 @@ from .custody import (
     serialize_audit_anchor_artifact,
     serialize_envelope,
 )
+
+
+_MAX_ENCRYPTED_ANCHOR_BYTES = 32 * 1024 * 1024
 
 
 class EncryptedS3ObjectLockAuditAnchorSink:
@@ -144,6 +148,71 @@ class EncryptedS3ObjectLockAuditAnchorSink:
             object_version=version,
         )
 
+    def recover(self, receipt: AuditAnchorReceipt, *, organization_id: str) -> bytes:
+        """Recover and verify one exact encrypted Object Lock artifact version.
+
+        The method is intentionally an adapter capability rather than a normal
+        gateway route. It accepts only an exact receipt/object-version pair,
+        keeps the recovered metadata-only artifact in process memory, and
+        validates the envelope, object metadata, canonical artifact, and audit
+        chain before returning it to a controlled recovery procedure.
+        """
+
+        _validate_recovery_receipt(receipt)
+        if not isinstance(organization_id, str) or not organization_id:
+            raise CustodyError("audit_anchor_recovery_receipt_invalid")
+        try:
+            object_key = self._object_key(organization_id=organization_id, artifact_id=receipt.artifact_id)
+            response = self._client.get_object(
+                Bucket=self._bucket,
+                Key=object_key,
+                VersionId=receipt.object_version,
+            )
+        except Exception as error:
+            raise _s3_custody_error(error, operation="read") from None
+        if not isinstance(response, Mapping):
+            raise CustodyError("audit_anchor_recovery_object_invalid")
+        body = response.get("Body")
+        read = getattr(body, "read", None)
+        if not callable(read):
+            raise CustodyError("audit_anchor_recovery_object_invalid")
+        try:
+            payload = read(_MAX_ENCRYPTED_ANCHOR_BYTES + 1)
+        except TypeError:
+            try:
+                payload = read()
+            except Exception:
+                raise CustodyError("audit_anchor_recovery_object_invalid") from None
+        except Exception:
+            raise CustodyError("audit_anchor_recovery_object_invalid") from None
+        if not isinstance(payload, bytes) or not payload or len(payload) > _MAX_ENCRYPTED_ANCHOR_BYTES:
+            raise CustodyError("audit_anchor_recovery_object_invalid")
+
+        payload_digest = hashlib.sha256(payload).hexdigest()
+        metadata = response.get("Metadata")
+        if not isinstance(metadata, Mapping) or not _metadata_matches_receipt(
+            metadata,
+            receipt=receipt,
+            payload_digest=payload_digest,
+        ):
+            raise CustodyError("audit_anchor_recovery_metadata_invalid")
+        envelope = parse_envelope(payload)
+        if envelope.organization_id != organization_id or envelope.purpose != KEY_PURPOSE_DATA_ENCRYPTION:
+            raise CustodyError("audit_anchor_recovery_metadata_invalid")
+        artifact = self._cipher.unseal(envelope)
+        parsed = parse_audit_anchor_artifact(artifact)
+        if not hmac.compare_digest(serialize_audit_anchor_artifact(parsed), artifact):
+            raise CustodyError("audit_anchor_recovery_payload_invalid")
+        artifact_id, head_digest, _ = audit_anchor_summary(parsed)
+        artifact_digest = hashlib.sha256(artifact).hexdigest()
+        if (
+            artifact_id != receipt.artifact_id
+            or not hmac.compare_digest(head_digest, receipt.head_digest)
+            or not hmac.compare_digest(artifact_digest, receipt.artifact_sha256)
+        ):
+            raise CustodyError("audit_anchor_recovery_payload_invalid")
+        return artifact
+
     def _object_key(self, *, organization_id: str, artifact_id: str) -> str:
         organization_hash = hashlib.sha256(organization_id.encode("utf-8")).hexdigest()[:24]
         prefix = f"{self._prefix}/" if self._prefix else ""
@@ -217,6 +286,41 @@ def _validate_anchor_input(
     ):
         raise CustodyError("audit_anchor_metadata_mismatch")
     return hashlib.sha256(artifact).digest()
+
+
+def _validate_recovery_receipt(receipt: object) -> None:
+    if not isinstance(receipt, AuditAnchorReceipt) or receipt.backend != EncryptedS3ObjectLockAuditAnchorSink.backend:
+        raise CustodyError("audit_anchor_recovery_receipt_invalid")
+    if not isinstance(receipt.object_version, str) or not receipt.object_version:
+        raise CustodyError("audit_anchor_recovery_receipt_invalid")
+    try:
+        uuid.UUID(receipt.artifact_id)
+    except (TypeError, ValueError, AttributeError):
+        raise CustodyError("audit_anchor_recovery_receipt_invalid") from None
+    for value in (receipt.artifact_sha256, receipt.head_digest):
+        if not isinstance(value, str) or len(value) != 64 or any(character not in "0123456789abcdef" for character in value):
+            raise CustodyError("audit_anchor_recovery_receipt_invalid")
+
+
+def _metadata_matches_receipt(
+    metadata: Mapping[object, object],
+    *,
+    receipt: AuditAnchorReceipt,
+    payload_digest: str,
+) -> bool:
+    expected = {
+        "hormuz-schema-id": ENCRYPTED_ENVELOPE_SCHEMA_ID,
+        "hormuz-schema-version": str(ENCRYPTED_ENVELOPE_SCHEMA_VERSION),
+        "hormuz-audit-anchor-schema-id": AUDIT_ANCHOR_SCHEMA_ID,
+        "hormuz-audit-anchor-schema-version": str(AUDIT_ANCHOR_SCHEMA_VERSION),
+        "hormuz-artifact-sha256": receipt.artifact_sha256,
+        "hormuz-head-digest": receipt.head_digest,
+        "hormuz-payload-sha256": payload_digest,
+    }
+    return all(
+        isinstance(metadata.get(key), str) and hmac.compare_digest(metadata[key], value)
+        for key, value in expected.items()
+    )
 
 
 def _bucket_region(value: object) -> str:
