@@ -1,6 +1,8 @@
 include SECURITY.md
 include config.example.json
+include hormuz/secret-inventory-v1.json
 include tools/_verification_runtime.py
+include tools/verify_secret_inventory.py
 include tools/oidc_reference_conformance.py
 include tools/verify_ceph_rgw_custody_conformance.py
 recursive-include docs *.md

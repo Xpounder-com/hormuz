@@ -152,11 +152,17 @@ def _verify_isolated_install(wheel: Path, config_template: Path, base_python: Pa
                 import sys
                 from pathlib import Path
 
+                import hormuz
+                from hormuz._secret_inventory import load_secret_inventory
                 from hormuz.config import GatewayConfig
                 from hormuz.server import GatewayServer
 
                 root = Path({str(root)!r})
                 assert importlib.util.find_spec("hormuz.context") is None
+                package_root = Path(hormuz.__file__).resolve().parents[1]
+                secret_inventory = load_secret_inventory(source_root=package_root)
+                assert secret_inventory["schema_id"] == "hormuz.secret-inventory"
+                assert secret_inventory["schema_version"] == 1
                 config = GatewayConfig.load(
                     Path({str(config_path)!r}),
                     environ={{"HORMUZ_TOKEN": "test-identity-token"}},
