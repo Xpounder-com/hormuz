@@ -97,12 +97,20 @@ class PostgresConnectionPool:
         if self._closed:
             raise PostgresStorageError("storage_pool_closed")
         assert self._pool is not None
+        body_error: BaseException | None = None
         try:
             with self._pool.connection(timeout=self._settings.acquire_timeout_seconds) as connection:
-                yield connection
-        except PostgresStorageError:
-            raise
+                try:
+                    yield connection
+                except BaseException as error:
+                    # The transaction body owns policy and domain failures.
+                    # A legitimate denial must not become a storage outage
+                    # merely because it propagates through the pool context.
+                    body_error = error
+                    raise
         except Exception as error:
+            if error is body_error or isinstance(error, PostgresStorageError):
+                raise
             raise self._storage_error(error) from None
 
     def close(self) -> None:
