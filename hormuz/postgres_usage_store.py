@@ -26,13 +26,7 @@ from .contracts import (
     AUDIT_EVENT_SCHEMA_VERSION,
     COST_BASIS_CONFIGURED_RATE_CARD_ESTIMATE,
     COVERAGE_GATEWAY_CAPTURED_REQUESTS_ONLY,
-    REQUEST_ATTEMPT_EVENT_SCHEMA_ID,
-    REQUEST_ATTEMPT_EVENT_SCHEMA_VERSION,
-    REQUEST_ATTEMPT_SCHEMA_ID,
-    REQUEST_ATTEMPT_SCHEMA_VERSION,
     validate_policy_action,
-    validate_request_attempt,
-    validate_request_attempt_event,
     validate_request_status,
 )
 from .evidence import EvidenceStorageError, security_audit_event, usage_audit_event
@@ -43,13 +37,25 @@ from .postgres import (
     validate_postgres_identifier,
     verify_postgres_schema,
 )
-from .store import (
+from ._persistence import (
     MonthlyTotals,
     RequestAttempt,
+    RequestAttemptState,
     RequestAttemptStateError,
     ReservationDenied,
     ReservationScope,
     SecretTotals,
+    build_request_attempt_event,
+    build_request_attempt_root,
+    is_sha256_digest,
+    normalize_audit_chain_head,
+    normalize_request_attempt_result,
+    normalize_request_attempt_state,
+    require_pending_request_attempt_state,
+    require_terminal_request_attempt_state,
+    should_mark_request_attempt_unknown,
+    stored_utc_timestamp,
+    validate_anchor_age,
 )
 
 
@@ -222,16 +228,7 @@ class PostgresUsageStore:
             if not create:
                 return None
             raise PostgresStorageError("audit_chain_head_unavailable")
-        head_digest = row["head_digest"]
-        if head_digest is not None and not isinstance(head_digest, str):
-            raise PostgresStorageError("audit_chain_head_malformed")
-        return AuditChainHead(
-            organization_id=str(row["organization_id"]),
-            chain_version=int(row["chain_version"]),
-            chain_epoch=int(row["chain_epoch"]),
-            sequence=int(row["sequence"]),
-            head_digest=head_digest,
-        )
+        return normalize_audit_chain_head(row, error_factory=PostgresStorageError)
 
     def _append_audit_chain_entry_in_cursor(
         self,
@@ -627,31 +624,23 @@ class PostgresUsageStore:
         organization_id = self._organization(identity.organization_id)
         now = datetime.now(timezone.utc)
         attempt_id = str(uuid.uuid4())
-        root = {
-            "evidence_schema_id": REQUEST_ATTEMPT_SCHEMA_ID,
-            "evidence_schema_version": REQUEST_ATTEMPT_SCHEMA_VERSION,
-            "attempt_id": attempt_id,
-            "created_at": now.isoformat(),
-            "organization_id": organization_id,
-            "actor_id": identity.actor_id,
-            "actor_name": identity.actor_name,
-            "team_id": identity.team_id,
-            "team_name": identity.team_name,
-            "identity_type": identity.identity_type,
-            "authentication_source": identity.authentication_source,
-            "client": client,
-            "protocol": protocol,
-            "requested_model": requested_model,
-            "resolved_alias": resolved_alias,
-            "upstream_model": upstream_model,
-            "policy_version": policy_version,
-            "policy_action": policy_action,
-            "redaction_count": max(0, redaction_count),
-            "redaction_rules": sorted(set(redaction_rules)),
-            "reserved_tokens": max(0, reserved_tokens),
-            "reserved_cost_microusd": max(0, reserved_cost_microusd),
-        }
-        validate_request_attempt(root)
+        root = build_request_attempt_root(
+            attempt_id=attempt_id,
+            created_at=now,
+            identity=identity,
+            organization_id=organization_id,
+            client=client,
+            protocol=protocol,
+            requested_model=requested_model,
+            resolved_alias=resolved_alias,
+            upstream_model=upstream_model,
+            policy_version=policy_version,
+            policy_action=policy_action,
+            redaction_count=redaction_count,
+            redaction_rules=redaction_rules,
+            reserved_tokens=reserved_tokens,
+            reserved_cost_microusd=reserved_cost_microusd,
+        )
         with self._transaction(organization_id) as connection:
             with connection.cursor() as cursor:
                 self._sweep_stale_request_attempts_in_cursor(cursor, now=now, organization_id=organization_id)
@@ -733,27 +722,25 @@ class PostgresUsageStore:
     ) -> None:
         """Finalize a pending attempt once and retain the linked usage evidence."""
 
-        if status not in {"succeeded", "failed", "rate_limited"}:
-            raise RequestAttemptStateError("request_attempt_terminal_state_unsupported")
+        require_terminal_request_attempt_state(status)
         organization = self._organization(organization_id)
         with self._transaction(organization) as connection:
             with connection.cursor() as cursor:
                 root = self._request_attempt_root_in_cursor(cursor, attempt.attempt_id, organization, for_update=True)
-                sequence, state = self._latest_request_attempt_state_in_cursor(cursor, attempt.attempt_id)
-                if state != "pending":
-                    raise RequestAttemptStateError("request_attempt_not_pending")
-                identity = self._identity_from_request_attempt(root)
+                latest = self._latest_request_attempt_state_in_cursor(cursor, attempt.attempt_id)
+                require_pending_request_attempt_state(latest.state)
+                result = normalize_request_attempt_result(root, error_factory=PostgresStorageError)
                 usage_event_id = self._record_in_cursor(
                     cursor,
-                    identity=identity,
-                    client=str(root["client"]),
-                    protocol=str(root["protocol"]),
-                    requested_model=str(root["requested_model"]),
-                    resolved_alias=_row_optional_string(root, "resolved_alias"),
-                    upstream_model=_row_optional_string(root, "upstream_model"),
+                    identity=result.identity,
+                    client=result.client,
+                    protocol=result.protocol,
+                    requested_model=result.requested_model,
+                    resolved_alias=result.resolved_alias,
+                    upstream_model=result.upstream_model,
                     provider_reported_model=provider_reported_model,
-                    policy_version=str(root["policy_version"]),
-                    policy_action=str(root["policy_action"]),
+                    policy_version=result.policy_version,
+                    policy_action=result.policy_action,
                     status=status,
                     input_tokens=input_tokens,
                     output_tokens=output_tokens,
@@ -762,15 +749,15 @@ class PostgresUsageStore:
                     reasoning_tokens=reasoning_tokens,
                     cost_microusd=cost_microusd,
                     provider_request_id=provider_request_id,
-                    redaction_count=int(root["redaction_count"]),
-                    redaction_rules=tuple(_json_string_list(root["redaction_rules"])),
+                    redaction_count=result.redaction_count,
+                    redaction_rules=result.redaction_rules,
                 )
                 self._append_request_attempt_event_in_cursor(
                     cursor,
                     attempt_id=attempt.attempt_id,
                     organization_id=organization,
                     occurred_at=datetime.now(timezone.utc),
-                    sequence=sequence + 1,
+                    sequence=latest.sequence + 1,
                     state=status,
                     reason_code=None,
                     usage_event_id=usage_event_id,
@@ -798,17 +785,15 @@ class PostgresUsageStore:
         with self._transaction(organization) as connection:
             with connection.cursor() as cursor:
                 self._request_attempt_root_in_cursor(cursor, attempt.attempt_id, organization, for_update=True)
-                sequence, state = self._latest_request_attempt_state_in_cursor(cursor, attempt.attempt_id)
-                if state == "outcome_unknown":
+                latest = self._latest_request_attempt_state_in_cursor(cursor, attempt.attempt_id)
+                if not should_mark_request_attempt_unknown(latest.state):
                     return False
-                if state != "pending":
-                    raise RequestAttemptStateError("request_attempt_not_pending")
                 self._append_request_attempt_event_in_cursor(
                     cursor,
                     attempt_id=attempt.attempt_id,
                     organization_id=organization,
                     occurred_at=datetime.now(timezone.utc),
-                    sequence=sequence + 1,
+                    sequence=latest.sequence + 1,
                     state="outcome_unknown",
                     reason_code=reason_code,
                     usage_event_id=None,
@@ -966,15 +951,15 @@ class PostgresUsageStore:
         for row in rows:
             attempt_id = str(row["attempt_id"])
             self._request_attempt_root_in_cursor(cursor, attempt_id, organization_id, for_update=True)
-            sequence, state = self._latest_request_attempt_state_in_cursor(cursor, attempt_id)
-            if state != "pending":
+            latest = self._latest_request_attempt_state_in_cursor(cursor, attempt_id)
+            if latest.state != "pending":
                 continue
             self._append_request_attempt_event_in_cursor(
                 cursor,
                 attempt_id=attempt_id,
                 organization_id=organization_id,
                 occurred_at=now,
-                sequence=sequence + 1,
+                sequence=latest.sequence + 1,
                 state="outcome_unknown",
                 reason_code="stale_pending",
                 usage_event_id=None,
@@ -1023,7 +1008,11 @@ class PostgresUsageStore:
             raise RequestAttemptStateError("request_attempt_not_found")
         return dict(root)
 
-    def _latest_request_attempt_state_in_cursor(self, cursor: object, attempt_id: str) -> tuple[int, str]:
+    def _latest_request_attempt_state_in_cursor(
+        self,
+        cursor: object,
+        attempt_id: str,
+    ) -> RequestAttemptState:
         cursor.execute(
             f"""
             SELECT sequence, state
@@ -1037,7 +1026,7 @@ class PostgresUsageStore:
         event = cursor.fetchone()
         if event is None:
             raise PostgresStorageError("request_attempt_event_missing")
-        return int(event["sequence"]), str(event["state"])
+        return normalize_request_attempt_state(event)
 
     def _append_request_attempt_event_in_cursor(
         self,
@@ -1051,19 +1040,15 @@ class PostgresUsageStore:
         reason_code: str | None,
         usage_event_id: str | None,
     ) -> str:
-        event = {
-            "event_schema_id": REQUEST_ATTEMPT_EVENT_SCHEMA_ID,
-            "event_schema_version": REQUEST_ATTEMPT_EVENT_SCHEMA_VERSION,
-            "id": str(uuid.uuid4()),
-            "attempt_id": attempt_id,
-            "organization_id": organization_id,
-            "occurred_at": occurred_at.isoformat(),
-            "sequence": sequence,
-            "state": state,
-            "reason_code": reason_code,
-            "usage_event_id": usage_event_id,
-        }
-        validate_request_attempt_event(event)
+        event = build_request_attempt_event(
+            attempt_id=attempt_id,
+            organization_id=organization_id,
+            occurred_at=occurred_at,
+            sequence=sequence,
+            state=state,
+            reason_code=reason_code,
+            usage_event_id=usage_event_id,
+        )
         cursor.execute(
             f"""
             INSERT INTO {self._table('gateway_request_attempt_events')} (
@@ -1086,20 +1071,6 @@ class PostgresUsageStore:
             ),
         )
         return str(event["id"])
-
-    @staticmethod
-    def _identity_from_request_attempt(root: dict[str, object]) -> Identity:
-        return Identity(
-            token_env="REQUEST_ATTEMPT_LEDGER",
-            token="",
-            actor_id=str(root["actor_id"]),
-            actor_name=str(root["actor_name"]),
-            team_id=str(root["team_id"]),
-            team_name=str(root["team_name"]),
-            organization_id=str(root["organization_id"]),
-            identity_type=str(root["identity_type"]),
-            authentication_source=str(root["authentication_source"]),
-        )
 
     def release_budget_reservation(
         self,
@@ -1421,7 +1392,12 @@ class PostgresUsageStore:
             checkpoint_sequence = int(checkpoint["sequence"])
             if checkpoint_sequence > head.sequence:
                 raise PostgresStorageError("audit_chain_checkpoint_mismatch")
-            checkpoint_at = _postgres_timestamp(checkpoint["anchored_at"], code="audit_chain_checkpoint_malformed")
+            checkpoint_at = stored_utc_timestamp(
+                checkpoint["anchored_at"],
+                code="audit_chain_checkpoint_malformed",
+                error_factory=PostgresStorageError,
+                accept_datetime=True,
+            )
         oldest_unanchored_at: datetime | None = None
         if head.sequence > checkpoint_sequence:
             cursor.execute(
@@ -1437,7 +1413,12 @@ class PostgresUsageStore:
             row = cursor.fetchone()
             if row is None:
                 raise PostgresStorageError("audit_chain_head_mismatch")
-            oldest_unanchored_at = _postgres_timestamp(row["appended_at"], code="audit_chain_entry_malformed")
+            oldest_unanchored_at = stored_utc_timestamp(
+                row["appended_at"],
+                code="audit_chain_entry_malformed",
+                error_factory=PostgresStorageError,
+                accept_datetime=True,
+            )
         overdue = bool(
             maximum_age_seconds is not None
             and oldest_unanchored_at is not None
@@ -1459,7 +1440,7 @@ class PostgresUsageStore:
         maximum_age_seconds: int | None = None,
         now: datetime | None = None,
     ) -> AuditChainAnchorStatus:
-        _validate_anchor_age(maximum_age_seconds)
+        validate_anchor_age(maximum_age_seconds, error_factory=PostgresStorageError)
         current = now or datetime.now(timezone.utc)
         if current.tzinfo is None:
             raise PostgresStorageError("audit_chain_anchor_age_invalid")
@@ -1489,7 +1470,7 @@ class PostgresUsageStore:
         chain_version = checkpoint.get("chain_version")
         if (
             not isinstance(chain_version, int)
-            or not _is_sha256_digest(artifact_sha256)
+            or not is_sha256_digest(artifact_sha256)
             or not isinstance(anchor_backend, str)
             or not anchor_backend
             or (object_version is not None and not isinstance(object_version, str))
@@ -1770,7 +1751,7 @@ class PostgresUsageStore:
                 sources = self._audit_chain_source_events_in_cursor(cursor, organization_id=organization)
         if head.chain_version != AUDIT_CHAIN_VERSION or head.chain_epoch < 1 or head.sequence < 0:
             raise PostgresStorageError("audit_chain_head_malformed")
-        if head.head_digest is not None and not _is_sha256_digest(head.head_digest):
+        if head.head_digest is not None and not is_sha256_digest(head.head_digest):
             raise PostgresStorageError("audit_chain_head_malformed")
         if checkpoint_tuple is not None and checkpoint_tuple[0] != head.chain_version:
             raise PostgresStorageError("audit_chain_checkpoint_mismatch")
@@ -1819,7 +1800,7 @@ class PostgresUsageStore:
                     or predecessor_epoch < 1
                     or predecessor_epoch >= epoch_number
                     or predecessor_sequence < 1
-                    or not _is_sha256_digest(predecessor_digest)
+                    or not is_sha256_digest(predecessor_digest)
                 ):
                     raise PostgresStorageError("audit_chain_epoch_malformed")
                 predecessor = verified.get((predecessor_epoch, predecessor_sequence))
@@ -1888,54 +1869,3 @@ class PostgresUsageStore:
 
 def _month_start() -> datetime:
     return datetime.now(timezone.utc).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-
-
-def _row_optional_string(row: dict[str, object], name: str) -> str | None:
-    value = row[name]
-    if value is None:
-        return None
-    if not isinstance(value, str):
-        raise PostgresStorageError("request_attempt_evidence_malformed")
-    return value
-
-
-def _json_string_list(value: object) -> list[str]:
-    if not isinstance(value, str):
-        raise PostgresStorageError("request_attempt_evidence_malformed")
-    try:
-        decoded = json.loads(value)
-    except (TypeError, ValueError, json.JSONDecodeError):
-        raise PostgresStorageError("request_attempt_evidence_malformed") from None
-    if not isinstance(decoded, list) or any(not isinstance(item, str) for item in decoded):
-        raise PostgresStorageError("request_attempt_evidence_malformed")
-    return decoded
-
-
-def _postgres_timestamp(value: object, *, code: str) -> datetime:
-    if isinstance(value, datetime):
-        parsed = value
-    elif isinstance(value, str):
-        try:
-            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-        except ValueError:
-            raise PostgresStorageError(code) from None
-    else:
-        raise PostgresStorageError(code)
-    if parsed.tzinfo is None:
-        raise PostgresStorageError(code)
-    return parsed.astimezone(timezone.utc)
-
-
-def _validate_anchor_age(value: int | None) -> None:
-    if value is None:
-        return
-    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
-        raise PostgresStorageError("audit_chain_anchor_age_invalid")
-
-
-def _is_sha256_digest(value: object) -> bool:
-    return (
-        isinstance(value, str)
-        and len(value) == 64
-        and all(character in "0123456789abcdef" for character in value)
-    )
