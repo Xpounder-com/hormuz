@@ -100,10 +100,10 @@ object is written.
 
 ## Transit key-version rotation and recovery checkpoint
 
-[Issue #69](https://github.com/Xpounder-com/hormuz/issues/69) adds a separate,
-opt-in proof for the same self-hosted target. It is a recovery checkpoint, not
-an expansion of the existing RGW-level certification claim until its own live
-evidence is reviewed.
+[Issue #69](https://github.com/Xpounder-com/hormuz/issues/69) is completed in
+[PR #70](https://github.com/Xpounder-com/hormuz/pull/70), with final
+content-free live evidence published on the PR. It is a recovery checkpoint,
+not an expansion of the existing RGW-level certification claim.
 
 The checkpoint requires three distinct named Transit keys:
 
