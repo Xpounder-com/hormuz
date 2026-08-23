@@ -35,7 +35,6 @@ import time
 from collections.abc import Mapping
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any
 from unittest import mock
 from uuid import uuid4
 
@@ -45,11 +44,23 @@ from hormuz.postgres import POSTGRES_SCHEMA_VERSION, PostgresStorageError, migra
 from hormuz.postgres_usage_store import PostgresUsageStore
 from hormuz.server import GatewayServer, serve_in_thread
 
+try:
+    from tools._verification_runtime import (
+        is_pinned_image_reference,
+        run_container_command,
+        write_private_json_evidence,
+    )
+except ModuleNotFoundError:  # Direct execution resolves helpers beside this script.
+    from _verification_runtime import (  # type: ignore[no-redef]
+        is_pinned_image_reference,
+        run_container_command,
+        write_private_json_evidence,
+    )
+
 
 SUMMARY_SCHEMA_ID = "hormuz.postgresql-interruption-recovery"
 SUMMARY_SCHEMA_VERSION = 1
 SUMMARY_COVERAGE = "ephemeral_single_database_abrupt_interrupt_restart_only"
-_POSTGRES_IMAGE_PATTERN = re.compile(r"postgres@sha256:[0-9a-f]{64}\Z")
 _POSTGRES_VERSION_PATTERN = re.compile(r"\d+\.\d+(?:\.\d+)?\Z")
 _CONTAINER_PATTERN = re.compile(r"hormuz-postgres-interruption-[a-z0-9-]{8,80}\Z")
 _DISPOSABLE_LABEL = "io.hormuz.disposable-interruption"
@@ -410,30 +421,14 @@ def write_summary(path: Path, summary: Mapping[str, object]) -> None:
     """Atomically write the validated, owner-only summary and nothing else."""
 
     validate_summary(summary)
-    temporary_path: Path | None = None
     try:
-        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            dir=path.parent,
-            prefix=".hormuz-interruption-",
-            delete=False,
-        ) as temporary:
-            temporary_path = Path(temporary.name)
-            os.fchmod(temporary.fileno(), 0o600)
-            json.dump(summary, temporary, sort_keys=True, separators=(",", ":"))
-            temporary.write("\n")
-            temporary.flush()
-            os.fsync(temporary.fileno())
-        os.replace(temporary_path, path)
-        os.chmod(path, 0o600)
+        write_private_json_evidence(
+            path,
+            summary,
+            temporary_prefix=".hormuz-interruption-",
+            parent_mode=0o700,
+        )
     except OSError as error:
-        if temporary_path is not None:
-            try:
-                temporary_path.unlink(missing_ok=True)
-            except OSError:
-                pass
         raise InterruptionRecoveryError("interruption_summary_write_failed") from error
 
 
@@ -727,15 +722,12 @@ def _docker(
     require_success: bool = True,
 ) -> subprocess.CompletedProcess[str]:
     try:
-        result = subprocess.run(
+        result = run_container_command(
             ("docker", *arguments),
-            check=False,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            timeout=timeout_seconds,
+            timeout_seconds=timeout_seconds,
+            capture_stderr=False,
         )
-    except (OSError, subprocess.SubprocessError) as error:
+    except (OSError, subprocess.SubprocessError, ValueError) as error:
         raise InterruptionRecoveryError("interruption_docker_unavailable") from error
     if require_success and result.returncode != 0:
         raise InterruptionRecoveryError("interruption_docker_command_failed")
@@ -743,7 +735,7 @@ def _docker(
 
 
 def _validate_database_identity(*, database_image: object, database_version: object) -> None:
-    if not isinstance(database_image, str) or _POSTGRES_IMAGE_PATTERN.fullmatch(database_image) is None:
+    if not is_pinned_image_reference(database_image, image_name="postgres"):
         raise InterruptionRecoveryError("interruption_database_image_not_pinned")
     if not isinstance(database_version, str) or _POSTGRES_VERSION_PATTERN.fullmatch(database_version) is None:
         raise InterruptionRecoveryError("interruption_database_version_invalid")

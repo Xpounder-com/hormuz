@@ -431,6 +431,10 @@ class CephRGWCustodyRotationRecoveryTests(unittest.TestCase):
             "./tools/verify_ceph_rgw_custody_rotation_recovery.py",
             dockerfile,
         )
+        self.assertIn(
+            "COPY tools/_verification_runtime.py ./tools/_verification_runtime.py",
+            dockerfile,
+        )
 
 
 if __name__ == "__main__":

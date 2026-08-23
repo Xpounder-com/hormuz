@@ -7,6 +7,7 @@
 set -euo pipefail
 
 REPOSITORY_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+source "$REPOSITORY_ROOT/tools/_verification_runtime.sh"
 # PostgreSQL 16.14 multi-platform image index, inspected 2026-08-22.
 POSTGRES_IMAGE="postgres@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777"
 POSTGRES_VERSION="16.14"
@@ -62,15 +63,11 @@ failure() {
 
 remove_disposable_container() {
   local container="$1"
-  local label
-  label="$(docker inspect --format "{{ index .Config.Labels \"$DISPOSABLE_LABEL\" }}" "$container" 2>/dev/null || true)"
-  if [[ "$label" == "true" ]]; then docker rm --force "$container" >/dev/null 2>&1 || true; fi
+  hormuz_remove_disposable_container "$container" "$DISPOSABLE_LABEL"
 }
 
 remove_disposable_network() {
-  local label
-  label="$(docker network inspect --format "{{ index .Labels \"$DISPOSABLE_LABEL\" }}" "$NETWORK" 2>/dev/null || true)"
-  if [[ "$label" == "true" ]]; then docker network rm "$NETWORK" >/dev/null 2>&1 || true; fi
+  hormuz_remove_disposable_network "$NETWORK" "$DISPOSABLE_LABEL"
 }
 
 remove_disposable_work_dir() {
