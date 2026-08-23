@@ -17,8 +17,12 @@ RELAY_METADATA_SCHEMA_ID = "hormuz.relay-metadata"
 RELAY_METADATA_SCHEMA_VERSION = 1
 AUDIT_EVENT_SCHEMA_ID = "hormuz.audit-event"
 AUDIT_EVENT_SCHEMA_VERSION = 2
+AUDIT_ANCHOR_SCHEMA_ID = "hormuz.audit-anchor"
+AUDIT_ANCHOR_SCHEMA_VERSION = 1
 
 HEALTH_SCHEMA_ID = "hormuz.gateway-health"
+READINESS_SCHEMA_ID = "hormuz.gateway-readiness"
+READINESS_SCHEMA_VERSION = 1
 IDENTITY_SCHEMA_ID = "hormuz.gateway-identity"
 USAGE_SUMMARY_SCHEMA_ID = "hormuz.gateway-usage-summary"
 ERROR_SCHEMA_ID = "hormuz.gateway-error"
@@ -56,12 +60,14 @@ PUBLIC_ERROR_CODES = frozenset({*PUBLIC_ERROR_CODES_V1, "hormuz_storage_unavaila
 
 _CURRENT_SCHEMA_VERSIONS = {
     HEALTH_SCHEMA_ID: 1,
+    READINESS_SCHEMA_ID: READINESS_SCHEMA_VERSION,
     IDENTITY_SCHEMA_ID: 1,
     USAGE_SUMMARY_SCHEMA_ID: 1,
     ERROR_SCHEMA_ID: ERROR_SCHEMA_VERSION,
     POLICY_DECISION_SCHEMA_ID: 1,
     POLICY_CONTROL_STATUS_SCHEMA_ID: 1,
     USAGE_REPORT_SCHEMA_ID: 1,
+    AUDIT_ANCHOR_SCHEMA_ID: AUDIT_ANCHOR_SCHEMA_VERSION,
 }
 
 _REQUEST_STATUSES = frozenset({"succeeded", "failed", "denied", "rate_limited"})
@@ -165,6 +171,13 @@ def contract_manifest() -> dict[str, object]:
                 "response",
                 "hormuz",
                 ["schema_id", "schema_version", "status", "service", "protocols"],
+            ),
+            _manifest_schema(
+                READINESS_SCHEMA_ID,
+                READINESS_SCHEMA_VERSION,
+                "response",
+                "hormuz",
+                ["schema_id", "schema_version", "status", "service", "reason"],
             ),
             _manifest_schema(
                 IDENTITY_SCHEMA_ID,
@@ -337,6 +350,23 @@ def contract_manifest() -> dict[str, object]:
                 ],
             ),
             _manifest_schema(
+                AUDIT_ANCHOR_SCHEMA_ID,
+                AUDIT_ANCHOR_SCHEMA_VERSION,
+                "durable-evidence",
+                "hormuz",
+                [
+                    "schema_id",
+                    "schema_version",
+                    "artifact_id",
+                    "organization_id",
+                    "created_at",
+                    "chain_algorithm",
+                    "event_count",
+                    "entries",
+                    "head_digest",
+                ],
+            ),
+            _manifest_schema(
                 RELAY_METADATA_SCHEMA_ID,
                 RELAY_METADATA_SCHEMA_VERSION,
                 "http-headers",
@@ -477,6 +507,7 @@ def validate_contract(value: Mapping[str, Any]) -> None:
     schema_version = _value_integer(value, "schema_version")
     validator = {
         (HEALTH_SCHEMA_ID, 1): _validate_health,
+        (READINESS_SCHEMA_ID, READINESS_SCHEMA_VERSION): _validate_readiness,
         (IDENTITY_SCHEMA_ID, 1): _validate_identity,
         (USAGE_SUMMARY_SCHEMA_ID, 1): _validate_usage_summary,
         (ERROR_SCHEMA_ID, 1): lambda item: _validate_error(item, PUBLIC_ERROR_CODES_V1),
@@ -484,6 +515,7 @@ def validate_contract(value: Mapping[str, Any]) -> None:
         (POLICY_DECISION_SCHEMA_ID, 1): _validate_policy_decision,
         (POLICY_CONTROL_STATUS_SCHEMA_ID, 1): _validate_policy_control_status,
         (USAGE_REPORT_SCHEMA_ID, 1): _validate_usage_report,
+        (AUDIT_ANCHOR_SCHEMA_ID, AUDIT_ANCHOR_SCHEMA_VERSION): _validate_audit_anchor,
     }.get((schema_id, schema_version))
     if validator is None:
         raise ContractValidationError(f"unsupported Hormuz contract: {schema_id} v{schema_version}")
@@ -512,6 +544,18 @@ def validate_audit_event(value: Mapping[str, Any]) -> None:
             _validate_audit_security_v2(value)
             return
     raise ContractValidationError(f"unsupported Hormuz audit event: {event_type} v{version}")
+
+
+def validate_audit_anchor(value: Mapping[str, Any]) -> None:
+    """Strictly validate the structural contract of an immutable audit snapshot.
+
+    Cryptographic digest and predecessor verification remains in
+    ``hormuz.custody`` so a provider-neutral storage reader can use the same
+    implementation.  This contract validator ensures only current,
+    metadata-only tenant evidence enters that verifier.
+    """
+
+    _validate_audit_anchor(value)
 
 
 def validate_policy_control_event(value: Mapping[str, Any]) -> None:
@@ -633,6 +677,18 @@ def _validate_health(value: Mapping[str, Any]) -> None:
     _value_string(value, "status")
     _value_string(value, "service")
     _value_string_list(value, "protocols")
+
+
+def _validate_readiness(value: Mapping[str, Any]) -> None:
+    _exact_keys(value, {"schema_id", "schema_version", "status", "service", "reason"})
+    status = _value_string(value, "status")
+    _value_string(value, "service")
+    reason = _nullable_string(value, "reason")
+    if status == "ready" and reason is None:
+        return
+    if status == "not_ready" and reason in {"dependency_unavailable", "draining"}:
+        return
+    raise ContractValidationError("readiness status and reason are invalid")
 
 
 def _validate_identity(value: Mapping[str, Any]) -> None:
@@ -994,6 +1050,68 @@ def _validate_usage_report_row(value: Mapping[str, Any], *, path: str) -> None:
     for field in optional:
         if field in value:
             _nullable_string(value, field, path=path)
+
+
+def _validate_audit_anchor(value: Mapping[str, Any]) -> None:
+    _exact_keys(
+        value,
+        {
+            "schema_id",
+            "schema_version",
+            "artifact_id",
+            "organization_id",
+            "created_at",
+            "chain_algorithm",
+            "event_count",
+            "entries",
+            "head_digest",
+        },
+    )
+    if _value_string(value, "schema_id") != AUDIT_ANCHOR_SCHEMA_ID:
+        raise ContractValidationError("unsupported audit anchor schema_id")
+    if _value_integer(value, "schema_version") != AUDIT_ANCHOR_SCHEMA_VERSION:
+        raise ContractValidationError("unsupported audit anchor schema_version")
+    _value_string(value, "artifact_id")
+    organization_id = _value_string(value, "organization_id")
+    _value_string(value, "created_at")
+    if _value_string(value, "chain_algorithm") != "sha256":
+        raise ContractValidationError("unsupported audit anchor chain algorithm")
+    event_count = _value_integer(value, "event_count", minimum=1)
+    _sha256_digest(_value_string(value, "head_digest"), "audit anchor head_digest")
+    entries = value.get("entries")
+    if not isinstance(entries, list) or len(entries) != event_count:
+        raise ContractValidationError("audit anchor entry count is invalid")
+    seen_event_ids: set[str] = set()
+    previous_digest: str | None = None
+    for sequence, entry in enumerate(entries, start=1):
+        if not isinstance(entry, Mapping):
+            raise ContractValidationError("audit anchor entry must be an object")
+        _exact_keys(
+            entry,
+            {"schema_id", "schema_version", "sequence", "previous_digest", "event_digest", "event"},
+            path=f"entries[{sequence - 1}]",
+        )
+        if _value_string(entry, "schema_id", path=f"entries[{sequence - 1}]") != "hormuz.audit-chain-entry":
+            raise ContractValidationError("unsupported audit anchor entry schema_id")
+        if _value_integer(entry, "schema_version", path=f"entries[{sequence - 1}]") != 1:
+            raise ContractValidationError("unsupported audit anchor entry schema_version")
+        if _value_integer(entry, "sequence", path=f"entries[{sequence - 1}]") != sequence:
+            raise ContractValidationError("audit anchor sequence is invalid")
+        if entry.get("previous_digest") != previous_digest:
+            raise ContractValidationError("audit anchor predecessor is invalid")
+        digest = _value_string(entry, "event_digest", path=f"entries[{sequence - 1}]")
+        _sha256_digest(digest, f"entries[{sequence - 1}].event_digest")
+        event = _value_mapping(entry, "event", path=f"entries[{sequence - 1}]")
+        validate_audit_event(event)
+        if event.get("schema_id") != AUDIT_EVENT_SCHEMA_ID or event.get("schema_version") != AUDIT_EVENT_SCHEMA_VERSION:
+            raise ContractValidationError("audit anchor requires current audit evidence")
+        if event.get("organization_id") != organization_id:
+            raise ContractValidationError("audit anchor tenant mismatch")
+        event_id = _value_string(event, "id", path=f"entries[{sequence - 1}].event")
+        if event_id in seen_event_ids:
+            raise ContractValidationError("audit anchor duplicate event")
+        seen_event_ids.add(event_id)
+        previous_digest = digest
 
 
 def _validate_audit_usage_v1(value: Mapping[str, Any]) -> None:

@@ -17,7 +17,13 @@ from .contracts import (
     validate_request_status,
 )
 from .evidence import security_audit_event, usage_audit_event
-from .postgres import PostgresStorageError, postgres_transaction, validate_postgres_identifier, verify_postgres_schema
+from .postgres import (
+    PostgresConnectionPool,
+    PostgresStorageError,
+    postgres_transaction,
+    validate_postgres_identifier,
+    verify_postgres_schema,
+)
 from .store import MonthlyTotals, ReservationDenied, ReservationScope, SecretTotals
 
 
@@ -39,6 +45,7 @@ class PostgresUsageStore:
         schema: str = "hormuz",
         runtime_role: str = "hormuz_runtime",
         verify_schema: bool = True,
+        connection_pool: PostgresConnectionPool | None = None,
     ):
         if not isinstance(dsn, str) or not dsn:
             raise PostgresStorageError("postgres_dsn_unavailable")
@@ -50,8 +57,14 @@ class PostgresUsageStore:
         self.schema = validate_postgres_identifier(schema, "postgres_schema")
         self.runtime_role = validate_postgres_identifier(runtime_role, "postgres_runtime_role")
         self._qualified_schema = '"' + self.schema.replace('"', '""') + '"'
+        self._connection_pool = connection_pool
         if verify_schema:
-            verify_postgres_schema(dsn, schema=self.schema, runtime_role=self.runtime_role)
+            verify_postgres_schema(
+                dsn,
+                schema=self.schema,
+                runtime_role=self.runtime_role,
+                connection_pool=self._connection_pool,
+            )
 
     def _table(self, name: str) -> str:
         return f"{self._qualified_schema}.{name}"
@@ -71,7 +84,30 @@ class PostgresUsageStore:
             schema=self.schema,
             runtime_role=self.runtime_role,
             organization_id=organization_id,
+            connection_pool=self._connection_pool,
         )
+
+    def verify_ready(self) -> None:
+        """Prove every configured tenant can use the restricted runtime path.
+
+        The query is deliberately read-only and returns no evidence or tenant
+        metadata. It still exercises the configured runtime role, RLS policy,
+        transaction-local organization setting, and (when configured) the
+        bounded connection pool.
+        """
+
+        for organization_id in self.organization_ids:
+            with self._transaction(organization_id) as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        f"""
+                        SELECT 1
+                        FROM {self._table('gateway_usage_events')}
+                        WHERE organization_id = %s
+                        LIMIT 1
+                        """,
+                        (organization_id,),
+                    )
 
     def record(
         self,

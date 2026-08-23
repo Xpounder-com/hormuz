@@ -127,7 +127,8 @@ jobs:
           python -m venv "$RUNNER_TEMP/hormuz-postgres-wheel"
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/pip" install \
             dist/hormuz-*.whl \
-            'psycopg[binary]>=3.3.4,<3.4'
+            'psycopg[binary]>=3.3.4,<3.4' \
+            'psycopg-pool>=3.3.1,<3.4'
       - name: Prove PostgreSQL migration and repository compatibility
         env:
           HORMUZ_TEST_POSTGRES_DSN: postgresql://postgres:hormuz-test-password@127.0.0.1:${{ job.services.postgres.ports[5432] }}/hormuz_test
@@ -137,6 +138,78 @@ jobs:
             -s "$GITHUB_WORKSPACE/tests" \
             -p test_postgres.py \
             -v
+
+  postgres-backup-restore:
+    name: PostgreSQL logical recovery drill
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Build the candidate wheel
+        run: |
+          python -m pip install build==1.3.0
+          python -m build
+      - name: Install the candidate and PostgreSQL adapter in isolation
+        run: |
+          python -m venv "$RUNNER_TEMP/hormuz-postgres-recovery"
+          "$RUNNER_TEMP/hormuz-postgres-recovery/bin/pip" install \
+            dist/hormuz-*.whl \
+            'psycopg[binary]>=3.3.4,<3.4' \
+            'psycopg-pool>=3.3.1,<3.4'
+      - name: Exercise disposable logical backup and restore
+        env:
+          HORMUZ_POSTGRES_RECOVERY_PYTHON: ${{ runner.temp }}/hormuz-postgres-recovery/bin/python
+          HORMUZ_POSTGRES_RECOVERY_EVIDENCE_DIR: ${{ runner.temp }}/hormuz-postgres-recovery-evidence
+        run: ./tools/verify_postgres_backup_restore.sh
+      - name: Preserve PostgreSQL recovery evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hormuz-postgres-recovery
+          path: ${{ runner.temp }}/hormuz-postgres-recovery-evidence/summary.json
+          if-no-files-found: warn
+          retention-days: 7
+
+  oci-reference-runtime:
+    name: OCI reference runtime
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build and smoke-test the non-root OCI reference runtime
+        run: ./tools/verify_oci_reference.sh
+
+  oci-supply-chain:
+    name: OCI supply-chain evidence
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build candidate and enforce the fix-aware vulnerability policy
+        env:
+          HORMUZ_OCI_SUPPLY_CHAIN_EVIDENCE_DIR: ${{ runner.temp }}/hormuz-oci-supply-chain
+        run: ./tools/verify_oci_supply_chain.sh
+      - name: Preserve OCI supply-chain evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hormuz-oci-supply-chain
+          path: ${{ runner.temp }}/hormuz-oci-supply-chain/*
+          if-no-files-found: warn
+          retention-days: 7
 
   client-compatibility:
     name: Codex and Claude Code compatibility

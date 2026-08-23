@@ -1,0 +1,22 @@
+{
+  "checks": {
+    "active_policy_versions": true,
+    "migration_ledger": true,
+    "rls_without_organization_context": true,
+    "tenant_scoped_repository": true
+  },
+  "migration_version": 2,
+  "record_counts": {
+    "active_budget_reservations": 2,
+    "active_policy_versions": 2,
+    "organizations": 2,
+    "policy_administrators": 2,
+    "policy_control_events": 6,
+    "policy_versions": 2,
+    "secret_events": 2,
+    "usage_events": 2
+  },
+  "schema_id": "hormuz.postgresql-recovery-drill-state",
+  "schema_version": 1,
+  "state_fingerprint": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+}

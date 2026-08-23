@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import json
 import hashlib
+import ipaddress
 import math
 import os
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
+
+from .custody import KEY_PURPOSES, KEY_PURPOSE_DATA_ENCRYPTION, KEY_PURPOSE_PROVIDER_CREDENTIAL
 
 
 class ConfigError(ValueError):
@@ -17,6 +20,26 @@ class ConfigError(ValueError):
 
 _ENVIRONMENT_NAME_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 _POSTGRES_IDENTIFIER_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
+_AWS_REGION_PATTERN = re.compile(r"[a-z]{2}(?:-gov)?-[a-z0-9-]+-\d+\Z")
+_S3_BUCKET_PATTERN = re.compile(r"[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]\Z")
+
+
+# Configuration is a deployment control input. Bound and validate its raw
+# syntax before looking up any environment-backed identity or secret value.
+MAX_CONFIGURATION_BYTES = 1 * 1024 * 1024
+MAX_CONFIGURATION_DEPTH = 64
+MAX_CONFIGURATION_NODES = 100_000
+MAX_TRUSTED_PROXY_CIDRS = 64
+
+_CONFIGURATION_UNAVAILABLE = "configuration_unavailable"
+_CONFIGURATION_TOO_LARGE = "configuration_too_large"
+_CONFIGURATION_INVALID_ENCODING = "configuration_invalid_encoding"
+_CONFIGURATION_INVALID_JSON = "configuration_invalid_json"
+_CONFIGURATION_DUPLICATE_MEMBER = "configuration_duplicate_member"
+_CONFIGURATION_NONFINITE_NUMBER = "configuration_nonfinite_number"
+_CONFIGURATION_STRUCTURE_LIMIT = "configuration_structure_limit"
+_CONFIGURATION_SCHEMA_INVALID = "configuration_schema_invalid"
+_CONFIGURATION_UNSUPPORTED_FIELDS = "configuration_unsupported_fields"
 
 
 _DEPRECATED_CONTEXT_CONFIGURATION_KEYS = frozenset(
@@ -47,9 +70,29 @@ class ListenConfig:
 
 
 @dataclass(frozen=True)
+class IngressConfig:
+    """The gateway-side boundary for customer-controlled TLS termination.
+
+    ``local`` is intentionally the simple development default.  The external
+    proxy mode never makes Hormuz a TLS terminator: it only accepts an already
+    network-restricted and authenticated proxy hop.
+    """
+
+    mode: str = "local"
+    trusted_proxy_cidrs: tuple[str, ...] = ()
+    trusted_proxy_networks: tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...] = field(
+        default=(),
+        repr=False,
+    )
+    credential_env: str | None = None
+    credential: str = field(default="", repr=False)
+
+
+@dataclass(frozen=True)
 class UpstreamConfig:
     base_url: str
-    api_key_env: str
+    api_key_env: str | None = None
+    api_key_envelope_path: Path | None = None
     allow_response_storage: bool = False
     allow_background: bool = False
 
@@ -76,6 +119,55 @@ class UsageStorageConfig:
     postgres_migration_dsn_env: str = "HORMUZ_POSTGRES_MIGRATION_DSN"
     postgres_schema: str = "hormuz"
     postgres_runtime_role: str = "hormuz_runtime"
+    postgres_pool: "PostgresPoolConfig" = field(default_factory=lambda: PostgresPoolConfig())
+
+
+@dataclass(frozen=True)
+class PostgresPoolConfig:
+    """Bounded runtime-pool settings for the optional PostgreSQL adapter.
+
+    These settings apply only to long-running gateway runtime connections. The
+    migration credential intentionally remains a one-shot operator connection,
+    and the policy-control credential remains a distinct service boundary.
+    """
+
+    min_connections: int = 1
+    max_connections: int = 8
+    acquire_timeout_seconds: int = 5
+    max_waiting: int = 16
+    max_lifetime_seconds: int = 3600
+    max_idle_seconds: int = 300
+
+
+@dataclass(frozen=True)
+class KeyCustodyConfig:
+    """A configured external envelope-key service with purpose-separated keys.
+
+    Key references are identifiers only.  AWS workload credentials come from
+    the ambient SDK chain and must never be written into Hormuz JSON.
+    """
+
+    backend: str
+    region: str
+    key_references: dict[str, str]
+
+    def key_reference_for(self, purpose: str) -> str:
+        try:
+            return self.key_references[purpose]
+        except KeyError:
+            raise ConfigError(f"key_custody.key_references lacks required purpose: {purpose}") from None
+
+
+@dataclass(frozen=True)
+class AuditAnchorConfig:
+    """An explicit external immutable-retention target for audit snapshots."""
+
+    backend: str
+    region: str
+    bucket: str
+    prefix: str
+    retention_days: int
+    legal_hold: bool
 
 
 @dataclass(frozen=True)
@@ -220,6 +312,7 @@ class GatewayConfig:
     identities_by_token: dict[str, Identity]
     model_routes: dict[str, ModelRoute]
     organization_policy: Policy
+    ingress: IngressConfig = field(default_factory=IngressConfig)
     oidc_issuers: dict[str, OIDCIssuerConfig] = field(default_factory=dict)
     identities_by_subject: dict[tuple[str, str], Identity] = field(default_factory=dict)
     secret_controls: SecretControls = field(default_factory=SecretControls)
@@ -229,24 +322,20 @@ class GatewayConfig:
     upstream_timeout_seconds: int = 600
     usage_storage: UsageStorageConfig = field(default_factory=UsageStorageConfig)
     policy_control: PolicyControlConfig = field(default_factory=PolicyControlConfig)
+    key_custody: KeyCustodyConfig | None = None
+    audit_anchor: AuditAnchorConfig | None = None
 
     @classmethod
     def load(cls, path: str | Path, *, environ: dict[str, str] | None = None) -> "GatewayConfig":
         source_path = Path(path).expanduser().resolve()
-        try:
-            raw = json.loads(source_path.read_text(encoding="utf-8"))
-        except FileNotFoundError as error:
-            raise ConfigError(f"Configuration file does not exist: {source_path}") from error
-        except json.JSONDecodeError as error:
-            raise ConfigError(f"Invalid JSON in {source_path}: {error}") from error
-        if not isinstance(raw, dict):
-            raise ConfigError("Gateway configuration must be a JSON object")
+        raw = _load_configuration_json(source_path)
         _reject_deprecated_context_configuration(raw)
+        _validate_configuration_schema(raw)
 
-        env = os.environ if environ is None else environ
         listen_raw = _object(raw.get("listen", {}), "listen")
         host = _string(listen_raw.get("host", "127.0.0.1"), "listen.host")
         port = _integer(listen_raw.get("port", 8787), "listen.port", minimum=1, maximum=65535)
+        ingress = _ingress_config(raw.get("ingress", {}), listen_host=host)
 
         database_value = _string(raw.get("database", "./hormuz.sqlite3"), "database")
         database_path = Path(database_value).expanduser()
@@ -261,6 +350,7 @@ class GatewayConfig:
                 "postgres_migration_dsn_env",
                 "postgres_schema",
                 "postgres_runtime_role",
+                "postgres_pool",
             }
         )
         if unsupported_storage_fields:
@@ -287,11 +377,17 @@ class GatewayConfig:
             usage_storage_raw.get("postgres_runtime_role", "hormuz_runtime"),
             "usage_storage.postgres_runtime_role",
         )
+        postgres_pool = _postgres_pool_config(usage_storage_raw.get("postgres_pool", {}))
         if usage_backend == "postgresql" and postgres_dsn_env == postgres_migration_dsn_env:
             raise ConfigError(
                 "usage_storage.postgres_dsn_env and usage_storage.postgres_migration_dsn_env "
                 "must name separate credentials"
             )
+        if usage_backend != "postgresql" and "postgres_pool" in usage_storage_raw:
+            raise ConfigError("usage_storage.postgres_pool requires usage_storage.backend postgresql")
+
+        key_custody = _key_custody(raw.get("key_custody"))
+        audit_anchor = _audit_anchor(raw.get("audit_anchor"), key_custody=key_custody)
 
         policy_control_raw = _object(raw.get("policy_control", {}), "policy_control")
         unsupported_policy_control_fields = set(policy_control_raw).difference(
@@ -365,13 +461,47 @@ class GatewayConfig:
         upstreams: dict[str, UpstreamConfig] = {}
         for protocol in ("openai", "anthropic"):
             item = _object(upstreams_raw.get(protocol), f"upstreams.{protocol}")
+            unsupported_upstream_fields = set(item).difference(
+                {
+                    "base_url",
+                    "api_key_env",
+                    "api_key_envelope",
+                    "allow_response_storage",
+                    "allow_background",
+                }
+            )
+            if unsupported_upstream_fields:
+                raise ConfigError(
+                    f"upstreams.{protocol} contains unsupported fields: "
+                    + ", ".join(sorted(str(field) for field in unsupported_upstream_fields))
+                )
             base_url = _string(item.get("base_url"), f"upstreams.{protocol}.base_url").rstrip("/")
             parsed = urlparse(base_url)
             if parsed.scheme not in {"http", "https"} or not parsed.netloc:
                 raise ConfigError(f"upstreams.{protocol}.base_url must be an HTTP(S) URL")
+            api_key_env_value = item.get("api_key_env")
+            api_key_envelope_value = item.get("api_key_envelope")
+            if (api_key_env_value is None) == (api_key_envelope_value is None):
+                raise ConfigError(
+                    f"upstreams.{protocol} must configure exactly one of api_key_env or api_key_envelope"
+                )
+            api_key_env: str | None = None
+            api_key_envelope_path: Path | None = None
+            if api_key_env_value is not None:
+                api_key_env = _environment_name(api_key_env_value, f"upstreams.{protocol}.api_key_env")
+            else:
+                if key_custody is None:
+                    raise ConfigError(f"upstreams.{protocol}.api_key_envelope requires key_custody")
+                key_custody.key_reference_for(KEY_PURPOSE_PROVIDER_CREDENTIAL)
+                api_key_envelope_path = _configured_path(
+                    api_key_envelope_value,
+                    f"upstreams.{protocol}.api_key_envelope",
+                    source_path.parent,
+                )
             upstreams[protocol] = UpstreamConfig(
                 base_url=base_url,
-                api_key_env=_string(item.get("api_key_env"), f"upstreams.{protocol}.api_key_env"),
+                api_key_env=api_key_env,
+                api_key_envelope_path=api_key_envelope_path,
                 allow_response_storage=_boolean(
                     item.get("allow_response_storage", False),
                     f"upstreams.{protocol}.allow_response_storage",
@@ -385,21 +515,14 @@ class GatewayConfig:
         identities_raw = raw.get("identities", [])
         if not isinstance(identities_raw, list):
             raise ConfigError("identities must be an array")
-        identities_by_token: dict[str, Identity] = {}
+        static_identities: list[Identity] = []
         for index, value in enumerate(identities_raw):
             item = _object(value, f"identities[{index}]")
             prefix = f"identities[{index}]"
-            token_env = _string(item.get("token_env"), f"{prefix}.token_env")
-            token = env.get(token_env, "")
-            if not token:
-                raise ConfigError(f"Required identity token environment variable is not set: {token_env}")
-            if len(token) < 16:
-                raise ConfigError(f"Identity token from {token_env} must be at least 16 characters")
-            if token in identities_by_token:
-                raise ConfigError(f"Identity tokens must be unique; duplicate value from {token_env}")
+            token_env = _environment_name(item.get("token_env"), f"{prefix}.token_env")
             identity = Identity(
                 token_env=token_env,
-                token=token,
+                token="",
                 actor_id=_string(item.get("actor_id"), f"{prefix}.actor_id"),
                 actor_name=_string(item.get("actor_name"), f"{prefix}.actor_name"),
                 team_id=_string(item.get("team_id"), f"{prefix}.team_id"),
@@ -409,7 +532,7 @@ class GatewayConfig:
                 clearance=_classification(item.get("clearance", "internal"), f"{prefix}.clearance"),
                 identity_type=_identity_type(item.get("identity_type", "human"), f"{prefix}.identity_type"),
             )
-            identities_by_token[token] = identity
+            static_identities.append(identity)
 
         authentication_raw = _object(raw.get("authentication", {}), "authentication")
         oidc_raw = _object(authentication_raw.get("oidc", {}), "authentication.oidc")
@@ -513,12 +636,12 @@ class GatewayConfig:
                     ),
                     authentication_source=f"oidc:{issuer}",
                 )
-        if not identities_by_token and not identities_by_subject:
+        if not static_identities and not identities_by_subject:
             raise ConfigError("At least one static identity or OIDC subject mapping is required")
-        _validate_identity_consistency((*identities_by_token.values(), *identities_by_subject.values()))
+        _validate_identity_consistency((*static_identities, *identities_by_subject.values()))
         bootstrap_administrators = _bootstrap_administrators(
             bootstrap_administrators_raw,
-            identities_by_token=identities_by_token,
+            static_identities=tuple(static_identities),
             oidc_issuers=oidc_issuers,
         )
 
@@ -544,7 +667,7 @@ class GatewayConfig:
             )
 
         egress_raw = _object(raw.get("egress_controls", {}), "egress_controls")
-        secret_controls = _secret_controls(egress_raw.get("secrets", {}), env)
+        secret_controls = _secret_controls(egress_raw.get("secrets", {}))
         if policy_control_mode == "postgresql":
             # In managed mode the active policy is loaded only from the shared
             # immutable control plane. Keep a harmless empty local projection
@@ -567,9 +690,12 @@ class GatewayConfig:
         config = cls(
             source_path=source_path,
             listen=ListenConfig(host=host, port=port),
+            ingress=ingress,
             database_path=database_path,
             upstreams=upstreams,
-            identities_by_token=identities_by_token,
+            identities_by_token={
+                f"pending-static-{index}": identity for index, identity in enumerate(static_identities)
+            },
             model_routes=model_routes,
             organization_policy=organization_policy,
             oidc_issuers=oidc_issuers,
@@ -585,6 +711,7 @@ class GatewayConfig:
                 postgres_migration_dsn_env=postgres_migration_dsn_env,
                 postgres_schema=postgres_schema,
                 postgres_runtime_role=postgres_runtime_role,
+                postgres_pool=postgres_pool,
             ),
             policy_control=PolicyControlConfig(
                 mode=policy_control_mode,
@@ -593,11 +720,30 @@ class GatewayConfig:
                 postgres_control_role=policy_control_role,
                 break_glass=break_glass,
             ),
+            key_custody=key_custody,
+            audit_anchor=audit_anchor,
         )
         config.validate_references()
-        return config
+        _validate_dedicated_ingress_credential_env(config)
+        env = os.environ if environ is None else environ
+        identities_by_token = _resolve_static_identity_tokens(tuple(static_identities), env)
+        resolved_ingress = _resolve_ingress_credential(config.ingress, env)
+        if resolved_ingress.credential and resolved_ingress.credential in identities_by_token:
+            raise ConfigError("ingress credential must not equal a static identity token")
+        return replace(
+            config,
+            ingress=resolved_ingress,
+            identities_by_token=identities_by_token,
+            secret_controls=_resolve_secret_controls(config.secret_controls, env),
+        )
 
     def validate_references(self) -> None:
+        if any(upstream.api_key_envelope_path is not None for upstream in self.upstreams.values()):
+            if len(self.organization_ids) != 1:
+                raise ConfigError(
+                    "encrypted upstream credentials require exactly one configured organization; "
+                    "use a tenant-scoped gateway configuration"
+                )
         policies = [self.organization_policy, *self.team_policies.values(), *self.actor_policies.values()]
         for policy in policies:
             for alias in policy.allowed_models or ():
@@ -718,6 +864,300 @@ class GatewayConfig:
         return f"local-config-{hashlib.sha256(canonical).hexdigest()[:16]}"
 
 
+_ROOT_CONFIGURATION_FIELDS = frozenset(
+    {
+        "listen",
+        "ingress",
+        "database",
+        "upstreams",
+        "identities",
+        "authentication",
+        "model_routes",
+        "egress_controls",
+        "policies",
+        "max_request_bytes",
+        "upstream_timeout_seconds",
+        "usage_storage",
+        "policy_control",
+        "key_custody",
+        "audit_anchor",
+    }
+)
+_LISTEN_FIELDS = frozenset({"host", "port"})
+_INGRESS_FIELDS = frozenset({"mode", "trusted_proxy_cidrs", "credential_env"})
+_UPSTREAM_FIELDS = frozenset(
+    {"base_url", "api_key_env", "api_key_envelope", "allow_response_storage", "allow_background"}
+)
+_IDENTITY_FIELDS = frozenset(
+    {
+        "token_env",
+        "actor_id",
+        "actor_name",
+        "team_id",
+        "team_name",
+        "allowed_clients",
+        "organization_id",
+        "clearance",
+        "identity_type",
+    }
+)
+_OIDC_ISSUER_FIELDS = frozenset(
+    {
+        "issuer",
+        "audiences",
+        "jwks_uri",
+        "algorithms",
+        "clock_skew_seconds",
+        "discovery_cache_seconds",
+        "allow_insecure_http",
+        "subjects",
+    }
+)
+_OIDC_SUBJECT_FIELDS = _IDENTITY_FIELDS.difference({"token_env"}).union({"subject"})
+_MODEL_ROUTE_FIELDS = frozenset(
+    {
+        "protocol",
+        "upstream_model",
+        "input_cost_per_million",
+        "cache_read_cost_per_million",
+        "cache_write_cost_per_million",
+        "output_cost_per_million",
+    }
+)
+_EGRESS_CONTROL_FIELDS = frozenset({"secrets"})
+_SECRET_CONTROL_FIELDS = frozenset({"mode", "builtins", "custom_secret_envs"})
+_POLICIES_FIELDS = frozenset({"organization", "teams", "actors"})
+_POLICY_FIELDS = frozenset(
+    {
+        "allowed_clients",
+        "allowed_models",
+        "fallback_model",
+        "fallback_models",
+        "max_output_tokens",
+        "monthly_token_limit",
+        "monthly_budget_usd",
+        "per_actor_monthly_budget_usd",
+    }
+)
+_FALLBACK_MODEL_FIELDS = frozenset({"openai", "anthropic"})
+_USAGE_STORAGE_FIELDS = frozenset(
+    {
+        "backend",
+        "postgres_dsn_env",
+        "postgres_migration_dsn_env",
+        "postgres_schema",
+        "postgres_runtime_role",
+        "postgres_pool",
+    }
+)
+_POSTGRES_POOL_FIELDS = frozenset(
+    {
+        "min_connections",
+        "max_connections",
+        "acquire_timeout_seconds",
+        "max_waiting",
+        "max_lifetime_seconds",
+        "max_idle_seconds",
+    }
+)
+_POLICY_CONTROL_FIELDS = frozenset(
+    {
+        "mode",
+        "bootstrap_administrators",
+        "postgres_control_dsn_env",
+        "postgres_control_role",
+        "break_glass",
+    }
+)
+_BREAK_GLASS_FIELDS = frozenset({"enabled", "token_env"})
+_BOOTSTRAP_ADMINISTRATOR_FIELDS = frozenset({"organization_id", "actor_id", "issuer", "subject"})
+_KEY_CUSTODY_FIELDS = frozenset({"backend", "region", "key_references"})
+_AUDIT_ANCHOR_FIELDS = frozenset({"backend", "region", "bucket", "prefix", "retention_days", "legal_hold"})
+
+
+class _ConfigurationInputError(ValueError):
+    """Internal JSON decoder failure with a fixed, content-free code."""
+
+    def __init__(self, code: str):
+        self.code = code
+        super().__init__(code)
+
+
+def _load_configuration_json(source_path: Path) -> dict[str, Any]:
+    """Read one bounded, unambiguous JSON object before any secret lookup."""
+
+    try:
+        with source_path.open("rb") as source:
+            encoded = source.read(MAX_CONFIGURATION_BYTES + 1)
+    except OSError:
+        raise ConfigError(_CONFIGURATION_UNAVAILABLE) from None
+    if len(encoded) > MAX_CONFIGURATION_BYTES:
+        raise ConfigError(_CONFIGURATION_TOO_LARGE)
+    try:
+        decoded = encoded.decode("utf-8")
+    except UnicodeDecodeError:
+        raise ConfigError(_CONFIGURATION_INVALID_ENCODING) from None
+    try:
+        raw = json.loads(
+            decoded,
+            object_pairs_hook=_reject_duplicate_json_members,
+            parse_constant=_reject_nonfinite_json_number,
+        )
+    except _ConfigurationInputError as error:
+        raise ConfigError(error.code) from None
+    except (json.JSONDecodeError, RecursionError, ValueError):
+        raise ConfigError(_CONFIGURATION_INVALID_JSON) from None
+    if not isinstance(raw, dict):
+        raise ConfigError(_CONFIGURATION_SCHEMA_INVALID)
+    _validate_configuration_structure(raw)
+    return raw
+
+
+def _reject_duplicate_json_members(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise _ConfigurationInputError(_CONFIGURATION_DUPLICATE_MEMBER)
+        result[key] = value
+    return result
+
+
+def _reject_nonfinite_json_number(_value: str) -> None:
+    raise _ConfigurationInputError(_CONFIGURATION_NONFINITE_NUMBER)
+
+
+def _validate_configuration_structure(raw: object) -> None:
+    """Reject deeply nested or enormous JSON without recursive traversal."""
+
+    pending: list[tuple[object, int]] = [(raw, 1)]
+    nodes = 0
+    while pending:
+        value, depth = pending.pop()
+        nodes += 1
+        if nodes > MAX_CONFIGURATION_NODES or depth > MAX_CONFIGURATION_DEPTH:
+            raise ConfigError(_CONFIGURATION_STRUCTURE_LIMIT)
+        if isinstance(value, float) and not math.isfinite(value):
+            raise ConfigError(_CONFIGURATION_NONFINITE_NUMBER)
+        if isinstance(value, dict):
+            pending.extend((item, depth + 1) for item in value.values())
+        elif isinstance(value, list):
+            pending.extend((item, depth + 1) for item in value)
+
+
+def _validate_configuration_schema(raw: dict[str, Any]) -> None:
+    """Reject unknown fields across the raw schema before environment lookup."""
+
+    _schema_object(raw, _ROOT_CONFIGURATION_FIELDS)
+
+    _schema_optional_object(raw, "listen", _LISTEN_FIELDS)
+    _schema_optional_object(raw, "ingress", _INGRESS_FIELDS)
+
+    upstreams = _schema_required_object(raw, "upstreams", frozenset({"openai", "anthropic"}))
+    for value in upstreams.values():
+        _schema_object(value, _UPSTREAM_FIELDS)
+
+    identities = _schema_optional_array(raw, "identities")
+    for value in identities:
+        _schema_object(value, _IDENTITY_FIELDS)
+
+    authentication = _schema_optional_object(raw, "authentication", frozenset({"oidc"}))
+    if authentication is not None:
+        oidc = _schema_optional_object(authentication, "oidc", frozenset({"issuers"}))
+        if oidc is not None:
+            issuers = _schema_optional_array(oidc, "issuers")
+            for issuer in issuers:
+                issuer_object = _schema_object(issuer, _OIDC_ISSUER_FIELDS)
+                subjects = _schema_optional_array(issuer_object, "subjects")
+                for subject in subjects:
+                    _schema_object(subject, _OIDC_SUBJECT_FIELDS)
+
+    model_routes = _schema_required_mapping(raw, "model_routes")
+    for value in model_routes.values():
+        _schema_object(value, _MODEL_ROUTE_FIELDS)
+
+    egress = _schema_optional_object(raw, "egress_controls", _EGRESS_CONTROL_FIELDS)
+    if egress is not None:
+        _schema_optional_object(egress, "secrets", _SECRET_CONTROL_FIELDS)
+
+    if "policies" in raw:
+        policies = _schema_object(raw["policies"], _POLICIES_FIELDS)
+        if "organization" in policies:
+            _validate_policy_schema(policies["organization"])
+        for scope in ("teams", "actors"):
+            if scope not in policies:
+                continue
+            for policy in _schema_mapping(policies[scope]).values():
+                _validate_policy_schema(policy)
+
+    usage_storage = _schema_optional_object(raw, "usage_storage", _USAGE_STORAGE_FIELDS)
+    if usage_storage is not None:
+        _schema_optional_object(usage_storage, "postgres_pool", _POSTGRES_POOL_FIELDS)
+
+    policy_control = _schema_optional_object(raw, "policy_control", _POLICY_CONTROL_FIELDS)
+    if policy_control is not None:
+        _schema_optional_object(policy_control, "break_glass", _BREAK_GLASS_FIELDS)
+        for administrator in _schema_optional_array(policy_control, "bootstrap_administrators"):
+            _schema_object(administrator, _BOOTSTRAP_ADMINISTRATOR_FIELDS)
+
+    if "key_custody" in raw and raw["key_custody"] is not None:
+        key_custody = _schema_object(raw["key_custody"], _KEY_CUSTODY_FIELDS)
+        if "key_references" in key_custody:
+            _schema_object(key_custody["key_references"], frozenset(KEY_PURPOSES))
+
+    if "audit_anchor" in raw and raw["audit_anchor"] is not None:
+        _schema_object(raw["audit_anchor"], _AUDIT_ANCHOR_FIELDS)
+
+
+def _validate_policy_schema(value: object) -> None:
+    policy = _schema_object(value, _POLICY_FIELDS)
+    if "fallback_models" in policy and policy["fallback_models"] is not None:
+        _schema_object(policy["fallback_models"], _FALLBACK_MODEL_FIELDS)
+
+
+def _schema_required_object(
+    parent: dict[str, Any],
+    key: str,
+    allowed_fields: frozenset[str],
+) -> dict[str, Any]:
+    return _schema_object(parent.get(key), allowed_fields)
+
+
+def _schema_optional_object(
+    parent: dict[str, Any],
+    key: str,
+    allowed_fields: frozenset[str],
+) -> dict[str, Any] | None:
+    if key not in parent:
+        return None
+    return _schema_object(parent[key], allowed_fields)
+
+
+def _schema_required_mapping(parent: dict[str, Any], key: str) -> dict[str, Any]:
+    return _schema_mapping(parent.get(key))
+
+
+def _schema_optional_array(parent: dict[str, Any], key: str) -> list[Any]:
+    if key not in parent:
+        return []
+    value = parent[key]
+    if not isinstance(value, list):
+        raise ConfigError(_CONFIGURATION_SCHEMA_INVALID)
+    return value
+
+
+def _schema_mapping(value: object) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise ConfigError(_CONFIGURATION_SCHEMA_INVALID)
+    return value
+
+
+def _schema_object(value: object, allowed_fields: frozenset[str]) -> dict[str, Any]:
+    result = _schema_mapping(value)
+    if set(result).difference(allowed_fields):
+        raise ConfigError(_CONFIGURATION_UNSUPPORTED_FIELDS)
+    return result
+
+
 def _policy(value: Any, path: str) -> Policy:
     item = _object(value, path)
     return Policy(
@@ -775,7 +1215,124 @@ def _reject_deprecated_context_configuration(raw: dict[str, Any]) -> None:
             raise ConfigError(_CONTEXT_EXPERIMENT_MOVED_MESSAGE)
 
 
-def _secret_controls(value: Any, env: dict[str, str]) -> SecretControls:
+def _ingress_config(value: Any, *, listen_host: str) -> IngressConfig:
+    """Parse the private proxy hop without resolving its credential yet."""
+
+    item = _object(value, "ingress")
+    mode = _string(item.get("mode", "local"), "ingress.mode")
+    if mode not in {"local", "external_tls_proxy"}:
+        raise ConfigError("ingress.mode must be local or external_tls_proxy")
+
+    if mode == "local":
+        if "trusted_proxy_cidrs" in item or "credential_env" in item:
+            raise ConfigError("ingress.trusted_proxy_cidrs and ingress.credential_env require external_tls_proxy mode")
+        if not _is_loopback_listener(listen_host):
+            raise ConfigError("a non-loopback listen.host requires ingress.mode external_tls_proxy")
+        return IngressConfig()
+
+    trusted_proxy_cidrs = _string_tuple(
+        item.get("trusted_proxy_cidrs", []),
+        "ingress.trusted_proxy_cidrs",
+    )
+    if not trusted_proxy_cidrs:
+        raise ConfigError("ingress.trusted_proxy_cidrs must contain at least one network")
+    if len(trusted_proxy_cidrs) > MAX_TRUSTED_PROXY_CIDRS:
+        raise ConfigError(f"ingress.trusted_proxy_cidrs must contain at most {MAX_TRUSTED_PROXY_CIDRS} networks")
+
+    networks: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = []
+    for index, cidr in enumerate(trusted_proxy_cidrs):
+        try:
+            networks.append(ipaddress.ip_network(cidr, strict=True))
+        except ValueError:
+            raise ConfigError(f"ingress.trusted_proxy_cidrs[{index}] must be a canonical CIDR") from None
+    if len(networks) != len(set(networks)):
+        raise ConfigError("ingress.trusted_proxy_cidrs cannot contain duplicate networks")
+    ipv4_networks = [network for network in networks if network.version == 4]
+    ipv6_networks = [network for network in networks if network.version == 6]
+    collapsed_networks = (
+        *tuple(ipaddress.collapse_addresses(ipv4_networks)),
+        *tuple(ipaddress.collapse_addresses(ipv6_networks)),
+    )
+    if any(network.prefixlen == 0 for network in collapsed_networks):
+        raise ConfigError("ingress.trusted_proxy_cidrs must not admit every address")
+
+    return IngressConfig(
+        mode=mode,
+        trusted_proxy_cidrs=trusted_proxy_cidrs,
+        trusted_proxy_networks=collapsed_networks,
+        credential_env=_environment_name(item.get("credential_env"), "ingress.credential_env"),
+    )
+
+
+def _is_loopback_listener(host: str) -> bool:
+    normalized = host.lower().rstrip(".")
+    if normalized == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(normalized).is_loopback
+    except ValueError:
+        return False
+
+
+def _resolve_ingress_credential(ingress: IngressConfig, env: dict[str, str]) -> IngressConfig:
+    """Resolve the proxy credential only after every semantic check succeeds."""
+
+    if ingress.mode == "local":
+        return ingress
+    assert ingress.credential_env is not None
+    credential = env.get(ingress.credential_env, "")
+    if not credential:
+        raise ConfigError(f"Required ingress credential environment variable is not set: {ingress.credential_env}")
+    if len(credential) < 16:
+        raise ConfigError(f"Ingress credential from {ingress.credential_env} must be at least 16 characters")
+    return replace(ingress, credential=credential)
+
+
+def _validate_dedicated_ingress_credential_env(config: GatewayConfig) -> None:
+    """Keep the proxy-hop secret separate from every other configured secret.
+
+    The ingress credential passes through customer-controlled infrastructure,
+    so reusing a provider key, employee token, database DSN, break-glass
+    credential, or redaction secret would accidentally widen access to that
+    other secret.  This is a configuration-time invariant; it does not inspect
+    or expose any environment values.
+    """
+
+    ingress = config.ingress
+    if ingress.mode == "local":
+        return
+    assert ingress.credential_env is not None
+
+    credential_envs = {
+        identity.token_env
+        for identity in config.identities_by_token.values()
+        if identity.token_env
+    }
+    credential_envs.update(
+        upstream.api_key_env
+        for upstream in config.upstreams.values()
+        if upstream.api_key_env is not None
+    )
+    credential_envs.update(config.secret_controls.custom_secret_envs)
+    if config.usage_storage.backend == "postgresql":
+        credential_envs.update(
+            {
+                config.usage_storage.postgres_dsn_env,
+                config.usage_storage.postgres_migration_dsn_env,
+            }
+        )
+    if config.policy_control.mode == "postgresql":
+        credential_envs.add(config.policy_control.postgres_control_dsn_env)
+        if config.policy_control.break_glass.enabled:
+            credential_envs.add(config.policy_control.break_glass.token_env)
+
+    if ingress.credential_env in credential_envs:
+        raise ConfigError("ingress.credential_env must name a credential distinct from all other Hormuz secrets")
+
+
+def _secret_controls(value: Any) -> SecretControls:
+    """Parse the non-secret custom-detector configuration only."""
+
     item = _object(value, "egress_controls.secrets")
     mode = _string(item.get("mode", "redact"), "egress_controls.secrets.mode")
     if mode not in {"off", "redact", "deny"}:
@@ -785,26 +1342,122 @@ def _secret_controls(value: Any, env: dict[str, str]) -> SecretControls:
         item.get("custom_secret_envs", []),
         "egress_controls.secrets.custom_secret_envs",
     )
+    return SecretControls(
+        mode=mode,
+        builtins=builtins,
+        custom_secret_envs=secret_envs,
+    )
+
+
+def _resolve_secret_controls(controls: SecretControls, env: dict[str, str]) -> SecretControls:
+    """Resolve configured detector values only after semantic config validation."""
+
     secret_values: list[tuple[str, str]] = []
-    for env_name in secret_envs:
+    for env_name in controls.custom_secret_envs:
         secret_value = env.get(env_name, "")
         if not secret_value:
             raise ConfigError(f"Required custom secret environment variable is not set: {env_name}")
         if len(secret_value) < 8:
             raise ConfigError(f"Custom secret from {env_name} must be at least 8 characters")
         secret_values.append((f"custom:{env_name}", secret_value))
-    return SecretControls(
-        mode=mode,
-        builtins=builtins,
-        custom_secret_envs=secret_envs,
-        custom_secret_values=tuple(secret_values),
+    return replace(controls, custom_secret_values=tuple(secret_values))
+
+
+def _resolve_static_identity_tokens(
+    identities: tuple[Identity, ...],
+    env: dict[str, str],
+) -> dict[str, Identity]:
+    """Resolve static tokens after every non-secret config invariant is valid."""
+
+    resolved: dict[str, Identity] = {}
+    for identity in identities:
+        token = env.get(identity.token_env, "")
+        if not token:
+            raise ConfigError(f"Required identity token environment variable is not set: {identity.token_env}")
+        if len(token) < 16:
+            raise ConfigError(f"Identity token from {identity.token_env} must be at least 16 characters")
+        if token in resolved:
+            raise ConfigError(f"Identity tokens must be unique; duplicate value from {identity.token_env}")
+        resolved[token] = replace(identity, token=token)
+    return resolved
+
+
+def _key_custody(value: Any) -> KeyCustodyConfig | None:
+    """Parse an opt-in external key-custody profile without credentials."""
+
+    if value is None:
+        return None
+    item = _object(value, "key_custody")
+    unsupported = set(item).difference({"backend", "region", "key_references"})
+    if unsupported:
+        raise ConfigError("key_custody contains unsupported fields: " + ", ".join(sorted(unsupported)))
+    backend = _string(item.get("backend"), "key_custody.backend")
+    if backend != "aws-kms":
+        raise ConfigError("key_custody.backend must be aws-kms")
+    region = _aws_region(item.get("region"), "key_custody.region")
+    raw_references = _object(item.get("key_references"), "key_custody.key_references")
+    if not raw_references:
+        raise ConfigError("key_custody.key_references must contain at least one purpose")
+    key_references: dict[str, str] = {}
+    for purpose, raw_reference in raw_references.items():
+        if not isinstance(purpose, str) or purpose not in KEY_PURPOSES:
+            raise ConfigError(
+                "key_custody.key_references keys must be one of: " + ", ".join(sorted(KEY_PURPOSES))
+            )
+        reference = _string(raw_reference, f"key_custody.key_references.{purpose}")
+        if len(reference) > 2048 or any(character in reference for character in "\x00\r\n"):
+            raise ConfigError(f"key_custody.key_references.{purpose} must be a safe KMS key reference")
+        key_references[purpose] = reference
+    if len(key_references) != len(set(key_references.values())):
+        raise ConfigError("key_custody.key_references must use distinct keys for distinct purposes")
+    return KeyCustodyConfig(backend=backend, region=region, key_references=key_references)
+
+
+def _audit_anchor(value: Any, *, key_custody: KeyCustodyConfig | None) -> AuditAnchorConfig | None:
+    """Parse an explicit S3 Object Lock target with no accidental default."""
+
+    if value is None:
+        return None
+    item = _object(value, "audit_anchor")
+    unsupported = set(item).difference({"backend", "region", "bucket", "prefix", "retention_days", "legal_hold"})
+    if unsupported:
+        raise ConfigError("audit_anchor contains unsupported fields: " + ", ".join(sorted(unsupported)))
+    backend = _string(item.get("backend"), "audit_anchor.backend")
+    if backend != "aws-s3-object-lock":
+        raise ConfigError("audit_anchor.backend must be aws-s3-object-lock")
+    if key_custody is None:
+        raise ConfigError("audit_anchor requires key_custody for SSE-KMS encryption")
+    key_custody.key_reference_for(KEY_PURPOSE_DATA_ENCRYPTION)
+    region = _aws_region(item.get("region"), "audit_anchor.region")
+    if region != key_custody.region:
+        raise ConfigError("audit_anchor.region must equal key_custody.region for SSE-KMS")
+    bucket = _string(item.get("bucket"), "audit_anchor.bucket")
+    if _S3_BUCKET_PATTERN.fullmatch(bucket) is None or ".." in bucket or ".-" in bucket or "-." in bucket:
+        raise ConfigError("audit_anchor.bucket must be a valid lower-case S3 bucket name")
+    prefix = _string(item.get("prefix", "hormuz/audit"), "audit_anchor.prefix").strip("/")
+    if (
+        not prefix
+        or len(prefix) > 512
+        or any(character in prefix for character in "\x00\r\n")
+        or any(part in {"", ".", ".."} for part in prefix.split("/"))
+    ):
+        raise ConfigError("audit_anchor.prefix must be a safe non-empty object-key prefix")
+    retention_days = _integer(item.get("retention_days"), "audit_anchor.retention_days", minimum=1, maximum=36500)
+    legal_hold = _boolean(item.get("legal_hold", False), "audit_anchor.legal_hold")
+    return AuditAnchorConfig(
+        backend=backend,
+        region=region,
+        bucket=bucket,
+        prefix=prefix,
+        retention_days=retention_days,
+        legal_hold=legal_hold,
     )
 
 
 def _bootstrap_administrators(
     value: list[Any],
     *,
-    identities_by_token: dict[str, Identity],
+    static_identities: tuple[Identity, ...],
     oidc_issuers: dict[str, OIDCIssuerConfig],
 ) -> tuple[BootstrapAdministrator, ...]:
     """Validate tenant-qualified, one-time policy-admin bootstrap identities.
@@ -817,7 +1470,6 @@ def _bootstrap_administrators(
 
     administrators: list[BootstrapAdministrator] = []
     seen: set[tuple[str, str, str, str]] = set()
-    static_identities = tuple(identities_by_token.values())
     for index, raw_value in enumerate(value):
         path = f"policy_control.bootstrap_administrators[{index}]"
         item = _object(raw_value, path)
@@ -956,11 +1608,92 @@ def _environment_name(value: Any, path: str) -> str:
     return result
 
 
+def _aws_region(value: Any, path: str) -> str:
+    result = _string(value, path)
+    if _AWS_REGION_PATTERN.fullmatch(result) is None:
+        raise ConfigError(f"{path} must be a valid AWS region identifier")
+    return result
+
+
+def _configured_path(value: Any, path: str, base_directory: Path) -> Path:
+    result = _string(value, path)
+    if any(character in result for character in "\x00\r\n"):
+        raise ConfigError(f"{path} must be a safe file path")
+    configured = Path(result).expanduser()
+    return configured.resolve() if configured.is_absolute() else (base_directory / configured).resolve()
+
+
 def _postgres_identifier(value: Any, path: str) -> str:
     result = _string(value, path)
     if _POSTGRES_IDENTIFIER_PATTERN.fullmatch(result) is None:
         raise ConfigError(f"{path} must be a safe PostgreSQL identifier")
     return result
+
+
+def _postgres_pool_config(value: Any) -> PostgresPoolConfig:
+    raw = _object(value, "usage_storage.postgres_pool")
+    allowed = {
+        "min_connections",
+        "max_connections",
+        "acquire_timeout_seconds",
+        "max_waiting",
+        "max_lifetime_seconds",
+        "max_idle_seconds",
+    }
+    unsupported = set(raw).difference(allowed)
+    if unsupported:
+        raise ConfigError(
+            "usage_storage.postgres_pool contains unsupported fields: "
+            + ", ".join(sorted(str(field) for field in unsupported))
+        )
+    min_connections = _integer(
+        raw.get("min_connections", 1),
+        "usage_storage.postgres_pool.min_connections",
+        minimum=1,
+        maximum=100,
+    )
+    max_connections = _integer(
+        raw.get("max_connections", 8),
+        "usage_storage.postgres_pool.max_connections",
+        minimum=1,
+        maximum=1000,
+    )
+    if min_connections > max_connections:
+        raise ConfigError(
+            "usage_storage.postgres_pool.min_connections must not exceed max_connections"
+        )
+    acquire_timeout_seconds = _integer(
+        raw.get("acquire_timeout_seconds", 5),
+        "usage_storage.postgres_pool.acquire_timeout_seconds",
+        minimum=1,
+        maximum=120,
+    )
+    max_waiting = _integer(
+        raw.get("max_waiting", 16),
+        "usage_storage.postgres_pool.max_waiting",
+        minimum=1,
+        maximum=10000,
+    )
+    max_lifetime_seconds = _integer(
+        raw.get("max_lifetime_seconds", 3600),
+        "usage_storage.postgres_pool.max_lifetime_seconds",
+        minimum=60,
+        maximum=7 * 24 * 60 * 60,
+    )
+    max_idle_seconds = _integer(
+        raw.get("max_idle_seconds", 300),
+        "usage_storage.postgres_pool.max_idle_seconds",
+        minimum=1,
+        maximum=max_lifetime_seconds,
+    )
+    return PostgresPoolConfig(
+        min_connections=min_connections,
+        max_connections=max_connections,
+        acquire_timeout_seconds=acquire_timeout_seconds,
+        max_waiting=max_waiting,
+        max_lifetime_seconds=max_lifetime_seconds,
+        max_idle_seconds=max_idle_seconds,
+    )
 
 
 def _optional_string(value: Any, path: str) -> str | None:

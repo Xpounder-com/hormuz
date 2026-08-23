@@ -1,0 +1,56 @@
+{
+  "listen": {
+    "host": "0.0.0.0",
+    "port": 8787
+  },
+  "ingress": {
+    "mode": "external_tls_proxy",
+    "trusted_proxy_cidrs": ["127.0.0.1/32"],
+    "credential_env": "HORMUZ_INGRESS_CREDENTIAL"
+  },
+  "database": "/var/lib/hormuz/hormuz.sqlite3",
+  "upstreams": {
+    "openai": {
+      "base_url": "http://127.0.0.1:9",
+      "api_key_env": "HORMUZ_CONTAINER_TEST_OPENAI_KEY",
+      "allow_response_storage": false,
+      "allow_background": false
+    },
+    "anthropic": {
+      "base_url": "http://127.0.0.1:9",
+      "api_key_env": "HORMUZ_CONTAINER_TEST_ANTHROPIC_KEY"
+    }
+  },
+  "identities": [
+    {
+      "token_env": "HORMUZ_CONTAINER_TEST_TOKEN",
+      "actor_id": "container-test-user",
+      "actor_name": "Container Test User",
+      "team_id": "container-test-team",
+      "team_name": "Container Test Team",
+      "organization_id": "container-test-org",
+      "identity_type": "ci",
+      "clearance": "internal",
+      "allowed_clients": ["codex", "claude-code"]
+    }
+  ],
+  "model_routes": {
+    "container-openai": {
+      "protocol": "openai",
+      "upstream_model": "gpt-container-test"
+    },
+    "container-anthropic": {
+      "protocol": "anthropic",
+      "upstream_model": "claude-container-test"
+    }
+  },
+  "policies": {
+    "organization": {
+      "allowed_clients": ["codex", "claude-code"],
+      "allowed_models": ["container-openai", "container-anthropic"],
+      "max_output_tokens": 64
+    },
+    "teams": {},
+    "actors": {}
+  }
+}

@@ -11,9 +11,12 @@ import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from unittest import mock
 
 from hormuz.config import GatewayConfig, Policy
 from hormuz.contracts import relay_contract_header, validate_audit_event, validate_contract
+from hormuz.custody import KEY_PURPOSE_PROVIDER_CREDENTIAL, EnvelopeCipher, GeneratedDataKey
+from hormuz.custody_runtime import write_envelope_file
 from hormuz.policy import PolicyEngine
 from hormuz.postgres import PostgresStorageError
 from hormuz.server import GatewayServer, serve_in_thread
@@ -304,6 +307,52 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertEqual(totals.reasoning_tokens, 7)
         self.assertGreater(totals.cost_microusd, 0)
 
+    def test_gateway_uses_an_encrypted_provider_credential_at_startup(self) -> None:
+        """The runtime must prefer the sealed source over any plaintext env value."""
+
+        self.gateway.shutdown()
+        self.gateway.server_close()
+        envelope_path = self.root / "openai.envelope"
+        data_key = b"K" * 32
+        provider = mock.Mock()
+        provider.generate_data_key.return_value = GeneratedDataKey(
+            key_reference="alias/hormuz-provider",
+            plaintext=data_key,
+            encrypted=b"test-wrapped-data-key",
+        )
+        provider.decrypt_data_key.return_value = data_key
+        envelope = EnvelopeCipher(provider).seal(
+            OPENAI_KEY.encode("utf-8"),
+            organization_id="organization",
+            purpose=KEY_PURPOSE_PROVIDER_CREDENTIAL,
+            key_reference="alias/hormuz-provider",
+        )
+        write_envelope_file(envelope_path, envelope)
+
+        config_value = self._config(self.provider.server_port, _free_port())
+        config_value["key_custody"] = {
+            "backend": "aws-kms",
+            "region": "us-east-1",
+            "key_references": {"provider_credential": "alias/hormuz-provider"},
+        }
+        config_value["upstreams"]["openai"] = {
+            "base_url": f"http://127.0.0.1:{self.provider.server_port}",
+            "api_key_envelope": "./openai.envelope",
+        }
+        self.config_path.write_text(json.dumps(config_value), encoding="utf-8")
+        # A fallback bug would make this different value reach the upstream.
+        os.environ["TEST_OPENAI_KEY"] = "unexpected-plaintext-fallback"
+        with mock.patch("hormuz.custody_runtime.create_data_key_provider", return_value=provider):
+            self.config = GatewayConfig.load(self.config_path)
+            self.gateway = GatewayServer(self.config)
+        self.gateway_thread = serve_in_thread(self.gateway)
+
+        status, _, _ = self._post("/v1/responses", {"model": "engineering-fast", "input": "hello"})
+        self.assertEqual(status, 200)
+        self.assertEqual(FakeProviderHandler.requests[-1]["headers"]["authorization"], f"Bearer {OPENAI_KEY}")
+        self.assertEqual(provider.decrypt_data_key.call_count, 1)
+        self.assertNotIn(OPENAI_KEY.encode("utf-8"), envelope_path.read_bytes())
+
     def test_policy_and_evidence_contracts_are_versioned_without_mutating_provider_body(self) -> None:
         status, headers, body = self._get("/health", token=None)
         self.assertEqual(status, 200)
@@ -339,6 +388,74 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertEqual(status, 401)
         self.assertEqual(headers["x-hormuz-contract"], "hormuz.gateway-error;v=2")
         validate_contract(json.loads(body))
+
+    def test_liveness_and_readiness_are_unauthenticated_versioned_probes_without_provider_egress(self) -> None:
+        before = len(FakeProviderHandler.requests)
+
+        status, headers, body = self._get("/health", token=None)
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["x-hormuz-contract"], "hormuz.gateway-health;v=1")
+        liveness = json.loads(body)
+        validate_contract(liveness)
+        self.assertEqual(liveness["status"], "ok")
+
+        status, headers, body = self._get("/ready", token=None)
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["x-hormuz-contract"], "hormuz.gateway-readiness;v=1")
+        readiness = json.loads(body)
+        validate_contract(readiness)
+        self.assertEqual(readiness, {
+            "schema_id": "hormuz.gateway-readiness",
+            "schema_version": 1,
+            "status": "ready",
+            "service": "hormuz",
+            "reason": None,
+        })
+        self.assertEqual(len(FakeProviderHandler.requests), before)
+
+    def test_readiness_dependency_failure_and_draining_are_content_free(self) -> None:
+        class UnavailableStore:
+            def verify_ready(self) -> None:
+                raise PostgresStorageError("company-database-host-must-not-leak")
+
+        before = len(FakeProviderHandler.requests)
+        self.gateway.store = UnavailableStore()
+        status, headers, body = self._get("/ready", token=None)
+        self.assertEqual(status, 503)
+        self.assertEqual(headers["x-hormuz-contract"], "hormuz.gateway-readiness;v=1")
+        dependency_unavailable = json.loads(body)
+        validate_contract(dependency_unavailable)
+        self.assertEqual(dependency_unavailable["status"], "not_ready")
+        self.assertEqual(dependency_unavailable["reason"], "dependency_unavailable")
+        self.assertNotIn("company-database-host-must-not-leak", repr(dependency_unavailable))
+        self.assertEqual(len(FakeProviderHandler.requests), before)
+
+        self.gateway._accepting_requests.clear()
+        status, _, body = self._get("/ready", token=None)
+        self.assertEqual(status, 503)
+        draining = json.loads(body)
+        validate_contract(draining)
+        self.assertEqual(draining["reason"], "draining")
+
+    def test_readiness_fails_closed_when_the_active_policy_check_is_unavailable(self) -> None:
+        unavailable_policy_runtime = mock.Mock()
+        unavailable_policy_runtime.verify_active_policies.side_effect = PostgresStorageError("policy-store-unavailable")
+        self.gateway.policy_engine.policy_runtime = unavailable_policy_runtime
+        before = len(FakeProviderHandler.requests)
+
+        status, headers, body = self._get("/ready", token=None)
+
+        self.assertEqual(status, 503)
+        self.assertEqual(headers["x-hormuz-contract"], "hormuz.gateway-readiness;v=1")
+        response = json.loads(body)
+        validate_contract(response)
+        self.assertEqual(response["reason"], "dependency_unavailable")
+        self.assertEqual(len(FakeProviderHandler.requests), before)
+
+    def test_shutdown_marks_the_gateway_draining_before_listener_close(self) -> None:
+        self.gateway.shutdown()
+
+        self.assertEqual(self.gateway.readiness_reason(), "draining")
 
     def test_storage_interruption_fails_closed_before_provider_egress_without_content_leakage(self) -> None:
         class UnavailableStore:
@@ -833,6 +950,173 @@ class GatewayIntegrationTests(unittest.TestCase):
                 "actors": {},
             },
         }
+
+
+class ExternalProxyIngressIntegrationTests(unittest.TestCase):
+    """Exercise the customer-controlled TLS proxy boundary at the HTTP edge."""
+
+    ingress_credential = "customer-proxy-credential-with-sufficient-length"
+
+    def setUp(self) -> None:
+        self.temporary = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary.name)
+        FakeProviderHandler.requests = []
+        self.provider = ThreadingHTTPServer(("127.0.0.1", 0), FakeProviderHandler)
+        self.provider_thread = threading.Thread(target=self.provider.serve_forever, daemon=True)
+        self.provider_thread.start()
+
+        os.environ["TEST_GATEWAY_TOKEN"] = GATEWAY_TOKEN
+        os.environ["TEST_CLAUDE_ONLY_TOKEN"] = CLAUDE_ONLY_TOKEN
+        os.environ["TEST_OPENAI_KEY"] = OPENAI_KEY
+        os.environ["TEST_ANTHROPIC_KEY"] = ANTHROPIC_KEY
+        os.environ["TEST_INGRESS_CREDENTIAL"] = self.ingress_credential
+
+        self.config_path = self.root / "gateway.json"
+        self.config_value = GatewayIntegrationTests._config(self, self.provider.server_port, _free_port())
+        self.config_value["ingress"] = {
+            "mode": "external_tls_proxy",
+            "trusted_proxy_cidrs": ["127.0.0.1/32"],
+            "credential_env": "TEST_INGRESS_CREDENTIAL",
+        }
+        self._start_gateway()
+
+    def tearDown(self) -> None:
+        self.gateway.shutdown()
+        self.gateway.server_close()
+        self.provider.shutdown()
+        self.provider.server_close()
+        os.environ.pop("TEST_INGRESS_CREDENTIAL", None)
+        self.temporary.cleanup()
+
+    def test_every_route_rejects_missing_or_wrong_ingress_before_side_effects(self) -> None:
+        before = len(FakeProviderHandler.requests)
+        cases = (
+            ("GET", "/health", None),
+            ("GET", "/ready", None),
+            ("OPTIONS", "/v1/responses", None),
+            ("POST", "/v1/responses", {"model": "engineering-fast", "input": "blocked"}),
+            ("DELETE", "/v1/unknown", None),
+        )
+        for method, path, body in cases:
+            with self.subTest(method=method, path=path):
+                status, headers, response = self._request(method, path, body=body)
+                self._assert_ingress_denied(status, headers, response)
+
+                status, headers, response = self._request(
+                    method,
+                    path,
+                    body=body,
+                    headers={"X-Hormuz-Ingress-Credential": "wrong-proxy-credential"},
+                )
+                self._assert_ingress_denied(status, headers, response)
+
+        self.assertEqual(len(FakeProviderHandler.requests), before)
+        self.assertEqual(self.gateway.store.monthly_totals(actor_id="alice").requests, 0)
+
+    def test_untrusted_source_is_denied_even_with_the_proxy_credential(self) -> None:
+        self.config_value["ingress"]["trusted_proxy_cidrs"] = ["10.42.0.0/16"]
+        self._restart_gateway()
+
+        status, headers, response = self._request(
+            "POST",
+            "/v1/responses",
+            body={"model": "engineering-fast", "input": "blocked"},
+            headers={
+                "Authorization": f"Bearer {GATEWAY_TOKEN}",
+                "X-Hormuz-Ingress-Credential": self.ingress_credential,
+            },
+        )
+
+        self._assert_ingress_denied(status, headers, response)
+        self.assertEqual(FakeProviderHandler.requests, [])
+        self.assertEqual(self.gateway.store.monthly_totals(actor_id="alice").requests, 0)
+
+    def test_duplicate_ingress_credentials_fail_closed(self) -> None:
+        connection = http.client.HTTPConnection("127.0.0.1", self.gateway.server_port, timeout=5)
+        connection.putrequest("GET", "/health")
+        connection.putheader("X-Hormuz-Ingress-Credential", self.ingress_credential)
+        connection.putheader("X-Hormuz-Ingress-Credential", self.ingress_credential)
+        connection.endheaders()
+        response = connection.getresponse()
+        body = response.read()
+        headers = {name.lower(): value for name, value in response.getheaders()}
+        connection.close()
+
+        self._assert_ingress_denied(response.status, headers, body)
+        self.assertEqual(FakeProviderHandler.requests, [])
+
+    def test_trusted_proxy_request_is_allowed_and_does_not_forward_proxy_headers(self) -> None:
+        status, _, response = self._request(
+            "POST",
+            "/v1/responses",
+            body={"model": "engineering-fast", "input": "allowed"},
+            headers={
+                "Authorization": f"Bearer {GATEWAY_TOKEN}",
+                "X-Hormuz-Ingress-Credential": self.ingress_credential,
+                "Forwarded": "for=203.0.113.40;proto=https",
+                "X-Forwarded-For": "203.0.113.40",
+                "X-Forwarded-Proto": "https",
+                "X-Real-IP": "203.0.113.40",
+            },
+        )
+
+        self.assertEqual(status, 200, response)
+        self.assertEqual(self.gateway.store.monthly_totals(actor_id="alice").requests, 1)
+        self.assertEqual(len(FakeProviderHandler.requests), 1)
+        upstream_headers = FakeProviderHandler.requests[0]["headers"]
+        assert isinstance(upstream_headers, dict)
+        for name in (
+            "x-hormuz-ingress-credential",
+            "forwarded",
+            "x-forwarded-for",
+            "x-forwarded-proto",
+            "x-real-ip",
+        ):
+            self.assertNotIn(name, upstream_headers)
+
+        status, _, response = self._request(
+            "GET",
+            "/health",
+            headers={"X-Hormuz-Ingress-Credential": self.ingress_credential},
+        )
+        self.assertEqual(status, 200, response)
+
+    def _start_gateway(self) -> None:
+        self.config_path.write_text(json.dumps(self.config_value), encoding="utf-8")
+        self.config = GatewayConfig.load(self.config_path)
+        self.gateway = GatewayServer(self.config)
+        self.gateway_thread = serve_in_thread(self.gateway)
+
+    def _restart_gateway(self) -> None:
+        self.gateway.shutdown()
+        self.gateway.server_close()
+        self._start_gateway()
+
+    def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        body: dict | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> tuple[int, dict[str, str], bytes]:
+        connection = http.client.HTTPConnection("127.0.0.1", self.gateway.server_port, timeout=5)
+        request_headers = dict(headers or {})
+        if body is not None:
+            request_headers.setdefault("Content-Type", "application/json")
+        connection.request(method, path, body=None if body is None else json.dumps(body), headers=request_headers)
+        response = connection.getresponse()
+        response_body = response.read()
+        response_headers = {name.lower(): value for name, value in response.getheaders()}
+        connection.close()
+        return response.status, response_headers, response_body
+
+    def _assert_ingress_denied(self, status: int, headers: dict[str, str], response: bytes) -> None:
+        self.assertEqual(status, 401, response)
+        self.assertEqual(headers["x-hormuz-contract"], "hormuz.gateway-error;v=2")
+        payload = json.loads(response)
+        validate_contract(payload)
+        self.assertEqual(payload["error"], {"code": "unauthorized", "message": "Missing or invalid Hormuz ingress credential"})
 
 
 def _free_port() -> int:

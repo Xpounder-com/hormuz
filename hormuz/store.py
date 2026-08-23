@@ -77,6 +77,8 @@ class StorageSchemaError(RuntimeError):
 class UsageRepository(Protocol):
     """The narrow metadata-only storage contract used by policy and gateway code."""
 
+    def verify_ready(self) -> None: ...
+
     def record(self, **kwargs: object) -> str: ...
 
     def record_secret_event(self, **kwargs: object) -> str: ...
@@ -249,6 +251,27 @@ class UsageStore:
                     "UPDATE hormuz_schema_migrations SET state = 'applied', applied_at = ? WHERE version = ?",
                     (datetime.now(timezone.utc).isoformat(), version),
                 )
+
+    def verify_ready(self) -> None:
+        """Perform a read-only local-store readiness check.
+
+        Readiness must not attempt an upgrade or otherwise mutate durable
+        state. It verifies that the already-initialized migration ledger still
+        matches the binary's supported schema before the gateway accepts more
+        traffic.
+        """
+
+        with self._lock, self._connection() as connection:
+            rows = connection.execute(
+                "SELECT version, state FROM hormuz_schema_migrations ORDER BY version"
+            ).fetchall()
+        states = {int(row["version"]): str(row["state"]) for row in rows}
+        if any(state != "applied" for state in states.values()):
+            raise StorageSchemaError("storage_schema_partial_upgrade")
+        if states and max(states) > self.maximum_supported_schema_version:
+            raise StorageSchemaError("storage_schema_newer_than_binary")
+        if any(states.get(version) != "applied" for version in range(1, self.schema_version + 1)):
+            raise StorageSchemaError("storage_schema_unavailable")
 
     @classmethod
     def _apply_migration(cls, connection: sqlite3.Connection, version: int) -> None:

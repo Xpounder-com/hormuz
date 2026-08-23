@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import hmac
+import ipaddress
 import json
 import logging
-import os
 import sqlite3
 import threading
 import time
@@ -22,50 +23,157 @@ from .contracts import (
     ERROR_SCHEMA_ID,
     HEALTH_SCHEMA_ID,
     IDENTITY_SCHEMA_ID,
+    READINESS_SCHEMA_ID,
     USAGE_SUMMARY_SCHEMA_ID,
     contract_envelope,
     relay_contract_header,
 )
+from .custody_runtime import resolve_upstream_credentials
 from .evidence import EvidenceStorageError
 from .policy import PolicyDecision, PolicyEngine
+from .policy_runtime import PolicyRuntime
 from .postgres import PostgresStorageError
 from .redaction import RedactionError, SecretRedactor
 from .store import ReservationDenied, StorageSchemaError, UsageRepository
-from .store_router import create_usage_store
+from .store_router import create_postgres_runtime_pool, create_usage_store
 from .usage import ResponseUsageParser
 
 
 LOGGER = logging.getLogger("hormuz")
 _STORAGE_FAILURES = (sqlite3.Error, EvidenceStorageError, PostgresStorageError, StorageSchemaError)
+_INGRESS_CREDENTIAL_HEADER = "X-Hormuz-Ingress-Credential"
 
 
 class GatewayServer(ThreadingHTTPServer):
-    daemon_threads = True
+    # ThreadingMixIn joins non-daemon handler threads from ``server_close``.
+    # Keep that default so a graceful listener shutdown cannot close the
+    # runtime pool between a provider response and its final evidence write.
+    daemon_threads = False
+    block_on_close = True
     allow_reuse_address = True
 
     def __init__(self, config: GatewayConfig):
         self.config = config
+        self._accepting_requests = threading.Event()
         self.authenticator = Authenticator(config)
-        self.store: UsageRepository = create_usage_store(config)
-        self.policy_engine = PolicyEngine(config, self.store)
-        self.policy_engine.policy_runtime.verify_active_policies()
-        protected_values = [
-            ("hormuz_identity_token", identity.token)
-            for identity in config.identities_by_token.values()
-            if identity.token
-        ]
-        protected_values.extend(
-            ("provider_credential", value)
-            for upstream in config.upstreams.values()
-            if len(value := os.environ.get(upstream.api_key_env, "")) >= 8
-        )
-        self.secret_redactor = SecretRedactor(config.secret_controls, tuple(protected_values))
-        super().__init__((config.listen.host, config.listen.port), GatewayRequestHandler)
+        self.postgres_pool = create_postgres_runtime_pool(config)
+        try:
+            self.store: UsageRepository = create_usage_store(config, connection_pool=self.postgres_pool)
+            policy_runtime = PolicyRuntime(config, connection_pool=self.postgres_pool)
+            self.policy_engine = PolicyEngine(config, self.store, policy_runtime=policy_runtime)
+            self.policy_engine.policy_runtime.verify_active_policies()
+            self.upstream_credentials = resolve_upstream_credentials(config)
+            protected_values = [
+                ("hormuz_identity_token", identity.token)
+                for identity in config.identities_by_token.values()
+                if identity.token
+            ]
+            protected_values.extend(
+                ("provider_credential", value)
+                for value in self.upstream_credentials.values()
+                if len(value) >= 8
+            )
+            self.secret_redactor = SecretRedactor(config.secret_controls, tuple(protected_values))
+            super().__init__((config.listen.host, config.listen.port), GatewayRequestHandler)
+        except Exception:
+            self._close_postgres_pool()
+            raise
+        self._accepting_requests.set()
+        if self.postgres_pool is not None:
+            settings = self.postgres_pool.settings
+            LOGGER.info(
+                "postgres_pool_started min_connections=%d max_connections=%d max_waiting=%d "
+                "acquire_timeout_seconds=%d",
+                settings.min_connections,
+                settings.max_connections,
+                settings.max_waiting,
+                settings.acquire_timeout_seconds,
+            )
+
+    def shutdown(self) -> None:
+        """Stop advertising readiness before the listener begins draining."""
+
+        self.begin_drain()
+        super().shutdown()
+
+    def begin_drain(self) -> None:
+        """Stop advertising readiness without blocking the serving thread."""
+
+        self._accepting_requests.clear()
+
+    def server_close(self) -> None:
+        self._accepting_requests.clear()
+        try:
+            super().server_close()
+        finally:
+            self._close_postgres_pool()
+
+    def readiness_reason(self) -> str | None:
+        """Return a content-free reason when this process must not receive traffic."""
+
+        if not self._accepting_requests.is_set():
+            return "draining"
+        try:
+            self.store.verify_ready()
+            self.policy_engine.policy_runtime.verify_active_policies()
+        except _STORAGE_FAILURES:
+            LOGGER.warning("readiness_dependency_unavailable")
+            return "dependency_unavailable"
+        # A shutdown may have started while the read-only checks ran. Never
+        # report ready after the drain marker is cleared.
+        if not self._accepting_requests.is_set():
+            return "draining"
+        return None
+
+    def _close_postgres_pool(self) -> None:
+        if self.postgres_pool is None:
+            return
+        try:
+            self.postgres_pool.close()
+        except PostgresStorageError:
+            LOGGER.error("postgres_pool_close_failed")
 
 
 class GatewayRequestHandler(BaseHTTPRequestHandler):
     server: GatewayServer
     protocol_version = "HTTP/1.1"
+
+    def parse_request(self) -> bool:
+        """Reject an untrusted proxy hop before any route-specific behavior.
+
+        This happens after Python has parsed the HTTP request but before it
+        dispatches *any* method.  It therefore covers health checks and
+        unknown methods as well as the employee-facing API routes.
+        """
+
+        if not super().parse_request():
+            return False
+        ingress = self.server.config.ingress
+        if ingress.mode == "local":
+            return True
+
+        try:
+            peer = ipaddress.ip_address(self.client_address[0])
+        except ValueError:
+            reason = "peer_address_invalid"
+        else:
+            if not any(peer in network for network in ingress.trusted_proxy_networks):
+                reason = "peer_not_trusted"
+            else:
+                credentials = self.headers.get_all(_INGRESS_CREDENTIAL_HEADER, [])
+                if len(credentials) != 1 or not hmac.compare_digest(credentials[0], ingress.credential):
+                    reason = "credential_rejected"
+                else:
+                    return True
+
+        LOGGER.info("ingress_denied reason=%s method=%s", reason, self.command)
+        self.close_connection = True
+        self._send_error(
+            "unauthorized",
+            "Missing or invalid Hormuz ingress credential",
+            HTTPStatus.UNAUTHORIZED,
+        )
+        return False
 
     def do_GET(self) -> None:  # noqa: N802
         path = urlsplit(self.path).path
@@ -77,6 +185,29 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                     "status": "ok",
                     "service": "hormuz",
                     "protocols": ["openai-responses", "anthropic-messages"],
+                },
+            )
+            return
+        if path == "/ready":
+            reason = self.server.readiness_reason()
+            if reason is None:
+                self._send_contract_json(
+                    HTTPStatus.OK,
+                    READINESS_SCHEMA_ID,
+                    {
+                        "status": "ready",
+                        "service": "hormuz",
+                        "reason": None,
+                    },
+                )
+                return
+            self._send_contract_json(
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                READINESS_SCHEMA_ID,
+                {
+                    "status": "not_ready",
+                    "service": "hormuz",
+                    "reason": reason,
                 },
             )
             return
@@ -414,11 +545,11 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         route = decision.route
         assert route is not None
         upstream = self.server.config.upstreams[protocol]
-        upstream_key = os.environ.get(upstream.api_key_env, "")
+        upstream_key = self.server.upstream_credentials.get(protocol, "")
         if not upstream_key:
             self._send_protocol_error(
                 protocol,
-                f"Gateway upstream credential is unavailable: {upstream.api_key_env}",
+                "Gateway upstream credential is unavailable",
                 HTTPStatus.SERVICE_UNAVAILABLE,
                 code="gateway_upstream_not_configured",
             )

@@ -5,11 +5,15 @@ import unittest
 from pathlib import Path
 
 from hormuz.contracts import (
+    AUDIT_ANCHOR_SCHEMA_ID,
+    AUDIT_ANCHOR_SCHEMA_VERSION,
     AUDIT_EVENT_SCHEMA_ID,
     AUDIT_EVENT_SCHEMA_VERSION,
     ContractValidationError,
     ERROR_SCHEMA_ID,
     ERROR_SCHEMA_VERSION,
+    READINESS_SCHEMA_ID,
+    READINESS_SCHEMA_VERSION,
     contract_envelope,
     contract_manifest,
     relay_contract_header,
@@ -30,6 +34,8 @@ class PolicyEvidenceContractTests(unittest.TestCase):
 
         for name in (
             "health",
+            "readiness_ready",
+            "readiness_not_ready",
             "identity",
             "usage_summary",
             "error",
@@ -37,6 +43,7 @@ class PolicyEvidenceContractTests(unittest.TestCase):
             "policy_decision",
             "policy_control_status",
             "usage_report",
+            "audit_anchor_v1",
         ):
             validate_contract(fixtures[name])
         for name in ("audit_usage_v1", "audit_security_v1", "audit_usage_v2", "audit_security_v2"):
@@ -53,11 +60,17 @@ class PolicyEvidenceContractTests(unittest.TestCase):
         with self.assertRaises(ContractValidationError):
             validate_contract(fixtures["error_v2_unknown_code"])
         with self.assertRaises(ContractValidationError):
+            validate_contract(fixtures["readiness_reason_mismatch"])
+        with self.assertRaises(ContractValidationError):
             validate_audit_event(fixtures["audit_usage_unknown_field"])
         invalid_event = json.loads(json.dumps(valid["policy_control_event"]))
         invalid_event["change_summary"]["scopes"]["organization"]["fields"] = ["do-not-store-content"]
         with self.assertRaises(ContractValidationError):
             validate_policy_control_event(invalid_event)
+        invalid_anchor = json.loads(json.dumps(valid["audit_anchor_v1"]))
+        invalid_anchor["unexpected"] = "field"
+        with self.assertRaises(ContractValidationError):
+            validate_contract(invalid_anchor)
         legacy_storage_error = {**valid["error_v2"], "schema_version": 1}
         with self.assertRaises(ContractValidationError):
             validate_contract(legacy_storage_error)
@@ -69,7 +82,9 @@ class PolicyEvidenceContractTests(unittest.TestCase):
             for item in manifest["schemas"]
         }
         self.assertIn((AUDIT_EVENT_SCHEMA_ID, AUDIT_EVENT_SCHEMA_VERSION), schemas)
+        self.assertIn((AUDIT_ANCHOR_SCHEMA_ID, AUDIT_ANCHOR_SCHEMA_VERSION), schemas)
         self.assertIn((ERROR_SCHEMA_ID, ERROR_SCHEMA_VERSION), schemas)
+        self.assertIn((READINESS_SCHEMA_ID, READINESS_SCHEMA_VERSION), schemas)
         self.assertIn(("hormuz.policy-decision", 1), schemas)
         self.assertIn(("hormuz.policy-control-status", 1), schemas)
         self.assertIn(("hormuz.policy-document", 1), schemas)
