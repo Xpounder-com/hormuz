@@ -86,11 +86,15 @@ require_explicit_opt_in() {
 }
 
 run_recovery_tool() {
-  PYTHONSAFEPATH=1 "$PITR_PYTHON" "$REPOSITORY_ROOT/tools/verify_postgres_backup_restore.py" "$@"
+  PYTHONPATH="${REPOSITORY_ROOT}/tools${PYTHONPATH:+:${PYTHONPATH}}" \
+    PYTHONSAFEPATH=1 \
+    "$PITR_PYTHON" "$REPOSITORY_ROOT/tools/verify_postgres_backup_restore.py" "$@"
 }
 
 run_pitr_tool() {
-  PYTHONSAFEPATH=1 "$PITR_PYTHON" "$REPOSITORY_ROOT/tools/verify_postgres_pitr_recovery.py" "$@"
+  PYTHONPATH="${REPOSITORY_ROOT}/tools${PYTHONPATH:+:${PYTHONPATH}}" \
+    PYTHONSAFEPATH=1 \
+    "$PITR_PYTHON" "$REPOSITORY_ROOT/tools/verify_postgres_pitr_recovery.py" "$@"
 }
 
 wait_for_postgres() {

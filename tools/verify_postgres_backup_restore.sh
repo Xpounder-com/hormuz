@@ -74,7 +74,9 @@ host_port() {
 }
 
 run_recovery_tool() {
-  PYTHONSAFEPATH=1 "${RECOVERY_PYTHON}" "${REPOSITORY_ROOT}/tools/verify_postgres_backup_restore.py" "$@"
+  PYTHONPATH="${REPOSITORY_ROOT}/tools${PYTHONPATH:+:${PYTHONPATH}}" \
+    PYTHONSAFEPATH=1 \
+    "${RECOVERY_PYTHON}" "${REPOSITORY_ROOT}/tools/verify_postgres_backup_restore.py" "$@"
 }
 
 expect_recovery_tool_failure() {

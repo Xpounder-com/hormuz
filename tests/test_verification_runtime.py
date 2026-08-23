@@ -191,6 +191,20 @@ false
         self.assertIn("!tools/verify_ceph_rgw_custody_rotation_recovery.py", dockerignore)
 
     def test_python_proofs_remain_directly_executable_and_fail_nonzero_on_missing_arguments(self) -> None:
+        safe_helper_import = subprocess.run(
+            (sys.executable, "-c", "import _verification_runtime"),
+            cwd=ROOT,
+            env={
+                **os.environ,
+                "PYTHONPATH": str(ROOT / "tools"),
+                "PYTHONSAFEPATH": "1",
+            },
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(safe_helper_import.returncode, 0, safe_helper_import.stderr)
+
         scripts = (
             "verify_ceph_rgw_custody_conformance.py",
             "verify_ceph_rgw_custody_rotation_recovery.py",
@@ -202,7 +216,11 @@ false
         for filename in scripts:
             path = ROOT / "tools" / filename
             with self.subTest(filename=filename):
-                environment = {**os.environ, "PYTHONPATH": str(ROOT)}
+                environment = {
+                    **os.environ,
+                    "PYTHONPATH": str(ROOT),
+                    "PYTHONSAFEPATH": "1",
+                }
                 help_result = subprocess.run(
                     (sys.executable, str(path), "--help"),
                     cwd=ROOT,
@@ -221,6 +239,16 @@ false
                     text=True,
                 )
                 self.assertNotEqual(failure_result.returncode, 0)
+
+        for filename in (
+            "verify_postgres_backup_restore.sh",
+            "verify_postgres_interruption_recovery.sh",
+            "verify_postgres_pitr_recovery.sh",
+        ):
+            wrapper = (ROOT / "tools" / filename).read_text(encoding="utf-8")
+            with self.subTest(wrapper=filename):
+                self.assertIn('PYTHONPATH="${REPOSITORY_ROOT}/tools', wrapper)
+                self.assertIn("PYTHONSAFEPATH=1", wrapper)
 
 
 if __name__ == "__main__":
