@@ -102,6 +102,51 @@ class _BlockingReplicaBudgetProviderHandler(BaseHTTPRequestHandler):
         pass
 
 
+class _ReplicaPolicyProviderHandler(BaseHTTPRequestHandler):
+    """Record only provider admission for cross-replica policy tests."""
+
+    protocol_version = "HTTP/1.1"
+    request_count = 0
+    request_lock = threading.Lock()
+
+    @classmethod
+    def reset(cls) -> None:
+        cls.request_count = 0
+
+    def do_POST(self) -> None:  # noqa: N802
+        length = int(self.headers.get("Content-Length", "0"))
+        payload = json.loads(self.rfile.read(length))
+        with self.request_lock:
+            type(self).request_count += 1
+
+        self._send_json(
+            {
+                "id": "resp_replica_policy",
+                "object": "response",
+                "status": "completed",
+                "model": payload["model"],
+                "output": [],
+                "usage": {
+                    "input_tokens": 1,
+                    "output_tokens": 0,
+                    "total_tokens": 1,
+                },
+            }
+        )
+
+    def _send_json(self, value: dict[str, object], *, status: int = 200) -> None:
+        body = json.dumps(value, separators=(",", ":")).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("x-request-id", "req_replica_policy")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, format: str, *args: object) -> None:
+        pass
+
+
 @unittest.skipUnless(
     os.environ.get("HORMUZ_TEST_POSTGRES_DSN"),
     "Set HORMUZ_TEST_POSTGRES_DSN and install hormuz[postgres] to run PostgreSQL conformance",
@@ -1363,6 +1408,151 @@ class PostgresUsageStoreTests(unittest.TestCase):
             _BlockingReplicaBudgetProviderHandler.release_first_response.set()
             if first_request_thread is not None:
                 first_request_thread.join(timeout=10)
+            for gateway in gateways[: len(gateway_threads)]:
+                gateway.shutdown()
+            for gateway in gateways:
+                gateway.server_close()
+            for thread in gateway_threads:
+                thread.join(timeout=10)
+            provider.shutdown()
+            provider.server_close()
+            provider_thread.join(timeout=10)
+
+    def test_two_gateway_instances_converge_on_policy_activation_and_rollback(self) -> None:
+        """A committed policy pointer governs both replicas before provider egress."""
+
+        _ReplicaPolicyProviderHandler.reset()
+        provider = ThreadingHTTPServer(("127.0.0.1", 0), _ReplicaPolicyProviderHandler)
+        provider_thread = threading.Thread(target=provider.serve_forever, daemon=True)
+        provider_thread.start()
+
+        gateways: list[GatewayServer] = []
+        gateway_threads: list[threading.Thread] = []
+        try:
+            config, environment, _issuer = self._managed_config()
+            service = PolicyControlService(config, environ=environment)
+            service.bootstrap(organization_id="xpounder", credential_env="HORMUZ_POLICY_ADMIN_TOKEN")
+            permissive = self._stage(
+                service,
+                environment=environment,
+                document=self._policy_document(),
+            )
+            initial_activation = service.activate(
+                organization_id="xpounder",
+                credential_env="HORMUZ_POLICY_ADMIN_TOKEN",
+                version_id=permissive.version_id,
+            )
+            self.assertEqual(initial_activation.generation, 1)
+
+            upstreams = dict(config.upstreams)
+            upstreams["openai"] = replace(
+                upstreams["openai"],
+                base_url=f"http://127.0.0.1:{provider.server_port}/v1",
+                api_key_env="TEST_REPLICA_POLICY_OPENAI_KEY",
+            )
+            upstreams["anthropic"] = replace(
+                upstreams["anthropic"],
+                api_key_env="TEST_REPLICA_POLICY_ANTHROPIC_KEY",
+            )
+            environment.update(
+                {
+                    "TEST_REPLICA_POLICY_OPENAI_KEY": "replica-policy-provider-key",
+                    "TEST_REPLICA_POLICY_ANTHROPIC_KEY": "replica-policy-anthropic-key",
+                }
+            )
+            configs = tuple(
+                replace(
+                    config,
+                    listen=replace(config.listen, port=_free_port()),
+                    upstreams=dict(upstreams),
+                )
+                for _ in range(2)
+            )
+            with mock.patch.dict(os.environ, environment, clear=False):
+                gateways = [GatewayServer(replica_config) for replica_config in configs]
+
+            self.assertIsNotNone(gateways[0].postgres_pool)
+            self.assertIsNotNone(gateways[1].postgres_pool)
+            self.assertIsNot(gateways[0].postgres_pool, gateways[1].postgres_pool)
+            gateway_threads = [serve_in_thread(gateway) for gateway in gateways]
+
+            def send_request(gateway: GatewayServer) -> tuple[int, bytes]:
+                connection = http.client.HTTPConnection("127.0.0.1", gateway.server_port, timeout=5)
+                try:
+                    connection.request(
+                        "POST",
+                        "/v1/responses",
+                        body=json.dumps({"model": "gpt-5.4-mini", "input": "replica policy probe"}),
+                        headers={
+                            "Authorization": "Bearer policy-test-alice-token",
+                            "Content-Type": "application/json",
+                        },
+                    )
+                    response = connection.getresponse()
+                    return response.status, response.read()
+                finally:
+                    connection.close()
+
+            initial_status, initial_body = send_request(gateways[0])
+            self.assertEqual(initial_status, 200, initial_body)
+            self.assertEqual(_ReplicaPolicyProviderHandler.request_count, 1)
+
+            stricter = self._stage(
+                service,
+                environment=environment,
+                document=self._policy_document(actor_blocked=True),
+            )
+            strict_activation = service.activate(
+                organization_id="xpounder",
+                credential_env="HORMUZ_POLICY_ADMIN_TOKEN",
+                version_id=stricter.version_id,
+            )
+            self.assertEqual(strict_activation.generation, 2)
+
+            denied_status, denied_body = send_request(gateways[1])
+            self.assertEqual(denied_status, 403, denied_body)
+            self.assertEqual(json.loads(denied_body)["error"]["code"], "hormuz_policy_denied")
+            self.assertEqual(_ReplicaPolicyProviderHandler.request_count, 1)
+
+            rollback = service.rollback(
+                organization_id="xpounder",
+                credential_env="HORMUZ_POLICY_ADMIN_TOKEN",
+                version_id=permissive.version_id,
+            )
+            self.assertEqual(rollback.action, "policy_rolled_back")
+            self.assertEqual(rollback.generation, 3)
+
+            restored_status, restored_body = send_request(gateways[1])
+            self.assertEqual(restored_status, 200, restored_body)
+            self.assertEqual(_ReplicaPolicyProviderHandler.request_count, 2)
+
+            totals = gateways[0].store.monthly_totals(organization_id="xpounder")
+            self.assertEqual((totals.requests, totals.denied_requests), (3, 1))
+            events = gateways[0].store.audit_events(
+                since="2000-01-01T00:00:00+00:00",
+                organization_id="xpounder",
+            )
+            self.assertEqual(len(events), 3)
+            self.assertEqual(
+                {(event["status"], event["policy_action"], event["policy_version"]) for event in events},
+                {
+                    ("succeeded", "allowed", permissive.version_id),
+                    ("denied", "denied", stricter.version_id),
+                },
+            )
+
+            status = service.status(organization_id="xpounder", credential_env="HORMUZ_POLICY_ADMIN_TOKEN")
+            self.assertEqual(status.active.version_id if status.active else None, permissive.version_id)
+            self.assertEqual(status.active.generation if status.active else None, 3)
+
+            shared_store = PostgresUsageStore(
+                self.runtime_dsn,
+                organization_ids=("xpounder", "beta"),
+                schema=self.schema,
+                runtime_role=self.runtime_role,
+            )
+            self.assertEqual(shared_store.monthly_totals(organization_id="beta").requests, 0)
+        finally:
             for gateway in gateways[: len(gateway_threads)]:
                 gateway.shutdown()
             for gateway in gateways:
