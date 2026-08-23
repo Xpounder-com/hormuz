@@ -36,6 +36,15 @@ Only after the core contract is stable, the program proceeds through real operat
 3. prove TLS deployment, shared PostgreSQL operation, pooling, backup/restore/PITR, multi-instance revocation and coordination, health/readiness/SLOs, alerts, and incident procedures ([#11](https://github.com/Xpounder-com/hormuz/issues/11));
 4. prove container signing, SBOM and vulnerability gates, and independent release review ([#9](https://github.com/Xpounder-com/hormuz/issues/9)).
 
+PR [#30](https://github.com/Xpounder-com/hormuz/pull/30) completes the
+bounded external generic-OIDC resource-server reference checkpoint for #13:
+live Okta discovery/JWKS, a public native authorization-code PKCE S256 proof
+with `form_post`, explicit subject mapping through Hormuz's real `whoami`
+route, and tampered-token denial. The generic resource-server contract remains
+provider-neutral. #13 remains open for the deliberately separate browser SSO,
+Hormuz session broker, refresh-token custody, session rotation, secure-store,
+and lifecycle/revocation requirements.
+
 PR [#31](https://github.com/Xpounder-com/hormuz/pull/31) supplies the generic
 custody contract and AWS KMS/S3 Object Lock reference implementation for #17,
 including an opt-in live conformance gate. #17 remains open until that gate is
