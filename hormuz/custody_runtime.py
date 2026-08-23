@@ -1,8 +1,9 @@
 """Runtime construction and safe local handling for custody artifacts.
 
-The helpers here are the only bridge from validated configuration to the AWS
-adapters.  They deliberately keep plaintext provider credentials in memory
-only and reject unsafe encrypted-envelope files before AWS is contacted.
+The helpers here are the only bridge from validated configuration to optional
+custody adapters. They deliberately keep plaintext provider credentials in
+memory only and reject unsafe encrypted-envelope files before a key service is
+contacted.
 """
 
 from __future__ import annotations
@@ -26,23 +27,47 @@ from .custody import (
     parse_envelope,
     serialize_envelope,
 )
+from .openbao_custody import OpenBaoTransitDataKeyProvider
+from .self_hosted_custody import create_s3_compatible_object_lock_anchor_sink
 
 
 _MAX_ENVELOPE_FILE_BYTES = 32 * 1024 * 1024
 
 
-def create_data_key_provider(config: GatewayConfig) -> DataKeyProvider:
+def create_data_key_provider(
+    config: GatewayConfig,
+    *,
+    environ: Mapping[str, str] | None = None,
+) -> DataKeyProvider:
     """Construct the configured key provider without accepting raw credentials."""
 
     key_custody = config.key_custody
     if key_custody is None:
         raise CustodyError("key_custody_unconfigured")
     if key_custody.backend == "aws-kms":
+        if key_custody.region is None:
+            raise CustodyError("key_custody_configuration_invalid")
         return create_aws_kms_key_custodian(region=key_custody.region)
+    if key_custody.backend == "openbao-transit":
+        environment = os.environ if environ is None else environ
+        if key_custody.endpoint_url is None or key_custody.token_env is None or key_custody.transit_mount is None:
+            raise CustodyError("key_custody_configuration_invalid")
+        token = environment.get(key_custody.token_env, "")
+        if not token:
+            raise CustodyError("openbao_custody_token_unavailable")
+        return OpenBaoTransitDataKeyProvider(
+            endpoint_url=key_custody.endpoint_url,
+            token=token,
+            mount=key_custody.transit_mount,
+        )
     raise CustodyError("key_custody_backend_unsupported")
 
 
-def create_audit_anchor_sink(config: GatewayConfig) -> AuditAnchorSink:
+def create_audit_anchor_sink(
+    config: GatewayConfig,
+    *,
+    environ: Mapping[str, str] | None = None,
+) -> AuditAnchorSink:
     """Construct the explicit immutable-audit destination from configuration."""
 
     anchor = config.audit_anchor
@@ -53,10 +78,30 @@ def create_audit_anchor_sink(config: GatewayConfig) -> AuditAnchorSink:
         raise CustodyError("key_custody_unconfigured")
     encryption_key_reference = key_custody.key_reference_for(KEY_PURPOSE_DATA_ENCRYPTION)
     if anchor.backend == "aws-s3-object-lock":
+        if anchor.region is None:
+            raise CustodyError("audit_anchor_configuration_invalid")
         return create_s3_object_lock_anchor_sink(
             region=anchor.region,
             bucket=anchor.bucket,
             prefix=anchor.prefix,
+            encryption_key_reference=encryption_key_reference,
+        )
+    if anchor.backend == "s3-compatible-object-lock":
+        environment = os.environ if environ is None else environ
+        if (
+            anchor.endpoint_url is None
+            or anchor.access_key_env is None
+            or anchor.secret_key_env is None
+        ):
+            raise CustodyError("audit_anchor_configuration_invalid")
+        return create_s3_compatible_object_lock_anchor_sink(
+            endpoint_url=anchor.endpoint_url,
+            region=anchor.region,
+            bucket=anchor.bucket,
+            prefix=anchor.prefix,
+            access_key=environment.get(anchor.access_key_env, ""),
+            secret_key=environment.get(anchor.secret_key_env, ""),
+            key_provider=create_data_key_provider(config, environ=environment),
             encryption_key_reference=encryption_key_reference,
         )
     raise CustodyError("audit_anchor_backend_unsupported")
@@ -86,7 +131,7 @@ def resolve_upstream_credentials(
         if upstream.api_key_envelope_path is None:
             raise CustodyError("upstream_credential_source_invalid")
         if cipher is None:
-            cipher = EnvelopeCipher(create_data_key_provider(config))
+            cipher = EnvelopeCipher(create_data_key_provider(config, environ=environment))
         envelope = read_envelope_file(upstream.api_key_envelope_path)
         expected_organization_id = _single_organization_id(config)
         if (

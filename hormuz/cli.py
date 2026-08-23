@@ -188,7 +188,7 @@ def build_parser() -> argparse.ArgumentParser:
     custody_subparsers = custody.add_subparsers(dest="custody_command", required=True)
     custody_subparsers.add_parser(
         "verify",
-        help="Exercise AWS KMS keys and verify S3 Object Lock readiness without writing an audit object",
+        help="Exercise configured key custody and verify Object Lock readiness without writing an audit object",
     )
     seal = custody_subparsers.add_parser(
         "seal",
@@ -1003,31 +1003,51 @@ def _custody(config: GatewayConfig, args: argparse.Namespace) -> int:
 
 
 def _custody_verify(config: GatewayConfig) -> int:
-    """Exercise the AWS key profile and verify Object Lock without an audit write."""
+    """Exercise the configured custody profile without writing an audit object."""
 
     from .aws_custody import AWSKMSKeyCustodian, S3ObjectLockAuditAnchorSink, verify_aws_kms_profile
+    from .openbao_custody import OpenBaoTransitDataKeyProvider, verify_openbao_transit_profile
+    from .self_hosted_custody import EncryptedS3ObjectLockAuditAnchorSink
 
     key_custody = config.key_custody
     anchor_config = config.audit_anchor
     if key_custody is None or anchor_config is None:
         raise CustodyError("custody_profile_unconfigured")
     provider = create_data_key_provider(config)
-    if not isinstance(provider, AWSKMSKeyCustodian):
-        raise CustodyError("custody_profile_backend_unsupported")
-    statuses = verify_aws_kms_profile(
-        provider,
-        key_custody.key_references,
-        organization_id=_required_organization(config),
-    )
     sink = create_audit_anchor_sink(config)
-    if not isinstance(sink, S3ObjectLockAuditAnchorSink):
-        raise CustodyError("custody_profile_backend_unsupported")
-    sink.verify_configuration()
-    print(
-        f"key_custody=aws-kms verified_purposes={len(statuses)} data_key_round_trip=passed "
-        "audit_anchor=aws-s3-object-lock object_lock=enabled versioning=enabled",
-    )
-    return 0
+    organization_id = _required_organization(config)
+    if key_custody.backend == "aws-kms":
+        if not isinstance(provider, AWSKMSKeyCustodian) or not isinstance(sink, S3ObjectLockAuditAnchorSink):
+            raise CustodyError("custody_profile_backend_unsupported")
+        statuses = verify_aws_kms_profile(
+            provider,
+            key_custody.key_references,
+            organization_id=organization_id,
+        )
+        sink.verify_configuration()
+        print(
+            f"key_custody=aws-kms verified_purposes={len(statuses)} data_key_round_trip=passed "
+            "audit_anchor=aws-s3-object-lock object_lock=enabled versioning=enabled",
+        )
+        return 0
+    if key_custody.backend == "openbao-transit":
+        if not isinstance(provider, OpenBaoTransitDataKeyProvider) or not isinstance(
+            sink, EncryptedS3ObjectLockAuditAnchorSink
+        ):
+            raise CustodyError("custody_profile_backend_unsupported")
+        verified = verify_openbao_transit_profile(
+            provider,
+            key_custody.key_references,
+            organization_id=organization_id,
+        )
+        sink.verify_configuration()
+        print(
+            f"key_custody=openbao-transit verified_purposes={verified} data_key_round_trip=passed "
+            "audit_anchor=s3-compatible-object-lock payload_encryption=envelope "
+            "object_lock=enabled versioning=enabled",
+        )
+        return 0
+    raise CustodyError("custody_profile_backend_unsupported")
 
 
 def _custody_seal(config: GatewayConfig, args: argparse.Namespace) -> int:

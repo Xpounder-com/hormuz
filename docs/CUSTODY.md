@@ -1,17 +1,102 @@
-# KMS custody and immutable audit anchors
+# Customer-controlled custody and immutable audit anchors
 
 Hormuz can use an external key service to envelope-encrypt provider
 credentials and anchor metadata-only audit snapshots in immutable storage. The
-first supported and certification-target profile is **customer-managed AWS KMS
-keys plus an S3 bucket created with Object Lock enabled**. The interfaces are
-provider-neutral; AWS is not a policy dependency. A deployment is certified
-only after it completes its own live KMS/S3 evidence run.
+interfaces are provider-neutral; AWS is not a policy dependency. There are two
+explicit profiles:
 
-This is an explicit operational control. It is not enabled by default, does
-not store prompts or responses, and does not automatically migrate existing
-environment variables.
+- **Self-hosted:** OpenBao Transit plus a customer-operated S3-compatible
+  Object Lock service. This needs no cloud account. Hormuz encrypts the entire
+  audit artifact before it reaches the object store.
+- **AWS (optional):** customer-managed AWS KMS keys plus a bucket created with
+  S3 Object Lock enabled.
 
-## Required AWS profile
+A deployment is not certified merely by selecting a profile. It must complete
+the profile's live conformance evidence run. This is an explicit operational
+control: it is not enabled by default, does not store prompts or responses,
+and does not automatically migrate existing environment variables.
+
+## Account-free self-hosted profile
+
+Install the optional S3 wire-protocol adapter into the Hormuz service
+environment:
+
+```bash
+python -m pip install 'hormuz[self-hosted]'
+```
+
+The dependency is used only to speak the S3-compatible protocol. It does not
+create, discover, or fall back to an AWS account or ambient AWS credentials.
+
+Run OpenBao Transit as the key authority. Hormuz receives a short-lived random
+data key only to perform local AES-256-GCM envelope work; it never receives or
+stores a Transit master key. Configure one distinct Transit key name for each
+enabled material class, including `provider_credential` and
+`data_encryption`.
+
+The object store must provide Object Lock `COMPLIANCE` retention. The
+`custody verify` command checks these no-write prerequisites:
+
+- bucket versioning enabled;
+- Object Lock enabled for the bucket;
+- the configured bucket region.
+
+Every `audit-anchor` write requests `COMPLIANCE` retention and optional legal
+hold. The opt-in live conformance test is the evidence that a particular
+storage product actually enforces those operations.
+
+Use a separate S3 credential for the immutable-audit bucket and give it only
+the bucket/prefix and Object Lock operations required by Hormuz. The OpenBao
+token and the S3 access/secret values are process-environment secrets, never
+JSON configuration values. HTTP is allowed only for loopback development;
+remote OpenBao and object-store endpoints must use HTTPS.
+
+```json
+{
+  "key_custody": {
+    "backend": "openbao-transit",
+    "endpoint_url": "https://openbao.internal.example",
+    "token_env": "HORMUZ_OPENBAO_TOKEN",
+    "transit_mount": "transit",
+    "key_references": {
+      "provider_credential": "hormuz-provider-credentials",
+      "data_encryption": "hormuz-audit-data"
+    }
+  },
+  "audit_anchor": {
+    "backend": "s3-compatible-object-lock",
+    "endpoint_url": "https://audit-store.internal.example",
+    "region": "us-east-1",
+    "bucket": "example-hormuz-immutable-audit",
+    "prefix": "hormuz/audit",
+    "retention_days": 365,
+    "legal_hold": false,
+    "access_key_env": "HORMUZ_AUDIT_S3_ACCESS_KEY",
+    "secret_key_env": "HORMUZ_AUDIT_S3_SECRET_KEY"
+  }
+}
+```
+
+The sealed object contains a versioned Hormuz encrypted-envelope JSON payload,
+not the canonical audit artifact. Its Object Lock metadata binds the encrypted
+payload digest and the artifact's hash-chain head; the object key uses a hash
+of the tenant identifier. This is deliberate: a storage administrator can see
+that an object exists, but does not receive employee, event, or audit-artifact
+contents merely by reading it.
+
+Before sealing a credential or anchoring evidence, validate the live custody
+profile without writing an audit object:
+
+```bash
+hormuz --config /etc/hormuz/hormuz.json custody verify
+```
+
+The repository's generic adapter tests do not certify a particular storage
+product. A named self-hosted reference is added only after an opt-in,
+disposable conformance run proves actual COMPLIANCE-mode retention and legal
+hold behavior against that product and version.
+
+## Optional AWS profile
 
 Install the optional adapter into the Hormuz service environment:
 
@@ -82,16 +167,16 @@ customer-controlled key references and bucket names in deployment.
 
 `api_key_env` and `api_key_envelope` are mutually exclusive. An encrypted
 provider credential requires a single-tenant gateway configuration and the
-`provider_credential` KMS key purpose. Envelope files must be regular,
+`provider_credential` custody key purpose. Envelope files must be regular,
 owner-only (`0600`) files; links, group/world-readable files, malformed
 envelopes, unavailable KMS keys, and a purpose or tenant mismatch fail closed.
 
 ## Seal and rotate a provider key
 
-First exercise the configured KMS keys for the configured tenant/purpose
-contexts and validate AWS Object Lock readiness without creating an audit
-object. This creates no Hormuz secret or audit artifact, though AWS may record
-the KMS verification calls in CloudTrail:
+First exercise the configured custody keys for the configured tenant/purpose
+contexts and validate Object Lock readiness without creating an audit object.
+This creates no Hormuz secret or audit artifact. An AWS profile may record the
+verification calls in CloudTrail:
 
 ```bash
 hormuz --config /etc/hormuz/hormuz.json custody verify
@@ -118,7 +203,7 @@ a failed replacement does not truncate the prior envelope. Keep the prior
 encrypted file until the replacement has been validated and retained in the
 organization's normal configuration/backup process.
 
-To rotate to the currently configured KMS key for an envelope purpose:
+To rotate to the currently configured custody key for an envelope purpose:
 
 ```bash
 hormuz --config /etc/hormuz/hormuz.json custody rewrap \
@@ -128,7 +213,7 @@ hormuz --config /etc/hormuz/hormuz.json custody rewrap \
 
 Verify the new file with `hormuz doctor`, atomically replace the deployment
 reference according to your configuration-management process, then retire old
-KMS permissions only after all active envelopes and backups have been
+key-service permissions only after all active envelopes and backups have been
 re-encrypted and tested. Disabling or revoking a key fails gateway startup
 closed; it does not cause a fallback to plaintext environment credentials.
 
@@ -145,12 +230,14 @@ hormuz --config /etc/hormuz/hormuz.json audit-anchor \
 
 Hormuz validates current v2 metadata-only audit events, rejects mixed-tenant
 or legacy rows, generates a strict SHA-256 chain, verifies it before upload,
-and writes a unique, SSE-KMS-encrypted object with Object Lock `COMPLIANCE`
-retention. The sink accepts only the canonical serialized artifact. It includes a conditional-create precondition so the same artifact
-identifier cannot create a confusing second object version. The command prints
-only backend, a random artifact identifier, counts, hashes, and object-version
-metadata—never an S3 URL, tenant identifier, employee identity, prompt,
-response, token, or credential.
+and writes a unique Object Lock `COMPLIANCE` object. The self-hosted profile
+stores a complete envelope-encrypted artifact; the AWS profile uses SSE-KMS.
+The sink accepts only the canonical serialized artifact. It includes a
+conditional-create precondition so the same artifact identifier cannot create
+a confusing second object version. The command prints only backend, a random
+artifact identifier, counts, hashes, and object-version metadata—never an S3
+URL, tenant identifier, employee identity, prompt, response, token, or
+credential.
 
 The artifact verifier detects altered, deleted, reordered, duplicated, and
 cross-tenant entries within the anchored artifact. The current snapshot model
@@ -166,10 +253,10 @@ retention timestamp is computed from the gateway host's UTC system clock at
 command time, then sent to S3 as an absolute timestamp; production hosts must
 be time-synchronized. `legal_hold: true` applies a legal hold at object
 creation. Hormuz does not automate hold release or retention extension; those
-are controlled AWS operations. S3 Object Lock `COMPLIANCE` prevents shortening
-retention or deleting a protected object version through normal account
-operations, but it is not a substitute for account-level access controls,
-backup/recovery practice, or independent audit review.
+are controlled customer storage operations. S3 Object Lock `COMPLIANCE`
+prevents shortening retention or deleting a protected object version through
+normal account operations, but it is not a substitute for storage-administrator
+access controls, backup/recovery practice, or independent audit review.
 
 ## Live AWS conformance evidence
 
