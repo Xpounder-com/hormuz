@@ -10,7 +10,11 @@ from urllib.parse import unquote, urlparse
 from urllib.request import Request
 
 from hormuz.custody import KEY_PURPOSE_DATA_ENCRYPTION, KEY_PURPOSE_PROVIDER_CREDENTIAL, CustodyError, EnvelopeCipher
-from hormuz.openbao_custody import OpenBaoTransitDataKeyProvider, verify_openbao_transit_profile
+from hormuz.openbao_custody import (
+    OpenBaoTransitDataKeyProvider,
+    OpenBaoTransitKeyRotationControl,
+    verify_openbao_transit_profile,
+)
 
 
 class _Response:
@@ -35,6 +39,7 @@ class _OpenBaoTransport:
         self._next = 0
         self.status: int | None = None
         self.response: object | None = None
+        self.capabilities: dict[tuple[str | None, str], list[str]] = {}
 
     def __call__(self, request: Request, timeout_seconds: float) -> _Response:
         if self.status is not None:
@@ -43,18 +48,39 @@ class _OpenBaoTransport:
             return _Response(self.response)
         parsed = urlparse(request.full_url)
         parts = [unquote(part) for part in parsed.path.split("/") if part]
-        operation = "/".join(parts[2:-1])
-        key_reference = parts[-1]
         body = json.loads((request.data or b"{}").decode("utf-8"))
+        token = request.get_header("X-vault-token")
+        if parts == ["v1", "sys", "capabilities-self"]:
+            paths = body.get("paths")
+            if not isinstance(paths, list) or len(paths) != 1 or not isinstance(paths[0], str):
+                raise AssertionError("expected exactly one capability path")
+            self.calls.append(
+                {
+                    "operation": "sys/capabilities-self",
+                    "key_reference": None,
+                    "body": body,
+                    "timeout_seconds": timeout_seconds,
+                    "token": token,
+                }
+            )
+            return _Response({"data": {"capabilities": self.capabilities.get((token, paths[0]), ["deny"])}})
+        if len(parts) == 5 and parts[2] == "keys" and parts[-1] == "rotate":
+            operation = "keys/rotate"
+            key_reference = parts[3]
+        else:
+            operation = "/".join(parts[2:-1])
+            key_reference = parts[-1]
         self.calls.append(
             {
                 "operation": operation,
                 "key_reference": key_reference,
                 "body": body,
                 "timeout_seconds": timeout_seconds,
-                "token": request.get_header("X-vault-token"),
+                "token": token,
             }
         )
+        if operation == "keys/rotate":
+            return _Response({"data": {}})
         context = body.get("context")
         if not isinstance(context, str):
             return _Response({"errors": ["redacted"]})
@@ -197,6 +223,44 @@ class OpenBaoTransitDataKeyProviderTests(unittest.TestCase):
                 transport=self.transport,
             )
         self.assertEqual(raised.exception.code, "openbao_custody_endpoint_invalid")
+
+    def test_key_rotation_control_requires_a_separate_denied_runtime_token(self) -> None:
+        runtime_control = OpenBaoTransitKeyRotationControl(
+            endpoint_url="https://openbao.example.test:8200",
+            token="runtime-token",
+            transport=self.transport,
+        )
+        runtime_control.assert_rotation_denied(key_reference="audit-current")
+
+        administrator = OpenBaoTransitKeyRotationControl(
+            endpoint_url="https://openbao.example.test:8200",
+            token="administrator-token",
+            transport=self.transport,
+        )
+        self.transport.capabilities[("administrator-token", "transit/keys/audit-current/rotate")] = ["update"]
+        self.transport.capabilities[("administrator-token", "transit/datakey/plaintext/audit-current")] = ["deny"]
+        administrator.assert_rotation_only_administrator(key_reference="audit-current")
+        administrator.rotate_key_version(key_reference="audit-current")
+        self.assertEqual(
+            [(call["operation"], call["token"]) for call in self.transport.calls],
+            [
+                ("sys/capabilities-self", "runtime-token"),
+                ("sys/capabilities-self", "administrator-token"),
+                ("sys/capabilities-self", "administrator-token"),
+                ("sys/capabilities-self", "administrator-token"),
+                ("sys/capabilities-self", "administrator-token"),
+                ("sys/capabilities-self", "administrator-token"),
+                ("keys/rotate", "administrator-token"),
+            ],
+        )
+
+        self.transport.capabilities[("runtime-token", "transit/keys/audit-current/rotate")] = ["update"]
+        with self.assertRaisesRegex(CustodyError, "openbao_custody_runtime_rotation_authorized"):
+            runtime_control.assert_rotation_denied(key_reference="audit-current")
+
+        self.transport.capabilities[("administrator-token", "transit/decrypt/audit-current")] = ["update"]
+        with self.assertRaisesRegex(CustodyError, "openbao_custody_rotation_administrator_data_plane_authorized"):
+            administrator.assert_rotation_only_administrator(key_reference="audit-current")
 
 
 if __name__ == "__main__":

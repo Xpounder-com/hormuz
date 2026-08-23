@@ -65,6 +65,17 @@ protection. Native ARM64 runtime conformance is tracked separately in
 [#68](https://github.com/Xpounder-com/hormuz/issues/68) and does not block the
 reference unless it becomes a promised launch platform.
 
+The current #17 checkpoint, [#69](https://github.com/Xpounder-com/hormuz/issues/69),
+adds a separately credentialed OpenBao Transit key-version rotation and fresh
+artifact-recovery proof for that same self-hosted lab. It must prove that a
+normal data-plane token cannot rotate either named key, then recover a
+pre-rotation provider envelope and exact retained metadata-only audit artifact
+through fresh clients after a rotation-only administrator rotates the same named
+key versions. #69 is not complete until its live, content-free evidence is
+reviewed; it does not claim OpenBao backend recovery, customer RPO/RTO,
+production KMS/BYOK, HA/DR, or host-root protection. The parent #17 gate remains
+open after this checkpoint.
+
 The first separately verifiable #11 slice, [#32](https://github.com/Xpounder-com/hormuz/issues/32), is completed in [PR #33](https://github.com/Xpounder-com/hormuz/pull/33): bounded PostgreSQL runtime pooling with tenant-safe checkout reuse. The second, [#34](https://github.com/Xpounder-com/hormuz/issues/34), is completed in [PR #35](https://github.com/Xpounder-com/hormuz/pull/35): a versioned liveness/readiness contract that checks only Hormuz's local policy/evidence dependencies and graceful-drain state. The third, [#36](https://github.com/Xpounder-com/hormuz/issues/36), is completed in [PR #37](https://github.com/Xpounder-com/hormuz/pull/37): bounded, unambiguous, schema-strict configuration parsing before secret or dependency initialization. The fourth, [#38](https://github.com/Xpounder-com/hormuz/issues/38), is completed in [PR #39](https://github.com/Xpounder-com/hormuz/pull/39): a non-root OCI reference runtime with only mounted runtime configuration and data. The fifth, [#40](https://github.com/Xpounder-com/hormuz/issues/40), is completed in [PR #41](https://github.com/Xpounder-com/hormuz/pull/41): candidate SBOM evidence and a fix-aware OCI vulnerability gate. The sixth, [#42](https://github.com/Xpounder-com/hormuz/issues/42), is completed in [PR #43](https://github.com/Xpounder-com/hormuz/pull/43): a disposable logical PostgreSQL backup-and-restore drill. The seventh, [#44](https://github.com/Xpounder-com/hormuz/issues/44), is completed in [PR #45](https://github.com/Xpounder-com/hormuz/pull/45): a customer-controlled TLS reference with an authenticated, network-restricted gateway proxy hop. The eighth, [#46](https://github.com/Xpounder-com/hormuz/issues/46), is completed in [PR #47](https://github.com/Xpounder-com/hormuz/pull/47): two independent gateway instances with separate bounded PostgreSQL pools preserve one organization budget reservation, stable pre-egress denial, shared metadata-only evidence, and tenant isolation. Those slices remain intentionally narrower than customer TLS/certificate operations, HA/failover, production backup/PITR, multi-region coordination, replicated sessions/revocation/approval grants/idempotency, and operational recovery evidence.
 
 The ninth, [#48](https://github.com/Xpounder-com/hormuz/issues/48), is completed in [PR #49](https://github.com/Xpounder-com/hormuz/pull/49): an audited immutable policy activation is observed at request start by the other live gateway instance, causes a pre-egress denial, and can reactivate the previous immutable policy without rewriting earlier evidence.

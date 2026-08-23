@@ -86,9 +86,18 @@ class _FakeS3Failure(Exception):
         self.response = {"Error": {"Code": code}}
 
 
+class _Body:
+    def __init__(self, value: bytes) -> None:
+        self._value = value
+
+    def read(self, amount: int = -1) -> bytes:
+        return self._value if amount < 0 else self._value[:amount]
+
+
 class _FakeS3Client:
     def __init__(self) -> None:
         self.puts: list[dict[str, object]] = []
+        self.objects: dict[tuple[str, str], dict[str, object]] = {}
         self.versioning: object = {"Status": "Enabled"}
         self.lock: object = {"ObjectLockConfiguration": {"ObjectLockEnabled": "Enabled"}}
         self.location: object = {"LocationConstraint": "us-east-1"}
@@ -107,7 +116,27 @@ class _FakeS3Client:
         if self.failure is not None:
             raise _FakeS3Failure(self.failure)
         self.puts.append(copy.deepcopy(kwargs))
-        return {"VersionId": "version-1"}
+        version = "version-1"
+        key = kwargs["Key"]
+        body = kwargs["Body"]
+        metadata = kwargs["Metadata"]
+        assert isinstance(key, str)
+        assert isinstance(body, bytes)
+        assert isinstance(metadata, dict)
+        self.objects[(key, version)] = {"Body": body, "Metadata": copy.deepcopy(metadata)}
+        return {"VersionId": version}
+
+    def get_object(self, **kwargs: object) -> dict[str, object]:
+        if self.failure is not None:
+            raise _FakeS3Failure(self.failure)
+        key = kwargs["Key"]
+        version = kwargs["VersionId"]
+        assert isinstance(key, str)
+        assert isinstance(version, str)
+        record = self.objects[(key, version)]
+        body = record["Body"]
+        assert isinstance(body, bytes)
+        return {"Body": _Body(body), "Metadata": copy.deepcopy(record["Metadata"])}
 
 
 class _TransitVerificationResponse:
@@ -257,6 +286,65 @@ class SelfHostedAuditAnchorTests(unittest.TestCase):
                 legal_hold=False,
             )
         self.assertEqual(raised.exception.code, "audit_anchor_object_conflict")
+
+    def test_recovery_reads_one_exact_version_through_a_fresh_sink(self) -> None:
+        artifact = build_audit_anchor_artifact(
+            [_usage_event()],
+            organization_id="xpounder",
+            created_at=datetime(2026, 8, 21, tzinfo=timezone.utc),
+            artifact_id="16ab5178-397e-4624-9431-1a40fbf8f09f",
+        )
+        encoded = serialize_audit_anchor_artifact(artifact)
+        receipt = self.sink.anchor(
+            encoded,
+            artifact_id=artifact["artifact_id"],  # type: ignore[arg-type]
+            organization_id="xpounder",
+            head_digest=artifact["head_digest"],  # type: ignore[arg-type]
+            retention_until=datetime.now(timezone.utc) + timedelta(days=30),
+            legal_hold=False,
+        )
+        recovery_sink = EncryptedS3ObjectLockAuditAnchorSink(
+            self.client,
+            region="us-east-1",
+            bucket="hormuz-audit-bucket",
+            prefix="immutable/audit",
+            key_provider=self.provider,
+            encryption_key_reference="audit-data",
+        )
+
+        self.assertEqual(recovery_sink.recover(receipt, organization_id="xpounder"), encoded)
+
+    def test_recovery_rejects_corrupted_payload_or_receipt(self) -> None:
+        artifact = build_audit_anchor_artifact([_usage_event()], organization_id="xpounder")
+        receipt = self.sink.anchor(
+            serialize_audit_anchor_artifact(artifact),
+            artifact_id=artifact["artifact_id"],  # type: ignore[arg-type]
+            organization_id="xpounder",
+            head_digest=artifact["head_digest"],  # type: ignore[arg-type]
+            retention_until=datetime.now(timezone.utc) + timedelta(days=30),
+            legal_hold=False,
+        )
+        key = self.sink._object_key(  # noqa: SLF001 - test controls the retained fake version.
+            organization_id="xpounder",
+            artifact_id=receipt.artifact_id,
+        )
+        record = self.client.objects[(key, "version-1")]
+        payload = record["Body"]
+        assert isinstance(payload, bytes)
+        record["Body"] = payload[:-1] + bytes([payload[-1] ^ 1])
+
+        with self.assertRaises(CustodyError):
+            self.sink.recover(receipt, organization_id="xpounder")
+
+        malformed_receipt = AuditAnchorReceipt(
+            backend=receipt.backend,
+            artifact_id=receipt.artifact_id,
+            artifact_sha256=receipt.artifact_sha256,
+            head_digest=receipt.head_digest,
+            object_version=None,
+        )
+        with self.assertRaisesRegex(CustodyError, "audit_anchor_recovery_receipt_invalid"):
+            self.sink.recover(malformed_receipt, organization_id="xpounder")
 
     def test_factory_refuses_implicit_or_missing_storage_credentials(self) -> None:
         with self.assertRaises(CustodyError) as raised:
