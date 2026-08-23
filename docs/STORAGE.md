@@ -2,7 +2,7 @@
 
 Hormuz stores only the metadata needed to enforce policy and account for governed requests. It does not store prompts, provider response bodies, matched secret values, provider credentials, or context/memory records. Before provider egress, it also records a content-free immutable request-attempt root and its reservation so uncertain provider activity cannot be silently dropped.
 
-This document describes the storage compatibility gate for the core gateway. It proves the SQLite and PostgreSQL usage/evidence repositories have the same narrow contract and documents one disposable logical backup-and-restore drill. It does **not** establish production PostgreSQL operations, production backup/PITR, HA/DR, KMS/BYOK, immutable audit retention, or multi-instance coordination. Those remain separate release gates in [ROADMAP.md](ROADMAP.md).
+This document describes the storage compatibility gate for the core gateway. It proves the SQLite and PostgreSQL usage/evidence repositories have the same narrow contract and documents disposable logical backup-and-restore and point-in-time-recovery drills. It does **not** establish production PostgreSQL operations, production backup/PITR, HA/DR, KMS/BYOK, immutable audit retention, or multi-instance coordination. Those remain separate release gates in [ROADMAP.md](ROADMAP.md).
 
 ## Supported modes
 
@@ -269,6 +269,45 @@ tenant export/delete, or DR certification. Production operators must retain
 and rehearse their database platform's supported backup and recovery procedure
 separately.
 
+### Disposable PostgreSQL point-in-time recovery drill
+
+The repository also contains an explicitly acknowledged, disposable physical
+WAL/PITR check:
+
+~~~bash
+python3 -m pip install '.[postgres]'
+HORMUZ_POSTGRES_PITR_ACKNOWLEDGEMENT=I_UNDERSTAND_DISPOSABLE_POSTGRESQL_PITR \
+  ./tools/verify_postgres_pitr_recovery.sh
+~~~
+
+It creates a Docker-labelled PostgreSQL 16.14 source container from a
+digest-pinned image, seeds the same fixed two-tenant Hormuz metadata fixture,
+and takes a physical `pg_basebackup`. Only after that base backup succeeds it
+commits a fixed pre-target marker, creates a named PostgreSQL restore point,
+commits a fixed post-target marker, and waits for the exact switched WAL files
+to enter the local archive. A recovered physical copy must contain the
+pre-target marker, omit the post-target marker, and be promoted from the named
+restore point. The ordinary Hormuz restricted runtime/control verification then
+must still match the original metadata-only state, including its migration
+ledger, active policy, request-attempt/reservation state, and RLS isolation.
+
+Two independent negative recoveries must fail without promotion: one requests
+an unreachable named restore point with a complete archive; the other requests
+the real target with an empty WAL archive. The runner can target only
+containers that it created with its fixed Docker label and exact pinned image.
+It removes source, recovery, negative-recovery containers, the network, base
+backup, WAL archive, and fixture state after completion.
+
+Only an owner-readable `hormuz.postgresql-pitr-recovery` v1 `summary.json` is
+retained. It contains the pinned database identity, fixed boolean checks, and
+durations. It excludes container names, ports, database names, roles,
+connection strings, marker values, fixture policy, event rows, archive files,
+and credentials. A failing run writes no summary.
+
+This proves a **disposable local WAL/PITR mechanism**, not production backup
+retention, customer recovery, production RPO/RTO, backup encryption,
+managed-database operations, HA/failover, or disaster-recovery certification.
+
 ### Disposable PostgreSQL interruption-and-recovery drill
 
 The repository also contains a separate, explicitly opt-in proof of one
@@ -331,12 +370,12 @@ HORMUZ_TEST_POSTGRES_DSN='postgresql://operator@host:5432/hormuz_test' \
 
 CI runs this PostgreSQL suite separately against a pinned disposable PostgreSQL service. It proves the adapter's migration idempotency, runtime/control-role separation, RLS behavior, tenant isolation, append-only request-attempt evidence, conservative unknown-outcome reservations, pooled checkout reuse with tenant-state reset, bounded saturation, broken-connection replacement, rolling replacement with a separately authenticated runtime login, policy bootstrap/activation/rollback, contract fixtures, malformed-evidence failure, rollback/partial-schema failure, and competing budget reservation behavior.
 
-A separate PostgreSQL recovery job runs both the disposable logical drill
-(against source, recovery, and quarantine containers) and the labelled
-interruption-and-recovery drill against the same digest-pinned image. A
-successful run uploads only their content-free summaries for seven days. A
-failed run may have no summary, but it never uploads a dump, intermediate
-state, request, response, credential, or database data. Neither gate is a
-substitute for managed-database PITR, HA/failover, credential rotation, load
-testing, cloud backup, customer secret-manager integration, or DR
-certification.
+A separate PostgreSQL recovery job runs the disposable logical drill (against
+source, recovery, and quarantine containers), the labelled
+interruption-and-recovery drill, and the explicitly acknowledged physical PITR
+drill against the same digest-pinned image. A successful run uploads only their
+content-free summaries for seven days. A failed run may have no summary, but
+it never uploads a dump, WAL archive, intermediate state, request, response,
+credential, or database data. These gates are not substitutes for
+managed-database PITR, HA/failover, credential rotation, load testing, cloud
+backup, customer secret-manager integration, or DR certification.

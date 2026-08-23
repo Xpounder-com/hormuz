@@ -128,6 +128,7 @@ GitHub Actions runs independent gates without provider credentials:
 - source-distribution and wheel builds followed by a clean-wheel inspection and isolated gateway-start boundary test;
 - PostgreSQL migration and repository compatibility against the pinned service image;
 - a disposable `pg_dump` custom-format / `pg_restore` recovery drill against digest-pinned source, recovery, and quarantine PostgreSQL containers;
+- a disposable physical PostgreSQL WAL/PITR drill that requires a named recovery target, proves target exclusion, and fails closed without required WAL;
 - non-root OCI reference-runtime smoke testing with externally mounted inputs;
 - CycloneDX SBOM generation and a fix-aware OCI vulnerability gate for the exact local candidate image;
 - installed-client routing through local fake providers using pinned official Codex and Claude Code package versions.
@@ -204,6 +205,33 @@ credentials. A failing run emits no dump or intermediate state artifact. This
 is evidence for a disposable logical exercise only. It does not establish
 PITR, production RPO/RTO, cloud backup, customer-data recovery, encryption,
 HA/failover, automatic promotion, or DR certification.
+
+## PostgreSQL point-in-time recovery
+
+The same `PostgreSQL recovery drills` CI job also invokes:
+
+```bash
+HORMUZ_POSTGRES_PITR_ACKNOWLEDGEMENT=I_UNDERSTAND_DISPOSABLE_POSTGRESQL_PITR \
+  ./tools/verify_postgres_pitr_recovery.sh
+```
+
+The opt-in wrapper starts only specifically named and Docker-labelled
+PostgreSQL 16.14 containers selected by immutable image digest. It creates a
+physical base backup of fixed metadata-only Hormuz state, commits a marker
+after that backup, creates a named recovery point, commits a later marker, and
+waits for the exact switched WAL files. The recovered copy must replay the
+pre-target state, exclude the post-target state, promote from the named target,
+and pass Hormuz's restricted runtime/control verification against the original
+metadata fingerprint. Separate recoveries with an unreachable target and an
+empty WAL archive must terminate non-zero without promotion.
+
+CI retains only `hormuz.postgresql-pitr-recovery` v1 `summary.json` for seven
+days. It contains the pinned database identity, boolean checks, and durations;
+it excludes container names, ports, database names, roles, connection strings,
+marker values, fixture state, archive files, and credentials. This proves a
+single local disposable WAL/PITR mechanism only. It does not establish
+production backup retention, customer restore, production RPO/RTO, encryption,
+HA/failover, managed-database operations, or DR certification.
 
 ## PostgreSQL interruption and pool recovery
 
