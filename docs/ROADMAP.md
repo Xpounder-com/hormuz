@@ -75,7 +75,7 @@ The twelfth, [#61](https://github.com/Xpounder-com/hormuz/issues/61), is complet
 
 The thirteenth, [#63](https://github.com/Xpounder-com/hormuz/issues/63), is completed in [PR #64](https://github.com/Xpounder-com/hormuz/pull/64): one live gateway instance withdraws readiness and denies new governed requests before provider egress during an abrupt disposable PostgreSQL stop, then recovers through its existing bounded pool after the same database restarts. It does not claim database failover, HA, automatic promotion, production RPO/RTO, or provider replay.
 
-The fourteenth, [#66](https://github.com/Xpounder-com/hormuz/issues/66), is the current bounded slice: a disposable physical PostgreSQL WAL/PITR drill. It must recover exactly to a named restore point, prove that the post-target marker is excluded, verify Hormuz's restricted metadata state and RLS boundary, and fail closed for an unreachable target or missing archived WAL. It is not a production backup, customer RPO/RTO, HA/failover, or DR-certification claim.
+The fourteenth, [#66](https://github.com/Xpounder-com/hormuz/issues/66), is completed in [PR #67](https://github.com/Xpounder-com/hormuz/pull/67): a digest-pinned, disposable physical PostgreSQL WAL/PITR drill recovers exactly to a named restore point, proves the post-target marker is excluded, verifies Hormuz's restricted metadata state and RLS boundary, and fails closed for an unreachable target or missing archived WAL. It does not claim production backup retention, customer RPO/RTO, HA/failover, managed-database operations, or DR certification.
 
 ## Feature-freeze rule
 
