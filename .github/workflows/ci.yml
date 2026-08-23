@@ -136,7 +136,39 @@ jobs:
           cd "$RUNNER_TEMP"
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -m unittest discover \
             -s "$GITHUB_WORKSPACE/tests" \
-            -p test_postgres.py \
+            -p test_postgres_test_boundaries.py \
+            -v
+          "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -m unittest discover \
+            -s "$GITHUB_WORKSPACE/tests" \
+            -p test_postgres_migration_rls.py \
+            -v
+          "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -m unittest discover \
+            -s "$GITHUB_WORKSPACE/tests" \
+            -p test_postgres_policy_control.py \
+            -v
+          "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -m unittest discover \
+            -s "$GITHUB_WORKSPACE/tests" \
+            -p test_postgres_usage.py \
+            -v
+          "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -m unittest discover \
+            -s "$GITHUB_WORKSPACE/tests" \
+            -p test_postgres_audit_chain.py \
+            -v
+          "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -m unittest discover \
+            -s "$GITHUB_WORKSPACE/tests" \
+            -p test_postgres_request_attempts.py \
+            -v
+          "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -m unittest discover \
+            -s "$GITHUB_WORKSPACE/tests" \
+            -p test_postgres_multi_instance.py \
+            -v
+          "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -m unittest discover \
+            -s "$GITHUB_WORKSPACE/tests" \
+            -p test_postgres_runtime_recovery.py \
+            -v
+          "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -m unittest discover \
+            -s "$GITHUB_WORKSPACE/tests" \
+            -p test_postgres_pooling.py \
             -v
 
   postgres-backup-restore:
