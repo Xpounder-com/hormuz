@@ -97,7 +97,8 @@ but the target is optional and does not change the S3-compatible Object Lock
 product contract. Its immutable image digest becomes a Hormuz certification
 only after the opt-in live conformance gate proves actual COMPLIANCE-mode
 retention, legal hold, prohibited deletion and retention reduction, encrypted
-artifact recovery, and content-free audit evidence. See
+artifact recovery, content-free audit evidence, and the schema-v2 pinned
+`linux/amd64` runner digest. See
 [CEPH_RGW_CONFORMANCE.md](CEPH_RGW_CONFORMANCE.md).
 
 ## Optional AWS profile

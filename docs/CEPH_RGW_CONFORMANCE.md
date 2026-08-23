@@ -43,10 +43,16 @@ tentacle (stable)`. It then uses only explicit OpenBao and RGW credentials to:
 9. write a private, versioned, content-free evidence record only when every
    check passes.
 
-The evidence JSON intentionally contains the candidate release/digest,
-platform, check names, random artifact IDs, artifact hashes, hashes of object
-versions, and nonclaims. It excludes the endpoint, bucket, object key, tenant identifier,
-credential values, prompts, and responses.
+The current evidence JSON is schema v2. It intentionally contains the candidate
+release/digest and platform, the pinned `linux/amd64` runner's local
+content-addressed image digest, check names, random artifact IDs, artifact
+hashes, hashes of object versions, and nonclaims. It excludes the endpoint,
+bucket, object key, tenant identifier, credential values, prompts, and
+responses.
+
+Schema v1 records remain readable as historical evidence. They lack runner
+attestation and must not be rewritten in place; a new v2 run is required for a
+current Ceph reference review.
 
 ## Lab prerequisites
 
@@ -87,31 +93,33 @@ object is written.
 
 ## Run the gate
 
-Install the optional S3 client and export values only into the invoking process:
+Run the gate from the dedicated, pinned `linux/amd64` container, even when the
+Ceph lab host is ARM64. The wrapper builds a local content-addressed runner
+image from an immutable Python base digest, records that resulting runner image
+digest and architecture in evidence, and runs it with Linux host networking so
+only the lab's loopback RGW and OpenBao endpoints are reachable.
+Before it starts the runner, the wrapper independently checks the local RGW
+container's exact release, digest, and platform. It passes only that
+content-free attestation to the runner, so the runner never receives Docker's
+privileged host socket.
+
+Place the existing conformance environment values in a root-readable,
+mode-`0600` environment file. Do not put the runner image values in that file:
+the wrapper derives them after its build. Then invoke:
 
 ```bash
-python -m pip install '.[self-hosted]'
-export HORMUZ_RUN_CEPH_RGW_CUSTODY_CONFORMANCE=1
-export HORMUZ_CEPH_RGW_CUSTODY_CONFIRMATION=I_UNDERSTAND_DISPOSABLE_OBJECT_LOCK_RETENTION
-export HORMUZ_CEPH_RGW_ENDPOINT=http://127.0.0.1:7480
-# Match the S3 LocationConstraint reported by this RGW. Stock single-zone Ceph uses "default".
-export HORMUZ_CEPH_RGW_REGION=default
-export HORMUZ_CEPH_RGW_BUCKET=hormuz-ceph-conformance
-export HORMUZ_CEPH_RGW_ACCESS_KEY=...
-export HORMUZ_CEPH_RGW_SECRET_KEY=...
-export HORMUZ_CEPH_RGW_CONTAINER=...
-export HORMUZ_CEPH_OPENBAO_ENDPOINT=http://127.0.0.1:8200
-export HORMUZ_CEPH_OPENBAO_TOKEN=...
-export HORMUZ_CEPH_OPENBAO_PROVIDER_KEY=hormuz-conformance-provider
-export HORMUZ_CEPH_OPENBAO_DATA_KEY=hormuz-conformance-audit
-python tools/verify_ceph_rgw_custody_conformance.py \
+export HORMUZ_CEPH_RGW_CONFORMANCE_ENV_FILE=/secure/path/ceph-conformance.env
+tools/run_ceph_rgw_custody_conformance_container.sh \
   --evidence-out /secure/path/ceph-rgw-custody-evidence.json
 ```
 
-The exact confirmation is deliberate: a successful gate leaves at least two
-objects retained for `HORMUZ_CEPH_RGW_RETENTION_DAYS` (one day by default).
-Do not set the test bucket or endpoint to a production custody location. Never
-place any secret value in a shell command, source file, configuration file, or
+The environment file contains the previous `HORMUZ_RUN_CEPH_RGW_CUSTODY_CONFORMANCE`,
+confirmation, RGW, OpenBao, and credential variables. Its RGW and OpenBao
+endpoints must still be loopback-only. The exact confirmation is deliberate: a
+successful gate leaves at least two objects retained for
+`HORMUZ_CEPH_RGW_RETENTION_DAYS` (one day by default). Do not set the test
+bucket or endpoint to a production custody location. Never place a secret
+value in a shell command, source file, configuration file, evidence record, or
 issue/PR comment.
 
 `HORMUZ_CEPH_RGW_REGION` is the exact S3 location returned by
@@ -124,7 +132,8 @@ A successful command is an evidence input, not an automatic marketing claim.
 For an actual certification decision:
 
 1. retain the resulting evidence JSON in the release record;
-2. verify its schema, exact release/digest, and all required check names;
+2. verify its schema, exact target release/digest, `linux/amd64` runner digest,
+   and all required check names;
 3. review the local Cephadm and RGW logs under the organization's normal
    operational controls;
 4. attach only the content-free record and a concise outcome to the issue/PR;
@@ -138,3 +147,7 @@ volumes, Ceph OSD data, or the lab itself. It also does not establish a
 production storage design, host hardening, IAM/RBAC completeness, backup/PITR,
 multi-host durability, HA/failover, SIEM delivery, or independent audit. Those
 remain distinct enterprise-release gates.
+
+The reference runner's `linux/amd64` architecture proves neither native ARM64
+Hormuz runtime support nor a production deployment topology. ARM64 is tracked
+separately if it is included in a future launch support commitment.
