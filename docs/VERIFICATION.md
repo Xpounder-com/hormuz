@@ -200,7 +200,42 @@ or candidate-mismatched scanner/SBOM data fails closed; this is a scanner
 evidence failure, not a statement that the image is vulnerability-free. The
 scanner binary is pinned, but its advisory database is refreshed at scan time.
 There is no registry publication, signing, attestation, exception workflow, or
-customer-content scanning in this gate.
+customer-content scanning in this individual gate.
+
+## OCI reproducibility and signed release
+
+The `OCI reproducibility` job invokes:
+
+```bash
+./tools/verify_oci_reproducibility.sh
+```
+
+It performs two independent no-cache `linux/amd64` builds with the reviewed
+wheel hashes, pinned frontend/base, source commit timestamp, and BuildKit
+timestamp rewriting. The verifier requires byte-identical OCI archives, one
+AMD64 manifest, complete blob hashes, and exact version/revision labels. CI
+retains only the content-free summary, not the archives.
+
+`.github/workflows/release-oci.yml` is a separate tag-only publication gate.
+It requires an annotated protected tag matching the package version and exact
+release workflow identity, rebuilds and compares the digest, publishes first
+under an immutable commit locator, runs the runtime and supply-chain gates
+against that digest, and then creates keyless Cosign signature, CycloneDX, and
+bounded SLSA v1 attestations. Before any Sigstore operation, a strict validator
+requires a public repository and allowlisted, release-bound, secret-free SBOM
+and provenance shape. The image signature uses public Rekor. The two
+attestations are timestamped Fulcio identities attached only to private GHCR
+and are not uploaded to Rekor. Only after exact issuer, workflow/tag identity,
+digest, image-signature transparency, and attestation verification pass does
+the workflow add the semantic-version registry tag.
+
+The final `hormuz.oci-release-evidence` summary hashes every retained evidence
+file and records the registry-portable digest contract, AMD64 boundary,
+mirroring requirements, exact signer, and explicit Rekor/attestation
+boundaries. GHCR is the first private registry, not the product contract. The
+workflow artifact contains only allowlisted summaries, not raw SBOM,
+provenance, vulnerability, or Cosign verification payloads. This workflow does not
+certify Compose, Kubernetes, a customer mirror, public TLS, HA, or recovery.
 
 ## PostgreSQL logical backup and restore
 

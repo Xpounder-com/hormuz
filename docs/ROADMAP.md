@@ -61,9 +61,11 @@ conformance runner and a content-free evidence schema; the live single-host
 Cephadm proof is recorded in [#60](https://github.com/Xpounder-com/hormuz/issues/60).
 Ceph RGW Tentacle 20.2.3 is Hormuz's first verified self-hosted reference for
 RGW-level enforcement only, never host-root or production-immutability
-protection. Native ARM64 runtime conformance is tracked separately in
-[#68](https://github.com/Xpounder-com/hormuz/issues/68) and does not block the
-reference unless it becomes a promised launch platform.
+protection. Native ARM64 conformance for that exact Ceph target remains in
+[#68](https://github.com/Xpounder-com/hormuz/issues/68). General native ARM64
+Hormuz OCI runtime verification is separately tracked in
+[#109](https://github.com/Xpounder-com/hormuz/issues/109) and blocks any future
+multi-architecture Hormuz image, not this Ceph reference.
 
 [#95](https://github.com/Xpounder-com/hormuz/issues/95) binds that reference
 to the exact OpenBao Transit image, version, and platform. Its live,

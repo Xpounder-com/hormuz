@@ -1,30 +1,65 @@
-# OCI reference runtime
+# Signed OCI deployment contract
 
-The Hormuz OCI image is a small **reference runtime**, not a hosted
-deployment product. It runs the core `hormuz` package as numeric user and group
-`65532:65532`; it does not contain customer configuration or policy data,
-credentials, usage data, audit evidence, or the separately packaged context
-experiment.
+Hormuz's application deployment contract is one signed OCI digest. The image
+runs the core `hormuz` package as numeric user and group `65532:65532`; it does
+not contain customer configuration or policy data, credentials, usage data,
+audit evidence, or the separately packaged context experiment.
 
-The image uses digest-pinned Dockerfile frontend and Python 3.14 slim bases
-named in [`Dockerfile`](../Dockerfile). The runtime stage also applies available
-Debian package upgrades during its build, so a candidate is not a fully
-reproducible dependency build; its exact resolved package state is captured by
-the SBOM described below. Hormuz does **not** claim a published image, signed
-image, registry policy, or a vulnerability-free image.
+`ghcr.io/xpounder-com/hormuz` is the first publication registry, not part of
+the product contract. An operator may recursively mirror the exact manifest,
+signature, and attestations to another OCI registry as long as the destination
+manifest digest remains identical and the original release identity still
+verifies.
 
-## Build
+The initial release platform is **`linux/amd64` only**. Issue
+[#109](https://github.com/Xpounder-com/hormuz/issues/109) must close before a
+multi-architecture manifest or general native ARM64 support claim is
+published. Ceph-specific issue #68 cannot satisfy that runtime gate.
+
+## Deterministic unsigned payload
+
+[`Dockerfile`](../Dockerfile) pins the Dockerfile frontend and Python 3.14 slim
+base by digest. It accepts only `linux/amd64`, resolves its build and runtime
+Python wheels from reviewed exact-version/hash locks under `requirements/`,
+does not compile bytecode, and performs no moving Debian update inside the
+build. A fixable base vulnerability is addressed by reviewing a new base
+digest, not by resolving a package index during a release build.
+
+The Dockerfile-specific `Dockerfile.dockerignore` starts from an empty context
+and admits only the Dockerfile, core packaging files, the two OCI lock files,
+and the `hormuz/` package. It takes precedence over the repository's broader
+Ceph-conformance ignore file. A local `hormuz.json`, `.env`, SQLite database,
+test suite, verification tool, and `experiments/context/` cannot enter the
+release build context through an incidental broad copy.
+
+Build a local AMD64 image from the current commit:
 
 ```bash
-docker build --tag hormuz:local .
+version="$(python3 -c 'import pathlib, tomllib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"])')"
+revision="$(git rev-parse HEAD)"
+source_date_epoch="$(git show -s --format=%ct "$revision")"
+docker build --platform linux/amd64 --provenance=false --sbom=false \
+  --build-arg "HORMUZ_VERSION=$version" \
+  --build-arg "VCS_REF=$revision" \
+  --build-arg "SOURCE_DATE_EPOCH=$source_date_epoch" \
+  --tag hormuz:local .
 ```
 
-`Dockerfile` uses a two-stage build. Its `.dockerignore` is an allowlist for
-only `pyproject.toml`, `README.md`, and `hormuz/`, so a local `hormuz.json`,
-`.env` file, SQLite database, test suite, and `experiments/context/` cannot be
-copied into the image by the build.
+The release reproducibility proof builds two independent, no-cache OCI
+archives and uses BuildKit timestamp rewriting. It requires byte-for-byte
+identical archives, one `linux/amd64` manifest, matching version/revision
+labels, complete blob hashes, and the same manifest digest:
 
-## Supply-chain evidence
+```bash
+HORMUZ_OCI_REPRODUCIBILITY_EVIDENCE_DIR="$(mktemp -d)" \
+  ./tools/verify_oci_reproducibility.sh
+```
+
+This proves reproducibility under the exact recorded base, locks, Buildx,
+BuildKit, source commit, and source-date boundary. It is not a universal claim
+across unrecorded toolchains.
+
+## SBOM and vulnerability evidence
 
 Run the candidate evidence gate from the repository root:
 
@@ -33,54 +68,152 @@ HORMUZ_OCI_SUPPLY_CHAIN_EVIDENCE_DIR="$(mktemp -d)" \
   ./tools/verify_oci_supply_chain.sh
 ```
 
-The gate builds one local candidate image, generates a CycloneDX JSON SBOM,
-scans that same local image with Trivy `0.74.0` pinned by immutable image
-digest, and writes these review artifacts to the selected directory:
+The gate generates a CycloneDX JSON SBOM, scans the exact candidate with Trivy
+`0.74.0` pinned by immutable image digest, and writes:
 
 - `hormuz.cdx.json` — package-level CycloneDX SBOM;
-- `trivy-vulnerabilities.json` — raw scanner report, including lower-severity
-  and unfixed observations;
-- `summary.json` — versioned candidate identity, scanner identity, artifact
-  checksums, coverage label, finding counts, and the policy verdict.
+- `trivy-vulnerabilities.json` — complete raw scanner evidence;
+- `summary.json` — candidate/scanner identity, evidence hashes, counts, policy,
+  and verdict.
 
-The verifier rejects missing, malformed, or candidate-mismatched artifacts. It
-fails the command only when Trivy reports a `HIGH` or `CRITICAL` finding with a
-non-empty `FixedVersion`; lower-severity findings and HIGH/CRITICAL findings
-without a scanner-reported fix remain visible in the report but do not deny the
-candidate. The scanner image is pinned, while its vulnerability database is
-intentionally refreshed at scan time, so a newly published advisory can change
-the result. These artifacts contain image and package metadata, not runtime
-configuration, credentials, prompts, responses, or gateway audit records.
+Missing, malformed, unsupported, or candidate-mismatched evidence fails
+closed. A `HIGH` or `CRITICAL` finding with a scanner-reported fixed version
+blocks release; all lower-severity and unfixed observations remain visible.
+The vulnerability database refreshes at scan time, so an advisory update may
+change the result without a source change. The evidence contains package/image
+metadata, not prompts, responses, configuration, credentials, or customer
+data.
+
+## Protected release workflow
+
+`.github/workflows/release-oci.yml` runs only for a strict `vMAJOR.MINOR.PATCH`
+tag and fails unless all of these are true:
+
+- the repository is exactly `Xpounder-com/hormuz`;
+- the repository is public before any Sigstore operation can create durable
+  external metadata;
+- the tag is annotated, protected by GitHub rules, matches the package version,
+  resolves to the event commit, and is reachable from `origin/main`;
+- the workflow identity is exactly
+  `Xpounder-com/hormuz/.github/workflows/release-oci.yml@refs/tags/<tag>`;
+- the normalized payload rebuilds identically and the published digest equals
+  the reproducibility digest;
+- runtime smoke, SBOM, and vulnerability gates pass against that digest;
+- the CycloneDX SBOM and bounded SLSA v1 predicate pass strict allowlisted
+  schema, release-identity, private-path, and secret-pattern validation before
+  any signing or attestation operation;
+- the keyless image signature is written and independently verified through
+  public Rekor;
+- the keyless CycloneDX and SLSA v1 attestations use public Fulcio and timestamp
+  services but no Rekor service, and are attached only to the private GHCR
+  package during first publication;
+- certificate extensions match the release workflow name, repository, source
+  tag ref, source commit, and `push` trigger in addition to the exact subject;
+- GHCR remains private and the semantic-version registry tag is either absent
+  or already resolves to the exact verified digest; it is never reassigned.
+
+The workflow first uses the immutable `sha-<commit>` locator. It adds the
+semantic-version registry tag only after signature and attestation verification
+passes. A rerun may accept the same tag at the same digest, but can never move
+it to another digest. It never publishes a mutable `latest` tag.
+
+## Signing identity and public disclosure
+
+The release uses Cosign/Sigstore with GitHub Actions OIDC. It stores no
+long-lived signing private key. Verification requires both:
+
+```text
+issuer:   https://token.actions.githubusercontent.com
+identity: https://github.com/Xpounder-com/hormuz/.github/workflows/release-oci.yml@refs/tags/<tag>
+```
+
+The public image-signature Rekor entry may expose the artifact digest,
+repository name, release workflow path, commit/ref, and signing event—not just
+a generic identity. It must not contain source code, image layers, credentials,
+private workspace paths, prompts/responses, or customer data. This disclosure
+is an explicit tradeoff of the approved keyless profile.
+
+The SBOM and SLSA predicate are not uploaded to Rekor. They are signed OCI
+referrers in the first registry and remain private while the GHCR package is
+private. If the package owner later makes that package public, those referrers
+expose package names, versions, dependency and license metadata, and bounded
+build metadata. The release gate therefore validates their complete schema and
+all string values before they are signed or attached. Raw SBOM, provenance,
+vulnerability, or verification payloads are not uploaded as workflow
+artifacts; the workflow retains only allowlisted content-free summaries.
+
+After authenticating to the private first registry, verify the exact digest:
+
+```bash
+image="ghcr.io/xpounder-com/hormuz@sha256:<release-digest>"
+identity="https://github.com/Xpounder-com/hormuz/.github/workflows/release-oci.yml@refs/tags/v0.1.0"
+issuer="https://token.actions.githubusercontent.com"
+commit="<release-commit-sha>"
+
+certificate_claims=(
+  --certificate-identity "$identity"
+  --certificate-oidc-issuer "$issuer"
+  --certificate-github-workflow-name "Release signed OCI digest"
+  --certificate-github-workflow-ref "refs/tags/v0.1.0"
+  --certificate-github-workflow-repository "Xpounder-com/hormuz"
+  --certificate-github-workflow-sha "$commit"
+  --certificate-github-workflow-trigger "push"
+)
+
+cosign verify "${certificate_claims[@]}" "$image"
+cosign verify-attestation --type cyclonedx \
+  --insecure-ignore-tlog \
+  --use-signed-timestamps \
+  "${certificate_claims[@]}" \
+  "$image"
+cosign verify-attestation --type slsaprovenance1 \
+  --insecure-ignore-tlog \
+  --use-signed-timestamps \
+  "${certificate_claims[@]}" \
+  "$image"
+```
+
+Do not weaken verification to an unrestricted identity regular expression.
+The expected protected tag is part of the certificate identity and ref claim.
+For the two attestations, Cosign's explicitly named
+`--insecure-ignore-tlog` option records the intentional absence of a Rekor
+entry; verification still requires the exact Fulcio workload identity,
+certificate transparency proof, and signed timestamp. Do not apply that option
+to the image signature.
+
+## Mirroring and rollback
+
+A mirror procedure must copy the subject manifest and all OCI referrers,
+including the Cosign signature and both attestations. After copying, resolve
+the destination manifest, require the exact source digest, and repeat all three
+Cosign verifications against the destination digest and original workflow
+identity. A registry that changes the manifest digest or omits referrers has
+not mirrored the Hormuz deployment contract successfully.
+
+Rollback selects a previously verified signed digest directly. A mutable tag,
+rebuild, re-sign under a different workflow, or ad hoc down-migration is not a
+rollback substitute. Registry retention and deletion must preserve every
+supported rollback digest and its referrers.
 
 ## Run with explicit runtime inputs
 
-Prepare a deployment configuration outside the image. It names environment
-variables such as `OPENAI_API_KEY`; it must not contain their values. For a
-SQLite deployment, set the configuration's database path to
-`/var/lib/hormuz/hormuz.sqlite3`. A `0.0.0.0:8787` listener also requires the
-explicit external TLS proxy ingress configuration and its private-hop
-credential environment variable; see [DEPLOYMENT.md](DEPLOYMENT.md).
-`config.example.json` is a starting point, not a container-ready configuration
-without those changes.
+Prepare configuration outside the image. It names environment variables such
+as `OPENAI_API_KEY`; it must not contain their values. For SQLite, set the
+database path to `/var/lib/hormuz/hormuz.sqlite3`. A `0.0.0.0:8787` listener
+also requires the external TLS proxy and private-hop credential described in
+[DEPLOYMENT.md](DEPLOYMENT.md).
 
-Create a data directory that the numeric runtime identity can write. The
-following initialization is a one-time local-volume setup; normal Hormuz
-runtime remains non-root.
+Create a durable volume owned by the fixed runtime identity, mount the real
+configuration read-only, and inject secrets through the deployment platform:
 
 ```bash
 docker volume create hormuz-data
-docker run --rm --user 0:0 \
+docker run --rm --platform linux/amd64 --user 0:0 \
   --mount type=volume,src=hormuz-data,dst=/var/lib/hormuz \
   --entrypoint /usr/local/bin/python \
   hormuz:local -c 'import os; os.chown("/var/lib/hormuz", 65532, 65532)'
-```
 
-Place the real configuration in an operator-controlled directory, then inject
-credentials through your platform's secret mechanism (shown here as an ignored
-local env file):
-
-```bash
-docker run --rm --name hormuz \
+docker run --rm --platform linux/amd64 --name hormuz \
   --read-only \
   --tmpfs /tmp:mode=1777 \
   --cap-drop=ALL \
@@ -92,49 +225,27 @@ docker run --rm --name hormuz \
   hormuz:local
 ```
 
-The default `HORMUZ_CONFIG` value is `/etc/hormuz/hormuz.json`; point it at a
-different mounted path only with another runtime environment value. Do not
-pass secrets in Dockerfile arguments, image labels, command arguments, a
-committed env file, or the configuration JSON.
+Do not pass secrets in Docker build arguments, labels, command arguments, a
+committed environment file, or the configuration JSON. PostgreSQL migrations
+use a separately scoped operator credential before gateway startup; the image
+does not perform schema changes automatically.
 
-For PostgreSQL-backed usage/evidence, the image still runs as non-root. Mount
-configuration as above and supply the separately scoped runtime DSN only at
-runtime. Apply PostgreSQL migrations with the documented operator migration
-credential before starting the gateway; the reference image does not perform
-schema changes at startup.
+With a read-only root filesystem, `/tmp` is temporary writable storage and
+`/var/lib/hormuz` is the explicit durable SQLite mount. Use `GET /health` for
+liveness and `GET /ready` for traffic readiness; see
+[OPERATIONS.md](OPERATIONS.md).
 
-## Writable paths and probes
-
-With a read-only root filesystem, `/tmp` must be a temporary writable mount and
-`/var/lib/hormuz` is the durable SQLite data mount. The image does not declare
-an implicit data volume because deployment ownership and retention are an
-operator decision.
-
-Use `GET /health` for liveness and `GET /ready` for traffic readiness. Their
-versioned, content-free semantics and graceful shutdown behavior are described
-in [OPERATIONS.md](OPERATIONS.md). When external proxy mode is enabled, the
-image health check reads the mounted ingress credential environment value and
-uses it only for its local `/health` probe; it does not test provider
-availability, employee authorization, customer TLS, or a remote database.
-
-## Executable reference proof
-
-Run the local proof from the repository root:
+## Executable runtime proof and nonclaims
 
 ```bash
 ./tools/verify_oci_reference.sh
 ```
 
-It builds the image, confirms the declared numeric user and health check,
-proves no default configuration is embedded, checks that the context packages
-are absent, starts the gateway with a read-only root filesystem and mounted
-runtime inputs, validates `/health` and `/ready`, verifies SQLite lands only on
-the durable mount, and requires `SIGTERM` to exit cleanly. It uses fixed
-placeholder values and never contacts a model provider.
+The proof confirms AMD64, numeric non-root identity, mounted inputs, read-only
+root, versioned health/readiness, durable SQLite placement, and graceful
+SIGTERM without contacting a model provider.
 
-The reference proof exercises only the generic gateway-side ingress boundary;
-it does not establish customer public TLS, certificate operations, a specific
-proxy/firewall/network policy, registry publication, image signing or
-provenance attestation, a vulnerability-free image, Kubernetes, high
-availability, backup/PITR, multi-instance coordination, customer IdP
-conformance, or incident operations. Those remain separate release gates.
+Signing the image does not certify Docker Compose, Kubernetes, Helm, public
+TLS, a database, a cloud, customer configuration, HA, backup/PITR, disaster
+recovery, or customer operations. Those claims require their own deployment
+profile and release gates.

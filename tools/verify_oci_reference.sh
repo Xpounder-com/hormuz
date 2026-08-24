@@ -8,6 +8,7 @@ set -euo pipefail
 readonly REPOSITORY_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "${REPOSITORY_ROOT}/tools/_verification_runtime.sh"
 readonly IMAGE_NAME="${HORMUZ_OCI_TEST_IMAGE:-hormuz:oci-reference-test}"
+readonly SKIP_BUILD="${HORMUZ_OCI_SKIP_BUILD:-0}"
 readonly CONTAINER_NAME="hormuz-oci-reference-${RANDOM}-${RANDOM}"
 readonly DISPOSABLE_LABEL="io.hormuz.disposable-oci-reference"
 readonly FIXTURE_PATH="${REPOSITORY_ROOT}/tests/fixtures/oci/reference-config.json"
@@ -54,10 +55,33 @@ assert value["status"] == sys.argv[2], value
 trap cleanup EXIT
 
 cd "${REPOSITORY_ROOT}"
-docker build --tag "${IMAGE_NAME}" --file Dockerfile .
+if [[ "${SKIP_BUILD}" == "1" ]]; then
+  [[ "${IMAGE_NAME}" =~ ^[^[:space:]@]+@sha256:[0-9a-f]{64}$ ]] \
+    || fail "a skipped build requires one digest-pinned OCI reference"
+  docker image inspect "${IMAGE_NAME}" >/dev/null \
+    || fail "the digest-pinned OCI reference is not present locally"
+elif [[ "${SKIP_BUILD}" == "0" ]]; then
+  version="$(python3 -c 'import pathlib, tomllib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text(encoding="utf-8"))["project"]["version"])')"
+  revision="$(git rev-parse HEAD)"
+  source_date_epoch="$(git show -s --format=%ct "${revision}")"
+  docker build \
+    --platform linux/amd64 \
+    --provenance=false \
+    --sbom=false \
+    --tag "${IMAGE_NAME}" \
+    --build-arg "HORMUZ_VERSION=${version}" \
+    --build-arg "VCS_REF=${revision}" \
+    --build-arg "SOURCE_DATE_EPOCH=${source_date_epoch}" \
+    --file Dockerfile \
+    .
+else
+  fail "HORMUZ_OCI_SKIP_BUILD must be 0 or 1"
+fi
 
 [[ "$(docker image inspect --format '{{.Config.User}}' "${IMAGE_NAME}")" == "65532:65532" ]] \
   || fail "image does not declare the fixed 65532:65532 runtime identity"
+[[ "$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "${IMAGE_NAME}")" == "linux/amd64" ]] \
+  || fail "image does not match the approved linux/amd64 release platform"
 [[ "$(docker image inspect --format '{{json .Config.Entrypoint}}' "${IMAGE_NAME}")" == '["hormuz"]' ]] \
   || fail "image does not use the Hormuz CLI entrypoint"
 [[ "$(docker image inspect --format '{{json .Config.Cmd}}' "${IMAGE_NAME}")" == '["serve"]' ]] \
@@ -68,6 +92,7 @@ docker build --tag "${IMAGE_NAME}" --file Dockerfile .
 set +e
 missing_config_output="$(
   docker run --rm \
+    --platform linux/amd64 \
     --read-only \
     --tmpfs /tmp:mode=1777 \
     --cap-drop=ALL \
@@ -82,6 +107,7 @@ set -e
   || fail "missing runtime configuration did not fail with the stable content-free error"
 
 docker run --rm \
+  --platform linux/amd64 \
   --read-only \
   --tmpfs /tmp:mode=1777 \
   --cap-drop=ALL \
@@ -107,6 +133,7 @@ cp "${FIXTURE_PATH}" "${config_directory}/hormuz.json"
 chmod 0777 "${config_directory}" "${data_directory}"
 
 docker run --detach \
+  --platform linux/amd64 \
   --name "${CONTAINER_NAME}" \
   --label "${DISPOSABLE_LABEL}=true" \
   --read-only \

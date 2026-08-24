@@ -364,9 +364,11 @@ two retained objects behind: one to prove COMPLIANCE retention cannot be
 shortened or deleted, and one with a legal hold. It also writes and deletes an
 unprotected control version, and extends retained-object retention, so a later
 denial cannot be explained away as missing RGW permissions. Native ARM64
-runtime conformance is separately tracked in
-[issue #68](https://github.com/Xpounder-com/hormuz/issues/68) and does not
-block this reference verification unless it becomes a promised launch platform.
+conformance for that exact Ceph target is tracked in
+[issue #68](https://github.com/Xpounder-com/hormuz/issues/68). General native
+ARM64 Hormuz OCI runtime verification is separately tracked in
+[issue #109](https://github.com/Xpounder-com/hormuz/issues/109) and is not part
+of this custody proof.
 Run it only with a disposable Object-Lock-enabled bucket with no default
 retention:
 

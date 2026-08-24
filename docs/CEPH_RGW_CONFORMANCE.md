@@ -31,10 +31,11 @@ document; neither record is unrestricted production certification. The earlier
 Ceph-only schema-v2 record remains published in
 [issue #60](https://github.com/Xpounder-com/hormuz/issues/60).
 
-Native ARM64 Hormuz runtime conformance is tracked separately in
-[issue #68](https://github.com/Xpounder-com/hormuz/issues/68). It does not
-block this reference verification unless native ARM64 becomes a promised
-launch platform.
+Native ARM64 conformance for the exact Ceph target is tracked in
+[issue #68](https://github.com/Xpounder-com/hormuz/issues/68). General native
+ARM64 Hormuz OCI runtime verification is instead tracked in
+[issue #109](https://github.com/Xpounder-com/hormuz/issues/109); it blocks a
+future multi-architecture Hormuz image, not this custody reference.
 
 ## What the gate proves
 

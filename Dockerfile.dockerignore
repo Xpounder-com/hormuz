@@ -1,0 +1,13 @@
+# Default Hormuz OCI releases start from an empty context. This Dockerfile-
+# specific allowlist takes precedence over .dockerignore, whose extra tools are
+# required only by the separate Ceph conformance image.
+**
+!Dockerfile
+!Dockerfile.dockerignore
+!pyproject.toml
+!README.md
+!requirements/
+!requirements/oci-build-linux-amd64.lock
+!requirements/oci-runtime-linux-amd64.lock
+!hormuz/
+!hormuz/**

@@ -175,6 +175,32 @@ false
                 "fixable_blocking",
                 "_validate_vulnerability_report",
             ),
+            "verify_oci_release_preflight.py": (
+                "release_tag_not_protected",
+                "release_tag_not_annotated",
+                "release_workflow_identity_mismatch",
+            ),
+            "verify_oci_reproducibility.py": (
+                "independent_oci_archives_differ",
+                "oci_index_must_contain_one_manifest",
+                "oci_platform_mismatch",
+            ),
+            "create_oci_release_provenance.py": (
+                "published_digest_not_reproducible_digest",
+                "supply_chain_verdict_not_pass",
+                "first_publication_registry_mismatch",
+            ),
+            "verify_public_oci_metadata.py": (
+                "public_metadata_repository_not_public",
+                "public_metadata_duplicate_json_member",
+                "secret_pattern_detected",
+            ),
+            "write_oci_release_evidence.py": (
+                "recursive_signature_and_attestation_copy_required",
+                "public_rekor_may_expose",
+                "public_rekor_upload",
+                "release_workflow_identity_mismatch",
+            ),
         }
         for filename, assertions in expected_assertions.items():
             source = (ROOT / "tools" / filename).read_text(encoding="utf-8")
@@ -189,6 +215,14 @@ false
         dockerignore = (ROOT / ".dockerignore").read_text(encoding="utf-8")
         self.assertIn("!tools/_verification_runtime.py", dockerignore)
         self.assertIn("!tools/verify_ceph_rgw_custody_rotation_recovery.py", dockerignore)
+
+        release_dockerignore = (ROOT / "Dockerfile.dockerignore").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("!requirements/oci-runtime-linux-amd64.lock", release_dockerignore)
+        self.assertIn("!hormuz/**", release_dockerignore)
+        self.assertNotIn("!tools/", release_dockerignore)
+        self.assertNotIn("!tests/", release_dockerignore)
 
     def test_python_proofs_remain_directly_executable_and_fail_nonzero_on_missing_arguments(self) -> None:
         safe_helper_import = subprocess.run(
@@ -212,6 +246,11 @@ false
             "verify_postgres_interruption_recovery.py",
             "verify_postgres_pitr_recovery.py",
             "verify_oci_supply_chain.py",
+            "verify_oci_release_preflight.py",
+            "verify_oci_reproducibility.py",
+            "create_oci_release_provenance.py",
+            "verify_public_oci_metadata.py",
+            "write_oci_release_evidence.py",
         )
         for filename in scripts:
             path = ROOT / "tools" / filename

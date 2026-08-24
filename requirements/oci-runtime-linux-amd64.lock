@@ -1,0 +1,19 @@
+# Exact CPython 3.14 / linux/amd64 runtime wheel set for the signed OCI image.
+# Every artifact is binary-only and hash-verified before it enters the
+# wheelhouse. A multi-architecture image requires a separately verified lock.
+cffi==2.1.1 \
+    --hash=sha256:b0431303acaea1089ad4b3e9ce4e6518193def1118d4073ca848635ee4ea2e96
+cryptography==50.0.0 \
+    --hash=sha256:82148ec5bddac30b51a5b3c1945075f896fa022cb93f8e4a01e9f6ee95292c5f
+psycopg==3.3.4 \
+    --hash=sha256:b6bbc25ccf05c8fad3b061d9db2ef0909a555171b84b07f29458a447253d679a
+psycopg-binary==3.3.4 \
+    --hash=sha256:8c0056529e68dbe9184cd4019a1f3d8f3a4ead2f6fc7a5afcf27d3314edd1277
+psycopg-pool==3.3.1 \
+    --hash=sha256:2af5b432941c4c9ad5c87b3fa410aec910ec8f7c122855897983a06c45f2e4b5
+pycparser==3.0 \
+    --hash=sha256:b727414169a36b7d524c1c3e31839a521725078d7b2ff038656844266160a992
+PyJWT==2.13.0 \
+    --hash=sha256:66adcc2aff09b3f1bbd95fc1e1577df8ac8723c978552fd43304c8a290ac5728
+typing-extensions==4.16.0 \
+    --hash=sha256:481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8
