@@ -1,0 +1,259 @@
+{
+  "schema_id": "hormuz.quiet-alpha-evidence",
+  "schema_version": 1,
+  "evidence_kind": "synthetic_test_fixture",
+  "program": "hormuz-v0.1.0-quiet-alpha",
+  "publication_status": "content_free",
+  "generated_at": "2026-08-24T00:00:00Z",
+  "operator_attestation": {
+    "distinct_humans_verified_off_repository": false,
+    "identity_mapping_not_committed": true,
+    "reports_triaged_to_content_free_references": true,
+    "broad_promotion_not_started": true
+  },
+  "sessions": [
+    {
+      "session_id": "qas:10000000-0000-4000-8000-000000000001",
+      "participant_id": "qa:00000000-0000-4000-8000-000000000001",
+      "session_date": "2026-08-01",
+      "persona": "developer",
+      "source_commit": "1111111111111111111111111111111111111111",
+      "package_version": "0.1.0",
+      "installation_method": "source_checkout",
+      "environment": {
+        "os_family": "linux",
+        "os_major_version": "24",
+        "architecture": "x86_64",
+        "python_minor": "3.12",
+        "docker_used": false
+      },
+      "consent_content_free_recording": true,
+      "installation_status": "passed",
+      "demo_status": "passed",
+      "assistance": "none",
+      "time_to_install_seconds": 180,
+      "time_to_demo_seconds": 45,
+      "failure_code": "none",
+      "optional_provider_path": "openai_codex_succeeded",
+      "returning_session": false,
+      "content_free_attestations": {
+        "prompt_or_response_absent": true,
+        "credential_or_token_absent": true,
+        "customer_or_company_data_absent": true,
+        "person_identity_absent": true,
+        "local_path_absent": true,
+        "free_text_absent": true
+      }
+    },
+    {
+      "session_id": "qas:10000000-0000-4000-8000-000000000002",
+      "participant_id": "qa:00000000-0000-4000-8000-000000000002",
+      "session_date": "2026-08-02",
+      "persona": "security",
+      "source_commit": "2222222222222222222222222222222222222222",
+      "package_version": "0.1.0",
+      "installation_method": "source_checkout",
+      "environment": {
+        "os_family": "linux",
+        "os_major_version": "22",
+        "architecture": "x86_64",
+        "python_minor": "3.11",
+        "docker_used": false
+      },
+      "consent_content_free_recording": true,
+      "installation_status": "passed",
+      "demo_status": "passed",
+      "assistance": "public_repository_material_only",
+      "time_to_install_seconds": 240,
+      "time_to_demo_seconds": 60,
+      "failure_code": "none",
+      "optional_provider_path": "anthropic_claude_succeeded",
+      "returning_session": false,
+      "content_free_attestations": {
+        "prompt_or_response_absent": true,
+        "credential_or_token_absent": true,
+        "customer_or_company_data_absent": true,
+        "person_identity_absent": true,
+        "local_path_absent": true,
+        "free_text_absent": true
+      }
+    },
+    {
+      "session_id": "qas:10000000-0000-4000-8000-000000000003",
+      "participant_id": "qa:00000000-0000-4000-8000-000000000003",
+      "session_date": "2026-08-03",
+      "persona": "platform",
+      "source_commit": "3333333333333333333333333333333333333333",
+      "package_version": "0.1.0",
+      "installation_method": "source_checkout",
+      "environment": {
+        "os_family": "macos",
+        "os_major_version": "15",
+        "architecture": "arm64",
+        "python_minor": "3.13",
+        "docker_used": false
+      },
+      "consent_content_free_recording": true,
+      "installation_status": "passed",
+      "demo_status": "passed",
+      "assistance": "none",
+      "time_to_install_seconds": 300,
+      "time_to_demo_seconds": 50,
+      "failure_code": "none",
+      "optional_provider_path": "both_succeeded",
+      "returning_session": false,
+      "content_free_attestations": {
+        "prompt_or_response_absent": true,
+        "credential_or_token_absent": true,
+        "customer_or_company_data_absent": true,
+        "person_identity_absent": true,
+        "local_path_absent": true,
+        "free_text_absent": true
+      }
+    },
+    {
+      "session_id": "qas:10000000-0000-4000-8000-000000000004",
+      "participant_id": "qa:00000000-0000-4000-8000-000000000004",
+      "session_date": "2026-08-04",
+      "persona": "engineering_admin",
+      "source_commit": "4444444444444444444444444444444444444444",
+      "package_version": "0.1.0",
+      "installation_method": "source_checkout",
+      "environment": {
+        "os_family": "wsl",
+        "os_major_version": "2",
+        "architecture": "x86_64",
+        "python_minor": "3.12",
+        "docker_used": false
+      },
+      "consent_content_free_recording": true,
+      "installation_status": "passed",
+      "demo_status": "passed",
+      "assistance": "public_repository_material_only",
+      "time_to_install_seconds": 420,
+      "time_to_demo_seconds": 75,
+      "failure_code": "none",
+      "optional_provider_path": "not_attempted",
+      "returning_session": false,
+      "content_free_attestations": {
+        "prompt_or_response_absent": true,
+        "credential_or_token_absent": true,
+        "customer_or_company_data_absent": true,
+        "person_identity_absent": true,
+        "local_path_absent": true,
+        "free_text_absent": true
+      }
+    },
+    {
+      "session_id": "qas:10000000-0000-4000-8000-000000000005",
+      "participant_id": "qa:00000000-0000-4000-8000-000000000005",
+      "session_date": "2026-08-05",
+      "persona": "developer",
+      "source_commit": "5555555555555555555555555555555555555555",
+      "package_version": "0.1.0",
+      "installation_method": "signed_oci_digest",
+      "environment": {
+        "os_family": "linux",
+        "os_major_version": "24",
+        "architecture": "x86_64",
+        "python_minor": "3.14",
+        "docker_used": true
+      },
+      "consent_content_free_recording": true,
+      "installation_status": "passed",
+      "demo_status": "passed",
+      "assistance": "none",
+      "time_to_install_seconds": 120,
+      "time_to_demo_seconds": 40,
+      "failure_code": "none",
+      "optional_provider_path": "not_attempted",
+      "returning_session": false,
+      "content_free_attestations": {
+        "prompt_or_response_absent": true,
+        "credential_or_token_absent": true,
+        "customer_or_company_data_absent": true,
+        "person_identity_absent": true,
+        "local_path_absent": true,
+        "free_text_absent": true
+      }
+    },
+    {
+      "session_id": "qas:10000000-0000-4000-8000-000000000006",
+      "participant_id": "qa:00000000-0000-4000-8000-000000000006",
+      "session_date": "2026-08-06",
+      "persona": "platform",
+      "source_commit": "6666666666666666666666666666666666666666",
+      "package_version": "0.1.0",
+      "installation_method": "source_checkout",
+      "environment": {
+        "os_family": "linux",
+        "os_major_version": "23",
+        "architecture": "x86_64",
+        "python_minor": "3.13",
+        "docker_used": false
+      },
+      "consent_content_free_recording": true,
+      "installation_status": "passed",
+      "demo_status": "passed",
+      "assistance": "none",
+      "time_to_install_seconds": 210,
+      "time_to_demo_seconds": 55,
+      "failure_code": "none",
+      "optional_provider_path": "not_attempted",
+      "returning_session": false,
+      "content_free_attestations": {
+        "prompt_or_response_absent": true,
+        "credential_or_token_absent": true,
+        "customer_or_company_data_absent": true,
+        "person_identity_absent": true,
+        "local_path_absent": true,
+        "free_text_absent": true
+      }
+    },
+    {
+      "session_id": "qas:10000000-0000-4000-8000-000000000007",
+      "participant_id": "qa:00000000-0000-4000-8000-000000000001",
+      "session_date": "2026-08-08",
+      "persona": "developer",
+      "source_commit": "7777777777777777777777777777777777777777",
+      "package_version": "0.1.0",
+      "installation_method": "source_checkout",
+      "environment": {
+        "os_family": "linux",
+        "os_major_version": "24",
+        "architecture": "x86_64",
+        "python_minor": "3.12",
+        "docker_used": false
+      },
+      "consent_content_free_recording": true,
+      "installation_status": "passed",
+      "demo_status": "passed",
+      "assistance": "none",
+      "time_to_install_seconds": 175,
+      "time_to_demo_seconds": 42,
+      "failure_code": "none",
+      "optional_provider_path": "not_attempted",
+      "returning_session": true,
+      "content_free_attestations": {
+        "prompt_or_response_absent": true,
+        "credential_or_token_absent": true,
+        "customer_or_company_data_absent": true,
+        "person_identity_absent": true,
+        "local_path_absent": true,
+        "free_text_absent": true
+      }
+    }
+  ],
+  "findings": [
+    {
+      "finding_id": "qaf:20000000-0000-4000-8000-000000000001",
+      "category": "installation",
+      "blocker": true,
+      "reference_type": "public_issue",
+      "reference": "https://github.com/Xpounder-com/hormuz/issues/110",
+      "status": "resolved",
+      "resolution_commit": "ffffffffffffffffffffffffffffffffffffffff",
+      "retest_session_id": "qas:10000000-0000-4000-8000-000000000007"
+    }
+  ]
+}

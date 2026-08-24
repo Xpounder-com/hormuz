@@ -46,6 +46,11 @@ exits. It is an executable product tour, not a provider-compatibility or
 production-deployment claim. Its `PASS` lines are human diagnostic output, not
 a new machine-readable compatibility contract.
 
+Invited independent reviewers should follow the
+[quiet-alpha verification guide](docs/QUIET_ALPHA.md). Its strict aggregate
+uses opaque participant IDs and fixed metadata enums; Hormuz adds no product
+telemetry, and a synthetic fixture can never satisfy the launch gate.
+
 ## What works
 
 - OpenAI-compatible `POST /v1/responses` proxying, including streaming.

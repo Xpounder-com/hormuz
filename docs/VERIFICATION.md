@@ -28,6 +28,33 @@ A one-provider run is explicitly partial. Closing issue #115 requires one
 successful artifact containing both real providers at the same source
 revision; provider-free CI cannot substitute for it.
 
+## Independent quiet-alpha gate
+
+The invited-reviewer procedure and strict content-free aggregate are defined
+in [QUIET_ALPHA.md](QUIET_ALPHA.md). The evidence contract allows only opaque
+participant/session IDs, coarse environment enums, completion states, elapsed
+seconds, fixed failure codes, issue/advisory references, resolution commits,
+and content-free attestations. It has no fields for identities, feedback text,
+prompts, responses, credentials, customer data, local paths, logs, or
+screenshots, and Hormuz contains no hidden collection path.
+
+Run the contract tests and synthetic-fixture check with:
+
+```bash
+python -m unittest -v tests.test_quiet_alpha_evidence
+python tools/verify_quiet_alpha_evidence.py \
+  tests/fixtures/quiet_alpha/complete-synthetic-v1.json \
+  --allow-synthetic-fixture
+```
+
+Synthetic evidence always reports `ready_for_broad_promotion: false`. Actual
+release evidence additionally requires the operator to attest distinct humans
+off-repository, five independent installation/demo completions across all
+four reviewer personas, a later returning-user session, and resolution plus
+independent retest of every security or installation blocker. The validator
+does not prove the off-repository identity attestation or replace issue #115's
+live-provider gate.
+
 ## Provider-free five-minute path
 
 The public checkout exposes one configuration-free product tour:

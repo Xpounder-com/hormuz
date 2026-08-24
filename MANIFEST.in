@@ -9,6 +9,7 @@ include tools/_verification_runtime.py
 include tools/verify_secret_inventory.py
 include tools/verify_public_community_paths.py
 include tools/verify_launch_assets.py
+include tools/verify_quiet_alpha_evidence.py
 include tools/oidc_reference_conformance.py
 include tools/verify_ceph_rgw_custody_conformance.py
 recursive-include docs *.md
