@@ -120,3 +120,11 @@ The GitHub publication gate also tests Python 3.11 through 3.14, builds and inst
 ## Roadmap boundary
 
 The current hardening program focuses on a minimal gateway core: policy enforcement, versioned PostgreSQL policy administration, accounting, deterministic secret egress, metadata-only audit, and OIDC JWT verification. The package boundary and policy/evidence contract are explicit, the SQLite/PostgreSQL compatibility seam is tested, and the non-root OCI reference runtime has a candidate SBOM and fix-aware vulnerability gate. A disposable logical PostgreSQL backup/restore exercise now proves a narrow recovery path, but it is not production backup/PITR or DR evidence. Before an enterprise release Hormuz still needs live customer-account certification, migration of every secret class, registry publication and image signing/provenance, TLS and deployment hardening, shared PostgreSQL operations, production backup/PITR, multi-instance coordination, and independent review. It is not building an organizational-memory or workflow product.
+
+## Community and support
+
+Read [CONTRIBUTING.md](CONTRIBUTING.md) before proposing a change and
+[SUPPORT.md](SUPPORT.md) before filing an installation or compatibility report.
+Suspected vulnerabilities must follow the private path in
+[SECURITY.md](SECURITY.md), never a public issue. Participation is governed by
+[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
