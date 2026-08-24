@@ -1,0 +1,130 @@
+{
+  "schema_version": 1,
+  "repository": "Xpounder-com/hormuz",
+  "metadata": {
+    "description": "Open-source AI gateway for policy, model routing, redaction, and usage/cost evidence across Codex and Claude Code.",
+    "topics": [
+      "ai-gateway",
+      "ai-governance",
+      "anthropic",
+      "claude-code",
+      "cli",
+      "codex",
+      "cost-control",
+      "llm",
+      "openai",
+      "policy-enforcement",
+      "python",
+      "security"
+    ],
+    "features": {
+      "discussions": true,
+      "issues": true,
+      "projects": false,
+      "wiki": false
+    }
+  },
+  "actions": {
+    "sha_pinning_required": true,
+    "default_workflow_permissions": "read",
+    "can_approve_pull_request_reviews": false,
+    "pre_public_allowed_actions": "all",
+    "public_allowed_actions": "selected",
+    "allowed_action_owners": [
+      "actions",
+      "docker",
+      "sigstore"
+    ],
+    "public_allowlist": {
+      "github_owned_allowed": true,
+      "verified_allowed": false,
+      "patterns_allowed": [
+        "docker/*@*",
+        "sigstore/cosign-installer@*"
+      ]
+    }
+  },
+  "required_checks": [
+    {
+      "context": "Build and install package",
+      "integration_id": 15368
+    },
+    {
+      "context": "Codex and Claude Code compatibility",
+      "integration_id": 15368
+    },
+    {
+      "context": "OCI reference runtime",
+      "integration_id": 15368
+    },
+    {
+      "context": "OCI reproducibility",
+      "integration_id": 15368
+    },
+    {
+      "context": "OCI supply-chain evidence",
+      "integration_id": 15368
+    },
+    {
+      "context": "PostgreSQL compatibility",
+      "integration_id": 15368
+    },
+    {
+      "context": "PostgreSQL recovery drills",
+      "integration_id": 15368
+    },
+    {
+      "context": "Python 3.11",
+      "integration_id": 15368
+    },
+    {
+      "context": "Python 3.12",
+      "integration_id": 15368
+    },
+    {
+      "context": "Python 3.13",
+      "integration_id": 15368
+    },
+    {
+      "context": "Python 3.14",
+      "integration_id": 15368
+    }
+  ],
+  "ruleset_files": [
+    ".github/rulesets/main.json",
+    ".github/rulesets/version-tag-creation.json",
+    ".github/rulesets/version-tag-immutability.json"
+  ],
+  "discussions": [
+    "Announcements",
+    "General",
+    "Ideas",
+    "Polls",
+    "Q&A",
+    "Show and tell"
+  ],
+  "phase_contracts": {
+    "pre_public": {
+      "visibility": "private",
+      "secret_scanning": "deferred_until_public",
+      "selected_action_patterns": "deferred_until_public"
+    },
+    "public": {
+      "visibility": "public",
+      "secret_scanning": "enabled",
+      "selected_action_patterns": "enforced"
+    }
+  },
+  "public_transition_checks": [
+    "disclosure_gate_closed",
+    "owner_authorization_recorded",
+    "social_preview_configured",
+    "organization_profile_public",
+    "repository_pinned",
+    "anonymous_clone_verified",
+    "anonymous_templates_verified",
+    "anonymous_discussions_verified",
+    "license_detection_verified",
+    "public_ghcr_pull_verified"
+  ]
+}
