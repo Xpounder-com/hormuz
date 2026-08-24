@@ -26,6 +26,9 @@ also capture allowlisted API evidence when applying or reviewing those settings.
 | Fork pull requests | Not applicable | Read-only `pull_request`; no `pull_request_target` and no repository secrets |
 | Anonymous/public checks | Not applicable | Clone, templates, Discussions, license detection, and GHCR pull verified without owner credentials |
 
+The blocking CI workflow runs once for each pull request and once after merge to
+`main`. A feature-branch push does not also start a duplicate 11-job run.
+
 GitHub documents both the full-SHA requirement and the limitation on selected
 third-party patterns for private repositories outside an enterprise in its
 [Actions permissions API](https://docs.github.com/en/rest/actions/permissions)

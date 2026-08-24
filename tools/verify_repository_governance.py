@@ -330,6 +330,15 @@ def _validate_workflows(
         action_use_count += len(pinned)
 
     ci = (root / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+    if not re.search(
+        r"^on:\s*\n  push:\s*\n    branches:\s*\n      - main\s*\n"
+        r"  pull_request:\s*\n  workflow_dispatch:\s*$",
+        ci,
+        flags=re.MULTILINE,
+    ):
+        raise RepositoryGovernanceError(
+            "CI must run once for pull requests and once after merge to main"
+        )
     versions_match = re.search(r'python-version:\s*\[([^\]]+)\]', ci)
     versions = re.findall(r'"(3\.\d+)"', versions_match.group(1) if versions_match else "")
     if versions != ["3.11", "3.12", "3.13", "3.14"]:
