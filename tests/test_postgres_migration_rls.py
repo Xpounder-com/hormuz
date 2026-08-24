@@ -37,6 +37,36 @@ class PostgresMigrationRLSTests(PostgresTestCase):
         )
         self.assertTrue(status.complete)
         self.assertEqual(status.version, POSTGRES_SCHEMA_VERSION)
+
+    def test_schema_v8_missing_custody_evidence_trigger_fails_closed(self) -> None:
+        """A migration ledger alone cannot stand in for v2 evidence guards."""
+
+        schema = self._create_schema_v2_fixture()
+        status = migrate_postgres(
+            self.owner_dsn,
+            schema=schema,
+            runtime_role=self.runtime_role,
+            policy_control_role=self.policy_control_role,
+            custody_control_role=self.custody_control_role,
+            custody_executor_role=self.custody_executor_role,
+        )
+        self.assertEqual(status.version, POSTGRES_SCHEMA_VERSION)
+        with self.psycopg.connect(self.owner_dsn, autocommit=True) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    self.sql.SQL("DROP TRIGGER custody_deletion_events_contract_required ON {}.custody_deletion_events").format(
+                        self.sql.Identifier(schema)
+                    )
+                )
+
+        with self.assertRaises(PostgresStorageError) as raised:
+            verify_postgres_schema(
+                self.runtime_dsn,
+                schema=schema,
+                runtime_role=self.runtime_role,
+            )
+        self.assertEqual(raised.exception.code, "storage_schema_partial_upgrade")
+
     def test_policy_control_role_verifies_only_the_shared_migration_ledger(self) -> None:
         with self.assertRaises(PostgresStorageError) as raised:
             verify_postgres_schema(

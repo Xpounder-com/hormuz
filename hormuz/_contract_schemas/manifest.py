@@ -14,11 +14,97 @@ from .common import (
     _value_string_list,
 )
 from .constants import (
+    AUDIT_CHAIN_ENTRY_SCHEMA_ID,
+    AUDIT_CHAIN_ENTRY_SCHEMA_VERSION,
+    CUSTODY_DELETION_EVENT_SCHEMA_ID,
+    CUSTODY_DELETION_EVENT_SCHEMA_VERSION,
+    CUSTODY_ENVELOPE_ATTESTATION_SCHEMA_ID,
+    CUSTODY_ENVELOPE_ATTESTATION_SCHEMA_VERSION,
+    CUSTODY_EVIDENCE_EXPORT_SCHEMA_ID,
+    CUSTODY_EVIDENCE_EXPORT_SCHEMA_VERSION,
     MANIFEST_SCHEMA_ID,
     MANIFEST_SCHEMA_VERSION,
     PUBLIC_ERROR_CODES,
     _REQUEST_STATUSES,
 )
+
+
+def custody_evidence_schema_entries() -> list[dict[str, object]]:
+    """Return the v2 custody additions owned by the schema-manifest family."""
+
+    return [
+        _manifest_schema(
+            AUDIT_CHAIN_ENTRY_SCHEMA_ID,
+            AUDIT_CHAIN_ENTRY_SCHEMA_VERSION,
+            "durable-evidence",
+            [
+                "organization_id",
+                "chain_version",
+                "chain_epoch",
+                "sequence",
+                "previous_digest",
+                "event_digest",
+                "source_schema_id",
+                "source_schema_version",
+                "source_event_id",
+                "strict allowlisted metadata-only custody source event",
+            ],
+        ),
+        _manifest_schema(
+            CUSTODY_ENVELOPE_ATTESTATION_SCHEMA_ID,
+            CUSTODY_ENVELOPE_ATTESTATION_SCHEMA_VERSION,
+            "durable-evidence",
+            [
+                "organization_id",
+                "execution_id",
+                "attestation_kind",
+                "tenant-qualified immutable asset identities and fingerprints",
+                "occurred_at",
+            ],
+        ),
+        _manifest_schema(
+            CUSTODY_DELETION_EVENT_SCHEMA_ID,
+            CUSTODY_DELETION_EVENT_SCHEMA_VERSION,
+            "durable-evidence",
+            [
+                "organization_id",
+                "deletion_event_id",
+                "source schema and immutable source event identity",
+                "source retention and legal-hold state",
+                "decision=deletion_blocked",
+                "reason_code",
+                "occurred_at",
+            ],
+        ),
+        _manifest_schema(
+            CUSTODY_EVIDENCE_EXPORT_SCHEMA_ID,
+            CUSTODY_EVIDENCE_EXPORT_SCHEMA_VERSION,
+            "cli-output",
+            [
+                "schema_id",
+                "schema_version",
+                "organization_id",
+                "generated_at",
+                "strict metadata-only custody source records with v2 chain positions",
+            ],
+        ),
+    ]
+
+
+def _manifest_schema(
+    schema_id: str,
+    schema_version: int,
+    delivery: str,
+    fields: list[str],
+) -> dict[str, object]:
+    return {
+        "schema_id": schema_id,
+        "schema_version": schema_version,
+        "delivery": delivery,
+        "ownership": "hormuz",
+        "legacy": False,
+        "fields": fields,
+    }
 
 
 def validate_contract_manifest(value: Mapping[str, Any]) -> None:

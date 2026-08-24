@@ -36,7 +36,7 @@ The current Hormuz-owned JSON schemas are:
 | `hormuz status --json` | `hormuz.usage-report` v1 |
 | audit JSONL events | `hormuz.audit-event` v2 |
 | immutable audit-anchor artifact | `hormuz.audit-anchor` v1 |
-| commit-time audit-chain entry | `hormuz.commit-audit-chain-entry` v1 |
+| commit-time audit-chain entry | `hormuz.commit-audit-chain-entry` v1 (legacy gateway evidence) / v2 (strict custody source evidence) |
 | externally retainable chain checkpoint | `hormuz.audit-chain-checkpoint` v1 |
 | immutable staged policy document | `hormuz.policy-document` v1 |
 | PostgreSQL policy-control event row | `hormuz.policy-control-event` v1 |
@@ -44,6 +44,9 @@ The current Hormuz-owned JSON schemas are:
 | PostgreSQL custody-execution attempt row | `hormuz.custody-execution-attempt` v2 |
 | PostgreSQL custody-execution event row | `hormuz.custody-execution-event` v1 |
 | PostgreSQL custody-lifecycle event row | `hormuz.custody-lifecycle-event` v1 |
+| PostgreSQL custody-envelope attestation row | `hormuz.custody-envelope-attestation` v1 |
+| PostgreSQL custody deletion-denial row | `hormuz.custody-deletion-event` v1 |
+| `hormuz custody evidence export` output | `hormuz.custody-evidence-export` v1 |
 
 OpenAI and Anthropic response bodies remain provider-owned. Hormuz does not add a schema wrapper or fields to those bodies, because doing so would break Codex and Claude Code compatibility. Instead, a relayed provider response carries:
 
@@ -55,12 +58,19 @@ The same header names the separately versioned Hormuz relay-metadata contract. H
 
 ## Commit-time audit-chain contract
 
-`hormuz.commit-audit-chain-entry` v1 is durable metadata-only evidence, not a
-provider response. One entry is written atomically with each current v2 usage
-or secret-egress audit event. Its digest is SHA-256 over a canonical object
-containing the organization ID, chain version, epoch, sequence, prior digest,
-and complete canonical audit event. The entry is tenant-qualified; Hormuz does
-not maintain a global chain.
+`hormuz.commit-audit-chain-entry` v1 is durable metadata-only gateway evidence,
+not a provider response. One entry is written atomically with each current v2
+usage or secret-egress audit event. Its digest is SHA-256 over a canonical
+object containing the organization ID, chain version, epoch, sequence, prior
+digest, and complete canonical audit event. The entry is tenant-qualified;
+Hormuz does not maintain a global chain.
+
+Version 2 is a separate strict custody-evidence entry shape. It additionally
+binds `source_schema_id`, `source_schema_version`, and `source_event_id` plus a
+complete source record drawn from an allowlisted union. New source families are
+breaking contract work: a validator, manifest entry, compatibility fixture,
+migration, and verifier update are required. Version 1 stays readable and is
+never rewritten; old verifiers fail closed on an unsupported entry version.
 
 `hormuz.audit-chain-checkpoint` v1 is the compact artifact sent to external
 Object Lock. It contains `checkpoint_id`, `organization_id`, `chain_version`,
@@ -105,6 +115,15 @@ acknowledgements are content-free coordination state rather than a new public
 evidence schema. They ensure an affected asset is locally blocked before a
 replica acknowledges and before the immutable lifecycle event activates. See
 [CUSTODY_CONTROL.md](CUSTODY_CONTROL.md).
+
+PostgreSQL schema v8 adds persisted tenant retention policy, immutable
+per-record `retain_until`, and legal-hold fields to new custody evidence. The
+database clock is authoritative for source timestamps. `hormuz.custody-envelope-attestation`
+v1, `hormuz.custody-deletion-event` v1, and the tenant-scoped
+`hormuz.custody-evidence-export` v1 have exact fields only. A deletion event
+can only declare `decision: deletion_blocked`; it never authorizes a deletion.
+The export includes only custody evidence and its global chain positions, not a
+claim of complete organization-wide audit history.
 
 Model fields have distinct meanings:
 
@@ -211,6 +230,19 @@ The release line has these intentional pre-stability changes:
     custody boundary is PostgreSQL-only. An older binary fails closed on the
     v7 ledger. See [CUSTODY_CONTROL.md](CUSTODY_CONTROL.md) and
     [STORAGE.md](STORAGE.md).
+13. PostgreSQL schema v8 keeps v1 audit-chain entries unchanged and adds the
+    strict custody-source `hormuz.commit-audit-chain-entry` v2 shape. Every new
+    custody control, execution, lifecycle, attestation, or deletion-denial
+    source record commits with its v2 entry and updated tenant chain head in the
+    same transaction; a missing source/entry pair rolls back. Managed custody
+    now requires a bootstrap-only `custody_retention` policy. PostgreSQL derives
+    each durable source timestamp and immutable deadline from its own clock and
+    persisted policy; later configuration changes cannot shorten a record. The
+    current binary rejects unsupported v2 source schemas, while version-1
+    gateway entries remain readable. SQLite stays schema v4 because custody
+    authority and retention enforcement are PostgreSQL-only. An older binary
+    fails closed on the v8 ledger. See [CUSTODY_CONTROL.md](CUSTODY_CONTROL.md)
+    and [AUDIT.md](AUDIT.md).
 
 The SQLite migrations add the metadata columns required to emit v2 while retaining existing usage rows, add tenant scope to active budget reservations, add the versioned append-only request-attempt ledger, and add the per-organization commit-time evidence chain. Each persisted usage, secret-evidence, request-attempt, or audit-chain object carries an explicit schema identifier and version where it is a public/durable evidence format, so later code cannot silently reinterpret its evidence shape. Historical rows receive explicit legacy defaults where the old database could not know a value. Earlier applications will not understand newer schemas; rollback therefore requires retaining or restoring the earlier application/database pair. The corresponding PostgreSQL adapter is migration-led and uses a distinct operator migration credential and restricted runtime credential. See [STORAGE.md](STORAGE.md) for the upgrade, rollback, recovery, and remaining-operational-gates boundary.
 

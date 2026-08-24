@@ -317,6 +317,49 @@ def build_parser() -> argparse.ArgumentParser:
     _custody_control_auth_arguments(approve)
     approve.add_argument("--operation-id", required=True, help="Immutable custody operation identifier")
 
+    custody_evidence = custody_subparsers.add_parser(
+        "evidence",
+        help="Export or inspect governed, metadata-only custody evidence",
+    )
+    custody_evidence_subparsers = custody_evidence.add_subparsers(
+        dest="custody_evidence_command",
+        required=True,
+    )
+    custody_evidence_export = custody_evidence_subparsers.add_parser(
+        "export",
+        help="Write a strict tenant-scoped metadata-only custody evidence export to stdout",
+    )
+    _custody_control_auth_arguments(custody_evidence_export)
+    custody_evidence_delete_check = custody_evidence_subparsers.add_parser(
+        "deletion-check",
+        help="Record why a custody evidence record cannot be deleted; this never deletes data",
+    )
+    _custody_control_auth_arguments(custody_evidence_delete_check)
+    custody_evidence_delete_check.add_argument(
+        "--source-schema-id",
+        required=True,
+        choices=[
+            "hormuz.custody-control-event",
+            "hormuz.custody-execution-attempt",
+            "hormuz.custody-execution-event",
+            "hormuz.custody-lifecycle-event",
+            "hormuz.custody-envelope-attestation",
+            "hormuz.custody-deletion-event",
+        ],
+        help="Strict source schema of the already committed evidence record",
+    )
+    custody_evidence_delete_check.add_argument(
+        "--source-schema-version",
+        type=int,
+        required=True,
+        help="Strict source schema version of the already committed evidence record",
+    )
+    custody_evidence_delete_check.add_argument(
+        "--source-event-id",
+        required=True,
+        help="Immutable source event identifier",
+    )
+
     custody_executor = subparsers.add_parser(
         "custody-executor",
         help="Run machine-only custody-executor maintenance",
@@ -1309,7 +1352,7 @@ def _is_sha256_digest(value: object) -> bool:
 
 
 def _custody(config: GatewayConfig, args: argparse.Namespace) -> int:
-    if args.custody_command in {"bootstrap", "status", "administrator", "authorize", "approve"}:
+    if args.custody_command in {"bootstrap", "status", "administrator", "authorize", "approve", "evidence"}:
         return _custody_control(config, args)
     if config.custody_control.mode == "postgresql":
         raise CustodyControlError("custody_governed_executor_required")
@@ -1421,6 +1464,34 @@ def _custody_control(config: GatewayConfig, args: argparse.Namespace) -> int:
         )
         _print_custody_operation("custody operation approved", operation)
         return 0
+    if command == "evidence":
+        if args.custody_evidence_command == "export":
+            print(
+                json.dumps(
+                    service.export_evidence(
+                        organization_id=args.organization,
+                        credential_env=args.credential_env,
+                    ),
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
+            return 0
+        if args.custody_evidence_command == "deletion-check":
+            print(
+                json.dumps(
+                    service.record_deletion_blocked(
+                        organization_id=args.organization,
+                        credential_env=args.credential_env,
+                        source_schema_id=args.source_schema_id,
+                        source_schema_version=args.source_schema_version,
+                        source_event_id=args.source_event_id,
+                    ),
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
+            return 0
     raise CustodyControlError("custody_control_command_unsupported")
 
 

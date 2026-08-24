@@ -35,7 +35,12 @@ from ._contract_schemas.custody_execution import (
     validate_custody_execution_event as _validate_custody_execution_event_contract,
 )
 from ._contract_schemas.custody_lifecycle import (
+    validate_custody_envelope_attestation as _validate_custody_envelope_attestation_contract,
     validate_custody_lifecycle_event as _validate_custody_lifecycle_event_contract,
+)
+from ._contract_schemas.custody_retention import (
+    validate_custody_deletion_event as _validate_custody_deletion_event_contract,
+    validate_custody_evidence_export as _validate_custody_evidence_export_contract,
 )
 # This facade deliberately re-exports the stable schema vocabulary without
 # duplicating its ownership in the public compatibility module.
@@ -48,6 +53,7 @@ from ._contract_schemas.health import (
     _validate_readiness,
 )
 from ._contract_schemas.manifest import (
+    custody_evidence_schema_entries as _custody_evidence_schema_entries,
     validate_contract_manifest as _validate_contract_manifest_contract,
 )
 from ._contract_schemas.policy import (
@@ -106,7 +112,7 @@ def contract_manifest() -> dict[str, object]:
             "current_release_line": "0.2",
             "addition_rule": "New optional fields require a new documented schema version before release.",
             "breaking_change_rule": "Removed fields, changed types, changed semantics, or new required fields require a new schema version and migration guidance.",
-            "legacy_audit_read": "Audit event version 1 remains fixture-validated for historical exports; Hormuz emits version 2.",
+            "legacy_audit_read": "Audit chain entry version 1 remains readable for historical gateway evidence. Version 2 is limited to the documented custody source union; verifiers fail closed for unsupported entry or source versions.",
             "provider_protocol_rule": "OpenAI and Anthropic response bodies remain provider-owned. Hormuz metadata is versioned through X-Hormuz-Contract.",
         },
         "schemas": [
@@ -477,7 +483,7 @@ def contract_manifest() -> dict[str, object]:
             ),
             _manifest_schema(
                 AUDIT_CHAIN_ENTRY_SCHEMA_ID,
-                AUDIT_CHAIN_ENTRY_SCHEMA_VERSION,
+                AUDIT_CHAIN_ENTRY_LEGACY_SCHEMA_VERSION,
                 "durable-evidence",
                 "hormuz",
                 [
@@ -489,6 +495,7 @@ def contract_manifest() -> dict[str, object]:
                     "event_digest",
                     "complete metadata-only audit event",
                 ],
+                legacy=True,
             ),
             _manifest_schema(
                 AUDIT_CHAIN_CHECKPOINT_SCHEMA_ID,
@@ -505,6 +512,7 @@ def contract_manifest() -> dict[str, object]:
                     "created_at",
                 ],
             ),
+            *_custody_evidence_schema_entries(),
             _manifest_schema(
                 RELAY_METADATA_SCHEMA_ID,
                 RELAY_METADATA_SCHEMA_VERSION,
@@ -569,8 +577,10 @@ def validate_contract(value: Mapping[str, Any]) -> None:
         (CUSTODY_CONTROL_STATUS_SCHEMA_ID, CUSTODY_CONTROL_STATUS_SCHEMA_VERSION): _validate_custody_control_status_v3,
         (USAGE_REPORT_SCHEMA_ID, 1): _validate_usage_report,
         (AUDIT_ANCHOR_SCHEMA_ID, AUDIT_ANCHOR_SCHEMA_VERSION): _validate_audit_anchor,
+        (AUDIT_CHAIN_ENTRY_SCHEMA_ID, AUDIT_CHAIN_ENTRY_LEGACY_SCHEMA_VERSION): _validate_audit_chain_entry,
         (AUDIT_CHAIN_ENTRY_SCHEMA_ID, AUDIT_CHAIN_ENTRY_SCHEMA_VERSION): _validate_audit_chain_entry,
         (AUDIT_CHAIN_CHECKPOINT_SCHEMA_ID, AUDIT_CHAIN_CHECKPOINT_SCHEMA_VERSION): _validate_audit_chain_checkpoint,
+        (CUSTODY_EVIDENCE_EXPORT_SCHEMA_ID, CUSTODY_EVIDENCE_EXPORT_SCHEMA_VERSION): _validate_custody_evidence_export_contract,
     }.get((schema_id, schema_version))
     if validator is None:
         raise ContractValidationError(f"unsupported Hormuz contract: {schema_id} v{schema_version}")
@@ -661,6 +671,24 @@ def validate_custody_lifecycle_event(value: Mapping[str, Any]) -> None:
     """Validate a versioned, metadata-only custody lifecycle event."""
 
     _validate_custody_lifecycle_event_contract(value)
+
+
+def validate_custody_envelope_attestation(value: Mapping[str, Any]) -> None:
+    """Validate one metadata-only custody rewrap or restore attestation."""
+
+    _validate_custody_envelope_attestation_contract(value)
+
+
+def validate_custody_deletion_event(value: Mapping[str, Any]) -> None:
+    """Validate a metadata-only, governed refusal to delete custody evidence."""
+
+    _validate_custody_deletion_event_contract(value)
+
+
+def validate_custody_evidence_export(value: Mapping[str, Any]) -> None:
+    """Validate a tenant-scoped, metadata-only custody evidence export."""
+
+    _validate_custody_evidence_export_contract(value)
 
 
 def validate_policy_action(value: str) -> None:

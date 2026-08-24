@@ -22,7 +22,12 @@ AUDIT_CHAIN_VERSION = 1
 
 AUDIT_CHAIN_ENTRY_SCHEMA_ID = "hormuz.commit-audit-chain-entry"
 
-AUDIT_CHAIN_ENTRY_SCHEMA_VERSION = 1
+# Version 2 binds a strictly allowlisted custody-evidence source identity in
+# addition to the complete canonical metadata-only source record.  Version 1
+# remains supported for the existing gateway usage/security chain.
+AUDIT_CHAIN_ENTRY_SCHEMA_VERSION = 2
+
+AUDIT_CHAIN_ENTRY_LEGACY_SCHEMA_VERSION = 1
 
 AUDIT_CHAIN_CHECKPOINT_SCHEMA_ID = "hormuz.audit-chain-checkpoint"
 
@@ -82,6 +87,18 @@ CUSTODY_LIFECYCLE_EVENT_SCHEMA_ID = "hormuz.custody-lifecycle-event"
 
 CUSTODY_LIFECYCLE_EVENT_SCHEMA_VERSION = 1
 
+CUSTODY_ENVELOPE_ATTESTATION_SCHEMA_ID = "hormuz.custody-envelope-attestation"
+
+CUSTODY_ENVELOPE_ATTESTATION_SCHEMA_VERSION = 1
+
+CUSTODY_DELETION_EVENT_SCHEMA_ID = "hormuz.custody-deletion-event"
+
+CUSTODY_DELETION_EVENT_SCHEMA_VERSION = 1
+
+CUSTODY_EVIDENCE_EXPORT_SCHEMA_ID = "hormuz.custody-evidence-export"
+
+CUSTODY_EVIDENCE_EXPORT_SCHEMA_VERSION = 1
+
 USAGE_REPORT_SCHEMA_ID = "hormuz.usage-report"
 
 COST_BASIS_CONFIGURED_RATE_CARD_ESTIMATE = "configured_rate_card_estimate"
@@ -125,6 +142,7 @@ _CURRENT_SCHEMA_VERSIONS = {
     AUDIT_ANCHOR_SCHEMA_ID: AUDIT_ANCHOR_SCHEMA_VERSION,
     AUDIT_CHAIN_ENTRY_SCHEMA_ID: AUDIT_CHAIN_ENTRY_SCHEMA_VERSION,
     AUDIT_CHAIN_CHECKPOINT_SCHEMA_ID: AUDIT_CHAIN_CHECKPOINT_SCHEMA_VERSION,
+    CUSTODY_EVIDENCE_EXPORT_SCHEMA_ID: CUSTODY_EVIDENCE_EXPORT_SCHEMA_VERSION,
 }
 
 _REQUEST_STATUSES = frozenset({"succeeded", "failed", "denied", "rate_limited"})

@@ -27,6 +27,7 @@ from hormuz.custody_lifecycle import (
 from hormuz.custody_runtime_projection import CustodyRuntimeProjection, CustodyRuntimeProjectionError
 from hormuz.postgres import PostgresStorageError
 from hormuz.postgres_custody_lifecycle_store import PostgresCustodyProjectionStore
+from hormuz.postgres_usage_store import PostgresUsageStore
 from hormuz.server import GatewayServer, serve_in_thread
 
 if __package__:
@@ -120,6 +121,17 @@ class PostgresCustodyLifecycleTests(PostgresTestCase):
         self.assertEqual(attempt.execution_schema_version, 2)
         self.assertEqual(attempt.state, "succeeded")
         self.assertEqual(runner.requests, [request])
+
+        # v2 custody entries are verified through the runtime's bounded source
+        # reader; it has no direct access to custody-control tables.
+        custody_auditor = PostgresUsageStore(
+            self.runtime_dsn,
+            organization_ids=("xpounder",),
+            schema=self.schema,
+            runtime_role=self.runtime_role,
+        )
+        chain_head = custody_auditor.verify_audit_chain(organization_id="xpounder")
+        self.assertGreater(chain_head.sequence, 0)
 
         projection = PostgresCustodyProjectionStore(
             self.runtime_dsn,
@@ -823,6 +835,10 @@ class PostgresCustodyLifecycleTests(PostgresTestCase):
             CustodyRuntimeProjection(config, environ=environment)
         self.assertEqual(raised.exception.code, "custody_runtime_projection_unavailable")
 
+        CustodyControlService(config, environ=environment).bootstrap(
+            organization_id="xpounder",
+            credential_env="HORMUZ_CUSTODY_ADMIN_TOKEN",
+        )
         CustodyExecutorService(config, environ=environment).register_asset_catalog()
         projection = CustodyRuntimeProjection(config, environ=environment, start_background=False)
         self.addCleanup(projection.close)

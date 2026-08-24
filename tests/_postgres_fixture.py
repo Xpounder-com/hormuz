@@ -242,6 +242,7 @@ class PostgresTestCase(unittest.TestCase):
                     "custody_lifecycle_asset_identities",
                     "custody_execution_events",
                     "custody_execution_attempts",
+                    "custody_deletion_events",
                     "custody_control_events",
                     "custody_operation_approvals",
                     "custody_operation_intents",
@@ -632,6 +633,10 @@ class PostgresTestCase(unittest.TestCase):
             "postgres_control_role": self.custody_control_role,
             "authorization_ttl_seconds": authorization_ttl_seconds,
             "bootstrap_administrators": administrators,
+        }
+        value["custody_retention"] = {
+            "retention_days": 365,
+            "legal_hold": False,
         }
         value["custody_executor"] = {
             "postgres_executor_dsn_env": "TEST_POSTGRES_CUSTODY_EXECUTOR_DSN",

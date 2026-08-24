@@ -214,6 +214,19 @@ class CustodyExecutorConfig:
 
 
 @dataclass(frozen=True)
+class CustodyRetentionConfig:
+    """Explicit immutable-retention policy seeded at custody bootstrap.
+
+    The values are configuration inputs only during initial tenant setup.  The
+    managed custody store persists the accepted policy and uses PostgreSQL's
+    clock to derive each evidence record's immutable deadline.
+    """
+
+    retention_days: int
+    legal_hold: bool
+
+
+@dataclass(frozen=True)
 class Identity:
     token_env: str
     token: str = field(repr=False)
@@ -327,6 +340,7 @@ class GatewayConfig:
     policy_control: PolicyControlConfig = field(default_factory=PolicyControlConfig)
     custody_control: CustodyControlConfig = field(default_factory=CustodyControlConfig)
     custody_executor: CustodyExecutorConfig = field(default_factory=CustodyExecutorConfig)
+    custody_retention: CustodyRetentionConfig | None = None
     custody_lifecycle: CustodyLifecycleConfig | None = None
     key_custody: KeyCustodyConfig | None = None
     audit_anchor: AuditAnchorConfig | None = None
@@ -339,6 +353,19 @@ class GatewayConfig:
         return build_gateway_config(cls, path, environ=environ)
 
     def validate_references(self) -> None:
+        if self.custody_control.mode == "postgresql" and self.custody_retention is None:
+            raise ConfigError("managed custody requires explicit custody_retention")
+        if self.custody_retention is not None:
+            if self.custody_control.mode != "postgresql":
+                raise ConfigError("custody_retention requires managed PostgreSQL custody control")
+            if (
+                isinstance(self.custody_retention.retention_days, bool)
+                or not isinstance(self.custody_retention.retention_days, int)
+                or not 1 <= self.custody_retention.retention_days <= 36500
+                or self.custody_retention.legal_hold is not True
+                and self.custody_retention.legal_hold is not False
+            ):
+                raise ConfigError("custody_retention is invalid")
         if self.custody_lifecycle is not None:
             if self.custody_control.mode != "postgresql" or self.usage_storage.backend != "postgresql":
                 raise ConfigError("custody_lifecycle requires managed PostgreSQL custody control")

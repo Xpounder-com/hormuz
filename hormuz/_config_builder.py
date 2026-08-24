@@ -20,6 +20,7 @@ from .config import (
     ConfigError,
     CustodyControlConfig,
     CustodyExecutorConfig,
+    CustodyRetentionConfig,
     GatewayConfig,
     Identity,
     IngressConfig,
@@ -229,11 +230,14 @@ def build_gateway_config(
     custody_bootstrap_administrators_raw = custody_control_raw.get("bootstrap_administrators", [])
     if not isinstance(custody_bootstrap_administrators_raw, list):
         raise ConfigError("custody_control.bootstrap_administrators must be an array")
+    custody_retention = _custody_retention(raw.get("custody_retention"))
     if custody_control_mode == "postgresql":
         if usage_backend != "postgresql":
             raise ConfigError("custody_control.mode postgresql requires usage_storage.backend postgresql")
         if key_custody is None:
             raise ConfigError("custody_control.mode postgresql requires key_custody")
+        if custody_retention is None:
+            raise ConfigError("custody_control.mode postgresql requires custody_retention")
         active_dsn_envs = {postgres_dsn_env, postgres_migration_dsn_env}
         active_roles = {postgres_runtime_role}
         if policy_control_mode == "postgresql":
@@ -250,10 +254,13 @@ def build_gateway_config(
             )
         if not custody_bootstrap_administrators_raw:
             raise ConfigError("custody_control.bootstrap_administrators must contain at least one administrator")
-    elif custody_bootstrap_administrators_raw:
-        raise ConfigError(
-            "custody_control.bootstrap_administrators require custody_control.mode postgresql"
-        )
+    else:
+        if custody_bootstrap_administrators_raw:
+            raise ConfigError(
+                "custody_control.bootstrap_administrators require custody_control.mode postgresql"
+            )
+        if custody_retention is not None:
+            raise ConfigError("custody_retention requires custody_control.mode postgresql")
 
     custody_executor_raw = _object(raw.get("custody_executor", {}), "custody_executor")
     unsupported_custody_executor_fields = set(custody_executor_raw).difference(
@@ -593,6 +600,7 @@ def build_gateway_config(
             postgres_executor_role=custody_executor_role,
             pending_attempt_ttl_seconds=custody_executor_pending_ttl_seconds,
         ),
+        custody_retention=custody_retention,
         custody_lifecycle=custody_lifecycle,
         key_custody=key_custody,
         audit_anchor=audit_anchor,
@@ -849,6 +857,26 @@ def _key_custody(value: Any) -> KeyCustodyConfig | None:
             transit_mount=_openbao_path_name(item.get("transit_mount", "transit"), "key_custody.transit_mount"),
         )
     raise ConfigError("key_custody.backend must be aws-kms or openbao-transit")
+
+
+def _custody_retention(value: Any) -> CustodyRetentionConfig | None:
+    """Parse a required-by-managed-custody immutable evidence-retention seed."""
+
+    if value is None:
+        return None
+    item = _object(value, "custody_retention")
+    unsupported = set(item).difference({"retention_days", "legal_hold"})
+    if unsupported:
+        raise ConfigError("custody_retention contains unsupported fields: " + ", ".join(sorted(unsupported)))
+    return CustodyRetentionConfig(
+        retention_days=_integer(
+            item.get("retention_days"),
+            "custody_retention.retention_days",
+            minimum=1,
+            maximum=36500,
+        ),
+        legal_hold=_boolean(item.get("legal_hold", False), "custody_retention.legal_hold"),
+    )
 
 
 def _custody_lifecycle(

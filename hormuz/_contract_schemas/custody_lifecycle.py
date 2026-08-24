@@ -8,6 +8,8 @@ from uuid import UUID
 
 from .common import ContractValidationError, _exact_keys, _nullable_string, _sha256_digest, _value_integer, _value_string
 from .constants import (
+    CUSTODY_ENVELOPE_ATTESTATION_SCHEMA_ID,
+    CUSTODY_ENVELOPE_ATTESTATION_SCHEMA_VERSION,
     CUSTODY_LIFECYCLE_EVENT_SCHEMA_ID,
     CUSTODY_LIFECYCLE_EVENT_SCHEMA_VERSION,
     _CUSTODY_LIFECYCLE_OPERATION_TYPES,
@@ -113,6 +115,66 @@ def validate_custody_lifecycle_event(value: Mapping[str, Any]) -> None:
     expected_type = "provider_credential" if operation_type == "disable_provider_credential" else "envelope"
     if asset_type != expected_type:
         raise ContractValidationError("custody lifecycle asset type is invalid")
+
+
+def validate_custody_envelope_attestation(value: Mapping[str, Any]) -> None:
+    """Validate one active-core rewrap or restore-proof record.
+
+    The record contains only immutable asset identities and fingerprints; no
+    envelope ciphertext, source path, KMS key reference, or plaintext is part
+    of this evidence contract.
+    """
+
+    _exact_keys(
+        value,
+        {
+            "attestation_schema_id",
+            "attestation_schema_version",
+            "organization_id",
+            "execution_id",
+            "attestation_kind",
+            "envelope_asset_id",
+            "envelope_generation",
+            "envelope_binding_fingerprint",
+            "source_key_asset_id",
+            "source_key_generation",
+            "source_key_binding_fingerprint",
+            "destination_key_asset_id",
+            "destination_key_generation",
+            "destination_key_binding_fingerprint",
+            "occurred_at",
+        },
+    )
+    if _value_string(value, "attestation_schema_id") != CUSTODY_ENVELOPE_ATTESTATION_SCHEMA_ID:
+        raise ContractValidationError("custody envelope attestation schema_id is unsupported")
+    if (
+        _value_integer(value, "attestation_schema_version", minimum=1)
+        != CUSTODY_ENVELOPE_ATTESTATION_SCHEMA_VERSION
+    ):
+        raise ContractValidationError("custody envelope attestation schema_version is unsupported")
+    _value_string(value, "organization_id")
+    _uuid(_value_string(value, "execution_id"), "execution_id")
+    kind = _value_string(value, "attestation_kind")
+    _value_string(value, "occurred_at")
+    _asset("envelope", _value_string(value, "envelope_asset_id"), value.get("envelope_generation"), value.get("envelope_binding_fingerprint"), field="envelope")
+    _asset(
+        "key_reference",
+        _value_string(value, "destination_key_asset_id"),
+        value.get("destination_key_generation"),
+        value.get("destination_key_binding_fingerprint"),
+        field="destination_key",
+    )
+    source_id = _nullable_string(value, "source_key_asset_id")
+    source_generation = value.get("source_key_generation")
+    source_fingerprint = _nullable_string(value, "source_key_binding_fingerprint")
+    if kind == "rewrapped":
+        _asset("key_reference", source_id, source_generation, source_fingerprint, field="source_key")
+        return
+    if kind == "restore_verified":
+        if source_id is not None or source_generation is not None or source_fingerprint is not None:
+            raise ContractValidationError("custody restore attestation source key is invalid")
+        return
+    raise ContractValidationError("custody envelope attestation kind is invalid")
 
 
 def _asset(asset_type: object, asset_id: object, generation: object, fingerprint: object, *, field: str) -> None:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from typing import Any
+from uuid import UUID
 
 from .common import (
     ContractValidationError,
@@ -23,12 +24,16 @@ from .constants import (
     AUDIT_CHAIN_CHECKPOINT_SCHEMA_ID,
     AUDIT_CHAIN_CHECKPOINT_SCHEMA_VERSION,
     AUDIT_CHAIN_ENTRY_SCHEMA_ID,
+    AUDIT_CHAIN_ENTRY_LEGACY_SCHEMA_VERSION,
     AUDIT_CHAIN_ENTRY_SCHEMA_VERSION,
     AUDIT_CHAIN_VERSION,
     AUDIT_EVENT_SCHEMA_ID,
     AUDIT_EVENT_SCHEMA_VERSION,
     COVERAGE_GATEWAY_CAPTURED_REQUESTS_ONLY,
 )
+from .custody import validate_custody_control_event
+from .custody_execution import validate_custody_execution_attempt, validate_custody_execution_event
+from .custody_lifecycle import validate_custody_envelope_attestation, validate_custody_lifecycle_event
 from .policy import validate_policy_action, validate_request_status
 
 
@@ -81,6 +86,17 @@ def validate_audit_chain_checkpoint(value: Mapping[str, Any]) -> None:
 
 
 def _validate_audit_chain_entry(value: Mapping[str, Any]) -> None:
+    schema_version = _value_integer(value, "schema_version", minimum=1)
+    if schema_version == AUDIT_CHAIN_ENTRY_LEGACY_SCHEMA_VERSION:
+        _validate_audit_chain_entry_v1(value)
+        return
+    if schema_version == AUDIT_CHAIN_ENTRY_SCHEMA_VERSION:
+        _validate_audit_chain_entry_v2(value)
+        return
+    raise ContractValidationError("unsupported audit chain entry schema_version")
+
+
+def _validate_audit_chain_entry_v1(value: Mapping[str, Any]) -> None:
     _exact_keys(
         value,
         {
@@ -97,7 +113,7 @@ def _validate_audit_chain_entry(value: Mapping[str, Any]) -> None:
     )
     if _value_string(value, "schema_id") != AUDIT_CHAIN_ENTRY_SCHEMA_ID:
         raise ContractValidationError("unsupported audit chain entry schema_id")
-    if _value_integer(value, "schema_version") != AUDIT_CHAIN_ENTRY_SCHEMA_VERSION:
+    if _value_integer(value, "schema_version") != AUDIT_CHAIN_ENTRY_LEGACY_SCHEMA_VERSION:
         raise ContractValidationError("unsupported audit chain entry schema_version")
     organization_id = _value_string(value, "organization_id")
     if _value_integer(value, "chain_version", minimum=1) != AUDIT_CHAIN_VERSION:
@@ -117,6 +133,105 @@ def _validate_audit_chain_entry(value: Mapping[str, Any]) -> None:
         raise ContractValidationError("audit chain requires current audit evidence")
     if event.get("organization_id") != organization_id:
         raise ContractValidationError("audit chain tenant mismatch")
+
+
+def _validate_audit_chain_entry_v2(value: Mapping[str, Any]) -> None:
+    _exact_keys(
+        value,
+        {
+            "schema_id",
+            "schema_version",
+            "organization_id",
+            "chain_version",
+            "chain_epoch",
+            "sequence",
+            "previous_digest",
+            "event_digest",
+            "source_schema_id",
+            "source_schema_version",
+            "source_event_id",
+            "event",
+        },
+    )
+    if _value_string(value, "schema_id") != AUDIT_CHAIN_ENTRY_SCHEMA_ID:
+        raise ContractValidationError("unsupported audit chain entry schema_id")
+    if _value_integer(value, "schema_version") != AUDIT_CHAIN_ENTRY_SCHEMA_VERSION:
+        raise ContractValidationError("unsupported audit chain entry schema_version")
+    organization_id = _value_string(value, "organization_id")
+    if _value_integer(value, "chain_version", minimum=1) != AUDIT_CHAIN_VERSION:
+        raise ContractValidationError("unsupported audit chain version")
+    _value_integer(value, "chain_epoch", minimum=1)
+    _value_integer(value, "sequence", minimum=1)
+    previous_digest = value.get("previous_digest")
+    if previous_digest is not None:
+        _sha256_digest(_value_string(value, "previous_digest"), "audit chain previous_digest")
+    _sha256_digest(_value_string(value, "event_digest"), "audit chain event_digest")
+    source_schema_id = _value_string(value, "source_schema_id")
+    source_schema_version = _value_integer(value, "source_schema_version", minimum=1)
+    source_event_id = _value_string(value, "source_event_id")
+    event = _value_mapping(value, "event")
+    _validate_audit_chain_v2_source(
+        event,
+        organization_id=organization_id,
+        source_schema_id=source_schema_id,
+        source_schema_version=source_schema_version,
+        source_event_id=source_event_id,
+    )
+
+
+def _validate_audit_chain_v2_source(
+    event: Mapping[str, Any],
+    *,
+    organization_id: str,
+    source_schema_id: str,
+    source_schema_version: int,
+    source_event_id: str,
+) -> None:
+    """Validate the finite v2 source union before it can be hash-chained.
+
+    This deliberately does not accept a generic object.  Adding a new source
+    requires an explicit contract validator and a chain-entry schema review.
+    """
+
+    if source_schema_id == "hormuz.custody-control-event" and source_schema_version == 1:
+        validate_custody_control_event(event)
+        _uuid(source_event_id, "audit chain custody control source_event_id")
+        expected_source_id = source_event_id
+    elif source_schema_id == "hormuz.custody-execution-attempt" and source_schema_version == 2:
+        validate_custody_execution_attempt(event)
+        expected_source_id = _value_string(event, "execution_id")
+    elif source_schema_id == "hormuz.custody-execution-event" and source_schema_version == 1:
+        validate_custody_execution_event(event)
+        execution_id = _value_string(event, "execution_id")
+        sequence = _value_integer(event, "sequence", minimum=1)
+        expected_source_id = f"{execution_id}:{sequence}"
+    elif source_schema_id == "hormuz.custody-lifecycle-event" and source_schema_version == 1:
+        validate_custody_lifecycle_event(event)
+        expected_source_id = _value_string(event, "lifecycle_event_id")
+    elif source_schema_id == "hormuz.custody-envelope-attestation" and source_schema_version == 1:
+        validate_custody_envelope_attestation(event)
+        expected_source_id = f"{_value_string(event, 'execution_id')}:{_value_string(event, 'attestation_kind')}"
+    elif source_schema_id == "hormuz.custody-deletion-event" and source_schema_version == 1:
+        # Import lazily: custody retention's export validator imports this
+        # audit validator, while this finite source branch is only evaluated
+        # after both contract modules have loaded.
+        from .custody_retention import validate_custody_deletion_event
+
+        validate_custody_deletion_event(event)
+        expected_source_id = _value_string(event, "deletion_event_id")
+    else:
+        raise ContractValidationError("audit chain v2 source schema is unsupported")
+    if source_event_id != expected_source_id:
+        raise ContractValidationError("audit chain v2 source identity is invalid")
+    if event.get("organization_id") != organization_id:
+        raise ContractValidationError("audit chain tenant mismatch")
+
+
+def _uuid(value: str, field: str) -> None:
+    try:
+        UUID(value)
+    except (ValueError, TypeError, AttributeError) as error:
+        raise ContractValidationError(f"{field} is invalid") from error
 
 
 def _validate_audit_chain_checkpoint(value: Mapping[str, Any]) -> None:

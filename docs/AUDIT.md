@@ -70,9 +70,25 @@ hormuz --config /etc/hormuz/hormuz.json audit-chain verify \
 
 The checkpoint is a small `hormuz.audit-chain-checkpoint` v1 object containing
 only the organization, chain version/epoch/sequence, head digest, timestamp,
-and random checkpoint identifier. The retained Object Lock object is the
+its own schema ID/version, and random checkpoint identifier. The retained Object Lock object is the
 external evidence; the local receipt supports freshness monitoring but is not a
 substitute for the protected object.
+
+Run `hormuz audit-chain anchor` from a customer-controlled scheduler (for
+example a systemd timer or Kubernetes CronJob). The scheduled job anchors the
+tenant's organization, chain epoch, sequence, head digest, chain version, and
+checkpoint schema version. `audit_chain.maximum_anchor_age_seconds` turns an
+overdue receipt into a readiness failure/alert without putting Object Lock on
+the request path; the job itself is the only component that contacts the anchor
+store.
+
+Commit-time entry v1 remains untouched for historical usage and secret-egress
+evidence. Entry v2 is an explicit, finite custody-source union: custody control
+events, executor attempts/events, lifecycle events, envelope attestations, and
+deletion-block events. It has an exact metadata-only schema and binds its source
+schema ID/version/event ID into the canonical digest. Verifiers reject unknown
+entry/source versions and arbitrary source JSON rather than treating it as a
+forward-compatible extension.
 
 After an intentional restore or migration, an operator must start a new epoch
 from a trusted canonical checkpoint. Hormuz never silently resets sequence
