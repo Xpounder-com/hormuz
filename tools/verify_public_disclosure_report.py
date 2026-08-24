@@ -50,6 +50,8 @@ FINDING_IDS = {
     "history_generic_documentation_values",
     "history_generic_synthetic_identifiers",
     "history_private_path_false_positive",
+    "reachable_blob_documentation_versions",
+    "reachable_blob_synthetic_identifiers",
 }
 BLOCKER_STATUSES = {
     "authorization_required",
@@ -181,6 +183,8 @@ def validate_report(report: Mapping[str, Any]) -> None:
             "merge_commits",
             "non_merge_commits",
             "reachable_objects",
+            "reachable_blobs",
+            "reachable_blob_bytes",
             "server_unadvertised_unreachable_enumerable",
         },
         "audit_boundary",
@@ -196,6 +200,8 @@ def validate_report(report: Mapping[str, Any]) -> None:
         "merge_commits",
         "non_merge_commits",
         "reachable_objects",
+        "reachable_blobs",
+        "reachable_blob_bytes",
     ):
         _count(boundary[key], f"audit_boundary_{key}")
     if boundary["advertised_refs"] != boundary["advertised_heads"] + boundary["advertised_pull_refs"]:
@@ -330,6 +336,7 @@ def _validate_scanner(scanner: Mapping[str, Any]) -> Mapping[str, Any]:
         "git_email",
         "git_generic",
         "git_path",
+        "reachable_blob_generic",
         "github_surface_email",
         "github_surface_generic",
         "github_surface_path",
@@ -392,6 +399,8 @@ def _validate_scan_finding_counts(scan_counts: Mapping[str, Any], raw_findings: 
         "git_path": findings["history_credential_url_test_fixtures"]
         + findings["history_private_path_false_positive"],
         "git_email": findings["history_file_email_synthetic_values"],
+        "reachable_blob_generic": findings["reachable_blob_synthetic_identifiers"]
+        + findings["reachable_blob_documentation_versions"],
         "artifact_generic": findings["artifact_generic_synthetic_identifiers"],
         "artifact_path": findings["artifact_credential_url_test_fixtures"]
         + findings["artifact_private_path_false_positive"],

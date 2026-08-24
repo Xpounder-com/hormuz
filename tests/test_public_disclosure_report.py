@@ -29,7 +29,7 @@ class PublicDisclosureReportTests(unittest.TestCase):
         self.assertEqual(self.report["verdict"], "decision_required")
         self.assertFalse(self.report["publication"]["visibility_changed"])
         self.assertFalse(self.report["publication"]["raw_audit_material_committed"])
-        self.assertEqual(len(self.report["findings"]), 14)
+        self.assertEqual(len(self.report["findings"]), 16)
         self.assertEqual(len(self.report["blockers"]), 5)
 
     def test_duplicate_keys_and_sensitive_values_fail_closed(self) -> None:

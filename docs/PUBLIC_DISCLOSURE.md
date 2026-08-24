@@ -20,6 +20,27 @@ artifacts, and the recorded GitHub issue, pull-request, review, release,
 environment, variable, secret, and package-count surfaces. Artifact archives
 were checked for unsafe paths and encryption before recursive scanning.
 
+The Git audit used two independent views. First, Gitleaks traversed every
+non-merge diff reachable from all advertised refs while Git separately counted
+all commits and checked the fresh mirror for unreachable objects. Second, every
+unique reachable blob was materialized under its object ID into an owner-only
+temporary directory and scanned again without relying on commit-diff behavior.
+This second pass covered merge-resolution content and every historical blob,
+including content later deleted from a branch. The report reconciles the two
+scan-result sets separately so duplicate observations are not mistaken for new
+secrets.
+
+The sensitive-data checks included Gitleaks's default rules plus separate
+searches for email-shaped strings, credential-bearing URLs, and private local
+filesystem paths. Actions logs were scanned as downloaded archives. Every
+available artifact was downloaded, structurally checked for encryption and
+unsafe archive paths, recursively expanded to a bounded depth, and scanned.
+GitHub API snapshots covered issues, pull requests, comments, reviews,
+workflows, releases, deployments, environments, variables, secret metadata,
+hooks, rulesets, and package count. A human reviewed every match category
+against its source role before assigning `safe`, `removed`, or
+`decision_required`; no matched value appears in the public report.
+
 GitHub does not expose unadvertised, unreachable objects from its server object
 database through an ordinary clone or repository API. The fresh all-ref mirror
 contained no unreachable objects, but that is not evidence that GitHub retains

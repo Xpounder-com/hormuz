@@ -5,7 +5,7 @@
   "repository": "Xpounder-com/hormuz",
   "observed_window": {
     "started_at": "2026-08-24T13:54:32Z",
-    "ended_at": "2026-08-24T19:42:24Z"
+    "ended_at": "2026-08-24T19:47:37Z"
   },
   "audit_boundary": {
     "baseline_commit": "b135d52619435aba145f4dbd8ee2dc19419e0d03",
@@ -16,6 +16,8 @@
     "non_merge_commits": 224,
     "merge_commits": 27,
     "reachable_objects": 3499,
+    "reachable_blobs": 2197,
+    "reachable_blob_bytes": 75217350,
     "fresh_mirror_unreachable_objects": 0,
     "server_unadvertised_unreachable_enumerable": false
   },
@@ -65,6 +67,7 @@
       "git_generic": 22,
       "git_path": 4,
       "git_email": 41,
+      "reachable_blob_generic": 30,
       "artifact_generic": 844,
       "artifact_path": 128,
       "artifact_email": 46826,
@@ -90,6 +93,20 @@
       "surface": "git_history",
       "occurrences": 2,
       "unique_values": null,
+      "classification": "safe"
+    },
+    {
+      "id": "reachable_blob_synthetic_identifiers",
+      "surface": "git_history",
+      "occurrences": 20,
+      "unique_values": 10,
+      "classification": "safe"
+    },
+    {
+      "id": "reachable_blob_documentation_versions",
+      "surface": "git_history",
+      "occurrences": 10,
+      "unique_values": 1,
       "classification": "safe"
     },
     {
