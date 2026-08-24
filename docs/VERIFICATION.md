@@ -2,6 +2,32 @@
 
 This file records executable evidence for client/provider compatibility. It intentionally contains no provider credentials, prompts, responses beyond fixed test markers, or employee secrets.
 
+## Provider-free five-minute path
+
+The public checkout exposes one configuration-free product tour:
+
+```bash
+hormuz demo
+```
+
+It starts a disposable loopback provider simulator and the real Hormuz
+gateway, then proves an allowed request, model fallback plus output cap,
+pre-egress secret redaction, pre-egress policy denial, and strict metadata-only
+usage/security evidence. The regression test intercepts every outbound socket
+connection and rejects any destination other than `127.0.0.1`. The command
+also verifies that its synthetic request content, response content, identity
+credentials, provider credential, original secret, and redaction replacement
+are absent from the durable audit events before deleting the temporary SQLite
+ledger.
+
+The blocking `Python 3.11` through `Python 3.14` Linux CI matrix runs this
+documented command immediately after installation. Each job records the
+installation-step wall time in GitHub Actions and the command prints its own
+measured demonstration time. The isolated wheel and `linux/amd64` OCI gates
+also run the command, so a source-only import path cannot satisfy the
+quickstart release gate. These are provider-free product-path proofs, not live
+OpenAI/Anthropic compatibility or a production deployment claim.
+
 ## 2026-08-15
 
 ### Live OpenAI path
@@ -130,6 +156,7 @@ volumes, and does not establish HA, recovery, or production immutability.
 GitHub Actions runs independent gates without provider credentials:
 
 - the complete core unit and loopback gateway suite on Python 3.11, 3.12, 3.13, and 3.14;
+- the provider-free documented quickstart on every release-gated Python version, the isolated wheel, and the candidate `linux/amd64` image;
 - source-distribution and wheel builds followed by a clean-wheel inspection and isolated gateway-start boundary test;
 - PostgreSQL migration and repository compatibility against the pinned service image, including tenant custody authority and one/two-person approval behavior;
 - a disposable `pg_dump` custom-format / `pg_restore` recovery drill against digest-pinned source, recovery, and quarantine PostgreSQL containers;

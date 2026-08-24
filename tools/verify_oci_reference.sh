@@ -89,6 +89,18 @@ fi
 [[ "$(docker image inspect --format '{{json .Config.Healthcheck.Test}}' "${IMAGE_NAME}")" == *'/health'* ]] \
   || fail "image does not declare the liveness health check"
 
+demo_output="$(
+  docker run --rm \
+    --platform linux/amd64 \
+    --read-only \
+    --tmpfs /tmp:mode=1777 \
+    --cap-drop=ALL \
+    --security-opt=no-new-privileges \
+    "${IMAGE_NAME}" demo
+)" || fail "provider-free quickstart failed inside the candidate image"
+[[ "${demo_output}" == *'PASS external provider calls: 0 (3 loopback simulator calls)'* ]] \
+  || fail "candidate-image quickstart did not prove the provider-free boundary"
+
 set +e
 missing_config_output="$(
   docker run --rm \
