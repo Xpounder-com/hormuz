@@ -203,3 +203,8 @@ Read [contribution guidance](CONTRIBUTING.md) before proposing a change and
 compatibility report. Suspected vulnerabilities must follow the
 [private security path](SECURITY.md), never a public issue. Participation is
 governed by the [Code of Conduct](CODE_OF_CONDUCT.md).
+
+The evidence-grounded [launch package](docs/launch/README.md) is intentionally
+marked as a non-publishable draft until the disclosure, live-provider,
+repository, signed-image, community, quiet-alpha, commercial-URL, and owner-
+approval gates are complete.

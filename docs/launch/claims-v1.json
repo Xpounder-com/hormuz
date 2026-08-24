@@ -1,0 +1,355 @@
+{
+  "schema_version": 1,
+  "repository": "Xpounder-com/hormuz",
+  "release": "v0.1.0-public-alpha",
+  "publication_status": "draft_do_not_publish",
+  "publication_gate": {
+    "owner_copy_approval": "required",
+    "commercial_urls": "required",
+    "quiet_alpha_issue": 110,
+    "required_closed_issues": [
+      101,
+      110,
+      113,
+      114,
+      115,
+      116
+    ]
+  },
+  "assets": [
+    {
+      "id": "landing_page",
+      "path": "docs/launch/LANDING_PAGE.md",
+      "claim_ids": [
+        "ALPHA_BOUNDARY",
+        "CLIENT_VERIFICATION",
+        "COST_REPORTING",
+        "EVIDENCE_BOUNDARY",
+        "GATEWAY_SCOPE",
+        "OCI_ROADMAP",
+        "POLICY_CONTROLS",
+        "PROVIDER_FREE_DEMO",
+        "SECRET_EGRESS"
+      ]
+    },
+    {
+      "id": "terminal_demo",
+      "path": "docs/launch/TERMINAL_DEMO.md",
+      "claim_ids": [
+        "ALPHA_BOUNDARY",
+        "PROVIDER_FREE_DEMO"
+      ]
+    },
+    {
+      "id": "architecture_security",
+      "path": "docs/launch/ARCHITECTURE_AND_SECURITY.md",
+      "claim_ids": [
+        "ALPHA_BOUNDARY",
+        "DATA_BOUNDARY",
+        "EVIDENCE_BOUNDARY",
+        "GATEWAY_SCOPE",
+        "OCI_ROADMAP",
+        "POLICY_CONTROLS",
+        "SECRET_EGRESS"
+      ]
+    },
+    {
+      "id": "technical_article",
+      "path": "docs/launch/TECHNICAL_ARTICLE.md",
+      "claim_ids": [
+        "ALPHA_BOUNDARY",
+        "CLIENT_VERIFICATION",
+        "COST_REPORTING",
+        "DATA_BOUNDARY",
+        "EVIDENCE_BOUNDARY",
+        "GATEWAY_SCOPE",
+        "POLICY_CONTROLS",
+        "PROVIDER_FREE_DEMO",
+        "SECRET_EGRESS"
+      ]
+    },
+    {
+      "id": "social_show_hn",
+      "path": "docs/launch/SOCIAL_AND_SHOW_HN.md",
+      "claim_ids": [
+        "ALPHA_BOUNDARY",
+        "CLIENT_VERIFICATION",
+        "COST_REPORTING",
+        "GATEWAY_SCOPE",
+        "PROVIDER_FREE_DEMO"
+      ]
+    },
+    {
+      "id": "conversion_analytics",
+      "path": "docs/launch/CONVERSION_AND_ANALYTICS.md",
+      "claim_ids": [
+        "ALPHA_BOUNDARY",
+        "COST_REPORTING"
+      ]
+    }
+  ],
+  "claims": [
+    {
+      "id": "GATEWAY_SCOPE",
+      "text": "Hormuz is a CLI-first AI gateway and control plane that sits between existing Codex or Claude Code clients and OpenAI or Anthropic provider APIs.",
+      "classification": "implemented_alpha",
+      "evidence": [
+        {
+          "kind": "closed_issue",
+          "value": "https://github.com/Xpounder-com/hormuz/issues/20"
+        },
+        {
+          "kind": "repository_path",
+          "value": "README.md"
+        },
+        {
+          "kind": "repository_path",
+          "value": "tests/test_gateway.py"
+        }
+      ]
+    },
+    {
+      "id": "POLICY_CONTROLS",
+      "text": "Hormuz applies identity-bound client, model, output-limit, token-budget, and estimated-cost policy before provider egress.",
+      "classification": "implemented_alpha",
+      "evidence": [
+        {
+          "kind": "closed_issue",
+          "value": "https://github.com/Xpounder-com/hormuz/issues/21"
+        },
+        {
+          "kind": "repository_path",
+          "value": "hormuz/policy.py"
+        },
+        {
+          "kind": "repository_path",
+          "value": "tests/test_gateway.py"
+        }
+      ]
+    },
+    {
+      "id": "SECRET_EGRESS",
+      "text": "Hormuz can redact or deny configured and detected secret values before upstream serialization and records only content-free detection evidence.",
+      "classification": "implemented_alpha",
+      "evidence": [
+        {
+          "kind": "closed_issue",
+          "value": "https://github.com/Xpounder-com/hormuz/issues/20"
+        },
+        {
+          "kind": "repository_path",
+          "value": "hormuz/redaction.py"
+        },
+        {
+          "kind": "repository_path",
+          "value": "tests/test_redaction.py"
+        }
+      ]
+    },
+    {
+      "id": "EVIDENCE_BOUNDARY",
+      "text": "Hormuz records versioned metadata-only policy, usage, cost, status, and security evidence while excluding prompt and response bodies from its usage ledger.",
+      "classification": "verified_alpha",
+      "evidence": [
+        {
+          "kind": "closed_issue",
+          "value": "https://github.com/Xpounder-com/hormuz/issues/25"
+        },
+        {
+          "kind": "closed_issue",
+          "value": "https://github.com/Xpounder-com/hormuz/issues/26"
+        },
+        {
+          "kind": "repository_path",
+          "value": "docs/CONTRACTS.md"
+        },
+        {
+          "kind": "repository_path",
+          "value": "tests/test_contracts.py"
+        }
+      ]
+    },
+    {
+      "id": "PROVIDER_FREE_DEMO",
+      "text": "The hormuz demo command exercises the real HTTP, policy, redaction, request-attempt, and SQLite evidence path against disposable loopback providers without a provider account or external provider call.",
+      "classification": "verified_alpha",
+      "evidence": [
+        {
+          "kind": "closed_issue",
+          "value": "https://github.com/Xpounder-com/hormuz/issues/111"
+        },
+        {
+          "kind": "repository_path",
+          "value": "hormuz/demo.py"
+        },
+        {
+          "kind": "repository_path",
+          "value": "tests/test_demo.py"
+        }
+      ]
+    },
+    {
+      "id": "CLIENT_VERIFICATION",
+      "text": "Pinned Codex and Claude Code clients are exercised through Hormuz against loopback providers in blocking CI; live two-provider BYO evidence remains an open release gate.",
+      "classification": "implemented_alpha",
+      "evidence": [
+        {
+          "kind": "closed_issue",
+          "value": "https://github.com/Xpounder-com/hormuz/issues/20"
+        },
+        {
+          "kind": "open_issue",
+          "value": "https://github.com/Xpounder-com/hormuz/issues/115"
+        },
+        {
+          "kind": "repository_path",
+          "value": ".github/workflows/ci.yml"
+        },
+        {
+          "kind": "repository_path",
+          "value": "tests/test_live_client_conformance.py"
+        }
+      ]
+    },
+    {
+      "id": "COST_REPORTING",
+      "text": "Hormuz reports metadata-only token and estimated-cost usage by organization, team, person, client, and model, with explicit pricing and coverage boundaries.",
+      "classification": "verified_alpha",
+      "evidence": [
+        {
+          "kind": "closed_issue",
+          "value": "https://github.com/Xpounder-com/hormuz/issues/15"
+        },
+        {
+          "kind": "repository_path",
+          "value": "docs/USAGE.md"
+        },
+        {
+          "kind": "repository_path",
+          "value": "tests/test_postgres_usage.py"
+        }
+      ]
+    },
+    {
+      "id": "DATA_BOUNDARY",
+      "text": "Employee credentials are removed before provider egress, provider credentials stay on the Hormuz service, and prompt or response bodies are not written to the usage database.",
+      "classification": "implemented_alpha",
+      "evidence": [
+        {
+          "kind": "closed_issue",
+          "value": "https://github.com/Xpounder-com/hormuz/issues/20"
+        },
+        {
+          "kind": "repository_path",
+          "value": "SECURITY.md"
+        },
+        {
+          "kind": "repository_path",
+          "value": "tests/test_gateway.py"
+        }
+      ]
+    },
+    {
+      "id": "OCI_ROADMAP",
+      "text": "The first publication target is a signed linux/amd64 OCI digest, with private GHCR as the first registry rather than the portable artifact contract; publication remains pending.",
+      "classification": "roadmap",
+      "evidence": [
+        {
+          "kind": "open_issue",
+          "value": "https://github.com/Xpounder-com/hormuz/issues/101"
+        },
+        {
+          "kind": "repository_path",
+          "value": "docs/OCI.md"
+        },
+        {
+          "kind": "repository_path",
+          "value": "docs/decisions/0008-signed-oci-deployment-contract.md"
+        }
+      ]
+    },
+    {
+      "id": "ALPHA_BOUNDARY",
+      "text": "Hormuz v0.1.0 is a public open-source alpha for evaluation and design-partner hardening, not a production, enterprise-HA, disaster-recovery, compliance, or independent-security-review claim.",
+      "classification": "nonclaim",
+      "evidence": [
+        {
+          "kind": "open_issue",
+          "value": "https://github.com/Xpounder-com/hormuz/issues/117"
+        },
+        {
+          "kind": "repository_path",
+          "value": "README.md"
+        },
+        {
+          "kind": "repository_path",
+          "value": "SUPPORT.md"
+        },
+        {
+          "kind": "repository_path",
+          "value": "SECURITY.md"
+        }
+      ]
+    }
+  ],
+  "ctas": [
+    {
+      "id": "governance_review",
+      "label": "Book an AI Governance Review",
+      "url_token": "{{AI_GOVERNANCE_REVIEW_URL}}",
+      "status": "owner_url_required",
+      "mode": "human_review"
+    },
+    {
+      "id": "paid_pilot",
+      "label": "Apply for a paid design-partner pilot",
+      "url_token": "{{PAID_PILOT_URL}}",
+      "status": "owner_url_required",
+      "mode": "human_review"
+    }
+  ],
+  "analytics": [
+    {
+      "id": "successful_installations",
+      "definition": "An independent evaluator reports that a clean supported-environment install completed and hormuz --help exited successfully.",
+      "source": "opt_in_completion_report",
+      "privacy_boundary": "No hidden CLI telemetry and no prompts, responses, credentials, or customer identifiers."
+    },
+    {
+      "id": "completed_demos",
+      "definition": "An independent evaluator reports that hormuz demo completed with every documented PASS line.",
+      "source": "opt_in_completion_report",
+      "privacy_boundary": "Record release or commit and outcome only; never demo inputs or local paths."
+    },
+    {
+      "id": "governed_requests",
+      "definition": "An opted-in evaluator confirms at least one synthetic or authorized request reached a provider through Hormuz with a recorded policy outcome.",
+      "source": "opt_in_completion_report",
+      "privacy_boundary": "Aggregate count and provider family only; never prompt, response, credential, or employee identity."
+    },
+    {
+      "id": "returning_users",
+      "definition": "An opted-in evaluator reports meaningful Hormuz use in two distinct seven-day periods.",
+      "source": "opt_in_follow_up",
+      "privacy_boundary": "No cross-site fingerprinting or automatic CLI identity; deduplicate only with explicit consent."
+    },
+    {
+      "id": "useful_reports",
+      "definition": "A public issue, discussion, or private security report leads to a confirmed documentation, compatibility, security, or product improvement.",
+      "source": "maintainer_triage",
+      "privacy_boundary": "Count classification and resolution only; keep private reports and personal data out of launch analytics."
+    },
+    {
+      "id": "design_partner_conversations",
+      "definition": "A human completes a substantive governance discovery conversation with an organization that matches the stated alpha boundary.",
+      "source": "owner_recorded_pipeline",
+      "privacy_boundary": "Report aggregate stage counts publicly; customer identity and notes remain private."
+    },
+    {
+      "id": "pilot_applications",
+      "definition": "A human submits the owner-approved paid-pilot application and consents to follow-up.",
+      "source": "owner_controlled_form",
+      "privacy_boundary": "Collect the minimum contact and qualification fields; never request credentials, prompts, responses, or customer data."
+    }
+  ]
+}
