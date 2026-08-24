@@ -85,6 +85,7 @@ ALLOWED_ROOT_PROPERTIES = {
     "aquasecurity:trivy:DiffID",
     "aquasecurity:trivy:ImageID",
     "aquasecurity:trivy:Labels:org.opencontainers.image.description",
+    "aquasecurity:trivy:Labels:org.opencontainers.image.licenses",
     "aquasecurity:trivy:Labels:org.opencontainers.image.revision",
     "aquasecurity:trivy:Labels:org.opencontainers.image.source",
     "aquasecurity:trivy:Labels:org.opencontainers.image.title",
@@ -488,6 +489,7 @@ def _validate_sbom(
     required_root_properties = {
         "aquasecurity:trivy:ImageID",
         "aquasecurity:trivy:Labels:org.opencontainers.image.description",
+        "aquasecurity:trivy:Labels:org.opencontainers.image.licenses",
         "aquasecurity:trivy:Labels:org.opencontainers.image.revision",
         "aquasecurity:trivy:Labels:org.opencontainers.image.source",
         "aquasecurity:trivy:Labels:org.opencontainers.image.title",
@@ -505,6 +507,11 @@ def _validate_sbom(
         root_properties,
         "aquasecurity:trivy:Labels:org.opencontainers.image.description",
         "Non-root reference runtime for the Hormuz enterprise AI policy gateway",
+    )
+    _require_single_property(
+        root_properties,
+        "aquasecurity:trivy:Labels:org.opencontainers.image.licenses",
+        "Apache-2.0",
     )
     _require_single_property(root_properties, "aquasecurity:trivy:Labels:org.opencontainers.image.source", f"https://github.com/{EXPECTED_REPOSITORY}")
     _require_single_property(root_properties, "aquasecurity:trivy:Labels:org.opencontainers.image.title", "Hormuz")

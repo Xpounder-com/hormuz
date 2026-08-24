@@ -259,6 +259,10 @@ class OciPublicMetadataTests(unittest.TestCase):
                             ),
                         },
                         {
+                            "name": "aquasecurity:trivy:Labels:org.opencontainers.image.licenses",
+                            "value": "Apache-2.0",
+                        },
+                        {
                             "name": "aquasecurity:trivy:Labels:org.opencontainers.image.revision",
                             "value": COMMIT,
                         },

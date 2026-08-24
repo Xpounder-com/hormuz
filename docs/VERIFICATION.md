@@ -142,6 +142,14 @@ The workflow grants only read access to repository contents, disables persisted 
 
 A separate weekly canary installs the latest published Codex and Claude Code packages in an ephemeral runner and exercises only the two fake-provider compatibility tests. It has no provider credentials, does not block ordinary pull requests, and is intended to surface upstream protocol drift before an employee upgrade does.
 
+The package job also builds the core and separated experiment with Apache 2.0
+metadata and license files, installs every core extra into a fresh environment,
+and fails closed on an unexpected distribution, license identity, or missing
+license artifact. It validates the versioned content-free disclosure report but
+does not turn a `decision_required` report into publication authorization. See
+[PUBLIC_DISCLOSURE.md](PUBLIC_DISCLOSURE.md) for the audited surfaces,
+limitations, and separate owner-authorization boundary.
+
 The publication candidate was also checked locally on August 15, 2026 with Codex `0.147.0` and Claude Code `2.1.233`, the then-current npm releases. Both routed successfully through Hormuz, and the complete 29-test suite passed with those executables selected first on `PATH`.
 
 ## PostgreSQL custody-control authority

@@ -84,6 +84,22 @@ jobs:
             > "$RUNNER_TEMP/context-pack.json"
           CONTEXT_PACK_PATH="$RUNNER_TEMP/context-pack.json" "$RUNNER_TEMP/hormuz-wheel/bin/python" -c 'import json, os, pathlib; value = json.loads(pathlib.Path(os.environ["CONTEXT_PACK_PATH"]).read_text()); assert value["schema_version"] == "hormuz.context-pack.v1"; assert value["items"]'
           "$RUNNER_TEMP/hormuz-wheel/bin/python" -m unittest discover -s experiments/context/tests -v
+      - name: Verify the resolved license boundary for every declared extra
+        run: |
+          python -m venv "$RUNNER_TEMP/hormuz-license"
+          core_wheel="$(printf '%s\n' dist/hormuz-*.whl)"
+          "$RUNNER_TEMP/hormuz-license/bin/pip" install \
+            "${core_wheel}[postgres,aws,self-hosted]" \
+            experiments/context/dist/hormuz_context_experiment-*.whl
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/hormuz-license/bin/python" \
+            "$GITHUB_WORKSPACE/tools/verify_dependency_licenses.py" \
+            --output "$RUNNER_TEMP/dependency-license-summary.json"
+      - name: Validate the content-free public disclosure report
+        run: |
+          python tools/verify_public_disclosure_report.py \
+            --report docs/evidence/public-disclosure-report-v1.json \
+            --require-verdict decision_required
       - name: Preserve distribution evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -91,6 +107,7 @@ jobs:
           path: |
             dist/*
             experiments/context/dist/*
+            ${{ runner.temp }}/dependency-license-summary.json
           if-no-files-found: error
           retention-days: 7
 
@@ -133,7 +150,7 @@ jobs:
             'psycopg-pool>=3.3.1,<3.4'
       - name: Prove PostgreSQL migration and repository compatibility
         env:
-          HORMUZ_TEST_POSTGRES_DSN: postgresql://postgres:hormuz-test-password@127.0.0.1:${{ job.services.postgres.ports[5432] }}/hormuz_test
+          HORMUZ_TEST_POSTGRES_DSN: postgresql://postgres:hormuz-test-password@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/hormuz_test
         run: |
           cd "$RUNNER_TEMP"
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -m unittest discover \

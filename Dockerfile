@@ -37,7 +37,7 @@ RUN python -m pip install \
 # The Docker build context allowlist admits only these core packaging inputs.
 # Configuration, credentials, usage data, tests, and the context experiment
 # never enter either build stage.
-COPY pyproject.toml README.md ./
+COPY pyproject.toml README.md LICENSE ./
 COPY hormuz/ ./hormuz/
 
 RUN python -m pip wheel \
@@ -63,6 +63,7 @@ LABEL org.opencontainers.image.title="Hormuz" \
       org.opencontainers.image.description="Non-root reference runtime for the Hormuz enterprise AI policy gateway" \
       org.opencontainers.image.vendor="NeuralInt" \
       org.opencontainers.image.source="https://github.com/Xpounder-com/hormuz" \
+      org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.version="${HORMUZ_VERSION}" \
       org.opencontainers.image.revision="${VCS_REF}"
 

@@ -6,6 +6,7 @@
 !Dockerfile.dockerignore
 !pyproject.toml
 !README.md
+!LICENSE
 !requirements/
 !requirements/oci-build-linux-amd64.lock
 !requirements/oci-runtime-linux-amd64.lock

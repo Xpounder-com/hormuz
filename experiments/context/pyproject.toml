@@ -7,6 +7,8 @@ name = "hormuz-context-experiment"
 version = "0.1.0"
 description = "Deprecated experimental context-pack tooling separated from the Hormuz core gateway."
 readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
 authors = [
   { name = "NeuralInt" }

@@ -1,11 +1,15 @@
 include SECURITY.md
+include LICENSE
 include config.example.json
 include hormuz/secret-inventory-v1.json
 include tools/_verification_runtime.py
 include tools/verify_secret_inventory.py
 include tools/oidc_reference_conformance.py
 include tools/verify_ceph_rgw_custody_conformance.py
+include tools/verify_dependency_licenses.py
+include tools/verify_public_disclosure_report.py
 recursive-include docs *.md
+recursive-include docs/evidence *.json
 recursive-include tests *.py *.json
 recursive-include hormuz/migrations/postgresql *.sql
 prune experiments

@@ -1,0 +1,240 @@
+{
+  "schema_id": "hormuz.public-disclosure-report",
+  "schema_version": 1,
+  "report_revision": 1,
+  "repository": "Xpounder-com/hormuz",
+  "observed_window": {
+    "started_at": "2026-08-24T13:54:32Z",
+    "ended_at": "2026-08-24T19:42:24Z"
+  },
+  "audit_boundary": {
+    "baseline_commit": "b135d52619435aba145f4dbd8ee2dc19419e0d03",
+    "advertised_refs": 46,
+    "advertised_heads": 3,
+    "advertised_pull_refs": 43,
+    "commits": 251,
+    "non_merge_commits": 224,
+    "merge_commits": 27,
+    "reachable_objects": 3499,
+    "fresh_mirror_unreachable_objects": 0,
+    "server_unadvertised_unreachable_enumerable": false
+  },
+  "external_surfaces": {
+    "actions": {
+      "workflow_runs": 419,
+      "run_logs_available": 416,
+      "run_logs_without_jobs": 3,
+      "run_logs_scanned": 416,
+      "artifacts_total": 1281,
+      "artifacts_available": 783,
+      "artifacts_expired": 498,
+      "artifacts_downloaded": 783,
+      "artifact_bytes_scanned": 2420190051,
+      "artifact_archives_unsafe_or_encrypted": 0,
+      "caches": 14,
+      "cache_bytes": 1271061702,
+      "cache_content_downloadable": false
+    },
+    "github": {
+      "surface_snapshot_files": 59,
+      "issues_and_pull_requests": 118,
+      "issue_comments": 302,
+      "pull_requests": 42,
+      "pull_review_comments": 96,
+      "pull_reviews": 29,
+      "commit_comments": 0,
+      "releases": 0,
+      "release_assets": 0,
+      "environments": 0,
+      "actions_variables": 0,
+      "actions_secrets": 0,
+      "dependabot_secrets": 0,
+      "container_packages": 0,
+      "repository_secret_scanning_enabled": false,
+      "repository_secret_scanning_push_protection_enabled": false
+    }
+  },
+  "scanner": {
+    "name": "gitleaks",
+    "version": "8.30.1",
+    "binary_sha256": "sha256:ba52fb1bfabbcde42f032afad3d6e0b19dff8ed105229a16e7caa338bbc0e84f",
+    "official_release_checksum_verified": true,
+    "git_version": "2.50.1",
+    "archive_depth": 5,
+    "result_counts": {
+      "git_generic": 22,
+      "git_path": 4,
+      "git_email": 41,
+      "artifact_generic": 844,
+      "artifact_path": 128,
+      "artifact_email": 46826,
+      "github_surface_generic": 3,
+      "github_surface_path": 0,
+      "github_surface_email": 85,
+      "run_log_generic": 0,
+      "run_log_path": 0,
+      "run_log_email": 0,
+      "current_tree_generic": 0
+    }
+  },
+  "findings": [
+    {
+      "id": "history_generic_synthetic_identifiers",
+      "surface": "git_history",
+      "occurrences": 20,
+      "unique_values": 10,
+      "classification": "safe"
+    },
+    {
+      "id": "history_generic_documentation_values",
+      "surface": "git_history",
+      "occurrences": 2,
+      "unique_values": null,
+      "classification": "safe"
+    },
+    {
+      "id": "artifact_generic_synthetic_identifiers",
+      "surface": "actions_artifacts",
+      "occurrences": 844,
+      "unique_values": 12,
+      "classification": "safe"
+    },
+    {
+      "id": "github_surface_hash_values",
+      "surface": "github_surfaces",
+      "occurrences": 2,
+      "unique_values": 2,
+      "classification": "safe"
+    },
+    {
+      "id": "collector_authenticated_clone_credential",
+      "surface": "github_surfaces",
+      "occurrences": 1,
+      "unique_values": 1,
+      "classification": "removed"
+    },
+    {
+      "id": "history_credential_url_test_fixtures",
+      "surface": "git_history",
+      "occurrences": 3,
+      "unique_values": 3,
+      "classification": "safe"
+    },
+    {
+      "id": "artifact_credential_url_test_fixtures",
+      "surface": "actions_artifacts",
+      "occurrences": 126,
+      "unique_values": 3,
+      "classification": "safe"
+    },
+    {
+      "id": "history_private_path_false_positive",
+      "surface": "git_history",
+      "occurrences": 1,
+      "unique_values": 1,
+      "classification": "safe"
+    },
+    {
+      "id": "artifact_private_path_false_positive",
+      "surface": "actions_artifacts",
+      "occurrences": 2,
+      "unique_values": 1,
+      "classification": "safe"
+    },
+    {
+      "id": "history_file_email_synthetic_values",
+      "surface": "git_history",
+      "occurrences": 41,
+      "unique_values": null,
+      "classification": "safe"
+    },
+    {
+      "id": "artifact_email_dependency_metadata_and_fixtures",
+      "surface": "actions_artifacts",
+      "occurrences": 46826,
+      "unique_values": null,
+      "classification": "safe"
+    },
+    {
+      "id": "github_surface_ssh_url_email_false_positives",
+      "surface": "github_surfaces",
+      "occurrences": 85,
+      "unique_values": 1,
+      "classification": "safe"
+    },
+    {
+      "id": "commit_metadata_platform_emails",
+      "surface": "commit_metadata",
+      "occurrences": 2,
+      "unique_values": 2,
+      "classification": "safe"
+    },
+    {
+      "id": "commit_metadata_owner_email",
+      "surface": "commit_metadata",
+      "occurrences": 1,
+      "unique_values": 1,
+      "classification": "decision_required"
+    }
+  ],
+  "licensing": {
+    "apache_license_sha256": "sha256:c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+    "application": 1,
+    "experimental_package": 1,
+    "permissive_dependencies": 12,
+    "weak_copyleft_dependencies": 3,
+    "resolved_python_distributions": 17,
+    "package_archives_checked": 4,
+    "license_files_missing": 0,
+    "unknown_or_changed_licenses": 0,
+    "known_incompatible_inclusions": 0,
+    "container_sbom_components_reviewed": 107,
+    "dependency_licenses_remain_authoritative": true,
+    "legal_opinion_claimed": false
+  },
+  "publication": {
+    "repository_visibility": "private",
+    "owner_authorization": "pending",
+    "historical_owner_email_disposition": "pending",
+    "actions_cache_disposition": "pending",
+    "server_unadvertised_object_scope": "pending",
+    "final_candidate_delta_audit": "pending",
+    "visibility_changed": false,
+    "raw_audit_material_committed": false
+  },
+  "blockers": [
+    {
+      "id": "historical_owner_email_disclosure",
+      "status": "decision_required",
+      "required_action": "approve_disclosure_or_rewrite_history"
+    },
+    {
+      "id": "actions_cache_disposition",
+      "status": "decision_required",
+      "required_action": "delete_before_publication_or_explicitly_accept_risk"
+    },
+    {
+      "id": "server_unadvertised_object_scope",
+      "status": "decision_required",
+      "required_action": "accept_explicit_scope_or_publish_sanitized_repository"
+    },
+    {
+      "id": "final_candidate_delta_audit",
+      "status": "execution_required",
+      "required_action": "rescan_final_candidate_and_new_github_surfaces"
+    },
+    {
+      "id": "repository_visibility_authorization",
+      "status": "authorization_required",
+      "required_action": "explicit_owner_authorization_after_zero_other_blockers"
+    }
+  ],
+  "nonclaims": [
+    "automated_scan_alone_proves_history_safe",
+    "dependency_license_review_is_legal_opinion",
+    "expired_artifact_bytes_were_recovered",
+    "opaque_actions_cache_contents_were_scanned",
+    "server_unadvertised_unreachable_objects_were_enumerated"
+  ],
+  "verdict": "decision_required"
+}

@@ -99,6 +99,7 @@ class OciReproducibilityTests(unittest.TestCase):
             "os": "linux",
             "config": {
                 "Labels": {
+                    "org.opencontainers.image.licenses": "Apache-2.0",
                     "org.opencontainers.image.revision": commit,
                     "org.opencontainers.image.version": version,
                 }
