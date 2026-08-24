@@ -4,6 +4,13 @@ Hormuz sits between an employee's existing AI client and the provider API. The e
 
 Use TLS and an organization-controlled hostname outside local development. The examples below use `https://hormuz.example.com` as that deployment URL.
 
+The public-alpha compatibility baseline is Codex CLI `0.147.0` and Claude Code
+`2.1.233`. Blocking CI installs those exact releases; a separate weekly canary
+checks the latest releases without provider credentials. A newer client is not
+part of the supported baseline until its protocol path is deliberately
+verified. See [live client conformance](LIVE_CLIENT_CONFORMANCE.md) for the
+real-provider release gate and its metadata-only evidence boundary.
+
 ## Codex
 
 Generate the configuration from the running Hormuz configuration:
@@ -33,7 +40,7 @@ export HORMUZ_TOKEN="employee-specific-hormuz-token"
 codex
 ```
 
-Codex supports custom model providers using a base URL and credential environment variable. Provider selection belongs in user-level configuration; current Codex builds ignore provider settings found only in project-local configuration. See the official [Codex configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference).
+Codex supports custom model providers using a base URL and credential environment variable. Provider selection belongs in user-level configuration; current Codex builds ignore provider settings found only in project-local configuration. See the official [Codex configuration reference](https://developers.openai.com/codex/config-reference).
 
 Hormuz defaults to native OpenAI model IDs in its example configuration. This lets Codex retain its bundled model metadata while Hormuz decides whether that model is allowed, capped, denied, or replaced with the configured fallback. Optional company aliases work at the HTTP layer, but arbitrary aliases may cause Codex to use fallback client metadata.
 
@@ -61,6 +68,12 @@ Anthropic documents `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN` as the stati
 
 Do not set the company's `ANTHROPIC_API_KEY` on employee machines. Hormuz replaces the employee credential with the provider credential only for the upstream request.
 
+Claude Code `2.1.129` and later can optionally query a gateway `/v1/models`
+endpoint when `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1`. Hormuz does not
+yet implement that optional discovery surface. Leave it disabled and select an
+explicit supported model ID; generation continues through `/v1/messages`.
+See Anthropic's [LLM gateway reference](https://code.claude.com/docs/en/llm-gateway).
+
 ## Generic OIDC credentials
 
 After configuring the issuer and explicit subject mapping described in [OIDC.md](OIDC.md), add `--actor` and `--auth-mode oidc` to either `client-config` command. The Codex output uses its command-backed bearer-token configuration. The Claude output uses `apiKeyHelper`. Both invoke:
@@ -74,3 +87,10 @@ The helper does not load server configuration and does not mint tokens. It re-re
 ## Deployment boundary
 
 For a company rollout, endpoint management should install the client configuration and provision a unique identity for each human or service account. Shared employee tokens make per-person attribution and revocation unreliable. OIDC JWT verification is available now; native browser login, refresh-token custody, opaque-token handling, and SCIM remain later milestones. Provider keys remain server-side in every design.
+
+Hormuz governs the model-provider request path. It does not govern Codex or
+Claude Code shell commands, MCP servers, Git traffic, browser requests, or
+other client-side tools. The current public-alpha protocol boundary is OpenAI
+Responses and Anthropic Messages/count-tokens over HTTP/SSE; unsupported
+features and fail-closed behavior are listed in
+[live client conformance](LIVE_CLIENT_CONFORMANCE.md#unsupported-and-failure-behavior).

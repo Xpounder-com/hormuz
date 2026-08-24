@@ -890,6 +890,7 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertGreater(len(FakeProviderHandler.requests), before)
         upstream = FakeProviderHandler.requests[-1]
         self.assertEqual(upstream["body"]["model"], "gpt-test-fast")
+        self.assertIs(upstream["body"]["stream"], True)
         self.assertEqual(upstream["headers"]["authorization"], f"Bearer {OPENAI_KEY}")
 
     @unittest.skipUnless(
@@ -948,6 +949,7 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertTrue(generation_requests)
         upstream = generation_requests[-1]
         self.assertEqual(upstream["body"]["model"], "claude-sonnet-5")
+        self.assertIs(upstream["body"]["stream"], True)
         self.assertEqual(upstream["headers"]["x-api-key"], ANTHROPIC_KEY)
         self.assertNotIn("authorization", upstream["headers"])
 
