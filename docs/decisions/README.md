@@ -21,6 +21,7 @@ An agent, test result, or convenient implementation detail cannot move a decisio
 | [0004](0004-versioned-policy-control-plane.md) | Accepted | Versioned PostgreSQL policy control plane | [#21](https://github.com/Xpounder-com/hormuz/issues/21) |
 | [0005](0005-kms-custody-and-immutable-audit-anchors.md) | Accepted | Generic key custody with optional AWS and self-hosted Object Lock profiles | [#17](https://github.com/Xpounder-com/hormuz/issues/17) |
 | [0006](0006-commit-time-audit-chain-and-checkpoints.md) | Accepted | Per-organization commit-time audit chains and asynchronous checkpoints | [#72](https://github.com/Xpounder-com/hormuz/issues/72) |
+| [0007](0007-tenant-custody-authority.md) | Accepted | Tenant custody authority and governed lifecycle approvals | [#89](https://github.com/Xpounder-com/hormuz/issues/89) |
 
 ## Acceptance record
 

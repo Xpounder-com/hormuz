@@ -18,6 +18,7 @@ from .config import (
     BootstrapAdministrator,
     BreakGlassConfig,
     ConfigError,
+    CustodyControlConfig,
     GatewayConfig,
     Identity,
     IngressConfig,
@@ -180,6 +181,67 @@ def build_gateway_config(
     elif bootstrap_administrators_raw or break_glass.enabled:
         raise ConfigError(
             "policy_control.bootstrap_administrators and break_glass require policy_control.mode postgresql"
+        )
+
+    custody_control_raw = _object(raw.get("custody_control", {}), "custody_control")
+    unsupported_custody_control_fields = set(custody_control_raw).difference(
+        {
+            "mode",
+            "bootstrap_administrators",
+            "postgres_control_dsn_env",
+            "postgres_control_role",
+            "authorization_ttl_seconds",
+        }
+    )
+    if unsupported_custody_control_fields:
+        raise ConfigError(
+            "custody_control contains unsupported fields: "
+            + ", ".join(sorted(str(field) for field in unsupported_custody_control_fields))
+        )
+    custody_control_mode = _string(custody_control_raw.get("mode", "local"), "custody_control.mode")
+    if custody_control_mode not in {"local", "postgresql"}:
+        raise ConfigError("custody_control.mode must be local or postgresql")
+    custody_control_dsn_env = _environment_name(
+        custody_control_raw.get("postgres_control_dsn_env", "HORMUZ_CUSTODY_CONTROL_DSN"),
+        "custody_control.postgres_control_dsn_env",
+    )
+    custody_control_role = _postgres_identifier(
+        custody_control_raw.get("postgres_control_role", "hormuz_custody_control"),
+        "custody_control.postgres_control_role",
+    )
+    custody_authorization_ttl_seconds = _integer(
+        custody_control_raw.get("authorization_ttl_seconds", 900),
+        "custody_control.authorization_ttl_seconds",
+        minimum=60,
+        maximum=24 * 60 * 60,
+    )
+    custody_bootstrap_administrators_raw = custody_control_raw.get("bootstrap_administrators", [])
+    if not isinstance(custody_bootstrap_administrators_raw, list):
+        raise ConfigError("custody_control.bootstrap_administrators must be an array")
+    if custody_control_mode == "postgresql":
+        if usage_backend != "postgresql":
+            raise ConfigError("custody_control.mode postgresql requires usage_storage.backend postgresql")
+        if key_custody is None:
+            raise ConfigError("custody_control.mode postgresql requires key_custody")
+        active_dsn_envs = {postgres_dsn_env, postgres_migration_dsn_env}
+        active_roles = {postgres_runtime_role}
+        if policy_control_mode == "postgresql":
+            active_dsn_envs.add(policy_control_dsn_env)
+            active_roles.add(policy_control_role)
+        if custody_control_dsn_env in active_dsn_envs:
+            raise ConfigError(
+                "custody_control.postgres_control_dsn_env must name a credential distinct from "
+                "runtime, migration, and policy-control credentials"
+            )
+        if custody_control_role in active_roles:
+            raise ConfigError(
+                "custody_control.postgres_control_role must differ from runtime and policy-control roles"
+            )
+        if not custody_bootstrap_administrators_raw:
+            raise ConfigError("custody_control.bootstrap_administrators must contain at least one administrator")
+    elif custody_bootstrap_administrators_raw:
+        raise ConfigError(
+            "custody_control.bootstrap_administrators require custody_control.mode postgresql"
         )
 
     upstreams_raw = _object(raw.get("upstreams"), "upstreams")
@@ -369,6 +431,12 @@ def build_gateway_config(
         static_identities=tuple(static_identities),
         oidc_issuers=oidc_issuers,
     )
+    custody_bootstrap_administrators = _bootstrap_administrators(
+        custody_bootstrap_administrators_raw,
+        static_identities=tuple(static_identities),
+        oidc_issuers=oidc_issuers,
+        path_prefix="custody_control.bootstrap_administrators",
+    )
 
     routes_raw = _object(raw.get("model_routes"), "model_routes")
     if not routes_raw:
@@ -444,6 +512,13 @@ def build_gateway_config(
             postgres_control_dsn_env=policy_control_dsn_env,
             postgres_control_role=policy_control_role,
             break_glass=break_glass,
+        ),
+        custody_control=CustodyControlConfig(
+            mode=custody_control_mode,
+            bootstrap_administrators=custody_bootstrap_administrators,
+            postgres_control_dsn_env=custody_control_dsn_env,
+            postgres_control_role=custody_control_role,
+            authorization_ttl_seconds=custody_authorization_ttl_seconds,
         ),
         key_custody=key_custody,
         audit_anchor=audit_anchor,
@@ -591,6 +666,8 @@ def _validate_dedicated_ingress_credential_env(config: GatewayConfig) -> None:
         credential_envs.add(config.policy_control.postgres_control_dsn_env)
         if config.policy_control.break_glass.enabled:
             credential_envs.add(config.policy_control.break_glass.token_env)
+    if config.custody_control.mode == "postgresql":
+        credential_envs.add(config.custody_control.postgres_control_dsn_env)
 
     if ingress.credential_env in credential_envs:
         raise ConfigError("ingress.credential_env must name a credential distinct from all other Hormuz secrets")
@@ -801,8 +878,9 @@ def _bootstrap_administrators(
     *,
     static_identities: tuple[Identity, ...],
     oidc_issuers: dict[str, OIDCIssuerConfig],
+    path_prefix: str = "policy_control.bootstrap_administrators",
 ) -> tuple[BootstrapAdministrator, ...]:
-    """Validate tenant-qualified, one-time policy-admin bootstrap identities.
+    """Validate tenant-qualified, one-time control-plane bootstrap identities.
 
     The bootstrap format intentionally has no e-mail, username, team, or
     group-name field. Static credentials remain useful for a local bootstrap
@@ -813,7 +891,7 @@ def _bootstrap_administrators(
     administrators: list[BootstrapAdministrator] = []
     seen: set[tuple[str, str, str, str]] = set()
     for index, raw_value in enumerate(value):
-        path = f"policy_control.bootstrap_administrators[{index}]"
+        path = f"{path_prefix}[{index}]"
         item = _object(raw_value, path)
         keys = set(item)
         organization_id = _string(item.get("organization_id"), f"{path}.organization_id")

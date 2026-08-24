@@ -150,6 +150,10 @@ jobs:
             -v
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -m unittest discover \
             -s "$GITHUB_WORKSPACE/tests" \
+            -p test_postgres_custody_control.py \
+            -v
+          "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -m unittest discover \
+            -s "$GITHUB_WORKSPACE/tests" \
             -p test_postgres_usage.py \
             -v
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -m unittest discover \

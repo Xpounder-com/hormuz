@@ -32,6 +32,7 @@ The current Hormuz-owned JSON schemas are:
 | Hormuz-generated HTTP errors | `hormuz.gateway-error` v2 |
 | `hormuz policy-check` output | `hormuz.policy-decision` v1 |
 | `hormuz policy status --json` | `hormuz.policy-control-status` v1 |
+| `hormuz custody status --json` | `hormuz.custody-control-status` v1 |
 | `hormuz status --json` | `hormuz.usage-report` v1 |
 | audit JSONL events | `hormuz.audit-event` v2 |
 | immutable audit-anchor artifact | `hormuz.audit-anchor` v1 |
@@ -39,6 +40,7 @@ The current Hormuz-owned JSON schemas are:
 | externally retainable chain checkpoint | `hormuz.audit-chain-checkpoint` v1 |
 | immutable staged policy document | `hormuz.policy-document` v1 |
 | PostgreSQL policy-control event row | `hormuz.policy-control-event` v1 |
+| PostgreSQL custody-control event row | `hormuz.custody-control-event` v1 |
 
 OpenAI and Anthropic response bodies remain provider-owned. Hormuz does not add a schema wrapper or fields to those bodies, because doing so would break Codex and Claude Code compatibility. Instead, a relayed provider response carries:
 
@@ -82,6 +84,14 @@ Every durable v2 event snapshots the authenticated identity at request time:
 In local mode, `policy_version` is a deterministic content-free fingerprint of the policy-relevant configuration, prefixed `local-config-`. In managed PostgreSQL mode it is the exact immutable staged-policy digest, prefixed `sha256:`. A gateway reads and pins the active managed version when a request begins; activation cannot rewrite an in-flight request or its durable evidence. Neither form contains a credential value or request content.
 
 Managed policy control has two additional strict contracts. `hormuz.policy-document` v1 accepts only allowlisted routing, cap, budget, and egress-control fields. `hormuz.policy-control-status` v1 returns administration metadata for a current policy administrator: the active digest/generation, immutable version metadata, structural redacted change summaries, and stable administrator keys. PostgreSQL `hormuz.policy-control-event` v1 records bootstrap, administrator, stage, activation, rollback, and break-glass events. It stores both an explicit durable schema ID/version and opaque actor identity keys plus structural metadata only; Hormuz validates the exact event shape before it inserts the row, and the compatibility fixture exercises that durable schema. See [POLICY_CONTROL.md](POLICY_CONTROL.md) for authorization and lifecycle semantics.
+
+Managed custody control adds `hormuz.custody-control-status` v1 and
+`hormuz.custody-control-event` v1. Status contains tenant-qualified
+administrator facts and at most the latest 100 content-free operation intents;
+`operation_count` retains the complete total. Events retain opaque actor keys,
+fixed operation/risk/target semantics, digests, approval counts, and expiry.
+Unknown fields and invalid cross-field combinations fail closed. See
+[CUSTODY_CONTROL.md](CUSTODY_CONTROL.md).
 
 Model fields have distinct meanings:
 
@@ -143,6 +153,14 @@ The release line has these intentional pre-stability changes:
 7. Gateway configuration is now a bounded, duplicate-free, schema-strict deployment input. Existing configurations must remove unsupported or misspelled fields rather than rely on ignored values; malformed and unknown-field input fails before environment-backed secret resolution. See [OPERATIONS.md](OPERATIONS.md#configuration-input).
 8. PostgreSQL schema v3 and SQLite schema v3 add the append-only `hormuz.request-attempt` v1 and `hormuz.request-attempt-event` v1 durable-evidence contracts. Immediately before provider egress, Hormuz commits an immutable content-free attempt root, its `pending` event, and its conservative budget reservation together. A reliable provider result appends exactly one `succeeded`, `failed`, or `rate_limited` event and atomically materializes the linked usage audit event. An ambiguous transport or interrupted successful stream appends `outcome_unknown` without releasing its estimate. Stale pending attempts become `outcome_unknown` through the recovery sweeper. There is no automatic provider replay, and the provider-owned relay body remains unbuffered and unchanged.
 9. PostgreSQL schema v4 and SQLite schema v4 add `hormuz.commit-audit-chain-entry` v1 and `hormuz.audit-chain-checkpoint` v1. Every new current usage or secret-egress audit event commits with one tenant-qualified chain entry and an updated tenant head. The old event schemas remain unchanged and readable; pre-v4 events are not retroactively represented as commit-time chained evidence. Recovery or migration starts a new explicit epoch linked to a trusted checkpoint, never a silent sequence restart. See [AUDIT.md](AUDIT.md) and [STORAGE.md](STORAGE.md).
+10. PostgreSQL schema v5 adds tenant-scoped custody administrators,
+    content-free operation intents, append-only approvals, and immutable
+    `hormuz.custody-control-event` v1 rows. The dedicated custody-control role
+    cannot access usage or policy-control state; runtime and policy-control
+    roles cannot access custody state. SQLite remains schema v4 because managed
+    custody authority is PostgreSQL-only. An older binary fails closed on the
+    v5 ledger. See [CUSTODY_CONTROL.md](CUSTODY_CONTROL.md) and
+    [STORAGE.md](STORAGE.md).
 
 The SQLite migrations add the metadata columns required to emit v2 while retaining existing usage rows, add tenant scope to active budget reservations, add the versioned append-only request-attempt ledger, and add the per-organization commit-time evidence chain. Each persisted usage, secret-evidence, request-attempt, or audit-chain object carries an explicit schema identifier and version where it is a public/durable evidence format, so later code cannot silently reinterpret its evidence shape. Historical rows receive explicit legacy defaults where the old database could not know a value. Earlier applications will not understand newer schemas; rollback therefore requires retaining or restoring the earlier application/database pair. The corresponding PostgreSQL adapter is migration-led and uses a distinct operator migration credential and restricted runtime credential. See [STORAGE.md](STORAGE.md) for the upgrade, rollback, recovery, and remaining-operational-gates boundary.
 
@@ -154,7 +172,7 @@ After this contract is released, any new optional field needs a new documented s
 hormuz contract-manifest
 python3 -m unittest -v tests.test_contracts tests.test_cli tests.test_gateway tests.test_store
 HORMUZ_TEST_POSTGRES_DSN='postgresql://operator@host:5432/hormuz_test' \
-  python3 -m unittest -v tests.test_postgres
+  python3 -m unittest discover -s tests -p 'test_postgres_*.py' -v
 ```
 
-The contract tests validate current and legacy audit fixtures, reject unknown fields, verify the gateway preserves provider bodies, validate strict policy documents, and validate the migration-generated audit evidence. The PostgreSQL suite additionally proves the same normalized repository outcomes, forced tenant isolation, policy-admin bootstrap/activation/rollback, role separation, migration idempotency, partial/newer-schema failure, and content-free malformed-evidence handling against a disposable database.
+The contract tests validate current and legacy audit fixtures, reject unknown fields, verify the gateway preserves provider bodies, validate strict policy documents, and validate the migration-generated audit evidence. The PostgreSQL suite additionally proves the same normalized repository outcomes, forced tenant isolation, policy-admin bootstrap/activation/rollback, custody-admin bootstrap and approval thresholds, role separation, migration idempotency, partial/newer-schema failure, and content-free malformed-evidence handling against a disposable database.

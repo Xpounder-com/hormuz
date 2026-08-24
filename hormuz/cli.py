@@ -47,12 +47,20 @@ from .contracts import (
     COST_BASIS_CONFIGURED_RATE_CARD_ESTIMATE,
     COVERAGE_GATEWAY_CAPTURED_REQUESTS_ONLY,
     POLICY_CONTROL_STATUS_SCHEMA_ID,
+    CUSTODY_CONTROL_STATUS_SCHEMA_ID,
     POLICY_DECISION_SCHEMA_ID,
     USAGE_REPORT_SCHEMA_ID,
     contract_envelope,
     contract_manifest,
 )
 from .policy import PolicyEngine
+from .custody_control import CustodyControlService
+from .custody_repository import (
+    CUSTODY_OPERATIONS,
+    CustodyControlError,
+    CustodyControlStatus,
+    CustodyOperationIntent,
+)
 from .policy_control import PolicyControlService
 from .policy_document import PolicyDocumentError
 from .policy_repository import PolicyActivation, PolicyControlError, PolicyControlStatus, PolicyVersionRecord
@@ -250,6 +258,62 @@ def build_parser() -> argparse.ArgumentParser:
     rewrap.add_argument("--output", required=True, help="Owner-only rewrapped envelope output path")
     rewrap.add_argument("--force", action="store_true", help="Allow replacing an existing envelope path")
 
+    custody_bootstrap = custody_subparsers.add_parser(
+        "bootstrap",
+        help="Persist one-time configuration-seeded custody administrators",
+    )
+    _custody_control_auth_arguments(custody_bootstrap)
+
+    custody_status = custody_subparsers.add_parser(
+        "status",
+        help="Show tenant custody authorities and content-free approval intents",
+    )
+    _custody_control_auth_arguments(custody_status)
+    custody_status.add_argument("--json", action="store_true", help="Emit machine-readable metadata-only JSON")
+
+    custody_administrator = custody_subparsers.add_parser(
+        "administrator",
+        help="Manage governed custody administrators",
+    )
+    custody_administrator_subparsers = custody_administrator.add_subparsers(
+        dest="custody_administrator_command",
+        required=True,
+    )
+    for action in ("grant", "revoke"):
+        command = custody_administrator_subparsers.add_parser(
+            action,
+            help=f"{action.title()} an OIDC custody administrator",
+        )
+        _custody_control_auth_arguments(command)
+        command.add_argument("--issuer", required=True, help="Configured OIDC issuer URL")
+        command.add_argument("--subject", required=True, help="Stable OIDC subject")
+    custody_revoke_static = custody_administrator_subparsers.add_parser(
+        "revoke-static",
+        help="Retire a persisted static bootstrap custody administrator",
+    )
+    _custody_control_auth_arguments(custody_revoke_static)
+    custody_revoke_static.add_argument("--actor-id", required=True, help="Persisted static bootstrap actor ID")
+
+    authorize = custody_subparsers.add_parser(
+        "authorize",
+        help="Create an exact content-free custody-operation intent and record the first approval",
+    )
+    _custody_control_auth_arguments(authorize)
+    authorize.add_argument("--operation", required=True, choices=sorted(CUSTODY_OPERATIONS))
+    authorize.add_argument("--target-sha256", required=True, help="Digest of the exact lifecycle target")
+    authorize.add_argument("--parameters-sha256", required=True, help="Digest of the normalized execution plan")
+    authorize.add_argument(
+        "--protected-input-ref-sha256",
+        help="Digest of a protected input handle; required only for initial envelope sealing",
+    )
+
+    approve = custody_subparsers.add_parser(
+        "approve",
+        help="Add the distinct second administrator approval required by a destructive operation",
+    )
+    _custody_control_auth_arguments(approve)
+    approve.add_argument("--operation-id", required=True, help="Immutable custody operation identifier")
+
     storage = subparsers.add_parser("storage", help="Verify or migrate the metadata-only usage store")
     storage_subparsers = storage.add_subparsers(dest="storage_command", required=True)
     storage_subparsers.add_parser("verify", help="Verify the configured store is safe for this binary")
@@ -267,6 +331,15 @@ def _policy_control_auth_arguments(parser: argparse.ArgumentParser) -> None:
         "--credential-env",
         default="HORMUZ_POLICY_ADMIN_TOKEN",
         help="Environment variable holding an authenticated policy-admin credential",
+    )
+
+
+def _custody_control_auth_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--organization", required=True, help="Tenant organization ID")
+    parser.add_argument(
+        "--credential-env",
+        default="HORMUZ_CUSTODY_ADMIN_TOKEN",
+        help="Environment variable holding an authenticated custody-admin credential",
     )
 
 
@@ -323,6 +396,9 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     except CustodyError as error:
         print(f"custody error: {error.code}", file=sys.stderr)
+        return 2
+    except CustodyControlError as error:
+        print(f"custody control error: {error.code}", file=sys.stderr)
         return 2
     except (PolicyControlError, PolicyDocumentError) as error:
         print(f"policy control error: {error.code}", file=sys.stderr)
@@ -429,6 +505,9 @@ def _doctor(config: GatewayConfig) -> int:
         print("usage storage: verified")
         PolicyRuntime(config, connection_pool=runtime_pool).verify_active_policies()
         print(f"policy control: {config.policy_control.mode} verified")
+        if config.custody_control.mode == "postgresql":
+            CustodyControlService(config)
+        print(f"custody control: {config.custody_control.mode} verified")
     finally:
         _close_runtime_pool(runtime_pool)
     if config.oidc_issuers:
@@ -1209,6 +1288,10 @@ def _is_sha256_digest(value: object) -> bool:
 
 
 def _custody(config: GatewayConfig, args: argparse.Namespace) -> int:
+    if args.custody_command in {"bootstrap", "status", "administrator", "authorize", "approve"}:
+        return _custody_control(config, args)
+    if config.custody_control.mode == "postgresql":
+        raise CustodyControlError("custody_governed_executor_required")
     if args.custody_command == "verify":
         return _custody_verify(config)
     if args.custody_command == "seal":
@@ -1216,6 +1299,139 @@ def _custody(config: GatewayConfig, args: argparse.Namespace) -> int:
     if args.custody_command == "rewrap":
         return _custody_rewrap(config, args)
     raise CustodyError("custody_command_unsupported")
+
+
+def _custody_control(config: GatewayConfig, args: argparse.Namespace) -> int:
+    """Run human authorization through the custody-control service only."""
+
+    service = CustodyControlService(config)
+    command = args.custody_command
+    if command == "bootstrap":
+        administrators = service.bootstrap(
+            organization_id=args.organization,
+            credential_env=args.credential_env,
+        )
+        print(f"custody bootstrap initialized: organization={args.organization} administrators={len(administrators)}")
+        return 0
+    if command == "status":
+        _print_custody_status(
+            service.status(
+                organization_id=args.organization,
+                credential_env=args.credential_env,
+            ),
+            as_json=args.json,
+        )
+        return 0
+    if command == "administrator":
+        if args.custody_administrator_command == "grant":
+            administrator = service.grant_oidc_administrator(
+                organization_id=args.organization,
+                credential_env=args.credential_env,
+                issuer=args.issuer,
+                subject=args.subject,
+            )
+            print(
+                "custody administrator granted: "
+                f"organization={administrator.organization_id} issuer={administrator.issuer} "
+                f"subject={administrator.subject}"
+            )
+            return 0
+        if args.custody_administrator_command == "revoke":
+            service.revoke_oidc_administrator(
+                organization_id=args.organization,
+                credential_env=args.credential_env,
+                issuer=args.issuer,
+                subject=args.subject,
+            )
+            print(
+                "custody administrator revoked: "
+                f"organization={args.organization} issuer={args.issuer} subject={args.subject}"
+            )
+            return 0
+        if args.custody_administrator_command == "revoke-static":
+            service.revoke_static_administrator(
+                organization_id=args.organization,
+                credential_env=args.credential_env,
+                actor_id=args.actor_id,
+            )
+            print(
+                "static custody administrator revoked: "
+                f"organization={args.organization} actor_id={args.actor_id}"
+            )
+            return 0
+    if command == "authorize":
+        operation = service.authorize_operation(
+            organization_id=args.organization,
+            credential_env=args.credential_env,
+            operation_type=args.operation,
+            target_sha256=args.target_sha256,
+            parameters_sha256=args.parameters_sha256,
+            protected_input_ref_sha256=args.protected_input_ref_sha256,
+        )
+        _print_custody_operation("custody operation recorded", operation)
+        return 0
+    if command == "approve":
+        operation = service.approve_operation(
+            organization_id=args.organization,
+            credential_env=args.credential_env,
+            operation_id=args.operation_id,
+        )
+        _print_custody_operation("custody operation approved", operation)
+        return 0
+    raise CustodyControlError("custody_control_command_unsupported")
+
+
+def _print_custody_operation(prefix: str, operation: CustodyOperationIntent) -> None:
+    print(
+        f"{prefix}: organization={operation.organization_id} operation_id={operation.operation_id} "
+        f"operation={operation.operation_type} state={operation.effective_state()} "
+        f"approvals={len(operation.approvals)}/{operation.required_approvals}"
+    )
+
+
+def _print_custody_status(status: CustodyControlStatus, *, as_json: bool) -> None:
+    payload = {
+        "organization_id": status.organization_id,
+        "initialized": status.initialized,
+        "administrators": [administrator.audit_ref() for administrator in status.administrators],
+        "operation_count": status.operation_count,
+        "operations": [
+            {
+                "operation_id": operation.operation_id,
+                "operation_type": operation.operation_type,
+                "risk_level": operation.risk_level,
+                "target_kind": operation.target_kind,
+                "target_sha256": operation.target_sha256,
+                "parameters_sha256": operation.parameters_sha256,
+                "protected_input_ref_sha256": operation.protected_input_ref_sha256,
+                "state": operation.effective_state(),
+                "required_approvals": operation.required_approvals,
+                "approval_count": len(operation.approvals),
+                "created_at": operation.created_at.isoformat(),
+                "expires_at": operation.expires_at.isoformat(),
+                "authorized_at": operation.authorized_at.isoformat() if operation.authorized_at else None,
+                "requested_by_kind": operation.requested_by_kind,
+                "requested_by_identity_key": operation.requested_by_identity_key,
+                "approvals": [
+                    {
+                        "approver_kind": approval.approver_kind,
+                        "approver_identity_key": approval.approver_identity_key,
+                        "approved_at": approval.approved_at.isoformat(),
+                    }
+                    for approval in operation.approvals
+                ],
+            }
+            for operation in status.operations
+        ],
+    }
+    if as_json:
+        print(json.dumps(contract_envelope(CUSTODY_CONTROL_STATUS_SCHEMA_ID, payload), indent=2, sort_keys=True))
+        return
+    print(f"organization: {status.organization_id}")
+    print(f"initialized: {str(status.initialized).lower()}")
+    print(f"active custody administrators: {len(status.administrators)}")
+    print(f"custody operations: {status.operation_count}")
+    print(f"operations shown: {len(status.operations)}")
 
 
 def _custody_verify(config: GatewayConfig) -> int:
@@ -1345,6 +1561,7 @@ def _storage(config: GatewayConfig, args: argparse.Namespace) -> int:
             schema=config.usage_storage.postgres_schema,
             runtime_role=config.usage_storage.postgres_runtime_role,
             policy_control_role=config.policy_control.postgres_control_role,
+            custody_control_role=config.custody_control.postgres_control_role,
         )
         print(f"PostgreSQL usage storage migration is current: v{status.version}")
         return 0

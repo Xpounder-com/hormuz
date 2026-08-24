@@ -126,7 +126,7 @@ GitHub Actions runs independent gates without provider credentials:
 
 - the complete core unit and loopback gateway suite on Python 3.11, 3.12, 3.13, and 3.14;
 - source-distribution and wheel builds followed by a clean-wheel inspection and isolated gateway-start boundary test;
-- PostgreSQL migration and repository compatibility against the pinned service image;
+- PostgreSQL migration and repository compatibility against the pinned service image, including tenant custody authority and one/two-person approval behavior;
 - a disposable `pg_dump` custom-format / `pg_restore` recovery drill against digest-pinned source, recovery, and quarantine PostgreSQL containers;
 - a disposable physical PostgreSQL WAL/PITR drill that requires a named recovery target, proves target exclusion, and fails closed without required WAL;
 - non-root OCI reference-runtime smoke testing with externally mounted inputs;
@@ -138,6 +138,24 @@ The workflow grants only read access to repository contents, disables persisted 
 A separate weekly canary installs the latest published Codex and Claude Code packages in an ephemeral runner and exercises only the two fake-provider compatibility tests. It has no provider credentials, does not block ordinary pull requests, and is intended to surface upstream protocol drift before an employee upgrade does.
 
 The publication candidate was also checked locally on August 15, 2026 with Codex `0.147.0` and Claude Code `2.1.233`, the then-current npm releases. Both routed successfully through Hormuz, and the complete 29-test suite passed with those executables selected first on `PATH`.
+
+## PostgreSQL custody-control authority
+
+The `PostgreSQL compatibility` job runs
+`tests/test_postgres_custody_control.py` against the digest-pinned PostgreSQL
+service image. The tests prove one-time tenant bootstrap, stable OIDC
+issuer/subject authority without inference entitlement, forced tenant RLS,
+separate runtime/policy/custody roles, content-free initial-enrollment handles,
+one approval for routine operations, two distinct active administrators for
+destructive operations, expiry, replay denial, last-administrator protection,
+append-only approvals/events, and transaction rollback when evidence validation
+fails.
+
+This is a control-plane persistence and authorization proof. It does not
+execute KMS operations, expose or store plaintext, change customer IAM, provide
+the all-administrator-loss break-glass mechanism, prove a production database,
+or establish end-to-end custody readiness. See
+[CUSTODY_CONTROL.md](CUSTODY_CONTROL.md) for the exact boundary.
 
 ## OCI reference runtime
 

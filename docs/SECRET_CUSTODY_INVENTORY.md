@@ -27,9 +27,10 @@ The active core has two different custody categories:
    the `data_encryption` purpose before Object Lock storage in the self-hosted
    profile, or customer KMS service encryption in the optional AWS profile.
 2. **Externally injected access credentials.** Static identity tokens, ingress
-   credentials, PostgreSQL DSNs, policy-recovery credentials, custom redaction
-   values, the OpenBao token, and S3-compatible credentials remain owned by the
-   customer deployment secret manager or the authorized operator process.
+   credentials, PostgreSQL DSNs, policy- and custody-administrator credentials,
+   policy-recovery credentials, custom redaction values, the OpenBao token,
+   and S3-compatible credentials remain owned by the customer deployment
+   secret manager or the authorized operator process.
    Hormuz holds them only in process memory for their configured consumer.
 
 The second category must not be recursively placed behind the same service it
@@ -67,11 +68,12 @@ an implemented identity-connector envelope migration.
 
 - Provider credential operators replace an environment-injected credential or
   use the custody operator path to seal and rewrap an envelope.
-- Database operators rotate the distinct runtime, migration, and policy-control
-  DSNs in the customer secret manager and roll gateway/control-plane processes.
+- Database operators rotate the distinct runtime, migration, policy-control,
+  and custody-control DSNs in the customer secret manager and roll the affected
+  gateway or control-plane process.
 - Identity operators rotate static or short-lived administrator credentials;
-  the policy service continues to authorize the resulting principal rather than
-  trusting an actor name supplied to the CLI.
+  the policy and custody services continue to authorize the resulting principal
+  rather than trusting an actor name supplied to the CLI.
 - Policy-recovery operators separately protect and rotate the opt-in break-glass
   credential.
 - Custody operators rotate key-service authorization and purpose-specific key
@@ -94,9 +96,11 @@ strict object fields, safe identifiers, and exact source coordinates. Unknown
 fields—including a field that attempts to carry a secret value—fail closed with
 a stable content-free error.
 
-This checkpoint does not create a `custody_admin` authority, authenticate the
-existing local custody commands, add custody events to the per-organization
-audit chain, migrate reserved purpose classes, certify a customer cloud
-environment, or close issue #17. A separate design decision is required before
-granting any principal the root capability to seal, rewrap, revoke, or resolve
-managed secrets.
+This checkpoint inventories the tenant-scoped `custody_admin` authorization
+service and its separate database and administrator credentials. It does not
+grant inference, policy, identity, KMS, IAM, or gateway-runtime entitlement;
+execute an approved lifecycle operation; add custody events to the
+per-organization gateway audit chain; implement all-administrator-loss
+break-glass recovery; migrate reserved purpose classes; certify a customer
+cloud environment; or close issue #17. Customer KMS authority and the future
+narrowly permissioned custody executor remain separate security boundaries.

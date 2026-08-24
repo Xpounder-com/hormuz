@@ -142,6 +142,67 @@
       "egress_fields": ["openai.allow_background", "openai.allow_response_storage", "secrets.mode"]
     }
   },
+  "custody_control_status": {
+    "schema_id": "hormuz.custody-control-status",
+    "schema_version": 1,
+    "organization_id": "xpounder",
+    "initialized": true,
+    "administrators": [
+      {
+        "authentication_kind": "oidc",
+        "actor_id": null,
+        "issuer": "https://identity.example.com",
+        "subject": "custody-subject-123"
+      }
+    ],
+    "operation_count": 1,
+    "operations": [
+      {
+        "operation_id": "01234567-89ab-4def-8123-456789abcdef",
+        "operation_type": "seal_envelope",
+        "risk_level": "routine",
+        "target_kind": "envelope",
+        "target_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "parameters_sha256": "123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0",
+        "protected_input_ref_sha256": "23456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef01",
+        "state": "authorized",
+        "required_approvals": 1,
+        "approval_count": 1,
+        "created_at": "2026-08-23T00:00:00+00:00",
+        "expires_at": "2026-08-23T00:15:00+00:00",
+        "authorized_at": "2026-08-23T00:00:00+00:00",
+        "requested_by_kind": "oidc",
+        "requested_by_identity_key": "oidc:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "approvals": [
+          {
+            "approver_kind": "oidc",
+            "approver_identity_key": "oidc:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+            "approved_at": "2026-08-23T00:00:00+00:00"
+          }
+        ]
+      }
+    ]
+  },
+  "custody_control_event": {
+    "event_schema_id": "hormuz.custody-control-event",
+    "event_schema_version": 1,
+    "organization_id": "xpounder",
+    "occurred_at": "2026-08-23T00:00:00+00:00",
+    "event_type": "operation_approved",
+    "actor_kind": "oidc",
+    "actor_identity_key": "oidc:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    "target_identity_key": null,
+    "operation_id": "01234567-89ab-4def-8123-456789abcdef",
+    "operation_type": "retire_key_reference",
+    "risk_level": "destructive",
+    "target_kind": "key_reference",
+    "target_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    "parameters_sha256": "123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0",
+    "protected_input_ref_sha256": null,
+    "required_approvals": 2,
+    "approval_count": 1,
+    "expires_at": "2026-08-23T00:15:00+00:00"
+  },
   "usage_report": {
     "schema_id": "hormuz.usage-report",
     "schema_version": 1,

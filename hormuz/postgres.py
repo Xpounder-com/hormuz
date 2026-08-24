@@ -16,7 +16,7 @@ from typing import Any, Iterator, Mapping
 from .config import PostgresPoolConfig
 
 
-POSTGRES_SCHEMA_VERSION = 4
+POSTGRES_SCHEMA_VERSION = 5
 _IDENTIFIER_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 _POOL_RECONNECT_TIMEOUT_SECONDS = 15
 
@@ -180,15 +180,18 @@ def migrate_postgres(
     schema: str = "hormuz",
     runtime_role: str = "hormuz_runtime",
     policy_control_role: str = "hormuz_policy_control",
+    custody_control_role: str = "hormuz_custody_control",
 ) -> PostgresSchemaStatus:
     """Apply all bundled PostgreSQL migrations atomically and idempotently."""
 
     schema = validate_postgres_identifier(schema, "postgres_schema")
     runtime_role = validate_postgres_identifier(runtime_role, "postgres_runtime_role")
     policy_control_role = validate_postgres_identifier(policy_control_role, "postgres_policy_control_role")
+    custody_control_role = validate_postgres_identifier(custody_control_role, "postgres_custody_control_role")
     quoted_schema = _quote_identifier(schema)
     quoted_role = _quote_identifier(runtime_role)
     quoted_policy_control_role = _quote_identifier(policy_control_role)
+    quoted_custody_control_role = _quote_identifier(custody_control_role)
     psycopg, sql = _driver()
     try:
         connection = psycopg.connect(dsn)
@@ -224,6 +227,7 @@ def migrate_postgres(
                     raise PostgresStorageError("storage_schema_partial_upgrade")
                 if states:
                     _verify_applied_schema_shape(cursor, schema=schema, version=max(states))
+                    _verify_custody_schema_shape(cursor, schema=schema, version=max(states))
                 for version in range(1, POSTGRES_SCHEMA_VERSION + 1):
                     if version in states:
                         continue
@@ -239,6 +243,7 @@ def migrate_postgres(
                             quoted_schema,
                             quoted_role,
                             quoted_policy_control_role,
+                            quoted_custody_control_role,
                         )
                     )
                     cursor.execute(
@@ -251,6 +256,8 @@ def migrate_postgres(
                         ).format(sql.Identifier(schema)),
                         (version,),
                     )
+                _verify_applied_schema_shape(cursor, schema=schema, version=POSTGRES_SCHEMA_VERSION)
+                _verify_custody_schema_shape(cursor, schema=schema, version=POSTGRES_SCHEMA_VERSION)
         return PostgresSchemaStatus(version=POSTGRES_SCHEMA_VERSION, complete=True)
     except PostgresStorageError:
         raise
@@ -267,6 +274,7 @@ def verify_postgres_schema(
     runtime_role: str = "hormuz_runtime",
     connection_pool: PostgresConnectionPool | None = None,
     verify_runtime_schema: bool = True,
+    verify_custody_schema: bool = False,
 ) -> PostgresSchemaStatus:
     """Verify a credential sees the complete supported migration ledger.
 
@@ -282,6 +290,8 @@ def verify_postgres_schema(
 
     schema = validate_postgres_identifier(schema, "postgres_schema")
     runtime_role = validate_postgres_identifier(runtime_role, "postgres_runtime_role")
+    if verify_runtime_schema and verify_custody_schema:
+        raise PostgresStorageError("storage_schema_verification_scope_invalid")
     psycopg, sql = _driver()
     if connection_pool is not None:
         try:
@@ -292,6 +302,7 @@ def verify_postgres_schema(
                     schema=schema,
                     runtime_role=runtime_role,
                     verify_runtime_schema=verify_runtime_schema,
+                    verify_custody_schema=verify_custody_schema,
                 )
         except PostgresStorageError:
             raise
@@ -309,6 +320,7 @@ def verify_postgres_schema(
             schema=schema,
             runtime_role=runtime_role,
             verify_runtime_schema=verify_runtime_schema,
+            verify_custody_schema=verify_custody_schema,
         )
         return _verified_schema_status(rows)
     except PostgresStorageError:
@@ -326,6 +338,7 @@ def _schema_migration_rows(
     schema: str,
     runtime_role: str,
     verify_runtime_schema: bool = True,
+    verify_custody_schema: bool = False,
 ) -> list[Any]:
     """Read the migration ledger under a least-privileged product role."""
 
@@ -346,6 +359,13 @@ def _schema_migration_rows(
                 and max(states) <= POSTGRES_SCHEMA_VERSION
             ):
                 _verify_applied_schema_shape(cursor, schema=schema, version=max(states))
+            if (
+                verify_custody_schema
+                and states
+                and all(state == "applied" for state in states.values())
+                and max(states) <= POSTGRES_SCHEMA_VERSION
+            ):
+                _verify_custody_schema_shape(cursor, schema=schema, version=max(states))
             return rows
 
 
@@ -538,6 +558,100 @@ def _verify_applied_schema_shape(cursor: Any, *, schema: str, version: int) -> N
             raise PostgresStorageError("storage_schema_partial_upgrade")
 
 
+def _verify_custody_schema_shape(cursor: Any, *, schema: str, version: int) -> None:
+    """Reject a current custody ledger whose dedicated objects are missing."""
+
+    if version < 5:
+        return
+    required = {
+        "custody_tenants": {
+            "organization_id",
+            "initialized_at",
+            "initialized_by_kind",
+            "initialized_by_identity_key",
+        },
+        "custody_administrators": {
+            "organization_id",
+            "identity_key",
+            "authentication_kind",
+            "actor_id",
+            "issuer",
+            "subject",
+            "active",
+            "created_at",
+            "created_by_kind",
+            "created_by_identity_key",
+            "revoked_at",
+            "revoked_by_kind",
+            "revoked_by_identity_key",
+        },
+        "custody_operation_intents": {
+            "organization_id",
+            "operation_id",
+            "intent_schema_id",
+            "intent_schema_version",
+            "operation_type",
+            "risk_level",
+            "target_kind",
+            "target_sha256",
+            "parameters_sha256",
+            "protected_input_ref_sha256",
+            "state",
+            "required_approvals",
+            "created_at",
+            "expires_at",
+            "authorized_at",
+            "requested_by_kind",
+            "requested_by_identity_key",
+        },
+        "custody_operation_approvals": {
+            "organization_id",
+            "operation_id",
+            "approval_schema_id",
+            "approval_schema_version",
+            "approver_kind",
+            "approver_identity_key",
+            "approved_at",
+        },
+        "custody_control_events": {
+            "event_id",
+            "event_schema_id",
+            "event_schema_version",
+            "organization_id",
+            "occurred_at",
+            "event_type",
+            "actor_kind",
+            "actor_identity_key",
+            "target_identity_key",
+            "operation_id",
+            "operation_type",
+            "risk_level",
+            "target_kind",
+            "target_sha256",
+            "parameters_sha256",
+            "protected_input_ref_sha256",
+            "required_approvals",
+            "approval_count",
+            "expires_at",
+        },
+    }
+    for table, columns in required.items():
+        cursor.execute(
+            """
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = %s AND table_name = %s
+            """,
+            (schema, table),
+        )
+        observed = {
+            str(row["column_name"] if isinstance(row, Mapping) else row[0])
+            for row in cursor.fetchall()
+        }
+        if not columns.issubset(observed):
+            raise PostgresStorageError("storage_schema_partial_upgrade")
+
+
 @contextmanager
 def postgres_transaction(
     dsn: str,
@@ -623,12 +737,14 @@ def _migration_sql(
     quoted_schema: str,
     quoted_runtime_role: str,
     quoted_policy_control_role: str,
+    quoted_custody_control_role: str | None = None,
 ) -> str:
     filenames = {
         1: "0001_usage_evidence.sql",
         2: "0002_policy_control.sql",
         3: "0003_request_attempts.sql",
         4: "0004_commit_audit_chain.sql",
+        5: "0005_custody_control.sql",
     }
     filename = filenames.get(version)
     if filename is None:
@@ -645,6 +761,11 @@ def _migration_sql(
         schema=quoted_schema,
         runtime_role=quoted_runtime_role,
         policy_control_role=quoted_policy_control_role,
+        custody_control_role=(
+            _quote_identifier("hormuz_custody_control")
+            if quoted_custody_control_role is None
+            else quoted_custody_control_role
+        ),
     )
 
 

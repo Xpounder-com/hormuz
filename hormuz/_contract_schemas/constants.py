@@ -62,6 +62,14 @@ POLICY_CONTROL_EVENT_SCHEMA_ID = "hormuz.policy-control-event"
 
 POLICY_CONTROL_EVENT_SCHEMA_VERSION = 1
 
+CUSTODY_CONTROL_STATUS_SCHEMA_ID = "hormuz.custody-control-status"
+
+CUSTODY_CONTROL_STATUS_SCHEMA_VERSION = 1
+
+CUSTODY_CONTROL_EVENT_SCHEMA_ID = "hormuz.custody-control-event"
+
+CUSTODY_CONTROL_EVENT_SCHEMA_VERSION = 1
+
 USAGE_REPORT_SCHEMA_ID = "hormuz.usage-report"
 
 COST_BASIS_CONFIGURED_RATE_CARD_ESTIMATE = "configured_rate_card_estimate"
@@ -98,6 +106,7 @@ _CURRENT_SCHEMA_VERSIONS = {
     ERROR_SCHEMA_ID: ERROR_SCHEMA_VERSION,
     POLICY_DECISION_SCHEMA_ID: 1,
     POLICY_CONTROL_STATUS_SCHEMA_ID: 1,
+    CUSTODY_CONTROL_STATUS_SCHEMA_ID: CUSTODY_CONTROL_STATUS_SCHEMA_VERSION,
     USAGE_REPORT_SCHEMA_ID: 1,
     AUDIT_ANCHOR_SCHEMA_ID: AUDIT_ANCHOR_SCHEMA_VERSION,
     AUDIT_CHAIN_ENTRY_SCHEMA_ID: AUDIT_CHAIN_ENTRY_SCHEMA_VERSION,
@@ -163,3 +172,26 @@ _POLICY_EGRESS_FIELDS = (
 )
 
 _POLICY_BREAK_GLASS_REASONS = frozenset({"all_administrators_lost", "administrator_store_recovered"})
+
+_CUSTODY_OPERATION_TYPES = frozenset(
+    {
+        "seal_envelope",
+        "rewrap_envelope",
+        "verify_restore",
+        "retire_envelope",
+        "disable_provider_credential",
+        "retire_key_reference",
+        "resolve_recovery",
+    }
+)
+
+_CUSTODY_CONTROL_EVENT_TYPES = frozenset(
+    {
+        "bootstrap_initialized",
+        "administrator_granted",
+        "administrator_revoked",
+        "operation_requested",
+        "operation_approved",
+        "operation_authorized",
+    }
+)

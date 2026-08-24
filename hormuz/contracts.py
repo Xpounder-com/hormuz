@@ -27,6 +27,10 @@ from ._contract_schemas.common import (
     _value_string,
     _value_string_list,
 )
+from ._contract_schemas.custody import (
+    _validate_custody_control_status,
+    validate_custody_control_event as _validate_custody_control_event_contract,
+)
 from ._contract_schemas.constants import (
     MANIFEST_SCHEMA_ID,
     MANIFEST_SCHEMA_VERSION,
@@ -58,6 +62,10 @@ from ._contract_schemas.constants import (
     POLICY_DOCUMENT_SCHEMA_VERSION,
     POLICY_CONTROL_EVENT_SCHEMA_ID,
     POLICY_CONTROL_EVENT_SCHEMA_VERSION,
+    CUSTODY_CONTROL_STATUS_SCHEMA_ID,
+    CUSTODY_CONTROL_STATUS_SCHEMA_VERSION,
+    CUSTODY_CONTROL_EVENT_SCHEMA_ID,
+    CUSTODY_CONTROL_EVENT_SCHEMA_VERSION,
     USAGE_REPORT_SCHEMA_ID,
     COST_BASIS_CONFIGURED_RATE_CARD_ESTIMATE,
     ALLOCATION_BASIS_DIRECT_GATEWAY_REQUEST,
@@ -277,6 +285,36 @@ def contract_manifest() -> dict[str, object]:
                     "generation",
                     "reason_code",
                     "content-free structural metadata",
+                ],
+            ),
+            _manifest_schema(
+                CUSTODY_CONTROL_STATUS_SCHEMA_ID,
+                CUSTODY_CONTROL_STATUS_SCHEMA_VERSION,
+                "cli-output",
+                "hormuz",
+                [
+                    "schema_id",
+                    "schema_version",
+                    "organization_id",
+                    "initialized",
+                    "administrators",
+                    "content-free operation approvals",
+                ],
+            ),
+            _manifest_schema(
+                CUSTODY_CONTROL_EVENT_SCHEMA_ID,
+                CUSTODY_CONTROL_EVENT_SCHEMA_VERSION,
+                "durable-evidence",
+                "hormuz",
+                [
+                    "event_schema_id",
+                    "event_schema_version",
+                    "organization_id",
+                    "event_type",
+                    "opaque actor identity key",
+                    "operation type and risk",
+                    "target and parameter digests",
+                    "approval counts and expiry",
                 ],
             ),
             _manifest_schema(
@@ -553,6 +591,7 @@ def validate_contract(value: Mapping[str, Any]) -> None:
         (ERROR_SCHEMA_ID, ERROR_SCHEMA_VERSION): lambda item: _validate_error(item, PUBLIC_ERROR_CODES),
         (POLICY_DECISION_SCHEMA_ID, 1): _validate_policy_decision,
         (POLICY_CONTROL_STATUS_SCHEMA_ID, 1): _validate_policy_control_status,
+        (CUSTODY_CONTROL_STATUS_SCHEMA_ID, CUSTODY_CONTROL_STATUS_SCHEMA_VERSION): _validate_custody_control_status,
         (USAGE_REPORT_SCHEMA_ID, 1): _validate_usage_report,
         (AUDIT_ANCHOR_SCHEMA_ID, AUDIT_ANCHOR_SCHEMA_VERSION): _validate_audit_anchor,
         (AUDIT_CHAIN_ENTRY_SCHEMA_ID, AUDIT_CHAIN_ENTRY_SCHEMA_VERSION): _validate_audit_chain_entry,
@@ -623,6 +662,12 @@ def validate_policy_control_event(value: Mapping[str, Any]) -> None:
     """Validate one metadata-only immutable policy-control evidence row."""
 
     _validate_policy_control_event_contract(value)
+
+
+def validate_custody_control_event(value: Mapping[str, Any]) -> None:
+    """Validate one metadata-only immutable custody-control evidence row."""
+
+    _validate_custody_control_event_contract(value)
 
 
 def validate_policy_action(value: str) -> None:

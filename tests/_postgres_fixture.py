@@ -159,6 +159,13 @@ class PostgresTestCase(unittest.TestCase):
             cls.policy_control_role,
             cls.policy_control_password,
         )
+        cls.custody_control_role = f"hormuz_custody_control_{suffix}"
+        cls.custody_control_password = "hormuz-custody-control-test-password"
+        cls.custody_control_dsn = _runtime_dsn(
+            cls.owner_dsn,
+            cls.custody_control_role,
+            cls.custody_control_password,
+        )
         cls.addClassCleanup(cls._cleanup_test_resources)
         with psycopg.connect(cls.owner_dsn, autocommit=True) as connection:
             with connection.cursor() as cursor:
@@ -172,17 +179,24 @@ class PostgresTestCase(unittest.TestCase):
                         "CREATE ROLE {} LOGIN PASSWORD {} NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS"
                     ).format(sql.Identifier(cls.policy_control_role), sql.Literal(cls.policy_control_password))
                 )
+                cursor.execute(
+                    sql.SQL(
+                        "CREATE ROLE {} LOGIN PASSWORD {} NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS"
+                    ).format(sql.Identifier(cls.custody_control_role), sql.Literal(cls.custody_control_password))
+                )
         first = migrate_postgres(
             cls.owner_dsn,
             schema=cls.schema,
             runtime_role=cls.runtime_role,
             policy_control_role=cls.policy_control_role,
+            custody_control_role=cls.custody_control_role,
         )
         second = migrate_postgres(
             cls.owner_dsn,
             schema=cls.schema,
             runtime_role=cls.runtime_role,
             policy_control_role=cls.policy_control_role,
+            custody_control_role=cls.custody_control_role,
         )
         if first != second:
             raise AssertionError("PostgreSQL migrations are not idempotent")
@@ -196,11 +210,17 @@ class PostgresTestCase(unittest.TestCase):
                 cursor.execute(cls.sql.SQL("DROP SCHEMA IF EXISTS {} CASCADE").format(cls.sql.Identifier(cls.schema)))
                 cursor.execute(cls.sql.SQL("DROP ROLE IF EXISTS {}").format(cls.sql.Identifier(cls.runtime_role)))
                 cursor.execute(cls.sql.SQL("DROP ROLE IF EXISTS {}").format(cls.sql.Identifier(cls.policy_control_role)))
+                cursor.execute(cls.sql.SQL("DROP ROLE IF EXISTS {}").format(cls.sql.Identifier(cls.custody_control_role)))
 
     def setUp(self) -> None:
         with self.psycopg.connect(self.owner_dsn, autocommit=True) as connection:
             with connection.cursor() as cursor:
                 tables = (
+                    "custody_control_events",
+                    "custody_operation_approvals",
+                    "custody_operation_intents",
+                    "custody_administrators",
+                    "custody_tenants",
                     "policy_control_events",
                     "policy_active_versions",
                     "policy_versions",
@@ -499,6 +519,107 @@ class PostgresTestCase(unittest.TestCase):
             environment["HORMUZ_POLICY_BOB_TOKEN"] = "policy-test-bob-token"
         if break_glass:
             environment["HORMUZ_POLICY_BREAK_GLASS_TOKEN"] = "policy-break-glass-secret-value"
+        return GatewayConfig.load(path, environ=environment), environment, issuer
+
+    def _managed_custody_config(
+        self,
+        *,
+        bootstrap_bob: bool = True,
+        include_oidc: bool = False,
+        authorization_ttl_seconds: int = 900,
+    ) -> tuple[GatewayConfig, dict[str, str], str | None]:
+        """Return a managed-custody config with separate control credentials."""
+
+        value = json.loads((ROOT / "config.example.json").read_text(encoding="utf-8"))
+        value["usage_storage"] = {
+            "backend": "postgresql",
+            "postgres_dsn_env": "TEST_POSTGRES_RUNTIME_DSN",
+            "postgres_migration_dsn_env": "TEST_POSTGRES_MIGRATION_DSN",
+            "postgres_schema": self.schema,
+            "postgres_runtime_role": self.runtime_role,
+        }
+        if bootstrap_bob:
+            value["identities"].append(  # type: ignore[index]
+                {
+                    "token_env": "HORMUZ_BOB_TOKEN",
+                    "actor_id": "bob",
+                    "actor_name": "Bob Example",
+                    "team_id": "engineering",
+                    "team_name": "Engineering",
+                    "organization_id": "xpounder",
+                    "identity_type": "human",
+                    "clearance": "confidential",
+                    "allowed_clients": ["codex", "claude-code"],
+                }
+            )
+        issuer: str | None = None
+        if include_oidc:
+            issuer = "http://127.0.0.1:9444"
+            value["authentication"] = {
+                "oidc": {
+                    "issuers": [
+                        {
+                            "issuer": issuer,
+                            "audiences": ["hormuz-api"],
+                            "algorithms": ["RS256"],
+                            "allow_insecure_http": True,
+                            "subjects": [
+                                {
+                                    "subject": "runtime-user",
+                                    "actor_id": "runtime-user",
+                                    "actor_name": "Runtime User",
+                                    "team_id": "engineering",
+                                    "team_name": "Engineering",
+                                    "organization_id": "xpounder",
+                                    "identity_type": "human",
+                                    "clearance": "confidential",
+                                    "allowed_clients": ["codex"],
+                                }
+                            ],
+                        }
+                    ]
+                }
+            }
+        value["key_custody"] = {
+            "backend": "openbao-transit",
+            "endpoint_url": "http://127.0.0.1:8200",
+            "token_env": "HORMUZ_OPENBAO_TOKEN",
+            "transit_mount": "transit",
+            "key_references": {
+                "provider_credential": "provider-key",
+                "identity_connector_secret": "identity-key",
+                "session_material": "session-key",
+                "approval_fingerprint": "approval-key",
+                "data_encryption": "data-key",
+            },
+        }
+        administrators: list[dict[str, str]] = [
+            {"organization_id": "xpounder", "actor_id": "alice"}
+        ]
+        if bootstrap_bob:
+            administrators.append({"organization_id": "xpounder", "actor_id": "bob"})
+        value["custody_control"] = {
+            "mode": "postgresql",
+            "postgres_control_dsn_env": "TEST_POSTGRES_CUSTODY_CONTROL_DSN",
+            "postgres_control_role": self.custody_control_role,
+            "authorization_ttl_seconds": authorization_ttl_seconds,
+            "bootstrap_administrators": administrators,
+        }
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        path = Path(temporary.name) / "hormuz-managed-custody.json"
+        path.write_text(json.dumps(value), encoding="utf-8")
+        environment = {
+            "HORMUZ_TOKEN": "custody-test-alice-token",
+            "TEST_POSTGRES_RUNTIME_DSN": self.runtime_dsn,
+            "TEST_POSTGRES_MIGRATION_DSN": self.owner_dsn,
+            "TEST_POSTGRES_CUSTODY_CONTROL_DSN": self.custody_control_dsn,
+            "HORMUZ_CUSTODY_ADMIN_TOKEN": "custody-test-alice-token",
+            "HORMUZ_OPENBAO_TOKEN": "openbao-test-token-value",
+        }
+        if bootstrap_bob:
+            environment["HORMUZ_BOB_TOKEN"] = "custody-test-bob-token"
+            environment["HORMUZ_CUSTODY_BOB_TOKEN"] = "custody-test-bob-token"
         return GatewayConfig.load(path, environ=environment), environment, issuer
 
     def _policy_document(self, *, openai_model: str = "gpt-5.4-mini", actor_blocked: bool = False) -> dict[str, object]:
