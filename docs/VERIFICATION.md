@@ -99,13 +99,17 @@ boundary.
 
 ## Ceph RGW self-hosted Object Lock conformance
 
-Ceph RGW Tentacle 20.2.3 is the first **candidate** self-hosted storage target,
-not a completed certification. The opt-in
+OpenBao Transit plus Ceph RGW Tentacle 20.2.3 is the first **verified
+self-hosted reference** for the exact tested custody/retention and
+rotation/recovery behaviors, not unrestricted production certification. The
+exact-pair live evidence is published in
+[#95](https://github.com/Xpounder-com/hormuz/issues/95). The opt-in
 `tools/verify_ceph_rgw_custody_conformance.py` harness requires a local,
 operator-provisioned Linux Cephadm lab, loopback RGW/OpenBao endpoints, a
-dedicated Object-Lock-enabled bucket, and an explicitly attested running RGW
-container. It refuses a container whose release or repository digest differs
-from the target documented in [CEPH_RGW_CONFORMANCE.md](CEPH_RGW_CONFORMANCE.md).
+dedicated Object-Lock-enabled bucket, and explicitly attested running RGW and
+OpenBao containers. It refuses a container whose required release, repository
+digest, or platform differs from the target documented in
+[CEPH_RGW_CONFORMANCE.md](CEPH_RGW_CONFORMANCE.md).
 
 After first checking OpenBao data-key operations and Object Lock configuration,
 the harness first proves the credential can delete an unprotected control
@@ -115,10 +119,11 @@ artifacts, reads one back and verifies the Hormuz audit chain, asserts
 and version deletion, and checks a separate object has a legal hold. This
 distinguishes RGW enforcement from a merely underprivileged test credential. It
 writes a strict content-free evidence record only if every assertion passes.
-Normal CI tests the harness's validation and evidence shape against fakes; it
-does not claim live Ceph conformance. A single-host pass does not protect
-against a host-root administrator deleting disks or volumes, and does not
-establish HA, recovery, or production immutability.
+The published #60 record covers the earlier pinned Ceph-only target; #95
+publishes the current paired content-free evidence. Normal CI additionally
+tests the harness's validation and evidence shape against fakes. A single-host
+pass does not protect against a host-root administrator deleting disks or
+volumes, and does not establish HA, recovery, or production immutability.
 
 ## Automated publication gate
 

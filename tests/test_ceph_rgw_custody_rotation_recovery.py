@@ -271,6 +271,7 @@ class CephRGWCustodyRotationRecoveryTests(unittest.TestCase):
             "HORMUZ_CEPH_RGW_BUCKET": "hormuz-rotation-recovery",
             "HORMUZ_CEPH_RGW_ACCESS_KEY": "test-access-key",
             "HORMUZ_CEPH_RGW_SECRET_KEY": "test-secret-key",
+            "HORMUZ_CEPH_OPENBAO_CONTAINER": "openbao-0",
             "HORMUZ_CEPH_OPENBAO_ENDPOINT": "http://127.0.0.1:8200",
             "HORMUZ_CEPH_OPENBAO_RUNTIME_TOKEN": "runtime-token",
             "HORMUZ_CEPH_OPENBAO_ADMIN_TOKEN": "administrator-token",
@@ -296,6 +297,15 @@ class CephRGWCustodyRotationRecoveryTests(unittest.TestCase):
     def _runner() -> dict[str, str]:
         return {"image_digest": "sha256:" + "a" * 64, "platform": "linux/amd64"}
 
+    @staticmethod
+    def _openbao_target() -> dict[str, str]:
+        return {
+            "image_reference": conformance.OPENBAO_TARGET_IMAGE_REFERENCE,
+            "image_digest": conformance.OPENBAO_TARGET_IMAGE_DIGEST,
+            "version": conformance.OPENBAO_TARGET_VERSION_OUTPUT,
+            "platform": conformance.OPENBAO_TARGET_PLATFORM,
+        }
+
     def test_configuration_requires_separate_local_rotation_authority_and_key_purposes(self) -> None:
         self.assertEqual(self._config().retention_days, 1)
 
@@ -317,6 +327,12 @@ class CephRGWCustodyRotationRecoveryTests(unittest.TestCase):
             conformance.configuration_from_environment(environment)
         self.assertEqual(raised.exception.code, "local_endpoint_required")
 
+        environment = self._environment()
+        environment["HORMUZ_CEPH_OPENBAO_CONTAINER"] = "not/a-container"
+        with self.assertRaises(conformance.ConformanceFailure) as raised:
+            conformance.configuration_from_environment(environment)
+        self.assertEqual(raised.exception.code, "openbao_container_invalid")
+
     def test_pre_attested_target_and_runner_are_pinned(self) -> None:
         target_environment = {
             "HORMUZ_CEPH_RGW_TARGET_ATTESTED": "1",
@@ -333,16 +349,38 @@ class CephRGWCustodyRotationRecoveryTests(unittest.TestCase):
         }
         self.assertEqual(conformance.attest_runner_from_environment(runner_environment)["platform"], "linux/amd64")
 
+        openbao_environment = {
+            "HORMUZ_CEPH_OPENBAO_TARGET_ATTESTED": "1",
+            "HORMUZ_CEPH_OPENBAO_TARGET_IMAGE_REFERENCE": conformance.OPENBAO_TARGET_IMAGE_REFERENCE,
+            "HORMUZ_CEPH_OPENBAO_TARGET_IMAGE_DIGEST": conformance.OPENBAO_TARGET_IMAGE_DIGEST,
+            "HORMUZ_CEPH_OPENBAO_TARGET_VERSION": conformance.OPENBAO_TARGET_VERSION_OUTPUT,
+            "HORMUZ_CEPH_OPENBAO_TARGET_PLATFORM": conformance.OPENBAO_TARGET_PLATFORM,
+        }
+        self.assertEqual(conformance.attest_openbao_target_from_environment(openbao_environment), self._openbao_target())
+
         target_environment["HORMUZ_CEPH_RGW_TARGET_RELEASE"] = "20.2.2"
         with self.assertRaises(conformance.ConformanceFailure) as raised:
             conformance.attest_target_from_environment(target_environment)
         self.assertEqual(raised.exception.code, "pre_attested_target_invalid")
+
+        for field, wrong_value in (
+            ("HORMUZ_CEPH_OPENBAO_TARGET_IMAGE_REFERENCE", "openbao/openbao@sha256:" + "0" * 64),
+            ("HORMUZ_CEPH_OPENBAO_TARGET_IMAGE_DIGEST", "sha256:" + "0" * 64),
+            ("HORMUZ_CEPH_OPENBAO_TARGET_VERSION", "OpenBao v2.5.3"),
+            ("HORMUZ_CEPH_OPENBAO_TARGET_PLATFORM", "linux/amd64"),
+        ):
+            candidate = dict(openbao_environment)
+            candidate[field] = wrong_value
+            with self.assertRaises(conformance.ConformanceFailure) as raised:
+                conformance.attest_openbao_target_from_environment(candidate)
+            self.assertEqual(raised.exception.code, "pre_attested_openbao_target_invalid")
 
     def test_same_named_key_versions_recover_pre_rotation_material_with_a_fresh_runtime(self) -> None:
         runtime_factory = _RecoveryRuntimeFactory()
         evidence = conformance.run_conformance(
             self._config(),
             attest_target=self._target,
+            attest_openbao=self._openbao_target,
             attest_runner=self._runner,
             runtime_factory=runtime_factory,
         )
@@ -375,6 +413,7 @@ class CephRGWCustodyRotationRecoveryTests(unittest.TestCase):
             conformance.run_conformance(
                 self._config(),
                 attest_target=self._target,
+                attest_openbao=self._openbao_target,
                 attest_runner=self._runner,
                 runtime_factory=_RecoveryRuntimeFactory(runtime_can_rotate=True),
             )
@@ -385,6 +424,7 @@ class CephRGWCustodyRotationRecoveryTests(unittest.TestCase):
             conformance.run_conformance(
                 self._config(),
                 attest_target=self._target,
+                attest_openbao=self._openbao_target,
                 attest_runner=self._runner,
                 runtime_factory=_RecoveryRuntimeFactory(administrator_can_use_data_keys=True),
             )
@@ -394,6 +434,7 @@ class CephRGWCustodyRotationRecoveryTests(unittest.TestCase):
         evidence = conformance.run_conformance(
             self._config(),
             attest_target=self._target,
+            attest_openbao=self._openbao_target,
             attest_runner=self._runner,
             runtime_factory=_RecoveryRuntimeFactory(),
         )
@@ -412,6 +453,12 @@ class CephRGWCustodyRotationRecoveryTests(unittest.TestCase):
                 conformance.validate_evidence(invalid)
             self.assertEqual(raised.exception.code, "evidence_invalid")
 
+            legacy = dict(evidence)
+            legacy["schema_version"] = conformance._LEGACY_SCHEMA_VERSION
+            legacy["checks"] = list(conformance._LEGACY_REQUIRED_CHECKS)
+            del legacy["openbao_target"]
+            conformance.validate_evidence(legacy)
+
     def test_pinned_runner_launcher_cannot_mount_the_docker_socket_or_run_the_wrong_tool(self) -> None:
         launcher = ROOT / "tools" / "run_ceph_rgw_custody_rotation_recovery_container.sh"
         parsed = subprocess.run(["bash", "-n", str(launcher)], check=False, capture_output=True, text=True)
@@ -423,6 +470,12 @@ class CephRGWCustodyRotationRecoveryTests(unittest.TestCase):
         self.assertIn('--security-opt no-new-privileges', contents)
         self.assertIn('--entrypoint python', contents)
         self.assertIn('/opt/hormuz/tools/verify_ceph_rgw_custody_rotation_recovery.py', contents)
+        self.assertIn('HORMUZ_CEPH_OPENBAO_CONTAINER', contents)
+        self.assertIn('OPENBAO_TARGET_IMAGE_REFERENCE=', contents)
+        self.assertIn('HORMUZ_CEPH_OPENBAO_TARGET_ATTESTED=1', contents)
+        self.assertIn('openbao_platform_mismatch', contents)
+        self.assertIn("evidence_owner=\"$(stat --format '%u:%g'", contents)
+        self.assertIn('--user "${evidence_owner}"', contents)
         self.assertNotIn('/var/run/docker.sock', contents)
 
         dockerfile = (ROOT / "Dockerfile.ceph-rgw-conformance").read_text(encoding="utf-8")

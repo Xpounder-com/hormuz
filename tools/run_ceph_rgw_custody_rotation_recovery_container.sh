@@ -14,6 +14,10 @@ readonly TARGET_IMAGE_REFERENCE="quay.io/ceph/ceph@sha256:d195020de02512030118e7
 readonly TARGET_IMAGE_DIGEST="sha256:d195020de02512030118e772cef7859e92904e91eb4cb21acb503f8b94118137"
 readonly TARGET_RELEASE="20.2.3"
 readonly TARGET_VERSION_OUTPUT="ceph version 20.2.3 (06c2f9c35b67055a8a6fb99d1be236b3c4832ace) tentacle (stable)"
+readonly OPENBAO_TARGET_IMAGE_REFERENCE="openbao/openbao@sha256:436eaf9778cad75507ff70ea26ace30dcbe15606e619ac3823495663d7f7c115"
+readonly OPENBAO_TARGET_IMAGE_DIGEST="sha256:436eaf9778cad75507ff70ea26ace30dcbe15606e619ac3823495663d7f7c115"
+readonly OPENBAO_TARGET_PLATFORM="linux/arm64"
+readonly OPENBAO_TARGET_VERSION="OpenBao v2.5.4 (4f6d47246a053375271a5fd8af85c3b75695aa46), built 2026-05-20T16:08:53Z"
 
 failure() {
   printf 'Ceph custody rotation-recovery gate failed: %s\n' "$1" >&2
@@ -51,6 +55,29 @@ if [[ "${target_platform}" != "linux/amd64" && "${target_platform}" != "linux/ar
   failure 'candidate_platform_invalid'
 fi
 
+openbao_container="$(sed -n 's/^HORMUZ_CEPH_OPENBAO_CONTAINER=//p' "${ENVIRONMENT_FILE}")"
+if [[ ! "${openbao_container}" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$ ]]; then
+  failure 'openbao_container_invalid'
+fi
+if ! openbao_state_and_image="$(docker inspect --format '{{.State.Running}}|{{.Image}}' "${openbao_container}")"; then
+  failure 'openbao_container_unverified'
+fi
+openbao_running="${openbao_state_and_image%%|*}"
+openbao_image_id="${openbao_state_and_image#*|}"
+if [[ "${openbao_running}" != "true" || "${openbao_image_id}" != sha256:* ]]; then
+  failure 'openbao_container_unverified'
+fi
+if ! docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "${openbao_image_id}" | grep -Fqx "${OPENBAO_TARGET_IMAGE_REFERENCE}"; then
+  failure 'openbao_digest_mismatch'
+fi
+if [[ "$(docker exec "${openbao_container}" bao version)" != "${OPENBAO_TARGET_VERSION}" ]]; then
+  failure 'openbao_release_mismatch'
+fi
+openbao_platform="$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "${openbao_image_id}")"
+if [[ "${openbao_platform}" != "${OPENBAO_TARGET_PLATFORM}" ]]; then
+  failure 'openbao_platform_mismatch'
+fi
+
 readonly EVIDENCE_OUT="$2"
 readonly EVIDENCE_DIRECTORY="$(dirname "${EVIDENCE_OUT}")"
 readonly EVIDENCE_NAME="$(basename "${EVIDENCE_OUT}")"
@@ -60,6 +87,10 @@ fi
 
 umask 077
 mkdir -p "${EVIDENCE_DIRECTORY}"
+evidence_owner="$(stat --format '%u:%g' "${EVIDENCE_DIRECTORY}")"
+if [[ ! "${evidence_owner}" =~ ^[0-9]+:[0-9]+$ ]]; then
+  failure 'evidence_output_owner_invalid'
+fi
 image_id_file="$(mktemp "${TMPDIR:-/tmp}/hormuz-ceph-rotation-runner-image.XXXXXX")"
 cleanup() {
   hormuz_remove_temporary_file "${image_id_file}"
@@ -83,6 +114,7 @@ fi
 
 docker run --rm \
   --platform "${RUNNER_PLATFORM}" \
+  --user "${evidence_owner}" \
   --network host \
   --read-only \
   --tmpfs /tmp:rw,noexec,nosuid,size=64m \
@@ -94,6 +126,11 @@ docker run --rm \
   --env "HORMUZ_CEPH_RGW_TARGET_IMAGE_DIGEST=${TARGET_IMAGE_DIGEST}" \
   --env "HORMUZ_CEPH_RGW_TARGET_RELEASE=${TARGET_RELEASE}" \
   --env "HORMUZ_CEPH_RGW_TARGET_PLATFORM=${target_platform}" \
+  --env HORMUZ_CEPH_OPENBAO_TARGET_ATTESTED=1 \
+  --env "HORMUZ_CEPH_OPENBAO_TARGET_IMAGE_REFERENCE=${OPENBAO_TARGET_IMAGE_REFERENCE}" \
+  --env "HORMUZ_CEPH_OPENBAO_TARGET_IMAGE_DIGEST=${OPENBAO_TARGET_IMAGE_DIGEST}" \
+  --env "HORMUZ_CEPH_OPENBAO_TARGET_VERSION=${OPENBAO_TARGET_VERSION}" \
+  --env "HORMUZ_CEPH_OPENBAO_TARGET_PLATFORM=${openbao_platform}" \
   --env "HORMUZ_CEPH_RGW_RUNNER_IMAGE_DIGEST=${runner_image_digest}" \
   --env "HORMUZ_CEPH_RGW_RUNNER_PLATFORM=${RUNNER_PLATFORM}" \
   --volume "${EVIDENCE_DIRECTORY}:/evidence:rw" \

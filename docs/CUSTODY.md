@@ -11,8 +11,8 @@ explicit profiles:
 - **AWS (optional):** customer-managed AWS KMS keys plus a bucket created with
   S3 Object Lock enabled.
 
-A deployment is not certified merely by selecting a profile. It must complete
-the profile's live conformance evidence run. This is an explicit operational
+A deployment does not inherit verification merely by selecting a profile. It
+must complete the profile's live conformance evidence run. This is an explicit operational
 control: it is not enabled by default, does not store prompts or responses,
 and does not automatically migrate existing environment variables.
 
@@ -104,17 +104,22 @@ profile without writing an audit object:
 hormuz --config /etc/hormuz/hormuz.json custody verify
 ```
 
-The repository's generic adapter tests do not certify a particular storage
-product. Ceph RGW Tentacle is Hormuz's first self-hosted certification target,
-but the target is optional and does not change the S3-compatible Object Lock
-product contract. Its immutable image digest becomes a Hormuz certification
-only after the opt-in live conformance gate proves actual COMPLIANCE-mode
-retention, legal hold, prohibited deletion and retention reduction, encrypted
-artifact recovery, content-free audit evidence, and the schema-v2 pinned
-`linux/amd64` runner digest. See
+The repository's generic adapter tests do not verify a particular storage
+product. OpenBao Transit plus Ceph RGW Tentacle is Hormuz's first **verified
+self-hosted reference** for the exact custody/retention and rotation/recovery
+behaviors. The target is optional and does not change the vendor-neutral
+envelope-encryption or S3-compatible Object Lock product contracts. Its
+content-free evidence, exact OpenBao/Ceph attestations, and pinned
+`linux/amd64` runner provenance are published in
+[#95](https://github.com/Xpounder-com/hormuz/issues/95). See
 [CEPH_RGW_CONFORMANCE.md](CEPH_RGW_CONFORMANCE.md).
 
 ## Optional AWS profile
+
+The adapter is available but **not yet live-certified**. Its customer-authorized
+AWS KMS + S3 Object Lock conformance gate is tracked separately in
+[issue #94](https://github.com/Xpounder-com/hormuz/issues/94); it does not
+block the vendor-neutral core custody gate.
 
 Install the optional adapter into the Hormuz service environment:
 
@@ -337,27 +342,30 @@ conformance target, not a limitation Hormuz hides from an operator.
 
 ## Live Ceph RGW self-hosted conformance
 
-The first self-hosted target is **Ceph RGW Tentacle 20.2.3**, attested at
-runtime to this immutable image index:
+The verified RGW target is **Ceph RGW Tentacle 20.2.3**, attested at runtime to
+this immutable image index:
 
 ```text
 quay.io/ceph/ceph@sha256:d195020de02512030118e772cef7859e92904e91eb4cb21acb503f8b94118137
 ```
 
-It is Hormuz's first **certified self-hosted reference** for the constrained
-RGW-level Object Lock scope described here. The content-free schema-v2 live
-record is published in [issue #60](https://github.com/Xpounder-com/hormuz/issues/60).
+It is part of Hormuz's first **verified self-hosted reference** for the
+constrained RGW-level Object Lock scope described here: exact OpenBao Transit
+plus exact Ceph RGW. The content-free schema-v3 paired custody/retention record
+and schema-v2 paired rotation/recovery record are published in
+[#95](https://github.com/Xpounder-com/hormuz/issues/95).
 The operator-provisioned lab is a disposable, single-host Linux Cephadm
 environment with a loopback RGW endpoint and a local OpenBao Transit service.
-The gate refuses arbitrary remote endpoints and refuses a running RGW container
-whose image digest or Ceph version is not the exact reference above. It leaves
+The gate refuses arbitrary remote endpoints and refuses a running RGW or
+OpenBao container whose image, release/version, or platform is not the exact
+reference recorded in [CEPH_RGW_CONFORMANCE.md](CEPH_RGW_CONFORMANCE.md). It leaves
 two retained objects behind: one to prove COMPLIANCE retention cannot be
 shortened or deleted, and one with a legal hold. It also writes and deletes an
 unprotected control version, and extends retained-object retention, so a later
 denial cannot be explained away as missing RGW permissions. Native ARM64
 runtime conformance is separately tracked in
 [issue #68](https://github.com/Xpounder-com/hormuz/issues/68) and does not
-block this reference certification unless it becomes a promised launch platform.
+block this reference verification unless it becomes a promised launch platform.
 Run it only with a disposable Object-Lock-enabled bucket with no default
 retention:
 
@@ -372,6 +380,7 @@ export HORMUZ_CEPH_RGW_BUCKET=hormuz-ceph-conformance
 export HORMUZ_CEPH_RGW_ACCESS_KEY=... # dedicated RGW credential, not an AWS credential
 export HORMUZ_CEPH_RGW_SECRET_KEY=...
 export HORMUZ_CEPH_RGW_CONTAINER=... # locally running RGW container name or ID
+export HORMUZ_CEPH_OPENBAO_CONTAINER=... # locally running exact OpenBao container name or ID
 export HORMUZ_CEPH_OPENBAO_ENDPOINT=http://127.0.0.1:8200
 export HORMUZ_CEPH_OPENBAO_TOKEN=...
 export HORMUZ_CEPH_OPENBAO_PROVIDER_KEY=hormuz-conformance-provider
@@ -382,9 +391,10 @@ python tools/verify_ceph_rgw_custody_conformance.py \
 
 The output record deliberately excludes endpoints, bucket names, organization
 identifiers, credentials, prompts, responses, and object keys. A passing record
-is necessary but not, by itself, a public certification claim: attach it to the
-release issue/PR and review the exact target digest before changing the target
-status. Full environment preparation, evidence semantics, and nonclaims are in
+is necessary but not, by itself, an unrestricted production-certification claim:
+attach it to the release issue/PR and review the exact target digest before
+changing the target status. Full environment preparation, evidence semantics,
+and nonclaims are in
 [CEPH_RGW_CONFORMANCE.md](CEPH_RGW_CONFORMANCE.md).
 
 ### Self-hosted Transit key-version rotation and artifact recovery
@@ -392,7 +402,8 @@ status. Full environment preparation, evidence semantics, and nonclaims are in
 The bounded self-hosted custody checkpoint in
 [issue #69](https://github.com/Xpounder-com/hormuz/issues/69) is completed in
 [PR #70](https://github.com/Xpounder-com/hormuz/pull/70). Its final
-content-free live evidence is published with the merged PR. It does not change
+content-free exact-pair live evidence is published in
+[#95](https://github.com/Xpounder-com/hormuz/issues/95). It does not change
 the normal gateway runtime: the runtime's OpenBao token remains a
 data-plane credential and must have no rotation authority. A separately scoped,
 short-lived **lab administrator** token is the only credential permitted to
@@ -421,7 +432,8 @@ tools/run_ceph_rgw_custody_rotation_recovery_container.sh \
 ```
 
 The environment file supplies the explicit opt-in/acknowledgement, RGW, and
-OpenBao values, including distinct `HORMUZ_CEPH_OPENBAO_RUNTIME_TOKEN` and
+OpenBao values, including `HORMUZ_CEPH_OPENBAO_CONTAINER`, distinct
+`HORMUZ_CEPH_OPENBAO_RUNTIME_TOKEN` and
 `HORMUZ_CEPH_OPENBAO_ADMIN_TOKEN`, plus distinct provider, data, and deliberately
 unavailable key names. The result is a private, content-free evidence record;
 it excludes endpoints, bucket/object identifiers, tokens, credentials, and

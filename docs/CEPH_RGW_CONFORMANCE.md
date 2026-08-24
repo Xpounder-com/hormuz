@@ -2,38 +2,48 @@
 
 ## Status
 
-**Certified self-hosted reference — single-host RGW enforcement only.**
+**Verified self-hosted reference — exact OpenBao Transit + Ceph RGW,
+single-host enforcement only.**
 
-Ceph RGW is Hormuz's first certified self-hosted reference for the optional,
-vendor-neutral S3-compatible Object Lock custody interface. Hormuz does not
-require Ceph in its core package, runtime, configuration, or customer
-deployment. An organization may use another S3-compatible Object Lock service
-after completing a separate conformance run.
+OpenBao Transit plus Ceph RGW is Hormuz's first verified self-hosted reference
+for the optional, vendor-neutral envelope-encryption and S3-compatible Object
+Lock custody interfaces. Hormuz does not require either product in its core
+package, runtime, configuration, or customer deployment. An organization may
+use another customer-controlled backend after completing a separate conformance
+run.
 
-The target under test is:
+The targets under test are:
 
 ```text
 Ceph release: Tentacle 20.2.3
 Image: quay.io/ceph/ceph@sha256:d195020de02512030118e772cef7859e92904e91eb4cb21acb503f8b94118137
+OpenBao image: openbao/openbao@sha256:436eaf9778cad75507ff70ea26ace30dcbe15606e619ac3823495663d7f7c115
+OpenBao version: OpenBao v2.5.4 (4f6d47246a053375271a5fd8af85c3b75695aa46), built 2026-05-20T16:08:53Z
+OpenBao platform: linux/arm64
 ```
 
-The certification decision is supported by the content-free schema-v2 live
-evidence record published in [issue #60](https://github.com/Xpounder-com/hormuz/issues/60)
-on 2026-08-23. It attests the exact release/digest above, a `linux/arm64`
-target, a pinned `linux/amd64` runner, and every required check in this
-document. It is not a production storage certification.
+The content-free records published in
+[#95](https://github.com/Xpounder-com/hormuz/issues/95) attest both exact
+targets above: a schema-v3 custody/retention record and a schema-v2
+rotation/recovery record. Both use a pinned `linux/amd64` runner against
+`linux/arm64` lab services. They prove only the exact behaviors in this
+document; neither record is unrestricted production certification. The earlier
+Ceph-only schema-v2 record remains published in
+[issue #60](https://github.com/Xpounder-com/hormuz/issues/60).
 
 Native ARM64 Hormuz runtime conformance is tracked separately in
 [issue #68](https://github.com/Xpounder-com/hormuz/issues/68). It does not
-block this reference certification unless native ARM64 becomes a promised
+block this reference verification unless native ARM64 becomes a promised
 launch platform.
 
 ## What the gate proves
 
 `tools/verify_ceph_rgw_custody_conformance.py` is intentionally opt-in. It
-first inspects the named local RGW container and refuses to continue unless it
-is running the exact image digest above and reports `ceph version 20.2.3 ...
-tentacle (stable)`. It then uses only explicit OpenBao and RGW credentials to:
+first inspects the named local RGW and OpenBao containers and refuses to
+continue unless the RGW is running the exact image digest above and reports
+`ceph version 20.2.3 ... tentacle (stable)`, and OpenBao is running the exact
+image, version, and platform above. It then uses only explicit OpenBao and RGW
+credentials to:
 
 1. verify two purpose-separated, tenant-bound OpenBao Transit data-key flows;
 2. verify bucket versioning and Object Lock are enabled;
@@ -50,16 +60,16 @@ tentacle (stable)`. It then uses only explicit OpenBao and RGW credentials to:
 9. write a private, versioned, content-free evidence record only when every
    check passes.
 
-The current evidence JSON is schema v2. It intentionally contains the reference
-release/digest and platform, the pinned `linux/amd64` runner's local
-content-addressed image digest, check names, random artifact IDs, artifact
-hashes, hashes of object versions, and nonclaims. It excludes the endpoint,
-bucket, object key, tenant identifier, credential values, prompts, and
-responses.
+The current custody/retention evidence JSON is schema v3. It contains the exact Ceph and OpenBao
+targets, the pinned `linux/amd64` runner's local content-addressed image
+digest, check names, random artifact IDs, artifact hashes, hashes of object
+versions, and nonclaims. It excludes the endpoint, bucket, object key, tenant
+identifier, credential values, prompts, and responses.
 
-Schema v1 records remain readable as historical evidence. They lack runner
-attestation and must not be rewritten in place; a new v2 run is required for a
-current Ceph reference review.
+Schema v1 and v2 records remain readable as historical evidence. They must not
+be rewritten in place: v1 lacks runner attestation, and the earlier custody v2
+lacks the exact OpenBao target. A fresh v3 run is required for a subsequent
+paired-reference review.
 
 ## Lab prerequisites
 
@@ -94,16 +104,17 @@ create two separate keys: one for `provider_credential`, one for
 `data_encryption`. Use a short-lived token limited to those keys. The runner
 never falls back to AWS credentials or a remote endpoint.
 
-Record the active RGW container name or ID after Cephadm deploys it. The runner
-will independently attest it, so an incorrect value fails before any retained
-object is written.
+Record the active RGW and OpenBao container names or IDs. The wrapper
+independently attests both, so an incorrect, stopped, or non-reference OpenBao
+container fails before any retained object is written.
 
 ## Transit key-version rotation and recovery checkpoint
 
 [Issue #69](https://github.com/Xpounder-com/hormuz/issues/69) is completed in
-[PR #70](https://github.com/Xpounder-com/hormuz/pull/70), with final
-content-free live evidence published on the PR. It is a recovery checkpoint,
-not an expansion of the existing RGW-level certification claim.
+[PR #70](https://github.com/Xpounder-com/hormuz/pull/70). The current exact
+OpenBao/Ceph schema-v2 rotation/recovery evidence is published in
+[#95](https://github.com/Xpounder-com/hormuz/issues/95). It is a recovery
+checkpoint, not an expansion of the bounded self-hosted-reference claim.
 
 The checkpoint requires three distinct named Transit keys:
 
@@ -141,6 +152,7 @@ HORMUZ_CEPH_RGW_BUCKET=<disposable Object-Lock bucket>
 HORMUZ_CEPH_RGW_ACCESS_KEY=<dedicated RGW access key>
 HORMUZ_CEPH_RGW_SECRET_KEY=<dedicated RGW secret>
 HORMUZ_CEPH_RGW_CONTAINER=<attested local RGW container>
+HORMUZ_CEPH_OPENBAO_CONTAINER=<attested local OpenBao container>
 HORMUZ_CEPH_OPENBAO_ENDPOINT=http://127.0.0.1:8200
 HORMUZ_CEPH_OPENBAO_RUNTIME_TOKEN=<data-plane-only token>
 HORMUZ_CEPH_OPENBAO_ADMIN_TOKEN=<rotation-only administrator token>
@@ -158,14 +170,15 @@ tools/run_ceph_rgw_custody_rotation_recovery_container.sh \
   --evidence-out /secure/path/ceph-rgw-custody-rotation-recovery.json
 ```
 
-The output schema is `hormuz.ceph-rgw-custody-rotation-recovery@1`. It contains
-only the exact target/runner provenance, required check names, duration values,
-retention days, and explicit nonclaims. It excludes fixture content, endpoints,
-bucket/object IDs, organization IDs, credentials, OpenBao tokens, and plaintext
-material. A fresh successful run is required for each evidence review; it is not
-an OpenBao storage-backend backup/PITR or master-key recovery test, a production
-KMS/BYOK certification, customer RPO/RTO, multi-host DR/HA, host-root/disk
-protection, or native ARM64 runtime conformance.
+The output schema is `hormuz.ceph-rgw-custody-rotation-recovery@2`. It contains
+only the exact Ceph/OpenBao target and runner provenance, required check names,
+duration values, retention days, and explicit nonclaims. It excludes fixture
+content, endpoints, bucket/object IDs, organization IDs, credentials, OpenBao
+tokens, and plaintext material. Schema-v1 records remain readable and are not
+rewritten. A fresh successful run is required for each evidence review; it is
+not an OpenBao storage-backend backup/PITR or master-key recovery test, a
+production KMS/BYOK certification, customer RPO/RTO, multi-host DR/HA,
+host-root/disk protection, or native ARM64 runtime conformance.
 
 ## Run the gate
 
@@ -175,9 +188,11 @@ image from an immutable Python base digest, records that resulting runner image
 digest and architecture in evidence, and runs it with Linux host networking so
 only the lab's loopback RGW and OpenBao endpoints are reachable.
 Before it starts the runner, the wrapper independently checks the local RGW
-container's exact release, digest, and platform. It passes only that
-content-free attestation to the runner, so the runner never receives Docker's
-privileged host socket.
+container's exact release, digest, and platform, plus the local OpenBao
+container's exact image, version, and platform. It passes only those
+content-free attestations to the runner, so the runner never receives Docker's
+privileged host socket. The runner executes as the evidence directory's owner,
+preserving owner-only evidence without a privileged filesystem capability.
 
 Place the existing conformance environment values in a root-readable,
 mode-`0600` environment file. Do not put the runner image values in that file:
@@ -189,10 +204,11 @@ tools/run_ceph_rgw_custody_conformance_container.sh \
   --evidence-out /secure/path/ceph-rgw-custody-evidence.json
 ```
 
-The environment file contains the previous `HORMUZ_RUN_CEPH_RGW_CUSTODY_CONFORMANCE`,
-confirmation, RGW, OpenBao, and credential variables. Its RGW and OpenBao
-endpoints must still be loopback-only. The exact confirmation is deliberate: a
-successful gate leaves at least two objects retained for
+The environment file contains the required `HORMUZ_RUN_CEPH_RGW_CUSTODY_CONFORMANCE`,
+confirmation, RGW, OpenBao, and credential variables, including
+`HORMUZ_CEPH_OPENBAO_CONTAINER`. Its RGW and OpenBao endpoints must still be
+loopback-only. The exact confirmation is deliberate: a successful gate leaves
+at least two objects retained for
 `HORMUZ_CEPH_RGW_RETENTION_DAYS` (one day by default). Do not set the test
 bucket or endpoint to a production custody location. Never place a secret
 value in a shell command, source file, configuration file, evidence record, or
@@ -202,10 +218,10 @@ issue/PR comment.
 `GetBucketLocation`, not an inferred AWS geography. Use `us-east-1` only when
 that is what the target RGW returns.
 
-## Certification procedure
+## Verification-record procedure
 
-A successful command is an evidence input, not an automatic marketing claim.
-For an actual certification decision:
+A successful command is evidence, not an unrestricted production claim. To
+record a verified self-hosted reference:
 
 1. retain the resulting evidence JSON in the release record;
 2. verify its schema, exact target release/digest, `linux/amd64` runner digest,
