@@ -10,8 +10,9 @@
 
 Hormuz will expose provider-neutral envelope-key and immutable-audit-anchor
 contracts. AWS KMS and S3 Object Lock remain an optional reference
-implementation and certification target. An account-free profile uses OpenBao
-Transit plus a customer-operated S3-compatible Object Lock service. Both
+implementation with a separate future live-certification gate. An account-free
+profile uses OpenBao Transit plus a customer-operated S3-compatible Object Lock
+service. Both
 integrations are optional at package install time and must be enabled
 explicitly in deployment configuration.
 
@@ -61,10 +62,12 @@ configured retention period. It does not prove that a mutable source database
 did not lose a row before the next explicit anchor; commit-time database
 chaining and automated delivery are separate work.
 
-Customer-managed AWS KMS keys provide the intended BYOK deployment boundary:
-the customer owns KMS policy, rotation, disablement, and deletion protection.
-Imported KMS material, CloudHSM, and external key stores may be used by a
-customer only after their exact operational profile is separately verified.
+Customer-controlled key infrastructure provides the BYOK deployment boundary:
+the customer owns key policy, rotation, disablement, and deletion protection.
+AWS KMS remains a supported optional adapter, but its live certification is
+separate. Imported KMS material, CloudHSM, external key stores, and any other
+backend may be used only after its exact operational profile is separately
+verified.
 
 The generic self-hosted adapter is deliberately not a storage-provider
 certification. Every candidate must pass an opt-in, real-service conformance
@@ -74,17 +77,22 @@ single-node local composition, once added, proves integration only; it does
 not protect against a host or storage administrator and is not a production
 immutability claim.
 
-## Amendment: first self-hosted certification target (2026-08-23)
+## Amendment: first verified self-hosted reference (2026-08-23)
 
 The product owner selected **Ceph RGW Tentacle** as the first self-hosted
-certification target. This is an operational reference choice, not a new
+verification reference. This is an operational reference choice, not a new
 Hormuz storage backend: the supported product contract remains an
 S3-compatible Object Lock interface, and Ceph remains optional for customers.
 
-The target is specifically the Tentacle `20.2.3` immutable image index
-`quay.io/ceph/ceph@sha256:d195020de02512030118e772cef7859e92904e91eb4cb21acb503f8b94118137`.
-It may be called certified only after the opt-in live gate attests the running
-RGW container to that exact release/digest and verifies all of the following:
+The verified RGW target is specifically the Tentacle `20.2.3` immutable image
+index `quay.io/ceph/ceph@sha256:d195020de02512030118e772cef7859e92904e91eb4cb21acb503f8b94118137`.
+The paired-reference target verified in [#95](https://github.com/Xpounder-com/hormuz/issues/95)
+uses OpenBao Transit
+`openbao/openbao@sha256:436eaf9778cad75507ff70ea26ace30dcbe15606e619ac3823495663d7f7c115`,
+`linux/arm64`, and `OpenBao v2.5.4 (4f6d47246a053375271a5fd8af85c3b75695aa46), built 2026-05-20T16:08:53Z`.
+The opt-in live gate attested both local containers to those exact targets and
+verified all of the following before the pair was recorded as a verified
+self-hosted reference:
 
 - Object Lock `COMPLIANCE` retention is present;
 - a protected version cannot be deleted;
@@ -101,9 +109,9 @@ delete or reduction could be an IAM limitation rather than evidence of
 
 The first runner intentionally accepts only a disposable single-host local
 lab. A successful run proves RGW-level enforcement only; a root administrator
-can still remove the underlying host disks or volumes. It does not certify
-host-root protection, multi-host durability, backup/recovery, HA, or a
-production deployment.
+can still remove the underlying host disks or volumes. It is not unrestricted
+production certification and does not prove host-root protection, multi-host
+durability, backup/recovery, HA, or a production deployment.
 
 ## Rejected alternatives
 
@@ -118,7 +126,7 @@ production deployment.
   because a storage read capability should not expose metadata-only employee or
   audit content. The account-free profile encrypts the complete artifact before
   object-store egress.
-- **Naming a storage product as certified before live WORM evidence:** rejected
+- **Claiming a storage product is verified before live WORM evidence:** rejected
   because S3 API compatibility alone does not prove compliance-mode retention
   is actually enforced.
 - **An AWS-specific core policy model:** rejected because cloud choice belongs

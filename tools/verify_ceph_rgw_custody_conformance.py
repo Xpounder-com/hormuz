@@ -2,10 +2,10 @@
 """Prove the optional Ceph RGW Object Lock custody target on a local host.
 
 This is a release-gate harness, not a Hormuz runtime dependency.  It only
-accepts a loopback RGW/OpenBao lab and attests the running RGW container to a
-specific Ceph release and immutable image digest before it writes any retained
-test objects.  The resulting evidence record contains no endpoint, bucket,
-organization, credential, prompt, or response data.
+accepts a loopback RGW/OpenBao lab and attests the running RGW and OpenBao
+containers to specific releases and immutable image digests before it writes
+any retained test objects.  The resulting evidence record contains no
+endpoint, bucket, organization, credential, prompt, or response data.
 """
 
 from __future__ import annotations
@@ -52,12 +52,17 @@ except ModuleNotFoundError:  # Direct execution resolves helpers beside this scr
 
 
 SCHEMA_ID = "hormuz.ceph-rgw-custody-conformance"
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 _LEGACY_SCHEMA_VERSION = 1
+_PREVIOUS_SCHEMA_VERSION = 2
 TARGET_RELEASE = "20.2.3"
 TARGET_IMAGE_DIGEST = "sha256:d195020de02512030118e772cef7859e92904e91eb4cb21acb503f8b94118137"
 TARGET_IMAGE_REFERENCE = f"quay.io/ceph/ceph@{TARGET_IMAGE_DIGEST}"
 TARGET_VERSION_OUTPUT = "ceph version 20.2.3 (06c2f9c35b67055a8a6fb99d1be236b3c4832ace) tentacle (stable)"
+OPENBAO_TARGET_IMAGE_DIGEST = "sha256:436eaf9778cad75507ff70ea26ace30dcbe15606e619ac3823495663d7f7c115"
+OPENBAO_TARGET_IMAGE_REFERENCE = f"openbao/openbao@{OPENBAO_TARGET_IMAGE_DIGEST}"
+OPENBAO_TARGET_PLATFORM = "linux/arm64"
+OPENBAO_TARGET_VERSION_OUTPUT = "OpenBao v2.5.4 (4f6d47246a053375271a5fd8af85c3b75695aa46), built 2026-05-20T16:08:53Z"
 OPT_IN_ENV = "HORMUZ_RUN_CEPH_RGW_CUSTODY_CONFORMANCE"
 CONFIRMATION_ENV = "HORMUZ_CEPH_RGW_CUSTODY_CONFIRMATION"
 CONFIRMATION_VALUE = "I_UNDERSTAND_DISPOSABLE_OBJECT_LOCK_RETENTION"
@@ -74,7 +79,7 @@ _DENIED_CODES = frozenset(
         "OperationNotPermitted",
     }
 )
-_REQUIRED_CHECKS = (
+_PREVIOUS_REQUIRED_CHECKS = (
     "local_container_release_and_digest_attested",
     "openbao_tenant_bound_data_key_operations",
     "bucket_versioning_and_object_lock_configuration",
@@ -85,6 +90,11 @@ _REQUIRED_CHECKS = (
     "retention_reduction_denied",
     "protected_version_deletion_denied",
     "legal_hold_present",
+)
+_REQUIRED_CHECKS = (
+    "local_container_release_and_digest_attested",
+    "openbao_container_release_and_digest_attested",
+    *_PREVIOUS_REQUIRED_CHECKS[1:],
 )
 _NONCLAIMS = (
     "not_production_immutability",
@@ -114,6 +124,7 @@ class ConformanceConfig:
     access_key: str
     secret_key: str
     rgw_container: str
+    openbao_container: str
     openbao_endpoint: str
     openbao_token: str
     transit_mount: str
@@ -178,6 +189,9 @@ def configuration_from_environment(environ: Mapping[str, str]) -> ConformanceCon
     container = _required(environ, "HORMUZ_CEPH_RGW_CONTAINER")
     if not _CONTAINER_NAME.fullmatch(container):
         raise ConformanceFailure("rgw_container_invalid")
+    openbao_container = _required(environ, "HORMUZ_CEPH_OPENBAO_CONTAINER")
+    if not _CONTAINER_NAME.fullmatch(openbao_container):
+        raise ConformanceFailure("openbao_container_invalid")
 
     prefix = environ.get("HORMUZ_CEPH_RGW_PREFIX", "hormuz/conformance").strip("/")
     if not prefix:
@@ -199,6 +213,7 @@ def configuration_from_environment(environ: Mapping[str, str]) -> ConformanceCon
         access_key=_required(environ, "HORMUZ_CEPH_RGW_ACCESS_KEY"),
         secret_key=_required(environ, "HORMUZ_CEPH_RGW_SECRET_KEY"),
         rgw_container=container,
+        openbao_container=openbao_container,
         openbao_endpoint=openbao_endpoint,
         openbao_token=_required(environ, "HORMUZ_CEPH_OPENBAO_TOKEN"),
         transit_mount=transit_mount,
@@ -263,6 +278,44 @@ def attest_local_rgw_container(
     }
 
 
+def attest_local_openbao_container(
+    container: str,
+    *,
+    command_output: Callable[[Sequence[str]], str] = _command_output,
+) -> dict[str, str]:
+    """Bind the key authority to the exact local OpenBao image under test."""
+
+    state_and_image = command_output(
+        ["docker", "inspect", "--format", "{{.State.Running}}|{{.Image}}", container]
+    )
+    running, separator, image_id = state_and_image.partition("|")
+    if running != "true" or not separator or not image_id.startswith("sha256:"):
+        raise ConformanceFailure("openbao_container_unverified")
+
+    digests_raw = command_output(["docker", "image", "inspect", "--format", "{{json .RepoDigests}}", image_id])
+    try:
+        digests = json.loads(digests_raw)
+    except json.JSONDecodeError:
+        raise ConformanceFailure("openbao_container_unverified") from None
+    if not isinstance(digests, list) or OPENBAO_TARGET_IMAGE_REFERENCE not in digests:
+        raise ConformanceFailure("openbao_digest_mismatch")
+
+    version = command_output(["docker", "exec", container, "bao", "version"])
+    if version != OPENBAO_TARGET_VERSION_OUTPUT:
+        raise ConformanceFailure("openbao_release_mismatch")
+
+    platform = command_output(["docker", "image", "inspect", "--format", "{{.Os}}/{{.Architecture}}", image_id])
+    if platform != OPENBAO_TARGET_PLATFORM:
+        raise ConformanceFailure("openbao_platform_mismatch")
+
+    return {
+        "image_reference": OPENBAO_TARGET_IMAGE_REFERENCE,
+        "image_digest": OPENBAO_TARGET_IMAGE_DIGEST,
+        "version": OPENBAO_TARGET_VERSION_OUTPUT,
+        "platform": OPENBAO_TARGET_PLATFORM,
+    }
+
+
 def attest_target_from_environment(environ: Mapping[str, str] | None = None) -> dict[str, str]:
     """Validate content-free target metadata pre-attested by the local launcher."""
 
@@ -289,6 +342,35 @@ def attest_configured_target(container: str) -> dict[str, str]:
     if os.environ.get("HORMUZ_CEPH_RGW_TARGET_ATTESTED") == "1":
         return attest_target_from_environment()
     return attest_local_rgw_container(container)
+
+
+def attest_openbao_target_from_environment(environ: Mapping[str, str] | None = None) -> dict[str, str]:
+    """Validate content-free OpenBao target metadata pre-attested by the launcher."""
+
+    source = os.environ if environ is None else environ
+    target = {
+        "image_reference": source.get("HORMUZ_CEPH_OPENBAO_TARGET_IMAGE_REFERENCE", ""),
+        "image_digest": source.get("HORMUZ_CEPH_OPENBAO_TARGET_IMAGE_DIGEST", ""),
+        "version": source.get("HORMUZ_CEPH_OPENBAO_TARGET_VERSION", ""),
+        "platform": source.get("HORMUZ_CEPH_OPENBAO_TARGET_PLATFORM", ""),
+    }
+    if (
+        source.get("HORMUZ_CEPH_OPENBAO_TARGET_ATTESTED") != "1"
+        or target["image_reference"] != OPENBAO_TARGET_IMAGE_REFERENCE
+        or target["image_digest"] != OPENBAO_TARGET_IMAGE_DIGEST
+        or target["version"] != OPENBAO_TARGET_VERSION_OUTPUT
+        or target["platform"] != OPENBAO_TARGET_PLATFORM
+    ):
+        raise ConformanceFailure("pre_attested_openbao_target_invalid")
+    return target
+
+
+def attest_configured_openbao_target(container: str) -> dict[str, str]:
+    """Use host Docker attestation directly or a wrapper-provided OpenBao attestation."""
+
+    if os.environ.get("HORMUZ_CEPH_OPENBAO_TARGET_ATTESTED") == "1":
+        return attest_openbao_target_from_environment()
+    return attest_local_openbao_container(container)
 
 
 def attest_runner_from_environment(environ: Mapping[str, str] | None = None) -> dict[str, str]:
@@ -533,12 +615,14 @@ def run_conformance(
     config: ConformanceConfig,
     *,
     attest: Callable[[str], dict[str, str]] = attest_configured_target,
+    attest_openbao: Callable[[str], dict[str, str]] = attest_configured_openbao_target,
     attest_runner: Callable[[], dict[str, str]] = attest_runner_from_environment,
     runtime_factory: Callable[[ConformanceConfig], ConformanceRuntime] = create_runtime,
 ) -> dict[str, object]:
     """Run the full live proof and return a strict, content-free record."""
 
     target = attest(config.rgw_container)
+    openbao_target = attest_openbao(config.openbao_container)
     runner = attest_runner()
     runtime = runtime_factory(config)
     verified_purposes = verify_openbao_transit_profile(
@@ -601,6 +685,7 @@ def run_conformance(
         "executed_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "scope": "single_host_rgw_enforcement_only",
         "target": target,
+        "openbao_target": openbao_target,
         "runner": runner,
         "checks": list(_REQUIRED_CHECKS),
         "retained_artifacts": [compliance_record, legal_hold_record],
@@ -610,7 +695,7 @@ def run_conformance(
 
 
 def validate_evidence(evidence: Mapping[str, object]) -> None:
-    """Fail closed unless a record matches the strict v1 or current v2 shape."""
+    """Fail closed unless a record matches the strict v1, v2, or current v3 shape."""
 
     version = evidence.get("schema_version")
     expected_keys = {
@@ -626,7 +711,13 @@ def validate_evidence(evidence: Mapping[str, object]) -> None:
         "nonclaims",
     }
     expected_nonclaims = _NONCLAIMS
+    expected_checks = _PREVIOUS_REQUIRED_CHECKS
     if version == SCHEMA_VERSION:
+        expected_keys.add("runner")
+        expected_keys.add("openbao_target")
+        expected_nonclaims = _CURRENT_NONCLAIMS
+        expected_checks = _REQUIRED_CHECKS
+    elif version == _PREVIOUS_SCHEMA_VERSION:
         expected_keys.add("runner")
         expected_nonclaims = _CURRENT_NONCLAIMS
     elif version != _LEGACY_SCHEMA_VERSION:
@@ -641,7 +732,7 @@ def validate_evidence(evidence: Mapping[str, object]) -> None:
         or evidence.get("scope") != "single_host_rgw_enforcement_only"
         or not isinstance(evidence.get("executed_at"), str)
         or not isinstance(checks, list)
-        or checks != list(_REQUIRED_CHECKS)
+        or checks != list(expected_checks)
         or not isinstance(nonclaims, list)
         or nonclaims != list(expected_nonclaims)
     ):
@@ -664,13 +755,23 @@ def validate_evidence(evidence: Mapping[str, object]) -> None:
     ):
         raise ConformanceFailure("evidence_invalid")
 
-    if version == SCHEMA_VERSION:
+    if version in {_PREVIOUS_SCHEMA_VERSION, SCHEMA_VERSION}:
         runner = _require_mapping(evidence.get("runner"), "evidence_invalid")
         if (
             set(runner) != {"image_digest", "platform"}
             or not is_sha256_digest(runner.get("image_digest"))
             or runner.get("platform") != "linux/amd64"
         ):
+            raise ConformanceFailure("evidence_invalid")
+
+    if version == SCHEMA_VERSION:
+        openbao_target = _require_mapping(evidence.get("openbao_target"), "evidence_invalid")
+        if dict(openbao_target) != {
+            "image_reference": OPENBAO_TARGET_IMAGE_REFERENCE,
+            "image_digest": OPENBAO_TARGET_IMAGE_DIGEST,
+            "version": OPENBAO_TARGET_VERSION_OUTPUT,
+            "platform": OPENBAO_TARGET_PLATFORM,
+        }:
             raise ConformanceFailure("evidence_invalid")
 
     retention_days = evidence.get("retention_days")

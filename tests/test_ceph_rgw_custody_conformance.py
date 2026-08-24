@@ -4,6 +4,7 @@ import hashlib
 import importlib.util
 import json
 import stat
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -221,6 +222,7 @@ class CephRGWConfigurationTests(unittest.TestCase):
             "HORMUZ_CEPH_RGW_SECRET_KEY": "test-secret-key",
             "HORMUZ_CEPH_RGW_CONTAINER": "ceph-rgw-0",
             "HORMUZ_CEPH_OPENBAO_ENDPOINT": "http://127.0.0.1:8200",
+            "HORMUZ_CEPH_OPENBAO_CONTAINER": "openbao-0",
             "HORMUZ_CEPH_OPENBAO_TOKEN": "test-openbao-token",
             "HORMUZ_CEPH_OPENBAO_PROVIDER_KEY": "provider-key",
             "HORMUZ_CEPH_OPENBAO_DATA_KEY": "audit-key",
@@ -249,6 +251,12 @@ class CephRGWConfigurationTests(unittest.TestCase):
         with self.assertRaises(conformance.ConformanceFailure) as raised:
             conformance.configuration_from_environment(environment)
         self.assertEqual(raised.exception.code, "key_purposes_not_separated")
+
+        environment = self._environment()
+        environment["HORMUZ_CEPH_OPENBAO_CONTAINER"] = "not/a-container"
+        with self.assertRaises(conformance.ConformanceFailure) as raised:
+            conformance.configuration_from_environment(environment)
+        self.assertEqual(raised.exception.code, "openbao_container_invalid")
 
 
 class CephRGWAttestationTests(unittest.TestCase):
@@ -291,6 +299,80 @@ class CephRGWAttestationTests(unittest.TestCase):
             conformance.attest_target_from_environment(environment)
         self.assertEqual(raised.exception.code, "pre_attested_target_invalid")
 
+    def test_openbao_attestation_requires_exact_container_image_platform_and_version(self) -> None:
+        image_id = "sha256:openbao-image"
+        responses = {
+            ("docker", "inspect", "--format", "{{.State.Running}}|{{.Image}}", "openbao-0"): f"true|{image_id}",
+            ("docker", "image", "inspect", "--format", "{{json .RepoDigests}}", image_id): json.dumps(
+                [conformance.OPENBAO_TARGET_IMAGE_REFERENCE]
+            ),
+            ("docker", "exec", "openbao-0", "bao", "version"): conformance.OPENBAO_TARGET_VERSION_OUTPUT,
+            ("docker", "image", "inspect", "--format", "{{.Os}}/{{.Architecture}}", image_id): "linux/arm64",
+        }
+
+        def command_output(command: Sequence[str]) -> str:
+            return responses[tuple(command)]
+
+        self.assertEqual(
+            conformance.attest_local_openbao_container("openbao-0", command_output=command_output),
+            {
+                "image_reference": conformance.OPENBAO_TARGET_IMAGE_REFERENCE,
+                "image_digest": conformance.OPENBAO_TARGET_IMAGE_DIGEST,
+                "version": conformance.OPENBAO_TARGET_VERSION_OUTPUT,
+                "platform": conformance.OPENBAO_TARGET_PLATFORM,
+            },
+        )
+
+        responses[("docker", "inspect", "--format", "{{.State.Running}}|{{.Image}}", "openbao-0")] = f"false|{image_id}"
+        with self.assertRaises(conformance.ConformanceFailure) as raised:
+            conformance.attest_local_openbao_container("openbao-0", command_output=command_output)
+        self.assertEqual(raised.exception.code, "openbao_container_unverified")
+
+        responses[("docker", "inspect", "--format", "{{.State.Running}}|{{.Image}}", "openbao-0")] = f"true|{image_id}"
+        responses[("docker", "image", "inspect", "--format", "{{json .RepoDigests}}", image_id)] = json.dumps([])
+        with self.assertRaises(conformance.ConformanceFailure) as raised:
+            conformance.attest_local_openbao_container("openbao-0", command_output=command_output)
+        self.assertEqual(raised.exception.code, "openbao_digest_mismatch")
+
+        responses[("docker", "image", "inspect", "--format", "{{json .RepoDigests}}", image_id)] = json.dumps(
+            [conformance.OPENBAO_TARGET_IMAGE_REFERENCE]
+        )
+        responses[("docker", "exec", "openbao-0", "bao", "version")] = "OpenBao v2.5.3"
+        with self.assertRaises(conformance.ConformanceFailure) as raised:
+            conformance.attest_local_openbao_container("openbao-0", command_output=command_output)
+        self.assertEqual(raised.exception.code, "openbao_release_mismatch")
+
+        responses[("docker", "exec", "openbao-0", "bao", "version")] = conformance.OPENBAO_TARGET_VERSION_OUTPUT
+        responses[("docker", "image", "inspect", "--format", "{{.Os}}/{{.Architecture}}", image_id)] = "linux/amd64"
+        with self.assertRaises(conformance.ConformanceFailure) as raised:
+            conformance.attest_local_openbao_container("openbao-0", command_output=command_output)
+        self.assertEqual(raised.exception.code, "openbao_platform_mismatch")
+
+    def test_pre_attested_openbao_target_must_match_the_exact_candidate(self) -> None:
+        environment = {
+            "HORMUZ_CEPH_OPENBAO_TARGET_ATTESTED": "1",
+            "HORMUZ_CEPH_OPENBAO_TARGET_IMAGE_REFERENCE": conformance.OPENBAO_TARGET_IMAGE_REFERENCE,
+            "HORMUZ_CEPH_OPENBAO_TARGET_IMAGE_DIGEST": conformance.OPENBAO_TARGET_IMAGE_DIGEST,
+            "HORMUZ_CEPH_OPENBAO_TARGET_VERSION": conformance.OPENBAO_TARGET_VERSION_OUTPUT,
+            "HORMUZ_CEPH_OPENBAO_TARGET_PLATFORM": conformance.OPENBAO_TARGET_PLATFORM,
+        }
+        self.assertEqual(
+            conformance.attest_openbao_target_from_environment(environment)["image_digest"],
+            conformance.OPENBAO_TARGET_IMAGE_DIGEST,
+        )
+
+        for field, wrong_value in (
+            ("HORMUZ_CEPH_OPENBAO_TARGET_IMAGE_REFERENCE", "openbao/openbao@sha256:" + "0" * 64),
+            ("HORMUZ_CEPH_OPENBAO_TARGET_IMAGE_DIGEST", "sha256:" + "0" * 64),
+            ("HORMUZ_CEPH_OPENBAO_TARGET_VERSION", "OpenBao v2.5.3"),
+            ("HORMUZ_CEPH_OPENBAO_TARGET_PLATFORM", "linux/amd64"),
+        ):
+            candidate = dict(environment)
+            candidate[field] = wrong_value
+            with self.assertRaises(conformance.ConformanceFailure) as raised:
+                conformance.attest_openbao_target_from_environment(candidate)
+            self.assertEqual(raised.exception.code, "pre_attested_openbao_target_invalid")
+
 
 class CephRGWRunnerAttestationTests(unittest.TestCase):
     def test_runner_requires_a_content_addressed_x86_64_image(self) -> None:
@@ -312,6 +394,20 @@ class CephRGWRunnerAttestationTests(unittest.TestCase):
             )
         self.assertEqual(raised.exception.code, "runner_platform_invalid")
 
+    def test_pinned_runner_launcher_attests_openbao_without_mounting_the_docker_socket(self) -> None:
+        launcher = ROOT / "tools" / "run_ceph_rgw_custody_conformance_container.sh"
+        parsed = subprocess.run(["bash", "-n", str(launcher)], check=False, capture_output=True, text=True)
+        self.assertEqual(parsed.returncode, 0, parsed.stderr)
+        contents = launcher.read_text(encoding="utf-8")
+        self.assertIn('readonly OPENBAO_TARGET_IMAGE_REFERENCE=', contents)
+        self.assertIn('HORMUZ_CEPH_OPENBAO_CONTAINER', contents)
+        self.assertIn('docker exec "${openbao_container}" bao version', contents)
+        self.assertIn('HORMUZ_CEPH_OPENBAO_TARGET_ATTESTED=1', contents)
+        self.assertIn('openbao_platform_mismatch', contents)
+        self.assertIn("evidence_owner=\"$(stat --format '%u:%g'", contents)
+        self.assertIn('--user "${evidence_owner}"', contents)
+        self.assertNotIn('/var/run/docker.sock', contents)
+
 
 class CephRGWLiveHarnessShapeTests(unittest.TestCase):
     def _config(self) -> object:
@@ -323,6 +419,7 @@ class CephRGWLiveHarnessShapeTests(unittest.TestCase):
             access_key="test-access-key",
             secret_key="test-secret-key",
             rgw_container="ceph-rgw-0",
+            openbao_container="openbao-0",
             openbao_endpoint="http://127.0.0.1:8200",
             openbao_token="test-openbao-token",
             transit_mount="transit",
@@ -344,15 +441,22 @@ class CephRGWLiveHarnessShapeTests(unittest.TestCase):
                 "release": "20.2.3",
                 "platform": "linux/arm64",
             },
+            attest_openbao=lambda container: {
+                "image_reference": conformance.OPENBAO_TARGET_IMAGE_REFERENCE,
+                "image_digest": conformance.OPENBAO_TARGET_IMAGE_DIGEST,
+                "version": conformance.OPENBAO_TARGET_VERSION_OUTPUT,
+                "platform": conformance.OPENBAO_TARGET_PLATFORM,
+            },
             attest_runner=lambda: {"image_digest": "sha256:" + "b" * 64, "platform": "linux/amd64"},
             runtime_factory=lambda config: conformance.ConformanceRuntime(provider=provider, sink=sink, client=client),
         )
 
         self.assertTrue(sink.verified)
         self.assertEqual(evidence["schema_id"], conformance.SCHEMA_ID)
-        self.assertEqual(evidence["schema_version"], 2)
+        self.assertEqual(evidence["schema_version"], 3)
         self.assertEqual(evidence["status"], "passed")
         self.assertEqual(evidence["runner"]["platform"], "linux/amd64")
+        self.assertEqual(evidence["openbao_target"]["version"], conformance.OPENBAO_TARGET_VERSION_OUTPUT)
         self.assertEqual(len(evidence["retained_artifacts"]), 2)
         serialized = json.dumps(evidence, sort_keys=True)
         self.assertNotIn("127.0.0.1", serialized)
@@ -375,7 +479,14 @@ class CephRGWLiveHarnessShapeTests(unittest.TestCase):
                 conformance.write_evidence(output, invalid)
             self.assertEqual(raised.exception.code, "evidence_invalid")
 
-            legacy = dict(evidence)
+            previous = dict(evidence)
+            previous["schema_version"] = 2
+            previous["checks"] = list(conformance._PREVIOUS_REQUIRED_CHECKS)
+            del previous["openbao_target"]
+            conformance.write_evidence(output, previous)
+            self.assertEqual(json.loads(output.read_text(encoding="utf-8"))["schema_version"], 2)
+
+            legacy = dict(previous)
             legacy["schema_version"] = 1
             legacy["nonclaims"] = list(conformance._NONCLAIMS)
             del legacy["runner"]
@@ -400,11 +511,17 @@ class CephRGWLiveHarnessShapeTests(unittest.TestCase):
             "platform": "linux/arm64",
         }
         runner = lambda: {"image_digest": "sha256:" + "c" * 64, "platform": "linux/amd64"}
+        openbao_target = lambda container: {
+            "image_reference": conformance.OPENBAO_TARGET_IMAGE_REFERENCE,
+            "image_digest": conformance.OPENBAO_TARGET_IMAGE_DIGEST,
+            "version": conformance.OPENBAO_TARGET_VERSION_OUTPUT,
+            "platform": conformance.OPENBAO_TARGET_PLATFORM,
+        }
 
         with mock.patch.object(client, "delete_object", side_effect=_S3Error("AccessDenied")):
             with self.assertRaises(conformance.ConformanceFailure) as raised:
                 conformance.run_conformance(
-                    self._config(), attest=target, attest_runner=runner, runtime_factory=runtime_factory
+                    self._config(), attest=target, attest_openbao=openbao_target, attest_runner=runner, runtime_factory=runtime_factory
                 )
         self.assertEqual(raised.exception.code, "control_delete_not_permitted")
 
@@ -415,7 +532,7 @@ class CephRGWLiveHarnessShapeTests(unittest.TestCase):
         with mock.patch.object(client, "put_object_retention", side_effect=_S3Error("AccessDenied")):
             with self.assertRaises(conformance.ConformanceFailure) as raised:
                 conformance.run_conformance(
-                    self._config(), attest=target, attest_runner=runner, runtime_factory=runtime_factory
+                    self._config(), attest=target, attest_openbao=openbao_target, attest_runner=runner, runtime_factory=runtime_factory
                 )
         self.assertEqual(raised.exception.code, "retention_extension_not_permitted")
 

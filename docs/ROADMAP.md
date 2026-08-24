@@ -47,10 +47,10 @@ and lifecycle/revocation requirements.
 
 PR [#31](https://github.com/Xpounder-com/hormuz/pull/31) supplies the generic
 custody contract and AWS KMS/S3 Object Lock reference implementation for #17,
-including an opt-in live conformance gate. #17 remains open until that gate is
-run in a customer-controlled AWS environment and the broader secret migration,
-immutable-history, retention operations, recovery, SIEM, and independent-review
-evidence is complete.
+including an opt-in live conformance gate. The AWS adapter is available but not
+yet live-certified; [#94](https://github.com/Xpounder-com/hormuz/issues/94)
+tracks that customer-authorized cloud proof separately. It does not block the
+vendor-neutral core #17 custody gate.
 
 PR [#59](https://github.com/Xpounder-com/hormuz/pull/59) adds the account-free
 OpenBao Transit plus S3-compatible Object Lock profile for
@@ -59,11 +59,18 @@ OpenBao Transit plus S3-compatible Object Lock profile for
 remains vendor-neutral. The implementation includes a strict, opt-in local
 conformance runner and a content-free evidence schema; the live single-host
 Cephadm proof is recorded in [#60](https://github.com/Xpounder-com/hormuz/issues/60).
-Ceph RGW Tentacle 20.2.3 is Hormuz's first certified self-hosted reference for
+Ceph RGW Tentacle 20.2.3 is Hormuz's first verified self-hosted reference for
 RGW-level enforcement only, never host-root or production-immutability
 protection. Native ARM64 runtime conformance is tracked separately in
 [#68](https://github.com/Xpounder-com/hormuz/issues/68) and does not block the
 reference unless it becomes a promised launch platform.
+
+[#95](https://github.com/Xpounder-com/hormuz/issues/95) binds that reference
+to the exact OpenBao Transit image, version, and platform. Its live,
+content-free schema-v3 custody/retention record and schema-v2
+rotation/recovery record verify the exact OpenBao + Ceph pairing, without
+changing the vendor-neutral product contract or claiming unrestricted
+production certification.
 
 The #17 checkpoint [#69](https://github.com/Xpounder-com/hormuz/issues/69) is
 completed in [PR #70](https://github.com/Xpounder-com/hormuz/pull/70): a
@@ -103,6 +110,17 @@ rollback on invalid evidence, full PostgreSQL recovery drills, and a clean
 wheel boundary. It does not implement the separately permissioned machine
 executor, all-administrator-loss break glass, customer IAM/KMS changes, cloud
 certification, or production readiness. The parent #17 gate remains open.
+
+The revised core #17 custody closure requires one proven customer-controlled
+backend, not live certification of every future cloud adapter. [#95](https://github.com/Xpounder-com/hormuz/issues/95)
+now supplies the exact OpenBao + Ceph self-hosted-reference evidence. The
+remaining sequence proceeds to [#91](https://github.com/Xpounder-com/hormuz/issues/91)
+for the isolated routine executor, [#92](https://github.com/Xpounder-com/hormuz/issues/92)
+for destructive lifecycle execution, and
+[#93](https://github.com/Xpounder-com/hormuz/issues/93) for retention/export,
+custody-event anchoring, and integrated recovery evidence. The reference does
+not claim unrestricted production certification. AWS certification remains an
+independent, customer-authorized gate in #94.
 
 The first separately verifiable #11 slice, [#32](https://github.com/Xpounder-com/hormuz/issues/32), is completed in [PR #33](https://github.com/Xpounder-com/hormuz/pull/33): bounded PostgreSQL runtime pooling with tenant-safe checkout reuse. The second, [#34](https://github.com/Xpounder-com/hormuz/issues/34), is completed in [PR #35](https://github.com/Xpounder-com/hormuz/pull/35): a versioned liveness/readiness contract that checks only Hormuz's local policy/evidence dependencies and graceful-drain state. The third, [#36](https://github.com/Xpounder-com/hormuz/issues/36), is completed in [PR #37](https://github.com/Xpounder-com/hormuz/pull/37): bounded, unambiguous, schema-strict configuration parsing before secret or dependency initialization. The fourth, [#38](https://github.com/Xpounder-com/hormuz/issues/38), is completed in [PR #39](https://github.com/Xpounder-com/hormuz/pull/39): a non-root OCI reference runtime with only mounted runtime configuration and data. The fifth, [#40](https://github.com/Xpounder-com/hormuz/issues/40), is completed in [PR #41](https://github.com/Xpounder-com/hormuz/pull/41): candidate SBOM evidence and a fix-aware OCI vulnerability gate. The sixth, [#42](https://github.com/Xpounder-com/hormuz/issues/42), is completed in [PR #43](https://github.com/Xpounder-com/hormuz/pull/43): a disposable logical PostgreSQL backup-and-restore drill. The seventh, [#44](https://github.com/Xpounder-com/hormuz/issues/44), is completed in [PR #45](https://github.com/Xpounder-com/hormuz/pull/45): a customer-controlled TLS reference with an authenticated, network-restricted gateway proxy hop. The eighth, [#46](https://github.com/Xpounder-com/hormuz/issues/46), is completed in [PR #47](https://github.com/Xpounder-com/hormuz/pull/47): two independent gateway instances with separate bounded PostgreSQL pools preserve one organization budget reservation, stable pre-egress denial, shared metadata-only evidence, and tenant isolation. Those slices remain intentionally narrower than customer TLS/certificate operations, HA/failover, production backup/PITR, multi-region coordination, replicated sessions/revocation/approval grants/idempotency, and operational recovery evidence.
 

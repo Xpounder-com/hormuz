@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Prove self-hosted encrypted custody recovery after Transit key rotation.
 
-This opt-in release-gate harness extends the certified local Ceph RGW/OpenBao
+This opt-in release-gate harness extends the verified local Ceph RGW/OpenBao
 reference with one narrow recovery proof. It creates only synthetic, in-memory
 provider-credential fixture data and a metadata-only audit artifact, rotates
 the same named Transit keys with a separately supplied lab administrator token,
@@ -51,11 +51,16 @@ except ModuleNotFoundError:  # Direct execution resolves helpers beside this scr
 
 
 SCHEMA_ID = "hormuz.ceph-rgw-custody-rotation-recovery"
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+_LEGACY_SCHEMA_VERSION = 1
 SCOPE = "single_host_ceph_rgw_openbao_transit_rotation_recovery_only"
 TARGET_RELEASE = "20.2.3"
 TARGET_IMAGE_DIGEST = "sha256:d195020de02512030118e772cef7859e92904e91eb4cb21acb503f8b94118137"
 TARGET_IMAGE_REFERENCE = f"quay.io/ceph/ceph@{TARGET_IMAGE_DIGEST}"
+OPENBAO_TARGET_IMAGE_DIGEST = "sha256:436eaf9778cad75507ff70ea26ace30dcbe15606e619ac3823495663d7f7c115"
+OPENBAO_TARGET_IMAGE_REFERENCE = f"openbao/openbao@{OPENBAO_TARGET_IMAGE_DIGEST}"
+OPENBAO_TARGET_PLATFORM = "linux/arm64"
+OPENBAO_TARGET_VERSION_OUTPUT = "OpenBao v2.5.4 (4f6d47246a053375271a5fd8af85c3b75695aa46), built 2026-05-20T16:08:53Z"
 RUNNER_PLATFORM = "linux/amd64"
 OPT_IN_ENV = "HORMUZ_RUN_CEPH_CUSTODY_ROTATION_RECOVERY"
 CONFIRMATION_ENV = "HORMUZ_CEPH_CUSTODY_ROTATION_RECOVERY_CONFIRMATION"
@@ -63,7 +68,7 @@ CONFIRMATION_VALUE = "I_UNDERSTAND_DISPOSABLE_OBJECT_LOCK_RETENTION_AND_TRANSIT_
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 _KEY_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}\Z")
 _HEX_DIGEST = re.compile(r"[0-9a-f]{64}\Z")
-_REQUIRED_CHECKS = (
+_LEGACY_REQUIRED_CHECKS = (
     "runtime_rotation_capability_denied",
     "rotation_administrator_scope_verified",
     "purpose_separated_data_keys_verified",
@@ -74,6 +79,10 @@ _REQUIRED_CHECKS = (
     "tenant_context_mismatch_fails_closed",
     "altered_encrypted_material_fails_closed",
     "invalid_audit_chain_fails_closed",
+)
+_REQUIRED_CHECKS = (
+    "openbao_container_release_and_digest_attested",
+    *_LEGACY_REQUIRED_CHECKS,
 )
 _DURATION_KEYS = (
     "pre_rotation_setup",
@@ -111,6 +120,7 @@ class RecoveryConfig:
     prefix: str
     access_key: str
     secret_key: str
+    openbao_container: str
     openbao_endpoint: str
     runtime_token: str
     administrator_token: str
@@ -170,6 +180,9 @@ def configuration_from_environment(environ: Mapping[str, str]) -> RecoveryConfig
     openbao_endpoint = _required(environ, "HORMUZ_CEPH_OPENBAO_ENDPOINT")
     if not _loopback_endpoint(rgw_endpoint) or not _loopback_endpoint(openbao_endpoint):
         raise ConformanceFailure("local_endpoint_required")
+    openbao_container = _required(environ, "HORMUZ_CEPH_OPENBAO_CONTAINER")
+    if not _KEY_NAME.fullmatch(openbao_container):
+        raise ConformanceFailure("openbao_container_invalid")
     try:
         retention_days = int(environ.get("HORMUZ_CEPH_RGW_RETENTION_DAYS", "1"))
     except ValueError:
@@ -196,6 +209,7 @@ def configuration_from_environment(environ: Mapping[str, str]) -> RecoveryConfig
         prefix=prefix,
         access_key=_required(environ, "HORMUZ_CEPH_RGW_ACCESS_KEY"),
         secret_key=_required(environ, "HORMUZ_CEPH_RGW_SECRET_KEY"),
+        openbao_container=openbao_container,
         openbao_endpoint=openbao_endpoint,
         runtime_token=runtime_token,
         administrator_token=administrator_token,
@@ -225,6 +239,27 @@ def attest_target_from_environment(environ: Mapping[str, str] | None = None) -> 
         or target["platform"] not in {"linux/amd64", "linux/arm64"}
     ):
         raise ConformanceFailure("pre_attested_target_invalid")
+    return target
+
+
+def attest_openbao_target_from_environment(environ: Mapping[str, str] | None = None) -> dict[str, str]:
+    """Require the wrapper to attest the exact local OpenBao target."""
+
+    source = os.environ if environ is None else environ
+    target = {
+        "image_reference": source.get("HORMUZ_CEPH_OPENBAO_TARGET_IMAGE_REFERENCE", ""),
+        "image_digest": source.get("HORMUZ_CEPH_OPENBAO_TARGET_IMAGE_DIGEST", ""),
+        "version": source.get("HORMUZ_CEPH_OPENBAO_TARGET_VERSION", ""),
+        "platform": source.get("HORMUZ_CEPH_OPENBAO_TARGET_PLATFORM", ""),
+    }
+    if (
+        source.get("HORMUZ_CEPH_OPENBAO_TARGET_ATTESTED") != "1"
+        or target["image_reference"] != OPENBAO_TARGET_IMAGE_REFERENCE
+        or target["image_digest"] != OPENBAO_TARGET_IMAGE_DIGEST
+        or target["version"] != OPENBAO_TARGET_VERSION_OUTPUT
+        or target["platform"] != OPENBAO_TARGET_PLATFORM
+    ):
+        raise ConformanceFailure("pre_attested_openbao_target_invalid")
     return target
 
 
@@ -390,6 +425,7 @@ def run_conformance(
     config: RecoveryConfig,
     *,
     attest_target: Callable[[], dict[str, str]] = attest_target_from_environment,
+    attest_openbao: Callable[[], dict[str, str]] = attest_openbao_target_from_environment,
     attest_runner: Callable[[], dict[str, str]] = attest_runner_from_environment,
     runtime_factory: Callable[[RecoveryConfig], RecoveryRuntime] = create_runtime,
 ) -> dict[str, object]:
@@ -397,6 +433,7 @@ def run_conformance(
 
     total_started = time.monotonic_ns()
     target = attest_target()
+    openbao_target = attest_openbao()
     runner = attest_runner()
     runtime = runtime_factory(config)
     _require_runtime_rotation_denied(runtime, config.provider_key)
@@ -463,6 +500,7 @@ def run_conformance(
         "executed_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "scope": SCOPE,
         "target": target,
+        "openbao_target": openbao_target,
         "runner": runner,
         "checks": list(_REQUIRED_CHECKS),
         "durations_ms": {
@@ -480,26 +518,34 @@ def run_conformance(
 def validate_evidence(evidence: Mapping[str, object]) -> None:
     """Reject every incomplete, non-pinned, or content-bearing evidence shape."""
 
-    if set(evidence) != {
+    version = evidence.get("schema_version")
+    expected_keys = {
         "schema_id",
         "schema_version",
         "status",
         "executed_at",
         "scope",
         "target",
-        "runner",
         "checks",
         "durations_ms",
         "retention_days",
         "nonclaims",
-    }:
+    }
+    expected_checks = _LEGACY_REQUIRED_CHECKS
+    if version == SCHEMA_VERSION:
+        expected_keys.update({"runner", "openbao_target"})
+        expected_checks = _REQUIRED_CHECKS
+    elif version == _LEGACY_SCHEMA_VERSION:
+        expected_keys.add("runner")
+    else:
+        raise ConformanceFailure("evidence_invalid")
+    if set(evidence) != expected_keys:
         raise ConformanceFailure("evidence_invalid")
     if (
         evidence.get("schema_id") != SCHEMA_ID
-        or evidence.get("schema_version") != SCHEMA_VERSION
         or evidence.get("status") != "passed"
         or evidence.get("scope") != SCOPE
-        or evidence.get("checks") != list(_REQUIRED_CHECKS)
+        or evidence.get("checks") != list(expected_checks)
         or evidence.get("nonclaims") != list(_NONCLAIMS)
     ):
         raise ConformanceFailure("evidence_invalid")
@@ -528,6 +574,15 @@ def validate_evidence(evidence: Mapping[str, object]) -> None:
         or runner.get("platform") != RUNNER_PLATFORM
     ):
         raise ConformanceFailure("evidence_invalid")
+    if version == SCHEMA_VERSION:
+        openbao_target = evidence.get("openbao_target")
+        if not isinstance(openbao_target, Mapping) or dict(openbao_target) != {
+            "image_reference": OPENBAO_TARGET_IMAGE_REFERENCE,
+            "image_digest": OPENBAO_TARGET_IMAGE_DIGEST,
+            "version": OPENBAO_TARGET_VERSION_OUTPUT,
+            "platform": OPENBAO_TARGET_PLATFORM,
+        }:
+            raise ConformanceFailure("evidence_invalid")
     durations = evidence.get("durations_ms")
     if (
         not isinstance(durations, Mapping)
