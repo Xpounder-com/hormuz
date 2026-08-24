@@ -69,6 +69,14 @@
       "message": "Hormuz durable policy storage is temporarily unavailable."
     }
   },
+  "error_v3": {
+    "schema_id": "hormuz.gateway-error",
+    "schema_version": 3,
+    "error": {
+      "code": "hormuz_custody_restricted",
+      "message": "Organization custody policy does not permit this provider credential."
+    }
+  },
   "policy_decision": {
     "schema_id": "hormuz.policy-decision",
     "schema_version": 1,
@@ -240,6 +248,63 @@
       }
     ]
   },
+  "custody_control_status_v3": {
+    "schema_id": "hormuz.custody-control-status",
+    "schema_version": 3,
+    "organization_id": "xpounder",
+    "initialized": true,
+    "administrators": [
+      {
+        "authentication_kind": "oidc",
+        "actor_id": null,
+        "issuer": "https://identity.example.com",
+        "subject": "custody-subject-123"
+      }
+    ],
+    "operation_count": 0,
+    "operations": [],
+    "execution_attempt_count": 1,
+    "execution_attempts": [
+      {
+        "execution_schema_id": "hormuz.custody-execution-attempt",
+        "execution_schema_version": 2,
+        "organization_id": "xpounder",
+        "execution_id": "42345678-89ab-4def-8123-456789abcdef",
+        "operation_id": "52345678-89ab-4def-8123-456789abcdef",
+        "operation_type": "disable_provider_credential",
+        "target_kind": "provider_credential",
+        "target_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "parameters_sha256": "123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0",
+        "protected_input_ref_sha256": null,
+        "claimed_at": "2026-08-23T00:00:00+00:00",
+        "state": "succeeded",
+        "events": [
+          {
+            "event_schema_id": "hormuz.custody-execution-event",
+            "event_schema_version": 1,
+            "organization_id": "xpounder",
+            "execution_id": "42345678-89ab-4def-8123-456789abcdef",
+            "operation_id": "52345678-89ab-4def-8123-456789abcdef",
+            "occurred_at": "2026-08-23T00:00:00+00:00",
+            "sequence": 1,
+            "state": "pending",
+            "reason_code": null
+          },
+          {
+            "event_schema_id": "hormuz.custody-execution-event",
+            "event_schema_version": 1,
+            "organization_id": "xpounder",
+            "execution_id": "42345678-89ab-4def-8123-456789abcdef",
+            "operation_id": "52345678-89ab-4def-8123-456789abcdef",
+            "occurred_at": "2026-08-23T00:00:01+00:00",
+            "sequence": 2,
+            "state": "succeeded",
+            "reason_code": null
+          }
+        ]
+      }
+    ]
+  },
   "custody_execution_attempt_v1": {
     "execution_schema_id": "hormuz.custody-execution-attempt",
     "execution_schema_version": 1,
@@ -275,6 +340,32 @@
     "sequence": 2,
     "state": "outcome_unknown",
     "reason_code": "stale_pending"
+  },
+  "custody_lifecycle_event_v1": {
+    "lifecycle_schema_id": "hormuz.custody-lifecycle-event",
+    "lifecycle_schema_version": 1,
+    "organization_id": "xpounder",
+    "lifecycle_event_id": "62345678-89ab-4def-8123-456789abcdef",
+    "execution_id": "42345678-89ab-4def-8123-456789abcdef",
+    "operation_id": "52345678-89ab-4def-8123-456789abcdef",
+    "occurred_at": "2026-08-23T00:00:01+00:00",
+    "operation_type": "disable_provider_credential",
+    "target_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    "parameters_sha256": "123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0",
+    "asset_type": "provider_credential",
+    "asset_id": "openai-primary",
+    "asset_generation": 1,
+    "asset_binding_fingerprint": "23456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef01",
+    "replacement_asset_type": null,
+    "replacement_asset_id": null,
+    "replacement_asset_generation": null,
+    "replacement_asset_binding_fingerprint": null,
+    "recovery_execution_id": null,
+    "recovery_resolution_code": null,
+    "chain_version": 1,
+    "sequence": 1,
+    "previous_digest": null,
+    "event_digest": "3456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef012"
   },
   "custody_control_event": {
     "event_schema_id": "hormuz.custody-control-event",

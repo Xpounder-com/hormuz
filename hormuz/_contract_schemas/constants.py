@@ -48,7 +48,7 @@ USAGE_SUMMARY_SCHEMA_ID = "hormuz.gateway-usage-summary"
 
 ERROR_SCHEMA_ID = "hormuz.gateway-error"
 
-ERROR_SCHEMA_VERSION = 2
+ERROR_SCHEMA_VERSION = 3
 
 POLICY_DECISION_SCHEMA_ID = "hormuz.policy-decision"
 
@@ -64,7 +64,7 @@ POLICY_CONTROL_EVENT_SCHEMA_VERSION = 1
 
 CUSTODY_CONTROL_STATUS_SCHEMA_ID = "hormuz.custody-control-status"
 
-CUSTODY_CONTROL_STATUS_SCHEMA_VERSION = 2
+CUSTODY_CONTROL_STATUS_SCHEMA_VERSION = 3
 
 CUSTODY_CONTROL_EVENT_SCHEMA_ID = "hormuz.custody-control-event"
 
@@ -72,11 +72,15 @@ CUSTODY_CONTROL_EVENT_SCHEMA_VERSION = 1
 
 CUSTODY_EXECUTION_SCHEMA_ID = "hormuz.custody-execution-attempt"
 
-CUSTODY_EXECUTION_SCHEMA_VERSION = 1
+CUSTODY_EXECUTION_SCHEMA_VERSION = 2
 
 CUSTODY_EXECUTION_EVENT_SCHEMA_ID = "hormuz.custody-execution-event"
 
 CUSTODY_EXECUTION_EVENT_SCHEMA_VERSION = 1
+
+CUSTODY_LIFECYCLE_EVENT_SCHEMA_ID = "hormuz.custody-lifecycle-event"
+
+CUSTODY_LIFECYCLE_EVENT_SCHEMA_VERSION = 1
 
 USAGE_REPORT_SCHEMA_ID = "hormuz.usage-report"
 
@@ -104,7 +108,9 @@ PUBLIC_ERROR_CODES_V1 = frozenset(
     }
 )
 
-PUBLIC_ERROR_CODES = frozenset({*PUBLIC_ERROR_CODES_V1, "hormuz_storage_unavailable"})
+PUBLIC_ERROR_CODES_V2 = frozenset({*PUBLIC_ERROR_CODES_V1, "hormuz_storage_unavailable"})
+
+PUBLIC_ERROR_CODES = frozenset({*PUBLIC_ERROR_CODES_V2, "hormuz_custody_restricted"})
 
 _CURRENT_SCHEMA_VERSIONS = {
     HEALTH_SCHEMA_ID: 1,
@@ -209,3 +215,16 @@ _CUSTODY_EXECUTION_STATES = frozenset({"pending", "succeeded", "failed", "outcom
 _CUSTODY_EXECUTION_UNKNOWN_REASONS = frozenset({"external_result_ambiguous", "stale_pending"})
 
 _CUSTODY_EXECUTION_FAILURE_REASONS = frozenset({"execution_failed"})
+
+_CUSTODY_LIFECYCLE_OPERATION_TYPES = frozenset(
+    {
+        "retire_envelope",
+        "disable_provider_credential",
+        "retire_key_reference",
+        "resolve_recovery",
+    }
+)
+
+_CUSTODY_RECOVERY_RESOLUTION_CODES = frozenset(
+    {"confirmed_applied", "confirmed_not_applied", "compensating_action_completed"}
+)

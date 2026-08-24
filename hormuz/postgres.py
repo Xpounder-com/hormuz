@@ -16,7 +16,7 @@ from typing import Any, Iterator, Mapping
 from .config import PostgresPoolConfig
 
 
-POSTGRES_SCHEMA_VERSION = 6
+POSTGRES_SCHEMA_VERSION = 7
 _IDENTIFIER_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 _POOL_RECONNECT_TIMEOUT_SECONDS = 15
 
@@ -556,6 +556,62 @@ def _verify_applied_schema_shape(cursor: Any, *, schema: str, version: int) -> N
             "object_version",
             "anchored_at",
         }
+    if version >= 7:
+        required["custody_lifecycle_asset_identities"] = {
+            "organization_id",
+            "asset_type",
+            "asset_id",
+            "generation",
+            "binding_fingerprint",
+            "envelope_key_asset_id",
+            "envelope_key_generation",
+            "envelope_key_binding_fingerprint",
+            "registered_at",
+        }
+        required["custody_runtime_projection_heads"] = {
+            "organization_id",
+            "projection_schema_id",
+            "projection_schema_version",
+            "version",
+            "committed_at",
+        }
+        required["custody_runtime_projection_restrictions"] = {
+            "organization_id",
+            "asset_type",
+            "asset_id",
+            "generation",
+            "binding_fingerprint",
+            "restriction_kind",
+            "lifecycle_event_id",
+            "committed_at",
+        }
+        required["custody_runtime_replicas"] = {
+            "organization_id",
+            "replica_id",
+            "heartbeat_at",
+            "lease_expires_at",
+            "observed_projection_version",
+            "retired_at",
+        }
+        required["custody_runtime_projection_barriers"] = {
+            "organization_id",
+            "barrier_id",
+            "execution_id",
+            "proposed_version",
+            "asset_type",
+            "asset_id",
+            "asset_generation",
+            "restriction_kind",
+            "prepared_at",
+            "activated_at",
+            "resolved_at",
+        }
+        required["custody_runtime_projection_acks"] = {
+            "organization_id",
+            "barrier_id",
+            "replica_id",
+            "acknowledged_at",
+        }
     for table, columns in required.items():
         cursor.execute(
             """
@@ -679,6 +735,97 @@ def _verify_custody_schema_shape(cursor: Any, *, schema: str, version: int) -> N
                 },
             }
         )
+    if version >= 7:
+        required.update(
+            {
+                "custody_lifecycle_asset_identities": {
+                    "organization_id",
+                    "asset_type",
+                    "asset_id",
+                    "generation",
+                    "binding_fingerprint",
+                    "envelope_key_asset_id",
+                    "envelope_key_generation",
+                    "envelope_key_binding_fingerprint",
+                    "registered_at",
+                },
+                "custody_lifecycle_chain_heads": {
+                    "organization_id",
+                    "chain_version",
+                    "sequence",
+                    "head_digest",
+                    "committed_at",
+                },
+                "custody_lifecycle_events": {
+                    "organization_id",
+                    "lifecycle_event_id",
+                    "lifecycle_schema_id",
+                    "lifecycle_schema_version",
+                    "execution_id",
+                    "operation_id",
+                    "occurred_at",
+                    "operation_type",
+                    "target_sha256",
+                    "parameters_sha256",
+                    "event_digest",
+                },
+                "custody_envelope_attestations": {
+                    "organization_id",
+                    "execution_id",
+                    "attestation_kind",
+                    "envelope_asset_id",
+                    "destination_key_asset_id",
+                    "occurred_at",
+                },
+                "custody_runtime_projection_heads": {
+                    "organization_id",
+                    "projection_schema_id",
+                    "projection_schema_version",
+                    "version",
+                    "committed_at",
+                },
+                "custody_runtime_projection_restrictions": {
+                    "organization_id",
+                    "asset_type",
+                    "asset_id",
+                    "generation",
+                    "binding_fingerprint",
+                    "restriction_kind",
+                    "lifecycle_event_id",
+                    "committed_at",
+                },
+                "custody_runtime_replicas": {
+                    "organization_id",
+                    "replica_id",
+                    "registered_at",
+                    "heartbeat_at",
+                    "lease_expires_at",
+                    "observed_projection_version",
+                    "retired_at",
+                },
+                "custody_runtime_projection_barriers": {
+                    "organization_id",
+                    "barrier_id",
+                    "execution_id",
+                    "proposed_version",
+                    "operation_type",
+                    "asset_type",
+                    "asset_id",
+                    "asset_generation",
+                    "restriction_kind",
+                    "prepared_at",
+                    "activated_at",
+                    "resolved_at",
+                    "resolution_lifecycle_event_id",
+                },
+                "custody_runtime_projection_acks": {
+                    "organization_id",
+                    "barrier_id",
+                    "replica_id",
+                    "acknowledged_at",
+                },
+            }
+        )
     for table, columns in required.items():
         cursor.execute(
             """
@@ -727,6 +874,97 @@ def _verify_custody_executor_schema_shape(cursor: Any, *, schema: str, version: 
             "reason_code",
         },
     }
+    if version >= 7:
+        required.update(
+            {
+                "custody_lifecycle_asset_identities": {
+                    "organization_id",
+                    "asset_type",
+                    "asset_id",
+                    "generation",
+                    "binding_fingerprint",
+                    "envelope_key_asset_id",
+                    "envelope_key_generation",
+                    "envelope_key_binding_fingerprint",
+                    "registered_at",
+                },
+                "custody_lifecycle_chain_heads": {
+                    "organization_id",
+                    "chain_version",
+                    "sequence",
+                    "head_digest",
+                    "committed_at",
+                },
+                "custody_lifecycle_events": {
+                    "organization_id",
+                    "lifecycle_event_id",
+                    "lifecycle_schema_id",
+                    "lifecycle_schema_version",
+                    "execution_id",
+                    "operation_id",
+                    "occurred_at",
+                    "operation_type",
+                    "target_sha256",
+                    "parameters_sha256",
+                    "event_digest",
+                },
+                "custody_envelope_attestations": {
+                    "organization_id",
+                    "execution_id",
+                    "attestation_kind",
+                    "envelope_asset_id",
+                    "destination_key_asset_id",
+                    "occurred_at",
+                },
+                "custody_runtime_projection_heads": {
+                    "organization_id",
+                    "projection_schema_id",
+                    "projection_schema_version",
+                    "version",
+                    "committed_at",
+                },
+                "custody_runtime_projection_restrictions": {
+                    "organization_id",
+                    "asset_type",
+                    "asset_id",
+                    "generation",
+                    "binding_fingerprint",
+                    "restriction_kind",
+                    "lifecycle_event_id",
+                    "committed_at",
+                },
+                "custody_runtime_replicas": {
+                    "organization_id",
+                    "replica_id",
+                    "registered_at",
+                    "heartbeat_at",
+                    "lease_expires_at",
+                    "observed_projection_version",
+                    "retired_at",
+                },
+                "custody_runtime_projection_barriers": {
+                    "organization_id",
+                    "barrier_id",
+                    "execution_id",
+                    "proposed_version",
+                    "operation_type",
+                    "asset_type",
+                    "asset_id",
+                    "asset_generation",
+                    "restriction_kind",
+                    "prepared_at",
+                    "activated_at",
+                    "resolved_at",
+                    "resolution_lifecycle_event_id",
+                },
+                "custody_runtime_projection_acks": {
+                    "organization_id",
+                    "barrier_id",
+                    "replica_id",
+                    "acknowledged_at",
+                },
+            }
+        )
     for table, columns in required.items():
         cursor.execute(
             """
@@ -741,6 +979,32 @@ def _verify_custody_executor_schema_shape(cursor: Any, *, schema: str, version: 
             for row in cursor.fetchall()
         }
         if not columns.issubset(observed):
+            raise PostgresStorageError("storage_schema_partial_upgrade")
+    if version >= 7:
+        cursor.execute(
+            """
+            SELECT procedure.proname
+            FROM pg_catalog.pg_proc AS procedure
+            JOIN pg_catalog.pg_namespace AS namespace
+              ON namespace.oid = procedure.pronamespace
+            WHERE namespace.nspname = %s
+              AND procedure.proname IN (
+                  'custody_execution_has_two_active_approvers',
+                  'enforce_custody_lifecycle_asset_identity',
+                  'custody_lifecycle_next_chain_head'
+              )
+            """,
+            (schema,),
+        )
+        observed_functions = {
+            str(row["proname"] if isinstance(row, Mapping) else row[0])
+            for row in cursor.fetchall()
+        }
+        if observed_functions != {
+            "custody_execution_has_two_active_approvers",
+            "enforce_custody_lifecycle_asset_identity",
+            "custody_lifecycle_next_chain_head",
+        }:
             raise PostgresStorageError("storage_schema_partial_upgrade")
 
 
@@ -839,6 +1103,7 @@ def _migration_sql(
         4: "0004_commit_audit_chain.sql",
         5: "0005_custody_control.sql",
         6: "0006_custody_executor.sql",
+        7: "0007_custody_lifecycle.sql",
     }
     filename = filenames.get(version)
     if filename is None:

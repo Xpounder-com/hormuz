@@ -15,6 +15,7 @@ from .constants import (
     _CUSTODY_EXECUTION_FAILURE_REASONS,
     _CUSTODY_EXECUTION_STATES,
     _CUSTODY_EXECUTION_UNKNOWN_REASONS,
+    _CUSTODY_LIFECYCLE_OPERATION_TYPES,
 )
 
 
@@ -22,6 +23,10 @@ _TARGET_KINDS = {
     "seal_envelope": "envelope",
     "rewrap_envelope": "envelope",
     "verify_restore": "restore",
+    "retire_envelope": "envelope",
+    "disable_provider_credential": "provider_credential",
+    "retire_key_reference": "key_reference",
+    "resolve_recovery": "recovery",
 }
 
 
@@ -47,7 +52,8 @@ def validate_custody_execution_attempt(value: Mapping[str, Any]) -> None:
     )
     if _value_string(value, "execution_schema_id") != CUSTODY_EXECUTION_SCHEMA_ID:
         raise ContractValidationError("custody execution schema_id is unsupported")
-    if _value_integer(value, "execution_schema_version", minimum=1) != CUSTODY_EXECUTION_SCHEMA_VERSION:
+    schema_version = _value_integer(value, "execution_schema_version", minimum=1)
+    if schema_version not in {1, CUSTODY_EXECUTION_SCHEMA_VERSION}:
         raise ContractValidationError("custody execution schema_version is unsupported")
     _value_string(value, "organization_id")
     _uuid(_value_string(value, "execution_id"), "execution_id")
@@ -55,6 +61,8 @@ def validate_custody_execution_attempt(value: Mapping[str, Any]) -> None:
     operation_type = _value_string(value, "operation_type")
     if operation_type not in _TARGET_KINDS:
         raise ContractValidationError("custody execution operation_type is unsupported")
+    if schema_version == 1 and operation_type in _CUSTODY_LIFECYCLE_OPERATION_TYPES:
+        raise ContractValidationError("custody execution schema_version is unsupported")
     if _value_string(value, "target_kind") != _TARGET_KINDS[operation_type]:
         raise ContractValidationError("custody execution target_kind is invalid")
     _sha256_digest(_value_string(value, "target_sha256"), "target_sha256")

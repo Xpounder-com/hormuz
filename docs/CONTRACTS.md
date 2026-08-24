@@ -29,10 +29,10 @@ The current Hormuz-owned JSON schemas are:
 | `GET /ready` | `hormuz.gateway-readiness` v1 |
 | `GET /v1/gateway/whoami` | `hormuz.gateway-identity` v1 |
 | `GET /v1/gateway/usage` | `hormuz.gateway-usage-summary` v1 |
-| Hormuz-generated HTTP errors | `hormuz.gateway-error` v2 |
+| Hormuz-generated HTTP errors | `hormuz.gateway-error` v3 |
 | `hormuz policy-check` output | `hormuz.policy-decision` v1 |
 | `hormuz policy status --json` | `hormuz.policy-control-status` v1 |
-| `hormuz custody status --json` | `hormuz.custody-control-status` v2 |
+| `hormuz custody status --json` | `hormuz.custody-control-status` v3 |
 | `hormuz status --json` | `hormuz.usage-report` v1 |
 | audit JSONL events | `hormuz.audit-event` v2 |
 | immutable audit-anchor artifact | `hormuz.audit-anchor` v1 |
@@ -41,8 +41,9 @@ The current Hormuz-owned JSON schemas are:
 | immutable staged policy document | `hormuz.policy-document` v1 |
 | PostgreSQL policy-control event row | `hormuz.policy-control-event` v1 |
 | PostgreSQL custody-control event row | `hormuz.custody-control-event` v1 |
-| PostgreSQL custody-execution attempt row | `hormuz.custody-execution-attempt` v1 |
+| PostgreSQL custody-execution attempt row | `hormuz.custody-execution-attempt` v2 |
 | PostgreSQL custody-execution event row | `hormuz.custody-execution-event` v1 |
+| PostgreSQL custody-lifecycle event row | `hormuz.custody-lifecycle-event` v1 |
 
 OpenAI and Anthropic response bodies remain provider-owned. Hormuz does not add a schema wrapper or fields to those bodies, because doing so would break Codex and Claude Code compatibility. Instead, a relayed provider response carries:
 
@@ -87,17 +88,23 @@ In local mode, `policy_version` is a deterministic content-free fingerprint of t
 
 Managed policy control has two additional strict contracts. `hormuz.policy-document` v1 accepts only allowlisted routing, cap, budget, and egress-control fields. `hormuz.policy-control-status` v1 returns administration metadata for a current policy administrator: the active digest/generation, immutable version metadata, structural redacted change summaries, and stable administrator keys. PostgreSQL `hormuz.policy-control-event` v1 records bootstrap, administrator, stage, activation, rollback, and break-glass events. It stores both an explicit durable schema ID/version and opaque actor identity keys plus structural metadata only; Hormuz validates the exact event shape before it inserts the row, and the compatibility fixture exercises that durable schema. See [POLICY_CONTROL.md](POLICY_CONTROL.md) for authorization and lifecycle semantics.
 
-Managed custody control adds `hormuz.custody-control-status` v2 and
+Managed custody control adds `hormuz.custody-control-status` v3 and
 `hormuz.custody-control-event` v1. Status contains tenant-qualified
 administrator facts, at most the latest 100 content-free operation intents,
 and at most the latest 100 metadata-only custody execution attempts;
 `operation_count` and `execution_attempt_count` retain the complete totals.
-Each execution root uses `hormuz.custody-execution-attempt` v1 and its
-append-only transitions use `hormuz.custody-execution-event` v1. Raw execution
-targets, parameters, protected-input references, plaintext, ciphertext, and
-credentials are never contract fields. The previous status v1 remains
-validator-compatible. Unknown fields and invalid cross-field combinations fail
-closed. See [CUSTODY_CONTROL.md](CUSTODY_CONTROL.md).
+Each new execution root uses `hormuz.custody-execution-attempt` v2 and its
+append-only transitions use `hormuz.custody-execution-event` v1. The new
+metadata-only `hormuz.custody-lifecycle-event` v1 records a hash-linked
+destructive lifecycle effect by asset ID, generation, and binding fingerprint;
+it never contains a path, key reference, credential, target descriptor, or
+parameter descriptor. Historical status v1/v2 and routine-only execution root
+v1 remain validator-compatible. Unknown fields and invalid cross-field
+combinations fail closed. Internal replica leases, prepared barriers, and
+acknowledgements are content-free coordination state rather than a new public
+evidence schema. They ensure an affected asset is locally blocked before a
+replica acknowledges and before the immutable lifecycle event activates. See
+[CUSTODY_CONTROL.md](CUSTODY_CONTROL.md).
 
 Model fields have distinct meanings:
 
@@ -142,7 +149,16 @@ for the retention boundary.
 
 ## Errors
 
-Hormuz-generated JSON errors use `hormuz.gateway-error` v2 and a stable `error.code`. Version 2 adds the content-free `hormuz_storage_unavailable` classification; v1 remains validator-compatible for historical clients and does not silently accept that new code. The current public-code inventory is available in `hormuz contract-manifest`; it includes authentication, request-shape, policy, secret, budget, configuration, upstream, and durable-storage categories. A caller should switch on `error.code`, not an English error message.
+Hormuz-generated JSON errors use `hormuz.gateway-error` v3 and a stable
+`error.code`. Version 2 added the content-free
+`hormuz_storage_unavailable` classification; version 3 adds
+`hormuz_custody_restricted` for a lifecycle restriction that blocks a new
+provider selection. Historical v1/v2 objects remain validator-compatible and
+do not silently accept later codes. The current public-code inventory is
+available in `hormuz contract-manifest`; it includes authentication,
+request-shape, policy, secret, budget, configuration, upstream, custody, and
+durable-storage categories. A caller should switch on `error.code`, not an
+English error message.
 
 Where an OpenAI- or Anthropic-compatible endpoint must preserve a provider-native body, Hormuz supplies the equivalent stable classification through `X-Hormuz-Error-Code`. The provider body is not rewritten.
 
@@ -179,6 +195,22 @@ The release line has these intentional pre-stability changes:
     schema v4 because shared custody authority is PostgreSQL-only. An older
     binary fails closed on the v6 ledger. See [CUSTODY_CONTROL.md](CUSTODY_CONTROL.md)
     and [STORAGE.md](STORAGE.md).
+12. PostgreSQL schema v7 adds immutable custody asset identities, a
+    per-organization hash-linked `hormuz.custody-lifecycle-event` v1 ledger,
+    a derived runtime restriction projection, replica leases, prepared
+    admission barriers, acknowledgements, and rewrap/restore attestations.
+    A destructive execution root uses v2 and commits its terminal event plus
+    lifecycle event, barrier activation, and projection atomically after every
+    active replica acknowledges. The fixed five-second lease fences a replica
+    that loses coordination; it is not the normal invalidation path. The new
+    current custody-status v3
+    accepts v2 attempts; v1/v2 status and v1 routine-only attempts remain
+    historical compatibility shapes. The runtime role can read only the
+    fingerprint registry and projection; it cannot mutate lifecycle evidence
+    or restrictions. SQLite remains schema v4 because this governed shared
+    custody boundary is PostgreSQL-only. An older binary fails closed on the
+    v7 ledger. See [CUSTODY_CONTROL.md](CUSTODY_CONTROL.md) and
+    [STORAGE.md](STORAGE.md).
 
 The SQLite migrations add the metadata columns required to emit v2 while retaining existing usage rows, add tenant scope to active budget reservations, add the versioned append-only request-attempt ledger, and add the per-organization commit-time evidence chain. Each persisted usage, secret-evidence, request-attempt, or audit-chain object carries an explicit schema identifier and version where it is a public/durable evidence format, so later code cannot silently reinterpret its evidence shape. Historical rows receive explicit legacy defaults where the old database could not know a value. Earlier applications will not understand newer schemas; rollback therefore requires retaining or restoring the earlier application/database pair. The corresponding PostgreSQL adapter is migration-led and uses a distinct operator migration credential and restricted runtime credential. See [STORAGE.md](STORAGE.md) for the upgrade, rollback, recovery, and remaining-operational-gates boundary.
 

@@ -36,6 +36,13 @@ from .config import (
     UsageStorageConfig,
 )
 from .custody import KEY_PURPOSES, KEY_PURPOSE_DATA_ENCRYPTION, KEY_PURPOSE_PROVIDER_CREDENTIAL
+from .custody_lifecycle import (
+    CUSTODY_ASSET_TYPES,
+    CustodyAsset,
+    CustodyAssetCatalog,
+    CustodyLifecycleConfig,
+    binding_fingerprint,
+)
 
 
 _ENVIRONMENT_NAME_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
@@ -43,6 +50,9 @@ _POSTGRES_IDENTIFIER_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 _AWS_REGION_PATTERN = re.compile(r"[a-z]{2}(?:-gov)?-[a-z0-9-]+-\d+\Z")
 _S3_BUCKET_PATTERN = re.compile(r"[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]\Z")
 _OPENBAO_PATH_NAME_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}\Z")
+_CUSTODY_ASSET_IDENTIFIER_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,255}\Z")
+
+
 def build_gateway_config(
     config_type: type[GatewayConfig],
     path: str | Path,
@@ -483,6 +493,18 @@ def build_gateway_config(
         oidc_issuers=oidc_issuers,
         path_prefix="custody_control.bootstrap_administrators",
     )
+    configured_organization_ids = tuple(
+        sorted({identity.organization_id for identity in (*static_identities, *identities_by_subject.values())})
+    )
+    custody_lifecycle = _custody_lifecycle(
+        raw.get("custody_lifecycle"),
+        organization_ids=configured_organization_ids,
+        upstreams=upstreams,
+        key_custody=key_custody,
+        base_directory=source_path.parent,
+    )
+    if custody_lifecycle is not None and custody_control_mode != "postgresql":
+        raise ConfigError("custody_lifecycle requires custody_control.mode postgresql")
 
     routes_raw = _object(raw.get("model_routes"), "model_routes")
     if not routes_raw:
@@ -571,6 +593,7 @@ def build_gateway_config(
             postgres_executor_role=custody_executor_role,
             pending_attempt_ttl_seconds=custody_executor_pending_ttl_seconds,
         ),
+        custody_lifecycle=custody_lifecycle,
         key_custody=key_custody,
         audit_anchor=audit_anchor,
         audit_chain=audit_chain,
@@ -828,6 +851,201 @@ def _key_custody(value: Any) -> KeyCustodyConfig | None:
     raise ConfigError("key_custody.backend must be aws-kms or openbao-transit")
 
 
+def _custody_lifecycle(
+    value: Any,
+    *,
+    organization_ids: tuple[str, ...],
+    upstreams: dict[str, UpstreamConfig],
+    key_custody: KeyCustodyConfig | None,
+    base_directory: Path,
+) -> CustodyLifecycleConfig | None:
+    """Build the private asset catalog used by governed lifecycle operations.
+
+    Every source path and customer key reference remains in the configuration
+    catalog. The durable lifecycle ledger receives only the generated stable
+    identity and binding fingerprint.
+    """
+
+    if value is None:
+        return None
+    if len(organization_ids) != 1:
+        raise ConfigError(
+            "custody_lifecycle requires exactly one configured organization; use a tenant-scoped gateway configuration"
+        )
+    if key_custody is None:
+        raise ConfigError("custody_lifecycle requires key_custody")
+    item = _object(value, "custody_lifecycle")
+    unsupported = set(item).difference({"freshness_lease_seconds", "assets"})
+    if unsupported:
+        raise ConfigError("custody_lifecycle contains unsupported fields: " + ", ".join(sorted(unsupported)))
+    lease_seconds = _integer(
+        item.get("freshness_lease_seconds", 5),
+        "custody_lifecycle.freshness_lease_seconds",
+        minimum=5,
+        maximum=5,
+    )
+    raw_assets = item.get("assets")
+    if not isinstance(raw_assets, list) or not raw_assets:
+        raise ConfigError("custody_lifecycle.assets must contain at least one asset")
+    organization_id = organization_ids[0]
+    assets: list[CustodyAsset] = []
+    envelope_bindings: list[tuple[CustodyAsset, str, str, int, str, int]] = []
+    key_assets: list[tuple[CustodyAsset, str, str]] = []
+    provider_assets: dict[str, CustodyAsset] = {}
+
+    for index, raw_asset in enumerate(raw_assets):
+        prefix = f"custody_lifecycle.assets[{index}]"
+        asset = _object(raw_asset, prefix)
+        unsupported_asset = set(asset).difference({"asset_type", "asset_id", "generation", "binding"})
+        if unsupported_asset:
+            raise ConfigError(prefix + " contains unsupported fields: " + ", ".join(sorted(unsupported_asset)))
+        asset_type = _string(asset.get("asset_type"), f"{prefix}.asset_type")
+        if asset_type not in CUSTODY_ASSET_TYPES:
+            raise ConfigError(f"{prefix}.asset_type is unsupported")
+        asset_id = _asset_identifier(asset.get("asset_id"), f"{prefix}.asset_id")
+        generation = _integer(asset.get("generation"), f"{prefix}.generation", minimum=1)
+        binding_raw = _object(asset.get("binding"), f"{prefix}.binding")
+        if asset_type == "provider_credential":
+            unsupported_binding = set(binding_raw).difference({"protocol"})
+            if unsupported_binding:
+                raise ConfigError(f"{prefix}.binding contains unsupported fields: " + ", ".join(sorted(unsupported_binding)))
+            protocol = _string(binding_raw.get("protocol"), f"{prefix}.binding.protocol")
+            upstream = upstreams.get(protocol)
+            if upstream is None:
+                raise ConfigError(f"{prefix}.binding.protocol must identify a configured provider")
+            if protocol in provider_assets:
+                raise ConfigError(f"custody_lifecycle has more than one provider credential for {protocol}")
+            source = (
+                f"env:{upstream.api_key_env}"
+                if upstream.api_key_env is not None
+                else f"envelope:{upstream.api_key_envelope_path}"
+            )
+            binding = {"protocol": protocol, "source": source}
+        elif asset_type == "envelope":
+            required = {
+                "path",
+                "provider_credential_asset_id",
+                "provider_credential_generation",
+                "key_reference_asset_id",
+                "key_reference_generation",
+            }
+            if set(binding_raw) != required:
+                raise ConfigError(f"{prefix}.binding must define the configured envelope and its asset links")
+            path = _configured_path(binding_raw.get("path"), f"{prefix}.binding.path", base_directory)
+            provider_asset_id = _asset_identifier(
+                binding_raw.get("provider_credential_asset_id"),
+                f"{prefix}.binding.provider_credential_asset_id",
+            )
+            provider_generation = _integer(
+                binding_raw.get("provider_credential_generation"),
+                f"{prefix}.binding.provider_credential_generation",
+                minimum=1,
+            )
+            key_asset_id = _asset_identifier(
+                binding_raw.get("key_reference_asset_id"),
+                f"{prefix}.binding.key_reference_asset_id",
+            )
+            key_generation = _integer(
+                binding_raw.get("key_reference_generation"),
+                f"{prefix}.binding.key_reference_generation",
+                minimum=1,
+            )
+            binding = {
+                "path": str(path),
+                "provider_credential_asset": f"{provider_asset_id}@{provider_generation}",
+                "key_reference_asset": f"{key_asset_id}@{key_generation}",
+            }
+        else:
+            required = {"purpose", "key_reference"}
+            if set(binding_raw) != required:
+                raise ConfigError(f"{prefix}.binding must define the key purpose and customer key reference")
+            purpose = _string(binding_raw.get("purpose"), f"{prefix}.binding.purpose")
+            if purpose not in KEY_PURPOSES:
+                raise ConfigError(f"{prefix}.binding.purpose is unsupported")
+            reference = _string(binding_raw.get("key_reference"), f"{prefix}.binding.key_reference")
+            if len(reference) > 2048 or any(character in reference for character in "\x00\r\n"):
+                raise ConfigError(f"{prefix}.binding.key_reference must be a safe KMS key reference")
+            binding = {"purpose": purpose, "key_reference": reference}
+
+        fingerprint = binding_fingerprint(
+            organization_id=organization_id,
+            asset_type=asset_type,
+            asset_id=asset_id,
+            generation=generation,
+            binding=binding,
+        )
+        try:
+            constructed = CustodyAsset(
+                organization_id=organization_id,
+                asset_type=asset_type,
+                asset_id=asset_id,
+                generation=generation,
+                binding_fingerprint=fingerprint,
+                binding=binding,
+            )
+        except ValueError as error:
+            raise ConfigError(f"{prefix} is invalid") from error
+        assets.append(constructed)
+        if asset_type == "provider_credential":
+            provider_assets[binding["protocol"]] = constructed
+        elif asset_type == "envelope":
+            envelope_bindings.append(
+                (
+                    constructed,
+                    binding["path"],
+                    provider_asset_id,
+                    provider_generation,
+                    key_asset_id,
+                    key_generation,
+                )
+            )
+        else:
+            key_assets.append((constructed, binding["purpose"], binding["key_reference"]))
+
+    try:
+        catalog = CustodyAssetCatalog(tuple(assets))
+    except ValueError as error:
+        raise ConfigError("custody_lifecycle asset identities or bindings are duplicated") from error
+    if set(provider_assets) != set(upstreams):
+        raise ConfigError("custody_lifecycle requires exactly one provider credential asset per configured upstream")
+    envelopes_by_path = {path: asset for asset, path, _pid, _pgen, _kid, _kgen in envelope_bindings}
+    if len(envelopes_by_path) != len(envelope_bindings):
+        raise ConfigError("custody_lifecycle envelope paths must be unique")
+    for protocol, upstream in upstreams.items():
+        credential = provider_assets[protocol]
+        if upstream.api_key_envelope_path is None:
+            continue
+        envelope = envelopes_by_path.get(str(upstream.api_key_envelope_path))
+        if envelope is None:
+            raise ConfigError(f"custody_lifecycle requires an envelope asset for upstreams.{protocol}")
+        linked = next(
+            links
+            for links in envelope_bindings
+            if links[0].key == envelope.key
+        )
+        _asset, _path, provider_asset_id, provider_generation, key_asset_id, key_generation = linked
+        if credential.asset_id != provider_asset_id or credential.generation != provider_generation:
+            raise ConfigError(f"custody_lifecycle envelope link for upstreams.{protocol} is invalid")
+        try:
+            key_asset = catalog.asset(
+                organization_id=organization_id,
+                asset_type="key_reference",
+                asset_id=key_asset_id,
+                generation=key_generation,
+            )
+        except CustodyLifecycleError as error:
+            raise ConfigError(f"custody_lifecycle envelope link for upstreams.{protocol} is invalid") from error
+        if key_asset.binding.get("purpose") != KEY_PURPOSE_PROVIDER_CREDENTIAL:
+            raise ConfigError(f"custody_lifecycle envelope link for upstreams.{protocol} must use provider_credential")
+    for purpose, configured_reference in key_custody.key_references.items():
+        active = [asset for asset, candidate_purpose, reference in key_assets if candidate_purpose == purpose and reference == configured_reference]
+        if len(active) != 1:
+            raise ConfigError(
+                "custody_lifecycle requires one current key reference asset for " + purpose
+            )
+    return CustodyLifecycleConfig(freshness_lease_seconds=lease_seconds, assets=catalog)
+
+
 def _audit_anchor(value: Any, *, key_custody: KeyCustodyConfig | None) -> AuditAnchorConfig | None:
     """Parse an explicit S3 Object Lock target with no accidental default."""
 
@@ -995,6 +1213,15 @@ def _string(value: Any, path: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ConfigError(f"{path} must be a non-empty string")
     return value.strip()
+
+
+def _asset_identifier(value: Any, path: str) -> str:
+    """Accept an opaque stable asset ID without treating it as a filesystem key."""
+
+    result = _string(value, path)
+    if not _CUSTODY_ASSET_IDENTIFIER_PATTERN.fullmatch(result):
+        raise ConfigError(f"{path} must be a safe immutable asset identifier")
+    return result
 
 
 def _url(value: Any, path: str) -> str:

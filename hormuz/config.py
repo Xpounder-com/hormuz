@@ -11,6 +11,7 @@ from ._config_input import (
     MAX_CONFIGURATION_DEPTH,
     MAX_CONFIGURATION_NODES,
 )
+from .custody_lifecycle import CustodyLifecycleConfig
 
 
 class ConfigError(ValueError):
@@ -326,6 +327,7 @@ class GatewayConfig:
     policy_control: PolicyControlConfig = field(default_factory=PolicyControlConfig)
     custody_control: CustodyControlConfig = field(default_factory=CustodyControlConfig)
     custody_executor: CustodyExecutorConfig = field(default_factory=CustodyExecutorConfig)
+    custody_lifecycle: CustodyLifecycleConfig | None = None
     key_custody: KeyCustodyConfig | None = None
     audit_anchor: AuditAnchorConfig | None = None
     audit_chain: AuditChainConfig | None = None
@@ -337,6 +339,14 @@ class GatewayConfig:
         return build_gateway_config(cls, path, environ=environ)
 
     def validate_references(self) -> None:
+        if self.custody_lifecycle is not None:
+            if self.custody_control.mode != "postgresql" or self.usage_storage.backend != "postgresql":
+                raise ConfigError("custody_lifecycle requires managed PostgreSQL custody control")
+            if len(self.organization_ids) != 1:
+                raise ConfigError(
+                    "custody_lifecycle requires exactly one configured organization; "
+                    "use a tenant-scoped gateway configuration"
+                )
         if any(upstream.api_key_envelope_path is not None for upstream in self.upstreams.values()):
             if len(self.organization_ids) != 1:
                 raise ConfigError(

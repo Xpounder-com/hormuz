@@ -36,19 +36,28 @@ PostgreSQL schema v5 adds forced-RLS custody tenants, administrators, operation
 intents, append-only approvals, and immutable control events. A dedicated
 custody-control role owns only that surface. PostgreSQL schema v6 adds a
 separate custody-executor role and immutable routine-execution attempt/events.
-The executor must atomically claim one exact, current routine intent before any
-side effect, and it cannot change the human authority ledger. Managed mode
-fails closed rather than letting the legacy CLI execute KMS lifecycle work
-directly.
+PostgreSQL schema v7 extends that boundary with immutable asset generations,
+append-only destructive lifecycle events, rewrap/restore attestations, and a
+derived monotonic runtime projection. Restrictive changes prepare a durable
+affected-asset admission barrier; active replicas install and acknowledge it
+before the terminal event, lifecycle event, barrier activation, and projection
+advance commit atomically. A disconnected replica loses admission authority
+after a fixed five-second lease, while coordination loss makes it unready
+immediately. The executor must atomically claim one exact, current intent
+before any side effect, and it cannot change the human authority ledger or
+directly edit the projection. Managed mode fails closed rather than letting the
+legacy CLI execute KMS lifecycle work directly.
 
 The final active administrator cannot be removed by the ordinary path. Loss of
 all administrators returns a break-glass-required error, but this decision does
 not define or implement that recovery mechanism.
 
-Customer KMS and IAM remain authoritative. Hormuz records envelope and key
-references; it does not edit customer key policy, disable safeguards, or delete
-customer-owned keys. The isolated executor consumes only authorized, unexpired
-routine work; destructive lifecycle execution remains a separate release gate.
+Customer KMS and IAM remain authoritative. Hormuz records only immutable asset
+IDs/generations and binding fingerprints in evidence; it does not edit customer
+key policy, disable safeguards, or delete customer-owned keys. The isolated
+executor consumes only authorized, unexpired work. Its destructive actions are
+logical Hormuz selection restrictions, not provider-side revocation or customer
+KMS administration; external lifecycle work remains a separate release gate.
 
 ## Rejected alternatives
 

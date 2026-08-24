@@ -1,4 +1,4 @@
-"""PostgreSQL persistence for isolated routine-custody execution attempts."""
+"""PostgreSQL persistence for isolated governed-custody execution attempts."""
 
 from __future__ import annotations
 
@@ -15,10 +15,18 @@ from .custody_execution_repository import (
     CustodyExecutionAttempt,
     CustodyExecutionError,
     CustodyExecutionEvent,
+    CustodyExecutionResult,
     CustodyExecutionRequest,
     CustodyExecutionStatus,
 )
+from .custody_lifecycle import CustodyAssetCatalog, CustodyLifecycleError
 from .postgres import PostgresConnectionPool, PostgresStorageError, postgres_transaction, verify_postgres_schema
+from .postgres_custody_lifecycle_store import (
+    append_custody_lifecycle_event,
+    prepare_custody_runtime_barrier,
+    record_custody_envelope_attestation,
+    register_custody_asset_catalog,
+)
 
 
 _STATUS_ATTEMPT_LIMIT = 100
@@ -39,6 +47,7 @@ class PostgresCustodyExecutorStore:
         schema: str,
         custody_executor_role: str,
         pending_attempt_ttl_seconds: int,
+        asset_catalog: CustodyAssetCatalog | None = None,
         connection_pool: PostgresConnectionPool | None = None,
     ) -> None:
         if isinstance(pending_attempt_ttl_seconds, bool) or not isinstance(pending_attempt_ttl_seconds, int):
@@ -49,6 +58,7 @@ class PostgresCustodyExecutorStore:
         self._schema = schema
         self._runtime_role = custody_executor_role
         self._pending_attempt_ttl = timedelta(seconds=pending_attempt_ttl_seconds)
+        self._asset_catalog = asset_catalog
         self._connection_pool = connection_pool
         verify_postgres_schema(
             dsn,
@@ -60,7 +70,7 @@ class PostgresCustodyExecutorStore:
         )
 
     def claim(self, *, request: CustodyExecutionRequest) -> CustodyExecutionAttempt:
-        """Atomically consume one exact active routine authorization.
+        """Atomically consume one exact active governed authorization.
 
         The shared tenant advisory lock serializes this start boundary against
         custody-admin revocation. The root and its pending event commit before
@@ -72,6 +82,51 @@ class PostgresCustodyExecutorStore:
         with self._transaction(request.organization_id) as connection:
             with connection.cursor() as cursor:
                 self._lock_tenant(cursor, request.organization_id)
+                if self._asset_catalog is not None:
+                    register_custody_asset_catalog(
+                        cursor,
+                        organization_id=request.organization_id,
+                        catalog=self._asset_catalog,
+                        registered_at=now,
+                    )
+                    self._require_write_asset_unrestricted(cursor, request=request)
+                    if request.operation_type in {
+                        "disable_provider_credential",
+                        "retire_envelope",
+                        "retire_key_reference",
+                    }:
+                        cursor.execute(
+                            """
+                            SELECT 1
+                            FROM custody_runtime_projection_barriers
+                            WHERE organization_id = %s
+                              AND activated_at IS NULL
+                              AND resolved_at IS NULL
+                            LIMIT 1
+                            """,
+                            (request.organization_id,),
+                        )
+                        if cursor.fetchone() is not None:
+                            raise CustodyExecutionError("custody_execution_coordination_busy")
+                    if (
+                        request.operation_type == "resolve_recovery"
+                        and request.parameters.get("resolution_code") == "confirmed_applied"
+                    ):
+                        recovery_execution_id = request.target.get("recovery_execution_id")
+                        cursor.execute(
+                            """
+                            SELECT 1
+                            FROM custody_runtime_projection_barriers
+                            WHERE organization_id = %s
+                              AND execution_id = %s
+                              AND activated_at IS NULL
+                              AND resolved_at IS NULL
+                            LIMIT 1
+                            """,
+                            (request.organization_id, recovery_execution_id),
+                        )
+                        if cursor.fetchone() is not None:
+                            raise CustodyExecutionError("custody_recovery_resolution_invalid")
                 cursor.execute(
                     """
                     SELECT intent.*, administrator.active AS requester_active
@@ -86,7 +141,7 @@ class PostgresCustodyExecutorStore:
                 intent = cursor.fetchone()
                 if intent is None:
                     raise CustodyExecutionError("custody_execution_authorization_not_found")
-                self._require_exact_authorization(intent, request=request, now=now)
+                self._require_exact_authorization(cursor, intent, request=request, now=now)
                 cursor.execute(
                     """
                     SELECT execution_id FROM custody_execution_attempts
@@ -121,13 +176,14 @@ class PostgresCustodyExecutorStore:
                         operation_id, operation_type, target_kind, target_sha256, parameters_sha256,
                         protected_input_ref_sha256, claimed_at
                     ) VALUES (
-                        %s, %s, 'hormuz.custody-execution-attempt', 1,
+                        %s, %s, 'hormuz.custody-execution-attempt', %s,
                         %s, %s, %s, %s, %s, %s, %s
                     )
                     """,
                     (
                         attempt.organization_id,
                         attempt.execution_id,
+                        attempt.execution_schema_version,
                         attempt.operation_id,
                         attempt.operation_type,
                         attempt.target_kind,
@@ -140,6 +196,60 @@ class PostgresCustodyExecutorStore:
                 self._insert_event(cursor, attempt.events[0])
         return attempt
 
+    def register_asset_catalog(self, *, organization_ids: tuple[str, ...]) -> None:
+        """Register the configured immutable identities through the machine boundary.
+
+        Registration is configuration genesis, not an administrative state
+        change: it has no effect on provider selection or customer KMS state.
+        Existing identities can never be rebound because fingerprints must
+        match the first registered mapping.
+        """
+
+        if self._asset_catalog is None:
+            raise CustodyExecutionError("custody_lifecycle_configuration_required")
+        if not organization_ids or len(set(organization_ids)) != len(organization_ids):
+            raise CustodyExecutionError("custody_execution_organization_scope_invalid")
+        now = datetime.now(timezone.utc)
+        for organization_id in organization_ids:
+            with self._transaction(organization_id) as connection:
+                with connection.cursor() as cursor:
+                    self._lock_tenant(cursor, organization_id)
+                    register_custody_asset_catalog(
+                        cursor,
+                        organization_id=organization_id,
+                        catalog=self._asset_catalog,
+                        registered_at=now,
+                    )
+
+    def prepare_restriction(
+        self,
+        *,
+        organization_id: str,
+        execution_id: str,
+        result: CustodyExecutionResult,
+    ) -> None:
+        """Prepare the exact local barrier before any replica may acknowledge it."""
+
+        effect = result.lifecycle_effect
+        if effect is None or effect.asset is None or result.envelope_attestation is not None:
+            raise CustodyExecutionError("custody_lifecycle_execution_result_invalid")
+        now = datetime.now(timezone.utc)
+        with self._transaction(organization_id) as connection:
+            with connection.cursor() as cursor:
+                self._lock_execution(cursor, organization_id, execution_id)
+                attempt = self._load_attempt(cursor, organization_id=organization_id, execution_id=execution_id)
+                if attempt.state != "pending":
+                    raise CustodyExecutionError("custody_execution_already_finalized")
+                try:
+                    prepare_custody_runtime_barrier(
+                        cursor,
+                        attempt=attempt,
+                        effect=effect,
+                        prepared_at=now,
+                    )
+                except CustodyLifecycleError as error:
+                    raise CustodyExecutionError(error.code) from None
+
     def finalize(
         self,
         *,
@@ -147,6 +257,7 @@ class PostgresCustodyExecutorStore:
         execution_id: str,
         state: str,
         reason_code: str | None = None,
+        result: CustodyExecutionResult | None = None,
     ) -> CustodyExecutionAttempt:
         """Append one terminal event exactly once; roots are never rewritten."""
 
@@ -158,6 +269,8 @@ class PostgresCustodyExecutorStore:
             raise CustodyExecutionError("custody_execution_terminal_reason_invalid")
         if state == "outcome_unknown" and reason_code not in CUSTODY_EXECUTION_UNKNOWN_REASONS:
             raise CustodyExecutionError("custody_execution_terminal_reason_invalid")
+        if state != "succeeded" and result is not None:
+            raise CustodyExecutionError("custody_execution_terminal_result_invalid")
         now = datetime.now(timezone.utc)
         with self._transaction(organization_id) as connection:
             with connection.cursor() as cursor:
@@ -165,6 +278,17 @@ class PostgresCustodyExecutorStore:
                 attempt = self._load_attempt(cursor, organization_id=organization_id, execution_id=execution_id)
                 if attempt.state != "pending":
                     raise CustodyExecutionError("custody_execution_already_finalized")
+                if (
+                    state == "succeeded"
+                    and result is not None
+                    and result.lifecycle_effect is not None
+                    and result.lifecycle_effect.asset is not None
+                ):
+                    self._require_restriction_coordination_ready(
+                        cursor,
+                        organization_id=organization_id,
+                        execution_id=execution_id,
+                    )
                 event = CustodyExecutionEvent(
                     organization_id=organization_id,
                     execution_id=execution_id,
@@ -176,7 +300,7 @@ class PostgresCustodyExecutorStore:
                 )
                 self._validate_event(event)
                 self._insert_event(cursor, event)
-                return CustodyExecutionAttempt(
+                completed = CustodyExecutionAttempt(
                     organization_id=attempt.organization_id,
                     execution_id=attempt.execution_id,
                     operation_id=attempt.operation_id,
@@ -187,7 +311,10 @@ class PostgresCustodyExecutorStore:
                     protected_input_ref_sha256=attempt.protected_input_ref_sha256,
                     claimed_at=attempt.claimed_at,
                     events=(*attempt.events, event),
+                    execution_schema_version=attempt.execution_schema_version,
                 )
+                self._finalize_result(cursor, attempt=completed, result=result, occurred_at=now)
+                return completed
 
     def sweep_stale_pending(self, *, organization_ids: tuple[str, ...]) -> int:
         """Mark stale durable pending attempts unknown without replaying work."""
@@ -244,6 +371,7 @@ class PostgresCustodyExecutorStore:
 
     def _require_exact_authorization(
         self,
+        cursor: Any,
         intent: dict[str, object],
         *,
         request: CustodyExecutionRequest,
@@ -256,7 +384,8 @@ class PostgresCustodyExecutorStore:
             raise CustodyExecutionError("custody_execution_requester_inactive")
         if str(intent.get("state")) != "authorized":
             raise CustodyExecutionError("custody_execution_authorization_not_authorized")
-        if str(intent.get("risk_level")) != "routine" or str(intent.get("operation_type")) != request.operation_type:
+        expected_risk = "routine" if request.operation_type in {"seal_envelope", "rewrap_envelope", "verify_restore"} else "destructive"
+        if str(intent.get("risk_level")) != expected_risk or str(intent.get("operation_type")) != request.operation_type:
             raise CustodyExecutionError("custody_execution_authorization_mismatch")
         if (
             str(intent.get("target_sha256")) != request.target_sha256
@@ -264,6 +393,182 @@ class PostgresCustodyExecutorStore:
             or _nullable_text(intent.get("protected_input_ref_sha256")) != request.protected_input_ref_sha256
         ):
             raise CustodyExecutionError("custody_execution_authorization_mismatch")
+        if expected_risk == "destructive":
+            if self._asset_catalog is None:
+                raise CustodyExecutionError("custody_lifecycle_configuration_required")
+            cursor.execute(
+                """
+                SELECT custody_execution_has_two_active_approvers(%s, %s) AS authorized
+                """,
+                (request.organization_id, request.operation_id),
+            )
+            approval_row = cursor.fetchone()
+            if approval_row is None or approval_row.get("authorized") is not True:
+                raise CustodyExecutionError("custody_execution_active_approvers_required")
+
+    def _finalize_result(
+        self,
+        cursor: Any,
+        *,
+        attempt: CustodyExecutionAttempt,
+        result: CustodyExecutionResult | None,
+        occurred_at: datetime,
+    ) -> None:
+        if attempt.state != "succeeded":
+            if result is not None:
+                raise CustodyExecutionError("custody_execution_terminal_result_invalid")
+            return
+        is_destructive = attempt.operation_type not in {"seal_envelope", "rewrap_envelope", "verify_restore"}
+        if is_destructive:
+            if result is None or result.lifecycle_effect is None or result.envelope_attestation is not None:
+                raise CustodyExecutionError("custody_lifecycle_execution_result_required")
+            if result.lifecycle_effect.operation_type != attempt.operation_type:
+                raise CustodyExecutionError("custody_lifecycle_execution_result_invalid")
+            try:
+                append_custody_lifecycle_event(
+                    cursor,
+                    attempt=attempt,
+                    effect=result.lifecycle_effect,
+                    occurred_at=occurred_at,
+                )
+            except CustodyLifecycleError as error:
+                raise CustodyExecutionError(error.code) from None
+            return
+        if result is not None and result.lifecycle_effect is not None:
+            raise CustodyExecutionError("custody_lifecycle_execution_result_invalid")
+        if result is not None and result.envelope_attestation is not None:
+            try:
+                record_custody_envelope_attestation(
+                    cursor,
+                    attempt=attempt,
+                    attestation=result.envelope_attestation,
+                    occurred_at=occurred_at,
+                )
+            except CustodyLifecycleError as error:
+                raise CustodyExecutionError(error.code) from None
+
+    def _require_write_asset_unrestricted(self, cursor: Any, *, request: CustodyExecutionRequest) -> None:
+        """Pin the configured write key before an operation may call the KMS.
+
+        A later committed retirement may complete while this already-claimed
+        routine finishes, matching the request-start pin boundary used by the
+        gateway. A new claim after the restriction commits is denied.
+        """
+
+        if self._asset_catalog is None or request.operation_type not in {"seal_envelope", "rewrap_envelope"}:
+            return
+        path = request.target.get("path")
+        if not isinstance(path, str):
+            raise CustodyExecutionError("custody_lifecycle_write_asset_invalid")
+        envelopes = tuple(
+            asset
+            for asset in self._asset_catalog.assets_for(
+                organization_id=request.organization_id,
+                asset_type="envelope",
+            )
+            if asset.binding.get("path") == path
+        )
+        if len(envelopes) != 1:
+            raise CustodyExecutionError("custody_lifecycle_write_asset_invalid")
+        linked = envelopes[0].binding.get("key_reference_asset", "")
+        try:
+            linked_id, linked_generation = linked.rsplit("@", 1)
+            generation = int(linked_generation)
+            key_asset = self._asset_catalog.asset(
+                organization_id=request.organization_id,
+                asset_type="key_reference",
+                asset_id=linked_id,
+                generation=generation,
+            )
+        except (CustodyLifecycleError, TypeError, ValueError):
+            raise CustodyExecutionError("custody_lifecycle_write_asset_invalid") from None
+        cursor.execute(
+            """
+            SELECT restriction_kind
+            FROM custody_runtime_projection_restrictions
+            WHERE organization_id = %s
+              AND asset_type = %s
+              AND asset_id = %s
+              AND generation = %s
+            UNION ALL
+            SELECT restriction_kind
+            FROM custody_runtime_projection_barriers
+            WHERE organization_id = %s
+              AND asset_type = %s
+              AND asset_id = %s
+              AND asset_generation = %s
+              AND activated_at IS NULL
+              AND resolved_at IS NULL
+            LIMIT 1
+            """,
+            (
+                request.organization_id,
+                key_asset.asset_type,
+                key_asset.asset_id,
+                key_asset.generation,
+                request.organization_id,
+                key_asset.asset_type,
+                key_asset.asset_id,
+                key_asset.generation,
+            ),
+        )
+        restriction = cursor.fetchone()
+        if restriction is not None:
+            raise CustodyExecutionError("custody_key_reference_write_retired")
+
+    @staticmethod
+    def _require_restriction_coordination_ready(
+        cursor: Any,
+        *,
+        organization_id: str,
+        execution_id: str,
+    ) -> None:
+        """Serialize activation and reject it until every live replica acked."""
+
+        # The lifecycle lock is acquired first everywhere an event may append;
+        # the runtime lock then freezes registration, heartbeat, and ack state.
+        cursor.execute(
+            "SELECT pg_advisory_xact_lock(hashtext(%s))",
+            (f"hormuz:custody-lifecycle:{organization_id}",),
+        )
+        cursor.execute(
+            "SELECT pg_advisory_xact_lock(hashtext(%s))",
+            (f"hormuz:custody-runtime:{organization_id}",),
+        )
+        cursor.execute(
+            """
+            SELECT barrier_id
+            FROM custody_runtime_projection_barriers
+            WHERE organization_id = %s
+              AND execution_id = %s
+              AND activated_at IS NULL
+              AND resolved_at IS NULL
+            """,
+            (organization_id, execution_id),
+        )
+        barrier = cursor.fetchone()
+        if barrier is None:
+            raise CustodyExecutionError("custody_execution_coordination_not_prepared")
+        cursor.execute(
+            """
+            SELECT 1
+            FROM custody_runtime_replicas AS replica
+            WHERE replica.organization_id = %s
+              AND replica.retired_at IS NULL
+              AND replica.lease_expires_at > clock_timestamp()
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM custody_runtime_projection_acks AS acknowledgement
+                  WHERE acknowledgement.organization_id = replica.organization_id
+                    AND acknowledgement.replica_id = replica.replica_id
+                    AND acknowledgement.barrier_id = %s
+              )
+            LIMIT 1
+            """,
+            (organization_id, barrier["barrier_id"]),
+        )
+        if cursor.fetchone() is not None:
+            raise CustodyExecutionError("custody_execution_coordination_pending")
 
     def _load_attempt(
         self,
@@ -410,6 +715,7 @@ def _attempt_from_intent(
         protected_input_ref_sha256=_nullable_text(intent.get("protected_input_ref_sha256")),
         claimed_at=claimed_at,
         events=events,
+        execution_schema_version=2,
     )
 
 
@@ -430,6 +736,7 @@ def _attempt_from_rows(root: dict[str, object], event_rows: list[dict[str, objec
             protected_input_ref_sha256=_nullable_text(root.get("protected_input_ref_sha256")),
             claimed_at=claimed_at,
             events=events,
+            execution_schema_version=int(root["execution_schema_version"]),
         )
     except (KeyError, TypeError, ValueError) as error:
         raise PostgresStorageError("custody_execution_attempt_invalid") from error

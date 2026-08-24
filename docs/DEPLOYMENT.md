@@ -63,7 +63,7 @@ When external proxy mode is enabled, Hormuz checks the direct TCP peer address
 against the allowlist and verifies the dedicated
 `X-Hormuz-Ingress-Credential` header with a constant-time comparison before
 any route dispatch. A missing, duplicated, wrong, or untrusted request gets a
-content-free HTTP 401 `hormuz.gateway-error` v2 response with the existing
+content-free HTTP 401 `hormuz.gateway-error` v3 response with the existing
 `unauthorized` code. It does not reach employee authentication, policy,
 provider egress, usage storage, or audit storage.
 
@@ -89,6 +89,22 @@ this release line. Rotate by deploying a replacement gateway configuration and
 customer proxy/backend mapping through the customer's controlled rollout
 procedure. Do not place the credential in source control, client settings, or
 provider configuration.
+
+## Custody restriction coordination
+
+When `custody_lifecycle` is enabled, each gateway opens its normal bounded
+PostgreSQL runtime pool plus one restricted `LISTEN` connection for custody
+invalidation notifications. A frequent durable coordination scan is the
+fallback and renews a fixed five-second replica lease. Size database connection
+limits for that additional session per gateway instance.
+
+Do not route traffic to a process until `/ready` succeeds. Startup first loads
+the active projection and any prepared barriers, installs those barriers
+locally, and acknowledges them. Loss of the listener alone can fall back to
+the durable scan; failure to synchronize makes `/ready` unhealthy immediately
+and leaves admission fail closed. During shutdown, Hormuz stops advertising
+readiness, drains active handlers, retires its replica lease, and only then
+closes the runtime pool.
 
 ## Deliberate limits
 

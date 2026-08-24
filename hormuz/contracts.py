@@ -21,30 +21,34 @@ from ._contract_schemas.audit import (
 )
 from ._contract_schemas.common import (
     ContractValidationError,
-    _exact_keys,
     _value_integer,
-    _value_mapping,
     _value_string,
-    _value_string_list,
 )
 from ._contract_schemas.custody import (
     _validate_custody_control_status_v1,
     _validate_custody_control_status_v2,
+    _validate_custody_control_status_v3,
     validate_custody_control_event as _validate_custody_control_event_contract,
 )
 from ._contract_schemas.custody_execution import (
     validate_custody_execution_attempt as _validate_custody_execution_attempt_contract,
     validate_custody_execution_event as _validate_custody_execution_event_contract,
 )
+from ._contract_schemas.custody_lifecycle import (
+    validate_custody_lifecycle_event as _validate_custody_lifecycle_event_contract,
+)
 # This facade deliberately re-exports the stable schema vocabulary without
 # duplicating its ownership in the public compatibility module.
 from ._contract_schemas.constants import *  # noqa: F403
-from ._contract_schemas.constants import _CURRENT_SCHEMA_VERSIONS, _REQUEST_STATUSES
+from ._contract_schemas.constants import _CURRENT_SCHEMA_VERSIONS, PUBLIC_ERROR_CODES_V2
 from ._contract_schemas.health import (
     _validate_error,
     _validate_health,
     _validate_identity,
     _validate_readiness,
+)
+from ._contract_schemas.manifest import (
+    validate_contract_manifest as _validate_contract_manifest_contract,
 )
 from ._contract_schemas.policy import (
     _validate_policy_control_status,
@@ -175,6 +179,14 @@ def contract_manifest() -> dict[str, object]:
             ),
             _manifest_schema(
                 ERROR_SCHEMA_ID,
+                2,
+                "response",
+                "hormuz",
+                ["schema_id", "schema_version", "error"],
+                legacy=True,
+            ),
+            _manifest_schema(
+                ERROR_SCHEMA_ID,
                 ERROR_SCHEMA_VERSION,
                 "response",
                 "hormuz",
@@ -261,7 +273,7 @@ def contract_manifest() -> dict[str, object]:
             ),
             _manifest_schema(
                 CUSTODY_CONTROL_STATUS_SCHEMA_ID,
-                CUSTODY_CONTROL_STATUS_SCHEMA_VERSION,
+                2,
                 "cli-output",
                 "hormuz",
                 [
@@ -272,6 +284,22 @@ def contract_manifest() -> dict[str, object]:
                     "administrators",
                     "content-free operation approvals",
                     "content-free routine execution attempts",
+                ],
+                legacy=True,
+            ),
+            _manifest_schema(
+                CUSTODY_CONTROL_STATUS_SCHEMA_ID,
+                CUSTODY_CONTROL_STATUS_SCHEMA_VERSION,
+                "cli-output",
+                "hormuz",
+                [
+                    "schema_id",
+                    "schema_version",
+                    "organization_id",
+                    "initialized",
+                    "administrators",
+                    "content-free operation approvals",
+                    "content-free governed custody execution attempts",
                 ],
             ),
             _manifest_schema(
@@ -292,13 +320,29 @@ def contract_manifest() -> dict[str, object]:
             ),
             _manifest_schema(
                 CUSTODY_EXECUTION_SCHEMA_ID,
-                CUSTODY_EXECUTION_SCHEMA_VERSION,
+                1,
                 "durable-evidence",
                 "hormuz",
                 [
                     "execution_id",
                     "operation_id",
                     "routine operation type",
+                    "target and parameter digests",
+                    "protected input reference digest",
+                    "claimed_at",
+                    "state",
+                ],
+                legacy=True,
+            ),
+            _manifest_schema(
+                CUSTODY_EXECUTION_SCHEMA_ID,
+                CUSTODY_EXECUTION_SCHEMA_VERSION,
+                "durable-evidence",
+                "hormuz",
+                [
+                    "execution_id",
+                    "operation_id",
+                    "governed custody operation type",
                     "target and parameter digests",
                     "protected input reference digest",
                     "claimed_at",
@@ -317,6 +361,22 @@ def contract_manifest() -> dict[str, object]:
                     "sequence",
                     "state",
                     "reason_code",
+                ],
+            ),
+            _manifest_schema(
+                CUSTODY_LIFECYCLE_EVENT_SCHEMA_ID,
+                CUSTODY_LIFECYCLE_EVENT_SCHEMA_VERSION,
+                "durable-evidence",
+                "hormuz",
+                [
+                    "organization_id",
+                    "lifecycle_event_id",
+                    "execution_id",
+                    "operation_id",
+                    "operation type",
+                    "asset IDs and binding fingerprints",
+                    "recovery resolution code",
+                    "per-organization chain position and digest",
                 ],
             ),
             _manifest_schema(
@@ -486,97 +546,7 @@ def contract_manifest() -> dict[str, object]:
 def validate_contract_manifest(value: Mapping[str, Any]) -> None:
     """Strictly validate the versioned manifest emitted by ``contract-manifest``."""
 
-    _exact_keys(
-        value,
-        {
-            "schema_id",
-            "schema_version",
-            "compatibility",
-            "schemas",
-            "policy_action_semantics",
-            "request_status_semantics",
-            "error_codes",
-            "content_boundary",
-        },
-    )
-    if _value_string(value, "schema_id") != MANIFEST_SCHEMA_ID:
-        raise ContractValidationError("unsupported policy/evidence manifest schema_id")
-    if _value_integer(value, "schema_version") != MANIFEST_SCHEMA_VERSION:
-        raise ContractValidationError("unsupported policy/evidence manifest schema_version")
-
-    compatibility = _value_mapping(value, "compatibility")
-    _exact_keys(
-        compatibility,
-        {
-            "current_release_line",
-            "addition_rule",
-            "breaking_change_rule",
-            "legacy_audit_read",
-            "provider_protocol_rule",
-        },
-        path="compatibility",
-    )
-    for field in compatibility:
-        _value_string(compatibility, field, path="compatibility")
-
-    schemas = value.get("schemas")
-    if not isinstance(schemas, list) or not schemas:
-        raise ContractValidationError("schemas must be a non-empty array")
-    identities: set[tuple[str, int]] = set()
-    for index, schema in enumerate(schemas):
-        if not isinstance(schema, Mapping):
-            raise ContractValidationError(f"schemas[{index}] must be an object")
-        _exact_keys(
-            schema,
-            {"schema_id", "schema_version", "delivery", "ownership", "legacy", "fields"},
-            path=f"schemas[{index}]",
-        )
-        schema_id = _value_string(schema, "schema_id", path=f"schemas[{index}]")
-        schema_version = _value_integer(schema, "schema_version", minimum=1, path=f"schemas[{index}]")
-        identity = (schema_id, schema_version)
-        if identity in identities:
-            raise ContractValidationError(f"schemas contains duplicate identity: {schema_id} v{schema_version}")
-        identities.add(identity)
-        if _value_string(schema, "delivery", path=f"schemas[{index}]") not in {
-            "response",
-            "cli-output",
-            "durable-evidence",
-            "http-headers",
-        }:
-            raise ContractValidationError(f"schemas[{index}].delivery is unsupported")
-        if _value_string(schema, "ownership", path=f"schemas[{index}]") != "hormuz":
-            raise ContractValidationError(f"schemas[{index}].ownership must be hormuz")
-        if not isinstance(schema.get("legacy"), bool):
-            raise ContractValidationError(f"schemas[{index}].legacy must be a boolean")
-        _value_string_list(schema, "fields", path=f"schemas[{index}]")
-
-    policy_action_semantics = _value_mapping(value, "policy_action_semantics")
-    if set(policy_action_semantics) != {
-        "allowed",
-        "fallback",
-        "capped",
-        "redacted",
-        "denied",
-        "provider_policy_denied",
-        "secret_denied",
-        "budget_reservation_denied",
-    }:
-        raise ContractValidationError("policy_action_semantics has unsupported entries")
-    for field in policy_action_semantics:
-        _value_string(policy_action_semantics, field, path="policy_action_semantics")
-
-    request_status_semantics = _value_mapping(value, "request_status_semantics")
-    if set(request_status_semantics) != _REQUEST_STATUSES:
-        raise ContractValidationError("request_status_semantics has unsupported entries")
-    for field in request_status_semantics:
-        _value_string(request_status_semantics, field, path="request_status_semantics")
-
-    error_codes = value.get("error_codes")
-    if not isinstance(error_codes, list) or set(error_codes) != PUBLIC_ERROR_CODES or len(error_codes) != len(PUBLIC_ERROR_CODES):
-        raise ContractValidationError("error_codes must enumerate every stable public error code exactly once")
-    if error_codes != sorted(error_codes):
-        raise ContractValidationError("error_codes must be sorted")
-    _value_string(value, "content_boundary")
+    _validate_contract_manifest_contract(value)
 
 
 def validate_contract(value: Mapping[str, Any]) -> None:
@@ -590,11 +560,13 @@ def validate_contract(value: Mapping[str, Any]) -> None:
         (IDENTITY_SCHEMA_ID, 1): _validate_identity,
         (USAGE_SUMMARY_SCHEMA_ID, 1): _validate_usage_summary,
         (ERROR_SCHEMA_ID, 1): lambda item: _validate_error(item, PUBLIC_ERROR_CODES_V1),
+        (ERROR_SCHEMA_ID, 2): lambda item: _validate_error(item, PUBLIC_ERROR_CODES_V2),
         (ERROR_SCHEMA_ID, ERROR_SCHEMA_VERSION): lambda item: _validate_error(item, PUBLIC_ERROR_CODES),
         (POLICY_DECISION_SCHEMA_ID, 1): _validate_policy_decision,
         (POLICY_CONTROL_STATUS_SCHEMA_ID, 1): _validate_policy_control_status,
         (CUSTODY_CONTROL_STATUS_SCHEMA_ID, 1): _validate_custody_control_status_v1,
-        (CUSTODY_CONTROL_STATUS_SCHEMA_ID, CUSTODY_CONTROL_STATUS_SCHEMA_VERSION): _validate_custody_control_status_v2,
+        (CUSTODY_CONTROL_STATUS_SCHEMA_ID, 2): _validate_custody_control_status_v2,
+        (CUSTODY_CONTROL_STATUS_SCHEMA_ID, CUSTODY_CONTROL_STATUS_SCHEMA_VERSION): _validate_custody_control_status_v3,
         (USAGE_REPORT_SCHEMA_ID, 1): _validate_usage_report,
         (AUDIT_ANCHOR_SCHEMA_ID, AUDIT_ANCHOR_SCHEMA_VERSION): _validate_audit_anchor,
         (AUDIT_CHAIN_ENTRY_SCHEMA_ID, AUDIT_CHAIN_ENTRY_SCHEMA_VERSION): _validate_audit_chain_entry,
@@ -683,6 +655,12 @@ def validate_custody_execution_event(value: Mapping[str, Any]) -> None:
     """Validate one immutable custody-executor state transition."""
 
     _validate_custody_execution_event_contract(value)
+
+
+def validate_custody_lifecycle_event(value: Mapping[str, Any]) -> None:
+    """Validate a versioned, metadata-only custody lifecycle event."""
+
+    _validate_custody_lifecycle_event_contract(value)
 
 
 def validate_policy_action(value: str) -> None:

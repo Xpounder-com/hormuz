@@ -30,6 +30,7 @@ from .contracts import (
     relay_contract_header,
 )
 from .custody_runtime import resolve_upstream_credentials
+from .custody_runtime_projection import CustodyRuntimeProjection, CustodyRuntimeProjectionError
 from .evidence import EvidenceStorageError
 from .policy import PolicyDecision, PolicyEngine
 from .policy_runtime import PolicyRuntime
@@ -66,7 +67,14 @@ class GatewayServer(ThreadingHTTPServer):
             recovered_attempts = self.store.sweep_stale_request_attempts()
             if recovered_attempts:
                 LOGGER.warning("request_attempts_marked_outcome_unknown count=%d", recovered_attempts)
-            self.upstream_credentials = resolve_upstream_credentials(config)
+            self.custody_runtime_projection = CustodyRuntimeProjection(
+                config,
+                connection_pool=self.postgres_pool,
+            )
+            self.upstream_credentials = resolve_upstream_credentials(
+                config,
+                selection_allowed=self._upstream_credential_selection_allowed,
+            )
             protected_values = [
                 ("hormuz_identity_token", identity.token)
                 for identity in config.identities_by_token.values()
@@ -94,6 +102,32 @@ class GatewayServer(ThreadingHTTPServer):
                 settings.acquire_timeout_seconds,
             )
 
+    def _upstream_credential_selection_allowed(self, protocol: str) -> bool:
+        """Avoid loading a credential generation already restricted by custody.
+
+        A normal request repeats this check immediately before egress. This
+        startup guard is narrower: it prevents a freshly retired encrypted
+        envelope from being decrypted into a newly started gateway process,
+        while still allowing the gateway to start and return the stable 403
+        custody result for that protocol.
+        """
+
+        if not self.custody_runtime_projection.enabled:
+            return True
+        organization_ids = self.config.organization_ids
+        if len(organization_ids) != 1:
+            raise CustodyRuntimeProjectionError("custody_runtime_projection_configuration_invalid")
+        try:
+            self.custody_runtime_projection.require_provider_usable(
+                organization_id=organization_ids[0],
+                protocol=protocol,
+            )
+        except CustodyRuntimeProjectionError as error:
+            if error.code in {"custody_provider_credential_disabled", "custody_envelope_retired"}:
+                return False
+            raise
+        return True
+
     def shutdown(self) -> None:
         """Stop advertising readiness before the listener begins draining."""
 
@@ -120,6 +154,9 @@ class GatewayServer(ThreadingHTTPServer):
         try:
             self.store.verify_ready()
             self.policy_engine.policy_runtime.verify_active_policies()
+            if not self.custody_runtime_projection.readiness_healthy():
+                LOGGER.warning("readiness_custody_projection_stale")
+                return "dependency_unavailable"
         except _STORAGE_FAILURES:
             LOGGER.warning("readiness_dependency_unavailable")
             return "dependency_unavailable"
@@ -130,6 +167,9 @@ class GatewayServer(ThreadingHTTPServer):
         return None
 
     def _close_postgres_pool(self) -> None:
+        projection = getattr(self, "custody_runtime_projection", None)
+        if projection is not None:
+            projection.close()
         if self.postgres_pool is None:
             return
         try:
@@ -460,6 +500,27 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         if redaction.count:
             policy_action = f"{policy_action}+redacted"
         body = json.dumps(redaction.value, separators=(",", ":")).encode("utf-8")
+        try:
+            self.server.custody_runtime_projection.require_provider_usable(
+                organization_id=identity.organization_id,
+                protocol=protocol,
+            )
+        except CustodyRuntimeProjectionError as error:
+            if error.code in {"custody_provider_credential_disabled", "custody_envelope_retired"}:
+                self._send_protocol_error(
+                    protocol,
+                    "Organization custody policy does not permit this provider credential.",
+                    HTTPStatus.FORBIDDEN,
+                    code="hormuz_custody_restricted",
+                )
+                return
+            self._send_protocol_error(
+                protocol,
+                "Hormuz custody projection is temporarily unavailable.",
+                HTTPStatus.SERVICE_UNAVAILABLE,
+                code="hormuz_storage_unavailable",
+            )
+            return
         upstream_key = self.server.upstream_credentials.get(protocol, "")
         if not upstream_key:
             self._send_protocol_error(

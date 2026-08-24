@@ -70,6 +70,7 @@ _ROOT_CONFIGURATION_FIELDS = frozenset(
         "policy_control",
         "custody_control",
         "custody_executor",
+        "custody_lifecycle",
         "key_custody",
         "audit_anchor",
         "audit_chain",
@@ -175,6 +176,20 @@ _CUSTODY_EXECUTOR_FIELDS = frozenset(
         "postgres_executor_dsn_env",
         "postgres_executor_role",
         "pending_attempt_ttl_seconds",
+    }
+)
+_CUSTODY_LIFECYCLE_FIELDS = frozenset({"freshness_lease_seconds", "assets"})
+_CUSTODY_LIFECYCLE_ASSET_FIELDS = frozenset({"asset_type", "asset_id", "generation", "binding"})
+_CUSTODY_LIFECYCLE_BINDING_FIELDS = frozenset(
+    {
+        "protocol",
+        "path",
+        "provider_credential_asset_id",
+        "provider_credential_generation",
+        "key_reference_asset_id",
+        "key_reference_generation",
+        "purpose",
+        "key_reference",
     }
 )
 _BREAK_GLASS_FIELDS = frozenset({"enabled", "token_env"})
@@ -342,6 +357,12 @@ def _validate_configuration_schema(raw: dict[str, Any]) -> None:
             _schema_object(administrator, _BOOTSTRAP_ADMINISTRATOR_FIELDS)
 
     _schema_optional_object(raw, "custody_executor", _CUSTODY_EXECUTOR_FIELDS)
+
+    custody_lifecycle = _schema_optional_object(raw, "custody_lifecycle", _CUSTODY_LIFECYCLE_FIELDS)
+    if custody_lifecycle is not None:
+        for asset in _schema_optional_array(custody_lifecycle, "assets"):
+            asset_object = _schema_object(asset, _CUSTODY_LIFECYCLE_ASSET_FIELDS)
+            _schema_required_object(asset_object, "binding", _CUSTODY_LIFECYCLE_BINDING_FIELDS)
 
     if "key_custody" in raw and raw["key_custody"] is not None:
         key_custody = _schema_object(raw["key_custody"], _KEY_CUSTODY_FIELDS)

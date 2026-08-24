@@ -200,6 +200,9 @@ class ConfigurationInputTests(unittest.TestCase):
         def mutate_audit_chain(value: dict[str, object]) -> None:
             value["audit_chain"] = {"operator_secret_never_expose": "never-expose"}
 
+        def mutate_custody_lifecycle(value: dict[str, object]) -> None:
+            value["custody_lifecycle"] = {"operator_secret_never_expose": "never-expose"}
+
         mutations = (
             mutate_root,
             mutate_listen,
@@ -228,6 +231,7 @@ class ConfigurationInputTests(unittest.TestCase):
             mutate_key_references,
             mutate_audit_anchor,
             mutate_audit_chain,
+            mutate_custody_lifecycle,
         )
         for mutation in mutations:
             with self.subTest(boundary=mutation.__name__):

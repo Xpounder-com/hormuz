@@ -98,9 +98,11 @@ a stable content-free error.
 
 This checkpoint inventories the tenant-scoped `custody_admin` authorization
 service and the separate database credentials used by custody control and the
-isolated routine executor. It does not grant inference, policy, identity, KMS,
-IAM, or gateway-runtime entitlement; execute destructive lifecycle work; add
-custody events to the per-organization gateway audit chain; implement
-all-administrator-loss break-glass recovery; migrate reserved purpose classes;
-certify a customer cloud environment; or close issue #17. Customer KMS
-authority remains a separate security boundary.
+isolated governed executor. The executor can append Hormuz's logical,
+metadata-only destructive lifecycle restrictions, but it does not grant
+inference, policy, identity, KMS, IAM, or gateway-runtime entitlement; revoke
+a provider key outside Hormuz; alter customer KMS/IAM policy; add custody events
+to the per-organization gateway audit chain; implement all-administrator-loss
+break-glass recovery; migrate reserved purpose classes; certify a customer
+cloud environment; or close issue #17. Customer KMS authority remains a
+separate security boundary.

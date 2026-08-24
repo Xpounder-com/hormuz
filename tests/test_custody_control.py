@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from contextlib import redirect_stderr
+from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 import io
@@ -8,6 +8,8 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
 
 from hormuz.cli import build_parser, main
 from hormuz.config import ConfigError, GatewayConfig
@@ -180,6 +182,78 @@ class CustodyControlUnitTests(unittest.TestCase):
         with self.assertRaises(ConfigError):
             self._load(missing_keys, environment)
 
+    def test_lifecycle_configuration_binds_immutable_asset_generations_without_exposing_bindings_to_evidence(self) -> None:
+        value, environment = self._managed_value()
+        key_references = value["key_custody"]["key_references"]  # type: ignore[index]
+        value["custody_lifecycle"] = {
+            "freshness_lease_seconds": 5,
+            "assets": [
+                {
+                    "asset_type": "provider_credential",
+                    "asset_id": "openai-primary",
+                    "generation": 1,
+                    "binding": {"protocol": "openai"},
+                },
+                {
+                    "asset_type": "provider_credential",
+                    "asset_id": "anthropic-primary",
+                    "generation": 1,
+                    "binding": {"protocol": "anthropic"},
+                },
+                *[
+                    {
+                        "asset_type": "key_reference",
+                        "asset_id": f"{purpose}-current",
+                        "generation": 1,
+                        "binding": {"purpose": purpose, "key_reference": reference},
+                    }
+                    for purpose, reference in key_references.items()
+                ],
+            ],
+        }
+
+        config = self._load(value, environment)
+        assert config.custody_lifecycle is not None
+        provider = config.custody_lifecycle.assets.asset(
+            organization_id="xpounder",
+            asset_type="provider_credential",
+            asset_id="openai-primary",
+            generation=1,
+        )
+        self.assertEqual(provider.audit_ref()["asset_id"], "openai-primary")
+        self.assertNotIn("OPENAI_API_KEY", str(provider.audit_ref()))
+        self.assertNotIn("OPENAI_API_KEY", repr(provider))
+
+        variable_lease = json.loads(json.dumps(value))
+        variable_lease["custody_lifecycle"]["freshness_lease_seconds"] = 6  # type: ignore[index]
+        with self.assertRaises(ConfigError):
+            self._load(variable_lease, environment)
+
+        missing_provider = json.loads(json.dumps(value))
+        missing_provider["custody_lifecycle"]["assets"] = missing_provider["custody_lifecycle"]["assets"][1:]  # type: ignore[index]
+        with self.assertRaises(ConfigError) as raised:
+            self._load(missing_provider, environment)
+        self.assertEqual(
+            str(raised.exception),
+            "custody_lifecycle requires exactly one provider credential asset per configured upstream",
+        )
+
+        path_like_id = json.loads(json.dumps(value))
+        path_like_id["custody_lifecycle"]["assets"][0]["asset_id"] = "/private/customer/openai.key"  # type: ignore[index]
+        with self.assertRaises(ConfigError) as raised:
+            self._load(path_like_id, environment)
+        self.assertEqual(
+            str(raised.exception),
+            "custody_lifecycle.assets[0].asset_id must be a safe immutable asset identifier",
+        )
+
+        unmanaged = json.loads(json.dumps(value))
+        unmanaged["custody_control"] = {"mode": "local"}
+        unmanaged.pop("custody_executor")
+        with self.assertRaises(ConfigError) as raised:
+            self._load(unmanaged, environment)
+        self.assertEqual(str(raised.exception), "custody_lifecycle requires custody_control.mode postgresql")
+
     def test_governed_mode_blocks_direct_cli_execution_before_plaintext_lookup(self) -> None:
         value, environment = self._managed_value()
         with tempfile.TemporaryDirectory() as temporary:
@@ -226,6 +300,33 @@ class CustodyControlUnitTests(unittest.TestCase):
         self.assertFalse(hasattr(parsed, "actor"))
         self.assertFalse(hasattr(parsed, "plaintext"))
         self.assertEqual(parsed.credential_env, "HORMUZ_CUSTODY_ADMIN_TOKEN")
+
+    def test_machine_catalog_registration_has_no_human_or_plaintext_arguments(self) -> None:
+        parsed = build_parser().parse_args(["custody-executor", "register-assets"])
+
+        self.assertEqual(parsed.command, "custody-executor")
+        self.assertEqual(parsed.custody_executor_command, "register-assets")
+        self.assertFalse(hasattr(parsed, "actor"))
+        self.assertFalse(hasattr(parsed, "credential_env"))
+        self.assertFalse(hasattr(parsed, "plaintext"))
+
+    def test_machine_catalog_registration_routes_only_through_executor_service(self) -> None:
+        config = SimpleNamespace(
+            organization_ids=("xpounder",),
+            custody_lifecycle=SimpleNamespace(assets=SimpleNamespace(assets=(object(), object()))),
+        )
+        service = mock.Mock()
+        executor_factory = mock.Mock(return_value=service)
+        output = io.StringIO()
+        with (
+            mock.patch("hormuz.cli.GatewayConfig.load", return_value=config),
+            mock.patch("hormuz.cli.CustodyExecutorService", executor_factory),
+            redirect_stdout(output),
+        ):
+            self.assertEqual(main(["--config", "ignored.json", "custody-executor", "register-assets"]), 0)
+        executor_factory.assert_called_once_with(config)
+        service.register_asset_catalog.assert_called_once_with()
+        self.assertEqual(output.getvalue(), "custody asset catalog registered: organizations=1 assets=2\n")
 
     def _managed_value(self) -> tuple[dict[str, object], dict[str, str]]:
         value = json.loads((ROOT / "config.example.json").read_text(encoding="utf-8"))

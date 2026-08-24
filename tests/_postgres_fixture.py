@@ -231,6 +231,15 @@ class PostgresTestCase(unittest.TestCase):
         with self.psycopg.connect(self.owner_dsn, autocommit=True) as connection:
             with connection.cursor() as cursor:
                 tables = (
+                    "custody_runtime_projection_acks",
+                    "custody_runtime_projection_barriers",
+                    "custody_runtime_replicas",
+                    "custody_runtime_projection_restrictions",
+                    "custody_runtime_projection_heads",
+                    "custody_envelope_attestations",
+                    "custody_lifecycle_events",
+                    "custody_lifecycle_chain_heads",
+                    "custody_lifecycle_asset_identities",
                     "custody_execution_events",
                     "custody_execution_attempts",
                     "custody_control_events",
@@ -544,6 +553,8 @@ class PostgresTestCase(unittest.TestCase):
         bootstrap_bob: bool = True,
         include_oidc: bool = False,
         authorization_ttl_seconds: int = 900,
+        lifecycle: bool = False,
+        include_retirement_fixture_assets: bool = False,
     ) -> tuple[GatewayConfig, dict[str, str], str | None]:
         """Return a managed-custody config with separate control credentials."""
 
@@ -627,6 +638,69 @@ class PostgresTestCase(unittest.TestCase):
             "postgres_executor_role": self.custody_executor_role,
             "pending_attempt_ttl_seconds": authorization_ttl_seconds,
         }
+        if lifecycle:
+            lifecycle_assets: list[dict[str, object]] = [
+                {
+                    "asset_type": "provider_credential",
+                    "asset_id": "openai-primary",
+                    "generation": 1,
+                    "binding": {"protocol": "openai"},
+                },
+                {
+                    "asset_type": "provider_credential",
+                    "asset_id": "anthropic-primary",
+                    "generation": 1,
+                    "binding": {"protocol": "anthropic"},
+                },
+                *[
+                    {
+                        "asset_type": "key_reference",
+                        "asset_id": f"{purpose}-current",
+                        "generation": 1,
+                        "binding": {"purpose": purpose, "key_reference": reference},
+                    }
+                    for purpose, reference in value["key_custody"]["key_references"].items()  # type: ignore[index]
+                ],
+            ]
+            if include_retirement_fixture_assets:
+                lifecycle_assets.extend(
+                    [
+                        {
+                            "asset_type": "key_reference",
+                            "asset_id": "provider-credential-prior",
+                            "generation": 1,
+                            "binding": {"purpose": "provider_credential", "key_reference": "provider-key-prior"},
+                        },
+                        {
+                            "asset_type": "envelope",
+                            "asset_id": "openai-primary-envelope",
+                            "generation": 1,
+                            "binding": {
+                                "path": "/private/hormuz-test-openai.envelope",
+                                "provider_credential_asset_id": "openai-primary",
+                                "provider_credential_generation": 1,
+                                "key_reference_asset_id": "provider-credential-prior",
+                                "key_reference_generation": 1,
+                            },
+                        },
+                        {
+                            "asset_type": "envelope",
+                            "asset_id": "openai-current-envelope",
+                            "generation": 1,
+                            "binding": {
+                                "path": "/private/hormuz-test-openai-current.envelope",
+                                "provider_credential_asset_id": "openai-primary",
+                                "provider_credential_generation": 1,
+                                "key_reference_asset_id": "provider_credential-current",
+                                "key_reference_generation": 1,
+                            },
+                        },
+                    ]
+                )
+            value["custody_lifecycle"] = {
+                "freshness_lease_seconds": 5,
+                "assets": lifecycle_assets,
+            }
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         path = Path(temporary.name) / "hormuz-managed-custody.json"

@@ -578,6 +578,19 @@ class CustodyRuntimeTests(unittest.TestCase):
             self.assertEqual(credentials, {"openai": "openai-encrypted-secret", "anthropic": "anthropic-secret"})
             self.assertNotIn("openai-encrypted-secret", output.read_text(encoding="utf-8"))
 
+    def test_selection_guard_skips_a_retired_envelope_without_reading_or_decrypting_it(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config = self._config(root, envelope=str(root / "retired-openai.envelope"))
+            with patch("hormuz.custody_runtime.create_data_key_provider") as key_provider:
+                credentials = resolve_upstream_credentials(
+                    config,
+                    environ={"ANTHROPIC_API_KEY": "anthropic-secret"},
+                    selection_allowed=lambda protocol: protocol != "openai",
+                )
+            self.assertEqual(credentials, {"openai": "", "anthropic": "anthropic-secret"})
+            key_provider.assert_not_called()
+
     def test_unsafe_envelope_permissions_fail_before_key_service_use(self) -> None:
         provider = _MemoryDataKeyProvider()
         with tempfile.TemporaryDirectory() as temporary:

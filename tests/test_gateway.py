@@ -388,7 +388,7 @@ class GatewayIntegrationTests(unittest.TestCase):
             token="wrong-token",
         )
         self.assertEqual(status, 401)
-        self.assertEqual(headers["x-hormuz-contract"], "hormuz.gateway-error;v=2")
+        self.assertEqual(headers["x-hormuz-contract"], "hormuz.gateway-error;v=3")
         validate_contract(json.loads(body))
 
     def test_liveness_and_readiness_are_unauthenticated_versioned_probes_without_provider_egress(self) -> None:
@@ -483,7 +483,7 @@ class GatewayIntegrationTests(unittest.TestCase):
 
         status, headers, body = self._get("/v1/gateway/usage")
         self.assertEqual(status, 503)
-        self.assertEqual(headers["x-hormuz-contract"], "hormuz.gateway-error;v=2")
+        self.assertEqual(headers["x-hormuz-contract"], "hormuz.gateway-error;v=3")
         response = json.loads(body)
         validate_contract(response)
         self.assertEqual(response["error"]["code"], "hormuz_storage_unavailable")
@@ -1232,7 +1232,7 @@ class ExternalProxyIngressIntegrationTests(unittest.TestCase):
 
     def _assert_ingress_denied(self, status: int, headers: dict[str, str], response: bytes) -> None:
         self.assertEqual(status, 401, response)
-        self.assertEqual(headers["x-hormuz-contract"], "hormuz.gateway-error;v=2")
+        self.assertEqual(headers["x-hormuz-contract"], "hormuz.gateway-error;v=3")
         payload = json.loads(response)
         validate_contract(payload)
         self.assertEqual(payload["error"], {"code": "unauthorized", "message": "Missing or invalid Hormuz ingress credential"})
