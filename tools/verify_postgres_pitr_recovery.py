@@ -10,8 +10,10 @@ from __future__ import annotations
 
 import argparse
 import re
+import subprocess
 import sys
-from collections.abc import Mapping
+import time
+from collections.abc import Callable, Mapping
 from pathlib import Path
 
 try:
@@ -30,6 +32,13 @@ SUMMARY_SCHEMA_ID = "hormuz.postgresql-pitr-recovery"
 SUMMARY_SCHEMA_VERSION = 1
 SUMMARY_COVERAGE = "ephemeral_postgresql_wal_pitr_only"
 _POSTGRES_VERSION_PATTERN = re.compile(r"\d+\.\d+(?:\.\d+)?\Z")
+_RECOVERY_CONTAINER_PATTERN = re.compile(
+    r"hormuz-postgres-pitr-recovery-[0-9]+\Z"
+)
+_RECOVERY_DATABASE = "hormuz_pitr"
+_DEFAULT_PROMOTION_ATTEMPTS = 45
+_DEFAULT_PROMOTION_INTERVAL_MS = 1000
+_PROMOTION_PROBE_TIMEOUT_SECONDS = 5
 _CHECK_KEYS = (
     "base_backup_created",
     "pre_target_wal_replayed",
@@ -63,21 +72,40 @@ def main(argv: list[str] | None = None) -> int:
     for key in _DURATION_KEYS:
         summary.add_argument(f"--{key.replace('_', '-')}-ms", type=int, required=True)
     summary.add_argument("--output", required=True, type=Path)
+    promotion_wait = commands.add_parser(
+        "promotion-wait",
+        help="wait for the positive disposable recovery target to promote",
+    )
+    promotion_wait.add_argument("--container", required=True)
+    promotion_wait.add_argument(
+        "--attempts", type=int, default=_DEFAULT_PROMOTION_ATTEMPTS
+    )
+    promotion_wait.add_argument(
+        "--interval-ms", type=int, default=_DEFAULT_PROMOTION_INTERVAL_MS
+    )
 
     args = parser.parse_args(argv)
     try:
-        if args.command != "summary":  # pragma: no cover - argparse owns this boundary
+        if args.command == "summary":
+            checks = {key: getattr(args, key) for key in _CHECK_KEYS}
+            durations = {key: getattr(args, f"{key}_ms") for key in _DURATION_KEYS}
+            evidence = build_summary(
+                database_image=args.database_image,
+                database_version=args.database_version,
+                checks=checks,
+                durations_ms=durations,
+            )
+            write_summary(args.output, evidence)
+            print("wrote content-free PostgreSQL PITR recovery summary")
+        elif args.command == "promotion-wait":
+            wait_for_promotion(
+                lambda: _postgres_is_promoted(args.container),
+                attempts=args.attempts,
+                interval_ms=args.interval_ms,
+            )
+            print("disposable PostgreSQL recovery target promoted")
+        else:  # pragma: no cover - argparse owns this boundary
             raise AssertionError(f"unsupported PITR command: {args.command}")
-        checks = {key: getattr(args, key) for key in _CHECK_KEYS}
-        durations = {key: getattr(args, f"{key}_ms") for key in _DURATION_KEYS}
-        evidence = build_summary(
-            database_image=args.database_image,
-            database_version=args.database_version,
-            checks=checks,
-            durations_ms=durations,
-        )
-        write_summary(args.output, evidence)
-        print("wrote content-free PostgreSQL PITR recovery summary")
         return 0
     except PITRRecoveryError as error:
         print(f"PostgreSQL PITR recovery failed: {error}", file=sys.stderr)
@@ -148,6 +176,66 @@ def write_summary(path: Path, summary: Mapping[str, object]) -> None:
         )
     except OSError as error:
         raise PITRRecoveryError("summary_write_failed") from error
+
+
+def wait_for_promotion(
+    probe: Callable[[], bool],
+    *,
+    attempts: int = _DEFAULT_PROMOTION_ATTEMPTS,
+    interval_ms: int = _DEFAULT_PROMOTION_INTERVAL_MS,
+    sleeper: Callable[[float], None] = time.sleep,
+) -> None:
+    """Wait a bounded time for the positive recovery target to leave recovery."""
+
+    if (
+        not isinstance(attempts, int)
+        or isinstance(attempts, bool)
+        or not 1 <= attempts <= 300
+        or not isinstance(interval_ms, int)
+        or isinstance(interval_ms, bool)
+        or not 0 <= interval_ms <= 10_000
+    ):
+        raise PITRRecoveryError("promotion_wait_configuration_invalid")
+    for attempt in range(attempts):
+        if probe() is True:
+            return
+        if attempt + 1 < attempts:
+            sleeper(interval_ms / 1000)
+    raise PITRRecoveryError("recovery_target_promotion_timeout")
+
+
+def _postgres_is_promoted(container: object) -> bool:
+    """Return only whether the fixed disposable target reports recovery=false."""
+
+    if (
+        not isinstance(container, str)
+        or _RECOVERY_CONTAINER_PATTERN.fullmatch(container) is None
+    ):
+        raise PITRRecoveryError("promotion_target_invalid")
+    try:
+        completed = subprocess.run(
+            (
+                "docker",
+                "exec",
+                container,
+                "psql",
+                "--username=postgres",
+                f"--dbname={_RECOVERY_DATABASE}",
+                "--set=ON_ERROR_STOP=on",
+                "--tuples-only",
+                "--no-align",
+                "--command",
+                "SELECT pg_is_in_recovery()",
+            ),
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=_PROMOTION_PROBE_TIMEOUT_SECONDS,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return completed.returncode == 0 and completed.stdout.strip() == "f"
 
 
 def _validate_database_identity(*, database_image: object, database_version: object) -> None:

@@ -496,13 +496,18 @@ commits a fixed pre-target marker, creates a named PostgreSQL restore point,
 commits a fixed post-target marker, and waits for the exact switched WAL files
 to enter the local archive. A recovered physical copy must contain the
 pre-target marker, omit the post-target marker, and be promoted from the named
-restore point. The ordinary Hormuz restricted runtime/control verification then
-must still match the original metadata-only state, including its migration
-ledger, active policy, request-attempt/reservation state, and RLS isolation.
+restore point. Connection readiness alone is insufficient: the positive path
+polls `pg_is_in_recovery()` for a bounded 45 attempts and fails with the
+content-free `recovery_target_promotion_timeout` code unless PostgreSQL reports
+promotion. Only then does it assert marker state and run the ordinary Hormuz
+restricted runtime/control verification against the original metadata-only
+state, including its migration ledger, active policy,
+request-attempt/reservation state, and RLS isolation.
 
 Two independent negative recoveries must fail without promotion: one requests
 an unreachable named restore point with a complete archive; the other requests
-the real target with an empty WAL archive. The runner can target only
+the real target with an empty WAL archive. These negative cases never use the
+positive promotion wait and must still exit nonzero. The runner can target only
 containers that it created with its fixed Docker label and exact pinned image.
 It removes source, recovery, negative-recovery containers, the network, base
 backup, WAL archive, and fixture state after completion.
