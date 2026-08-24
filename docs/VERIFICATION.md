@@ -2,6 +2,32 @@
 
 This file records executable evidence for client/provider compatibility. It intentionally contains no provider credentials, prompts, responses beyond fixed test markers, or employee secrets.
 
+## Live pinned-client release gate
+
+The manual `Live BYO-provider client conformance` workflow and
+`tools/verify_live_client_conformance.py` are the repeatable real-provider
+gate. They require exact Codex `0.147.0` and Claude Code `2.1.233` executables,
+dedicated operator-attested provider credentials, explicit OpenAI and
+Anthropic model IDs, and an acknowledgement that the run incurs provider
+cost. Provider credentials are scoped to the gateway process and removed from
+both client environments.
+
+The tool observes only allowlisted post-policy metadata immediately before
+egress, then validates strict v2 usage/security events after each real
+streaming response. Its schema-v1 artifact records client hashes, tenant
+identity, model routing, policy/cap/redaction outcomes, token counts,
+configured-rate-card cost, and booleans for provider-request-ID presence and
+pre-egress checks. Prompts, responses, request IDs, keys, identity tokens, and
+debug logs are prohibited. The runner binds evidence to an exact clean Git
+`HEAD` and refuses to overwrite an existing artifact. See
+[LIVE_CLIENT_CONFORMANCE.md](LIVE_CLIENT_CONFORMANCE.md) for the command,
+workflow secret boundary, strict evidence contract, unsupported features, and
+nonclaims.
+
+A one-provider run is explicitly partial. Closing issue #115 requires one
+successful artifact containing both real providers at the same source
+revision; provider-free CI cannot substitute for it.
+
 ## Provider-free five-minute path
 
 The public checkout exposes one configuration-free product tour:
@@ -102,7 +128,11 @@ The default suite uses only loopback fake providers:
 python3 -m unittest -v
 ```
 
-The live OpenAI check requires an ignored credential file or secret-manager injection. Start Hormuz with credentials in its environment, configure Codex using [CLIENTS.md](CLIENTS.md), request a fixed marker, then verify metadata with:
+The historical live OpenAI record above predates the repeatable two-provider
+release harness. New evidence should use
+[the live client conformance command](LIVE_CLIENT_CONFORMANCE.md), which emits
+a strict content-free artifact. For ordinary operator inspection, Hormuz's
+versioned usage summary remains available through:
 
 ```bash
 hormuz --config hormuz.json status --json
@@ -168,6 +198,12 @@ GitHub Actions runs independent gates without provider credentials:
 The workflow grants only read access to repository contents, disables persisted checkout credentials, pins every GitHub Action to a reviewed commit SHA and the scanner image to an immutable digest, and retains build artifacts for seven days. Dependabot is configured to propose updates to action and Python build dependencies; a client-version bump remains an intentional compatibility change because it can alter the provider protocol.
 
 A separate weekly canary installs the latest published Codex and Claude Code packages in an ephemeral runner and exercises only the two fake-provider compatibility tests. It has no provider credentials, does not block ordinary pull requests, and is intended to surface upstream protocol drift before an employee upgrade does.
+
+The live BYO-provider workflow is manual-only, uses the protected
+`live-provider-conformance` environment, grants `contents: read`, serializes
+runs to prevent overlapping spend, and scopes provider secrets only to the
+conformance step. It is not a scheduled canary and never runs for a pull
+request.
 
 The publication candidate was also checked locally on August 15, 2026 with Codex `0.147.0` and Claude Code `2.1.233`, the then-current npm releases. Both routed successfully through Hormuz, and the complete 29-test suite passed with those executables selected first on `PATH`.
 

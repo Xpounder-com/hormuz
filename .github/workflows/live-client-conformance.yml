@@ -1,0 +1,79 @@
+name: Live BYO-provider client conformance
+
+on:
+  workflow_dispatch:
+    inputs:
+      openai_model:
+        description: Exact OpenAI model ID available to the dedicated conformance key
+        required: true
+        type: string
+      anthropic_model:
+        description: Exact Anthropic model ID available to the dedicated conformance key
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: live-byo-provider-client-conformance
+  cancel-in-progress: false
+
+jobs:
+  live-clients:
+    name: Pinned Codex and Claude Code through real providers
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: live-provider-conformance
+    env:
+      CODEX_VERSION: "0.147.0"
+      CLAUDE_CODE_VERSION: "2.1.233"
+    steps:
+      - name: Check out exact source revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Install Hormuz runtime
+        run: python -m pip install --editable .
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+      - name: Install exact supported official clients
+        run: |
+          npm install --prefix "$RUNNER_TEMP/hormuz-live-clients" --no-package-lock --no-save \
+            "@openai/codex@$CODEX_VERSION" \
+            "@anthropic-ai/claude-code@$CLAUDE_CODE_VERSION"
+          echo "$RUNNER_TEMP/hormuz-live-clients/node_modules/.bin" >> "$GITHUB_PATH"
+      - name: Record exact client versions
+        run: |
+          codex --version
+          claude --version
+      - name: Run real-provider conformance without exposing provider keys to clients
+        env:
+          HORMUZ_LIVE_OPENAI_PROVIDER_KEY: ${{ secrets.HORMUZ_LIVE_OPENAI_PROVIDER_KEY }}
+          HORMUZ_LIVE_ANTHROPIC_PROVIDER_KEY: ${{ secrets.HORMUZ_LIVE_ANTHROPIC_PROVIDER_KEY }}
+          HORMUZ_LIVE_OPENAI_MODEL: ${{ inputs.openai_model }}
+          HORMUZ_LIVE_ANTHROPIC_MODEL: ${{ inputs.anthropic_model }}
+          HORMUZ_LIVE_CLIENT_CONFORMANCE_ACKNOWLEDGEMENT: I_UNDERSTAND_LIVE_PROVIDER_CALLS_HAVE_COST_AND_USE_DEDICATED_KEYS
+        run: |
+          python tools/verify_live_client_conformance.py \
+            --provider openai \
+            --provider anthropic \
+            --openai-model "$HORMUZ_LIVE_OPENAI_MODEL" \
+            --anthropic-model "$HORMUZ_LIVE_ANTHROPIC_MODEL" \
+            --expected-codex-version "$CODEX_VERSION" \
+            --expected-claude-code-version "$CLAUDE_CODE_VERSION" \
+            --source-revision "$GITHUB_SHA" \
+            --evidence-out "$RUNNER_TEMP/hormuz-live-client-conformance/evidence.json"
+      - name: Preserve strict metadata-only evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hormuz-live-client-conformance-${{ github.sha }}
+          path: ${{ runner.temp }}/hormuz-live-client-conformance/evidence.json
+          if-no-files-found: error
+          retention-days: 7
