@@ -55,6 +55,10 @@ Keep connection strings out of the JSON configuration. Configure only environmen
     "bootstrap_administrators": [
       {"organization_id": "xpounder", "actor_id": "alice"}
     ]
+  },
+  "custody_retention": {
+    "retention_days": 365,
+    "legal_hold": false
   }
 }
 ~~~
@@ -390,6 +394,30 @@ fails closed. Rollback requires restoring the previously tested
 application/database pair. Version 7 does not alter customer KMS/IAM policy,
 revoke a provider credential outside Hormuz, delete ciphertext or keys, create
 break-glass recovery, or externally anchor the lifecycle chain.
+
+### PostgreSQL schema v8 custody-evidence retention
+
+Version 8 keeps existing v1 gateway-chain entries untouched and adds strict v2
+chain entries only for a finite, metadata-only custody-source union. Managed
+custody requires `custody_retention` before tenant bootstrap. PostgreSQL records
+each custody source timestamp with its own clock and persists the derived
+`retain_until` plus legal-hold state; later configuration edits cannot shorten
+an existing record.
+
+Each new custody control, execution attempt/event, lifecycle event, envelope
+attestation, or deletion-denial record commits with its exact v2 chain entry and
+updated tenant chain head in one transaction. A missing source/entry pair rolls
+back. The runtime role cannot write or delete custody source records, shorten
+custody retention, or bypass the v2 source checks. A tenant-scoped custody-evidence export is available through the
+authenticated custody-control service; there is no delete endpoint. A
+deletion-check records `deletion_blocked` with the retention, legal-hold, or
+strong-approval reason without authorizing destructive deletion.
+
+Version 8 remains PostgreSQL-only because custody authority and retention
+enforcement require forced RLS and restricted roles. An older binary fails
+closed on the newer ledger; rollback requires the previously tested
+application/database pair. See [CUSTODY_CONTROL.md](CUSTODY_CONTROL.md) and
+[CONTRACTS.md](CONTRACTS.md) for the exact contract and compatibility rules.
 
 ## Upgrade, rollback, and recovery
 

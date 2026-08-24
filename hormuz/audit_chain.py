@@ -20,6 +20,7 @@ from .contracts import (
     AUDIT_CHAIN_CHECKPOINT_SCHEMA_ID,
     AUDIT_CHAIN_CHECKPOINT_SCHEMA_VERSION,
     AUDIT_CHAIN_ENTRY_SCHEMA_ID,
+    AUDIT_CHAIN_ENTRY_LEGACY_SCHEMA_VERSION,
     AUDIT_CHAIN_ENTRY_SCHEMA_VERSION,
     AUDIT_CHAIN_VERSION,
     AUDIT_EVENT_SCHEMA_ID,
@@ -28,6 +29,12 @@ from .contracts import (
     validate_audit_chain_checkpoint,
     validate_audit_chain_entry,
     validate_audit_event,
+    validate_custody_control_event,
+    validate_custody_deletion_event,
+    validate_custody_envelope_attestation,
+    validate_custody_execution_attempt,
+    validate_custody_execution_event,
+    validate_custody_lifecycle_event,
 )
 
 
@@ -65,6 +72,20 @@ class AuditChainAnchorStatus:
     overdue: bool
 
 
+@dataclass(frozen=True)
+class AuditChainSource:
+    """One finite, metadata-only v2 source identity.
+
+    Version 1 entries have no source wrapper and remain limited to current
+    gateway audit events.  Version 2 adds this identity to bind custody event
+    families without opening the chain to arbitrary JSON records.
+    """
+
+    schema_id: str
+    schema_version: int
+    event_id: str
+
+
 def canonical_json_bytes(value: object, *, code: str = "audit_chain_malformed") -> bytes:
     """Encode a strict, portable JSON representation for hashing or storage."""
 
@@ -91,35 +112,104 @@ def build_audit_chain_entry(
     chain_epoch: int,
     sequence: int,
     previous_digest: str | None,
+    entry_schema_version: int = AUDIT_CHAIN_ENTRY_LEGACY_SCHEMA_VERSION,
+    source: AuditChainSource | None = None,
 ) -> dict[str, object]:
-    """Return one strict entry whose digest binds its complete audit event."""
+    """Return one strict entry whose digest binds its complete source event.
 
-    normalized_event = _normalized_current_event(event)
-    organization_id = normalized_event["organization_id"]
-    assert isinstance(organization_id, str)
+    The default deliberately remains the established v1 encoding so existing
+    usage/security writers retain their durable format.  New custody writers
+    must opt into the strict v2 source union through ``source``.
+    """
+
     _validate_chain_position(chain_version=chain_version, chain_epoch=chain_epoch, sequence=sequence)
     _validate_digest(previous_digest, allow_none=True, code="audit_chain_predecessor_invalid")
-    digest = _entry_digest(
-        organization_id=organization_id,
+    if entry_schema_version == AUDIT_CHAIN_ENTRY_LEGACY_SCHEMA_VERSION:
+        if source is not None:
+            raise AuditChainError("audit_chain_source_schema_unsupported")
+        normalized_event = _normalized_v1_audit_event(event)
+        organization_id = normalized_event["organization_id"]
+        assert isinstance(organization_id, str)
+        digest = _entry_digest_v1(
+            organization_id=organization_id,
+            chain_version=chain_version,
+            chain_epoch=chain_epoch,
+            sequence=sequence,
+            previous_digest=previous_digest,
+            event=normalized_event,
+        )
+        entry: dict[str, object] = {
+            "schema_id": AUDIT_CHAIN_ENTRY_SCHEMA_ID,
+            "schema_version": AUDIT_CHAIN_ENTRY_LEGACY_SCHEMA_VERSION,
+            "organization_id": organization_id,
+            "chain_version": chain_version,
+            "chain_epoch": chain_epoch,
+            "sequence": sequence,
+            "previous_digest": previous_digest,
+            "event_digest": digest,
+            "event": normalized_event,
+        }
+    elif entry_schema_version == AUDIT_CHAIN_ENTRY_SCHEMA_VERSION:
+        if source is None:
+            raise AuditChainError("audit_chain_source_schema_unsupported")
+        normalized_event = _normalized_v2_source_event(event, source=source)
+        organization_id = normalized_event["organization_id"]
+        assert isinstance(organization_id, str)
+        digest = _entry_digest_v2(
+            organization_id=organization_id,
+            chain_version=chain_version,
+            chain_epoch=chain_epoch,
+            sequence=sequence,
+            previous_digest=previous_digest,
+            source=source,
+            event=normalized_event,
+        )
+        entry = {
+            "schema_id": AUDIT_CHAIN_ENTRY_SCHEMA_ID,
+            "schema_version": AUDIT_CHAIN_ENTRY_SCHEMA_VERSION,
+            "organization_id": organization_id,
+            "chain_version": chain_version,
+            "chain_epoch": chain_epoch,
+            "sequence": sequence,
+            "previous_digest": previous_digest,
+            "event_digest": digest,
+            "source_schema_id": source.schema_id,
+            "source_schema_version": source.schema_version,
+            "source_event_id": source.event_id,
+            "event": normalized_event,
+        }
+    else:
+        raise AuditChainError("audit_chain_entry_schema_unsupported")
+    _validate_entry(entry)
+    return entry
+
+
+def build_custody_audit_chain_entry(
+    event: Mapping[str, Any],
+    *,
+    source_schema_id: str,
+    source_schema_version: int,
+    source_event_id: str,
+    chain_version: int,
+    chain_epoch: int,
+    sequence: int,
+    previous_digest: str | None,
+) -> dict[str, object]:
+    """Build a v2 entry from the finite custody-evidence source union."""
+
+    return build_audit_chain_entry(
+        event,
         chain_version=chain_version,
         chain_epoch=chain_epoch,
         sequence=sequence,
         previous_digest=previous_digest,
-        event=normalized_event,
+        entry_schema_version=AUDIT_CHAIN_ENTRY_SCHEMA_VERSION,
+        source=AuditChainSource(
+            schema_id=source_schema_id,
+            schema_version=source_schema_version,
+            event_id=source_event_id,
+        ),
     )
-    entry: dict[str, object] = {
-        "schema_id": AUDIT_CHAIN_ENTRY_SCHEMA_ID,
-        "schema_version": AUDIT_CHAIN_ENTRY_SCHEMA_VERSION,
-        "organization_id": organization_id,
-        "chain_version": chain_version,
-        "chain_epoch": chain_epoch,
-        "sequence": sequence,
-        "previous_digest": previous_digest,
-        "event_digest": digest,
-        "event": normalized_event,
-    }
-    _validate_entry(entry)
-    return entry
 
 
 def verify_audit_chain_entry(
@@ -146,22 +236,45 @@ def verify_audit_chain_entry(
         raise AuditChainError("audit_chain_predecessor_invalid")
     event = entry["event"]
     assert isinstance(event, Mapping)
-    normalized_event = _normalized_current_event(event)
-    if normalized_event.get("organization_id") != expected_organization_id:
-        raise AuditChainError("audit_chain_tenant_mismatch")
-    if source_event is None:
-        raise AuditChainError("audit_chain_source_event_missing")
-    normalized_source = _normalized_current_event(source_event)
-    if canonical_json_bytes(normalized_source) != canonical_json_bytes(normalized_event):
-        raise AuditChainError("audit_chain_source_event_mismatch")
-    actual = _entry_digest(
-        organization_id=expected_organization_id,
-        chain_version=expected_chain_version,
-        chain_epoch=expected_chain_epoch,
-        sequence=expected_sequence,
-        previous_digest=expected_previous_digest,
-        event=normalized_event,
-    )
+    schema_version = entry.get("schema_version")
+    if schema_version == AUDIT_CHAIN_ENTRY_LEGACY_SCHEMA_VERSION:
+        normalized_event = _normalized_v1_audit_event(event)
+        if normalized_event.get("organization_id") != expected_organization_id:
+            raise AuditChainError("audit_chain_tenant_mismatch")
+        if source_event is None:
+            raise AuditChainError("audit_chain_source_event_missing")
+        normalized_source = _normalized_v1_audit_event(source_event)
+        if canonical_json_bytes(normalized_source) != canonical_json_bytes(normalized_event):
+            raise AuditChainError("audit_chain_source_event_mismatch")
+        actual = _entry_digest_v1(
+            organization_id=expected_organization_id,
+            chain_version=expected_chain_version,
+            chain_epoch=expected_chain_epoch,
+            sequence=expected_sequence,
+            previous_digest=expected_previous_digest,
+            event=normalized_event,
+        )
+    elif schema_version == AUDIT_CHAIN_ENTRY_SCHEMA_VERSION:
+        source = audit_chain_entry_source(entry)
+        normalized_event = _normalized_v2_source_event(event, source=source)
+        if normalized_event.get("organization_id") != expected_organization_id:
+            raise AuditChainError("audit_chain_tenant_mismatch")
+        if source_event is None:
+            raise AuditChainError("audit_chain_source_event_missing")
+        normalized_source = _normalized_v2_source_event(source_event, source=source)
+        if canonical_json_bytes(normalized_source) != canonical_json_bytes(normalized_event):
+            raise AuditChainError("audit_chain_source_event_mismatch")
+        actual = _entry_digest_v2(
+            organization_id=expected_organization_id,
+            chain_version=expected_chain_version,
+            chain_epoch=expected_chain_epoch,
+            sequence=expected_sequence,
+            previous_digest=expected_previous_digest,
+            source=source,
+            event=normalized_event,
+        )
+    else:  # Defensive after strict validator so callers receive one stable code.
+        raise AuditChainError("audit_chain_entry_schema_unsupported")
     digest = entry.get("event_digest")
     if not isinstance(digest, str) or not hmac.compare_digest(digest, actual):
         raise AuditChainError("audit_chain_digest_invalid")
@@ -262,7 +375,30 @@ def audit_chain_checkpoint_position(checkpoint: Mapping[str, Any]) -> tuple[str,
     return identifier, organization_id, chain_version, epoch, sequence, head_digest
 
 
-def _entry_digest(
+def audit_chain_entry_source(entry: Mapping[str, Any]) -> AuditChainSource:
+    """Return a strict source identity from one supported v2 entry."""
+
+    _validate_entry(entry)
+    if entry.get("schema_version") != AUDIT_CHAIN_ENTRY_SCHEMA_VERSION:
+        raise AuditChainError("audit_chain_entry_schema_unsupported")
+    source_schema_id = entry.get("source_schema_id")
+    source_schema_version = entry.get("source_schema_version")
+    source_event_id = entry.get("source_event_id")
+    if (
+        not isinstance(source_schema_id, str)
+        or isinstance(source_schema_version, bool)
+        or not isinstance(source_schema_version, int)
+        or not isinstance(source_event_id, str)
+    ):
+        raise AuditChainError("audit_chain_source_schema_unsupported")
+    return AuditChainSource(
+        schema_id=source_schema_id,
+        schema_version=source_schema_version,
+        event_id=source_event_id,
+    )
+
+
+def _entry_digest_v1(
     *,
     organization_id: str,
     chain_version: int,
@@ -286,7 +422,35 @@ def _entry_digest(
     ).hexdigest()
 
 
-def _normalized_current_event(event: Mapping[str, Any]) -> dict[str, object]:
+def _entry_digest_v2(
+    *,
+    organization_id: str,
+    chain_version: int,
+    chain_epoch: int,
+    sequence: int,
+    previous_digest: str | None,
+    source: AuditChainSource,
+    event: Mapping[str, Any],
+) -> str:
+    return hashlib.sha256(
+        canonical_json_bytes(
+            {
+                "domain": "hormuz.commit-audit-chain-entry.v2",
+                "organization_id": organization_id,
+                "chain_version": chain_version,
+                "chain_epoch": chain_epoch,
+                "sequence": sequence,
+                "previous_digest": previous_digest,
+                "source_schema_id": source.schema_id,
+                "source_schema_version": source.schema_version,
+                "source_event_id": source.event_id,
+                "event": dict(event),
+            }
+        )
+    ).hexdigest()
+
+
+def _normalized_v1_audit_event(event: Mapping[str, Any]) -> dict[str, object]:
     try:
         parsed = json.loads(canonical_json_bytes(dict(event)).decode("utf-8"))
         if not isinstance(parsed, dict):
@@ -299,6 +463,44 @@ def _normalized_current_event(event: Mapping[str, Any]) -> dict[str, object]:
         or parsed.get("schema_version") != AUDIT_EVENT_SCHEMA_VERSION
     ):
         raise AuditChainError("audit_chain_event_schema_unsupported")
+    organization_id = parsed.get("organization_id")
+    if not isinstance(organization_id, str) or not organization_id:
+        raise AuditChainError("audit_chain_event_malformed")
+    return parsed
+
+
+def _normalized_v2_source_event(event: Mapping[str, Any], *, source: AuditChainSource) -> dict[str, object]:
+    try:
+        parsed = json.loads(canonical_json_bytes(dict(event)).decode("utf-8"))
+        if not isinstance(parsed, dict):
+            raise ValueError
+        if source.schema_id == "hormuz.custody-control-event" and source.schema_version == 1:
+            validate_custody_control_event(parsed)
+            _validate_uuid(source.event_id, code="audit_chain_event_malformed")
+            expected_id = source.event_id
+        elif source.schema_id == "hormuz.custody-execution-attempt" and source.schema_version == 2:
+            validate_custody_execution_attempt(parsed)
+            expected_id = parsed.get("execution_id")
+        elif source.schema_id == "hormuz.custody-execution-event" and source.schema_version == 1:
+            validate_custody_execution_event(parsed)
+            execution_id = parsed.get("execution_id")
+            sequence = parsed.get("sequence")
+            expected_id = f"{execution_id}:{sequence}"
+        elif source.schema_id == "hormuz.custody-lifecycle-event" and source.schema_version == 1:
+            validate_custody_lifecycle_event(parsed)
+            expected_id = parsed.get("lifecycle_event_id")
+        elif source.schema_id == "hormuz.custody-envelope-attestation" and source.schema_version == 1:
+            validate_custody_envelope_attestation(parsed)
+            expected_id = f"{parsed.get('execution_id')}:{parsed.get('attestation_kind')}"
+        elif source.schema_id == "hormuz.custody-deletion-event" and source.schema_version == 1:
+            validate_custody_deletion_event(parsed)
+            expected_id = parsed.get("deletion_event_id")
+        else:
+            raise AuditChainError("audit_chain_event_schema_unsupported")
+    except (AuditChainError, ContractValidationError, TypeError, ValueError, json.JSONDecodeError):
+        raise AuditChainError("audit_chain_event_malformed") from None
+    if source.event_id != expected_id:
+        raise AuditChainError("audit_chain_event_malformed")
     organization_id = parsed.get("organization_id")
     if not isinstance(organization_id, str) or not organization_id:
         raise AuditChainError("audit_chain_event_malformed")

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import json
 from pathlib import Path
 import shutil
 import sqlite3
@@ -9,7 +10,14 @@ import threading
 import unittest
 from unittest import mock
 
-from hormuz.audit_chain import build_audit_chain_checkpoint, parse_audit_chain_checkpoint, serialize_audit_chain_checkpoint
+from hormuz.audit_chain import (
+    AuditChainError,
+    build_custody_audit_chain_entry,
+    build_audit_chain_checkpoint,
+    parse_audit_chain_checkpoint,
+    serialize_audit_chain_checkpoint,
+    verify_audit_chain_entry,
+)
 from hormuz.config import Identity
 from hormuz.store import StorageSchemaError, UsageStore
 
@@ -43,6 +51,47 @@ def _record(store: UsageStore, identity: Identity, *, status: str = "succeeded")
 
 
 class CommitTimeAuditChainTests(unittest.TestCase):
+    def test_v2_custody_entry_has_a_strict_source_union_while_v1_remains_readable(self) -> None:
+        fixtures = json.loads((Path(__file__).parent / "fixtures" / "contracts" / "valid-v1.json").read_text())
+        event = fixtures["custody_control_event"]
+        source_event_id = "01234567-89ab-4def-8123-456789abcdef"
+        entry = build_custody_audit_chain_entry(
+            event,
+            source_schema_id="hormuz.custody-control-event",
+            source_schema_version=1,
+            source_event_id=source_event_id,
+            chain_version=1,
+            chain_epoch=1,
+            sequence=1,
+            previous_digest=None,
+        )
+
+        self.assertEqual(entry["schema_version"], 2)
+        self.assertEqual(
+            verify_audit_chain_entry(
+                entry,
+                expected_organization_id="xpounder",
+                expected_chain_version=1,
+                expected_chain_epoch=1,
+                expected_sequence=1,
+                expected_previous_digest=None,
+                source_event=event,
+            ),
+            entry["event_digest"],
+        )
+        with self.assertRaises(AuditChainError) as unsupported_source:
+            build_custody_audit_chain_entry(
+                {"arbitrary": "json"},
+                source_schema_id="hormuz.unreviewed-source",
+                source_schema_version=1,
+                source_event_id=source_event_id,
+                chain_version=1,
+                chain_epoch=1,
+                sequence=1,
+                previous_digest=None,
+            )
+        self.assertEqual(unsupported_source.exception.code, "audit_chain_event_malformed")
+
     def test_events_commit_to_independent_tenant_chains_and_remain_content_free(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "usage.sqlite3"

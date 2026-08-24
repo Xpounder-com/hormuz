@@ -59,10 +59,15 @@ class CustodyControlService:
             raise CustodyControlError("custody_bootstrap_administrator_invalid") from error
         if not configured or not any(_same_identity(caller, administrator) for administrator in configured):
             raise CustodyControlError("custody_bootstrap_credential_not_authorized")
+        retention = self._config.custody_retention
+        if retention is None:
+            raise CustodyControlError("custody_retention_required")
         return self._repository.bootstrap(
             organization_id=organization_id,
             caller=caller,
             administrators=configured,
+            retention_days=retention.retention_days,
+            retention_legal_hold=retention.legal_hold,
         )
 
     def grant_oidc_administrator(
@@ -164,6 +169,33 @@ class CustodyControlService:
         return self._repository.status(
             organization_id=organization_id,
             caller=self._authenticated_administrator(organization_id=organization_id, credential_env=credential_env),
+        )
+
+    def export_evidence(self, *, organization_id: str, credential_env: str) -> dict[str, object]:
+        """Export tenant custody evidence through the authenticated control boundary."""
+
+        return self._repository.export_evidence(
+            organization_id=organization_id,
+            caller=self._authenticated_administrator(organization_id=organization_id, credential_env=credential_env),
+        )
+
+    def record_deletion_blocked(
+        self,
+        *,
+        organization_id: str,
+        credential_env: str,
+        source_schema_id: str,
+        source_schema_version: int,
+        source_event_id: str,
+    ) -> dict[str, object]:
+        """Record a governed custody-evidence deletion refusal without deleting."""
+
+        return self._repository.record_deletion_blocked(
+            organization_id=organization_id,
+            caller=self._authenticated_administrator(organization_id=organization_id, credential_env=credential_env),
+            source_schema_id=source_schema_id,
+            source_schema_version=source_schema_version,
+            source_event_id=source_event_id,
         )
 
     def _authenticated_administrator(self, *, organization_id: str, credential_env: str) -> CustodyAdministrator:

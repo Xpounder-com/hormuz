@@ -68,6 +68,10 @@ migration, and policy-control surfaces:
     "postgres_executor_dsn_env": "HORMUZ_CUSTODY_EXECUTOR_DSN",
     "postgres_executor_role": "hormuz_custody_executor",
     "pending_attempt_ttl_seconds": 900
+  },
+  "custody_retention": {
+    "retention_days": 365,
+    "legal_hold": false
   }
 }
 ```
@@ -139,12 +143,21 @@ Email addresses, usernames, mutable group names, and arbitrary token claims do
 not grant custody authority. An OIDC custody administrator need not have a
 gateway inference identity.
 
+`custody_retention` is also a bootstrap input, not an everyday configuration
+override. It is required before managed custody can initialize; missing,
+malformed, or local-mode retention configuration fails closed. PostgreSQL's
+`clock_timestamp()` supplies each custody-evidence `occurred_at` and stores an
+immutable `retain_until` derived from the tenant's persisted retention days.
+Later file/configuration changes cannot shorten existing records or alter their
+legal-hold state. The only supported retention values are one to 36,500 calendar
+days and a Boolean initial legal hold.
+
 Before schema migration, the database operator must create both
 `hormuz_custody_control` and `hormuz_custody_executor` as distinct restricted
 roles with `NOINHERIT` and without superuser, database-creation, role-creation,
 or `BYPASSRLS` privileges. A separately deployed executor login may assume only
 the executor role; do not place its DSN or key-service credential in the normal
-gateway deployment. PostgreSQL schema v7 grants the control role custody
+gateway deployment. PostgreSQL schema v8 grants the control role custody
 authority and status reads. The executor receives only tenant-scoped
 authorization metadata, a Boolean two-active-approver check, immutable
 asset-registration and attempt/lifecycle/attestation insert surfaces, and no
@@ -357,6 +370,43 @@ not silently executed by the administrator CLI process. The separate
 `custody-executor register-assets` command is deliberately machine-only and
 does not accept administrator credentials or execution input.
 
+### Custody evidence export and deletion denials
+
+The authenticated control service can export the tenant's custody evidence
+without exposing ciphertext, envelope paths, KMS references, prompts, responses,
+or secret values:
+
+```bash
+hormuz --config /etc/hormuz/hormuz.json custody evidence export \
+  --organization acme > acme-custody-evidence.json
+```
+
+The export is `hormuz.custody-evidence-export` v1. It contains strict v2
+commit-time chain entries for custody source records plus each source record's
+immutable `retain_until` and legal-hold state. It is a tenant custody export,
+not an organization-wide usage export; its entries retain their positions in the
+organization's global audit chain and must be verified with the normal chain
+verifier and a trusted checkpoint when independent tamper evidence is required.
+
+Hormuz has no evidence-delete command. The only deletion-related control is a
+content-free check which records a new immutable `hormuz.custody-deletion-event`
+v1 with `decision: deletion_blocked`:
+
+```bash
+hormuz --config /etc/hormuz/hormuz.json custody evidence deletion-check \
+  --organization acme \
+  --source-schema-id hormuz.custody-control-event \
+  --source-schema-version 1 \
+  --source-event-id <immutable-source-event-id>
+```
+
+It returns `retention_active`, `legal_hold_active`, or
+`strong_approval_required`. The last result is still a denial: expiration never
+grants a delete entitlement. A future destructive deletion design would need a
+separate strong-approval contract, while externally anchored Object Lock
+artifacts remain outside Hormuz's deletion scope. The normal gateway runtime
+has no delete, retention-shortening, or chain-write privilege.
+
 The last active administrator cannot be revoked through the ordinary path. If
 all administrators are lost through an external database or disaster event,
 ordinary operations fail with `custody_break_glass_required`. This release has
@@ -372,7 +422,11 @@ most the latest 100 metadata-only attempt records and accepts the governed
 routine-only attempt shape. Each append-only execution state record remains
 `hormuz.custody-execution-event` v1. The separately hash-linked lifecycle
 record is `hormuz.custody-lifecycle-event` v1. `hormuz.custody-control-event`
-v1 remains the human-authority event schema. All are listed in `hormuz
+v1 remains the human-authority event schema. `hormuz.custody-envelope-attestation`
+v1 and `hormuz.custody-deletion-event` v1 are strict metadata-only source
+records. Each is wrapped only by the strict source-allowlisted
+`hormuz.commit-audit-chain-entry` v2 format; version-1 chain entries remain
+untouched for historical gateway evidence. All are listed in `hormuz
 contract-manifest` and covered by compatibility fixtures.
 
 This checkpoint proves governed destructive lifecycle authorization,
@@ -382,6 +436,6 @@ barriers and acknowledgements, five-second partition fencing, write-retirement
 prerequisites, append-only recovery resolution, tenant isolation, and no
 automatic replay. It does **not** revoke a provider key,
 change customer IAM, disable or delete a customer key, delete ciphertext,
-implement all-administrator-loss break glass, externally anchor the custody
-lifecycle chain, certify a cloud deployment, establish production readiness,
+implement all-administrator-loss break glass, certify a cloud deployment,
+establish production readiness,
 or close parent issue #17.

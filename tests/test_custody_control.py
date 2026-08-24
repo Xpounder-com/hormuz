@@ -182,6 +182,20 @@ class CustodyControlUnitTests(unittest.TestCase):
         with self.assertRaises(ConfigError):
             self._load(missing_keys, environment)
 
+        missing_retention = json.loads(json.dumps(value))
+        missing_retention.pop("custody_retention")
+        with self.assertRaises(ConfigError) as raised:
+            self._load(missing_retention, environment)
+        self.assertEqual(
+            str(raised.exception),
+            "custody_control.mode postgresql requires custody_retention",
+        )
+
+        invalid_retention = json.loads(json.dumps(value))
+        invalid_retention["custody_retention"] = {"retention_days": 0, "legal_hold": False}
+        with self.assertRaises(ConfigError):
+            self._load(invalid_retention, environment)
+
     def test_lifecycle_configuration_binds_immutable_asset_generations_without_exposing_bindings_to_evidence(self) -> None:
         value, environment = self._managed_value()
         key_references = value["key_custody"]["key_references"]  # type: ignore[index]
@@ -250,6 +264,7 @@ class CustodyControlUnitTests(unittest.TestCase):
         unmanaged = json.loads(json.dumps(value))
         unmanaged["custody_control"] = {"mode": "local"}
         unmanaged.pop("custody_executor")
+        unmanaged.pop("custody_retention")
         with self.assertRaises(ConfigError) as raised:
             self._load(unmanaged, environment)
         self.assertEqual(str(raised.exception), "custody_lifecycle requires custody_control.mode postgresql")
@@ -300,6 +315,37 @@ class CustodyControlUnitTests(unittest.TestCase):
         self.assertFalse(hasattr(parsed, "actor"))
         self.assertFalse(hasattr(parsed, "plaintext"))
         self.assertEqual(parsed.credential_env, "HORMUZ_CUSTODY_ADMIN_TOKEN")
+
+        export = build_parser().parse_args(
+            [
+                "custody",
+                "evidence",
+                "export",
+                "--organization",
+                "xpounder",
+            ]
+        )
+        self.assertEqual(export.custody_evidence_command, "export")
+        self.assertFalse(hasattr(export, "actor"))
+        self.assertFalse(hasattr(export, "plaintext"))
+
+        deletion_check = build_parser().parse_args(
+            [
+                "custody",
+                "evidence",
+                "deletion-check",
+                "--organization",
+                "xpounder",
+                "--source-schema-id",
+                "hormuz.custody-control-event",
+                "--source-schema-version",
+                "1",
+                "--source-event-id",
+                "11111111-1111-4111-8111-111111111111",
+            ]
+        )
+        self.assertEqual(deletion_check.custody_evidence_command, "deletion-check")
+        self.assertFalse(hasattr(deletion_check, "delete"))
 
     def test_machine_catalog_registration_has_no_human_or_plaintext_arguments(self) -> None:
         parsed = build_parser().parse_args(["custody-executor", "register-assets"])
@@ -367,6 +413,10 @@ class CustodyControlUnitTests(unittest.TestCase):
             "bootstrap_administrators": [
                 {"organization_id": "xpounder", "actor_id": "alice"}
             ],
+        }
+        value["custody_retention"] = {
+            "retention_days": 365,
+            "legal_hold": False,
         }
         value["custody_executor"] = {
             "postgres_executor_dsn_env": "TEST_EXECUTOR_DSN",

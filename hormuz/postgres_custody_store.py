@@ -5,14 +5,30 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 import hashlib
+import json
 from typing import Any, Iterator
 from uuid import UUID, uuid4
 
 from .contracts import (
     CUSTODY_CONTROL_EVENT_SCHEMA_ID,
     CUSTODY_CONTROL_EVENT_SCHEMA_VERSION,
+    CUSTODY_DELETION_EVENT_SCHEMA_ID,
+    CUSTODY_DELETION_EVENT_SCHEMA_VERSION,
+    CUSTODY_EVIDENCE_EXPORT_SCHEMA_ID,
     ContractValidationError,
+    contract_envelope,
+    validate_audit_chain_entry,
     validate_custody_control_event,
+    validate_custody_deletion_event,
+    validate_custody_evidence_export,
+)
+from .custody_evidence import (
+    CUSTODY_CONTROL_AUDIT_SOURCE,
+    CUSTODY_DELETION_AUDIT_SOURCE,
+    append_custody_audit_chain_entry,
+    bootstrap_custody_evidence_timestamps,
+    canonical_custody_evidence_json,
+    custody_evidence_timestamps,
 )
 from .custody_repository import (
     CustodyAdministrator,
@@ -30,6 +46,16 @@ from .postgres import PostgresConnectionPool, PostgresStorageError, postgres_tra
 
 _STATUS_OPERATION_LIMIT = 100
 _MAX_AUTHORIZATION_TTL = timedelta(hours=24)
+_CUSTODY_AUDIT_SOURCES = frozenset(
+    {
+        ("hormuz.custody-control-event", 1),
+        ("hormuz.custody-execution-attempt", 2),
+        ("hormuz.custody-execution-event", 1),
+        ("hormuz.custody-lifecycle-event", 1),
+        ("hormuz.custody-envelope-attestation", 1),
+        CUSTODY_DELETION_AUDIT_SOURCE,
+    }
+)
 
 
 def custody_identity_key(administrator: CustodyAdministrator) -> str:
@@ -83,6 +109,8 @@ class PostgresCustodyControlStore:
         organization_id: str,
         caller: CustodyAdministrator,
         administrators: tuple[CustodyAdministrator, ...],
+        retention_days: int,
+        retention_legal_hold: bool,
     ) -> tuple[CustodyAdministrator, ...]:
         if not administrators:
             raise CustodyControlError("custody_bootstrap_administrators_required")
@@ -96,21 +124,33 @@ class PostgresCustodyControlStore:
             administrator_keys.add(identity_key)
         if custody_identity_key(caller) not in administrator_keys:
             raise CustodyControlError("custody_bootstrap_caller_not_administrator")
-        now = datetime.now(timezone.utc)
         with self._transaction(organization_id) as connection:
             with connection.cursor() as cursor:
                 self._lock_tenant(cursor, organization_id)
                 cursor.execute("SELECT 1 FROM custody_tenants WHERE organization_id = %s", (organization_id,))
                 if cursor.fetchone() is not None:
                     raise CustodyControlError("custody_bootstrap_already_initialized")
+                now, _retain_until, _legal_hold = bootstrap_custody_evidence_timestamps(
+                    cursor,
+                    retention_days=retention_days,
+                    legal_hold=retention_legal_hold,
+                )
                 caller_key = custody_identity_key(caller)
                 cursor.execute(
                     """
                     INSERT INTO custody_tenants (
-                        organization_id, initialized_at, initialized_by_kind, initialized_by_identity_key
-                    ) VALUES (%s, %s, %s, %s)
+                        organization_id, initialized_at, initialized_by_kind, initialized_by_identity_key,
+                        retention_days, retention_legal_hold
+                    ) VALUES (%s, %s, %s, %s, %s, %s)
                     """,
-                    (organization_id, now, caller.authentication_kind, caller_key),
+                    (
+                        organization_id,
+                        now,
+                        caller.authentication_kind,
+                        caller_key,
+                        retention_days,
+                        retention_legal_hold,
+                    ),
                 )
                 for administrator in administrators:
                     self._insert_administrator(
@@ -534,6 +574,265 @@ class PostgresCustodyControlStore:
             execution_status=execution_status,
         )
 
+    def export_evidence(
+        self,
+        *,
+        organization_id: str,
+        caller: CustodyAdministrator,
+    ) -> dict[str, object]:
+        """Return the strict, content-free custody evidence export for one tenant.
+
+        The export intentionally contains only v2 custody source records.  Each
+        record retains its global audit-chain position, but it does not pretend
+        to be a complete organization-wide audit export when usage evidence is
+        owned by a different service boundary.
+        """
+
+        with self._transaction(organization_id) as connection:
+            with connection.cursor() as cursor:
+                self._require_administrator(cursor, organization_id=organization_id, caller=caller)
+                generated_at, _retain_until, _legal_hold = custody_evidence_timestamps(
+                    cursor,
+                    organization_id=organization_id,
+                )
+                cursor.execute(
+                    """
+                    SELECT chain_version, chain_epoch, sequence,
+                           entry_schema_id, entry_schema_version, event_id,
+                           previous_digest, event_digest, event_json,
+                           source_schema_id, source_schema_version, source_event_id
+                    FROM custody_audit_chain_export_entries(%s)
+                    """,
+                    (organization_id,),
+                )
+                rows = cursor.fetchall()
+                records = [
+                    self._export_record_from_row(
+                        cursor,
+                        organization_id=organization_id,
+                        row=row,
+                    )
+                    for row in rows
+                ]
+        try:
+            export = contract_envelope(
+                CUSTODY_EVIDENCE_EXPORT_SCHEMA_ID,
+                {
+                    "organization_id": organization_id,
+                    "generated_at": generated_at.isoformat(),
+                    "records": records,
+                },
+            )
+            validate_custody_evidence_export(export)
+        except ContractValidationError as error:
+            raise CustodyControlError("custody_evidence_export_invalid") from error
+        return export
+
+    def record_deletion_blocked(
+        self,
+        *,
+        organization_id: str,
+        caller: CustodyAdministrator,
+        source_schema_id: str,
+        source_schema_version: int,
+        source_event_id: str,
+    ) -> dict[str, object]:
+        """Atomically validate a source's protections and record a refusal.
+
+        This is deliberately a *check*, not a deletion operation.  It emits a
+        fresh immutable event and v2 chain entry even after the source deadline
+        has elapsed, because an actual destructive action remains outside the
+        current Hormuz control plane and requires a future strong-approval
+        design.
+        """
+
+        if (source_schema_id, source_schema_version) not in _CUSTODY_AUDIT_SOURCES:
+            raise CustodyControlError("custody_evidence_source_schema_unsupported")
+        if not isinstance(source_event_id, str) or not source_event_id:
+            raise CustodyControlError("custody_evidence_source_event_id_invalid")
+        with self._transaction(organization_id) as connection:
+            with connection.cursor() as cursor:
+                self._lock_tenant(cursor, organization_id)
+                self._require_administrator(cursor, organization_id=organization_id, caller=caller)
+                source_retain_until, source_legal_hold = self._source_retention(
+                    cursor,
+                    organization_id=organization_id,
+                    source_schema_id=source_schema_id,
+                    source_schema_version=source_schema_version,
+                    source_event_id=source_event_id,
+                )
+                occurred_at, retain_until, legal_hold = custody_evidence_timestamps(
+                    cursor,
+                    organization_id=organization_id,
+                )
+                reason_code = _deletion_block_reason(
+                    source_retain_until=source_retain_until,
+                    source_legal_hold=source_legal_hold,
+                    occurred_at=occurred_at,
+                )
+                event = {
+                    "deletion_schema_id": CUSTODY_DELETION_EVENT_SCHEMA_ID,
+                    "deletion_schema_version": CUSTODY_DELETION_EVENT_SCHEMA_VERSION,
+                    "organization_id": organization_id,
+                    "deletion_event_id": str(uuid4()),
+                    "occurred_at": occurred_at.isoformat(),
+                    "source_schema_id": source_schema_id,
+                    "source_schema_version": source_schema_version,
+                    "source_event_id": source_event_id,
+                    "source_retain_until": source_retain_until.isoformat(),
+                    "source_legal_hold": source_legal_hold,
+                    "decision": "deletion_blocked",
+                    "reason_code": reason_code,
+                }
+                try:
+                    validate_custody_deletion_event(event)
+                except ContractValidationError as error:
+                    raise CustodyControlError("custody_deletion_event_invalid") from error
+                evidence_json = canonical_custody_evidence_json(event)
+                cursor.execute(
+                    """
+                    INSERT INTO custody_deletion_events (
+                        organization_id, deletion_event_id, deletion_schema_id,
+                        deletion_schema_version, occurred_at,
+                        source_schema_id, source_schema_version, source_event_id,
+                        source_retain_until, source_legal_hold,
+                        decision, reason_code, evidence_json, retain_until, legal_hold
+                    ) VALUES (
+                        %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s
+                    )
+                    """,
+                    (
+                        event["organization_id"],
+                        event["deletion_event_id"],
+                        event["deletion_schema_id"],
+                        event["deletion_schema_version"],
+                        event["occurred_at"],
+                        event["source_schema_id"],
+                        event["source_schema_version"],
+                        event["source_event_id"],
+                        event["source_retain_until"],
+                        event["source_legal_hold"],
+                        event["decision"],
+                        event["reason_code"],
+                        evidence_json,
+                        retain_until,
+                        legal_hold,
+                    ),
+                )
+                append_custody_audit_chain_entry(
+                    cursor,
+                    organization_id=organization_id,
+                    source_schema_id=CUSTODY_DELETION_AUDIT_SOURCE[0],
+                    source_schema_version=CUSTODY_DELETION_AUDIT_SOURCE[1],
+                    source_event_id=str(event["deletion_event_id"]),
+                    event=event,
+                )
+        return event
+
+    def _export_record_from_row(
+        self,
+        cursor: Any,
+        *,
+        organization_id: str,
+        row: dict[str, object],
+    ) -> dict[str, object]:
+        source_schema_id = row.get("source_schema_id")
+        source_schema_version = row.get("source_schema_version")
+        source_event_id = row.get("source_event_id")
+        chain_event_json = row.get("event_json")
+        if (
+            not isinstance(source_schema_id, str)
+            or isinstance(source_schema_version, bool)
+            or not isinstance(source_schema_version, int)
+            or not isinstance(source_event_id, str)
+            or not isinstance(chain_event_json, str)
+            or (source_schema_id, source_schema_version) not in _CUSTODY_AUDIT_SOURCES
+        ):
+            raise CustodyControlError("custody_evidence_export_invalid")
+        cursor.execute(
+            """
+            SELECT custody_audit_chain_source_event_json(%s, %s, %s, %s) AS event_json,
+                   source_retention.retain_until,
+                   source_retention.legal_hold
+            FROM custody_audit_chain_source_retention(%s, %s, %s, %s) AS source_retention
+            """,
+            (
+                organization_id,
+                source_schema_id,
+                source_schema_version,
+                source_event_id,
+                organization_id,
+                source_schema_id,
+                source_schema_version,
+                source_event_id,
+            ),
+        )
+        source = cursor.fetchone()
+        if source is None or source.get("event_json") != chain_event_json:
+            raise CustodyControlError("custody_evidence_export_source_mismatch")
+        retain_until = source.get("retain_until")
+        legal_hold = source.get("legal_hold")
+        if not isinstance(retain_until, datetime) or not isinstance(legal_hold, bool):
+            raise CustodyControlError("custody_evidence_export_invalid")
+        try:
+            event = json.loads(chain_event_json)
+        except (TypeError, ValueError, json.JSONDecodeError) as error:
+            raise CustodyControlError("custody_evidence_export_invalid") from error
+        if not isinstance(event, dict):
+            raise CustodyControlError("custody_evidence_export_invalid")
+        entry = {
+            "schema_id": row.get("entry_schema_id"),
+            "schema_version": row.get("entry_schema_version"),
+            "organization_id": organization_id,
+            "chain_version": row.get("chain_version"),
+            "chain_epoch": row.get("chain_epoch"),
+            "sequence": row.get("sequence"),
+            "previous_digest": row.get("previous_digest"),
+            "event_digest": row.get("event_digest"),
+            "source_schema_id": source_schema_id,
+            "source_schema_version": source_schema_version,
+            "source_event_id": source_event_id,
+            "event": event,
+        }
+        try:
+            validate_audit_chain_entry(entry)
+        except ContractValidationError as error:
+            raise CustodyControlError("custody_evidence_export_invalid") from error
+        if row.get("event_id") != source_event_id:
+            raise CustodyControlError("custody_evidence_export_invalid")
+        return {
+            "entry": entry,
+            "retain_until": retain_until.isoformat(),
+            "legal_hold": legal_hold,
+        }
+
+    def _source_retention(
+        self,
+        cursor: Any,
+        *,
+        organization_id: str,
+        source_schema_id: str,
+        source_schema_version: int,
+        source_event_id: str,
+    ) -> tuple[datetime, bool]:
+        cursor.execute(
+            """
+            SELECT source_retention.retain_until, source_retention.legal_hold
+            FROM custody_audit_chain_source_retention(%s, %s, %s, %s) AS source_retention
+            """,
+            (organization_id, source_schema_id, source_schema_version, source_event_id),
+        )
+        source = cursor.fetchone()
+        if source is None:
+            raise CustodyControlError("custody_evidence_not_found")
+        retain_until = source.get("retain_until")
+        legal_hold = source.get("legal_hold")
+        if not isinstance(retain_until, datetime) or not isinstance(legal_hold, bool):
+            raise CustodyControlError("custody_evidence_not_found")
+        return retain_until, legal_hold
+
     def _load_operation(self, cursor: Any, *, organization_id: str, operation_id: str) -> CustodyOperationIntent:
         cursor.execute(
             "SELECT * FROM custody_operation_intents WHERE organization_id = %s AND operation_id = %s",
@@ -718,7 +1017,10 @@ class PostgresCustodyControlStore:
         approval_count: int | None = None,
         expires_at: datetime | None = None,
     ) -> None:
-        occurred_at = datetime.now(timezone.utc)
+        occurred_at, retain_until, legal_hold = custody_evidence_timestamps(
+            cursor,
+            organization_id=organization_id,
+        )
         event = {
             "event_schema_id": CUSTODY_CONTROL_EVENT_SCHEMA_ID,
             "event_schema_version": CUSTODY_CONTROL_EVENT_SCHEMA_VERSION,
@@ -743,20 +1045,24 @@ class PostgresCustodyControlStore:
             validate_custody_control_event(event)
         except ContractValidationError as error:
             raise CustodyControlError("custody_control_event_invalid") from error
+        event_id = str(uuid4())
+        evidence_json = canonical_custody_evidence_json(event)
         cursor.execute(
             """
             INSERT INTO custody_control_events (
                 event_id, event_schema_id, event_schema_version, organization_id, occurred_at,
                 event_type, actor_kind, actor_identity_key, target_identity_key, operation_id,
                 operation_type, risk_level, target_kind, target_sha256, parameters_sha256,
-                protected_input_ref_sha256, required_approvals, approval_count, expires_at
+                protected_input_ref_sha256, required_approvals, approval_count, expires_at,
+                evidence_json, retain_until, legal_hold
             ) VALUES (
                 %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                %s, %s, %s, %s, %s, %s, %s, %s, %s
+                %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                %s, %s, %s
             )
             """,
             (
-                str(uuid4()),
+                event_id,
                 event["event_schema_id"],
                 event["event_schema_version"],
                 event["organization_id"],
@@ -775,7 +1081,18 @@ class PostgresCustodyControlStore:
                 event["required_approvals"],
                 event["approval_count"],
                 event["expires_at"],
+                evidence_json,
+                retain_until,
+                legal_hold,
             ),
+        )
+        append_custody_audit_chain_entry(
+            cursor,
+            organization_id=organization_id,
+            source_schema_id=CUSTODY_CONTROL_AUDIT_SOURCE[0],
+            source_schema_version=CUSTODY_CONTROL_AUDIT_SOURCE[1],
+            source_event_id=event_id,
+            event=event,
         )
 
     def _lock_tenant(self, cursor: Any, organization_id: str) -> None:
@@ -801,6 +1118,23 @@ def _validate_operation_id(value: str) -> None:
         UUID(value)
     except (ValueError, TypeError, AttributeError) as error:
         raise CustodyControlError("custody_operation_id_invalid") from error
+
+
+def _deletion_block_reason(
+    *,
+    source_retain_until: datetime,
+    source_legal_hold: bool,
+    occurred_at: datetime,
+) -> str:
+    """Return the only supported custody deletion outcome for this release."""
+
+    if source_legal_hold:
+        return "legal_hold_active"
+    if source_retain_until > occurred_at:
+        return "retention_active"
+    # Expiration never grants a deletion entitlement.  A future destructive
+    # path must add a separately governed strong-approval contract.
+    return "strong_approval_required"
 
 
 def _administrator_from_row(row: dict[str, object]) -> CustodyAdministrator:

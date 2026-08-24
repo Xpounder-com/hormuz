@@ -236,6 +236,23 @@ class CustodyControlRepository(Protocol):
         caller: CustodyAdministrator,
     ) -> CustodyControlStatus: ...
 
+    def export_evidence(
+        self,
+        *,
+        organization_id: str,
+        caller: CustodyAdministrator,
+    ) -> dict[str, object]: ...
+
+    def record_deletion_blocked(
+        self,
+        *,
+        organization_id: str,
+        caller: CustodyAdministrator,
+        source_schema_id: str,
+        source_schema_version: int,
+        source_event_id: str,
+    ) -> dict[str, object]: ...
+
 
 def required_approvals(operation_type: str) -> int:
     if operation_type in CUSTODY_ROUTINE_OPERATIONS:

@@ -16,7 +16,7 @@ from typing import Any, Iterator, Mapping
 from .config import PostgresPoolConfig
 
 
-POSTGRES_SCHEMA_VERSION = 7
+POSTGRES_SCHEMA_VERSION = 8
 _IDENTIFIER_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 _POOL_RECONNECT_TIMEOUT_SECONDS = 15
 
@@ -612,6 +612,10 @@ def _verify_applied_schema_shape(cursor: Any, *, schema: str, version: int) -> N
             "replica_id",
             "acknowledged_at",
         }
+    if version >= 8:
+        required["gateway_audit_chain_entries"].update(
+            {"source_schema_id", "source_schema_version", "source_event_id"}
+        )
     for table, columns in required.items():
         cursor.execute(
             """
@@ -627,6 +631,8 @@ def _verify_applied_schema_shape(cursor: Any, *, schema: str, version: int) -> N
         }
         if not columns.issubset(observed):
             raise PostgresStorageError("storage_schema_partial_upgrade")
+    if version >= 8:
+        _verify_custody_evidence_schema_objects(cursor, schema=schema)
 
 
 def _verify_custody_schema_shape(cursor: Any, *, schema: str, version: int) -> None:
@@ -826,6 +832,30 @@ def _verify_custody_schema_shape(cursor: Any, *, schema: str, version: int) -> N
                 },
             }
         )
+    if version >= 8:
+        required["custody_tenants"].update({"retention_days", "retention_legal_hold"})
+        required["custody_control_events"].update({"evidence_json", "retain_until", "legal_hold"})
+        required["custody_execution_attempts"].update({"evidence_json", "retain_until", "legal_hold"})
+        required["custody_execution_events"].update({"evidence_json", "retain_until", "legal_hold"})
+        required["custody_lifecycle_events"].update({"evidence_json", "retain_until", "legal_hold"})
+        required["custody_envelope_attestations"].update({"evidence_json", "retain_until", "legal_hold"})
+        required["custody_deletion_events"] = {
+            "organization_id",
+            "deletion_event_id",
+            "deletion_schema_id",
+            "deletion_schema_version",
+            "occurred_at",
+            "source_schema_id",
+            "source_schema_version",
+            "source_event_id",
+            "source_retain_until",
+            "source_legal_hold",
+            "decision",
+            "reason_code",
+            "evidence_json",
+            "retain_until",
+            "legal_hold",
+        }
     for table, columns in required.items():
         cursor.execute(
             """
@@ -841,6 +871,8 @@ def _verify_custody_schema_shape(cursor: Any, *, schema: str, version: int) -> N
         }
         if not columns.issubset(observed):
             raise PostgresStorageError("storage_schema_partial_upgrade")
+    if version >= 8:
+        _verify_custody_evidence_schema_objects(cursor, schema=schema)
 
 
 def _verify_custody_executor_schema_shape(cursor: Any, *, schema: str, version: int) -> None:
@@ -965,6 +997,11 @@ def _verify_custody_executor_schema_shape(cursor: Any, *, schema: str, version: 
                 },
             }
         )
+    if version >= 8:
+        required["custody_execution_attempts"].update({"evidence_json", "retain_until", "legal_hold"})
+        required["custody_execution_events"].update({"evidence_json", "retain_until", "legal_hold"})
+        required["custody_lifecycle_events"].update({"evidence_json", "retain_until", "legal_hold"})
+        required["custody_envelope_attestations"].update({"evidence_json", "retain_until", "legal_hold"})
     for table, columns in required.items():
         cursor.execute(
             """
@@ -1006,6 +1043,131 @@ def _verify_custody_executor_schema_shape(cursor: Any, *, schema: str, version: 
             "custody_lifecycle_next_chain_head",
         }:
             raise PostgresStorageError("storage_schema_partial_upgrade")
+    if version >= 8:
+        _verify_custody_evidence_schema_objects(cursor, schema=schema)
+
+
+def _verify_custody_evidence_schema_objects(cursor: Any, *, schema: str) -> None:
+    """Require v8 source-binding and retention guards, not just their columns."""
+
+    required_functions = {
+        "custody_audit_chain_append_entry",
+        "custody_audit_chain_export_entries",
+        "custody_audit_chain_next_position",
+        "custody_audit_chain_source_event_json",
+        "custody_audit_chain_source_retention",
+        "custody_evidence_exact_keys",
+        "custody_evidence_timestamp_matches",
+        "deny_custody_evidence_mutation",
+        "enforce_custody_audit_chain_entry",
+        "enforce_custody_audit_chain_entry_insert",
+        "enforce_custody_evidence_contract",
+        "enforce_custody_evidence_retention",
+    }
+    cursor.execute(
+        """
+        SELECT procedure.proname
+        FROM pg_catalog.pg_proc AS procedure
+        JOIN pg_catalog.pg_namespace AS namespace
+          ON namespace.oid = procedure.pronamespace
+        WHERE namespace.nspname = %s
+          AND procedure.proname IN (
+              'custody_audit_chain_append_entry',
+              'custody_audit_chain_export_entries',
+              'custody_audit_chain_next_position',
+              'custody_audit_chain_source_event_json',
+              'custody_audit_chain_source_retention',
+              'custody_evidence_exact_keys',
+              'custody_evidence_timestamp_matches',
+              'deny_custody_evidence_mutation',
+              'enforce_custody_audit_chain_entry',
+              'enforce_custody_audit_chain_entry_insert',
+              'enforce_custody_evidence_contract',
+              'enforce_custody_evidence_retention'
+          )
+        """,
+        (schema,),
+    )
+    observed_functions = {
+        str(row["proname"] if isinstance(row, Mapping) else row[0])
+        for row in cursor.fetchall()
+    }
+    if observed_functions != required_functions:
+        raise PostgresStorageError("storage_schema_partial_upgrade")
+
+    required_triggers = {
+        "custody_control_events_chain_required",
+        "custody_control_events_contract_required",
+        "custody_control_events_immutable",
+        "custody_control_events_retention_required",
+        "custody_deletion_events_chain_required",
+        "custody_deletion_events_contract_required",
+        "custody_deletion_events_immutable",
+        "custody_deletion_events_retention_required",
+        "custody_envelope_attestations_chain_required",
+        "custody_envelope_attestations_contract_required",
+        "custody_envelope_attestations_immutable",
+        "custody_envelope_attestations_retention_required",
+        "custody_execution_attempts_chain_required",
+        "custody_execution_attempts_contract_required",
+        "custody_execution_attempts_immutable",
+        "custody_execution_attempts_retention_required",
+        "custody_execution_events_chain_required",
+        "custody_execution_events_contract_required",
+        "custody_execution_events_immutable",
+        "custody_execution_events_retention_required",
+        "gateway_audit_chain_entries_v2_source_required",
+        "custody_lifecycle_events_chain_required",
+        "custody_lifecycle_events_contract_required",
+        "custody_lifecycle_events_immutable",
+        "custody_lifecycle_events_retention_required",
+    }
+    cursor.execute(
+        """
+        SELECT trigger.tgname
+        FROM pg_catalog.pg_trigger AS trigger
+        JOIN pg_catalog.pg_class AS relation
+          ON relation.oid = trigger.tgrelid
+        JOIN pg_catalog.pg_namespace AS namespace
+          ON namespace.oid = relation.relnamespace
+        WHERE namespace.nspname = %s
+          AND NOT trigger.tgisinternal
+          AND trigger.tgname IN (
+              'custody_control_events_chain_required',
+              'custody_control_events_contract_required',
+              'custody_control_events_immutable',
+              'custody_control_events_retention_required',
+              'custody_deletion_events_chain_required',
+              'custody_deletion_events_contract_required',
+              'custody_deletion_events_immutable',
+              'custody_deletion_events_retention_required',
+              'custody_envelope_attestations_chain_required',
+              'custody_envelope_attestations_contract_required',
+              'custody_envelope_attestations_immutable',
+              'custody_envelope_attestations_retention_required',
+              'custody_execution_attempts_chain_required',
+              'custody_execution_attempts_contract_required',
+              'custody_execution_attempts_immutable',
+              'custody_execution_attempts_retention_required',
+              'custody_execution_events_chain_required',
+              'custody_execution_events_contract_required',
+              'custody_execution_events_immutable',
+              'custody_execution_events_retention_required',
+              'gateway_audit_chain_entries_v2_source_required',
+              'custody_lifecycle_events_chain_required',
+              'custody_lifecycle_events_contract_required',
+              'custody_lifecycle_events_immutable',
+              'custody_lifecycle_events_retention_required'
+          )
+        """,
+        (schema,),
+    )
+    observed_triggers = {
+        str(row["tgname"] if isinstance(row, Mapping) else row[0])
+        for row in cursor.fetchall()
+    }
+    if observed_triggers != required_triggers:
+        raise PostgresStorageError("storage_schema_partial_upgrade")
 
 
 @contextmanager
@@ -1104,6 +1266,7 @@ def _migration_sql(
         5: "0005_custody_control.sql",
         6: "0006_custody_executor.sql",
         7: "0007_custody_lifecycle.sql",
+        8: "0008_custody_evidence_retention.sql",
     }
     filename = filenames.get(version)
     if filename is None:

@@ -70,6 +70,7 @@ _ROOT_CONFIGURATION_FIELDS = frozenset(
         "policy_control",
         "custody_control",
         "custody_executor",
+        "custody_retention",
         "custody_lifecycle",
         "key_custody",
         "audit_anchor",
@@ -178,6 +179,7 @@ _CUSTODY_EXECUTOR_FIELDS = frozenset(
         "pending_attempt_ttl_seconds",
     }
 )
+_CUSTODY_RETENTION_FIELDS = frozenset({"retention_days", "legal_hold"})
 _CUSTODY_LIFECYCLE_FIELDS = frozenset({"freshness_lease_seconds", "assets"})
 _CUSTODY_LIFECYCLE_ASSET_FIELDS = frozenset({"asset_type", "asset_id", "generation", "binding"})
 _CUSTODY_LIFECYCLE_BINDING_FIELDS = frozenset(
@@ -357,6 +359,7 @@ def _validate_configuration_schema(raw: dict[str, Any]) -> None:
             _schema_object(administrator, _BOOTSTRAP_ADMINISTRATOR_FIELDS)
 
     _schema_optional_object(raw, "custody_executor", _CUSTODY_EXECUTOR_FIELDS)
+    _schema_optional_object(raw, "custody_retention", _CUSTODY_RETENTION_FIELDS)
 
     custody_lifecycle = _schema_optional_object(raw, "custody_lifecycle", _CUSTODY_LIFECYCLE_FIELDS)
     if custody_lifecycle is not None:

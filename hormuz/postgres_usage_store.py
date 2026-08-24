@@ -1686,6 +1686,57 @@ class PostgresUsageStore:
             sources[event_id] = event
         return sources
 
+    @staticmethod
+    def _custody_audit_chain_source_events_in_cursor(
+        cursor: Any,
+        *,
+        organization_id: str,
+        entries: list[Mapping[str, object]],
+    ) -> dict[tuple[str, int, str], dict[str, object]]:
+        """Load v2 custody sources through the bounded verifier function.
+
+        The ordinary gateway runtime intentionally has no direct read privilege
+        on custody control or execution evidence.  PostgreSQL exposes only a
+        source row already tied to the selected v2 chain entry, keeping audit
+        verification content-free and tenant scoped.
+        """
+
+        sources: dict[tuple[str, int, str], dict[str, object]] = {}
+        for entry in entries:
+            if entry.get("entry_schema_version") != 2:
+                continue
+            source_schema_id = entry.get("source_schema_id")
+            source_schema_version = entry.get("source_schema_version")
+            source_event_id = entry.get("source_event_id")
+            if (
+                not isinstance(source_schema_id, str)
+                or isinstance(source_schema_version, bool)
+                or not isinstance(source_schema_version, int)
+                or not isinstance(source_event_id, str)
+            ):
+                raise PostgresStorageError("audit_chain_entry_malformed")
+            key = (source_schema_id, source_schema_version, source_event_id)
+            if key in sources:
+                raise PostgresStorageError("audit_chain_entry_malformed")
+            cursor.execute(
+                """
+                SELECT custody_audit_chain_source_event_json(%s, %s, %s, %s) AS event_json
+                """,
+                (organization_id, source_schema_id, source_schema_version, source_event_id),
+            )
+            row = cursor.fetchone()
+            event_json = row.get("event_json") if row is not None else None
+            if not isinstance(event_json, str):
+                raise PostgresStorageError("audit_chain_source_event_missing")
+            try:
+                parsed = json.loads(event_json)
+            except (TypeError, ValueError, json.JSONDecodeError):
+                raise PostgresStorageError("audit_chain_source_event_malformed") from None
+            if not isinstance(parsed, dict):
+                raise PostgresStorageError("audit_chain_source_event_malformed")
+            sources[key] = parsed
+        return sources
+
     def verify_audit_chain(
         self,
         *,
@@ -1740,7 +1791,8 @@ class PostgresUsageStore:
                 cursor.execute(
                     f"""
                     SELECT chain_version, chain_epoch, sequence, entry_schema_id,
-                           entry_schema_version, event_id, previous_digest, event_digest, event_json
+                           entry_schema_version, event_id, previous_digest, event_digest, event_json,
+                           source_schema_id, source_schema_version, source_event_id
                     FROM {self._table('gateway_audit_chain_entries')}
                     WHERE organization_id = %s
                     ORDER BY chain_epoch ASC, sequence ASC
@@ -1749,6 +1801,11 @@ class PostgresUsageStore:
                 )
                 entries = cursor.fetchall()
                 sources = self._audit_chain_source_events_in_cursor(cursor, organization_id=organization)
+                custody_sources = self._custody_audit_chain_source_events_in_cursor(
+                    cursor,
+                    organization_id=organization,
+                    entries=entries,
+                )
         if head.chain_version != AUDIT_CHAIN_VERSION or head.chain_epoch < 1 or head.sequence < 0:
             raise PostgresStorageError("audit_chain_head_malformed")
         if head.head_digest is not None and not is_sha256_digest(head.head_digest):
@@ -1823,7 +1880,7 @@ class PostgresUsageStore:
                     parsed_event = json.loads(str(row["event_json"]))
                     if not isinstance(parsed_event, dict):
                         raise ValueError
-                    entry = {
+                    entry: dict[str, object] = {
                         "schema_id": row["entry_schema_id"],
                         "schema_version": row["entry_schema_version"],
                         "organization_id": organization,
@@ -1834,9 +1891,36 @@ class PostgresUsageStore:
                         "event_digest": row["event_digest"],
                         "event": parsed_event,
                     }
-                    event_id = parsed_event.get("id")
-                    if not isinstance(event_id, str) or row["event_id"] != event_id:
-                        raise AuditChainError("audit_chain_entry_malformed")
+                    entry_schema_version = row["entry_schema_version"]
+                    if entry_schema_version == 1:
+                        event_id = parsed_event.get("id")
+                        if not isinstance(event_id, str) or row["event_id"] != event_id:
+                            raise AuditChainError("audit_chain_entry_malformed")
+                        source_event = sources.get(event_id)
+                    elif entry_schema_version == 2:
+                        source_schema_id = row["source_schema_id"]
+                        source_schema_version = row["source_schema_version"]
+                        source_event_id = row["source_event_id"]
+                        if (
+                            not isinstance(source_schema_id, str)
+                            or isinstance(source_schema_version, bool)
+                            or not isinstance(source_schema_version, int)
+                            or not isinstance(source_event_id, str)
+                            or row["event_id"] != source_event_id
+                        ):
+                            raise AuditChainError("audit_chain_entry_malformed")
+                        entry.update(
+                            {
+                                "source_schema_id": source_schema_id,
+                                "source_schema_version": source_schema_version,
+                                "source_event_id": source_event_id,
+                            }
+                        )
+                        source_event = custody_sources.get(
+                            (source_schema_id, source_schema_version, source_event_id)
+                        )
+                    else:
+                        raise AuditChainError("audit_chain_entry_schema_unsupported")
                     digest = verify_audit_chain_entry(
                         entry,
                         expected_organization_id=organization,
@@ -1844,7 +1928,7 @@ class PostgresUsageStore:
                         expected_chain_epoch=epoch_number,
                         expected_sequence=expected_sequence,
                         expected_previous_digest=previous_digest,
-                        source_event=sources.get(event_id) if isinstance(event_id, str) else None,
+                        source_event=source_event,
                     )
                 except (AuditChainError, ValueError, TypeError, json.JSONDecodeError) as error:
                     code = error.code if isinstance(error, AuditChainError) else "audit_chain_entry_malformed"

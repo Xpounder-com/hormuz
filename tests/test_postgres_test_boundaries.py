@@ -25,6 +25,7 @@ EXPECTED_OWNERS = {
             "test_storage_cli_uses_the_operator_dsn_only_for_migration",
             "test_runtime_role_fails_closed_without_an_organization_context",
             "test_newer_or_partial_schema_fails_closed_without_mutating_evidence",
+            "test_schema_v8_missing_custody_evidence_trigger_fails_closed",
         },
     ),
     "test_postgres_policy_control": (
@@ -47,6 +48,10 @@ EXPECTED_OWNERS = {
             "test_expired_or_invalid_authorization_rolls_back_without_a_second_approval",
             "test_last_administrator_protection_and_all_admin_loss_require_separate_break_glass",
             "test_tenant_isolation_and_append_only_authorization_history_are_database_enforced",
+            "test_retained_custody_evidence_exports_through_control_and_deletion_is_only_blocked",
+            "test_unlinked_deletion_evidence_rolls_back_at_commit",
+            "test_direct_custody_writer_cannot_use_evidence_as_a_json_side_channel",
+            "test_runtime_cannot_insert_an_arbitrary_v2_audit_chain_entry",
         },
     ),
     "test_postgres_custody_executor": (
@@ -143,7 +148,7 @@ class PostgresTestBoundaryTests(unittest.TestCase):
             suite = unittest.defaultTestLoader.loadTestsFromName(f"{module_name}.{class_name}")
             self.assertEqual(suite.countTestCases(), len(expected_methods), module_name)
 
-        self.assertEqual(len(owned), 54)
+        self.assertEqual(len(owned), 59)
         self.assertFalse((ROOT / "tests" / "test_postgres.py").exists())
         self.assertFalse(
             any(name.startswith("test_") for name in PostgresTestCase.__dict__),

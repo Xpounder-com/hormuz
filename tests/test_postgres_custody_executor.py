@@ -144,17 +144,9 @@ class PostgresCustodyExecutorTests(PostgresTestCase):
         with self.assertRaises(CustodyExecutionError) as raised:
             executor.execute(request=request)
         self.assertEqual(raised.exception.code, "custody_execution_outcome_unknown_pending")
-        with self.psycopg.connect(self.owner_dsn) as connection:
-            with connection.transaction():
-                with connection.cursor() as cursor:
-                    cursor.execute(
-                        self.sql.SQL(
-                            "UPDATE {}.custody_execution_attempts "
-                            "SET claimed_at = CURRENT_TIMESTAMP - INTERVAL '2 minutes' "
-                            "WHERE organization_id = %s AND operation_id = %s"
-                        ).format(self.sql.Identifier(self.schema)),
-                        ("xpounder", request.operation_id),
-                    )
+        # A durable attempt is immutable. Narrow the test-only in-memory
+        # sweeper window instead of rewriting the committed database clock.
+        executor._repository._pending_attempt_ttl = timedelta(0)
         self.assertEqual(executor.sweep_stale_pending(), 1)
         with self.assertRaises(CustodyExecutionError) as replay:
             executor.execute(request=request)
@@ -187,17 +179,9 @@ class PostgresCustodyExecutorTests(PostgresTestCase):
         self.assertEqual(raised.exception.code, "custody_execution_finalization_unavailable")
         self.assertEqual(runner.requests, [request])
 
-        with self.psycopg.connect(self.owner_dsn) as connection:
-            with connection.transaction():
-                with connection.cursor() as cursor:
-                    cursor.execute(
-                        self.sql.SQL(
-                            "UPDATE {}.custody_execution_attempts "
-                            "SET claimed_at = CURRENT_TIMESTAMP - INTERVAL '2 minutes' "
-                            "WHERE organization_id = %s AND operation_id = %s"
-                        ).format(self.sql.Identifier(self.schema)),
-                        ("xpounder", request.operation_id),
-                    )
+        # Preserve immutable evidence while deterministically exercising the
+        # stale-pending recovery branch.
+        executor._repository._pending_attempt_ttl = timedelta(0)
         self.assertEqual(executor.sweep_stale_pending(), 1)
         with self.assertRaises(CustodyExecutionError) as replay:
             executor.execute(request=request)
@@ -227,7 +211,13 @@ class PostgresCustodyExecutorTests(PostgresTestCase):
             schema=self.schema,
             custody_control_role=self.custody_control_role,
         )
-        control_store.bootstrap(organization_id="beta", caller=beta_admin, administrators=(beta_admin,))
+        control_store.bootstrap(
+            organization_id="beta",
+            caller=beta_admin,
+            administrators=(beta_admin,),
+            retention_days=365,
+            retention_legal_hold=False,
+        )
         beta_template = CustodyExecutionRequest(
             organization_id="beta",
             operation_id="00000000-0000-4000-8000-000000000001",

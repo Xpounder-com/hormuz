@@ -14,7 +14,20 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Iterator
 from uuid import uuid4
 
-from .contracts import ContractValidationError, validate_custody_lifecycle_event
+from .contracts import (
+    CUSTODY_ENVELOPE_ATTESTATION_SCHEMA_ID,
+    CUSTODY_ENVELOPE_ATTESTATION_SCHEMA_VERSION,
+    ContractValidationError,
+    validate_custody_envelope_attestation,
+    validate_custody_lifecycle_event,
+)
+from .custody_evidence import (
+    CUSTODY_ENVELOPE_ATTESTATION_AUDIT_SOURCE,
+    CUSTODY_LIFECYCLE_AUDIT_SOURCE,
+    append_custody_audit_chain_entry,
+    canonical_custody_evidence_json,
+    custody_evidence_timestamps,
+)
 from .custody_execution_repository import CustodyExecutionAttempt, execution_descriptor_sha256
 from .custody_lifecycle import (
     CUSTODY_LIFECYCLE_CHAIN_VERSION,
@@ -191,7 +204,6 @@ def append_custody_lifecycle_event(
     *,
     attempt: CustodyExecutionAttempt,
     effect: CustodyLifecycleEffect,
-    occurred_at: datetime,
 ) -> CustodyLifecycleEvent:
     """Append an exact effect; the database derives the projection atomically."""
 
@@ -220,6 +232,10 @@ def append_custody_lifecycle_event(
         raise PostgresStorageError("custody_lifecycle_chain_head_invalid") from error
     if sequence < 1 or (previous_digest is not None and not isinstance(previous_digest, str)):
         raise PostgresStorageError("custody_lifecycle_chain_head_invalid")
+    occurred_at, retain_until, legal_hold = custody_evidence_timestamps(
+        cursor,
+        organization_id=attempt.organization_id,
+    )
     lifecycle_event_id = str(uuid4())
     event = build_custody_lifecycle_event(
         organization_id=attempt.organization_id,
@@ -247,11 +263,12 @@ def append_custody_lifecycle_event(
             asset_type, asset_id, asset_generation, asset_binding_fingerprint,
             replacement_asset_type, replacement_asset_id, replacement_asset_generation,
             replacement_asset_binding_fingerprint, recovery_execution_id, recovery_resolution_code,
-            chain_version, sequence, previous_digest, event_digest
+            chain_version, sequence, previous_digest, event_digest,
+            evidence_json, retain_until, legal_hold
         ) VALUES (
             %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
             %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-            %s, %s, %s, %s
+            %s, %s, %s, %s, %s, %s, %s
         )
         """,
         (
@@ -279,10 +296,21 @@ def append_custody_lifecycle_event(
             record["sequence"],
             record["previous_digest"],
             record["event_digest"],
+            canonical_custody_evidence_json(record),
+            retain_until,
+            legal_hold,
         ),
     )
     if cursor.rowcount != 1:
         raise PostgresStorageError("custody_lifecycle_event_unavailable")
+    append_custody_audit_chain_entry(
+        cursor,
+        organization_id=attempt.organization_id,
+        source_schema_id=CUSTODY_LIFECYCLE_AUDIT_SOURCE[0],
+        source_schema_version=CUSTODY_LIFECYCLE_AUDIT_SOURCE[1],
+        source_event_id=event.lifecycle_event_id,
+        event=record,
+    )
     return event
 
 
@@ -382,7 +410,6 @@ def record_custody_envelope_attestation(
     *,
     attempt: CustodyExecutionAttempt,
     attestation: CustodyEnvelopeAttestation,
-    occurred_at: datetime,
 ) -> None:
     """Persist a successful routine proof used by later key retirement."""
 
@@ -399,7 +426,32 @@ def record_custody_envelope_attestation(
         )
     ):
         raise CustodyLifecycleError("custody_lifecycle_tenant_mismatch")
+    occurred_at, retain_until, legal_hold = custody_evidence_timestamps(
+        cursor,
+        organization_id=attempt.organization_id,
+    )
     source = attestation.source_key_asset
+    record: dict[str, object] = {
+        "attestation_schema_id": CUSTODY_ENVELOPE_ATTESTATION_SCHEMA_ID,
+        "attestation_schema_version": CUSTODY_ENVELOPE_ATTESTATION_SCHEMA_VERSION,
+        "organization_id": attempt.organization_id,
+        "execution_id": attempt.execution_id,
+        "attestation_kind": attestation.kind,
+        "envelope_asset_id": attestation.envelope_asset.asset_id,
+        "envelope_generation": attestation.envelope_asset.generation,
+        "envelope_binding_fingerprint": attestation.envelope_asset.binding_fingerprint,
+        "source_key_asset_id": source.asset_id if source is not None else None,
+        "source_key_generation": source.generation if source is not None else None,
+        "source_key_binding_fingerprint": source.binding_fingerprint if source is not None else None,
+        "destination_key_asset_id": attestation.destination_key_asset.asset_id,
+        "destination_key_generation": attestation.destination_key_asset.generation,
+        "destination_key_binding_fingerprint": attestation.destination_key_asset.binding_fingerprint,
+        "occurred_at": occurred_at.isoformat(),
+    }
+    try:
+        validate_custody_envelope_attestation(record)
+    except ContractValidationError as error:
+        raise CustodyLifecycleError("custody_lifecycle_attestation_invalid") from error
     cursor.execute(
         """
         INSERT INTO custody_envelope_attestations (
@@ -407,27 +459,38 @@ def record_custody_envelope_attestation(
             envelope_asset_id, envelope_generation, envelope_binding_fingerprint,
             source_key_asset_id, source_key_generation, source_key_binding_fingerprint,
             destination_key_asset_id, destination_key_generation, destination_key_binding_fingerprint,
-            occurred_at
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            occurred_at, evidence_json, retain_until, legal_hold
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
         (
-            attempt.organization_id,
-            attempt.execution_id,
-            attestation.kind,
-            attestation.envelope_asset.asset_id,
-            attestation.envelope_asset.generation,
-            attestation.envelope_asset.binding_fingerprint,
-            source.asset_id if source is not None else None,
-            source.generation if source is not None else None,
-            source.binding_fingerprint if source is not None else None,
-            attestation.destination_key_asset.asset_id,
-            attestation.destination_key_asset.generation,
-            attestation.destination_key_asset.binding_fingerprint,
+            record["organization_id"],
+            record["execution_id"],
+            record["attestation_kind"],
+            record["envelope_asset_id"],
+            record["envelope_generation"],
+            record["envelope_binding_fingerprint"],
+            record["source_key_asset_id"],
+            record["source_key_generation"],
+            record["source_key_binding_fingerprint"],
+            record["destination_key_asset_id"],
+            record["destination_key_generation"],
+            record["destination_key_binding_fingerprint"],
             occurred_at,
+            canonical_custody_evidence_json(record),
+            retain_until,
+            legal_hold,
         ),
     )
     if cursor.rowcount != 1:
         raise PostgresStorageError("custody_lifecycle_attestation_unavailable")
+    append_custody_audit_chain_entry(
+        cursor,
+        organization_id=attempt.organization_id,
+        source_schema_id=CUSTODY_ENVELOPE_ATTESTATION_AUDIT_SOURCE[0],
+        source_schema_version=CUSTODY_ENVELOPE_ATTESTATION_AUDIT_SOURCE[1],
+        source_event_id=f"{attempt.execution_id}:{attestation.kind}",
+        event=record,
+    )
 
 
 class PostgresCustodyProjectionStore:

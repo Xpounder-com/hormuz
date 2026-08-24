@@ -8,10 +8,17 @@ import os
 from unittest import mock
 
 from hormuz.cli import main
-from hormuz.contracts import ContractValidationError, validate_contract, validate_custody_control_event
+from hormuz.contracts import (
+    ContractValidationError,
+    validate_contract,
+    validate_custody_control_event,
+    validate_custody_deletion_event,
+    validate_custody_evidence_export,
+)
 from hormuz.custody_control import CustodyControlService
 from hormuz.custody_repository import CustodyAdministrator, CustodyControlError
 from hormuz.postgres_custody_store import PostgresCustodyControlStore
+from hormuz.postgres_usage_store import PostgresUsageStore
 
 if __package__:
     from ._postgres_fixture import PostgresTestCase
@@ -25,6 +32,269 @@ _PROTECTED_INPUT = "2" * 64
 
 
 class PostgresCustodyControlTests(PostgresTestCase):
+    def test_retained_custody_evidence_exports_through_control_and_deletion_is_only_blocked(self) -> None:
+        config, environment, _issuer = self._managed_custody_config()
+        service = CustodyControlService(config, environ=environment)
+        service.bootstrap(organization_id="xpounder", credential_env="HORMUZ_CUSTODY_ADMIN_TOKEN")
+
+        initial_export = service.export_evidence(
+            organization_id="xpounder",
+            credential_env="HORMUZ_CUSTODY_ADMIN_TOKEN",
+        )
+        validate_contract(initial_export)
+        validate_custody_evidence_export(initial_export)
+        self.assertEqual(initial_export["organization_id"], "xpounder")
+        records = initial_export["records"]
+        assert isinstance(records, list) and records
+        first_entry = records[0]["entry"]
+        assert isinstance(first_entry, dict)
+
+        blocked = service.record_deletion_blocked(
+            organization_id="xpounder",
+            credential_env="HORMUZ_CUSTODY_ADMIN_TOKEN",
+            source_schema_id=str(first_entry["source_schema_id"]),
+            source_schema_version=int(first_entry["source_schema_version"]),
+            source_event_id=str(first_entry["source_event_id"]),
+        )
+        validate_custody_deletion_event(blocked)
+        self.assertEqual((blocked["decision"], blocked["reason_code"]), ("deletion_blocked", "retention_active"))
+        self.assertNotIn("plaintext", json.dumps(blocked, sort_keys=True))
+        self.assertNotIn("secret", json.dumps(blocked, sort_keys=True))
+
+        # The runtime proves the new deletion-block source through its bounded
+        # verifier, despite having no direct custody-source table privilege.
+        auditor = PostgresUsageStore(
+            self.runtime_dsn,
+            organization_ids=("xpounder",),
+            schema=self.schema,
+            runtime_role=self.runtime_role,
+        )
+        self.assertGreater(auditor.verify_audit_chain(organization_id="xpounder").sequence, 1)
+
+        export = service.export_evidence(
+            organization_id="xpounder",
+            credential_env="HORMUZ_CUSTODY_ADMIN_TOKEN",
+        )
+        validate_contract(export)
+        validate_custody_evidence_export(export)
+        exported_records = export["records"]
+        assert isinstance(exported_records, list)
+        self.assertEqual(len(exported_records), len(records) + 1)
+        self.assertEqual(exported_records[-1]["entry"]["event"]["decision"], "deletion_blocked")
+        serialized = json.dumps(export, sort_keys=True)
+        self.assertNotIn("ciphertext", serialized)
+        self.assertNotIn("provider-key", serialized)
+        self.assertNotIn("/private/", serialized)
+
+        with self.psycopg.connect(self.owner_dsn) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    self.sql.SQL(
+                        "SELECT occurred_at, retain_until, legal_hold FROM {}.custody_deletion_events"
+                    ).format(self.sql.Identifier(self.schema))
+                )
+                deletion_row = cursor.fetchone()
+        assert deletion_row is not None
+        self.assertEqual(deletion_row[1] - deletion_row[0], timedelta(days=365))
+        self.assertFalse(deletion_row[2])
+
+        for role, statement in (
+            (self.custody_control_role, "UPDATE custody_deletion_events SET reason_code = reason_code"),
+            (self.custody_control_role, "DELETE FROM custody_deletion_events"),
+            (self.runtime_role, "DELETE FROM custody_deletion_events"),
+        ):
+            with self.subTest(role=role, statement=statement):
+                with self.psycopg.connect(self.owner_dsn) as connection:
+                    with self.assertRaises(self.psycopg.Error):
+                        with connection.transaction():
+                            with connection.cursor() as cursor:
+                                self._set_role_and_tenant(cursor, role, "xpounder")
+                                cursor.execute(statement)
+
+    def test_unlinked_deletion_evidence_rolls_back_at_commit(self) -> None:
+        config, environment, _issuer = self._managed_custody_config()
+        service = CustodyControlService(config, environ=environment)
+        service.bootstrap(organization_id="xpounder", credential_env="HORMUZ_CUSTODY_ADMIN_TOKEN")
+        event_id = "a0000000-0000-4000-8000-000000000001"
+        with self.psycopg.connect(self.custody_control_dsn) as connection:
+            with self.assertRaises(self.psycopg.Error):
+                with connection.transaction():
+                    with connection.cursor() as cursor:
+                        self._set_role_and_tenant(cursor, self.custody_control_role, "xpounder")
+                        cursor.execute("SELECT clock_timestamp() AS occurred_at")
+                        occurred_at = cursor.fetchone()[0]
+                        cursor.execute(
+                            """
+                            INSERT INTO custody_deletion_events (
+                                organization_id, deletion_event_id, deletion_schema_id,
+                                deletion_schema_version, occurred_at,
+                                source_schema_id, source_schema_version, source_event_id,
+                                source_retain_until, source_legal_hold,
+                                decision, reason_code, evidence_json, retain_until, legal_hold
+                            ) VALUES (
+                                %s, %s, %s, %s, %s,
+                                %s, %s, %s, %s, %s,
+                                %s, %s, %s, %s, %s
+                            )
+                            """,
+                            (
+                                "xpounder",
+                                event_id,
+                                "hormuz.custody-deletion-event",
+                                1,
+                                occurred_at,
+                                "hormuz.custody-control-event",
+                                1,
+                                "missing-source-event",
+                                occurred_at,
+                                False,
+                                "deletion_blocked",
+                                "retention_active",
+                                json.dumps(
+                                    {
+                                        "deletion_schema_id": "hormuz.custody-deletion-event",
+                                        "deletion_schema_version": 1,
+                                        "organization_id": "xpounder",
+                                        "deletion_event_id": event_id,
+                                        "occurred_at": occurred_at.isoformat(),
+                                        "source_schema_id": "hormuz.custody-control-event",
+                                        "source_schema_version": 1,
+                                        "source_event_id": "missing-source-event",
+                                        "source_retain_until": occurred_at.isoformat(),
+                                        "source_legal_hold": False,
+                                        "decision": "deletion_blocked",
+                                        "reason_code": "retention_active",
+                                    },
+                                    sort_keys=True,
+                                    separators=(",", ":"),
+                                ),
+                                occurred_at + timedelta(days=365),
+                                False,
+                            ),
+                        )
+        with self.psycopg.connect(self.owner_dsn) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    self.sql.SQL(
+                        "SELECT COUNT(*) FROM {}.custody_deletion_events WHERE deletion_event_id = %s"
+                    ).format(self.sql.Identifier(self.schema)),
+                    (event_id,),
+                )
+                self.assertEqual(cursor.fetchone()[0], 0)
+
+    def test_direct_custody_writer_cannot_use_evidence_as_a_json_side_channel(self) -> None:
+        config, environment, _issuer = self._managed_custody_config()
+        service = CustodyControlService(config, environ=environment)
+        service.bootstrap(organization_id="xpounder", credential_env="HORMUZ_CUSTODY_ADMIN_TOKEN")
+        event_id = "a0000000-0000-4000-8000-000000000002"
+        with self.psycopg.connect(self.custody_control_dsn) as connection:
+            with connection.transaction():
+                with connection.cursor() as cursor:
+                    self._set_role_and_tenant(cursor, self.custody_control_role, "xpounder")
+                    cursor.execute("SELECT clock_timestamp() AS occurred_at")
+                    occurred_at = cursor.fetchone()[0]
+                    cursor.execute("SAVEPOINT malformed_custody_evidence")
+                    with self.assertRaises(self.psycopg.Error) as raised:
+                        cursor.execute(
+                            """
+                            INSERT INTO custody_deletion_events (
+                                organization_id, deletion_event_id, deletion_schema_id,
+                                deletion_schema_version, occurred_at,
+                                source_schema_id, source_schema_version, source_event_id,
+                                source_retain_until, source_legal_hold,
+                                decision, reason_code, evidence_json, retain_until, legal_hold
+                            ) VALUES (
+                                %s, %s, %s, %s, %s,
+                                %s, %s, %s, %s, %s,
+                                %s, %s, %s, %s, %s
+                            )
+                            """,
+                            (
+                                "xpounder",
+                                event_id,
+                                "hormuz.custody-deletion-event",
+                                1,
+                                occurred_at,
+                                "hormuz.custody-control-event",
+                                1,
+                                "missing-source-event",
+                                occurred_at,
+                                False,
+                                "deletion_blocked",
+                                "retention_active",
+                                json.dumps(
+                                    {
+                                        "deletion_schema_id": "hormuz.custody-deletion-event",
+                                        "deletion_schema_version": 1,
+                                        "organization_id": "xpounder",
+                                        "deletion_event_id": event_id,
+                                        "occurred_at": occurred_at.isoformat(),
+                                        "source_schema_id": "hormuz.custody-control-event",
+                                        "source_schema_version": 1,
+                                        "source_event_id": "missing-source-event",
+                                        "source_retain_until": occurred_at.isoformat(),
+                                        "source_legal_hold": False,
+                                        "decision": "deletion_blocked",
+                                        "reason_code": "retention_active",
+                                        "plaintext": "must-never-persist",
+                                    },
+                                    sort_keys=True,
+                                    separators=(",", ":"),
+                                ),
+                                occurred_at + timedelta(days=365),
+                                False,
+                            ),
+                        )
+                    self.assertIn("custody evidence contract is invalid", str(raised.exception))
+                    cursor.execute("ROLLBACK TO SAVEPOINT malformed_custody_evidence")
+
+    def test_runtime_cannot_insert_an_arbitrary_v2_audit_chain_entry(self) -> None:
+        """The legacy runtime append grant must not open a v2 JSON side channel."""
+
+        config, environment, _issuer = self._managed_custody_config()
+        CustodyControlService(config, environ=environment).bootstrap(
+            organization_id="xpounder",
+            credential_env="HORMUZ_CUSTODY_ADMIN_TOKEN",
+        )
+        with self.psycopg.connect(self.owner_dsn) as connection:
+            with connection.transaction():
+                with connection.cursor() as cursor:
+                    self._set_role_and_tenant(cursor, self.runtime_role, "xpounder")
+                    cursor.execute("SAVEPOINT malformed_v2_chain_entry")
+                    with self.assertRaises(self.psycopg.Error) as raised:
+                        cursor.execute(
+                            """
+                            INSERT INTO gateway_audit_chain_entries (
+                                organization_id, chain_version, chain_epoch, sequence,
+                                entry_schema_id, entry_schema_version, event_id,
+                                previous_digest, event_digest, event_json, appended_at,
+                                source_schema_id, source_schema_version, source_event_id
+                            ) VALUES (
+                                %s, %s, %s, %s,
+                                %s, %s, %s,
+                                %s, %s, %s, clock_timestamp(),
+                                %s, %s, %s
+                            )
+                            """,
+                            (
+                                "xpounder",
+                                1,
+                                1,
+                                999,
+                                "hormuz.commit-audit-chain-entry",
+                                2,
+                                "missing-custody-source",
+                                None,
+                                "0" * 64,
+                                '{"unapproved":"metadata"}',
+                                "hormuz.custody-control-event",
+                                1,
+                                "missing-custody-source",
+                            ),
+                        )
+                    self.assertIn("custody audit source evidence mismatch", str(raised.exception))
+                    cursor.execute("ROLLBACK TO SAVEPOINT malformed_v2_chain_entry")
+
     def test_bootstrap_authority_is_separate_from_runtime_policy_and_kms_entitlement(self) -> None:
         config, environment, issuer = self._managed_custody_config(include_oidc=True)
         assert issuer is not None
@@ -356,11 +626,15 @@ class PostgresCustodyControlTests(PostgresTestCase):
             organization_id="xpounder",
             caller=xpounder,
             administrators=(xpounder,),
+            retention_days=365,
+            retention_legal_hold=False,
         )
         repository.bootstrap(
             organization_id="beta",
             caller=beta,
             administrators=(beta,),
+            retention_days=365,
+            retention_legal_hold=False,
         )
         operation = repository.request_operation(
             organization_id="xpounder",

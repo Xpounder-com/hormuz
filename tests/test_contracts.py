@@ -24,6 +24,12 @@ from hormuz.contracts import (
     CUSTODY_LIFECYCLE_EVENT_SCHEMA_VERSION,
     CUSTODY_EXECUTION_SCHEMA_ID,
     CUSTODY_EXECUTION_SCHEMA_VERSION,
+    CUSTODY_DELETION_EVENT_SCHEMA_ID,
+    CUSTODY_DELETION_EVENT_SCHEMA_VERSION,
+    CUSTODY_ENVELOPE_ATTESTATION_SCHEMA_ID,
+    CUSTODY_ENVELOPE_ATTESTATION_SCHEMA_VERSION,
+    CUSTODY_EVIDENCE_EXPORT_SCHEMA_ID,
+    CUSTODY_EVIDENCE_EXPORT_SCHEMA_VERSION,
     ERROR_SCHEMA_ID,
     ERROR_SCHEMA_VERSION,
     READINESS_SCHEMA_ID,
@@ -41,6 +47,9 @@ from hormuz.contracts import (
     validate_custody_control_event,
     validate_custody_execution_attempt,
     validate_custody_execution_event,
+    validate_custody_deletion_event,
+    validate_custody_envelope_attestation,
+    validate_custody_evidence_export,
     validate_custody_lifecycle_event,
     validate_policy_control_event,
     validate_request_attempt,
@@ -137,6 +146,31 @@ class PolicyEvidenceContractTests(unittest.TestCase):
         with self.assertRaises(ContractValidationError):
             validate_contract(legacy_storage_error)
 
+    def test_v2_custody_contract_fixtures_are_strict_and_legacy_entries_remain_accepted(self) -> None:
+        legacy = json.loads((FIXTURES / "valid-v1.json").read_text(encoding="utf-8"))
+        fixtures = json.loads((FIXTURES / "custody-v2.json").read_text(encoding="utf-8"))
+
+        validate_contract(legacy["audit_chain_entry_v1"])
+        validate_custody_control_event(fixtures["custody_control_event"])
+        validate_contract(fixtures["audit_chain_entry_v2"])
+        validate_custody_envelope_attestation(fixtures["custody_envelope_attestation_v1"])
+        validate_custody_deletion_event(fixtures["custody_deletion_event_v1"])
+        validate_contract(fixtures["custody_evidence_export_v1"])
+        validate_custody_evidence_export(fixtures["custody_evidence_export_v1"])
+
+        unsupported_entry = json.loads(json.dumps(fixtures["audit_chain_entry_v2"]))
+        unsupported_entry["schema_version"] = 3
+        with self.assertRaises(ContractValidationError):
+            validate_contract(unsupported_entry)
+        arbitrary_source = json.loads(json.dumps(fixtures["audit_chain_entry_v2"]))
+        arbitrary_source["source_schema_id"] = "example.unreviewed-record"
+        with self.assertRaises(ContractValidationError):
+            validate_contract(arbitrary_source)
+        leaked_export = json.loads(json.dumps(fixtures["custody_evidence_export_v1"]))
+        leaked_export["records"][0]["entry"]["event"]["plaintext"] = "must-never-appear"
+        with self.assertRaises(ContractValidationError):
+            validate_custody_evidence_export(leaked_export)
+
     def test_manifest_enumerates_current_contract_versions(self) -> None:
         manifest = contract_manifest()
         schemas = {
@@ -158,6 +192,9 @@ class PolicyEvidenceContractTests(unittest.TestCase):
         self.assertIn((CUSTODY_EXECUTION_SCHEMA_ID, CUSTODY_EXECUTION_SCHEMA_VERSION), schemas)
         self.assertIn((CUSTODY_EXECUTION_EVENT_SCHEMA_ID, CUSTODY_EXECUTION_EVENT_SCHEMA_VERSION), schemas)
         self.assertIn((CUSTODY_LIFECYCLE_EVENT_SCHEMA_ID, CUSTODY_LIFECYCLE_EVENT_SCHEMA_VERSION), schemas)
+        self.assertIn((CUSTODY_ENVELOPE_ATTESTATION_SCHEMA_ID, CUSTODY_ENVELOPE_ATTESTATION_SCHEMA_VERSION), schemas)
+        self.assertIn((CUSTODY_DELETION_EVENT_SCHEMA_ID, CUSTODY_DELETION_EVENT_SCHEMA_VERSION), schemas)
+        self.assertIn((CUSTODY_EVIDENCE_EXPORT_SCHEMA_ID, CUSTODY_EVIDENCE_EXPORT_SCHEMA_VERSION), schemas)
         self.assertIn((REQUEST_ATTEMPT_SCHEMA_ID, REQUEST_ATTEMPT_SCHEMA_VERSION), schemas)
         self.assertIn((REQUEST_ATTEMPT_EVENT_SCHEMA_ID, REQUEST_ATTEMPT_EVENT_SCHEMA_VERSION), schemas)
         self.assertEqual(manifest["schema_id"], "hormuz.policy-evidence-manifest")

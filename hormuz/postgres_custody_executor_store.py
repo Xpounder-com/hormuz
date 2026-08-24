@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Any, Iterator
 from uuid import uuid4
 
@@ -18,6 +18,14 @@ from .custody_execution_repository import (
     CustodyExecutionResult,
     CustodyExecutionRequest,
     CustodyExecutionStatus,
+)
+from .custody_evidence import (
+    CUSTODY_EXECUTION_ATTEMPT_AUDIT_SOURCE,
+    CUSTODY_EXECUTION_EVENT_AUDIT_SOURCE,
+    append_custody_audit_chain_entry,
+    canonical_custody_evidence_json,
+    custody_evidence_timestamps,
+    custody_execution_event_source_id,
 )
 from .custody_lifecycle import CustodyAssetCatalog, CustodyLifecycleError
 from .postgres import PostgresConnectionPool, PostgresStorageError, postgres_transaction, verify_postgres_schema
@@ -78,10 +86,13 @@ class PostgresCustodyExecutorStore:
         storage call.
         """
 
-        now = datetime.now(timezone.utc)
         with self._transaction(request.organization_id) as connection:
             with connection.cursor() as cursor:
                 self._lock_tenant(cursor, request.organization_id)
+                now, retain_until, legal_hold = custody_evidence_timestamps(
+                    cursor,
+                    organization_id=request.organization_id,
+                )
                 if self._asset_catalog is not None:
                     register_custody_asset_catalog(
                         cursor,
@@ -175,9 +186,10 @@ class PostgresCustodyExecutorStore:
                         organization_id, execution_id, execution_schema_id, execution_schema_version,
                         operation_id, operation_type, target_kind, target_sha256, parameters_sha256,
                         protected_input_ref_sha256, claimed_at
+                        , evidence_json, retain_until, legal_hold
                     ) VALUES (
                         %s, %s, 'hormuz.custody-execution-attempt', %s,
-                        %s, %s, %s, %s, %s, %s, %s
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
                     )
                     """,
                     (
@@ -191,9 +203,25 @@ class PostgresCustodyExecutorStore:
                         attempt.parameters_sha256,
                         attempt.protected_input_ref_sha256,
                         attempt.claimed_at,
+                        canonical_custody_evidence_json(attempt.contract_record()),
+                        retain_until,
+                        legal_hold,
                     ),
                 )
-                self._insert_event(cursor, attempt.events[0])
+                append_custody_audit_chain_entry(
+                    cursor,
+                    organization_id=attempt.organization_id,
+                    source_schema_id=CUSTODY_EXECUTION_ATTEMPT_AUDIT_SOURCE[0],
+                    source_schema_version=CUSTODY_EXECUTION_ATTEMPT_AUDIT_SOURCE[1],
+                    source_event_id=attempt.execution_id,
+                    event=attempt.contract_record(),
+                )
+                self._insert_event(
+                    cursor,
+                    attempt.events[0],
+                    retain_until=retain_until,
+                    legal_hold=legal_hold,
+                )
         return attempt
 
     def register_asset_catalog(self, *, organization_ids: tuple[str, ...]) -> None:
@@ -209,11 +237,14 @@ class PostgresCustodyExecutorStore:
             raise CustodyExecutionError("custody_lifecycle_configuration_required")
         if not organization_ids or len(set(organization_ids)) != len(organization_ids):
             raise CustodyExecutionError("custody_execution_organization_scope_invalid")
-        now = datetime.now(timezone.utc)
         for organization_id in organization_ids:
             with self._transaction(organization_id) as connection:
                 with connection.cursor() as cursor:
                     self._lock_tenant(cursor, organization_id)
+                    now, _retain_until, _legal_hold = custody_evidence_timestamps(
+                        cursor,
+                        organization_id=organization_id,
+                    )
                     register_custody_asset_catalog(
                         cursor,
                         organization_id=organization_id,
@@ -233,10 +264,13 @@ class PostgresCustodyExecutorStore:
         effect = result.lifecycle_effect
         if effect is None or effect.asset is None or result.envelope_attestation is not None:
             raise CustodyExecutionError("custody_lifecycle_execution_result_invalid")
-        now = datetime.now(timezone.utc)
         with self._transaction(organization_id) as connection:
             with connection.cursor() as cursor:
                 self._lock_execution(cursor, organization_id, execution_id)
+                now, _retain_until, _legal_hold = custody_evidence_timestamps(
+                    cursor,
+                    organization_id=organization_id,
+                )
                 attempt = self._load_attempt(cursor, organization_id=organization_id, execution_id=execution_id)
                 if attempt.state != "pending":
                     raise CustodyExecutionError("custody_execution_already_finalized")
@@ -271,10 +305,13 @@ class PostgresCustodyExecutorStore:
             raise CustodyExecutionError("custody_execution_terminal_reason_invalid")
         if state != "succeeded" and result is not None:
             raise CustodyExecutionError("custody_execution_terminal_result_invalid")
-        now = datetime.now(timezone.utc)
         with self._transaction(organization_id) as connection:
             with connection.cursor() as cursor:
                 self._lock_execution(cursor, organization_id, execution_id)
+                now, retain_until, legal_hold = custody_evidence_timestamps(
+                    cursor,
+                    organization_id=organization_id,
+                )
                 attempt = self._load_attempt(cursor, organization_id=organization_id, execution_id=execution_id)
                 if attempt.state != "pending":
                     raise CustodyExecutionError("custody_execution_already_finalized")
@@ -299,7 +336,12 @@ class PostgresCustodyExecutorStore:
                     reason_code=reason_code,
                 )
                 self._validate_event(event)
-                self._insert_event(cursor, event)
+                self._insert_event(
+                    cursor,
+                    event,
+                    retain_until=retain_until,
+                    legal_hold=legal_hold,
+                )
                 completed = CustodyExecutionAttempt(
                     organization_id=attempt.organization_id,
                     execution_id=attempt.execution_id,
@@ -313,7 +355,7 @@ class PostgresCustodyExecutorStore:
                     events=(*attempt.events, event),
                     execution_schema_version=attempt.execution_schema_version,
                 )
-                self._finalize_result(cursor, attempt=completed, result=result, occurred_at=now)
+                self._finalize_result(cursor, attempt=completed, result=result)
                 return completed
 
     def sweep_stale_pending(self, *, organization_ids: tuple[str, ...]) -> int:
@@ -321,11 +363,15 @@ class PostgresCustodyExecutorStore:
 
         if not organization_ids or len(set(organization_ids)) != len(organization_ids):
             raise CustodyExecutionError("custody_execution_organization_scope_invalid")
-        cutoff = datetime.now(timezone.utc) - self._pending_attempt_ttl
         count = 0
         for organization_id in organization_ids:
             with self._transaction(organization_id) as connection:
                 with connection.cursor() as cursor:
+                    now, _retain_until, _legal_hold = custody_evidence_timestamps(
+                        cursor,
+                        organization_id=organization_id,
+                    )
+                    cutoff = now - self._pending_attempt_ttl
                     cursor.execute(
                         """
                         SELECT attempt.execution_id, attempt.operation_id
@@ -355,17 +401,26 @@ class PostgresCustodyExecutorStore:
                             continue
                         if attempt.state != "pending":
                             continue
+                        event_time, retain_until, legal_hold = custody_evidence_timestamps(
+                            cursor,
+                            organization_id=organization_id,
+                        )
                         event = CustodyExecutionEvent(
                             organization_id=organization_id,
                             execution_id=execution_id,
                             operation_id=attempt.operation_id,
-                            occurred_at=datetime.now(timezone.utc),
+                            occurred_at=event_time,
                             sequence=2,
                             state="outcome_unknown",
                             reason_code="stale_pending",
                         )
                         self._validate_event(event)
-                        self._insert_event(cursor, event)
+                        self._insert_event(
+                            cursor,
+                            event,
+                            retain_until=retain_until,
+                            legal_hold=legal_hold,
+                        )
                         count += 1
         return count
 
@@ -412,7 +467,6 @@ class PostgresCustodyExecutorStore:
         *,
         attempt: CustodyExecutionAttempt,
         result: CustodyExecutionResult | None,
-        occurred_at: datetime,
     ) -> None:
         if attempt.state != "succeeded":
             if result is not None:
@@ -429,7 +483,6 @@ class PostgresCustodyExecutorStore:
                     cursor,
                     attempt=attempt,
                     effect=result.lifecycle_effect,
-                    occurred_at=occurred_at,
                 )
             except CustodyLifecycleError as error:
                 raise CustodyExecutionError(error.code) from None
@@ -442,7 +495,6 @@ class PostgresCustodyExecutorStore:
                     cursor,
                     attempt=attempt,
                     attestation=result.envelope_attestation,
-                    occurred_at=occurred_at,
                 )
             except CustodyLifecycleError as error:
                 raise CustodyExecutionError(error.code) from None
@@ -598,13 +650,20 @@ class PostgresCustodyExecutorStore:
         )
         return _attempt_from_rows(root, cursor.fetchall())
 
-    def _insert_event(self, cursor: Any, event: CustodyExecutionEvent) -> None:
+    def _insert_event(
+        self,
+        cursor: Any,
+        event: CustodyExecutionEvent,
+        *,
+        retain_until: datetime,
+        legal_hold: bool,
+    ) -> None:
         cursor.execute(
             """
             INSERT INTO custody_execution_events (
                 organization_id, execution_id, sequence, event_schema_id, event_schema_version,
-                operation_id, occurred_at, state, reason_code
-            ) VALUES (%s, %s, %s, 'hormuz.custody-execution-event', 1, %s, %s, %s, %s)
+                operation_id, occurred_at, state, reason_code, evidence_json, retain_until, legal_hold
+            ) VALUES (%s, %s, %s, 'hormuz.custody-execution-event', 1, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 event.organization_id,
@@ -614,7 +673,21 @@ class PostgresCustodyExecutorStore:
                 event.occurred_at,
                 event.state,
                 event.reason_code,
+                canonical_custody_evidence_json(event.contract_record()),
+                retain_until,
+                legal_hold,
             ),
+        )
+        append_custody_audit_chain_entry(
+            cursor,
+            organization_id=event.organization_id,
+            source_schema_id=CUSTODY_EXECUTION_EVENT_AUDIT_SOURCE[0],
+            source_schema_version=CUSTODY_EXECUTION_EVENT_AUDIT_SOURCE[1],
+            source_event_id=custody_execution_event_source_id(
+                execution_id=event.execution_id,
+                sequence=event.sequence,
+            ),
+            event=event.contract_record(),
         )
 
     def _validate_attempt(self, attempt: CustodyExecutionAttempt) -> None:
