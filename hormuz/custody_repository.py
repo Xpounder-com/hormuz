@@ -4,8 +4,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 from uuid import UUID
+
+if TYPE_CHECKING:
+    from .custody_execution_repository import CustodyExecutionStatus
 
 
 CUSTODY_ROUTINE_OPERATIONS = frozenset(
@@ -176,6 +179,7 @@ class CustodyControlStatus:
     administrators: tuple[CustodyAdministrator, ...]
     operation_count: int
     operations: tuple[CustodyOperationIntent, ...]
+    execution_status: "CustodyExecutionStatus | None" = None
 
 
 class CustodyControlRepository(Protocol):

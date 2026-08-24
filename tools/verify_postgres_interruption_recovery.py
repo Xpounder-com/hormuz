@@ -225,6 +225,7 @@ def run_interruption_recovery(
                 runtime_role=runtime_role,
                 policy_control_role=policy_control_role,
                 custody_control_role=_custody_control_role(policy_control_role),
+                custody_executor_role=_custody_executor_role(policy_control_role),
             )
             if not status.complete or status.version != POSTGRES_SCHEMA_VERSION:
                 raise InterruptionRecoveryError("interruption_migration_not_current")
@@ -561,6 +562,7 @@ def _provision_restricted_roles(
     if runtime_role == policy_control_role:
         raise InterruptionRecoveryError("interruption_roles_must_be_distinct")
     custody_control_role = _custody_control_role(policy_control_role)
+    custody_executor_role = _custody_executor_role(policy_control_role)
     try:
         import psycopg
         from psycopg import sql
@@ -584,6 +586,11 @@ def _provision_restricted_roles(
                         "CREATE ROLE {} NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS"
                     ).format(sql.Identifier(custody_control_role))
                 )
+                cursor.execute(
+                    sql.SQL(
+                        "CREATE ROLE {} NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS"
+                    ).format(sql.Identifier(custody_executor_role))
+                )
     except psycopg.Error as error:
         raise InterruptionRecoveryError("interruption_role_provisioning_failed") from error
 
@@ -592,6 +599,13 @@ def _custody_control_role(policy_control_role: str) -> str:
     return validate_postgres_identifier(
         f"{policy_control_role}_custody",
         "postgres_custody_control_role",
+    )
+
+
+def _custody_executor_role(policy_control_role: str) -> str:
+    return validate_postgres_identifier(
+        f"{policy_control_role}_custody_executor",
+        "postgres_custody_executor_role",
     )
 
 

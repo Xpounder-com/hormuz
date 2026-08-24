@@ -34,8 +34,12 @@ administrator sees and approves only its digest.
 
 PostgreSQL schema v5 adds forced-RLS custody tenants, administrators, operation
 intents, append-only approvals, and immutable control events. A dedicated
-custody-control role owns only that surface. Managed mode fails closed rather
-than letting the legacy CLI execute KMS lifecycle work directly.
+custody-control role owns only that surface. PostgreSQL schema v6 adds a
+separate custody-executor role and immutable routine-execution attempt/events.
+The executor must atomically claim one exact, current routine intent before any
+side effect, and it cannot change the human authority ledger. Managed mode
+fails closed rather than letting the legacy CLI execute KMS lifecycle work
+directly.
 
 The final active administrator cannot be removed by the ordinary path. Loss of
 all administrators returns a break-glass-required error, but this decision does
@@ -43,8 +47,8 @@ not define or implement that recovery mechanism.
 
 Customer KMS and IAM remain authoritative. Hormuz records envelope and key
 references; it does not edit customer key policy, disable safeguards, or delete
-customer-owned keys. A later release gate must define the narrowly permissioned
-executor that consumes an authorized, unexpired intent.
+customer-owned keys. The isolated executor consumes only authorized, unexpired
+routine work; destructive lifecycle execution remains a separate release gate.
 
 ## Rejected alternatives
 

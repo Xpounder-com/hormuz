@@ -32,7 +32,7 @@ The current Hormuz-owned JSON schemas are:
 | Hormuz-generated HTTP errors | `hormuz.gateway-error` v2 |
 | `hormuz policy-check` output | `hormuz.policy-decision` v1 |
 | `hormuz policy status --json` | `hormuz.policy-control-status` v1 |
-| `hormuz custody status --json` | `hormuz.custody-control-status` v1 |
+| `hormuz custody status --json` | `hormuz.custody-control-status` v2 |
 | `hormuz status --json` | `hormuz.usage-report` v1 |
 | audit JSONL events | `hormuz.audit-event` v2 |
 | immutable audit-anchor artifact | `hormuz.audit-anchor` v1 |
@@ -41,6 +41,8 @@ The current Hormuz-owned JSON schemas are:
 | immutable staged policy document | `hormuz.policy-document` v1 |
 | PostgreSQL policy-control event row | `hormuz.policy-control-event` v1 |
 | PostgreSQL custody-control event row | `hormuz.custody-control-event` v1 |
+| PostgreSQL custody-execution attempt row | `hormuz.custody-execution-attempt` v1 |
+| PostgreSQL custody-execution event row | `hormuz.custody-execution-event` v1 |
 
 OpenAI and Anthropic response bodies remain provider-owned. Hormuz does not add a schema wrapper or fields to those bodies, because doing so would break Codex and Claude Code compatibility. Instead, a relayed provider response carries:
 
@@ -85,13 +87,17 @@ In local mode, `policy_version` is a deterministic content-free fingerprint of t
 
 Managed policy control has two additional strict contracts. `hormuz.policy-document` v1 accepts only allowlisted routing, cap, budget, and egress-control fields. `hormuz.policy-control-status` v1 returns administration metadata for a current policy administrator: the active digest/generation, immutable version metadata, structural redacted change summaries, and stable administrator keys. PostgreSQL `hormuz.policy-control-event` v1 records bootstrap, administrator, stage, activation, rollback, and break-glass events. It stores both an explicit durable schema ID/version and opaque actor identity keys plus structural metadata only; Hormuz validates the exact event shape before it inserts the row, and the compatibility fixture exercises that durable schema. See [POLICY_CONTROL.md](POLICY_CONTROL.md) for authorization and lifecycle semantics.
 
-Managed custody control adds `hormuz.custody-control-status` v1 and
+Managed custody control adds `hormuz.custody-control-status` v2 and
 `hormuz.custody-control-event` v1. Status contains tenant-qualified
-administrator facts and at most the latest 100 content-free operation intents;
-`operation_count` retains the complete total. Events retain opaque actor keys,
-fixed operation/risk/target semantics, digests, approval counts, and expiry.
-Unknown fields and invalid cross-field combinations fail closed. See
-[CUSTODY_CONTROL.md](CUSTODY_CONTROL.md).
+administrator facts, at most the latest 100 content-free operation intents,
+and at most the latest 100 metadata-only custody execution attempts;
+`operation_count` and `execution_attempt_count` retain the complete totals.
+Each execution root uses `hormuz.custody-execution-attempt` v1 and its
+append-only transitions use `hormuz.custody-execution-event` v1. Raw execution
+targets, parameters, protected-input references, plaintext, ciphertext, and
+credentials are never contract fields. The previous status v1 remains
+validator-compatible. Unknown fields and invalid cross-field combinations fail
+closed. See [CUSTODY_CONTROL.md](CUSTODY_CONTROL.md).
 
 Model fields have distinct meanings:
 
@@ -161,6 +167,18 @@ The release line has these intentional pre-stability changes:
     custody authority is PostgreSQL-only. An older binary fails closed on the
     v5 ledger. See [CUSTODY_CONTROL.md](CUSTODY_CONTROL.md) and
     [STORAGE.md](STORAGE.md).
+11. PostgreSQL schema v6 adds the isolated routine-custody executor's
+    `hormuz.custody-execution-attempt` v1 root and
+    `hormuz.custody-execution-event` v1 append-only state history. The
+    executor writes `pending` before an external effect and may append exactly
+    one `succeeded`, `failed`, or `outcome_unknown` event; roots and prior
+    events are never rewritten. Current `hormuz.custody-control-status` v2
+    exposes metadata-only attempt history while the former v1 status remains
+    readable. The restricted executor role cannot mutate custody authority,
+    policy, usage evidence, or customer KMS/IAM configuration. SQLite remains
+    schema v4 because shared custody authority is PostgreSQL-only. An older
+    binary fails closed on the v6 ledger. See [CUSTODY_CONTROL.md](CUSTODY_CONTROL.md)
+    and [STORAGE.md](STORAGE.md).
 
 The SQLite migrations add the metadata columns required to emit v2 while retaining existing usage rows, add tenant scope to active budget reservations, add the versioned append-only request-attempt ledger, and add the per-organization commit-time evidence chain. Each persisted usage, secret-evidence, request-attempt, or audit-chain object carries an explicit schema identifier and version where it is a public/durable evidence format, so later code cannot silently reinterpret its evidence shape. Historical rows receive explicit legacy defaults where the old database could not know a value. Earlier applications will not understand newer schemas; rollback therefore requires retaining or restoring the earlier application/database pair. The corresponding PostgreSQL adapter is migration-led and uses a distinct operator migration credential and restricted runtime credential. See [STORAGE.md](STORAGE.md) for the upgrade, rollback, recovery, and remaining-operational-gates boundary.
 

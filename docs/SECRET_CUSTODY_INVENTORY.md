@@ -69,8 +69,8 @@ an implemented identity-connector envelope migration.
 - Provider credential operators replace an environment-injected credential or
   use the custody operator path to seal and rewrap an envelope.
 - Database operators rotate the distinct runtime, migration, policy-control,
-  and custody-control DSNs in the customer secret manager and roll the affected
-  gateway or control-plane process.
+  custody-control, and custody-executor DSNs in the customer secret manager and
+  roll the affected gateway, control-plane, or isolated executor process.
 - Identity operators rotate static or short-lived administrator credentials;
   the policy and custody services continue to authorize the resulting principal
   rather than trusting an actor name supplied to the CLI.
@@ -97,10 +97,10 @@ fields—including a field that attempts to carry a secret value—fail closed w
 a stable content-free error.
 
 This checkpoint inventories the tenant-scoped `custody_admin` authorization
-service and its separate database and administrator credentials. It does not
-grant inference, policy, identity, KMS, IAM, or gateway-runtime entitlement;
-execute an approved lifecycle operation; add custody events to the
-per-organization gateway audit chain; implement all-administrator-loss
-break-glass recovery; migrate reserved purpose classes; certify a customer
-cloud environment; or close issue #17. Customer KMS authority and the future
-narrowly permissioned custody executor remain separate security boundaries.
+service and the separate database credentials used by custody control and the
+isolated routine executor. It does not grant inference, policy, identity, KMS,
+IAM, or gateway-runtime entitlement; execute destructive lifecycle work; add
+custody events to the per-organization gateway audit chain; implement
+all-administrator-loss break-glass recovery; migrate reserved purpose classes;
+certify a customer cloud environment; or close issue #17. Customer KMS
+authority remains a separate security boundary.

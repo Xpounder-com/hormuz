@@ -30,7 +30,7 @@
   "schema_id": "hormuz.postgresql-recovery-drill-summary",
   "schema_version": 1,
   "state": {
-    "migration_version": 5,
+    "migration_version": 6,
     "record_counts": {
       "active_budget_reservations": 4,
       "active_policy_versions": 2,

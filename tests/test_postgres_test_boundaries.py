@@ -49,6 +49,16 @@ EXPECTED_OWNERS = {
             "test_tenant_isolation_and_append_only_authorization_history_are_database_enforced",
         },
     ),
+    "test_postgres_custody_executor": (
+        "PostgresCustodyExecutorTests",
+        {
+            "test_executor_claims_exact_routine_intent_then_finalizes_once_and_exposes_metadata_status",
+            "test_authority_mismatch_expiry_and_requester_revocation_fail_closed_before_runner",
+            "test_ambiguous_effect_remains_pending_until_swept_unknown_without_replay",
+            "test_post_effect_finalization_failure_preserves_pending_for_unknown_recovery_without_replay",
+            "test_executor_role_is_tenant_isolated_and_cannot_rewrite_or_mismatch_execution_evidence",
+        },
+    ),
     "test_postgres_usage": (
         "PostgresUsageEvidenceTests",
         {
@@ -117,7 +127,7 @@ class PostgresTestBoundaryTests(unittest.TestCase):
             suite = unittest.defaultTestLoader.loadTestsFromName(f"{module_name}.{class_name}")
             self.assertEqual(suite.countTestCases(), len(expected_methods), module_name)
 
-        self.assertEqual(len(owned), 38)
+        self.assertEqual(len(owned), 43)
         self.assertFalse((ROOT / "tests" / "test_postgres.py").exists())
         self.assertFalse(
             any(name.startswith("test_") for name in PostgresTestCase.__dict__),

@@ -19,6 +19,7 @@ from .config import (
     BreakGlassConfig,
     ConfigError,
     CustodyControlConfig,
+    CustodyExecutorConfig,
     GatewayConfig,
     Identity,
     IngressConfig,
@@ -243,6 +244,51 @@ def build_gateway_config(
         raise ConfigError(
             "custody_control.bootstrap_administrators require custody_control.mode postgresql"
         )
+
+    custody_executor_raw = _object(raw.get("custody_executor", {}), "custody_executor")
+    unsupported_custody_executor_fields = set(custody_executor_raw).difference(
+        {
+            "postgres_executor_dsn_env",
+            "postgres_executor_role",
+            "pending_attempt_ttl_seconds",
+        }
+    )
+    if unsupported_custody_executor_fields:
+        raise ConfigError(
+            "custody_executor contains unsupported fields: "
+            + ", ".join(sorted(str(field) for field in unsupported_custody_executor_fields))
+        )
+    custody_executor_dsn_env = _environment_name(
+        custody_executor_raw.get("postgres_executor_dsn_env", "HORMUZ_CUSTODY_EXECUTOR_DSN"),
+        "custody_executor.postgres_executor_dsn_env",
+    )
+    custody_executor_role = _postgres_identifier(
+        custody_executor_raw.get("postgres_executor_role", "hormuz_custody_executor"),
+        "custody_executor.postgres_executor_role",
+    )
+    custody_executor_pending_ttl_seconds = _integer(
+        custody_executor_raw.get("pending_attempt_ttl_seconds", 900),
+        "custody_executor.pending_attempt_ttl_seconds",
+        minimum=60,
+        maximum=24 * 60 * 60,
+    )
+    if custody_control_mode != "postgresql" and custody_executor_raw:
+        raise ConfigError("custody_executor requires custody_control.mode postgresql")
+    if custody_control_mode == "postgresql":
+        active_dsn_envs = {postgres_dsn_env, postgres_migration_dsn_env, custody_control_dsn_env}
+        active_roles = {postgres_runtime_role, custody_control_role}
+        if policy_control_mode == "postgresql":
+            active_dsn_envs.add(policy_control_dsn_env)
+            active_roles.add(policy_control_role)
+        if custody_executor_dsn_env in active_dsn_envs:
+            raise ConfigError(
+                "custody_executor.postgres_executor_dsn_env must name a credential distinct from "
+                "runtime, migration, policy-control, and custody-control credentials"
+            )
+        if custody_executor_role in active_roles:
+            raise ConfigError(
+                "custody_executor.postgres_executor_role must differ from runtime, policy-control, and custody-control roles"
+            )
 
     upstreams_raw = _object(raw.get("upstreams"), "upstreams")
     upstreams: dict[str, UpstreamConfig] = {}
@@ -520,6 +566,11 @@ def build_gateway_config(
             postgres_control_role=custody_control_role,
             authorization_ttl_seconds=custody_authorization_ttl_seconds,
         ),
+        custody_executor=CustodyExecutorConfig(
+            postgres_executor_dsn_env=custody_executor_dsn_env,
+            postgres_executor_role=custody_executor_role,
+            pending_attempt_ttl_seconds=custody_executor_pending_ttl_seconds,
+        ),
         key_custody=key_custody,
         audit_anchor=audit_anchor,
         audit_chain=audit_chain,
@@ -668,6 +719,7 @@ def _validate_dedicated_ingress_credential_env(config: GatewayConfig) -> None:
             credential_envs.add(config.policy_control.break_glass.token_env)
     if config.custody_control.mode == "postgresql":
         credential_envs.add(config.custody_control.postgres_control_dsn_env)
+        credential_envs.add(config.custody_executor.postgres_executor_dsn_env)
 
     if ingress.credential_env in credential_envs:
         raise ConfigError("ingress.credential_env must name a credential distinct from all other Hormuz secrets")

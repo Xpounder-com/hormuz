@@ -128,11 +128,11 @@ control is enabled. It performs no provider request and returns only a
 content-free readiness result; see [OPERATIONS.md](OPERATIONS.md).
 
 Before migration, an operator creates the restricted runtime,
-policy-control, and custody-control roles. All must be distinct non-owner roles
+policy-control, custody-control, and custody-executor roles. All must be distinct non-owner roles
 with no superuser, database-creation, role-creation, inheritance, or BYPASSRLS
 capability. The migration grants each only its owned surface and the shared
-migration ledger. Existing deployments must create the configured custody role
-before applying PostgreSQL schema v5; migrations grant privileges to
+migration ledger. Existing deployments must create the configured custody roles
+before applying PostgreSQL schema v6; migrations grant privileges to
 pre-existing principals rather than creating customer database roles.
 
 ~~~sql
@@ -162,6 +162,14 @@ CREATE ROLE hormuz_custody_control
   NOINHERIT
   NOBYPASSRLS
   PASSWORD 'managed-out-of-band-secret';
+
+CREATE ROLE hormuz_custody_executor
+  NOLOGIN
+  NOSUPERUSER
+  NOCREATEDB
+  NOCREATEROLE
+  NOINHERIT
+  NOBYPASSRLS;
 ~~~
 
 For rolling runtime-credential rotation, retain `hormuz_runtime` as the stable
@@ -218,7 +226,9 @@ When `custody_control.mode` is `postgresql`, `hormuz doctor` verifies the
 dedicated migration and custody-table shape through the custody-control role.
 Normal gateway startup does not initialize or use this control credential.
 Bootstrap and lifecycle authorization run only through the governed custody
-service; see [CUSTODY_CONTROL.md](CUSTODY_CONTROL.md).
+service; see [CUSTODY_CONTROL.md](CUSTODY_CONTROL.md). The separately deployed
+routine executor verifies its own restricted credential and schema surface at
+startup. Normal gateway startup never receives or initializes that credential.
 
 SQLite upgrades happen on normal store initialization. Its ledger records the same supported migration state and refuses a partial or newer-than-binary schema.
 
@@ -294,8 +304,31 @@ permission merely to inspect schema metadata.
 
 There is no down-migration. An older binary encountering PostgreSQL schema v5
 fails closed. Rollback requires restoring the previously tested application and
-database pair. Managed mode also blocks legacy direct KMS lifecycle commands;
-schema migration does not create a custody executor or customer KMS authority.
+database pair. Schema v5 alone also blocks legacy direct KMS lifecycle commands;
+it does not create a custody executor or customer KMS authority.
+
+### PostgreSQL schema v6 routine-executor upgrade
+
+Version 6 is PostgreSQL-only. It adds forced-RLS
+`custody_execution_attempts` and append-only `custody_execution_events` tables.
+The executor claims an already authorized routine intent by atomically writing
+one immutable attempt root and its `pending` event before the external effect.
+The root's operation, type, target hash, parameter hash, and protected-input
+reference hash must match the active authorization even at the database insert
+boundary and cannot be rewritten; exactly one terminal event records
+`succeeded`, `failed`, or `outcome_unknown`.
+
+Create the configured restricted custody-executor role before migration. It
+gets tenant-scoped read access to metadata-only custody authorization facts and
+`SELECT`/`INSERT` only on its own attempt/event tables. It has no write access
+to administrators, intents, approvals, usage evidence, policy state, or
+customer KMS/IAM configuration. The custody-control role may read the execution
+metadata for authorized status output but cannot rewrite it.
+
+There is no down-migration. An older binary encountering PostgreSQL schema v6
+fails closed. Rollback requires the previously tested application/database
+pair. The migration does not create a human execution command, destructive
+lifecycle capability, break-glass recovery, or customer KMS authority.
 
 ## Upgrade, rollback, and recovery
 
@@ -322,7 +355,8 @@ python3 -m pip install '.[postgres]'
 ~~~
 
 It starts isolated source, recovery, and quarantine PostgreSQL 16.14
-containers from the digest-pinned test image. It creates two non-owner roles,
+containers from the digest-pinned test image. It creates four restricted
+non-owner roles (runtime, policy-control, custody-control, and custody-executor),
 applies Hormuz's normal PostgreSQL migrations to the source, and seeds only
 fixed two-tenant metadata: one usage record, one secret-egress record, one
 active budget reservation, one `outcome_unknown` request attempt with its

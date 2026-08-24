@@ -25,9 +25,10 @@ content-free classification and its nonclaims.
 
 For tenant-scoped human authorization of envelope lifecycle operations, use
 [CUSTODY_CONTROL.md](CUSTODY_CONTROL.md). Managed custody control separates
-administrator approval, PostgreSQL evidence, the future machine executor, and
+administrator approval, PostgreSQL evidence, the isolated routine machine executor, and
 customer KMS authority. When enabled, it deliberately disables the legacy
-direct verify/seal/rewrap CLI path until that executor is separately proven.
+direct verify/seal/rewrap CLI path; routine work is available only through the
+separately credentialed executor service.
 
 ## Account-free self-hosted profile
 

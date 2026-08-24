@@ -285,7 +285,7 @@ def provision_restricted_roles(
     policy_control_role: str,
     policy_control_password: str,
 ) -> None:
-    """Create isolated runtime, policy-control, and custody-control roles."""
+    """Create isolated runtime, policy-control, and custody service roles."""
 
     runtime_role = validate_postgres_identifier(runtime_role, "postgres_runtime_role")
     policy_control_role = validate_postgres_identifier(
@@ -295,6 +295,7 @@ def provision_restricted_roles(
     if runtime_role == policy_control_role:
         raise RecoveryDrillError("recovery_roles_must_be_distinct")
     custody_control_role = _custody_control_role(policy_control_role)
+    custody_executor_role = _custody_executor_role(policy_control_role)
     if not runtime_password or not policy_control_password:
         raise RecoveryDrillError("recovery_role_credential_unavailable")
     try:
@@ -327,6 +328,14 @@ def provision_restricted_roles(
                         "CREATE ROLE {} NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS"
                     ).format(sql.Identifier(custody_control_role))
                 )
+                cursor.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (custody_executor_role,))
+                if cursor.fetchone() is not None:
+                    raise RecoveryDrillError("recovery_role_already_exists")
+                cursor.execute(
+                    sql.SQL(
+                        "CREATE ROLE {} NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS"
+                    ).format(sql.Identifier(custody_executor_role))
+                )
     except RecoveryDrillError:
         raise
     except psycopg.Error as error:
@@ -355,6 +364,7 @@ def seed_source_state(
         runtime_role=runtime_role,
         policy_control_role=policy_control_role,
         custody_control_role=_custody_control_role(policy_control_role),
+        custody_executor_role=_custody_executor_role(policy_control_role),
     )
     if not migration.complete or migration.version != POSTGRES_SCHEMA_VERSION:
         raise RecoveryDrillError("source_migration_not_current")
@@ -539,6 +549,13 @@ def _custody_control_role(policy_control_role: str) -> str:
     return validate_postgres_identifier(
         f"{policy_control_role}_custody",
         "postgres_custody_control_role",
+    )
+
+
+def _custody_executor_role(policy_control_role: str) -> str:
+    return validate_postgres_identifier(
+        f"{policy_control_role}_custody_executor",
+        "postgres_custody_executor_role",
     )
 
 

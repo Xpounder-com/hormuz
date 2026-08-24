@@ -69,6 +69,7 @@ _ROOT_CONFIGURATION_FIELDS = frozenset(
         "usage_storage",
         "policy_control",
         "custody_control",
+        "custody_executor",
         "key_custody",
         "audit_anchor",
         "audit_chain",
@@ -167,6 +168,13 @@ _CUSTODY_CONTROL_FIELDS = frozenset(
         "postgres_control_dsn_env",
         "postgres_control_role",
         "authorization_ttl_seconds",
+    }
+)
+_CUSTODY_EXECUTOR_FIELDS = frozenset(
+    {
+        "postgres_executor_dsn_env",
+        "postgres_executor_role",
+        "pending_attempt_ttl_seconds",
     }
 )
 _BREAK_GLASS_FIELDS = frozenset({"enabled", "token_env"})
@@ -332,6 +340,8 @@ def _validate_configuration_schema(raw: dict[str, Any]) -> None:
     if custody_control is not None:
         for administrator in _schema_optional_array(custody_control, "bootstrap_administrators"):
             _schema_object(administrator, _BOOTSTRAP_ADMINISTRATOR_FIELDS)
+
+    _schema_optional_object(raw, "custody_executor", _CUSTODY_EXECUTOR_FIELDS)
 
     if "key_custody" in raw and raw["key_custody"] is not None:
         key_custody = _schema_object(raw["key_custody"], _KEY_CUSTODY_FIELDS)

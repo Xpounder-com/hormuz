@@ -67,6 +67,7 @@ _RUNTIME_CONSUMERS = frozenset(
         "policy_control_cli",
         "custody_control_runtime",
         "custody_control_cli",
+        "custody_executor_runtime",
         "policy_runtime",
         "storage_runtime",
         "storage_migration_cli",

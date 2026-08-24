@@ -1390,6 +1390,7 @@ def _print_custody_operation(prefix: str, operation: CustodyOperationIntent) -> 
 
 
 def _print_custody_status(status: CustodyControlStatus, *, as_json: bool) -> None:
+    execution_status = status.execution_status
     payload = {
         "organization_id": status.organization_id,
         "initialized": status.initialized,
@@ -1423,6 +1424,14 @@ def _print_custody_status(status: CustodyControlStatus, *, as_json: bool) -> Non
             }
             for operation in status.operations
         ],
+        "execution_attempt_count": execution_status.attempt_count if execution_status is not None else 0,
+        "execution_attempts": [
+            {
+                **attempt.contract_record(),
+                "events": [event.contract_record() for event in attempt.events],
+            }
+            for attempt in (execution_status.attempts if execution_status is not None else ())
+        ],
     }
     if as_json:
         print(json.dumps(contract_envelope(CUSTODY_CONTROL_STATUS_SCHEMA_ID, payload), indent=2, sort_keys=True))
@@ -1432,6 +1441,7 @@ def _print_custody_status(status: CustodyControlStatus, *, as_json: bool) -> Non
     print(f"active custody administrators: {len(status.administrators)}")
     print(f"custody operations: {status.operation_count}")
     print(f"operations shown: {len(status.operations)}")
+    print(f"custody execution attempts: {execution_status.attempt_count if execution_status is not None else 0}")
 
 
 def _custody_verify(config: GatewayConfig) -> int:
@@ -1562,6 +1572,7 @@ def _storage(config: GatewayConfig, args: argparse.Namespace) -> int:
             runtime_role=config.usage_storage.postgres_runtime_role,
             policy_control_role=config.policy_control.postgres_control_role,
             custody_control_role=config.custody_control.postgres_control_role,
+            custody_executor_role=config.custody_executor.postgres_executor_role,
         )
         print(f"PostgreSQL usage storage migration is current: v{status.version}")
         return 0

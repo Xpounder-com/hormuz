@@ -64,11 +64,19 @@ POLICY_CONTROL_EVENT_SCHEMA_VERSION = 1
 
 CUSTODY_CONTROL_STATUS_SCHEMA_ID = "hormuz.custody-control-status"
 
-CUSTODY_CONTROL_STATUS_SCHEMA_VERSION = 1
+CUSTODY_CONTROL_STATUS_SCHEMA_VERSION = 2
 
 CUSTODY_CONTROL_EVENT_SCHEMA_ID = "hormuz.custody-control-event"
 
 CUSTODY_CONTROL_EVENT_SCHEMA_VERSION = 1
+
+CUSTODY_EXECUTION_SCHEMA_ID = "hormuz.custody-execution-attempt"
+
+CUSTODY_EXECUTION_SCHEMA_VERSION = 1
+
+CUSTODY_EXECUTION_EVENT_SCHEMA_ID = "hormuz.custody-execution-event"
+
+CUSTODY_EXECUTION_EVENT_SCHEMA_VERSION = 1
 
 USAGE_REPORT_SCHEMA_ID = "hormuz.usage-report"
 
@@ -195,3 +203,9 @@ _CUSTODY_CONTROL_EVENT_TYPES = frozenset(
         "operation_authorized",
     }
 )
+
+_CUSTODY_EXECUTION_STATES = frozenset({"pending", "succeeded", "failed", "outcome_unknown"})
+
+_CUSTODY_EXECUTION_UNKNOWN_REASONS = frozenset({"external_result_ambiguous", "stale_pending"})
+
+_CUSTODY_EXECUTION_FAILURE_REASONS = frozenset({"execution_failed"})

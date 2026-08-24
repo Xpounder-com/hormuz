@@ -12,9 +12,9 @@ The security boundary is deliberately split:
    content-free operation intent.
 2. PostgreSQL retains the tenant-qualified intent, approvals, and immutable
    control events through the dedicated custody-control role.
-3. A future separately permissioned custody executor may consume an authorized,
-   unexpired intent. The normal gateway runtime and current CLI do not become
-   that executor.
+3. A separately deployed, separately credentialed custody executor may consume
+   one exact, authorized, unexpired **routine** intent. The normal gateway
+   runtime and human-administration CLI do not become that executor.
 4. The customer key service remains authoritative for key policy, protection,
    disablement, and deletion. Hormuz never edits customer IAM policy.
 
@@ -25,7 +25,7 @@ The security boundary is deliberately split:
 | `custody_admin` | Manage tenant custody administrators; approve exact lifecycle intents; inspect metadata-only status | Inference, policy, identity, customer IAM/KMS administration, plaintext access |
 | Custody-control service | Persist administrators, intents, approvals, and events | KMS calls, secret material, policy changes, gateway traffic |
 | Gateway runtime | Existing configured data-plane decrypt/generate operations only | Custody administration and governed lifecycle execution |
-| Future custody executor | Consume one authorized, unexpired intent under separately reviewed machine permissions | Human authorization and arbitrary customer-IAM changes |
+| Custody executor | Consume one authorized, unexpired routine intent; append its immutable attempt/result evidence | Human authorization, destructive lifecycle work, arbitrary customer-IAM changes, authority changes |
 | Customer KMS administrator | Own key/IAM lifecycle and protection | Automatic Hormuz role or entitlement |
 | Break-glass operator | Future recovery after loss of every custody administrator | Ordinary rewrap or restore-verification workflow |
 
@@ -60,6 +60,11 @@ migration, and policy-control surfaces:
     "bootstrap_administrators": [
       {"organization_id": "acme", "actor_id": "custody-bootstrap"}
     ]
+  },
+  "custody_executor": {
+    "postgres_executor_dsn_env": "HORMUZ_CUSTODY_EXECUTOR_DSN",
+    "postgres_executor_role": "hormuz_custody_executor",
+    "pending_attempt_ttl_seconds": 900
   }
 }
 ```
@@ -79,12 +84,16 @@ Email addresses, usernames, mutable group names, and arbitrary token claims do
 not grant custody authority. An OIDC custody administrator need not have a
 gateway inference identity.
 
-Before schema migration, the database operator must create
-`hormuz_custody_control` as a distinct restricted role with `NOINHERIT` and
-without superuser, database-creation, role-creation, or `BYPASSRLS` privileges.
-PostgreSQL schema v5 grants it only the custody-control tables and shared
-migration ledger. Runtime and policy-control roles receive no custody-table
-access; the custody role receives no usage or policy-control access.
+Before schema migration, the database operator must create both
+`hormuz_custody_control` and `hormuz_custody_executor` as distinct restricted
+roles with `NOINHERIT` and without superuser, database-creation, role-creation,
+or `BYPASSRLS` privileges. A separately deployed executor login may assume only
+the executor role; do not place its DSN or key-service credential in the normal
+gateway deployment. PostgreSQL schema v6 grants the control role custody
+authority and status reads, and grants the executor role only tenant-scoped
+authorization metadata plus append-only execution-attempt rows. Runtime and
+policy-control roles receive no custody-table access; neither custody role
+receives usage or policy-control access.
 
 ## Operation and approval contract
 
@@ -116,9 +125,53 @@ completes. If an earlier approver has been revoked, the immutable intent stays
 pending and a new intent must collect two current approvals.
 
 For initial enrollment, the secret owner supplies plaintext through a protected
-input path owned by the future executor. The administrator authorizes only the
-SHA-256 of that protected handle. Hormuz custody-control storage, status, and
-events contain no plaintext, ciphertext, credential value, prompt, or response.
+input path or resolver owned only by the executor. The administrator authorizes
+only the SHA-256 of that protected handle. Hormuz custody-control storage,
+execution roots/events, status, and logs contain no plaintext, ciphertext,
+credential value, prompt, response, protected-input handle, target descriptor,
+or parameter descriptor.
+
+## Routine executor contract
+
+The executor is a machine service boundary, not a human CLI command. It accepts
+an in-memory `CustodyExecutionRequest` containing the organization, operation
+ID, routine operation, target descriptor, parameter descriptor, and—for
+`seal_envelope` only—a protected-input reference. Canonical JSON SHA-256 values
+for those descriptors must exactly match the already authorized intent. The
+raw descriptors and reference are transient executor inputs; only their hashes
+are durable.
+
+Immediately before a key-service, protected-input, filesystem, or object-store
+side effect, the executor atomically writes one immutable
+`hormuz.custody-execution-attempt` root and its `pending` event under the
+tenant's RLS scope. It also verifies that the requester remains active, the
+intent is routine, authorized, unexpired, and otherwise unchanged. A new UUID
+`execution_id` identifies that one attempt. PostgreSQL repeats that exact
+authorization check in an insert trigger, so the executor credential cannot
+manufacture a mismatched attempt root through a raw database write.
+
+The only state transitions are:
+
+```text
+pending -> succeeded
+pending -> failed
+pending -> outcome_unknown
+```
+
+The terminal transition appends exactly one immutable event; neither the root
+nor an earlier event is rewritten. A known pre-effect failure becomes `failed`.
+An ambiguous provider, protected-input, filesystem, network, or finalization
+failure leaves the root `pending`; the stale-attempt sweeper later appends
+`outcome_unknown`. Hormuz never automatically replays the side effect. A new
+effect needs a new human authorization and therefore a new operation ID.
+
+The first concrete runner uses the existing vendor-neutral envelope interfaces:
+`seal_envelope`, `rewrap_envelope`, and `verify_restore`. The supplied
+owner-only-file resolver is a reference protected-input path; production
+deployments can supply a separately reviewed resolver without widening the
+ledger. The executor may seal, rewrap, or verify an envelope, but it cannot
+alter customer KMS/IAM policy, delete a customer key, retire an envelope, or
+perform break-glass recovery.
 
 ## CLI authorization flow
 
@@ -158,13 +211,18 @@ credential, procedure, and evidence boundary.
 
 ## Contracts and nonclaims
 
-`hormuz.custody-control-status` v1 is the strict CLI status schema and
-`hormuz.custody-control-event` v1 is the strict durable event schema. Both are
-listed in `hormuz contract-manifest` and covered by compatibility fixtures.
+`hormuz.custody-control-status` v2 is the current strict CLI status schema;
+v1 remains validator-compatible for the previous output shape. Status v2 adds
+at most the latest 100 metadata-only execution attempts. Each attempt uses
+`hormuz.custody-execution-attempt` v1 and each append-only state record uses
+`hormuz.custody-execution-event` v1. `hormuz.custody-control-event` v1 remains
+the separate human-authority event schema. All are listed in
+`hormuz contract-manifest` and covered by compatibility fixtures.
 
-This checkpoint proves authorization persistence, tenant isolation, database
-role separation, exact approval thresholds, expiry, replay denial, and
-rollback on invalid evidence. It does not execute KMS operations, change
-customer IAM, delete or disable customer keys, implement all-administrator-loss
-break glass, place custody events in the gateway audit chain, certify a cloud
-deployment, establish production readiness, or close parent issue #17.
+This checkpoint proves routine execution authorization, a separate database
+role, pre-effect durable attempts, exact request binding, tenant isolation,
+requester-revocation/expiry denial, append-only terminal state, and no automatic
+replay. It does not execute destructive lifecycle work, change customer IAM,
+delete or disable customer keys, implement all-administrator-loss break glass,
+place custody events in the gateway audit chain, certify a cloud deployment,
+establish production readiness, or close parent issue #17.
