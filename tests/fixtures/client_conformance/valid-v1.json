@@ -1,0 +1,70 @@
+{
+  "checks": [
+    "authenticated_identity",
+    "policy_selection",
+    "model_routing",
+    "output_cap_before_egress",
+    "secret_redaction_before_egress",
+    "real_provider_egress",
+    "streaming_request",
+    "provider_reported_usage",
+    "configured_rate_card_cost",
+    "content_free_audit",
+    "provider_credentials_absent_from_client"
+  ],
+  "credential_scope": "operator_attested_dedicated_least_privilege",
+  "generated_at": "2026-08-24T20:00:00+00:00",
+  "nonclaims": [
+    "not_provider_invoice",
+    "not_provider_key_scope_introspection",
+    "not_all_client_features",
+    "not_traffic_bypassing_hormuz",
+    "not_enterprise_production_readiness"
+  ],
+  "results": [
+    {
+      "actor_id": "live-codex-reviewer",
+      "allocation_basis": "direct_gateway_request",
+      "authentication_source": "static",
+      "cache_read_tokens": 8,
+      "cache_write_tokens": 0,
+      "client": "codex",
+      "client_entrypoint_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "client_runtime_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "client_version": "0.147.0",
+      "cost_basis": "configured_rate_card_estimate",
+      "cost_microusd": 42,
+      "coverage": "gateway_captured_requests_only",
+      "input_tokens": 30,
+      "organization_id": "hormuz-live-client-conformance",
+      "output_cap_observed": true,
+      "output_tokens": 6,
+      "policy_action": [
+        "capped+redacted"
+      ],
+      "policy_version": "local-config-0123456789abcdef",
+      "provider": "openai",
+      "provider_credential_in_client_environment": false,
+      "provider_reported_model": "gpt-test-2026-08-24",
+      "provider_request_id_present": true,
+      "reasoning_tokens": 2,
+      "redaction_before_egress_observed": true,
+      "redaction_count": 1,
+      "request_count": 1,
+      "requested_model": "gpt-test",
+      "routed_model": "gpt-test",
+      "secret_event_count": 1,
+      "status": "succeeded",
+      "streaming_request_observed": true,
+      "team_id": "release-conformance"
+    }
+  ],
+  "runner": {
+    "architecture": "x86_64",
+    "os": "linux"
+  },
+  "schema_id": "hormuz.live-client-conformance",
+  "schema_version": 1,
+  "scope": "partial",
+  "source_revision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+}

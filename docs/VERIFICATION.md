@@ -2,6 +2,103 @@
 
 This file records executable evidence for client/provider compatibility. It intentionally contains no provider credentials, prompts, responses beyond fixed test markers, or employee secrets.
 
+## Live pinned-client release gate
+
+The manual `Live BYO-provider client conformance` workflow and
+`tools/verify_live_client_conformance.py` are the repeatable real-provider
+gate. They require exact Codex `0.147.0` and Claude Code `2.1.233` executables,
+dedicated operator-attested provider credentials, explicit OpenAI and
+Anthropic model IDs, and an acknowledgement that the run incurs provider
+cost. Provider credentials are scoped to the gateway process and removed from
+both client environments.
+
+The tool observes only allowlisted post-policy metadata immediately before
+egress, then validates strict v2 usage/security events after each real
+streaming response. Its schema-v1 artifact records client hashes, tenant
+identity, model routing, policy/cap/redaction outcomes, token counts,
+configured-rate-card cost, and booleans for provider-request-ID presence and
+pre-egress checks. Prompts, responses, request IDs, keys, identity tokens, and
+debug logs are prohibited. The runner binds evidence to an exact clean Git
+`HEAD` and refuses to overwrite an existing artifact. See
+[LIVE_CLIENT_CONFORMANCE.md](LIVE_CLIENT_CONFORMANCE.md) for the command,
+workflow secret boundary, strict evidence contract, unsupported features, and
+nonclaims.
+
+A one-provider run is explicitly partial. Closing issue #115 requires one
+successful artifact containing both real providers at the same source
+revision; provider-free CI cannot substitute for it.
+
+## Independent quiet-alpha gate
+
+The invited-reviewer procedure and strict content-free aggregate are defined
+in [QUIET_ALPHA.md](QUIET_ALPHA.md). The evidence contract allows only opaque
+participant/session IDs, coarse environment enums, completion states, elapsed
+seconds, fixed failure codes, issue/advisory references, resolution commits,
+and content-free attestations. It has no fields for identities, feedback text,
+prompts, responses, credentials, customer data, local paths, logs, or
+screenshots, and Hormuz contains no hidden collection path.
+
+Run the contract tests and synthetic-fixture check with:
+
+```bash
+python -m unittest -v tests.test_quiet_alpha_evidence
+python tools/verify_quiet_alpha_evidence.py \
+  tests/fixtures/quiet_alpha/complete-synthetic-v1.json \
+  --allow-synthetic-fixture
+```
+
+Synthetic evidence always reports `ready_for_broad_promotion: false`. Actual
+release evidence additionally requires the operator to attest distinct humans
+off-repository, five independent installation/demo completions across all
+four reviewer personas, a later returning-user session, and resolution plus
+independent retest of every security or installation blocker. The validator
+does not prove the off-repository identity attestation or replace issue #115's
+live-provider gate.
+
+## Provider-free five-minute path
+
+The public checkout exposes one configuration-free product tour:
+
+```bash
+hormuz demo
+```
+
+It starts a disposable loopback provider simulator and the real Hormuz
+gateway, then proves an allowed request, model fallback plus output cap,
+pre-egress secret redaction, pre-egress policy denial, and strict metadata-only
+usage/security evidence. The regression test intercepts every outbound socket
+connection and rejects any destination other than `127.0.0.1`. The command
+also verifies that its synthetic request content, response content, identity
+credentials, provider credential, original secret, and redaction replacement
+are absent from the durable audit events before deleting the temporary SQLite
+ledger.
+
+The blocking `Python 3.11` through `Python 3.14` Linux CI matrix runs this
+documented command immediately after installation. Each job records the
+installation-step wall time in GitHub Actions and the command prints its own
+measured demonstration time. The isolated wheel and `linux/amd64` OCI gates
+also run the command, so a source-only import path cannot satisfy the
+quickstart release gate. These are provider-free product-path proofs, not live
+OpenAI/Anthropic compatibility or a production deployment claim.
+
+## Launch-claim boundary
+
+The formal-launch drafts and their schema-v1 claim ledger live under
+[`docs/launch`](launch/README.md). Validate them with:
+
+```bash
+python tools/verify_launch_assets.py
+python -m unittest -v tests.test_launch_assets
+```
+
+The draft verifier returns `"publishable": false` by design. It requires every
+asset to carry the do-not-publish marker, binds implemented and verified-alpha
+claims to closed issues plus repository evidence, labels roadmap and nonclaim
+statements separately, rejects unapproved commercial URL tokens, and freezes
+the privacy-bounded launch measures. It does not query GitHub or prove that an
+issue remains closed; final publication requires a fresh remote review, the
+quiet-alpha gate, owner-supplied intake URLs, and recorded owner approval.
+
 ## 2026-08-15
 
 ### Live OpenAI path
@@ -76,7 +173,11 @@ The default suite uses only loopback fake providers:
 python3 -m unittest -v
 ```
 
-The live OpenAI check requires an ignored credential file or secret-manager injection. Start Hormuz with credentials in its environment, configure Codex using [CLIENTS.md](CLIENTS.md), request a fixed marker, then verify metadata with:
+The historical live OpenAI record above predates the repeatable two-provider
+release harness. New evidence should use
+[the live client conformance command](LIVE_CLIENT_CONFORMANCE.md), which emits
+a strict content-free artifact. For ordinary operator inspection, Hormuz's
+versioned usage summary remains available through:
 
 ```bash
 hormuz --config hormuz.json status --json
@@ -130,6 +231,7 @@ volumes, and does not establish HA, recovery, or production immutability.
 GitHub Actions runs independent gates without provider credentials:
 
 - the complete core unit and loopback gateway suite on Python 3.11, 3.12, 3.13, and 3.14;
+- the provider-free documented quickstart on every release-gated Python version, the isolated wheel, and the candidate `linux/amd64` image;
 - source-distribution and wheel builds followed by a clean-wheel inspection and isolated gateway-start boundary test;
 - PostgreSQL migration and repository compatibility against the pinned service image, including tenant custody authority and one/two-person approval behavior;
 - a disposable `pg_dump` custom-format / `pg_restore` recovery drill against digest-pinned source, recovery, and quarantine PostgreSQL containers;
@@ -140,6 +242,12 @@ GitHub Actions runs independent gates without provider credentials:
 
 The workflow grants only read access to repository contents, disables persisted checkout credentials, pins every GitHub Action to a reviewed commit SHA and the scanner image to an immutable digest, and retains build artifacts for seven days. Dependabot is configured to propose updates to action and Python build dependencies; a client-version bump remains an intentional compatibility change because it can alter the provider protocol.
 
+Repository-side enforcement is a separate checked contract. Run
+`python tools/verify_repository_governance.py` and follow
+[`REPOSITORY_GOVERNANCE.md`](REPOSITORY_GOVERNANCE.md) to validate the pinned
+Action owners, public-fork safety boundary, required check identities, protected
+`main`, immutable version tags, and the explicit pre-public/public phases.
+
 A separate weekly canary installs the latest published Codex and Claude Code packages in an ephemeral runner and exercises only the two fake-provider compatibility tests. It has no provider credentials, does not block ordinary pull requests, and is intended to surface upstream protocol drift before an employee upgrade does.
 
 The package job also builds the core and separated experiment with Apache 2.0
@@ -149,6 +257,12 @@ license artifact. It validates the versioned content-free disclosure report but
 does not turn a `decision_required` report into publication authorization. See
 [PUBLIC_DISCLOSURE.md](PUBLIC_DISCLOSURE.md) for the audited surfaces,
 limitations, and separate owner-authorization boundary.
+
+The live BYO-provider workflow is manual-only, uses the protected
+`live-provider-conformance` environment, grants `contents: read`, serializes
+runs to prevent overlapping spend, and scopes provider secrets only to the
+conformance step. It is not a scheduled canary and never runs for a pull
+request.
 
 The publication candidate was also checked locally on August 15, 2026 with Codex `0.147.0` and Claude Code `2.1.233`, the then-current npm releases. Both routed successfully through Hormuz, and the complete 29-test suite passed with those executables selected first on `PATH`.
 

@@ -1,0 +1,85 @@
+{
+  "name": "Installation or first-run failure",
+  "description": "Report a clean-checkout, package-installation, Docker, or first-run problem.",
+  "title": "[Install]: ",
+  "labels": ["bug"],
+  "body": [
+    {
+      "type": "markdown",
+      "attributes": {
+        "value": "Check SUPPORT.md first. Public-alpha support is best effort. Never paste credentials, provider keys, employee tokens, customer configuration, prompts, responses, private paths, or vulnerability details."
+      }
+    },
+    {
+      "type": "dropdown",
+      "id": "method",
+      "attributes": {
+        "label": "Installation path",
+        "options": ["Clean source checkout", "Python package or wheel", "Official OCI image by digest", "Local Docker build", "Other"]
+      },
+      "validations": {"required": true}
+    },
+    {
+      "type": "input",
+      "id": "version",
+      "attributes": {
+        "label": "Hormuz version",
+        "description": "Commit SHA, tag, package version, or OCI digest.",
+        "placeholder": "commit abc1234 or sha256:..."
+      },
+      "validations": {"required": true}
+    },
+    {
+      "type": "textarea",
+      "id": "environment",
+      "attributes": {
+        "label": "Environment",
+        "description": "Operating system, architecture, Python version, Docker/OCI runtime version if used, and shell.",
+        "placeholder": "Linux amd64; Python 3.12; Docker 27; bash"
+      },
+      "validations": {"required": true}
+    },
+    {
+      "type": "textarea",
+      "id": "command",
+      "attributes": {
+        "label": "Exact sanitized command",
+        "description": "Show the first command that fails. Replace local names and paths with synthetic values.",
+        "render": "shell"
+      },
+      "validations": {"required": true}
+    },
+    {
+      "type": "textarea",
+      "id": "output",
+      "attributes": {
+        "label": "Smallest sanitized error",
+        "description": "Remove tokens, keys, customer configuration, usernames, internal hosts, private paths, and data before pasting.",
+        "render": "text"
+      },
+      "validations": {"required": true}
+    },
+    {
+      "type": "textarea",
+      "id": "attempts",
+      "attributes": {
+        "label": "Checks already tried",
+        "description": "Include the relevant SUPPORT.md check and whether a clean environment changes the result."
+      },
+      "validations": {"required": true}
+    },
+    {
+      "type": "checkboxes",
+      "id": "disclosure",
+      "attributes": {
+        "label": "Disclosure check",
+        "options": [
+          {
+            "label": "This report contains no credentials, prompts, responses, customer data, private infrastructure, or vulnerability details.",
+            "required": true
+          }
+        ]
+      }
+    }
+  ]
+}

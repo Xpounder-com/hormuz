@@ -1,0 +1,64 @@
+{
+  "name": "Documentation problem",
+  "description": "Report incorrect, missing, unsafe, or confusing public documentation.",
+  "title": "[Docs]: ",
+  "labels": ["documentation"],
+  "body": [
+    {
+      "type": "markdown",
+      "attributes": {
+        "value": "Do not paste private configurations, real credentials, customer data, prompts, responses, or security-bypass details while explaining the documentation problem."
+      }
+    },
+    {
+      "type": "input",
+      "id": "location",
+      "attributes": {
+        "label": "Document or public URL",
+        "description": "Link to the heading, file, command, or template that needs correction.",
+        "placeholder": "README.md#quick-start"
+      },
+      "validations": {"required": true}
+    },
+    {
+      "type": "textarea",
+      "id": "problem",
+      "attributes": {
+        "label": "Problem",
+        "description": "What is incorrect, missing, unsafe, or hard to understand?"
+      },
+      "validations": {"required": true}
+    },
+    {
+      "type": "textarea",
+      "id": "suggestion",
+      "attributes": {
+        "label": "Suggested correction",
+        "description": "Propose wording or an example using synthetic values, if helpful."
+      },
+      "validations": {"required": false}
+    },
+    {
+      "type": "dropdown",
+      "id": "impact",
+      "attributes": {
+        "label": "Impact",
+        "options": ["Blocks installation", "Could cause unsafe use", "Produces an incorrect result", "Causes confusion", "Minor correction"]
+      },
+      "validations": {"required": true}
+    },
+    {
+      "type": "checkboxes",
+      "id": "disclosure",
+      "attributes": {
+        "label": "Disclosure check",
+        "options": [
+          {
+            "label": "This report contains no credentials, prompts, responses, customer data, private infrastructure, or vulnerability details.",
+            "required": true
+          }
+        ]
+      }
+    }
+  ]
+}

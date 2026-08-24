@@ -7,6 +7,7 @@ import stat
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from tools import verify_postgres_pitr_recovery as pitr
 
@@ -114,6 +115,91 @@ class PostgresPITRRecoverySummaryTests(unittest.TestCase):
         self.assertEqual(result, 1)
         self.assertEqual(stderr.getvalue(), "PostgreSQL PITR recovery failed: summary_checks_invalid\n")
 
+    def test_promotion_wait_accepts_delayed_promotion(self) -> None:
+        states = iter((False, False, True))
+        sleep_calls: list[float] = []
+
+        pitr.wait_for_promotion(
+            lambda: next(states),
+            attempts=4,
+            interval_ms=250,
+            sleeper=sleep_calls.append,
+        )
+
+        self.assertEqual(sleep_calls, [0.25, 0.25])
+
+    def test_promotion_wait_has_a_distinct_content_free_timeout(self) -> None:
+        sleep_calls: list[float] = []
+
+        with self.assertRaisesRegex(
+            pitr.PITRRecoveryError, "^recovery_target_promotion_timeout$"
+        ):
+            pitr.wait_for_promotion(
+                lambda: False,
+                attempts=3,
+                interval_ms=100,
+                sleeper=sleep_calls.append,
+            )
+
+        self.assertEqual(sleep_calls, [0.1, 0.1])
+
+    def test_promotion_probe_uses_only_the_fixed_disposable_target(self) -> None:
+        completed = pitr.subprocess.CompletedProcess(
+            args=(), returncode=0, stdout="f\n", stderr=""
+        )
+        with mock.patch.object(
+            pitr.subprocess, "run", return_value=completed
+        ) as run:
+            promoted = pitr._postgres_is_promoted(
+                "hormuz-postgres-pitr-recovery-12345"
+            )
+
+        self.assertTrue(promoted)
+        command = run.call_args.args[0]
+        self.assertEqual(
+            command,
+            (
+                "docker",
+                "exec",
+                "hormuz-postgres-pitr-recovery-12345",
+                "psql",
+                "--username=postgres",
+                "--dbname=hormuz_pitr",
+                "--set=ON_ERROR_STOP=on",
+                "--tuples-only",
+                "--no-align",
+                "--command",
+                "SELECT pg_is_in_recovery()",
+            ),
+        )
+        self.assertEqual(run.call_args.kwargs["stderr"], pitr.subprocess.DEVNULL)
+        with self.assertRaisesRegex(
+            pitr.PITRRecoveryError, "promotion_target_invalid"
+        ):
+            pitr._postgres_is_promoted("customer-postgres")
+
+    def test_promotion_wait_cli_reports_only_the_timeout_code(self) -> None:
+        stderr = io.StringIO()
+        with mock.patch.object(pitr, "_postgres_is_promoted", return_value=False):
+            with contextlib.redirect_stderr(stderr):
+                result = pitr.main(
+                    [
+                        "promotion-wait",
+                        "--container",
+                        "hormuz-postgres-pitr-recovery-12345",
+                        "--attempts",
+                        "2",
+                        "--interval-ms",
+                        "0",
+                    ]
+                )
+
+        self.assertEqual(result, 1)
+        self.assertEqual(
+            stderr.getvalue(),
+            "PostgreSQL PITR recovery failed: recovery_target_promotion_timeout\n",
+        )
+
     def test_wrapper_requires_an_explicit_disposable_pitr_acknowledgement(self) -> None:
         wrapper = Path(__file__).resolve().parents[1] / "tools" / "verify_postgres_pitr_recovery.sh"
         source = wrapper.read_text(encoding="utf-8")
@@ -127,6 +213,19 @@ class PostgresPITRRecoverySummaryTests(unittest.TestCase):
         self.assertIn("pg_current_wal_lsn", source)
         self.assertIn("--command 'SELECT 1'", source)
         self.assertIn("recovery_target_name", source)
+        promotion = source.index(
+            'run_pitr_tool promotion-wait --container "$RECOVERY_CONTAINER"'
+        )
+        marker = source.index('marker_value="$(docker exec "$RECOVERY_CONTAINER"')
+        restricted_state = source.index("run_recovery_tool verify --runtime-dsn")
+        negative_recovery = source.index(
+            'start_negative_recovery "$UNREACHABLE_CONTAINER"'
+        )
+        self.assertLess(promotion, marker)
+        self.assertLess(marker, restricted_state)
+        self.assertLess(restricted_state, negative_recovery)
+        self.assertEqual(source.count("run_pitr_tool promotion-wait"), 1)
+        self.assertNotIn("recovery_target_not_promoted", source)
         self.assertIn("remove_disposable_container", source)
         self.assertIn("remove_disposable_work_dir", source)
         self.assertIn("copy_disposable_base_backup", source)

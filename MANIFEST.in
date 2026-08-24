@@ -1,9 +1,16 @@
 include SECURITY.md
 include LICENSE
+include SUPPORT.md
+include CONTRIBUTING.md
+include CODE_OF_CONDUCT.md
 include config.example.json
+include docs/launch/claims-v1.json
 include hormuz/secret-inventory-v1.json
 include tools/_verification_runtime.py
 include tools/verify_secret_inventory.py
+include tools/verify_public_community_paths.py
+include tools/verify_launch_assets.py
+include tools/verify_quiet_alpha_evidence.py
 include tools/oidc_reference_conformance.py
 include tools/verify_ceph_rgw_custody_conformance.py
 include tools/verify_dependency_licenses.py

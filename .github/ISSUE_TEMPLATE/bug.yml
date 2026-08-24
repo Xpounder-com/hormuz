@@ -1,0 +1,91 @@
+{
+  "name": "Bug report",
+  "description": "Report a reproducible Hormuz defect using synthetic, sanitized inputs.",
+  "title": "[Bug]: ",
+  "labels": ["bug"],
+  "body": [
+    {
+      "type": "markdown",
+      "attributes": {
+        "value": "Do not include credentials, tokens, prompts, responses, customer identifiers, private hostnames, database contents, or security-bypass details. Use the private path in SECURITY.md for sensitive behavior."
+      }
+    },
+    {
+      "type": "input",
+      "id": "version",
+      "attributes": {
+        "label": "Hormuz version",
+        "description": "Provide the commit SHA, tag, package version, or OCI digest.",
+        "placeholder": "commit abc1234 or v0.1.0"
+      },
+      "validations": {"required": true}
+    },
+    {
+      "type": "textarea",
+      "id": "environment",
+      "attributes": {
+        "label": "Sanitized environment",
+        "description": "Operating system, architecture, Python version, installation method, client version, persistence mode, and whether Docker is involved.",
+        "placeholder": "Linux amd64; Python 3.12; editable install; SQLite; Codex 0.147.0"
+      },
+      "validations": {"required": true}
+    },
+    {
+      "type": "textarea",
+      "id": "summary",
+      "attributes": {
+        "label": "Observed problem",
+        "description": "Describe one failure and its impact without sensitive data."
+      },
+      "validations": {"required": true}
+    },
+    {
+      "type": "textarea",
+      "id": "reproduction",
+      "attributes": {
+        "label": "Minimal synthetic reproduction",
+        "description": "Provide exact sanitized steps and commands. Replace every organization, person, credential, prompt, response, host, and path with a synthetic value.",
+        "render": "shell"
+      },
+      "validations": {"required": true}
+    },
+    {
+      "type": "textarea",
+      "id": "expected",
+      "attributes": {"label": "Expected behavior"},
+      "validations": {"required": true}
+    },
+    {
+      "type": "textarea",
+      "id": "actual",
+      "attributes": {
+        "label": "Sanitized actual behavior",
+        "description": "Paste only the smallest redacted error. Attachments follow the same disclosure rules."
+      },
+      "validations": {"required": true}
+    },
+    {
+      "type": "dropdown",
+      "id": "egress",
+      "attributes": {
+        "label": "Provider egress",
+        "description": "Did the failure occur before a request reached a provider?",
+        "options": ["No provider was contacted", "Provider may have been contacted", "Unknown"]
+      },
+      "validations": {"required": true}
+    },
+    {
+      "type": "checkboxes",
+      "id": "disclosure",
+      "attributes": {
+        "label": "Disclosure check",
+        "options": [
+          {
+            "label": "I used synthetic values and removed credentials, prompts, responses, identities, customer data, private infrastructure, and security-bypass details.",
+            "required": true
+          }
+        ]
+      }
+    }
+  ]
+}

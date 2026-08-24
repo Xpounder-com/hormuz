@@ -1,0 +1,63 @@
+{
+  "name": "Feature request",
+  "description": "Propose a bounded Hormuz gateway, policy, evidence, or operator outcome.",
+  "title": "[Feature]: ",
+  "labels": ["enhancement"],
+  "body": [
+    {
+      "type": "markdown",
+      "attributes": {
+        "value": "Describe the organizational control problem, not private customer implementation details or credentials. Suspected bypasses or vulnerabilities belong in the private SECURITY.md path."
+      }
+    },
+    {
+      "type": "textarea",
+      "id": "problem",
+      "attributes": {
+        "label": "Problem",
+        "description": "What cannot be governed or verified today, and who encounters it? Use a generic organization."
+      },
+      "validations": {"required": true}
+    },
+    {
+      "type": "textarea",
+      "id": "outcome",
+      "attributes": {
+        "label": "Verifiable outcome",
+        "description": "State what a user or operator can prove when this is complete."
+      },
+      "validations": {"required": true}
+    },
+    {
+      "type": "textarea",
+      "id": "boundary",
+      "attributes": {
+        "label": "Policy, evidence, and data boundary",
+        "description": "What data would cross Hormuz, what durable metadata is needed, and what must remain out of scope?"
+      },
+      "validations": {"required": true}
+    },
+    {
+      "type": "textarea",
+      "id": "alternatives",
+      "attributes": {
+        "label": "Alternatives considered",
+        "description": "Explain any existing configuration, provider, or client feature that partly addresses the problem."
+      },
+      "validations": {"required": false}
+    },
+    {
+      "type": "checkboxes",
+      "id": "disclosure",
+      "attributes": {
+        "label": "Disclosure check",
+        "options": [
+          {
+            "label": "I removed customer identities, internal systems, credentials, prompts, responses, and non-public security details.",
+            "required": true
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -54,7 +54,7 @@ class GatewayServer(ThreadingHTTPServer):
     block_on_close = True
     allow_reuse_address = True
 
-    def __init__(self, config: GatewayConfig):
+    def __init__(self, config: GatewayConfig, *, environ: Mapping[str, str] | None = None):
         self.config = config
         self._accepting_requests = threading.Event()
         self.authenticator = Authenticator(config)
@@ -73,6 +73,7 @@ class GatewayServer(ThreadingHTTPServer):
             )
             self.upstream_credentials = resolve_upstream_credentials(
                 config,
+                environ=environ,
                 selection_allowed=self._upstream_credential_selection_allowed,
             )
             protected_values = [
