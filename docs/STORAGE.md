@@ -132,7 +132,7 @@ policy-control, custody-control, and custody-executor roles. All must be distinc
 with no superuser, database-creation, role-creation, inheritance, or BYPASSRLS
 capability. The migration grants each only its owned surface and the shared
 migration ledger. Existing deployments must create the configured custody roles
-before applying PostgreSQL schema v6; migrations grant privileges to
+before applying PostgreSQL schema v7; migrations grant privileges to
 pre-existing principals rather than creating customer database roles.
 
 ~~~sql
@@ -227,8 +227,12 @@ dedicated migration and custody-table shape through the custody-control role.
 Normal gateway startup does not initialize or use this control credential.
 Bootstrap and lifecycle authorization run only through the governed custody
 service; see [CUSTODY_CONTROL.md](CUSTODY_CONTROL.md). The separately deployed
-routine executor verifies its own restricted credential and schema surface at
-startup. Normal gateway startup never receives or initializes that credential.
+executor verifies its own restricted credential and schema surface at startup.
+Normal gateway startup never receives or initializes that credential. When
+`custody_lifecycle` is configured, the runtime reads only registered asset
+fingerprints, the derived projection, and prepared content-free barriers. It
+registers an opaque replica lease, acknowledges a barrier only after local
+installation, and keeps the request path database-free and fail-closed.
 
 SQLite upgrades happen on normal store initialization. Its ledger records the same supported migration state and refuses a partial or newer-than-binary schema.
 
@@ -329,6 +333,63 @@ There is no down-migration. An older binary encountering PostgreSQL schema v6
 fails closed. Rollback requires the previously tested application/database
 pair. The migration does not create a human execution command, destructive
 lifecycle capability, break-glass recovery, or customer KMS authority.
+
+### PostgreSQL schema v7 governed lifecycle upgrade
+
+Version 7 is PostgreSQL-only. It extends the executor root to v2 for governed
+destructive operations and adds these forced-RLS, tenant-qualified objects:
+
+- `custody_lifecycle_asset_identities`: immutable asset ID/generation and
+  binding fingerprint registry. Envelope rows additionally retain only their
+  linked key asset ID/generation/fingerprint, never a local path, key
+  reference, or credential;
+- `custody_lifecycle_events` and `custody_lifecycle_chain_heads`: append-only
+  metadata-only destructive lifecycle history and a per-organization chain
+  head;
+- `custody_runtime_projection_heads` and
+  `custody_runtime_projection_restrictions`: derived, monotonic gateway
+  selection restrictions;
+- `custody_runtime_replicas`, `custody_runtime_projection_barriers`, and
+  `custody_runtime_projection_acks`: five-second replica authority, prepared
+  affected-asset admission barriers, and acknowledgements installed before
+  activation;
+- `custody_envelope_attestations`: successful rewrap and restore-verification
+  proof used to gate a write-key retirement.
+
+The executor can register a configuration catalog and append immutable events,
+but PostgreSQL triggers alone update the chain head and projection in the same
+transaction. The runtime role can only read fingerprint identities and the
+projection; it has no lifecycle insert, update, or delete privilege. The
+custody-control role can read the metadata-only history for status/audit
+purposes but cannot mutate it. A small security-definer function returns only
+whether exactly two destructive approvers remain active; the executor does not
+receive a broad read grant over approval history.
+
+Before starting a gateway with lifecycle enforcement, run the machine-only
+catalog registration under the executor deployment credential:
+
+~~~bash
+hormuz --config /etc/hormuz/hormuz.json custody-executor register-assets
+~~~
+
+Startup verifies every configured identity, synchronizes the active projection
+and prepared barriers, and acknowledges only after local enforcement is in
+place. PostgreSQL notification plus a durable background scan coordinates
+replicas; normal egress uses local immutable state without a PostgreSQL read per
+request. Activation is rejected while any replica has an unexpired lease and
+lacks an acknowledgement. A replica that loses coordination becomes unready
+immediately and its five-second local monotonic lease expires no later than the
+database lease used to exclude it. Thus a committed restriction is already
+blocked on acknowledged replicas, while disconnected replicas have been
+fenced from new admission. Version 7 serializes this path to one prepared
+restriction per organization; another restriction waits until activation or an
+explicit governed recovery resolution.
+
+There is no down-migration. An older binary encountering PostgreSQL schema v7
+fails closed. Rollback requires restoring the previously tested
+application/database pair. Version 7 does not alter customer KMS/IAM policy,
+revoke a provider credential outside Hormuz, delete ciphertext or keys, create
+break-glass recovery, or externally anchor the lifecycle chain.
 
 ## Upgrade, rollback, and recovery
 

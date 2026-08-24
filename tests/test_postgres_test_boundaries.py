@@ -59,6 +59,22 @@ EXPECTED_OWNERS = {
             "test_executor_role_is_tenant_isolated_and_cannot_rewrite_or_mismatch_execution_evidence",
         },
     ),
+    "test_postgres_custody_lifecycle": (
+        "PostgresCustodyLifecycleTests",
+        {
+            "test_two_person_disablement_appends_metadata_only_evidence_and_projects_atomically",
+            "test_two_live_replicas_acknowledge_before_atomic_restriction_activation",
+            "test_partitioned_replica_fences_locally_before_its_lease_can_be_excluded",
+            "test_revoking_one_destructive_approver_blocks_the_machine_before_lifecycle_execution",
+            "test_committed_disablement_denies_a_new_gateway_request_before_provider_egress",
+            "test_retired_envelope_blocks_runtime_selection",
+            "test_key_retirement_without_rewrap_and_restore_proof_leaves_no_terminal_event_or_projection",
+            "test_key_retirement_requires_attested_rewrap_and_restore_then_write_retires_only_old_key",
+            "test_recovery_resolution_appends_a_new_event_without_rewriting_unknown_attempt",
+            "test_confirmed_not_applied_resolution_releases_only_an_uncommitted_prepared_barrier",
+            "test_gateway_startup_requires_registered_immutable_catalog_and_rejects_rebinding",
+        },
+    ),
     "test_postgres_usage": (
         "PostgresUsageEvidenceTests",
         {
@@ -127,7 +143,7 @@ class PostgresTestBoundaryTests(unittest.TestCase):
             suite = unittest.defaultTestLoader.loadTestsFromName(f"{module_name}.{class_name}")
             self.assertEqual(suite.countTestCases(), len(expected_methods), module_name)
 
-        self.assertEqual(len(owned), 43)
+        self.assertEqual(len(owned), 54)
         self.assertFalse((ROOT / "tests" / "test_postgres.py").exists())
         self.assertFalse(
             any(name.startswith("test_") for name in PostgresTestCase.__dict__),

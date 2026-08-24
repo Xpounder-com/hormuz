@@ -55,6 +55,9 @@ from .contracts import (
 )
 from .policy import PolicyEngine
 from .custody_control import CustodyControlService
+from .custody_executor import CustodyExecutorService
+from .custody_execution_repository import CustodyExecutionError
+from .custody_lifecycle import CustodyLifecycleError
 from .custody_repository import (
     CUSTODY_OPERATIONS,
     CustodyControlError,
@@ -314,6 +317,19 @@ def build_parser() -> argparse.ArgumentParser:
     _custody_control_auth_arguments(approve)
     approve.add_argument("--operation-id", required=True, help="Immutable custody operation identifier")
 
+    custody_executor = subparsers.add_parser(
+        "custody-executor",
+        help="Run machine-only custody-executor maintenance",
+    )
+    custody_executor_subparsers = custody_executor.add_subparsers(
+        dest="custody_executor_command",
+        required=True,
+    )
+    custody_executor_subparsers.add_parser(
+        "register-assets",
+        help="Persist configured custody asset generations through the restricted executor boundary",
+    )
+
     storage = subparsers.add_parser("storage", help="Verify or migrate the metadata-only usage store")
     storage_subparsers = storage.add_subparsers(dest="storage_command", required=True)
     storage_subparsers.add_parser("verify", help="Verify the configured store is safe for this binary")
@@ -386,6 +402,8 @@ def main(argv: list[str] | None = None) -> int:
             return _audit_chain(config, args)
         if args.command == "custody":
             return _custody(config, args)
+        if args.command == "custody-executor":
+            return _custody_executor(config, args)
         if args.command == "storage":
             return _storage(config, args)
     except ConfigError as error:
@@ -399,6 +417,9 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     except CustodyControlError as error:
         print(f"custody control error: {error.code}", file=sys.stderr)
+        return 2
+    except (CustodyExecutionError, CustodyLifecycleError) as error:
+        print(f"custody executor error: {error.code}", file=sys.stderr)
         return 2
     except (PolicyControlError, PolicyDocumentError) as error:
         print(f"policy control error: {error.code}", file=sys.stderr)
@@ -1299,6 +1320,28 @@ def _custody(config: GatewayConfig, args: argparse.Namespace) -> int:
     if args.custody_command == "rewrap":
         return _custody_rewrap(config, args)
     raise CustodyError("custody_command_unsupported")
+
+
+def _custody_executor(config: GatewayConfig, args: argparse.Namespace) -> int:
+    """Run a machine-only custody action through the restricted service boundary.
+
+    This command intentionally has no human actor, approval, plaintext input,
+    or provider/KMS operation. It must run where the distinct
+    ``custody_executor`` credential is available; ordinary gateway and
+    custody-admin environments do not receive that credential.
+    """
+
+    if args.custody_executor_command != "register-assets":
+        raise CustodyExecutionError("custody_executor_command_unsupported")
+    if config.custody_lifecycle is None:
+        raise CustodyExecutionError("custody_lifecycle_configuration_required")
+    service = CustodyExecutorService(config)
+    service.register_asset_catalog()
+    print(
+        "custody asset catalog registered: "
+        f"organizations={len(config.organization_ids)} assets={len(config.custody_lifecycle.assets.assets)}"
+    )
+    return 0
 
 
 def _custody_control(config: GatewayConfig, args: argparse.Namespace) -> int:

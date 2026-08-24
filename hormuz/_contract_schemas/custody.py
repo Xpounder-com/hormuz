@@ -180,6 +180,18 @@ def _validate_custody_control_status_v1(value: Mapping[str, Any]) -> None:
 
 
 def _validate_custody_control_status_v2(value: Mapping[str, Any]) -> None:
+    _validate_custody_control_status_with_execution(value, allow_lifecycle_execution=False)
+
+
+def _validate_custody_control_status_v3(value: Mapping[str, Any]) -> None:
+    _validate_custody_control_status_with_execution(value, allow_lifecycle_execution=True)
+
+
+def _validate_custody_control_status_with_execution(
+    value: Mapping[str, Any],
+    *,
+    allow_lifecycle_execution: bool,
+) -> None:
     _exact_keys(
         value,
         {
@@ -219,10 +231,21 @@ def _validate_custody_control_status_v2(value: Mapping[str, Any]) -> None:
         path = f"execution_attempts[{index}]"
         if not isinstance(attempt, Mapping):
             raise ContractValidationError(f"{path} must be an object")
-        _validate_execution_status_attempt(attempt, organization_id=organization_id, path=path)
+        _validate_execution_status_attempt(
+            attempt,
+            organization_id=organization_id,
+            path=path,
+            allow_lifecycle_execution=allow_lifecycle_execution,
+        )
 
 
-def _validate_execution_status_attempt(value: Mapping[str, Any], *, organization_id: str, path: str) -> None:
+def _validate_execution_status_attempt(
+    value: Mapping[str, Any],
+    *,
+    organization_id: str,
+    path: str,
+    allow_lifecycle_execution: bool,
+) -> None:
     _exact_keys(
         value,
         {
@@ -244,6 +267,8 @@ def _validate_execution_status_attempt(value: Mapping[str, Any], *, organization
     )
     attempt_record = {key: value[key] for key in value if key != "events"}
     validate_custody_execution_attempt(attempt_record)
+    if not allow_lifecycle_execution and attempt_record.get("execution_schema_version") != 1:
+        raise ContractValidationError(f"{path} cannot contain governed lifecycle execution evidence")
     if value.get("organization_id") != organization_id:
         raise ContractValidationError(f"{path}.organization_id is invalid")
     events = value.get("events")

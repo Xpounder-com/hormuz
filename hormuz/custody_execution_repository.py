@@ -2,7 +2,7 @@
 
 This module is deliberately separate from :mod:`hormuz.custody_repository`.
 Custody control records human authority; the executor consumes one approved
-routine intent through a distinct machine credential.  Neither the execution
+governed intent through a distinct machine credential. Neither the execution
 request nor the durable attempt ledger contains plaintext secret material.
 """
 
@@ -15,17 +15,14 @@ from datetime import datetime
 from typing import Any, Mapping, Protocol
 from uuid import UUID
 
-from .custody_repository import CUSTODY_ROUTINE_OPERATIONS
+from .custody_repository import CUSTODY_OPERATIONS, CUSTODY_OPERATION_TARGET_KINDS, CUSTODY_ROUTINE_OPERATIONS
+from .custody_lifecycle import CustodyEnvelopeAttestation, CustodyLifecycleEffect
 
 
 CUSTODY_EXECUTION_STATES = frozenset({"pending", "succeeded", "failed", "outcome_unknown"})
 CUSTODY_EXECUTION_UNKNOWN_REASONS = frozenset({"external_result_ambiguous", "stale_pending"})
 CUSTODY_EXECUTION_FAILURE_REASONS = frozenset({"execution_failed"})
-_ROUTINE_TARGET_KINDS = {
-    "seal_envelope": "envelope",
-    "rewrap_envelope": "envelope",
-    "verify_restore": "restore",
-}
+_EXECUTION_TARGET_KINDS = CUSTODY_OPERATION_TARGET_KINDS
 
 _MAX_EXECUTION_DESCRIPTOR_BYTES = 64 * 1024
 _MAX_EXECUTION_DESCRIPTOR_DEPTH = 16
@@ -33,7 +30,7 @@ _MAX_PROTECTED_INPUT_REFERENCE_BYTES = 4096
 
 
 class CustodyExecutionError(RuntimeError):
-    """Stable, content-free routine-executor failure."""
+    """Stable, content-free governed-executor failure."""
 
     def __init__(self, code: str):
         super().__init__(code)
@@ -62,7 +59,7 @@ class CustodyExecutionRequest:
     def __post_init__(self) -> None:
         _stable_identifier(self.organization_id, "organization_id")
         _operation_id(self.operation_id)
-        if self.operation_type not in CUSTODY_ROUTINE_OPERATIONS:
+        if self.operation_type not in CUSTODY_OPERATIONS:
             raise ValueError("Custody execution operation_type is invalid")
         _canonical_descriptor(self.target, "target")
         _canonical_descriptor(self.parameters, "parameters")
@@ -142,6 +139,18 @@ class CustodyExecutionEvent:
 
 
 @dataclass(frozen=True)
+class CustodyExecutionResult:
+    """Non-secret execution result applied atomically with terminal evidence."""
+
+    lifecycle_effect: CustodyLifecycleEffect | None = None
+    envelope_attestation: CustodyEnvelopeAttestation | None = None
+
+    def __post_init__(self) -> None:
+        if self.lifecycle_effect is not None and self.envelope_attestation is not None:
+            raise ValueError("Custody execution result cannot mix lifecycle and routine evidence")
+
+
+@dataclass(frozen=True)
 class CustodyExecutionAttempt:
     """One immutable root plus its append-only execution event history."""
 
@@ -155,14 +164,19 @@ class CustodyExecutionAttempt:
     protected_input_ref_sha256: str | None
     claimed_at: datetime
     events: tuple[CustodyExecutionEvent, ...]
+    execution_schema_version: int = 2
 
     def __post_init__(self) -> None:
         _stable_identifier(self.organization_id, "organization_id")
         _operation_id(self.execution_id)
         _operation_id(self.operation_id)
-        if self.operation_type not in CUSTODY_ROUTINE_OPERATIONS:
+        if self.execution_schema_version not in {1, 2}:
+            raise ValueError("Custody execution attempt schema_version is invalid")
+        if self.operation_type not in CUSTODY_OPERATIONS:
             raise ValueError("Custody execution attempt operation_type is invalid")
-        if self.target_kind != _ROUTINE_TARGET_KINDS[self.operation_type]:
+        if self.execution_schema_version == 1 and self.operation_type not in CUSTODY_ROUTINE_OPERATIONS:
+            raise ValueError("Custody execution attempt schema_version is invalid")
+        if self.target_kind != _EXECUTION_TARGET_KINDS[self.operation_type]:
             raise ValueError("Custody execution attempt target_kind is invalid")
         _hex_digest(self.target_sha256, "target_sha256")
         _hex_digest(self.parameters_sha256, "parameters_sha256")
@@ -196,7 +210,7 @@ class CustodyExecutionAttempt:
 
         return {
             "execution_schema_id": CUSTODY_EXECUTION_SCHEMA_ID,
-            "execution_schema_version": CUSTODY_EXECUTION_SCHEMA_VERSION,
+            "execution_schema_version": self.execution_schema_version,
             "organization_id": self.organization_id,
             "execution_id": self.execution_id,
             "operation_id": self.operation_id,
@@ -240,6 +254,7 @@ class CustodyExecutionRepository(Protocol):
         execution_id: str,
         state: str,
         reason_code: str | None = None,
+        result: CustodyExecutionResult | None = None,
     ) -> CustodyExecutionAttempt: ...
 
     def sweep_stale_pending(self, *, organization_ids: tuple[str, ...]) -> int: ...

@@ -12,7 +12,7 @@ import os
 import stat
 import tempfile
 from pathlib import Path
-from typing import Mapping
+from typing import Callable, Mapping
 
 from .aws_custody import create_aws_kms_key_custodian, create_s3_object_lock_anchor_sink
 from .config import GatewayConfig
@@ -111,6 +111,7 @@ def resolve_upstream_credentials(
     config: GatewayConfig,
     *,
     environ: Mapping[str, str] | None = None,
+    selection_allowed: Callable[[str], bool] | None = None,
 ) -> dict[str, str]:
     """Resolve server-only upstream credentials from env or sealed envelopes.
 
@@ -118,13 +119,19 @@ def resolve_upstream_credentials(
     A missing environment source remains an empty string so the existing server
     behavior can return the stable provider-shaped unavailable response.
     Encrypted sources fail before listener startup instead of silently falling
-    back to a different source.
+    back to a different source. A runtime projection may decline a protocol
+    before this function reads an environment value or decrypts an envelope;
+    that preserves an envelope's recovery ciphertext without selecting it for
+    a fresh gateway process.
     """
 
     environment = os.environ if environ is None else environ
     result: dict[str, str] = {}
     cipher: EnvelopeCipher | None = None
     for protocol, upstream in config.upstreams.items():
+        if selection_allowed is not None and not selection_allowed(protocol):
+            result[protocol] = ""
+            continue
         if upstream.api_key_env is not None:
             result[protocol] = environment.get(upstream.api_key_env, "")
             continue

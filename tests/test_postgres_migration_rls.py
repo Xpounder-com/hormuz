@@ -36,7 +36,7 @@ class PostgresMigrationRLSTests(PostgresTestCase):
             runtime_role=self.runtime_role,
         )
         self.assertTrue(status.complete)
-        self.assertEqual(status.version, 6)
+        self.assertEqual(status.version, POSTGRES_SCHEMA_VERSION)
     def test_policy_control_role_verifies_only_the_shared_migration_ledger(self) -> None:
         with self.assertRaises(PostgresStorageError) as raised:
             verify_postgres_schema(
@@ -53,7 +53,7 @@ class PostgresMigrationRLSTests(PostgresTestCase):
             verify_runtime_schema=False,
         )
         self.assertTrue(status.complete)
-        self.assertEqual(status.version, 6)
+        self.assertEqual(status.version, POSTGRES_SCHEMA_VERSION)
     def test_schema_v2_upgrade_preserves_evidence_and_rejects_an_old_reader(self) -> None:
         schema = self._create_schema_v2_fixture()
         self._insert_v2_evidence(schema)
@@ -99,7 +99,7 @@ class PostgresMigrationRLSTests(PostgresTestCase):
             custody_control_role=self.custody_control_role,
             custody_executor_role=self.custody_executor_role,
         )
-        self.assertEqual(status.version, 6)
+        self.assertEqual(status.version, POSTGRES_SCHEMA_VERSION)
         store = PostgresUsageStore(
             self.runtime_dsn,
             organization_ids=("acme", "beta"),
@@ -333,7 +333,10 @@ class PostgresMigrationRLSTests(PostgresTestCase):
                 migration = io.StringIO()
                 with redirect_stdout(migration):
                     self.assertEqual(main(["--config", str(config_path), "storage", "migrate"]), 0)
-                self.assertEqual(migration.getvalue(), "PostgreSQL usage storage migration is current: v6\n")
+                self.assertEqual(
+                    migration.getvalue(),
+                    f"PostgreSQL usage storage migration is current: v{POSTGRES_SCHEMA_VERSION}\n",
+                )
 
                 verification = io.StringIO()
                 with redirect_stdout(verification):
