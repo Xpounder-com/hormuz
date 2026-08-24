@@ -129,6 +129,16 @@ class CustodyControlUnitTests(unittest.TestCase):
             config.custody_control.postgres_control_role,
             config.policy_control.postgres_control_role,
         )
+        self.assertEqual(config.custody_executor.postgres_executor_dsn_env, "TEST_EXECUTOR_DSN")
+        self.assertEqual(config.custody_executor.postgres_executor_role, "hormuz_custody_executor_test")
+        self.assertNotEqual(
+            config.custody_executor.postgres_executor_dsn_env,
+            config.custody_control.postgres_control_dsn_env,
+        )
+        self.assertNotEqual(
+            config.custody_executor.postgres_executor_role,
+            config.custody_control.postgres_control_role,
+        )
 
         duplicate_dsn = json.loads(json.dumps(value))
         duplicate_dsn["custody_control"]["postgres_control_dsn_env"] = "TEST_RUNTIME_DSN"
@@ -149,6 +159,21 @@ class CustodyControlUnitTests(unittest.TestCase):
         duplicate_policy_role["custody_control"]["postgres_control_role"] = "hormuz_policy_control_test"
         with self.assertRaises(ConfigError):
             self._load(duplicate_policy_role, environment)
+
+        duplicate_executor_dsn = json.loads(json.dumps(value))
+        duplicate_executor_dsn["custody_executor"]["postgres_executor_dsn_env"] = "TEST_CUSTODY_DSN"
+        with self.assertRaises(ConfigError):
+            self._load(duplicate_executor_dsn, environment)
+
+        duplicate_executor_role = json.loads(json.dumps(value))
+        duplicate_executor_role["custody_executor"]["postgres_executor_role"] = "hormuz_custody_control_test"
+        with self.assertRaises(ConfigError):
+            self._load(duplicate_executor_role, environment)
+
+        local_executor = json.loads(json.dumps(value))
+        local_executor["custody_control"] = {"mode": "local"}
+        with self.assertRaises(ConfigError):
+            self._load(local_executor, environment)
 
         missing_keys = json.loads(json.dumps(value))
         missing_keys.pop("key_custody")
@@ -242,11 +267,17 @@ class CustodyControlUnitTests(unittest.TestCase):
                 {"organization_id": "xpounder", "actor_id": "alice"}
             ],
         }
+        value["custody_executor"] = {
+            "postgres_executor_dsn_env": "TEST_EXECUTOR_DSN",
+            "postgres_executor_role": "hormuz_custody_executor_test",
+            "pending_attempt_ttl_seconds": 900,
+        }
         return value, {
             "HORMUZ_TOKEN": "custody-test-alice-token",
             "TEST_RUNTIME_DSN": "postgresql://runtime.example/hormuz",
             "TEST_MIGRATION_DSN": "postgresql://migration.example/hormuz",
             "TEST_CUSTODY_DSN": "postgresql://custody.example/hormuz",
+            "TEST_EXECUTOR_DSN": "postgresql://executor.example/hormuz",
             "TEST_POLICY_DSN": "postgresql://policy.example/hormuz",
             "HORMUZ_OPENBAO_TOKEN": "openbao-test-token-value",
         }

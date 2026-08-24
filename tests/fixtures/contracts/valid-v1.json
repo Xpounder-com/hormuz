@@ -183,6 +183,99 @@
       }
     ]
   },
+  "custody_control_status_v2": {
+    "schema_id": "hormuz.custody-control-status",
+    "schema_version": 2,
+    "organization_id": "xpounder",
+    "initialized": true,
+    "administrators": [
+      {
+        "authentication_kind": "oidc",
+        "actor_id": null,
+        "issuer": "https://identity.example.com",
+        "subject": "custody-subject-123"
+      }
+    ],
+    "operation_count": 0,
+    "operations": [],
+    "execution_attempt_count": 1,
+    "execution_attempts": [
+      {
+        "execution_schema_id": "hormuz.custody-execution-attempt",
+        "execution_schema_version": 1,
+        "organization_id": "xpounder",
+        "execution_id": "12345678-89ab-4def-8123-456789abcdef",
+        "operation_id": "01234567-89ab-4def-8123-456789abcdef",
+        "operation_type": "seal_envelope",
+        "target_kind": "envelope",
+        "target_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "parameters_sha256": "123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0",
+        "protected_input_ref_sha256": "23456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef01",
+        "claimed_at": "2026-08-23T00:00:00+00:00",
+        "state": "outcome_unknown",
+        "events": [
+          {
+            "event_schema_id": "hormuz.custody-execution-event",
+            "event_schema_version": 1,
+            "organization_id": "xpounder",
+            "execution_id": "12345678-89ab-4def-8123-456789abcdef",
+            "operation_id": "01234567-89ab-4def-8123-456789abcdef",
+            "occurred_at": "2026-08-23T00:00:00+00:00",
+            "sequence": 1,
+            "state": "pending",
+            "reason_code": null
+          },
+          {
+            "event_schema_id": "hormuz.custody-execution-event",
+            "event_schema_version": 1,
+            "organization_id": "xpounder",
+            "execution_id": "12345678-89ab-4def-8123-456789abcdef",
+            "operation_id": "01234567-89ab-4def-8123-456789abcdef",
+            "occurred_at": "2026-08-23T00:20:00+00:00",
+            "sequence": 2,
+            "state": "outcome_unknown",
+            "reason_code": "stale_pending"
+          }
+        ]
+      }
+    ]
+  },
+  "custody_execution_attempt_v1": {
+    "execution_schema_id": "hormuz.custody-execution-attempt",
+    "execution_schema_version": 1,
+    "organization_id": "xpounder",
+    "execution_id": "12345678-89ab-4def-8123-456789abcdef",
+    "operation_id": "01234567-89ab-4def-8123-456789abcdef",
+    "operation_type": "seal_envelope",
+    "target_kind": "envelope",
+    "target_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    "parameters_sha256": "123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0",
+    "protected_input_ref_sha256": "23456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef01",
+    "claimed_at": "2026-08-23T00:00:00+00:00",
+    "state": "pending"
+  },
+  "custody_execution_event_pending_v1": {
+    "event_schema_id": "hormuz.custody-execution-event",
+    "event_schema_version": 1,
+    "organization_id": "xpounder",
+    "execution_id": "12345678-89ab-4def-8123-456789abcdef",
+    "operation_id": "01234567-89ab-4def-8123-456789abcdef",
+    "occurred_at": "2026-08-23T00:00:00+00:00",
+    "sequence": 1,
+    "state": "pending",
+    "reason_code": null
+  },
+  "custody_execution_event_unknown_v1": {
+    "event_schema_id": "hormuz.custody-execution-event",
+    "event_schema_version": 1,
+    "organization_id": "xpounder",
+    "execution_id": "12345678-89ab-4def-8123-456789abcdef",
+    "operation_id": "01234567-89ab-4def-8123-456789abcdef",
+    "occurred_at": "2026-08-23T00:20:00+00:00",
+    "sequence": 2,
+    "state": "outcome_unknown",
+    "reason_code": "stale_pending"
+  },
   "custody_control_event": {
     "event_schema_id": "hormuz.custody-control-event",
     "event_schema_version": 1,

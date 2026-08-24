@@ -28,61 +28,18 @@ from ._contract_schemas.common import (
     _value_string_list,
 )
 from ._contract_schemas.custody import (
-    _validate_custody_control_status,
+    _validate_custody_control_status_v1,
+    _validate_custody_control_status_v2,
     validate_custody_control_event as _validate_custody_control_event_contract,
 )
-from ._contract_schemas.constants import (
-    MANIFEST_SCHEMA_ID,
-    MANIFEST_SCHEMA_VERSION,
-    RELAY_METADATA_SCHEMA_ID,
-    RELAY_METADATA_SCHEMA_VERSION,
-    AUDIT_EVENT_SCHEMA_ID,
-    AUDIT_EVENT_SCHEMA_VERSION,
-    AUDIT_ANCHOR_SCHEMA_ID,
-    AUDIT_ANCHOR_SCHEMA_VERSION,
-    AUDIT_CHAIN_VERSION,
-    AUDIT_CHAIN_ENTRY_SCHEMA_ID,
-    AUDIT_CHAIN_ENTRY_SCHEMA_VERSION,
-    AUDIT_CHAIN_CHECKPOINT_SCHEMA_ID,
-    AUDIT_CHAIN_CHECKPOINT_SCHEMA_VERSION,
-    REQUEST_ATTEMPT_SCHEMA_ID,
-    REQUEST_ATTEMPT_SCHEMA_VERSION,
-    REQUEST_ATTEMPT_EVENT_SCHEMA_ID,
-    REQUEST_ATTEMPT_EVENT_SCHEMA_VERSION,
-    HEALTH_SCHEMA_ID,
-    READINESS_SCHEMA_ID,
-    READINESS_SCHEMA_VERSION,
-    IDENTITY_SCHEMA_ID,
-    USAGE_SUMMARY_SCHEMA_ID,
-    ERROR_SCHEMA_ID,
-    ERROR_SCHEMA_VERSION,
-    POLICY_DECISION_SCHEMA_ID,
-    POLICY_CONTROL_STATUS_SCHEMA_ID,
-    POLICY_DOCUMENT_SCHEMA_ID,
-    POLICY_DOCUMENT_SCHEMA_VERSION,
-    POLICY_CONTROL_EVENT_SCHEMA_ID,
-    POLICY_CONTROL_EVENT_SCHEMA_VERSION,
-    CUSTODY_CONTROL_STATUS_SCHEMA_ID,
-    CUSTODY_CONTROL_STATUS_SCHEMA_VERSION,
-    CUSTODY_CONTROL_EVENT_SCHEMA_ID,
-    CUSTODY_CONTROL_EVENT_SCHEMA_VERSION,
-    USAGE_REPORT_SCHEMA_ID,
-    COST_BASIS_CONFIGURED_RATE_CARD_ESTIMATE,
-    ALLOCATION_BASIS_DIRECT_GATEWAY_REQUEST,
-    COVERAGE_GATEWAY_CAPTURED_REQUESTS_ONLY,
-    PUBLIC_ERROR_CODES_V1,
-    PUBLIC_ERROR_CODES,
-    _CURRENT_SCHEMA_VERSIONS,
-    _REQUEST_STATUSES,
-    _REQUEST_ATTEMPT_STATES,
-    _REQUEST_ATTEMPT_UNKNOWN_REASONS,
-    _IDENTITY_TYPES,
-    _POLICY_ACTIONS,
-    _POLICY_CONTROL_EVENT_TYPES,
-    _POLICY_CHANGE_FIELDS,
-    _POLICY_EGRESS_FIELDS,
-    _POLICY_BREAK_GLASS_REASONS,
+from ._contract_schemas.custody_execution import (
+    validate_custody_execution_attempt as _validate_custody_execution_attempt_contract,
+    validate_custody_execution_event as _validate_custody_execution_event_contract,
 )
+# This facade deliberately re-exports the stable schema vocabulary without
+# duplicating its ownership in the public compatibility module.
+from ._contract_schemas.constants import *  # noqa: F403
+from ._contract_schemas.constants import _CURRENT_SCHEMA_VERSIONS, _REQUEST_STATUSES
 from ._contract_schemas.health import (
     _validate_error,
     _validate_health,
@@ -289,6 +246,21 @@ def contract_manifest() -> dict[str, object]:
             ),
             _manifest_schema(
                 CUSTODY_CONTROL_STATUS_SCHEMA_ID,
+                1,
+                "cli-output",
+                "hormuz",
+                [
+                    "schema_id",
+                    "schema_version",
+                    "organization_id",
+                    "initialized",
+                    "administrators",
+                    "content-free operation approvals",
+                ],
+                legacy=True,
+            ),
+            _manifest_schema(
+                CUSTODY_CONTROL_STATUS_SCHEMA_ID,
                 CUSTODY_CONTROL_STATUS_SCHEMA_VERSION,
                 "cli-output",
                 "hormuz",
@@ -299,6 +271,7 @@ def contract_manifest() -> dict[str, object]:
                     "initialized",
                     "administrators",
                     "content-free operation approvals",
+                    "content-free routine execution attempts",
                 ],
             ),
             _manifest_schema(
@@ -315,6 +288,35 @@ def contract_manifest() -> dict[str, object]:
                     "operation type and risk",
                     "target and parameter digests",
                     "approval counts and expiry",
+                ],
+            ),
+            _manifest_schema(
+                CUSTODY_EXECUTION_SCHEMA_ID,
+                CUSTODY_EXECUTION_SCHEMA_VERSION,
+                "durable-evidence",
+                "hormuz",
+                [
+                    "execution_id",
+                    "operation_id",
+                    "routine operation type",
+                    "target and parameter digests",
+                    "protected input reference digest",
+                    "claimed_at",
+                    "state",
+                ],
+            ),
+            _manifest_schema(
+                CUSTODY_EXECUTION_EVENT_SCHEMA_ID,
+                CUSTODY_EXECUTION_EVENT_SCHEMA_VERSION,
+                "durable-evidence",
+                "hormuz",
+                [
+                    "execution_id",
+                    "operation_id",
+                    "occurred_at",
+                    "sequence",
+                    "state",
+                    "reason_code",
                 ],
             ),
             _manifest_schema(
@@ -591,7 +593,8 @@ def validate_contract(value: Mapping[str, Any]) -> None:
         (ERROR_SCHEMA_ID, ERROR_SCHEMA_VERSION): lambda item: _validate_error(item, PUBLIC_ERROR_CODES),
         (POLICY_DECISION_SCHEMA_ID, 1): _validate_policy_decision,
         (POLICY_CONTROL_STATUS_SCHEMA_ID, 1): _validate_policy_control_status,
-        (CUSTODY_CONTROL_STATUS_SCHEMA_ID, CUSTODY_CONTROL_STATUS_SCHEMA_VERSION): _validate_custody_control_status,
+        (CUSTODY_CONTROL_STATUS_SCHEMA_ID, 1): _validate_custody_control_status_v1,
+        (CUSTODY_CONTROL_STATUS_SCHEMA_ID, CUSTODY_CONTROL_STATUS_SCHEMA_VERSION): _validate_custody_control_status_v2,
         (USAGE_REPORT_SCHEMA_ID, 1): _validate_usage_report,
         (AUDIT_ANCHOR_SCHEMA_ID, AUDIT_ANCHOR_SCHEMA_VERSION): _validate_audit_anchor,
         (AUDIT_CHAIN_ENTRY_SCHEMA_ID, AUDIT_CHAIN_ENTRY_SCHEMA_VERSION): _validate_audit_chain_entry,
@@ -668,6 +671,18 @@ def validate_custody_control_event(value: Mapping[str, Any]) -> None:
     """Validate one metadata-only immutable custody-control evidence row."""
 
     _validate_custody_control_event_contract(value)
+
+
+def validate_custody_execution_attempt(value: Mapping[str, Any]) -> None:
+    """Validate one immutable metadata-only custody-executor attempt root."""
+
+    _validate_custody_execution_attempt_contract(value)
+
+
+def validate_custody_execution_event(value: Mapping[str, Any]) -> None:
+    """Validate one immutable custody-executor state transition."""
+
+    _validate_custody_execution_event_contract(value)
 
 
 def validate_policy_action(value: str) -> None:

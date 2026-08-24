@@ -166,6 +166,13 @@ class PostgresTestCase(unittest.TestCase):
             cls.custody_control_role,
             cls.custody_control_password,
         )
+        cls.custody_executor_role = f"hormuz_custody_executor_{suffix}"
+        cls.custody_executor_password = "hormuz-custody-executor-test-password"
+        cls.custody_executor_dsn = _runtime_dsn(
+            cls.owner_dsn,
+            cls.custody_executor_role,
+            cls.custody_executor_password,
+        )
         cls.addClassCleanup(cls._cleanup_test_resources)
         with psycopg.connect(cls.owner_dsn, autocommit=True) as connection:
             with connection.cursor() as cursor:
@@ -184,12 +191,18 @@ class PostgresTestCase(unittest.TestCase):
                         "CREATE ROLE {} LOGIN PASSWORD {} NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS"
                     ).format(sql.Identifier(cls.custody_control_role), sql.Literal(cls.custody_control_password))
                 )
+                cursor.execute(
+                    sql.SQL(
+                        "CREATE ROLE {} LOGIN PASSWORD {} NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS"
+                    ).format(sql.Identifier(cls.custody_executor_role), sql.Literal(cls.custody_executor_password))
+                )
         first = migrate_postgres(
             cls.owner_dsn,
             schema=cls.schema,
             runtime_role=cls.runtime_role,
             policy_control_role=cls.policy_control_role,
             custody_control_role=cls.custody_control_role,
+            custody_executor_role=cls.custody_executor_role,
         )
         second = migrate_postgres(
             cls.owner_dsn,
@@ -197,6 +210,7 @@ class PostgresTestCase(unittest.TestCase):
             runtime_role=cls.runtime_role,
             policy_control_role=cls.policy_control_role,
             custody_control_role=cls.custody_control_role,
+            custody_executor_role=cls.custody_executor_role,
         )
         if first != second:
             raise AssertionError("PostgreSQL migrations are not idempotent")
@@ -211,11 +225,14 @@ class PostgresTestCase(unittest.TestCase):
                 cursor.execute(cls.sql.SQL("DROP ROLE IF EXISTS {}").format(cls.sql.Identifier(cls.runtime_role)))
                 cursor.execute(cls.sql.SQL("DROP ROLE IF EXISTS {}").format(cls.sql.Identifier(cls.policy_control_role)))
                 cursor.execute(cls.sql.SQL("DROP ROLE IF EXISTS {}").format(cls.sql.Identifier(cls.custody_control_role)))
+                cursor.execute(cls.sql.SQL("DROP ROLE IF EXISTS {}").format(cls.sql.Identifier(cls.custody_executor_role)))
 
     def setUp(self) -> None:
         with self.psycopg.connect(self.owner_dsn, autocommit=True) as connection:
             with connection.cursor() as cursor:
                 tables = (
+                    "custody_execution_events",
+                    "custody_execution_attempts",
                     "custody_control_events",
                     "custody_operation_approvals",
                     "custody_operation_intents",
@@ -605,6 +622,11 @@ class PostgresTestCase(unittest.TestCase):
             "authorization_ttl_seconds": authorization_ttl_seconds,
             "bootstrap_administrators": administrators,
         }
+        value["custody_executor"] = {
+            "postgres_executor_dsn_env": "TEST_POSTGRES_CUSTODY_EXECUTOR_DSN",
+            "postgres_executor_role": self.custody_executor_role,
+            "pending_attempt_ttl_seconds": authorization_ttl_seconds,
+        }
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         path = Path(temporary.name) / "hormuz-managed-custody.json"
@@ -614,6 +636,7 @@ class PostgresTestCase(unittest.TestCase):
             "TEST_POSTGRES_RUNTIME_DSN": self.runtime_dsn,
             "TEST_POSTGRES_MIGRATION_DSN": self.owner_dsn,
             "TEST_POSTGRES_CUSTODY_CONTROL_DSN": self.custody_control_dsn,
+            "TEST_POSTGRES_CUSTODY_EXECUTOR_DSN": self.custody_executor_dsn,
             "HORMUZ_CUSTODY_ADMIN_TOKEN": "custody-test-alice-token",
             "HORMUZ_OPENBAO_TOKEN": "openbao-test-token-value",
         }

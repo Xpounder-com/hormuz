@@ -198,6 +198,21 @@ class CustodyControlConfig:
 
 
 @dataclass(frozen=True)
+class CustodyExecutorConfig:
+    """Dedicated machine credential and recovery window for custody execution.
+
+    This configuration is safe to distribute with the normal gateway config:
+    it contains only the name of an executor-only secret source. The secret
+    itself and the customer key-service credential belong only to the isolated
+    executor process.
+    """
+
+    postgres_executor_dsn_env: str = "HORMUZ_CUSTODY_EXECUTOR_DSN"
+    postgres_executor_role: str = "hormuz_custody_executor"
+    pending_attempt_ttl_seconds: int = 900
+
+
+@dataclass(frozen=True)
 class Identity:
     token_env: str
     token: str = field(repr=False)
@@ -310,6 +325,7 @@ class GatewayConfig:
     usage_storage: UsageStorageConfig = field(default_factory=UsageStorageConfig)
     policy_control: PolicyControlConfig = field(default_factory=PolicyControlConfig)
     custody_control: CustodyControlConfig = field(default_factory=CustodyControlConfig)
+    custody_executor: CustodyExecutorConfig = field(default_factory=CustodyExecutorConfig)
     key_custody: KeyCustodyConfig | None = None
     audit_anchor: AuditAnchorConfig | None = None
     audit_chain: AuditChainConfig | None = None

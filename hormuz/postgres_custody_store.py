@@ -24,6 +24,7 @@ from .custody_repository import (
     required_approvals,
     validate_sha256,
 )
+from .postgres_custody_executor_store import load_custody_execution_status
 from .postgres import PostgresConnectionPool, PostgresStorageError, postgres_transaction, verify_postgres_schema
 
 
@@ -520,12 +521,17 @@ class PostgresCustodyControlStore:
                     _operation_from_row(row, approvals=tuple(approvals_by_operation[str(row["operation_id"])]))
                     for row in rows
                 )
+                execution_status = load_custody_execution_status(
+                    cursor,
+                    organization_id=organization_id,
+                )
         return CustodyControlStatus(
             organization_id=organization_id,
             initialized=initialized,
             administrators=administrators,
             operation_count=operation_count,
             operations=operations,
+            execution_status=execution_status,
         )
 
     def _load_operation(self, cursor: Any, *, organization_id: str, operation_id: str) -> CustodyOperationIntent:

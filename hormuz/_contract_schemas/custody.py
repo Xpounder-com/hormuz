@@ -21,6 +21,7 @@ from .constants import (
     _CUSTODY_CONTROL_EVENT_TYPES,
     _CUSTODY_OPERATION_TYPES,
 )
+from .custody_execution import validate_custody_execution_attempt, validate_custody_execution_event
 
 
 _TARGET_KINDS = {
@@ -141,7 +142,7 @@ def validate_custody_control_event(value: Mapping[str, Any]) -> None:
         raise ContractValidationError("operation_authorized requires every approval")
 
 
-def _validate_custody_control_status(value: Mapping[str, Any]) -> None:
+def _validate_custody_control_status_v1(value: Mapping[str, Any]) -> None:
     _exact_keys(
         value,
         {
@@ -176,6 +177,96 @@ def _validate_custody_control_status(value: Mapping[str, Any]) -> None:
         if not isinstance(operation, Mapping):
             raise ContractValidationError(f"{path} must be an object")
         _validate_status_operation(operation, path=path)
+
+
+def _validate_custody_control_status_v2(value: Mapping[str, Any]) -> None:
+    _exact_keys(
+        value,
+        {
+            "schema_id",
+            "schema_version",
+            "organization_id",
+            "initialized",
+            "administrators",
+            "operation_count",
+            "operations",
+            "execution_attempt_count",
+            "execution_attempts",
+        },
+    )
+    _validate_custody_control_status_v1(
+        {
+            key: value[key]
+            for key in {
+                "schema_id",
+                "schema_version",
+                "organization_id",
+                "initialized",
+                "administrators",
+                "operation_count",
+                "operations",
+            }
+        }
+    )
+    attempt_count = _value_integer(value, "execution_attempt_count", minimum=0)
+    attempts = value.get("execution_attempts")
+    if not isinstance(attempts, list):
+        raise ContractValidationError("execution_attempts must be an array")
+    if attempt_count < len(attempts):
+        raise ContractValidationError("execution_attempt_count cannot be smaller than execution_attempts")
+    organization_id = _value_string(value, "organization_id")
+    for index, attempt in enumerate(attempts):
+        path = f"execution_attempts[{index}]"
+        if not isinstance(attempt, Mapping):
+            raise ContractValidationError(f"{path} must be an object")
+        _validate_execution_status_attempt(attempt, organization_id=organization_id, path=path)
+
+
+def _validate_execution_status_attempt(value: Mapping[str, Any], *, organization_id: str, path: str) -> None:
+    _exact_keys(
+        value,
+        {
+            "execution_schema_id",
+            "execution_schema_version",
+            "organization_id",
+            "execution_id",
+            "operation_id",
+            "operation_type",
+            "target_kind",
+            "target_sha256",
+            "parameters_sha256",
+            "protected_input_ref_sha256",
+            "claimed_at",
+            "state",
+            "events",
+        },
+        path=path,
+    )
+    attempt_record = {key: value[key] for key in value if key != "events"}
+    validate_custody_execution_attempt(attempt_record)
+    if value.get("organization_id") != organization_id:
+        raise ContractValidationError(f"{path}.organization_id is invalid")
+    events = value.get("events")
+    if not isinstance(events, list) or not events or len(events) > 2:
+        raise ContractValidationError(f"{path}.events is invalid")
+    expected_sequence = 1
+    state: str | None = None
+    for event_index, event in enumerate(events):
+        event_path = f"{path}.events[{event_index}]"
+        if not isinstance(event, Mapping):
+            raise ContractValidationError(f"{event_path} must be an object")
+        validate_custody_execution_event(event)
+        if (
+            event.get("organization_id") != organization_id
+            or event.get("execution_id") != value.get("execution_id")
+            or event.get("operation_id") != value.get("operation_id")
+            or event.get("sequence") != expected_sequence
+        ):
+            raise ContractValidationError(f"{event_path} does not match its execution attempt")
+        expected_sequence += 1
+        state = str(event.get("state"))
+    if value.get("state") != state:
+        raise ContractValidationError(f"{path}.state does not match its event history")
 
 
 def _validate_administrator(value: Mapping[str, Any], *, path: str) -> None:
