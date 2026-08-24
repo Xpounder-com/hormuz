@@ -1,0 +1,15 @@
+{
+  "blank_issues_enabled": false,
+  "contact_links": [
+    {
+      "name": "Private security report",
+      "url": "https://github.com/Xpounder-com/hormuz/security/advisories/new",
+      "about": "Report vulnerabilities privately. Never publish credentials, bypass details, prompts, responses, or customer data."
+    },
+    {
+      "name": "Public-alpha support boundary",
+      "url": "https://github.com/Xpounder-com/hormuz/blob/main/SUPPORT.md",
+      "about": "Check supported versions, response expectations, and the correct public report path."
+    }
+  ]
+}
