@@ -1,12 +1,50 @@
 # Hormuz
 
-Hormuz is a CLI-first enterprise control plane that puts organization policy between employees' existing AI clients and model providers. It currently proxies the OpenAI Responses API used by Codex and the Anthropic Messages API used by Claude Code.
+Keep Codex and Claude Code. Put company policy in between.
 
-The first executable milestone enforces client, model, output-token, monthly-token, team-budget, and per-person budget rules. It records metadata-only usage in a local SQLite ledger or an explicitly configured PostgreSQL usage/evidence repository, estimates cost from configured rate cards, and keeps provider API keys on the Hormuz server rather than distributing them to employees.
+Hormuz is a CLI-first AI gateway and control plane. It authenticates the person
+and team behind each request, enforces which clients, models, output limits,
+budgets, and secret-egress rules apply, routes allowed traffic to OpenAI or
+Anthropic, and records versioned metadata-only evidence. Employees keep their
+existing AI clients; company provider credentials stay on the Hormuz service.
 
-The included rate cards are examples current as of August 15, 2026. Treat them as versioned configuration: verify them against provider pricing before production use and reconcile estimated spend against provider invoices.
+Hormuz is a **public open-source alpha**, not a production-ready or
+enterprise-HA release. Use it with synthetic data for evaluation. Its current
+proofs do not establish production security, availability, disaster recovery,
+provider-invoice accuracy, or suitability for customer secrets.
 
-Hormuz is alpha software. The local prototype proves routing and policy behavior; it is not yet a production-ready multi-tenant service.
+## Try the real gateway without a provider account
+
+From a clean checkout on the release-gated Linux source path:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --editable .
+hormuz demo
+```
+
+The install may download Python dependencies. The demonstration itself uses
+only disposable loopback listeners: it needs no configuration, API key, model
+account, or provider network call. It sends synthetic requests through the
+real Hormuz HTTP, policy, redaction, request-attempt, and SQLite evidence path,
+then reports:
+
+```text
+PASS allowed request reached the loopback provider simulator
+PASS unapproved model was rerouted and output-capped
+PASS detected secret was redacted before provider egress
+PASS denied request made no provider call
+PASS content-free evidence validated: 4 usage events, 1 security event
+PASS external provider calls: 0 (3 loopback simulator calls)
+```
+
+The command validates the existing versioned evidence contracts, proves its
+synthetic request, response, identity, and credential values are absent from
+the ledger, and removes the temporary configuration and database before it
+exits. It is an executable product tour, not a provider-compatibility or
+production-deployment claim. Its `PASS` lines are human diagnostic output, not
+a new machine-readable compatibility contract.
 
 ## What works
 
@@ -34,7 +72,40 @@ Hormuz is alpha software. The local prototype proves routing and policy behavior
 - OCI supply-chain evidence that blocks fixable HIGH/CRITICAL findings while retaining all other scanner observations, plus a two-build byte-for-byte reproducibility gate.
 - A digest-pinned, disposable PostgreSQL logical backup-and-restore exercise that verifies metadata-only governed state and retains only a content-free recovery summary.
 
-## Quick start
+The included rate cards are examples current as of August 15, 2026. Treat them
+as versioned configuration: verify them against provider pricing before
+production use and reconcile estimated spend against provider invoices.
+
+## Architecture and maturity
+
+```text
+Codex / Claude Code
+        |
+authenticated person + team
+        |
+policy -> allow / deny / reroute / cap
+        |
+secret control -> redact / deny
+        |
+OpenAI / Anthropic
+
+Every governed outcome -> versioned metadata-only evidence
+```
+
+Hormuz governs provider-bound requests and their organizational usage
+evidence. It is not an identity provider, model, organizational memory,
+metadata compiler, or employee-productivity system.
+
+| Status | Public-alpha boundary |
+| --- | --- |
+| Production-ready | None claimed. The alpha is for evaluation and design-partner hardening. |
+| Implemented alpha | OpenAI/Anthropic-compatible gateway paths, policy enforcement, secret controls, identity binding, and metadata-only usage/evidence. |
+| Verified reference | Only the exact evidence-gated profiles in [SUPPORT.md](SUPPORT.md), including the Linux Python matrix and candidate `linux/amd64` OCI runtime. A verified reference is not unrestricted certification. |
+| Experimental | The context experiment is a separate package and is absent from the core wheel and gateway runtime. |
+| Deferred | Organizational memory, ticketing, workflow/productivity measurement, and new reporting dimensions are outside the current core. |
+| Unfinished | Public release publication, live BYO-provider release evidence, production HA/DR, cloud-specific certification, and independent review remain separate release gates. |
+
+## Configure real providers and clients
 
 Hormuz requires Python 3.11 or newer. OIDC verification uses PyJWT and `cryptography`; signature verification is intentionally delegated to maintained security libraries rather than implemented in Hormuz.
 
@@ -55,6 +126,10 @@ python3 -m hormuz --config hormuz.json client-config claude
 ```
 
 Employees authenticate to Hormuz with their unique `HORMUZ_TOKEN`. Hormuz removes that credential and authenticates upstream with the company's provider key.
+
+Continue with [Codex setup](docs/CLIENTS.md#codex),
+[Claude Code setup](docs/CLIENTS.md#claude-code), or the
+[signed OCI digest verification boundary](docs/OCI.md#protected-release-workflow).
 
 ## Policies and usage
 
@@ -123,8 +198,8 @@ The current hardening program focuses on a minimal gateway core: policy enforcem
 
 ## Community and support
 
-Read [CONTRIBUTING.md](CONTRIBUTING.md) before proposing a change and
-[SUPPORT.md](SUPPORT.md) before filing an installation or compatibility report.
-Suspected vulnerabilities must follow the private path in
-[SECURITY.md](SECURITY.md), never a public issue. Participation is governed by
-[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
+Read [contribution guidance](CONTRIBUTING.md) before proposing a change and
+[public-alpha support](SUPPORT.md) before filing an installation or
+compatibility report. Suspected vulnerabilities must follow the
+[private security path](SECURITY.md), never a public issue. Participation is
+governed by the [Code of Conduct](CODE_OF_CONDUCT.md).

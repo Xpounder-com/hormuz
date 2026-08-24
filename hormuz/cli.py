@@ -92,6 +92,10 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     subparsers.add_parser("serve", help="Run the OpenAI Responses and Anthropic Messages gateway")
+    subparsers.add_parser(
+        "demo",
+        help="Run the provider-free governed-policy quickstart on loopback",
+    )
     subparsers.add_parser("doctor", help="Validate configuration and required credentials")
     subparsers.add_parser("contract-manifest", help="Print the stable policy and evidence schema manifest")
     status = subparsers.add_parser("status", help="Print a current-month usage and cost report")
@@ -408,7 +412,7 @@ def main(argv: list[str] | None = None) -> int:
         return _context_experiment_moved()
     args = build_parser().parse_args(raw_argv)
     logging.basicConfig(
-        level=logging.DEBUG if args.verbose else logging.INFO,
+        level=logging.DEBUG if args.verbose else logging.WARNING if args.command == "demo" else logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
     if args.command == "auth" and args.auth_command == "token":
@@ -416,6 +420,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "contract-manifest":
         print(json.dumps(contract_manifest(), indent=2, sort_keys=True))
         return 0
+    if args.command == "demo":
+        return _provider_free_demo()
     try:
         config = GatewayConfig.load(args.config)
         if args.command == "serve":
@@ -504,6 +510,33 @@ def _context_experiment_moved() -> int:
         file=sys.stderr,
     )
     return 2
+
+
+def _provider_free_demo() -> int:
+    """Run the synthetic quickstart without loading customer configuration."""
+
+    from .demo import ProviderFreeDemoError, run_provider_free_demo
+
+    try:
+        result = run_provider_free_demo()
+    except ProviderFreeDemoError as error:
+        print(f"provider-free demo failed: {error.code}", file=sys.stderr)
+        return 1
+    print("Hormuz provider-free governed-policy demo")
+    print("PASS allowed request reached the loopback provider simulator")
+    print("PASS unapproved model was rerouted and output-capped")
+    print("PASS detected secret was redacted before provider egress")
+    print("PASS denied request made no provider call")
+    print(
+        "PASS content-free evidence validated: "
+        f"{result.usage_events} usage events, {result.security_events} security event"
+    )
+    print(
+        "PASS external provider calls: 0 "
+        f"({result.provider_simulator_calls} loopback simulator calls)"
+    )
+    print(f"Completed in {result.elapsed_seconds:.2f} seconds; temporary evidence removed")
+    return 0
 
 
 def _serve(config: GatewayConfig) -> int:

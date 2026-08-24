@@ -32,6 +32,8 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: Install Hormuz in editable mode
         run: python -m pip install --editable .
+      - name: Run provider-free five-minute quickstart
+        run: hormuz demo
       - name: Verify active-core secret custody inventory
         run: python tools/verify_secret_inventory.py
       - name: Run unit and gateway integration tests
@@ -69,6 +71,7 @@ jobs:
             dist/hormuz-*.whl \
             experiments/context/dist/hormuz_context_experiment-*.whl
           "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" --help
+          "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" demo
           "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" auth token --help
           "$RUNNER_TEMP/hormuz-wheel/bin/hormuz-context-experiment" --help
           HORMUZ_TOKEN=test-identity-token "$RUNNER_TEMP/hormuz-wheel/bin/hormuz-context-experiment" \
