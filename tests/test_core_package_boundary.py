@@ -7,6 +7,7 @@ import json
 import socket
 import sys
 import tempfile
+import tomllib
 import unittest
 from contextlib import redirect_stderr
 from dataclasses import replace
@@ -51,6 +52,18 @@ class CorePackageBoundaryTests(unittest.TestCase):
             self.assertEqual(main(["--config", "missing.json", "context-pack"]), 2)
         load_config.assert_not_called()
         self.assertIn("context_experiment_moved", stderr.getvalue())
+
+    def test_context_experiment_tracks_the_current_core_minor_line(self) -> None:
+        core = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+        experiment = tomllib.loads(
+            (ROOT / "experiments" / "context" / "pyproject.toml").read_text(
+                encoding="utf-8"
+            )
+        )
+        major, minor, _patch = core["project"]["version"].split(".")
+        expected = f"hormuz>={major}.{minor}.0,<{major}.{int(minor) + 1}.0"
+
+        self.assertEqual(experiment["project"]["dependencies"], [expected])
 
     def test_legacy_context_configuration_fails_closed(self) -> None:
         payload = json.loads((ROOT / "config.example.json").read_text(encoding="utf-8"))
