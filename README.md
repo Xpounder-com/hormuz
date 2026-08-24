@@ -29,8 +29,9 @@ Hormuz is alpha software. The local prototype proves routing and policy behavior
 - Versioned unauthenticated liveness and dependency-readiness probes for deployment health checks; readiness never calls a provider and turns unavailable before graceful shutdown drains requests.
 - Bounded, duplicate-free, schema-strict configuration loading before any identity, secret, storage, provider, or listener initialization.
 - A customer-controlled TLS reference boundary: public TLS stays at customer ingress, while a non-loopback Hormuz listener requires an authenticated, network-restricted proxy hop.
-- A digest-pinned, non-root OCI reference runtime with externally mounted configuration and durable SQLite data; its executable boundary is intentionally narrower than a published or production-certified deployment.
-- Candidate OCI supply-chain evidence: a CycloneDX SBOM and pinned Trivy scan that block only HIGH/CRITICAL findings with a scanner-reported fixed version, while retaining all other findings for review.
+- A deterministic `linux/amd64`, non-root OCI runtime with hash-locked Python wheels, externally mounted configuration, and durable SQLite data.
+- A protected release workflow for the portable signed OCI digest: private GHCR first publication, keyless GitHub OIDC/Cosign image signing with public Rekor, strictly validated registry-only CycloneDX and bounded provenance attestations, exact-workflow verification, and no mutable `latest` tag.
+- OCI supply-chain evidence that blocks fixable HIGH/CRITICAL findings while retaining all other scanner observations, plus a two-build byte-for-byte reproducibility gate.
 - A digest-pinned, disposable PostgreSQL logical backup-and-restore exercise that verifies metadata-only governed state and retains only a content-free recovery summary.
 
 ## Quick start

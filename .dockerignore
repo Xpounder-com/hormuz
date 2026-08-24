@@ -8,6 +8,9 @@
 !.dockerignore
 !pyproject.toml
 !README.md
+!requirements/
+!requirements/oci-build-linux-amd64.lock
+!requirements/oci-runtime-linux-amd64.lock
 !hormuz/
 !hormuz/**
 !tools/

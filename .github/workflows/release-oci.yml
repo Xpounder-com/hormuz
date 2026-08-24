@@ -1,0 +1,353 @@
+name: Release signed OCI digest
+
+on:
+  push:
+    tags:
+      - "v[0-9]*.[0-9]*.[0-9]*"
+
+permissions:
+  contents: read
+  id-token: write
+  packages: write
+
+concurrency:
+  group: oci-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Publish and verify signed linux/amd64 digest
+    if: ${{ github.repository == 'Xpounder-com/hormuz' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      IMAGE: ghcr.io/xpounder-com/hormuz
+      SIGSTORE_ISSUER: https://token.actions.githubusercontent.com
+    steps:
+      - name: Check out the complete protected tag history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+
+      - name: Allocate the runner-local evidence directory
+        run: |
+          evidence_dir="$RUNNER_TEMP/hormuz-oci-release"
+          tuf_root="$RUNNER_TEMP/hormuz-sigstore-tuf"
+          mkdir -p "$evidence_dir"
+          mkdir -p "$tuf_root"
+          printf 'EVIDENCE_DIR=%s\n' "$evidence_dir" >> "$GITHUB_ENV"
+          printf 'TUF_ROOT=%s\n' "$tuf_root" >> "$GITHUB_ENV"
+
+      - name: Verify repository, workflow, protected annotated tag, and version
+        id: preflight
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p "$EVIDENCE_DIR"
+          tag="${GITHUB_REF#refs/tags/}"
+          repository_visibility="$(gh api "/repos/$GITHUB_REPOSITORY" --jq .visibility)"
+          python3 tools/verify_oci_release_preflight.py \
+            --repository "$GITHUB_REPOSITORY" \
+            --repository-visibility "$repository_visibility" \
+            --ref "$GITHUB_REF" \
+            --workflow-ref "$GITHUB_WORKFLOW_REF" \
+            --commit "$GITHUB_SHA" \
+            --ref-protected "$GITHUB_REF_PROTECTED" \
+            --tag "$tag" \
+            --pyproject pyproject.toml \
+            --output "$EVIDENCE_DIR/preflight.json"
+          python3 -c '
+          import json, pathlib, sys
+          value = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+          release = value["release"]
+          signing = value["signing"]
+          for key, item in (
+              ("tag", release["tag"]),
+              ("version", release["package_version"]),
+              ("commit", release["commit"]),
+              ("source_date_epoch", release["source_date_epoch"]),
+              ("workflow_identity", signing["workflow_identity"]),
+          ):
+              print(f"{key}={item}")
+          ' "$EVIDENCE_DIR/preflight.json" >> "$GITHUB_OUTPUT"
+
+      - name: Set up pinned Buildx and BuildKit
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+        with:
+          version: v0.36.1
+          driver: docker-container
+          driver-opts: image=moby/buildkit@sha256:28a898719c18a33f4e8000685287fa36fd0dd9560c6440227d3a732d79bb41d8
+
+      - name: Record the exact builder boundary
+        run: |
+          docker buildx version > "$EVIDENCE_DIR/buildx-version.txt"
+          docker buildx inspect --bootstrap > "$EVIDENCE_DIR/buildx-inspect.txt"
+          grep -F 'v0.36.1' "$EVIDENCE_DIR/buildx-version.txt"
+          grep -F 'v0.32.2' "$EVIDENCE_DIR/buildx-inspect.txt"
+
+      - name: Prove the unsigned payload is reproducible
+        env:
+          HORMUZ_OCI_REPRODUCIBILITY_EVIDENCE_DIR: ${{ runner.temp }}/hormuz-oci-release/reproducibility
+          HORMUZ_OCI_REPRODUCIBILITY_REVISION: ${{ steps.preflight.outputs.commit }}
+          HORMUZ_OCI_REPRODUCIBILITY_SOURCE_DATE_EPOCH: ${{ steps.preflight.outputs.source_date_epoch }}
+          HORMUZ_OCI_REPRODUCIBILITY_TAG: ${{ steps.preflight.outputs.tag }}
+        run: ./tools/verify_oci_reproducibility.sh
+
+      - name: Log in to the first publication registry
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+          logout: true
+
+      - name: Publish the commit-addressed candidate without a release tag
+        id: publish
+        env:
+          COMMIT: ${{ steps.preflight.outputs.commit }}
+          SOURCE_DATE_EPOCH: ${{ steps.preflight.outputs.source_date_epoch }}
+          VERSION: ${{ steps.preflight.outputs.version }}
+        run: |
+          candidate="$IMAGE:sha-$COMMIT"
+          expected_digest="$(python3 -c 'import json, pathlib, sys; print(json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))["artifact"]["digest"])' "$EVIDENCE_DIR/reproducibility/summary.json")"
+          if docker buildx imagetools inspect "$candidate" >/dev/null 2>&1; then
+            digest="$(docker buildx imagetools inspect --format '{{json .}}' "$candidate" | jq -er '.manifest.digest')"
+          else
+            docker buildx build \
+              --platform linux/amd64 \
+              --pull \
+              --no-cache \
+              --provenance=false \
+              --sbom=false \
+              --output "type=image,name=$candidate,push=true,rewrite-timestamp=true" \
+              --build-arg "HORMUZ_VERSION=$VERSION" \
+              --build-arg "VCS_REF=$COMMIT" \
+              --build-arg "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH" \
+              --metadata-file "$EVIDENCE_DIR/publish-metadata.json" \
+              --file Dockerfile \
+              .
+            digest="$(python3 -c 'import json, pathlib, sys; print(json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))["containerimage.digest"])' "$EVIDENCE_DIR/publish-metadata.json")"
+          fi
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || {
+            echo "registry did not return a complete SHA-256 manifest digest" >&2
+            exit 1
+          }
+          if [[ "$digest" != "$expected_digest" ]]; then
+            echo "published candidate digest differs from the reproducible payload" >&2
+            exit 1
+          fi
+          printf 'digest=%s\n' "$digest" >> "$GITHUB_OUTPUT"
+          printf 'candidate=%s\n' "$candidate" >> "$GITHUB_OUTPUT"
+
+      - name: Confirm the first GHCR publication remains private
+        id: registry
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          visibility="$(gh api /orgs/Xpounder-com/packages/container/hormuz --jq .visibility)"
+          [[ "$visibility" == "private" ]] || {
+            echo "GHCR package visibility is not private" >&2
+            exit 1
+          }
+          printf 'visibility=%s\n' "$visibility" >> "$GITHUB_OUTPUT"
+
+      - name: Pull and exercise the exact candidate digest
+        env:
+          DIGEST: ${{ steps.publish.outputs.digest }}
+          HORMUZ_OCI_SKIP_BUILD: "1"
+        run: |
+          docker pull --platform linux/amd64 "$IMAGE@$DIGEST"
+          HORMUZ_OCI_TEST_IMAGE="$IMAGE@$DIGEST" ./tools/verify_oci_reference.sh
+
+      - name: Generate and enforce digest-bound SBOM and vulnerability evidence
+        env:
+          DIGEST: ${{ steps.publish.outputs.digest }}
+          HORMUZ_OCI_SUPPLY_CHAIN_EVIDENCE_DIR: ${{ runner.temp }}/hormuz-oci-release/supply-chain
+          HORMUZ_OCI_SUPPLY_CHAIN_SKIP_BUILD: "1"
+        run: HORMUZ_OCI_SUPPLY_CHAIN_IMAGE="$IMAGE@$DIGEST" ./tools/verify_oci_supply_chain.sh
+
+      - name: Create the bounded SLSA provenance predicate
+        env:
+          DIGEST: ${{ steps.publish.outputs.digest }}
+        run: |
+          python3 tools/create_oci_release_provenance.py \
+            --preflight "$EVIDENCE_DIR/preflight.json" \
+            --reproducibility "$EVIDENCE_DIR/reproducibility/summary.json" \
+            --supply-chain "$EVIDENCE_DIR/supply-chain/summary.json" \
+            --sbom "$EVIDENCE_DIR/supply-chain/hormuz.cdx.json" \
+            --vulnerabilities "$EVIDENCE_DIR/supply-chain/trivy-vulnerabilities.json" \
+            --image-reference "$IMAGE" \
+            --image-digest "$DIGEST" \
+            --invocation-uri "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT" \
+            --build-lock requirements/oci-build-linux-amd64.lock \
+            --runtime-lock requirements/oci-runtime-linux-amd64.lock \
+            --output "$EVIDENCE_DIR/provenance-predicate.json"
+
+      - name: Validate public metadata before any signing or attestation
+        env:
+          COMMIT: ${{ steps.preflight.outputs.commit }}
+          DIGEST: ${{ steps.publish.outputs.digest }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ steps.preflight.outputs.tag }}
+        run: |
+          repository_visibility="$(gh api "/repos/$GITHUB_REPOSITORY" --jq .visibility)"
+          python3 tools/verify_public_oci_metadata.py \
+            --sbom "$EVIDENCE_DIR/supply-chain/hormuz.cdx.json" \
+            --provenance "$EVIDENCE_DIR/provenance-predicate.json" \
+            --preflight "$EVIDENCE_DIR/preflight.json" \
+            --reproducibility "$EVIDENCE_DIR/reproducibility/summary.json" \
+            --supply-chain "$EVIDENCE_DIR/supply-chain/summary.json" \
+            --vulnerabilities "$EVIDENCE_DIR/supply-chain/trivy-vulnerabilities.json" \
+            --build-lock requirements/oci-build-linux-amd64.lock \
+            --runtime-lock requirements/oci-runtime-linux-amd64.lock \
+            --image-reference "$IMAGE" \
+            --image-digest "$DIGEST" \
+            --release-tag "$RELEASE_TAG" \
+            --commit "$COMMIT" \
+            --invocation-uri "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT" \
+            --repository-visibility "$repository_visibility" \
+            --output "$EVIDENCE_DIR/public-metadata-validation.json"
+
+      - name: Install pinned Cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: v3.1.3
+
+      - name: Create an ephemeral no-Rekor configuration for registry attestations
+        run: |
+          cosign signing-config create \
+            --with-default-services \
+            --no-default-rekor \
+            --out "$RUNNER_TEMP/hormuz-attestation-signing-config.json"
+          jq -e '
+            (.caUrls | length) > 0 and
+            (.tsaUrls | length) > 0 and
+            ((.rekorTlogUrls // []) | length) == 0 and
+            ((.rekorTlogConfig // {}) | length) == 0 and
+            ([paths(scalars) as $path | getpath($path) |
+              select(type == "string" and test("rekor"; "i"))] | length) == 0
+          ' "$RUNNER_TEMP/hormuz-attestation-signing-config.json" >/dev/null
+
+      - name: Sign through public Rekor and attach attestations only to private GHCR
+        env:
+          DIGEST: ${{ steps.publish.outputs.digest }}
+        run: |
+          cosign sign --yes --use-signing-config=true "$IMAGE@$DIGEST"
+          cosign attest --yes \
+            --signing-config "$RUNNER_TEMP/hormuz-attestation-signing-config.json" \
+            --type cyclonedx \
+            --predicate "$EVIDENCE_DIR/supply-chain/hormuz.cdx.json" \
+            "$IMAGE@$DIGEST"
+          cosign attest --yes \
+            --signing-config "$RUNNER_TEMP/hormuz-attestation-signing-config.json" \
+            --type slsaprovenance1 \
+            --predicate "$EVIDENCE_DIR/provenance-predicate.json" \
+            "$IMAGE@$DIGEST"
+
+      - name: Verify exact identity and require Rekor only for the image signature
+        env:
+          COMMIT: ${{ steps.preflight.outputs.commit }}
+          DIGEST: ${{ steps.publish.outputs.digest }}
+          WORKFLOW_IDENTITY: ${{ steps.preflight.outputs.workflow_identity }}
+        run: |
+          certificate_claims=(
+            --certificate-identity "$WORKFLOW_IDENTITY"
+            --certificate-oidc-issuer "$SIGSTORE_ISSUER"
+            --certificate-github-workflow-name "$GITHUB_WORKFLOW"
+            --certificate-github-workflow-ref "$GITHUB_REF"
+            --certificate-github-workflow-repository "$GITHUB_REPOSITORY"
+            --certificate-github-workflow-sha "$COMMIT"
+            --certificate-github-workflow-trigger "$GITHUB_EVENT_NAME"
+          )
+          cosign verify \
+            "${certificate_claims[@]}" \
+            --output json \
+            "$IMAGE@$DIGEST" > "$EVIDENCE_DIR/signature-verification.json"
+          cosign verify-attestation \
+            "${certificate_claims[@]}" \
+            --insecure-ignore-tlog \
+            --use-signed-timestamps \
+            --type cyclonedx \
+            --output json \
+            "$IMAGE@$DIGEST" > "$EVIDENCE_DIR/sbom-attestation-verification.json"
+          cosign verify-attestation \
+            "${certificate_claims[@]}" \
+            --insecure-ignore-tlog \
+            --use-signed-timestamps \
+            --type slsaprovenance1 \
+            --output json \
+            "$IMAGE@$DIGEST" > "$EVIDENCE_DIR/provenance-attestation-verification.json"
+          test -s "$EVIDENCE_DIR/signature-verification.json"
+          test -s "$EVIDENCE_DIR/sbom-attestation-verification.json"
+          test -s "$EVIDENCE_DIR/provenance-attestation-verification.json"
+
+      - name: Add the semantic version tag without permitting reassignment
+        env:
+          DIGEST: ${{ steps.publish.outputs.digest }}
+          RELEASE_TAG: ${{ steps.preflight.outputs.tag }}
+        run: |
+          if ! docker buildx imagetools inspect "$IMAGE:$RELEASE_TAG" >/dev/null 2>&1; then
+            docker buildx imagetools create \
+              --prefer-index=false \
+              --tag "$IMAGE:$RELEASE_TAG" \
+              "$IMAGE@$DIGEST"
+          fi
+          release_digest="$(docker buildx imagetools inspect --format '{{json .}}' "$IMAGE:$RELEASE_TAG" | jq -er '.manifest.digest')"
+          [[ "$release_digest" =~ ^sha256:[0-9a-f]{64}$ ]] || {
+            echo "registry did not return a complete SHA-256 release digest" >&2
+            exit 1
+          }
+          [[ "$release_digest" == "$DIGEST" ]] || {
+            echo "release tag exists at another digest and cannot be reassigned" >&2
+            exit 1
+          }
+
+      - name: Write final content-free release evidence
+        env:
+          COMMIT: ${{ steps.preflight.outputs.commit }}
+          DIGEST: ${{ steps.publish.outputs.digest }}
+          RELEASE_TAG: ${{ steps.preflight.outputs.tag }}
+          WORKFLOW_IDENTITY: ${{ steps.preflight.outputs.workflow_identity }}
+        run: |
+          python3 tools/write_oci_release_evidence.py \
+            --digest "$DIGEST" \
+            --tag "$RELEASE_TAG" \
+            --commit "$COMMIT" \
+            --workflow-identity "$WORKFLOW_IDENTITY" \
+            --first-publication-visibility "${{ steps.registry.outputs.visibility }}" \
+            --preflight "$EVIDENCE_DIR/preflight.json" \
+            --reproducibility "$EVIDENCE_DIR/reproducibility/summary.json" \
+            --supply-chain "$EVIDENCE_DIR/supply-chain/summary.json" \
+            --sbom "$EVIDENCE_DIR/supply-chain/hormuz.cdx.json" \
+            --vulnerabilities "$EVIDENCE_DIR/supply-chain/trivy-vulnerabilities.json" \
+            --provenance "$EVIDENCE_DIR/provenance-predicate.json" \
+            --public-metadata-validation "$EVIDENCE_DIR/public-metadata-validation.json" \
+            --signature-verification "$EVIDENCE_DIR/signature-verification.json" \
+            --sbom-verification "$EVIDENCE_DIR/sbom-attestation-verification.json" \
+            --provenance-verification "$EVIDENCE_DIR/provenance-attestation-verification.json" \
+            --output "$EVIDENCE_DIR/release-summary.json"
+          {
+            echo "## Signed OCI release"
+            echo
+            echo "- Contract: \`$IMAGE@$DIGEST\`"
+            echo "- First registry tag: \`$IMAGE:$RELEASE_TAG\`"
+            echo "- Platform: \`linux/amd64\`"
+            echo "- Image signing: keyless GitHub OIDC, public Rekor"
+            echo "- SBOM/SLSA: validated, keyless registry attestations; no Rekor upload"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Preserve metadata-only release evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hormuz-signed-oci-${{ github.ref_name }}
+          path: |
+            ${{ runner.temp }}/hormuz-oci-release/preflight.json
+            ${{ runner.temp }}/hormuz-oci-release/reproducibility/summary.json
+            ${{ runner.temp }}/hormuz-oci-release/supply-chain/summary.json
+            ${{ runner.temp }}/hormuz-oci-release/public-metadata-validation.json
+            ${{ runner.temp }}/hormuz-oci-release/release-summary.json
+          if-no-files-found: warn
+          retention-days: 30

@@ -1,13 +1,38 @@
 # syntax=docker/dockerfile:1@sha256:ecfaec9ed6d810b56388c508f4121597bfbba70d41a6dfeee4d8cad5f295fc32
-# Python 3.14.7-slim-trixie multi-platform index, inspected 2026-08-21.
-ARG PYTHON_BASE=python@sha256:ce40764625a4ff50df3548277632e7f96c4e77fe75fa848aae9885476e7df5a4
+# Python 3.14.7-slim-bookworm multi-platform index, inspected 2026-08-24.
+ARG PYTHON_BASE=python@sha256:23c59390fc717bf09f9336908199a0ae75d9c4264bf296123f94ad772fea3b52
+ARG SOURCE_DATE_EPOCH=0
 
 FROM ${PYTHON_BASE} AS builder
+
+ARG HORMUZ_VERSION=0.1.0
+ARG SOURCE_DATE_EPOCH
+ARG TARGETPLATFORM
 
 WORKDIR /build
 
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    PIP_NO_CACHE_DIR=1
+    PIP_NO_CACHE_DIR=1 \
+    PIP_NO_COMPILE=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH}
+
+# The first signed contract is deliberately linux/amd64 only. A distinct
+# native ARM64 release gate must close before this assertion can expand.
+RUN test "${TARGETPLATFORM}" = "linux/amd64"
+
+COPY requirements/oci-build-linux-amd64.lock requirements/oci-runtime-linux-amd64.lock ./requirements/
+
+RUN python -m pip install \
+        --only-binary=:all: \
+        --require-hashes \
+        --no-deps \
+        --requirement requirements/oci-build-linux-amd64.lock \
+    && python -m pip download \
+        --only-binary=:all: \
+        --require-hashes \
+        --dest /wheelhouse \
+        --requirement requirements/oci-runtime-linux-amd64.lock
 
 # The Docker build context allowlist admits only these core packaging inputs.
 # Configuration, credentials, usage data, tests, and the context experiment
@@ -15,29 +40,42 @@ ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
 COPY pyproject.toml README.md ./
 COPY hormuz/ ./hormuz/
 
-RUN python -m pip wheel --only-binary=:all: --wheel-dir /wheelhouse ".[postgres]" \
+RUN python -m pip wheel \
+        --no-build-isolation \
+        --no-deps \
+        --wheel-dir /wheelhouse \
+        . \
     && python -m venv /opt/hormuz \
-    && /opt/hormuz/bin/pip install --no-index --find-links=/wheelhouse "hormuz[postgres]" \
+    && /opt/hormuz/bin/pip install \
+        --no-index \
+        --no-compile \
+        --find-links=/wheelhouse \
+        "hormuz[postgres]==${HORMUZ_VERSION}" \
     && /opt/hormuz/bin/pip uninstall --yes pip setuptools
 
 FROM ${PYTHON_BASE} AS runtime
 
+ARG HORMUZ_VERSION=0.1.0
+ARG SOURCE_DATE_EPOCH
+ARG VCS_REF=unknown
+
 LABEL org.opencontainers.image.title="Hormuz" \
       org.opencontainers.image.description="Non-root reference runtime for the Hormuz enterprise AI policy gateway" \
-      org.opencontainers.image.vendor="NeuralInt"
+      org.opencontainers.image.vendor="NeuralInt" \
+      org.opencontainers.image.source="https://github.com/Xpounder-com/hormuz" \
+      org.opencontainers.image.version="${HORMUZ_VERSION}" \
+      org.opencontainers.image.revision="${VCS_REF}"
 
 ENV PATH="/opt/hormuz/bin:${PATH}" \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     HORMUZ_CONFIG=/etc/hormuz/hormuz.json
 
-# The runtime uses the isolated /opt/hormuz virtual environment. Remove the
-# unused global installer and its bundled dependencies so they are not shipped
-# or scanned as reachable application packages.
-RUN apt-get update \
-    && DEBIAN_FRONTEND=noninteractive apt-get upgrade --yes \
-    && rm -rf /var/lib/apt/lists/* \
-    && rm -rf /usr/local/bin/pip /usr/local/bin/pip3 /usr/local/bin/pip3.14 \
+# The pinned base digest supplies the complete OS state. Never resolve moving
+# Debian package indexes inside a reproducible release build; refresh the base
+# digest through a reviewed security update instead. Remove the unused global
+# installer so it is not shipped or scanned as a reachable application package.
+RUN rm -rf /usr/local/bin/pip /usr/local/bin/pip3 /usr/local/bin/pip3.14 \
         /usr/local/lib/python3.14/ensurepip \
         /usr/local/lib/python3.14/site-packages/pip \
         /usr/local/lib/python3.14/site-packages/pip-*.dist-info \
