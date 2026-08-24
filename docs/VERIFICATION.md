@@ -54,6 +54,24 @@ also run the command, so a source-only import path cannot satisfy the
 quickstart release gate. These are provider-free product-path proofs, not live
 OpenAI/Anthropic compatibility or a production deployment claim.
 
+## Launch-claim boundary
+
+The formal-launch drafts and their schema-v1 claim ledger live under
+[`docs/launch`](launch/README.md). Validate them with:
+
+```bash
+python tools/verify_launch_assets.py
+python -m unittest -v tests.test_launch_assets
+```
+
+The draft verifier returns `"publishable": false` by design. It requires every
+asset to carry the do-not-publish marker, binds implemented and verified-alpha
+claims to closed issues plus repository evidence, labels roadmap and nonclaim
+statements separately, rejects unapproved commercial URL tokens, and freezes
+the privacy-bounded launch measures. It does not query GitHub or prove that an
+issue remains closed; final publication requires a fresh remote review, the
+quiet-alpha gate, owner-supplied intake URLs, and recorded owner approval.
+
 ## 2026-08-15
 
 ### Live OpenAI path
