@@ -275,14 +275,12 @@ assert_disposable_target "$RECOVERY_CONTAINER"
 recovery_port="$(host_port "$RECOVERY_CONTAINER")"
 recovery_runtime_dsn="postgresql://$RUNTIME_ROLE:$RUNTIME_PASSWORD@127.0.0.1:$recovery_port/$DATABASE"
 recovery_policy_control_dsn="postgresql://$POLICY_CONTROL_ROLE:$POLICY_CONTROL_PASSWORD@127.0.0.1:$recovery_port/$DATABASE"
+run_pitr_tool promotion-wait --container "$RECOVERY_CONTAINER" >/dev/null
 restore_ms="$(duration_ms "$restore_started_seconds")"
 
 marker_value="$(docker exec "$RECOVERY_CONTAINER" psql --username=postgres --dbname="$DATABASE" --tuples-only --no-align --command "SELECT string_agg(marker, ',' ORDER BY marker) FROM hormuz_pitr_markers")"
 marker_value="$(printf '%s' "$marker_value" | tr -d '\r\n')"
 if [[ "$marker_value" != "$PRE_TARGET_MARKER" ]]; then failure 'pitr_marker_state_invalid'; fi
-recovery_mode="$(docker exec "$RECOVERY_CONTAINER" psql --username=postgres --dbname="$DATABASE" --tuples-only --no-align --command 'SELECT pg_is_in_recovery()')"
-recovery_mode="$(printf '%s' "$recovery_mode" | tr -d '\r\n')"
-if [[ "$recovery_mode" != "f" ]]; then failure 'recovery_target_not_promoted'; fi
 
 verify_started_seconds=$SECONDS
 run_recovery_tool verify --runtime-dsn "$recovery_runtime_dsn"   --policy-control-dsn "$recovery_policy_control_dsn" --schema "$SCHEMA"   --runtime-role "$RUNTIME_ROLE" --policy-control-role "$POLICY_CONTROL_ROLE"   --expected-state "$SOURCE_STATE" --state-output "$RECOVERY_STATE" >/dev/null
