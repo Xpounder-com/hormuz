@@ -30,6 +30,13 @@ Policy administration (managed PostgreSQL mode)
         +--> tenant-qualified root policy administrators
         +--> immutable policy documents -> atomic active-version pointer
         +--> gateway reads and pins one active version at request start
+
+Custody authorization (managed PostgreSQL mode)
+        |
+        +--> authenticated CLI -> CustodyControlService
+        +--> tenant-qualified root custody administrators
+        +--> immutable content-free intent + distinct approvals
+        +--> future separate executor; no KMS work in this service
 ```
 
 ## Code boundaries
@@ -41,6 +48,7 @@ Policy administration (managed PostgreSQL mode)
 - `hormuz/policy.py` evaluates access, fallback, caps, and budgets from exactly one request-bound policy snapshot.
 - `hormuz/policy_runtime.py`, `hormuz/policy_document.py`, and `hormuz/postgres_policy_store.py` read strict immutable policy documents, then resolve and pin the active PostgreSQL version when managed policy control is enabled.
 - `hormuz/policy_control.py` is the narrow authenticated service boundary used by the CLI for bootstrap, administrator changes, staging, activation, rollback, and break-glass recovery.
+- `hormuz/custody_control.py` and `hormuz/postgres_custody_store.py` own tenant custody authority and content-free lifecycle approvals. They do not receive plaintext, construct KMS clients, or execute an approved operation.
 - `hormuz/store.py` owns the SQLite schema and monthly aggregations; `hormuz/postgres_usage_store.py` implements the same narrow usage/evidence repository with transaction-local organization scope and PostgreSQL RLS. In PostgreSQL gateway mode, `hormuz.postgres.PostgresConnectionPool` supplies one bounded runtime pool shared with managed-policy reads; each checkout receives fresh transaction-local role, search-path, and tenant state.
 - `hormuz/audit_chain.py` owns canonical per-organization commit-time chain and checkpoint primitives. Storage adapters append a chain entry with each durable current audit event; custody adapters retain the compact checkpoint only through an explicit out-of-band operator command.
 - `hormuz/custody.py` owns provider-neutral encrypted-envelope and audit-anchor contracts; `hormuz/aws_custody.py` provides the optional AWS reference adapters, while `hormuz/openbao_custody.py` and `hormuz/self_hosted_custody.py` provide the optional OpenBao and S3-compatible Object Lock adapters. `hormuz/custody_runtime.py` resolves owner-only encrypted provider credentials at gateway startup.
@@ -69,6 +77,13 @@ OIDC authentication is currently a resource-server path for JWT access tokens. D
 ## Root-authority boundary
 
 `policy_admin` is not a model entitlement; it is root authority to change a tenant's policy. In managed mode, configuration may seed tenant-qualified bootstrap identities only before that tenant is initialized. PostgreSQL then becomes the source of truth for authority. The runtime database role cannot read administrators or mutate policies; the policy-control role cannot alter immutable version/event history. A CLI caller is authenticated from a credential and routed through `PolicyControlService`, never through a direct database command or a self-asserted actor. See [POLICY_CONTROL.md](POLICY_CONTROL.md).
+
+`custody_admin` is a separate tenant root authority for secret-envelope
+lifecycle authorization. It grants no inference, policy, identity, or direct
+customer-KMS entitlement. Human approval, the dedicated custody-control
+service/database role, the future machine executor, customer KMS authority, and
+all-administrator-loss break glass remain separate. See
+[CUSTODY_CONTROL.md](CUSTODY_CONTROL.md).
 
 ## Key-custody and audit-retention boundary
 

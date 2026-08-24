@@ -182,6 +182,22 @@ class PolicyControlConfig:
 
 
 @dataclass(frozen=True)
+class CustodyControlConfig:
+    """Tenant-scoped custody authority and approval-store configuration.
+
+    The control database credential authorizes only custody metadata. Customer
+    KMS permissions belong to a separate machine executor and are deliberately
+    absent from this configuration.
+    """
+
+    mode: str = "local"
+    bootstrap_administrators: tuple[BootstrapAdministrator, ...] = ()
+    postgres_control_dsn_env: str = "HORMUZ_CUSTODY_CONTROL_DSN"
+    postgres_control_role: str = "hormuz_custody_control"
+    authorization_ttl_seconds: int = 900
+
+
+@dataclass(frozen=True)
 class Identity:
     token_env: str
     token: str = field(repr=False)
@@ -293,6 +309,7 @@ class GatewayConfig:
     upstream_timeout_seconds: int = 600
     usage_storage: UsageStorageConfig = field(default_factory=UsageStorageConfig)
     policy_control: PolicyControlConfig = field(default_factory=PolicyControlConfig)
+    custody_control: CustodyControlConfig = field(default_factory=CustodyControlConfig)
     key_custody: KeyCustodyConfig | None = None
     audit_anchor: AuditAnchorConfig | None = None
     audit_chain: AuditChainConfig | None = None

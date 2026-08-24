@@ -6,7 +6,7 @@
     "rls_without_organization_context": true,
     "tenant_scoped_repository": true
   },
-  "migration_version": 4,
+  "migration_version": 5,
   "record_counts": {
     "active_budget_reservations": 4,
     "active_policy_versions": 2,

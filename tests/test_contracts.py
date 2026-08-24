@@ -14,6 +14,10 @@ from hormuz.contracts import (
     AUDIT_EVENT_SCHEMA_ID,
     AUDIT_EVENT_SCHEMA_VERSION,
     ContractValidationError,
+    CUSTODY_CONTROL_EVENT_SCHEMA_ID,
+    CUSTODY_CONTROL_EVENT_SCHEMA_VERSION,
+    CUSTODY_CONTROL_STATUS_SCHEMA_ID,
+    CUSTODY_CONTROL_STATUS_SCHEMA_VERSION,
     ERROR_SCHEMA_ID,
     ERROR_SCHEMA_VERSION,
     READINESS_SCHEMA_ID,
@@ -28,6 +32,7 @@ from hormuz.contracts import (
     validate_audit_event,
     validate_contract,
     validate_contract_manifest,
+    validate_custody_control_event,
     validate_policy_control_event,
     validate_request_attempt,
     validate_request_attempt_event,
@@ -52,6 +57,7 @@ class PolicyEvidenceContractTests(unittest.TestCase):
             "error_v2",
             "policy_decision",
             "policy_control_status",
+            "custody_control_status",
             "usage_report",
             "audit_anchor_v1",
             "audit_chain_entry_v1",
@@ -61,6 +67,7 @@ class PolicyEvidenceContractTests(unittest.TestCase):
         for name in ("audit_usage_v1", "audit_security_v1", "audit_usage_v2", "audit_security_v2"):
             validate_audit_event(fixtures[name])
         validate_policy_control_event(fixtures["policy_control_event"])
+        validate_custody_control_event(fixtures["custody_control_event"])
         validate_request_attempt(fixtures["request_attempt_v1"])
         validate_request_attempt_event(fixtures["request_attempt_pending_v1"])
         validate_request_attempt_event(fixtures["request_attempt_unknown_v1"])
@@ -82,6 +89,10 @@ class PolicyEvidenceContractTests(unittest.TestCase):
         invalid_event["change_summary"]["scopes"]["organization"]["fields"] = ["do-not-store-content"]
         with self.assertRaises(ContractValidationError):
             validate_policy_control_event(invalid_event)
+        invalid_custody_event = json.loads(json.dumps(valid["custody_control_event"]))
+        invalid_custody_event["plaintext"] = "must-never-appear"
+        with self.assertRaises(ContractValidationError):
+            validate_custody_control_event(invalid_custody_event)
         invalid_anchor = json.loads(json.dumps(valid["audit_anchor_v1"]))
         invalid_anchor["unexpected"] = "field"
         with self.assertRaises(ContractValidationError):
@@ -110,6 +121,8 @@ class PolicyEvidenceContractTests(unittest.TestCase):
         self.assertIn(("hormuz.policy-control-status", 1), schemas)
         self.assertIn(("hormuz.policy-document", 1), schemas)
         self.assertIn(("hormuz.policy-control-event", 1), schemas)
+        self.assertIn((CUSTODY_CONTROL_STATUS_SCHEMA_ID, CUSTODY_CONTROL_STATUS_SCHEMA_VERSION), schemas)
+        self.assertIn((CUSTODY_CONTROL_EVENT_SCHEMA_ID, CUSTODY_CONTROL_EVENT_SCHEMA_VERSION), schemas)
         self.assertIn((REQUEST_ATTEMPT_SCHEMA_ID, REQUEST_ATTEMPT_SCHEMA_VERSION), schemas)
         self.assertIn((REQUEST_ATTEMPT_EVENT_SCHEMA_ID, REQUEST_ATTEMPT_EVENT_SCHEMA_VERSION), schemas)
         self.assertEqual(manifest["schema_id"], "hormuz.policy-evidence-manifest")

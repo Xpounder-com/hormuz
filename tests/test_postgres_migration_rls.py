@@ -12,7 +12,13 @@ from unittest import mock
 
 from hormuz.cli import main
 from hormuz.config import GatewayConfig, UsageStorageConfig
-from hormuz.postgres import PostgresStorageError, migrate_postgres, postgres_transaction, verify_postgres_schema
+from hormuz.postgres import (
+    POSTGRES_SCHEMA_VERSION,
+    PostgresStorageError,
+    migrate_postgres,
+    postgres_transaction,
+    verify_postgres_schema,
+)
 from hormuz.postgres_usage_store import PostgresUsageStore
 from hormuz.store import ReservationScope
 from hormuz.store_router import create_usage_store
@@ -30,7 +36,7 @@ class PostgresMigrationRLSTests(PostgresTestCase):
             runtime_role=self.runtime_role,
         )
         self.assertTrue(status.complete)
-        self.assertEqual(status.version, 4)
+        self.assertEqual(status.version, 5)
     def test_policy_control_role_verifies_only_the_shared_migration_ledger(self) -> None:
         with self.assertRaises(PostgresStorageError) as raised:
             verify_postgres_schema(
@@ -47,7 +53,7 @@ class PostgresMigrationRLSTests(PostgresTestCase):
             verify_runtime_schema=False,
         )
         self.assertTrue(status.complete)
-        self.assertEqual(status.version, 4)
+        self.assertEqual(status.version, 5)
     def test_schema_v2_upgrade_preserves_evidence_and_rejects_an_old_reader(self) -> None:
         schema = self._create_schema_v2_fixture()
         self._insert_v2_evidence(schema)
@@ -90,8 +96,9 @@ class PostgresMigrationRLSTests(PostgresTestCase):
             schema=schema,
             runtime_role=self.runtime_role,
             policy_control_role=self.policy_control_role,
+            custody_control_role=self.custody_control_role,
         )
-        self.assertEqual(status.version, 4)
+        self.assertEqual(status.version, 5)
         store = PostgresUsageStore(
             self.runtime_dsn,
             organization_ids=("acme", "beta"),
@@ -164,6 +171,7 @@ class PostgresMigrationRLSTests(PostgresTestCase):
                 schema=schema,
                 runtime_role=self.runtime_role,
                 policy_control_role=self.policy_control_role,
+                custody_control_role=self.custody_control_role,
             )
         self.assertEqual(raised.exception.code, "storage_schema_partial_upgrade")
         with self.assertRaises(PostgresStorageError) as raised:
@@ -204,6 +212,7 @@ class PostgresMigrationRLSTests(PostgresTestCase):
                 schema=schema,
                 runtime_role=self.runtime_role,
                 policy_control_role=self.policy_control_role,
+                custody_control_role=self.custody_control_role,
             )
         self.assertEqual(raised.exception.code, "storage_schema_partial_upgrade")
         with self.assertRaises(PostgresStorageError) as raised:
@@ -244,6 +253,7 @@ class PostgresMigrationRLSTests(PostgresTestCase):
                 schema=schema,
                 runtime_role=self.runtime_role,
                 policy_control_role=self.policy_control_role,
+                custody_control_role=self.custody_control_role,
             )
         self.assertEqual(raised.exception.code, "storage_schema_partial_upgrade")
         with self.assertRaises(PostgresStorageError) as raised:
@@ -319,7 +329,7 @@ class PostgresMigrationRLSTests(PostgresTestCase):
                 migration = io.StringIO()
                 with redirect_stdout(migration):
                     self.assertEqual(main(["--config", str(config_path), "storage", "migrate"]), 0)
-                self.assertEqual(migration.getvalue(), "PostgreSQL usage storage migration is current: v4\n")
+                self.assertEqual(migration.getvalue(), "PostgreSQL usage storage migration is current: v5\n")
 
                 verification = io.StringIO()
                 with redirect_stdout(verification):
@@ -356,6 +366,7 @@ class PostgresMigrationRLSTests(PostgresTestCase):
                     cursor.execute("SELECT COUNT(*) FROM gateway_usage_events")
                     self.assertEqual(cursor.fetchone()[0], 0)
     def test_newer_or_partial_schema_fails_closed_without_mutating_evidence(self) -> None:
+        newer_version = POSTGRES_SCHEMA_VERSION + 1
         self.store.record(
             identity=_identity("acme"),
             client="codex",
@@ -377,8 +388,9 @@ class PostgresMigrationRLSTests(PostgresTestCase):
                     before = cursor.fetchone()[0]
                     cursor.execute(
                         self.sql.SQL(
-                            "INSERT INTO {}.hormuz_schema_migrations (version, state) VALUES (5, 'applying')"
-                        ).format(self.sql.Identifier(self.schema))
+                            "INSERT INTO {}.hormuz_schema_migrations (version, state) VALUES (%s, 'applying')"
+                        ).format(self.sql.Identifier(self.schema)),
+                        (newer_version,),
                     )
         with self.assertRaises(PostgresStorageError) as raised:
             PostgresUsageStore(
@@ -394,8 +406,9 @@ class PostgresMigrationRLSTests(PostgresTestCase):
                 with connection.cursor() as cursor:
                     cursor.execute(
                         self.sql.SQL(
-                            "UPDATE {}.hormuz_schema_migrations SET state = 'applied' WHERE version = 5"
-                        ).format(self.sql.Identifier(self.schema))
+                            "UPDATE {}.hormuz_schema_migrations SET state = 'applied' WHERE version = %s"
+                        ).format(self.sql.Identifier(self.schema)),
+                        (newer_version,),
                     )
         with self.assertRaises(PostgresStorageError) as raised:
             PostgresUsageStore(
@@ -417,8 +430,9 @@ class PostgresMigrationRLSTests(PostgresTestCase):
                     self.assertEqual(cursor.fetchone()[0], before)
                     cursor.execute(
                         self.sql.SQL(
-                            "DELETE FROM {}.hormuz_schema_migrations WHERE version = 5"
-                        ).format(self.sql.Identifier(self.schema))
+                            "DELETE FROM {}.hormuz_schema_migrations WHERE version = %s"
+                        ).format(self.sql.Identifier(self.schema)),
+                        (newer_version,),
                     )
 
 

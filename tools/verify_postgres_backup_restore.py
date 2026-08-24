@@ -285,7 +285,7 @@ def provision_restricted_roles(
     policy_control_role: str,
     policy_control_password: str,
 ) -> None:
-    """Create two non-owner roles without altering an existing principal."""
+    """Create isolated runtime, policy-control, and custody-control roles."""
 
     runtime_role = validate_postgres_identifier(runtime_role, "postgres_runtime_role")
     policy_control_role = validate_postgres_identifier(
@@ -294,6 +294,7 @@ def provision_restricted_roles(
     )
     if runtime_role == policy_control_role:
         raise RecoveryDrillError("recovery_roles_must_be_distinct")
+    custody_control_role = _custody_control_role(policy_control_role)
     if not runtime_password or not policy_control_password:
         raise RecoveryDrillError("recovery_role_credential_unavailable")
     try:
@@ -318,6 +319,14 @@ def provision_restricted_roles(
                             "NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS"
                         ).format(sql.Identifier(role), sql.Literal(password))
                     )
+                cursor.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", (custody_control_role,))
+                if cursor.fetchone() is not None:
+                    raise RecoveryDrillError("recovery_role_already_exists")
+                cursor.execute(
+                    sql.SQL(
+                        "CREATE ROLE {} NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS"
+                    ).format(sql.Identifier(custody_control_role))
+                )
     except RecoveryDrillError:
         raise
     except psycopg.Error as error:
@@ -345,6 +354,7 @@ def seed_source_state(
         schema=schema,
         runtime_role=runtime_role,
         policy_control_role=policy_control_role,
+        custody_control_role=_custody_control_role(policy_control_role),
     )
     if not migration.complete or migration.version != POSTGRES_SCHEMA_VERSION:
         raise RecoveryDrillError("source_migration_not_current")
@@ -523,6 +533,13 @@ def _validate_database_identifiers(
     if runtime_role == policy_control_role:
         raise RecoveryDrillError("recovery_roles_must_be_distinct")
     return schema, runtime_role, policy_control_role
+
+
+def _custody_control_role(policy_control_role: str) -> str:
+    return validate_postgres_identifier(
+        f"{policy_control_role}_custody",
+        "postgres_custody_control_role",
+    )
 
 
 def _fixture_config(

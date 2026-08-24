@@ -23,6 +23,12 @@ injected to bootstrap the database, key service, or immutable store. Run
 [SECRET_CUSTODY_INVENTORY.md](SECRET_CUSTODY_INVENTORY.md) for the exact
 content-free classification and its nonclaims.
 
+For tenant-scoped human authorization of envelope lifecycle operations, use
+[CUSTODY_CONTROL.md](CUSTODY_CONTROL.md). Managed custody control separates
+administrator approval, PostgreSQL evidence, the future machine executor, and
+customer KMS authority. When enabled, it deliberately disables the legacy
+direct verify/seal/rewrap CLI path until that executor is separately proven.
+
 ## Account-free self-hosted profile
 
 Install the optional S3 wire-protocol adapter into the Hormuz service

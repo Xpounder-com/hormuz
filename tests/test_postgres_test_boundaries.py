@@ -37,6 +37,18 @@ EXPECTED_OWNERS = {
             "test_policy_roles_are_separated_and_break_glass_requires_admin_loss",
         },
     ),
+    "test_postgres_custody_control": (
+        "PostgresCustodyControlTests",
+        {
+            "test_bootstrap_authority_is_separate_from_runtime_policy_and_kms_entitlement",
+            "test_routine_authorization_is_content_free_and_initial_enrollment_uses_only_a_handle_digest",
+            "test_destructive_authorization_requires_two_distinct_active_administrators_and_cannot_replay",
+            "test_destructive_authorization_requires_every_approver_to_remain_active",
+            "test_expired_or_invalid_authorization_rolls_back_without_a_second_approval",
+            "test_last_administrator_protection_and_all_admin_loss_require_separate_break_glass",
+            "test_tenant_isolation_and_append_only_authorization_history_are_database_enforced",
+        },
+    ),
     "test_postgres_usage": (
         "PostgresUsageEvidenceTests",
         {
@@ -105,7 +117,7 @@ class PostgresTestBoundaryTests(unittest.TestCase):
             suite = unittest.defaultTestLoader.loadTestsFromName(f"{module_name}.{class_name}")
             self.assertEqual(suite.countTestCases(), len(expected_methods), module_name)
 
-        self.assertEqual(len(owned), 31)
+        self.assertEqual(len(owned), 38)
         self.assertFalse((ROOT / "tests" / "test_postgres.py").exists())
         self.assertFalse(
             any(name.startswith("test_") for name in PostgresTestCase.__dict__),

@@ -47,11 +47,19 @@ Keep connection strings out of the JSON configuration. Configure only environmen
     "bootstrap_administrators": [
       {"organization_id": "xpounder", "actor_id": "alice"}
     ]
+  },
+  "custody_control": {
+    "mode": "postgresql",
+    "postgres_control_dsn_env": "HORMUZ_CUSTODY_CONTROL_DSN",
+    "postgres_control_role": "hormuz_custody_control",
+    "bootstrap_administrators": [
+      {"organization_id": "xpounder", "actor_id": "alice"}
+    ]
   }
 }
 ~~~
 
-HORMUZ_POSTGRES_MIGRATION_DSN is an operator credential that can create or update the Hormuz schema. HORMUZ_POSTGRES_DSN is the long-running gateway credential. HORMUZ_POLICY_CONTROL_DSN is the service credential used for administration. They must name different credentials in an operational deployment. Put all three in the deployment secret manager, not the configuration file, command history, or client environment.
+HORMUZ_POSTGRES_MIGRATION_DSN is an operator credential that can create or update the Hormuz schema. HORMUZ_POSTGRES_DSN is the long-running gateway credential. HORMUZ_POLICY_CONTROL_DSN and HORMUZ_CUSTODY_CONTROL_DSN are separate service credentials used for their respective administration surfaces. They must name four different credentials in an operational deployment. Put all four in the deployment secret manager, not the configuration file, command history, or client environment. Managed custody also requires a `key_custody` profile; see [CUSTODY_CONTROL.md](CUSTODY_CONTROL.md).
 
 ### Runtime-pool boundary
 
@@ -119,7 +127,13 @@ runtime pool, then verifies the active managed policy when managed policy
 control is enabled. It performs no provider request and returns only a
 content-free readiness result; see [OPERATIONS.md](OPERATIONS.md).
 
-Before the first migration, an operator creates the restricted runtime and policy-control roles. Both must be non-owner roles with no superuser, database-creation, role-creation, inheritance, or BYPASSRLS capability, and they must be different roles. The migration grants the runtime role only the usage/evidence surface plus read-only active-policy access. It grants the policy-control role only the policy-administration tables and migration ledger; it cannot update tenant initialization state, immutable policy versions, or control events. The runtime role has only `SELECT, INSERT` on request-attempt roots and events: an advisory lock serializes their append-only transitions without granting rewrite permission. An existing schema-v1 deployment must create its configured policy-control role before applying the schema-v2 migration, because migrations grant permissions to that pre-existing restricted role rather than creating database principals.
+Before migration, an operator creates the restricted runtime,
+policy-control, and custody-control roles. All must be distinct non-owner roles
+with no superuser, database-creation, role-creation, inheritance, or BYPASSRLS
+capability. The migration grants each only its owned surface and the shared
+migration ledger. Existing deployments must create the configured custody role
+before applying PostgreSQL schema v5; migrations grant privileges to
+pre-existing principals rather than creating customer database roles.
 
 ~~~sql
 CREATE ROLE hormuz_runtime
@@ -132,6 +146,15 @@ CREATE ROLE hormuz_runtime
   PASSWORD 'managed-out-of-band-secret';
 
 CREATE ROLE hormuz_policy_control
+  LOGIN
+  NOSUPERUSER
+  NOCREATEDB
+  NOCREATEROLE
+  NOINHERIT
+  NOBYPASSRLS
+  PASSWORD 'managed-out-of-band-secret';
+
+CREATE ROLE hormuz_custody_control
   LOGIN
   NOSUPERUSER
   NOCREATEDB
@@ -173,6 +196,7 @@ An operator applies migrations explicitly; a gateway process only verifies the c
 export HORMUZ_POSTGRES_MIGRATION_DSN='stored-by-your-secret-manager'
 export HORMUZ_POSTGRES_DSN='stored-by-your-secret-manager'
 export HORMUZ_POLICY_CONTROL_DSN='stored-by-your-secret-manager'
+export HORMUZ_CUSTODY_CONTROL_DSN='stored-by-your-secret-manager'
 
 hormuz --config hormuz.json storage migrate
 hormuz --config hormuz.json storage verify
@@ -189,6 +213,12 @@ The current PostgreSQL migrations create the usage-events, secret-events, active
 An absent organization context therefore sees no tenant rows. A configured organization ID that the repository does not recognize fails closed before querying.
 
 When `policy_control.mode` is `postgresql`, a gateway or `hormuz doctor` also fails closed until every configured tenant has an active immutable policy version. Run the one-time bootstrap, stage a policy document, and activate it through the governed CLI service; do not insert or modify policy rows manually. See [POLICY_CONTROL.md](POLICY_CONTROL.md).
+
+When `custody_control.mode` is `postgresql`, `hormuz doctor` verifies the
+dedicated migration and custody-table shape through the custody-control role.
+Normal gateway startup does not initialize or use this control credential.
+Bootstrap and lifecycle authorization run only through the governed custody
+service; see [CUSTODY_CONTROL.md](CUSTODY_CONTROL.md).
 
 SQLite upgrades happen on normal store initialization. Its ledger records the same supported migration state and refuses a partial or newer-than-binary schema.
 
@@ -247,6 +277,25 @@ canonical checkpoint artifact. A recovered older backup that lacks the
 checkpointed event cannot pass verification without that explicit external
 bridge. This is deliberate evidence of the recovery boundary, not a missing
 fallback behavior.
+
+### PostgreSQL schema v5 custody-control upgrade
+
+Version 5 is PostgreSQL-only. It adds forced-RLS custody tenants and
+administrators, immutable content-free operation targets, append-only approval
+rows, and immutable control events. SQLite remains at schema v4 because local
+custody commands do not implement shared root authority.
+
+Create the configured restricted custody-control role before migration. The
+operator migration validates the complete v5 shape. Runtime verification still
+checks only runtime evidence it is permitted to see; custody-service
+verification separately checks only custody objects. This family-specific
+verification prevents either service from receiving cross-boundary table read
+permission merely to inspect schema metadata.
+
+There is no down-migration. An older binary encountering PostgreSQL schema v5
+fails closed. Rollback requires restoring the previously tested application and
+database pair. Managed mode also blocks legacy direct KMS lifecycle commands;
+schema migration does not create a custody executor or customer KMS authority.
 
 ## Upgrade, rollback, and recovery
 
