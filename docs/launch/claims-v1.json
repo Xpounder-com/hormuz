@@ -26,7 +26,7 @@
         "COST_REPORTING",
         "EVIDENCE_BOUNDARY",
         "GATEWAY_SCOPE",
-        "OCI_ROADMAP",
+        "OCI_RELEASE",
         "POLICY_CONTROLS",
         "PROVIDER_FREE_DEMO",
         "SECRET_EGRESS"
@@ -48,7 +48,7 @@
         "DATA_BOUNDARY",
         "EVIDENCE_BOUNDARY",
         "GATEWAY_SCOPE",
-        "OCI_ROADMAP",
+        "OCI_RELEASE",
         "POLICY_CONTROLS",
         "SECRET_EGRESS"
       ]
@@ -250,13 +250,17 @@
       ]
     },
     {
-      "id": "OCI_ROADMAP",
-      "text": "The first publication target is a signed linux/amd64 OCI digest, with private GHCR as the first registry rather than the portable artifact contract; publication remains pending.",
-      "classification": "roadmap",
+      "id": "OCI_RELEASE",
+      "text": "Hormuz v0.1.1 is published as a signed linux/amd64 OCI digest with anonymous GHCR pull, exact-workflow verification, a public-Rekor image signature, registry SBOM and SLSA attestations, and recursive mirror proof; GHCR remains the first registry rather than the portable artifact contract.",
+      "classification": "verified_alpha",
       "evidence": [
         {
-          "kind": "open_issue",
+          "kind": "closed_issue",
           "value": "https://github.com/Xpounder-com/hormuz/issues/101"
+        },
+        {
+          "kind": "repository_path",
+          "value": ".github/workflows/release-oci.yml"
         },
         {
           "kind": "repository_path",

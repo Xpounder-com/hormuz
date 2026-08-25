@@ -1,4 +1,4 @@
-<!-- hormuz-launch-asset-v1 {"asset_id":"architecture_security","publication_status":"draft_do_not_publish","claim_ids":["ALPHA_BOUNDARY","DATA_BOUNDARY","EVIDENCE_BOUNDARY","GATEWAY_SCOPE","OCI_ROADMAP","POLICY_CONTROLS","SECRET_EGRESS"]} -->
+<!-- hormuz-launch-asset-v1 {"asset_id":"architecture_security","publication_status":"draft_do_not_publish","claim_ids":["ALPHA_BOUNDARY","DATA_BOUNDARY","EVIDENCE_BOUNDARY","GATEWAY_SCOPE","OCI_RELEASE","POLICY_CONTROLS","SECRET_EGRESS"]} -->
 
 # DRAFT — DO NOT PUBLISH
 
@@ -74,12 +74,13 @@ of a request.
 
 ## Deployment story
 
-The portable product target is a signed OCI digest. Private GHCR is only the
-first planned publication registry. The initial image target is
-`linux/amd64`; a multi-architecture manifest remains blocked on separate
-native `linux/arm64` verification. Publication, keyless signature verification,
-and public SBOM/provenance validation are still open release gates.
-<!-- claims: OCI_ROADMAP -->
+The portable product contract is the signed `v0.1.1` OCI digest. Public GHCR
+is only the first publication registry. The published image is `linux/amd64`;
+a multi-architecture manifest remains blocked on separate native
+`linux/arm64` verification. Exact keyless workflow identity, public Rekor image
+signature, registry SBOM/provenance attestations, anonymous pull, and recursive
+mirroring were verified for this release.
+<!-- claims: OCI_RELEASE -->
 
 The built-in server does not manage public TLS certificates. A customer-owned
 ingress terminates TLS and connects to Hormuz over an authenticated,

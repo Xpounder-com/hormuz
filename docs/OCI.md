@@ -142,13 +142,14 @@ all string values before they are signed or attached. Raw SBOM, provenance,
 vulnerability, or verification payloads are not uploaded as workflow
 artifacts; the workflow retains only allowlisted content-free summaries.
 
-After authenticating to the private first registry, verify the exact digest:
+The `v0.1.1` package was made public only after its private release candidate
+passed the complete gate. Verify the current public-alpha digest anonymously:
 
 ```bash
-image="ghcr.io/xpounder-com/hormuz@sha256:<release-digest>"
+image="ghcr.io/xpounder-com/hormuz@sha256:1bbcca3490a7a5b004a880f42e8250acb91ce566a9c59f3263d7b279568efb5a"
 identity="https://github.com/Xpounder-com/hormuz/.github/workflows/release-oci.yml@refs/tags/v0.1.1"
 issuer="https://token.actions.githubusercontent.com"
-commit="<release-commit-sha>"
+commit="b9388cba8945dbdc86a55d79dd92283841aeecc4"
 
 certificate_claims=(
   --certificate-identity "$identity"
