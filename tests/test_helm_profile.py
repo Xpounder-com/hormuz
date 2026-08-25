@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import copy
+import contextlib
+import io
 import json
 import os
 import runpy
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from tools import verify_helm_profile as helm_profile
 from tools import verify_core_wheel as core_distribution
@@ -272,7 +275,15 @@ class HelmChartContractTests(unittest.TestCase):
         kind = (fixture / "kind.yaml").read_text(encoding="utf-8")
         cilium = (fixture / "cilium-values.yaml").read_text(encoding="utf-8")
         postgres = (fixture / "postgres.yaml").read_text(encoding="utf-8")
+        proof_values = (fixture / "helm-values.yaml").read_text(encoding="utf-8")
         runner = (ROOT / "tools" / "verify_helm_profile.sh").read_text(encoding="utf-8")
+        chart_values = (CHART / "values.yaml").read_text(encoding="utf-8")
+        deployment_template = (CHART / "templates" / "deployment.yaml").read_text(
+            encoding="utf-8"
+        )
+        readme = (ROOT / "deploy" / "kubernetes" / "README.md").read_text(
+            encoding="utf-8"
+        )
         self.assertEqual(kind.count(helm_profile.KIND_NODE_IMAGE), 3)
         self.assertIn("disableDefaultCNI: true", kind)
         self.assertIn(helm_profile.CILIUM_AGENT_IMAGE.partition("@")[2], cilium)
@@ -285,7 +296,28 @@ class HelmChartContractTests(unittest.TestCase):
         self.assertNotIn("docker pull", runner)
         self.assertIn("write_random_hex_secret", runner)
         self.assertIn("emit_job_diagnostics", runner)
+        self.assertIn("capture_gateway_logs v1-before-upgrade", runner)
+        self.assertIn("capture_gateway_logs v2-before-rollback", runner)
+        self.assertIn("capture_gateway_logs v1-before-replica-deletion", runner)
+        self.assertIn("capture_gateway_logs v1-after-replica-replacement", runner)
+        self.assertIn("wait_for_job_log_marker", runner)
+        self.assertIn("--from=cronjob/replacement-traffic", runner)
+        self.assertIn("synthetic traffic did not remain active", runner)
+        self.assertIn("rendered-yaml-keywords.yaml", runner)
+        self.assertIn('runtimeSecret.env.NO=true', runner)
         self.assertNotIn('openssl rand -hex 32 >', runner)
+        self.assertNotIn("    HORMUZ_TOKEN:", chart_values)
+        self.assertNotIn("    OPENAI_API_KEY:", chart_values)
+        self.assertNotIn("    ANTHROPIC_API_KEY:", chart_values)
+        self.assertIn("    HORMUZ_TOKEN: hormuz-identity-token", proof_values)
+        self.assertIn("    OPENAI_API_KEY: openai-api-key", proof_values)
+        self.assertIn("    ANTHROPIC_API_KEY: anthropic-api-key", proof_values)
+        self.assertIn("name: {{ $name | quote }}", deployment_template)
+        self.assertIn("key: {{ $key | quote }}", deployment_template)
+        self.assertLess(
+            readme.index("kubectl create namespace hormuz-system"),
+            readme.index("kubectl --namespace hormuz-system create configmap"),
+        )
         self.assertNotIn("apiVersion: cilium.io/", (CHART / "templates" / "networkpolicy.yaml").read_text(encoding="utf-8"))
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
         self.assertIn("name: Kubernetes + Helm multi-replica reference", workflow)
@@ -317,6 +349,46 @@ class HelmChartContractTests(unittest.TestCase):
             (mount / "escaped").symlink_to(outside)
             with self.assertRaisesRegex(SystemExit, "proof_secret_unavailable"):
                 read_projected_secret(mount, "escaped")
+
+    def test_replacement_probe_emits_a_start_barrier_and_strict_summary(self) -> None:
+        probe = runpy.run_path(
+            str(ROOT / "deploy" / "kubernetes" / "conformance" / "probe.py")
+        )
+        replacement = probe["_run_replacement_traffic"]
+        request = mock.Mock(return_value={"status": 200})
+        original_request = replacement.__globals__["_governed_request"]
+        replacement.__globals__["_governed_request"] = request
+        output = io.StringIO()
+        try:
+            with (
+                mock.patch.object(
+                    probe["time"], "monotonic", side_effect=(0, 0, 1, 15)
+                ),
+                mock.patch.object(probe["time"], "sleep"),
+                contextlib.redirect_stdout(output),
+            ):
+                self.assertEqual(
+                    replacement(
+                        target="http://hormuz.invalid",
+                        headers={"Authorization": "synthetic"},
+                        expected_policy="fallback+capped+redacted",
+                        duration_seconds=15,
+                    ),
+                    0,
+                )
+        finally:
+            replacement.__globals__["_governed_request"] = original_request
+        lines = [json.loads(line) for line in output.getvalue().splitlines()]
+        self.assertEqual(lines[0], {"event": "traffic_started"})
+        self.assertEqual(
+            lines[-1],
+            {
+                "command": "replacement-traffic",
+                "failed_requests": 0,
+                "successful_requests": 2,
+            },
+        )
+        self.assertEqual(request.call_count, 2)
 
     def test_source_distribution_contract_includes_the_chart_and_live_proof(self) -> None:
         manifest = (ROOT / "MANIFEST.in").read_text(encoding="utf-8")
@@ -379,6 +451,29 @@ class HelmChartContractTests(unittest.TestCase):
         with self.assertRaisesRegex(helm_profile.HelmProfileError, "chart_owns_customer_dependency"):
             helm_profile.validate_manifest(
                 owned_secret,
+                expected_configuration=CONFIGURATION,
+                expected_runtime_secret=RUNTIME_SECRET,
+            )
+
+    def test_privileged_control_credentials_fail_closed(self) -> None:
+        privileged = valid_manifest()
+        for container in privileged["items"][0]["spec"]["template"]["spec"][
+            "initContainers"
+        ] + privileged["items"][0]["spec"]["template"]["spec"]["containers"]:
+            container["env"].append(
+                {
+                    "name": "HORMUZ_POSTGRES_MIGRATION_DSN",
+                    "valueFrom": {
+                        "secretKeyRef": {
+                            "name": RUNTIME_SECRET,
+                            "key": "postgres-migration-dsn",
+                        }
+                    },
+                }
+            )
+        with self.assertRaisesRegex(helm_profile.HelmProfileError, "privileged_env"):
+            helm_profile.validate_manifest(
+                privileged,
                 expected_configuration=CONFIGURATION,
                 expected_runtime_secret=RUNTIME_SECRET,
             )

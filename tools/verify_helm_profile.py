@@ -104,6 +104,10 @@ FORBIDDEN_EVIDENCE = (
     re.compile(r"\bsk-(?:ant-|proj-)?[A-Za-z0-9_-]{16,}\b"),
     re.compile(r"\beyJ[A-Za-z0-9_-]{12,}\.[A-Za-z0-9_-]{12,}\.[A-Za-z0-9_-]{12,}\b"),
 )
+PRIVILEGED_RUNTIME_ENV_SUFFIX_PATTERN = (
+    r"(_ADMIN_TOKEN|_BREAK_GLASS_TOKEN|_MIGRATION_DSN|_CONTROL_DSN|_EXECUTOR_DSN)$"
+)
+PRIVILEGED_RUNTIME_ENV_PATTERN = re.compile(PRIVILEGED_RUNTIME_ENV_SUFFIX_PATTERN)
 
 
 class HelmProfileError(RuntimeError):
@@ -250,6 +254,15 @@ def validate_chart(chart: Path) -> str:
     properties = _mapping(schema.get("properties"), "values_schema_properties")
     contract = _mapping(properties.get("contract"), "values_schema_contract")
     image = _mapping(properties.get("image"), "values_schema_image")
+    runtime_secret = _mapping(
+        properties.get("runtimeSecret"), "values_schema_runtime_secret"
+    )
+    runtime_env = _mapping(
+        _mapping(
+            runtime_secret.get("properties"), "values_schema_runtime_secret_properties"
+        ).get("env"),
+        "values_schema_runtime_env",
+    )
     digest = _mapping(image.get("properties"), "values_schema_image_properties").get("digest")
     if digest != {"const": HORMUZ_IMAGE.partition("@")[2]}:
         raise HelmProfileError("values_schema_image_digest")
@@ -260,6 +273,10 @@ def validate_chart(chart: Path) -> str:
         raise HelmProfileError("values_schema_contract")
     if contract_properties.get("platform") != {"const": PLATFORM}:
         raise HelmProfileError("values_schema_platform")
+    if runtime_env.get("propertyNames") != {
+        "not": {"pattern": PRIVILEGED_RUNTIME_ENV_SUFFIX_PATTERN}
+    }:
+        raise HelmProfileError("values_schema_privileged_runtime_env")
 
     values_text = (chart / "values.yaml").read_text(encoding="utf-8")
     if HORMUZ_IMAGE.partition("@")[2] not in values_text:
@@ -268,6 +285,8 @@ def validate_chart(chart: Path) -> str:
         raise HelmProfileError("mutable_image_tag")
     if "networkPolicy:\n  enabled: true" not in values_text:
         raise HelmProfileError("default_deny_not_enabled")
+    if "    HORMUZ_TOKEN:" in values_text:
+        raise HelmProfileError("static_identity_enabled_by_default")
 
     rendered_sources = "\n".join(
         (chart / name).read_text(encoding="utf-8")
@@ -294,7 +313,15 @@ def validate_chart(chart: Path) -> str:
         "readOnlyRootFilesystem: true",
         "drop: [\"ALL\"]",
         "whenUnsatisfiable: DoNotSchedule",
+        "nodeAffinityPolicy: Honor",
+        "nodeTaintsPolicy: Honor",
         "maxUnavailable: 0",
+        "name: {{ $name | quote }}",
+        "name: {{ $.Values.runtimeSecret.name | quote }}",
+        "key: {{ $key | quote }}",
+        "name: {{ .Values.configuration.name | quote }}",
+        "key: {{ .Values.configuration.key | quote }}",
+        "name: {{ .name | quote }}",
     ):
         if required not in rendered_sources:
             raise HelmProfileError("required_chart_control_missing")
@@ -508,6 +535,8 @@ def _validate_container_env(
             if item != {"name": "HORMUZ_CONFIG", "value": "/etc/hormuz/hormuz.json"}:
                 raise HelmProfileError(f"{role}_config_env")
             continue
+        if PRIVILEGED_RUNTIME_ENV_PATTERN.search(name):
+            raise HelmProfileError(f"{role}_privileged_env")
         if "value" in item:
             raise HelmProfileError(f"{role}_literal_secret")
         secret_ref = _mapping(

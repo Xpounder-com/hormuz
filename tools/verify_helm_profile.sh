@@ -144,6 +144,39 @@ emit_job_diagnostics() {
   fi
 }
 
+capture_gateway_logs() {
+  local checkpoint=$1
+  [[ "${checkpoint}" =~ ^[a-z0-9-]+$ ]] || fail "gateway log checkpoint invalid"
+  local output="${ARTIFACT_ROOT}/gateway-${checkpoint}.log"
+  kubectl --namespace hormuz-system logs \
+    --selector='app.kubernetes.io/instance=hormuz,app.kubernetes.io/component=gateway' \
+    --all-containers=true --prefix=true --tail=-1 >"${output}"
+  python3 "${ROOT}/tools/verify_helm_profile.py" assert-no-secrets \
+    --artifact "${output}" --secret-root "${SECRET_ROOT}" >/dev/null \
+    || fail "gateway logs failed secret non-disclosure: ${checkpoint}"
+}
+
+wait_for_job_log_marker() {
+  local namespace=$1
+  local job=$2
+  local marker=$3
+  local attempt
+  for attempt in $(seq 1 30); do
+    if kubectl --namespace "${namespace}" logs "job/${job}" 2>/dev/null \
+      | grep -Fxq "${marker}"; then
+      return
+    fi
+    if [[ "$(kubectl --namespace "${namespace}" get "job/${job}" \
+      --output=jsonpath='{.status.failed}' 2>/dev/null)" =~ ^[1-9][0-9]*$ ]]; then
+      emit_job_diagnostics "${namespace}" "${job}"
+      fail "probe job failed before its synchronization marker: ${namespace}/${job}"
+    fi
+    sleep 1
+  done
+  emit_job_diagnostics "${namespace}" "${job}"
+  fail "probe job synchronization marker missing: ${namespace}/${job}"
+}
+
 run_probe() {
   local namespace=$1
   local template=$2
@@ -237,6 +270,26 @@ if len(nodes) != 2:
     raise SystemExit("gateway_topology_not_spread")
 print(len(nodes))
 PY
+}
+
+wait_for_gateway_replacement() {
+  local old_uid=$1
+  local output=$2
+  local attempt
+  local topology
+  for attempt in $(seq 1 120); do
+    if topology="$(gateway_topology "${output}" 2>/dev/null)" \
+      && kubectl --namespace hormuz-system get pods \
+        --selector='app.kubernetes.io/instance=hormuz,app.kubernetes.io/component=gateway' \
+        --output=json \
+      | python3 -c 'import json,sys; old=sys.argv[1]; raise SystemExit(1 if any(i["metadata"]["uid"]==old for i in json.load(sys.stdin)["items"]) else 0)' "${old_uid}"; then
+      printf '%s\n' "${topology}"
+      return
+    fi
+    sleep 1
+  done
+  emit_deployment_diagnostics hormuz-system hormuz-hormuz
+  fail "deleted gateway replica did not reach a distinct ready replacement"
 }
 
 [[ "${HORMUZ_KUBERNETES_PROOF_ACK:-}" == "${PROOF_ACK}" ]] \
@@ -419,6 +472,17 @@ python3 "${ROOT}/tools/verify_helm_profile.py" assert-no-secrets \
   --artifact-root "${CHART_ROOT}" \
   --artifact "${ARTIFACT_ROOT}/rendered-v1.yaml" \
   --secret-root "${SECRET_ROOT}" >/dev/null
+helm template yaml-keywords "${CHART_ROOT}" --namespace hormuz-system \
+  --values "${FIXTURE_ROOT}/helm-values.yaml" \
+  --set-string "configuration.name=on" \
+  --set-string "configuration.key=true" \
+  --set-string "configuration.sha256=${config_v1_sha}" \
+  --set-string "runtimeSecret.name=on" \
+  --set-string "runtimeSecret.env.NO=true" \
+  --set-string "imagePullSecrets[0].name=on" \
+  >"${ARTIFACT_ROOT}/rendered-yaml-keywords.yaml"
+kubectl apply --dry-run=server \
+  --filename "${ARTIFACT_ROOT}/rendered-yaml-keywords.yaml" >/dev/null
 
 # Keep a failed first installation observable until its diagnostics have been
 # secret-scanned. The EXIT trap deletes the entire disposable cluster, while
@@ -475,6 +539,7 @@ create_immutable_secret hormuz-system hormuz-runtime-v2 \
   --from-file="anthropic-api-key=${SECRET_ROOT}/anthropic-api-key"
 config_v2_sha="sha256:$(sha256sum "${FIXTURE_ROOT}/hormuz.deny.json" | awk '{print $1}')"
 [[ "${config_v2_sha}" != "${config_v1_sha}" ]] || fail "replacement configuration was not distinct"
+capture_gateway_logs v1-before-upgrade
 helm upgrade hormuz "${CHART_ROOT}" \
   --namespace hormuz-system \
   --values "${FIXTURE_ROOT}/helm-values.yaml" \
@@ -488,6 +553,7 @@ POLICY_DENIALS=$((POLICY_DENIALS + 1))
 provider_stats "${ARTIFACT_ROOT}/provider-after-deny.json"
 assert_provider_stats "${ARTIFACT_ROOT}/provider-after-deny.json" "${SUCCESSFUL_REQUESTS}"
 
+capture_gateway_logs v2-before-rollback
 helm rollback hormuz 1 --namespace hormuz-system --wait --timeout 10m --cleanup-on-fail >/dev/null
 run_probe hormuz-ingress allowed-request 200
 SUCCESSFUL_REQUESTS=$((SUCCESSFUL_REQUESTS + 1))
@@ -499,33 +565,50 @@ old_pod="$(kubectl --namespace hormuz-system get pods \
   --sort-by=.metadata.name --output=jsonpath='{.items[0].metadata.name}')"
 old_uid="$(kubectl --namespace hormuz-system get pod "${old_pod}" --output=jsonpath='{.metadata.uid}')"
 PROBE_SEQUENCE=$((PROBE_SEQUENCE + 1))
-replacement_job="allowed-request-${PROBE_SEQUENCE}"
-kubectl --namespace hormuz-ingress create job "${replacement_job}" --from=cronjob/allowed-request >/dev/null
+replacement_job="replacement-traffic-${PROBE_SEQUENCE}"
+kubectl --namespace hormuz-ingress create job "${replacement_job}" \
+  --from=cronjob/replacement-traffic >/dev/null
+wait_for_job_log_marker hormuz-ingress "${replacement_job}" '{"event":"traffic_started"}'
+capture_gateway_logs v1-before-replica-deletion
 kubectl --namespace hormuz-system delete pod "${old_pod}" --wait=false >/dev/null
-kubectl --namespace hormuz-ingress wait --for=condition=complete "job/${replacement_job}" --timeout=120s >/dev/null
-kubectl --namespace hormuz-ingress logs "job/${replacement_job}" >"${ARTIFACT_ROOT}/${replacement_job}.json"
-python3 - "${ARTIFACT_ROOT}/${replacement_job}.json" <<'PY'
+kubectl --namespace hormuz-system wait --for=delete "pod/${old_pod}" --timeout=5m >/dev/null
+distinct_gateway_nodes="$(wait_for_gateway_replacement \
+  "${old_uid}" "${ARTIFACT_ROOT}/gateway-topology-replacement.json")"
+kubectl --namespace hormuz-system rollout status deployment/hormuz-hormuz --timeout=10m >/dev/null
+[[ "$(kubectl --namespace hormuz-ingress get "job/${replacement_job}" \
+  --output=jsonpath='{.status.active}')" == "1" ]] \
+  || fail "synthetic traffic did not remain active through replica replacement"
+if ! kubectl --namespace hormuz-ingress wait --for=condition=complete \
+  "job/${replacement_job}" --timeout=90s >/dev/null; then
+  emit_job_diagnostics hormuz-ingress "${replacement_job}"
+  fail "replacement traffic did not complete"
+fi
+kubectl --namespace hormuz-ingress logs "job/${replacement_job}" \
+  >"${ARTIFACT_ROOT}/${replacement_job}.jsonl"
+replacement_successes="$(python3 - "${ARTIFACT_ROOT}/${replacement_job}.jsonl" <<'PY'
 import json
 import sys
+values = []
 with open(sys.argv[1], encoding="utf-8") as stream:
-    value = json.load(stream)
-if value.get("status") != 200:
-    raise SystemExit("replacement_request_failed")
+    for line in stream:
+        if line.strip():
+            values.append(json.loads(line))
+if not values or values[0] != {"event": "traffic_started"}:
+    raise SystemExit("replacement_traffic_start_invalid")
+summary = values[-1]
+if (
+    summary.get("command") != "replacement-traffic"
+    or summary.get("failed_requests") != 0
+    or not isinstance(summary.get("successful_requests"), int)
+    or summary["successful_requests"] < 2
+):
+    raise SystemExit("replacement_traffic_summary_invalid")
+print(summary["successful_requests"])
 PY
+)"
+SUCCESSFUL_REQUESTS=$((SUCCESSFUL_REQUESTS + replacement_successes))
+capture_gateway_logs v1-after-replica-replacement
 kubectl --namespace hormuz-ingress delete "job/${replacement_job}" --wait=true >/dev/null
-SUCCESSFUL_REQUESTS=$((SUCCESSFUL_REQUESTS + 1))
-if kubectl --namespace hormuz-system get "pod/${old_pod}" >/dev/null 2>&1; then
-  kubectl --namespace hormuz-system wait --for=delete "pod/${old_pod}" --timeout=5m >/dev/null
-fi
-kubectl --namespace hormuz-system rollout status deployment/hormuz-hormuz --timeout=10m >/dev/null
-distinct_gateway_nodes="$(gateway_topology "${ARTIFACT_ROOT}/gateway-topology-replacement.json")"
-if kubectl --namespace hormuz-system get pods \
-  --selector='app.kubernetes.io/instance=hormuz,app.kubernetes.io/component=gateway' \
-  --output=json | python3 -c 'import json,sys; old=sys.argv[1]; raise SystemExit(1 if any(i["metadata"]["uid"]==old for i in json.load(sys.stdin)["items"]) else 0)' "${old_uid}"; then
-  :
-else
-  fail "deleted gateway replica was not replaced"
-fi
 
 provider_stats "${ARTIFACT_ROOT}/provider-final.json"
 assert_provider_stats "${ARTIFACT_ROOT}/provider-final.json" "${SUCCESSFUL_REQUESTS}"
@@ -533,11 +616,6 @@ usage_event_count="$(usage_events)"
 [[ "${usage_event_count}" -ge "${SUCCESSFUL_REQUESTS}" ]] \
   || fail "metadata-only usage evidence did not survive rolling changes"
 
-kubectl --namespace hormuz-system logs deployment/hormuz-hormuz --all-pods=true --prefix=false \
-  >"${ARTIFACT_ROOT}/gateway.log"
-kubectl --namespace hormuz-system logs \
-  --selector='app.kubernetes.io/instance=hormuz,app.kubernetes.io/component=gateway' \
-  --container=configuration-preflight --prefix=false >"${ARTIFACT_ROOT}/preflight.log"
 kubectl --namespace hormuz-dependencies logs deployment/postgres >"${ARTIFACT_ROOT}/postgres.log"
 kubectl --namespace hormuz-dependencies logs deployment/fake-provider >"${ARTIFACT_ROOT}/fake-provider.log"
 helm get values hormuz --namespace hormuz-system --output=json >"${ARTIFACT_ROOT}/installed-values.json"

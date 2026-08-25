@@ -53,7 +53,9 @@ spec:
           type: RuntimeDefault
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
-        {{- toYaml . | nindent 8 }}
+        {{- range . }}
+        - name: {{ .name | quote }}
+        {{- end }}
       {{- end }}
       initContainers:
         - name: configuration-preflight
@@ -65,11 +67,11 @@ spec:
             - name: HORMUZ_CONFIG
               value: /etc/hormuz/hormuz.json
             {{- range $name, $key := .Values.runtimeSecret.env }}
-            - name: {{ $name }}
+            - name: {{ $name | quote }}
               valueFrom:
                 secretKeyRef:
-                  name: {{ $.Values.runtimeSecret.name }}
-                  key: {{ $key }}
+                  name: {{ $.Values.runtimeSecret.name | quote }}
+                  key: {{ $key | quote }}
             {{- end }}
           securityContext:
             allowPrivilegeEscalation: false
@@ -94,11 +96,11 @@ spec:
             - name: HORMUZ_CONFIG
               value: /etc/hormuz/hormuz.json
             {{- range $name, $key := .Values.runtimeSecret.env }}
-            - name: {{ $name }}
+            - name: {{ $name | quote }}
               valueFrom:
                 secretKeyRef:
-                  name: {{ $.Values.runtimeSecret.name }}
-                  key: {{ $key }}
+                  name: {{ $.Values.runtimeSecret.name | quote }}
+                  key: {{ $key | quote }}
             {{- end }}
           ports:
             - name: http-private
@@ -150,10 +152,10 @@ spec:
       volumes:
         - name: configuration
           configMap:
-            name: {{ .Values.configuration.name }}
+            name: {{ .Values.configuration.name | quote }}
             defaultMode: 0440
             items:
-              - key: {{ .Values.configuration.key }}
+              - key: {{ .Values.configuration.key | quote }}
                 path: hormuz.json
         - name: temporary
           emptyDir:

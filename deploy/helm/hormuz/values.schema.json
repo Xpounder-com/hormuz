@@ -77,6 +77,11 @@
           "minProperties": 2,
           "maxProperties": 64,
           "required": ["HORMUZ_POSTGRES_DSN", "HORMUZ_INGRESS_CREDENTIAL"],
+          "propertyNames": {
+            "not": {
+              "pattern": "(_ADMIN_TOKEN|_BREAK_GLASS_TOKEN|_MIGRATION_DSN|_CONTROL_DSN|_EXECUTOR_DSN)$"
+            }
+          },
           "patternProperties": {
             "^[A-Z][A-Z0-9_]{0,127}$": {"$ref": "#/definitions/secretKey"}
           },

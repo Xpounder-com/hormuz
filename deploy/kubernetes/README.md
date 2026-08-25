@@ -79,6 +79,8 @@ placing values in Helm values, shell arguments, URLs, logs, or source control.
 Then create generation-scoped immutable objects from file paths:
 
 ```bash
+kubectl create namespace hormuz-system
+
 kubectl --namespace hormuz-system create configmap hormuz-config-v1 \
   --from-file=hormuz.json=/protected/hormuz.json
 kubectl --namespace hormuz-system patch configmap hormuz-config-v1 \
@@ -86,9 +88,7 @@ kubectl --namespace hormuz-system patch configmap hormuz-config-v1 \
 
 kubectl --namespace hormuz-system create secret generic hormuz-runtime-v1 \
   --from-file=postgres-runtime-dsn=/protected/postgres-runtime-dsn \
-  --from-file=hormuz-ingress-credential=/protected/hormuz-ingress-credential \
-  --from-file=openai-api-key=/protected/openai-api-key \
-  --from-file=anthropic-api-key=/protected/anthropic-api-key
+  --from-file=hormuz-ingress-credential=/protected/hormuz-ingress-credential
 kubectl --namespace hormuz-system patch secret hormuz-runtime-v1 \
   --type=merge --patch '{"immutable":true}'
 ```
@@ -167,8 +167,12 @@ PostgreSQL images directly by immutable digest; the proof never replaces those
 references with mutable tags. It proves two ready replicas on distinct workers,
 authenticated ingress, provider-shaped fake traffic, policy and
 metadata-only evidence persistence, ingress and egress denial, readiness-gated
-configuration/Secret replacement and rollback, one graceful Pod deletion and
-replacement while synthetic traffic succeeds, and clean chart/cluster removal.
+configuration/Secret replacement and rollback, and one graceful Pod deletion
+after sustained synthetic traffic has started. The proof requires that traffic
+to remain active until two distinct ready replicas—including a new Pod UID—are
+observed, then requires every request to have succeeded. Gateway and preflight
+logs are captured and secret-scanned before each revision change or deletion
+and once more after replacement. The proof then removes the chart and cluster.
 It contacts no model provider or external IdP.
 
 Only a strict mode-`0600` `hormuz.kubernetes-reference-proof` v1 summary is

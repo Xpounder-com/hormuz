@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import time
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -15,10 +16,14 @@ SYNTHETIC_SECRET = "sk-proj-KKKKKKKKKKKKKKKKKKKKKKKK"
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("health", "request", "network-denied"))
+    parser.add_argument(
+        "command",
+        choices=("health", "request", "replacement-traffic", "network-denied"),
+    )
     parser.add_argument("--target", required=True)
     parser.add_argument("--expected-status", type=int)
     parser.add_argument("--expected-policy")
+    parser.add_argument("--duration-seconds", type=int)
     parser.add_argument("--without-ingress", action="store_true")
     args = parser.parse_args()
 
@@ -52,29 +57,23 @@ def main() -> int:
                 "Content-Type": "application/json",
             }
         )
-        payload = {
-            "model": "unapproved-kubernetes-proof-model",
-            "input": f"Synthetic credential for redaction proof: {SYNTHETIC_SECRET}",
-            "max_output_tokens": 900,
-            "stream": False,
-        }
-        status, response_headers, body = _request(
-            "POST",
-            f"{args.target}/v1/responses",
+        if args.command == "replacement-traffic":
+            if args.duration_seconds is None or not 15 <= args.duration_seconds <= 120:
+                raise SystemExit("replacement_duration_invalid")
+            return _run_replacement_traffic(
+                target=args.target,
+                headers=headers,
+                expected_policy=args.expected_policy,
+                duration_seconds=args.duration_seconds,
+            )
+        result = _governed_request(
+            target=args.target,
             headers=headers,
-            body=json.dumps(payload, separators=(",", ":")).encode("utf-8"),
+            expected_status=args.expected_status,
+            expected_policy=args.expected_policy,
         )
-        policy = response_headers.get("x-hormuz-policy-decision")
-        if args.expected_policy is not None and policy != args.expected_policy:
-            raise SystemExit("policy_decision_invalid")
-        if status == 200:
-            value = json.loads(body)
-            if value.get("model") != "gpt-kubernetes-proof":
-                raise SystemExit("routed_model_invalid")
-        elif status == 403:
-            value = json.loads(body)
-            if value.get("error", {}).get("code") != "hormuz_secret_detected":
-                raise SystemExit("deny_contract_invalid")
+        print(json.dumps(result, sort_keys=True, separators=(",", ":")))
+        return 0
 
     if status != args.expected_status:
         raise SystemExit(f"unexpected_status:{status}")
@@ -85,6 +84,92 @@ def main() -> int:
                 "status": status,
                 "policy": response_headers.get("x-hormuz-policy-decision"),
                 "redactions": int(response_headers.get("x-hormuz-redactions", "0")),
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+    )
+    return 0
+
+
+def _governed_request(
+    *,
+    target: str,
+    headers: dict[str, str],
+    expected_status: int | None,
+    expected_policy: str | None,
+) -> dict[str, object]:
+    payload = {
+        "model": "unapproved-kubernetes-proof-model",
+        "input": f"Synthetic credential for redaction proof: {SYNTHETIC_SECRET}",
+        "max_output_tokens": 900,
+        "stream": False,
+    }
+    status, response_headers, body = _request(
+        "POST",
+        f"{target}/v1/responses",
+        headers=headers,
+        body=json.dumps(payload, separators=(",", ":")).encode("utf-8"),
+    )
+    policy = response_headers.get("x-hormuz-policy-decision")
+    if expected_policy is not None and policy != expected_policy:
+        raise SystemExit("policy_decision_invalid")
+    if status == 200:
+        value = json.loads(body)
+        if value.get("model") != "gpt-kubernetes-proof":
+            raise SystemExit("routed_model_invalid")
+    elif status == 403:
+        value = json.loads(body)
+        if value.get("error", {}).get("code") != "hormuz_secret_detected":
+            raise SystemExit("deny_contract_invalid")
+    if status != expected_status:
+        raise SystemExit(f"unexpected_status:{status}")
+    return {
+        "command": "request",
+        "status": status,
+        "policy": policy,
+        "redactions": int(response_headers.get("x-hormuz-redactions", "0")),
+    }
+
+
+def _run_replacement_traffic(
+    *,
+    target: str,
+    headers: dict[str, str],
+    expected_policy: str | None,
+    duration_seconds: int,
+) -> int:
+    deadline = time.monotonic() + duration_seconds
+    successful_requests = 0
+    failed_requests = 0
+    started = False
+    while time.monotonic() < deadline:
+        try:
+            _governed_request(
+                target=target,
+                headers=headers,
+                expected_status=200,
+                expected_policy=expected_policy,
+            )
+        except (URLError, TimeoutError, OSError):
+            failed_requests += 1
+        else:
+            successful_requests += 1
+            if not started:
+                print(
+                    json.dumps({"event": "traffic_started"}, separators=(",", ":")),
+                    flush=True,
+                )
+                started = True
+        time.sleep(0.5)
+    if successful_requests < 2 or failed_requests:
+        raise SystemExit("replacement_traffic_failed")
+    print(
+        json.dumps(
+            {
+                "command": "replacement-traffic",
+                "failed_requests": failed_requests,
+                "successful_requests": successful_requests,
             },
             sort_keys=True,
             separators=(",", ":"),

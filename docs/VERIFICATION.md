@@ -347,8 +347,10 @@ does not substitute mutable tags or use Kind's host-side image importer.
 It proves authenticated ingress, fake-provider
 routing/capping/redaction, metadata-only evidence persistence, denied ingress
 and egress, readiness-gated immutable configuration/Secret replacement and
-rollback, one Pod replacement under synthetic traffic, and clean removal. It contacts no model
-provider or external IdP.
+rollback, and sustained synthetic traffic synchronized across one observed Pod
+deletion and distinct ready replacement. It secret-scans gateway and preflight
+logs before each revision transition or deletion and after replacement, then
+proves clean removal. It contacts no model provider or external IdP.
 
 Only a strict mode-`0600` `hormuz.kubernetes-reference-proof` v1 summary is
 uploaded. Generated credentials, configuration, rendered resources, logs,

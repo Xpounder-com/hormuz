@@ -4,6 +4,10 @@ configuration:
 runtimeSecret:
   name: hormuz-runtime-v1
   revision: conformance-generation-v1
+  env:
+    HORMUZ_TOKEN: hormuz-identity-token
+    OPENAI_API_KEY: openai-api-key
+    ANTHROPIC_API_KEY: anthropic-api-key
 networkPolicy:
   ingress:
     - from:

@@ -23,10 +23,7 @@ runtimeSecret:
   revision: replace-with-customer-controlled-generation-v1
   env:
     HORMUZ_POSTGRES_DSN: postgres-runtime-dsn
-    HORMUZ_TOKEN: hormuz-identity-token
     HORMUZ_INGRESS_CREDENTIAL: hormuz-ingress-credential
-    OPENAI_API_KEY: openai-api-key
-    ANTHROPIC_API_KEY: anthropic-api-key
 
 service:
   port: 8787
