@@ -77,6 +77,13 @@ DSN. Cilium is used by the first disposable network-policy proof but is absent
 from the chart contract. See the
 [Kubernetes reference](../deploy/kubernetes/README.md).
 
+The accepted [v1 deployment ADR](decisions/0009-v1-deployment-profiles-and-recovery-objectives.md)
+and strict [state/ownership manifest](deployment-contract-v1.json) freeze which
+state is authoritative, derived, cached, ephemeral, or customer-owned. They
+also bind the Kubernetes enterprise-reference rehearsal to a five-minute RPO,
+a 60-minute internal RTO, and publication of complete end-to-end recovery
+time. Those are reference acceptance criteria, not customer SLAs.
+
 ## Compatibility boundary
 
 Hormuz implements the provider endpoints required by Codex and Claude Code rather than inventing a new employee-facing client. Provider protocol changes are compatibility risks and require executable conformance tests.

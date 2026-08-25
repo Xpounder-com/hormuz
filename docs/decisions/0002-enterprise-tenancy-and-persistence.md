@@ -101,7 +101,11 @@ The migration framework/library is deliberately not selected in this ADR. That c
 - A tenant is pinned to an approved region. Replication, backups, analytics, and support workflows cannot move tenant content outside that boundary without explicit policy.
 - Legal hold applies to durable control-plane records and audit evidence.
 
-Recovery point and recovery time objectives are not chosen here; they are commercial/operational decisions for the deployment milestone and must be measured before v1.0.
+The later accepted [ADR 0009](0009-v1-deployment-profiles-and-recovery-objectives.md)
+sets a five-minute RPO and a 60-minute internal RTO as executable acceptance
+criteria for the exact v1 Kubernetes enterprise-reference rehearsal. It also
+requires publication of the complete end-to-end recovery time. Those targets
+are not a universal customer SLA.
 
 ## Security invariants
 

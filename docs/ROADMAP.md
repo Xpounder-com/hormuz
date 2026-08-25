@@ -154,7 +154,9 @@ gate.
 
 That optional gate,
 [#108](https://github.com/Xpounder-com/hormuz/issues/108), is implemented in
-[#138](https://github.com/Xpounder-com/hormuz/pull/138) and bounded to a
+[#138](https://github.com/Xpounder-com/hormuz/pull/138), corrected and closed
+on merged-main evidence by [#139](https://github.com/Xpounder-com/hormuz/pull/139),
+and bounded to a
 vendor-neutral Helm chart plus an account-free disposable Kind/Cilium proof.
 The chart uses only standard Kubernetes APIs, deploys Hormuz behind an
 internal ClusterIP, and consumes customer-operated PostgreSQL through an
@@ -164,6 +166,16 @@ persistence, Pod replacement, and clean removal. Cilium is the first tested
 CNI rather than a product dependency. HA, RPO, RTO, zone failure, broad CNI
 portability, and deeper coordinated state/admission claims remain with their
 dedicated #103/#104/#105 gates.
+
+The final #100 recovery decision is accepted in
+[ADR 0009](decisions/0009-v1-deployment-profiles-and-recovery-objectives.md).
+Issue #105 must prove no more than a 300-second RPO and a 3,600-second internal
+RTO in the exact pinned Kubernetes enterprise-reference rehearsal. It must
+separately publish complete end-to-end time from failure injection through the
+first successful governed request after promotion. These thresholds are
+reference-rehearsal acceptance criteria, not customer SLAs. The versioned
+[deployment contract](deployment-contract-v1.json) freezes the supporting
+profile, ownership, platform, state-inventory, and nonclaim boundaries.
 
 ## Feature-freeze rule
 

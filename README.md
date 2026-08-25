@@ -78,6 +78,7 @@ telemetry, and a synthetic fixture can never satisfy the launch gate.
 - A published `v0.1.1` `linux/amd64` OCI artifact identified by immutable digest: keyless GitHub OIDC/Cosign signing with public Rekor, strictly validated registry-only CycloneDX and bounded provenance attestations, exact-workflow verification, anonymous GHCR pull, and no mutable `latest` tag.
 - OCI supply-chain evidence that blocks fixable HIGH/CRITICAL findings while retaining all other scanner observations, plus a two-build byte-for-byte reproducibility gate.
 - A versioned single-Linux-VM Docker Compose profile with one signed Hormuz digest, one private persistent PostgreSQL digest, protected file-mounted secrets, a customer-operated external-DSN path, and a provider-free clean-VM proof; it is for evaluation and pilots, not HA or production certification.
+- An optional vendor-neutral Kubernetes/Helm profile using the same signed digest, standard Kubernetes APIs, an internal ClusterIP, customer-supplied immutable inputs, customer-operated PostgreSQL, default-deny network policy, and a pinned disposable Kind/Cilium proof. Its deeper HA/recovery gates remain open.
 - A digest-pinned, disposable PostgreSQL logical backup-and-restore exercise that verifies metadata-only governed state and retains only a content-free recovery summary.
 
 The included rate cards are examples current as of August 15, 2026. Treat them
@@ -140,6 +141,11 @@ Continue with [Codex setup](docs/CLIENTS.md#codex),
 [signed OCI digest verification boundary](docs/OCI.md#protected-release-workflow),
 the [single-VM Compose pilot](deploy/compose/README.md), or the optional
 [Kubernetes + Helm multi-replica reference](deploy/kubernetes/README.md).
+The accepted [v1 deployment contract](docs/decisions/0009-v1-deployment-profiles-and-recovery-objectives.md)
+sets reference-rehearsal targets of a five-minute RPO and a 60-minute internal
+RTO while requiring publication of complete end-to-end recovery time. These
+are not customer SLAs, and they remain unproven until the dedicated recovery
+gate closes.
 
 ## Policies and usage
 
