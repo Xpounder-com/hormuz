@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import json
 import re
+import select
+import socket
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 
@@ -19,6 +22,11 @@ class Provider(BaseHTTPRequestHandler):
     provider_authorization_seen = False
     capped_output_seen = False
     routed_model_seen = False
+    blocking_requests = 0
+    blocking_gateway_ip: str | None = None
+    blocking_started = threading.Event()
+    blocking_release = threading.Event()
+    blocking_gateway_disconnected = threading.Event()
 
     def do_GET(self) -> None:  # noqa: N802
         if self.path == "/health":
@@ -33,12 +41,38 @@ class Provider(BaseHTTPRequestHandler):
                     "provider_authorization_seen": self.provider_authorization_seen,
                     "capped_output_seen": self.capped_output_seen,
                     "routed_model_seen": self.routed_model_seen,
+                    "blocking_requests": self.blocking_requests,
+                }
+            self._send(value)
+            return
+        if self.path == "/control/block/status":
+            with self.lock:
+                value = {
+                    "started": self.blocking_started.is_set(),
+                    "released": self.blocking_release.is_set(),
+                    "gateway_ip": self.blocking_gateway_ip,
+                    "gateway_disconnected": self.blocking_gateway_disconnected.is_set(),
                 }
             self._send(value)
             return
         self._send({"error": "not_found"}, status=404)
 
     def do_POST(self) -> None:  # noqa: N802
+        if self.path == "/control/block/release":
+            self.blocking_release.set()
+            self._send({"released": True})
+            return
+        if self.path == "/control/block/reset":
+            with self.lock:
+                if self.blocking_started.is_set() and not self.blocking_release.is_set():
+                    self._send({"error": "blocking_request_active"}, status=409)
+                    return
+                type(self).blocking_gateway_ip = None
+                self.blocking_started.clear()
+                self.blocking_release.clear()
+                self.blocking_gateway_disconnected.clear()
+            self._send({"reset": True})
+            return
         if self.path.partition("?")[0] != "/v1/responses":
             self._send({"error": "not_found"}, status=404)
             return
@@ -46,6 +80,7 @@ class Provider(BaseHTTPRequestHandler):
         body = json.loads(self.rfile.read(length))
         encoded = json.dumps(body, sort_keys=True, separators=(",", ":"))
         authorization = self.headers.get("Authorization", "")
+        blocking = "HORMUZ_BLOCKING_OPERATION_PROBE" in encoded
         with self.lock:
             type(self).requests += 1
             type(self).redaction_marker_seen |= _REDACTION_MARKER in encoded
@@ -55,23 +90,55 @@ class Provider(BaseHTTPRequestHandler):
             )
             type(self).capped_output_seen |= body.get("max_output_tokens") == 64
             type(self).routed_model_seen |= body.get("model") == "gpt-kubernetes-proof"
-        self._send(
-            {
-                "id": "resp_kubernetes_proof",
-                "object": "response",
-                "status": "completed",
-                "model": body.get("model"),
-                "output": [],
-                "usage": {
-                    "input_tokens": 12,
-                    "output_tokens": 4,
-                    "input_tokens_details": {"cached_tokens": 2},
-                    "output_tokens_details": {"reasoning_tokens": 1},
-                    "total_tokens": 16,
+            if blocking:
+                type(self).blocking_requests += 1
+                type(self).blocking_gateway_ip = self.client_address[0]
+                self.blocking_started.set()
+        if blocking and not self._wait_for_block_release(timeout=120):
+            self._send({"error": "blocking_probe_timeout"}, status=504)
+            return
+        try:
+            self._send(
+                {
+                    "id": "resp_kubernetes_proof",
+                    "object": "response",
+                    "status": "completed",
+                    "model": body.get("model"),
+                    "output": [],
+                    "usage": {
+                        "input_tokens": 12,
+                        "output_tokens": 4,
+                        "input_tokens_details": {"cached_tokens": 2},
+                        "output_tokens_details": {"reasoning_tokens": 1},
+                        "total_tokens": 16,
+                    },
                 },
-            },
-            request_id="req_kubernetes_proof",
-        )
+                request_id="req_kubernetes_proof",
+            )
+        except (BrokenPipeError, ConnectionResetError):
+            # An intentionally force-killed gateway cannot receive the
+            # provider response. The provider still records one egress and
+            # never retries it.
+            return
+
+    def _wait_for_block_release(self, *, timeout: int) -> bool:
+        deadline = time.monotonic() + timeout
+        disconnected = False
+        while time.monotonic() < deadline:
+            if self.blocking_release.wait(timeout=0.1):
+                return True
+            if disconnected:
+                continue
+            readable, _, _ = select.select([self.connection], [], [], 0)
+            if not readable:
+                continue
+            try:
+                disconnected = self.connection.recv(1, socket.MSG_PEEK) == b""
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                disconnected = True
+            if disconnected:
+                self.blocking_gateway_disconnected.set()
+        return False
 
     def _send(
         self,

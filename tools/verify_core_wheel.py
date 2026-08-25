@@ -53,6 +53,7 @@ REQUIRED_HELM_SDIST_PATHS = (
     "deploy/kubernetes/conformance/probes.yaml",
     "tools/verify_helm_profile.py",
     "tools/verify_helm_profile.sh",
+    "tools/verify_multi_replica_operation.py",
 )
 
 

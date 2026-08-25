@@ -344,8 +344,16 @@ endpoint. Its exact operator workflow and nonclaims are in the
 The `Kubernetes + Helm multi-replica reference` job invokes:
 
 ```bash
+HORMUZ_TEST_POSTGRES_DSN="$PROTECTED_DISPOSABLE_POSTGRES_DSN" \
+  python tools/verify_multi_replica_operation.py run-state-proof \
+    --postgres-image 'postgres@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777' \
+    --source-commit "$GITHUB_SHA" \
+    --output "$RUNNER_TEMP/hormuz-multi-replica-state.json"
+
 HORMUZ_KUBERNETES_PROOF_ACK=I_UNDERSTAND_THIS_IS_A_DISPOSABLE_KUBERNETES_REFERENCE_PROOF \
 HORMUZ_KUBERNETES_EVIDENCE_DIR=/protected/new/output-directory \
+HORMUZ_MULTI_REPLICA_STATE_EVIDENCE="$RUNNER_TEMP/hormuz-multi-replica-state.json" \
+HORMUZ_SOURCE_COMMIT="$GITHUB_SHA" \
   ./tools/verify_helm_profile.sh
 ```
 
@@ -370,12 +378,29 @@ deletion and distinct ready replacement. It secret-scans gateway and preflight
 logs before each revision transition or deletion and after replacement, then
 proves clean removal. It contacts no model provider or external IdP.
 
-Only a strict mode-`0600` `hormuz.kubernetes-reference-proof` v1 summary is
-uploaded. Generated credentials, configuration, rendered resources, logs,
-fake traffic, and raw database observations stay temporary and are deleted.
-The proof makes no HA, RPO, RTO, zone-failure, broad CNI-portability, browser
-session, cloud, customer-infrastructure, or production-operations claim. See
-the exact boundary in the
+The same job now binds that deployment proof to a focused eight-test PostgreSQL
+state proof. The named tests cover shared atomic budgets, immutable policy
+activation, tenant isolation, request-attempt reservations, concurrent audit
+chains, custody approval and barrier coordination, duplicated synchronization,
+stale acknowledgements, and partition fencing. In Kind, the verifier
+additionally holds one request at the fake provider during a normal Pod
+termination and one during a forced Pod deletion. It measures restrictive
+rollout, rollback, readiness withdrawal, in-flight drain, and replacement
+convergence. The forced-loss attempt must
+become `outcome_unknown`, keep one uncertain reservation, and correspond to
+exactly one provider egress.
+
+Only three strict mode-`0600` content-free summaries are uploaded:
+`hormuz.kubernetes-reference-proof` v1,
+`hormuz.multi-replica-state-proof` v1, and
+`hormuz.multi-replica-operation-proof` v1. The final summary binds the first
+two by SHA-256 and records the exact commit, image and chart digests, fixed
+event sequence, observed timings, state counts, and nonclaims.
+Generated credentials, configuration, rendered resources, logs, fake traffic,
+and raw database observations stay temporary and are deleted. The proof makes
+no PostgreSQL leader-failover, RPO, RTO, zone-failure, broad CNI-portability,
+browser-session, provider exactly-once, customer-infrastructure, or universal
+customer-SLA claim. See the exact boundary in the
 [Kubernetes profile](../deploy/kubernetes/README.md).
 
 ## OCI supply-chain evidence

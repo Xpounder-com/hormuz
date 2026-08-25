@@ -71,6 +71,74 @@ spec:
 apiVersion: batch/v1
 kind: CronJob
 metadata:
+  name: blocking-request
+  namespace: hormuz-ingress
+spec:
+  schedule: "0 0 31 2 *"
+  suspend: true
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      template:
+        metadata:
+          labels:
+            io.hormuz.proof-role: ingress
+        spec:
+          automountServiceAccountToken: false
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            fsGroup: 65532
+            fsGroupChangePolicy: OnRootMismatch
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: probe
+              image: ghcr.io/xpounder-com/hormuz@sha256:1bbcca3490a7a5b004a880f42e8250acb91ce566a9c59f3263d7b279568efb5a
+              command: ["/opt/hormuz/bin/python"]
+              args:
+                - -I
+                - /opt/hormuz-proof/probe.py
+                - blocking-request
+                - --target
+                - http://hormuz-hormuz.hormuz-system.svc.cluster.local:8787
+                - --expected-policy
+                - fallback+capped+redacted
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              resources:
+                requests:
+                  cpu: 25m
+                  memory: 32Mi
+                limits:
+                  cpu: 250m
+                  memory: 128Mi
+              volumeMounts:
+                - name: script
+                  mountPath: /opt/hormuz-proof/probe.py
+                  subPath: probe.py
+                  readOnly: true
+                - name: secrets
+                  mountPath: /run/hormuz-proof
+                  readOnly: true
+          volumes:
+            - name: script
+              configMap:
+                name: hormuz-probe-v1
+                defaultMode: 0440
+            - name: secrets
+              secret:
+                secretName: hormuz-probe-v1
+                defaultMode: 0440
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
   name: replacement-traffic
   namespace: hormuz-ingress
 spec:

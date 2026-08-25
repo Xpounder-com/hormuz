@@ -9,7 +9,7 @@
     "credential_env": "HORMUZ_INGRESS_CREDENTIAL"
   },
   "max_request_bytes": 1048576,
-  "upstream_timeout_seconds": 30,
+  "upstream_timeout_seconds": 45,
   "usage_storage": {
     "backend": "postgresql",
     "postgres_dsn_env": "HORMUZ_POSTGRES_DSN",

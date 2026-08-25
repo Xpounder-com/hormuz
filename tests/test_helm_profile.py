@@ -339,6 +339,17 @@ class HelmChartContractTests(unittest.TestCase):
         self.assertIn("validate-serving-generation", runner)
         self.assertIn("kubectl --namespace \"${namespace}\" rollout status", runner)
         self.assertIn("--from=cronjob/replacement-traffic", runner)
+        self.assertIn("--from=cronjob/blocking-request", runner)
+        self.assertIn("--grace-period=0 --force", runner)
+        self.assertIn("wait_for_provider_disconnect", runner)
+        self.assertIn("get endpointslices", runner)
+        self.assertNotIn("get endpoints hormuz-hormuz", runner)
+        self.assertIn("write-operation-proof", runner)
+        self.assertIn(
+            "REQUEST_ATTEMPT_STALE_SECONDS=$((UPSTREAM_TIMEOUT_SECONDS + 60))",
+            runner,
+        )
+        self.assertIn('sleep "$((REQUEST_ATTEMPT_STALE_SECONDS + 2))"', runner)
         self.assertIn("synthetic traffic did not remain active", runner)
         self.assertIn("rendered-yaml-keywords.yaml", runner)
         self.assertIn('runtimeSecret.env.NO=true', runner)
@@ -427,11 +438,61 @@ class HelmChartContractTests(unittest.TestCase):
         )
         self.assertEqual(request.call_count, 2)
 
+    def test_blocking_probe_distinguishes_graceful_completion_from_ambiguous_loss(self) -> None:
+        probe = runpy.run_path(
+            str(ROOT / "deploy" / "kubernetes" / "conformance" / "probe.py")
+        )
+        run_blocking = probe["_run_blocking_request"]
+        request = mock.Mock(return_value={"command": "request", "status": 200})
+        original_request = run_blocking.__globals__["_governed_request"]
+        run_blocking.__globals__["_governed_request"] = request
+        graceful_output = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(graceful_output):
+                self.assertEqual(
+                    run_blocking(
+                        command="blocking-request",
+                        target="http://hormuz.invalid",
+                        headers={"Authorization": "synthetic"},
+                        expected_policy="fallback+capped+redacted",
+                    ),
+                    0,
+                )
+            request.side_effect = OSError("synthetic connection loss")
+            ambiguous_output = io.StringIO()
+            with contextlib.redirect_stdout(ambiguous_output):
+                self.assertEqual(
+                    run_blocking(
+                        command="ambiguous-request",
+                        target="http://hormuz.invalid",
+                        headers={"Authorization": "synthetic"},
+                        expected_policy="fallback+capped+redacted",
+                    ),
+                    0,
+                )
+        finally:
+            run_blocking.__globals__["_governed_request"] = original_request
+        self.assertEqual(
+            [json.loads(line) for line in graceful_output.getvalue().splitlines()],
+            [
+                {"event": "blocking_request_started"},
+                {"command": "blocking-request", "status": 200},
+            ],
+        )
+        self.assertEqual(
+            [json.loads(line) for line in ambiguous_output.getvalue().splitlines()],
+            [
+                {"event": "blocking_request_started"},
+                {"command": "ambiguous-request", "transport_outcome": "ambiguous"},
+            ],
+        )
+
     def test_source_distribution_contract_includes_the_chart_and_live_proof(self) -> None:
         manifest = (ROOT / "MANIFEST.in").read_text(encoding="utf-8")
         self.assertIn("recursive-include deploy/helm", manifest)
         self.assertIn("recursive-include deploy/kubernetes", manifest)
         self.assertIn("tools/verify_helm_profile.py", manifest)
+        self.assertIn("tools/verify_multi_replica_operation.py", manifest)
         self.assertIn("deploy/helm/hormuz/Chart.yaml", core_distribution.REQUIRED_HELM_SDIST_PATHS)
         self.assertIn(
             "deploy/kubernetes/conformance/kind.yaml",

@@ -769,6 +769,21 @@ class PostgresCustodyLifecycleTests(PostgresTestCase):
                             ("xpounder", replica.replica_id, barrier_id, 99),
                         )
         replica._synchronize("xpounder")
+        # A duplicated notification may make a healthy replica observe and
+        # acknowledge the same prepared barrier again. The database contract
+        # keeps that replay idempotent while the stale-version acknowledgement
+        # above remains rejected.
+        replica._synchronize("xpounder")
+        with self.psycopg.connect(self.owner_dsn) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    self.sql.SQL(
+                        "SELECT COUNT(*) FROM {}.custody_runtime_projection_acks "
+                        "WHERE organization_id = %s AND barrier_id = %s AND replica_id = %s"
+                    ).format(self.sql.Identifier(self.schema)),
+                    ("xpounder", barrier_id, replica.replica_id),
+                )
+                self.assertEqual(cursor.fetchone()[0], 1)
         unknown = executor._repository.finalize(
             organization_id="xpounder",
             execution_id=pending.execution_id,

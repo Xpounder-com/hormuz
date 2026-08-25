@@ -7,6 +7,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CHART_ROOT="${ROOT}/deploy/helm/hormuz"
 FIXTURE_ROOT="${ROOT}/deploy/kubernetes/conformance"
 EVIDENCE_DIR="${HORMUZ_KUBERNETES_EVIDENCE_DIR:-}"
+STATE_EVIDENCE="${HORMUZ_MULTI_REPLICA_STATE_EVIDENCE:-}"
+SOURCE_COMMIT="${HORMUZ_SOURCE_COMMIT:-}"
 CLUSTER_NAME="${HORMUZ_KUBERNETES_CLUSTER_NAME:-hormuz-reference}"
 PROOF_ACK="I_UNDERSTAND_THIS_IS_A_DISPOSABLE_KUBERNETES_REFERENCE_PROOF"
 HORMUZ_IMAGE="ghcr.io/xpounder-com/hormuz@sha256:1bbcca3490a7a5b004a880f42e8250acb91ce566a9c59f3263d7b279568efb5a"
@@ -21,6 +23,10 @@ CILIUM_VERSION="1.20.1"
 CILIUM_CHART_SHA256="06210eef7c23d15f7699c79e2fe3a1ec9c389024c5c5c006ea04022d322449a2"
 CILIUM_AGENT_IMAGE="quay.io/cilium/cilium:v1.20.1@sha256:ae9ea21f7427fe24bc6ea7247eb552157a1b0a431744045d3f641545ca71d11b"
 CILIUM_OPERATOR_IMAGE="quay.io/cilium/operator-generic:v1.20.1@sha256:6c3885fc7b629099fdbe2a5c87869c86feb825fa18fae299eac0f61918d16ecf"
+UPSTREAM_TIMEOUT_SECONDS=45
+# Gateway reservations deliberately outlive the provider timeout by 60 seconds
+# so an ambiguous attempt cannot stop counting while its outcome is unknown.
+REQUEST_ATTEMPT_STALE_SECONDS=$((UPSTREAM_TIMEOUT_SECONDS + 60))
 WORK_ROOT=""
 SECRET_ROOT=""
 ARTIFACT_ROOT=""
@@ -29,6 +35,27 @@ CLUSTER_CREATED=0
 PROBE_SEQUENCE=0
 SUCCESSFUL_REQUESTS=0
 POLICY_DENIALS=0
+OPERATION_EVENT_SEQUENCE=0
+OPERATION_EVENT_LOG=""
+RESTRICTIVE_ROLLOUT_CONVERGENCE_MS=0
+ROLLBACK_CONVERGENCE_MS=0
+GRACEFUL_READINESS_WITHDRAWAL_MS=0
+GRACEFUL_INFLIGHT_DRAIN_MS=0
+ABRUPT_REPLACEMENT_CONVERGENCE_MS=0
+OUTCOME_UNKNOWN_ATTEMPTS=0
+UNCERTAIN_RESERVATIONS=0
+OPERATION_PROOF_ENABLED=0
+
+monotonic_ms() {
+  python3 -c 'import time; print(time.monotonic_ns() // 1_000_000)'
+}
+
+record_operation_event() {
+  local event=$1
+  [[ "${OPERATION_PROOF_ENABLED}" -eq 1 ]] || return
+  OPERATION_EVENT_SEQUENCE=$((OPERATION_EVENT_SEQUENCE + 1))
+  printf '%s|%s\n' "${OPERATION_EVENT_SEQUENCE}" "${event}" >>"${OPERATION_EVENT_LOG}"
+}
 
 fail() {
   printf 'Kubernetes reference proof failed: %s\n' "$1" >&2
@@ -251,13 +278,15 @@ provider_stats() {
 assert_provider_stats() {
   local input=$1
   local expected=$2
-  python3 - "${input}" "${expected}" <<'PY'
+  local expected_blocking=${3:-0}
+  python3 - "${input}" "${expected}" "${expected_blocking}" <<'PY'
 import json
 import sys
 
 with open(sys.argv[1], encoding="utf-8") as stream:
     value = json.load(stream)
 expected = int(sys.argv[2])
+expected_blocking = int(sys.argv[3])
 if value != {
     "requests": expected,
     "redaction_marker_seen": True,
@@ -265,9 +294,133 @@ if value != {
     "provider_authorization_seen": True,
     "capped_output_seen": True,
     "routed_model_seen": True,
+    "blocking_requests": expected_blocking,
 }:
     raise SystemExit("fake_provider_observation_invalid")
 PY
+}
+
+provider_control() {
+  local method=$1
+  local path=$2
+  local output=$3
+  kubectl --namespace hormuz-dependencies exec deployment/fake-provider -- \
+    /opt/hormuz/bin/python -I -c \
+    'from urllib.request import Request,urlopen; import sys; request=Request("http://127.0.0.1:8090"+sys.argv[2],method=sys.argv[1]); print(urlopen(request,timeout=3).read().decode("utf-8"))' \
+    "${method}" "${path}" >"${output}"
+}
+
+wait_for_provider_block() {
+  local output=$1
+  local attempt
+  for attempt in $(seq 1 30); do
+    provider_control GET /control/block/status "${output}"
+    if python3 - "${output}" <<'PY' >/dev/null
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as stream:
+    value = json.load(stream)
+raise SystemExit(0 if value.get("started") is True and value.get("gateway_ip") else 1)
+PY
+    then
+      python3 - "${output}" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as stream:
+    print(json.load(stream)["gateway_ip"])
+PY
+      return
+    fi
+    sleep 1
+  done
+  fail "blocking provider request did not start"
+}
+
+provider_release_block() {
+  provider_control POST /control/block/release "${ARTIFACT_ROOT}/provider-block-release.json"
+}
+
+provider_reset_block() {
+  provider_control POST /control/block/reset "${ARTIFACT_ROOT}/provider-block-reset.json"
+}
+
+wait_for_provider_disconnect() {
+  local output=$1
+  local attempt
+  for attempt in $(seq 1 30); do
+    provider_control GET /control/block/status "${output}"
+    if python3 - "${output}" <<'PY' >/dev/null
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as stream:
+    value = json.load(stream)
+raise SystemExit(0 if value.get("gateway_disconnected") is True else 1)
+PY
+    then
+      return
+    fi
+    sleep 1
+  done
+  fail "force-deleted gateway connection remained open at the provider"
+}
+
+gateway_pod_for_ip() {
+  local pod_ip=$1
+  kubectl --namespace hormuz-system get pods \
+    --selector='app.kubernetes.io/instance=hormuz,app.kubernetes.io/component=gateway' \
+    --output=json \
+    | python3 -c 'import json,sys; ip=sys.argv[1]; matches=[item["metadata"]["name"] for item in json.load(sys.stdin)["items"] if item.get("status",{}).get("podIP")==ip]; sys.exit("gateway_pod_for_ip_invalid") if len(matches)!=1 else print(matches[0])' \
+      "${pod_ip}"
+}
+
+wait_for_service_exclusion() {
+  local pod=$1
+  local pod_ip=$2
+  local started_ms=$3
+  local attempt
+  for attempt in $(seq 1 30); do
+    local pod_ready="False"
+    if kubectl --namespace hormuz-system get pod "${pod}" >/dev/null 2>&1; then
+      pod_ready="$(kubectl --namespace hormuz-system get pod "${pod}" \
+        --output=jsonpath='{.status.conditions[?(@.type=="Ready")].status}')"
+    fi
+    kubectl --namespace hormuz-system get endpointslices \
+      --selector='kubernetes.io/service-name=hormuz-hormuz' --output=json \
+      >"${ARTIFACT_ROOT}/service-endpoint-slices.json"
+    if [[ "${pod_ready}" != "True" ]] && python3 - "${ARTIFACT_ROOT}/service-endpoint-slices.json" "${pod_ip}" <<'PY' >/dev/null
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as stream:
+    value = json.load(stream)
+addresses = {
+    address
+    for item in value.get("items", [])
+    for endpoint in item.get("endpoints", [])
+    if endpoint.get("conditions", {}).get("ready") is True
+    for address in endpoint.get("addresses", [])
+}
+raise SystemExit(1 if sys.argv[2] in addresses else 0)
+PY
+    then
+      local elapsed=$(( $(monotonic_ms) - started_ms ))
+      [[ "${elapsed}" -gt 0 ]] || elapsed=1
+      printf '%s\n' "${elapsed}"
+      return
+    fi
+    sleep 1
+  done
+  fail "terminating replica remained ready or service-addressable"
+}
+
+request_attempt_uncertainty() {
+  kubectl --namespace hormuz-dependencies exec deployment/postgres -- \
+    psql --username postgres --dbname hormuz --tuples-only --no-align --field-separator='|' \
+      --command "WITH latest AS (SELECT root.attempt_id, root.organization_id, (SELECT event.state FROM hormuz.gateway_request_attempt_events AS event WHERE event.attempt_id = root.attempt_id ORDER BY event.sequence DESC LIMIT 1) AS state FROM hormuz.gateway_request_attempts AS root WHERE root.organization_id = 'kubernetes-proof-organization') SELECT COUNT(*) FILTER (WHERE state = 'outcome_unknown'), (SELECT COUNT(*) FROM hormuz.gateway_budget_reservations AS reservation JOIN latest ON latest.attempt_id = reservation.attempt_id WHERE latest.state = 'outcome_unknown' AND reservation.reserved_tokens > 0 AND reservation.reserved_cost_microusd > 0) FROM latest;" \
+    | tr -d '[:space:]'
 }
 
 usage_events() {
@@ -328,6 +481,13 @@ wait_for_gateway_replacement() {
 [[ "${HORMUZ_KUBERNETES_PROOF_ACK:-}" == "${PROOF_ACK}" ]] \
   || fail "set HORMUZ_KUBERNETES_PROOF_ACK=${PROOF_ACK}"
 [[ -n "${EVIDENCE_DIR}" ]] || fail "HORMUZ_KUBERNETES_EVIDENCE_DIR is required"
+if [[ -n "${STATE_EVIDENCE}" || -n "${SOURCE_COMMIT}" ]]; then
+  [[ -n "${STATE_EVIDENCE}" && -f "${STATE_EVIDENCE}" && ! -L "${STATE_EVIDENCE}" ]] \
+    || fail "HORMUZ_MULTI_REPLICA_STATE_EVIDENCE must name the completed state proof"
+  [[ "${SOURCE_COMMIT}" =~ ^[0-9a-f]{40}$ ]] \
+    || fail "HORMUZ_SOURCE_COMMIT must be the exact 40-character source commit"
+  OPERATION_PROOF_ENABLED=1
+fi
 [[ ! -e "${EVIDENCE_DIR}" ]] || fail "evidence output already exists"
 [[ "$(uname -s)" == "Linux" ]] || fail "the v1 proof requires Linux"
 host_arch="$(uname -m)"
@@ -350,6 +510,26 @@ mkdir -p "${WORK_ROOT}/bin" "${SECRET_ROOT}" "${ARTIFACT_ROOT}" "${WORK_ROOT}/ch
 chmod 0700 "${WORK_ROOT}" "${SECRET_ROOT}" "${ARTIFACT_ROOT}"
 mkdir -p "${EVIDENCE_DIR}"
 chmod 0700 "${EVIDENCE_DIR}"
+OPERATION_EVENT_LOG="${ARTIFACT_ROOT}/multi-replica-events.log"
+: >"${OPERATION_EVENT_LOG}"
+chmod 0600 "${OPERATION_EVENT_LOG}"
+if [[ "${OPERATION_PROOF_ENABLED}" -eq 1 ]]; then
+  python3 "${ROOT}/tools/verify_multi_replica_operation.py" validate \
+    --evidence "${STATE_EVIDENCE}" >/dev/null \
+    || fail "shared-state evidence is invalid"
+  install -m 0600 "${STATE_EVIDENCE}" "${EVIDENCE_DIR}/state-summary.json"
+fi
+python3 - "${FIXTURE_ROOT}/hormuz.allow.json" "${FIXTURE_ROOT}/hormuz.deny.json" \
+  "${UPSTREAM_TIMEOUT_SECONDS}" <<'PY'
+import json
+import sys
+
+expected = int(sys.argv[3])
+for path in sys.argv[1:3]:
+    with open(path, encoding="utf-8") as stream:
+        if json.load(stream).get("upstream_timeout_seconds") != expected:
+            raise SystemExit("upstream_timeout_fixture_mismatch")
+PY
 export KUBECONFIG
 export PATH="${WORK_ROOT}/bin:${PATH}"
 
@@ -555,6 +735,7 @@ provider_stats "${ARTIFACT_ROOT}/provider-v1.json"
 assert_provider_stats "${ARTIFACT_ROOT}/provider-v1.json" "${SUCCESSFUL_REQUESTS}"
 usage_before_replacement="$(usage_events)"
 [[ "${usage_before_replacement}" -ge 1 ]] || fail "metadata-only usage evidence was not committed"
+record_operation_event service_baseline_verified
 
 gateway_pod="$(kubectl --namespace hormuz-system get pods \
   --selector='app.kubernetes.io/instance=hormuz,app.kubernetes.io/component=gateway' \
@@ -577,6 +758,8 @@ create_immutable_secret hormuz-system hormuz-runtime-v2 \
 config_v2_sha="sha256:$(sha256sum "${FIXTURE_ROOT}/hormuz.deny.json" | awk '{print $1}')"
 [[ "${config_v2_sha}" != "${config_v1_sha}" ]] || fail "replacement configuration was not distinct"
 capture_gateway_logs v1-before-upgrade
+record_operation_event restrictive_rollout_started
+restrictive_rollout_started_ms="$(monotonic_ms)"
 helm upgrade hormuz "${CHART_ROOT}" \
   --namespace hormuz-system \
   --values "${FIXTURE_ROOT}/helm-values.yaml" \
@@ -589,17 +772,25 @@ wait_for_serving_generation \
   hormuz-system hormuz-hormuz replacement-v2 \
   hormuz-config-v2 "${config_v2_sha}" \
   hormuz-runtime-v2 conformance-generation-v2
+RESTRICTIVE_ROLLOUT_CONVERGENCE_MS=$(( $(monotonic_ms) - restrictive_rollout_started_ms ))
+[[ "${RESTRICTIVE_ROLLOUT_CONVERGENCE_MS}" -gt 0 ]] || RESTRICTIVE_ROLLOUT_CONVERGENCE_MS=1
+record_operation_event restrictive_generation_converged
 run_probe hormuz-ingress denied-request 403
 POLICY_DENIALS=$((POLICY_DENIALS + 1))
 provider_stats "${ARTIFACT_ROOT}/provider-after-deny.json"
 assert_provider_stats "${ARTIFACT_ROOT}/provider-after-deny.json" "${SUCCESSFUL_REQUESTS}"
 
 capture_gateway_logs v2-before-rollback
+record_operation_event rollback_started
+rollback_started_ms="$(monotonic_ms)"
 helm rollback hormuz 1 --namespace hormuz-system --wait --timeout 10m --cleanup-on-fail >/dev/null
 wait_for_serving_generation \
   hormuz-system hormuz-hormuz rollback-v1 \
   hormuz-config-v1 "${config_v1_sha}" \
   hormuz-runtime-v1 conformance-generation-v1
+ROLLBACK_CONVERGENCE_MS=$(( $(monotonic_ms) - rollback_started_ms ))
+[[ "${ROLLBACK_CONVERGENCE_MS}" -gt 0 ]] || ROLLBACK_CONVERGENCE_MS=1
+record_operation_event permissive_generation_converged
 run_probe hormuz-ingress allowed-request 200
 SUCCESSFUL_REQUESTS=$((SUCCESSFUL_REQUESTS + 1))
 provider_stats "${ARTIFACT_ROOT}/provider-after-rollback.json"
@@ -661,6 +852,142 @@ usage_event_count="$(usage_events)"
 [[ "${usage_event_count}" -ge "${SUCCESSFUL_REQUESTS}" ]] \
   || fail "metadata-only usage evidence did not survive rolling changes"
 
+# Preserve the already-closed #108 summary at its exact v1 boundary. The
+# stronger #103 proof below writes a separate schema and may intentionally
+# create one ambiguous provider outcome that is not a successful request.
+reference_successful_requests="${SUCCESSFUL_REQUESTS}"
+reference_policy_denials="${POLICY_DENIALS}"
+reference_usage_events="${usage_event_count}"
+
+if [[ "${OPERATION_PROOF_ENABLED}" -eq 1 ]]; then
+# Graceful drain: pin one provider request to the Service-selected replica,
+# terminate that exact Pod, prove it leaves readiness and the Service before a
+# sibling accepts new work, then release the provider response and require the
+# pinned handler to finish its evidence write before the old Pod disappears.
+PROBE_SEQUENCE=$((PROBE_SEQUENCE + 1))
+graceful_job="graceful-drain-${PROBE_SEQUENCE}"
+kubectl --namespace hormuz-ingress create job "${graceful_job}" \
+  --from=cronjob/blocking-request >/dev/null
+wait_for_job_log_marker \
+  hormuz-ingress "${graceful_job}" '{"event":"blocking_request_started"}'
+graceful_gateway_ip="$(wait_for_provider_block "${ARTIFACT_ROOT}/graceful-block-status.json")"
+graceful_pod="$(gateway_pod_for_ip "${graceful_gateway_ip}")"
+graceful_uid="$(kubectl --namespace hormuz-system get pod "${graceful_pod}" \
+  --output=jsonpath='{.metadata.uid}')"
+record_operation_event graceful_inflight_started
+graceful_started_ms="$(monotonic_ms)"
+kubectl --namespace hormuz-system delete pod "${graceful_pod}" --wait=false >/dev/null
+GRACEFUL_READINESS_WITHDRAWAL_MS="$(wait_for_service_exclusion \
+  "${graceful_pod}" "${graceful_gateway_ip}" "${graceful_started_ms}")"
+record_operation_event graceful_replica_withdrew_readiness
+run_probe hormuz-ingress allowed-request 200
+SUCCESSFUL_REQUESTS=$((SUCCESSFUL_REQUESTS + 1))
+record_operation_event sibling_service_request_succeeded
+provider_release_block
+if ! kubectl --namespace hormuz-ingress wait --for=condition=complete \
+  "job/${graceful_job}" --timeout=90s >/dev/null; then
+  emit_job_diagnostics hormuz-ingress "${graceful_job}"
+  fail "gracefully drained request did not complete"
+fi
+kubectl --namespace hormuz-ingress logs "job/${graceful_job}" \
+  >"${ARTIFACT_ROOT}/${graceful_job}.jsonl"
+python3 - "${ARTIFACT_ROOT}/${graceful_job}.jsonl" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as stream:
+    values = [json.loads(line) for line in stream if line.strip()]
+if values[0] != {"event": "blocking_request_started"}:
+    raise SystemExit("graceful_drain_start_invalid")
+if values[-1].get("command") != "blocking-request" or values[-1].get("status") != 200:
+    raise SystemExit("graceful_drain_result_invalid")
+PY
+SUCCESSFUL_REQUESTS=$((SUCCESSFUL_REQUESTS + 1))
+record_operation_event graceful_inflight_finalized
+GRACEFUL_INFLIGHT_DRAIN_MS=$(( $(monotonic_ms) - graceful_started_ms ))
+[[ "${GRACEFUL_INFLIGHT_DRAIN_MS}" -gt 0 ]] || GRACEFUL_INFLIGHT_DRAIN_MS=1
+distinct_gateway_nodes="$(wait_for_gateway_replacement \
+  "${graceful_uid}" "${ARTIFACT_ROOT}/gateway-topology-graceful-drain.json")"
+record_operation_event graceful_replacement_ready
+kubectl --namespace hormuz-ingress delete "job/${graceful_job}" --wait=true >/dev/null
+provider_reset_block
+
+# Abrupt loss: switch the same synthetic client to expect an ambiguous
+# transport, force-delete the exact Pod that reached provider egress, and
+# require a distinct ready replacement. After the reservation stale boundary,
+# one new Service request invokes the durable sweeper; the original attempt must
+# remain outcome_unknown with its uncertain reservation and no provider replay.
+kubectl --namespace hormuz-ingress patch cronjob blocking-request \
+  --type=json \
+  --patch='[{"op":"replace","path":"/spec/jobTemplate/spec/template/spec/containers/0/args/2","value":"ambiguous-request"}]' \
+  >/dev/null
+PROBE_SEQUENCE=$((PROBE_SEQUENCE + 1))
+abrupt_job="abrupt-loss-${PROBE_SEQUENCE}"
+kubectl --namespace hormuz-ingress create job "${abrupt_job}" \
+  --from=cronjob/blocking-request >/dev/null
+wait_for_job_log_marker \
+  hormuz-ingress "${abrupt_job}" '{"event":"blocking_request_started"}'
+abrupt_gateway_ip="$(wait_for_provider_block "${ARTIFACT_ROOT}/abrupt-block-status.json")"
+abrupt_pod="$(gateway_pod_for_ip "${abrupt_gateway_ip}")"
+abrupt_uid="$(kubectl --namespace hormuz-system get pod "${abrupt_pod}" \
+  --output=jsonpath='{.metadata.uid}')"
+record_operation_event ambiguous_inflight_started
+abrupt_started_ms="$(monotonic_ms)"
+kubectl --namespace hormuz-system delete pod "${abrupt_pod}" \
+  --grace-period=0 --force --wait=false >/dev/null
+record_operation_event owning_replica_force_deletion_requested
+wait_for_provider_disconnect "${ARTIFACT_ROOT}/abrupt-disconnect-status.json"
+record_operation_event abrupt_gateway_connection_closed
+provider_release_block
+if ! kubectl --namespace hormuz-ingress wait --for=condition=complete \
+  "job/${abrupt_job}" --timeout=90s >/dev/null; then
+  emit_job_diagnostics hormuz-ingress "${abrupt_job}"
+  fail "force-killed request did not report an ambiguous transport"
+fi
+kubectl --namespace hormuz-ingress logs "job/${abrupt_job}" \
+  >"${ARTIFACT_ROOT}/${abrupt_job}.jsonl"
+python3 - "${ARTIFACT_ROOT}/${abrupt_job}.jsonl" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as stream:
+    values = [json.loads(line) for line in stream if line.strip()]
+if values[0] != {"event": "blocking_request_started"}:
+    raise SystemExit("abrupt_loss_start_invalid")
+if values[-1] != {"command": "ambiguous-request", "transport_outcome": "ambiguous"}:
+    raise SystemExit("abrupt_loss_result_invalid")
+PY
+distinct_gateway_nodes="$(wait_for_gateway_replacement \
+  "${abrupt_uid}" "${ARTIFACT_ROOT}/gateway-topology-abrupt-loss.json")"
+ABRUPT_REPLACEMENT_CONVERGENCE_MS=$(( $(monotonic_ms) - abrupt_started_ms ))
+[[ "${ABRUPT_REPLACEMENT_CONVERGENCE_MS}" -gt 0 ]] || ABRUPT_REPLACEMENT_CONVERGENCE_MS=1
+record_operation_event abrupt_replacement_ready
+provider_reset_block
+sleep "$((REQUEST_ATTEMPT_STALE_SECONDS + 2))"
+run_probe hormuz-ingress allowed-request 200
+SUCCESSFUL_REQUESTS=$((SUCCESSFUL_REQUESTS + 1))
+uncertainty="$(request_attempt_uncertainty)"
+OUTCOME_UNKNOWN_ATTEMPTS="${uncertainty%%|*}"
+UNCERTAIN_RESERVATIONS="${uncertainty#*|}"
+[[ "${OUTCOME_UNKNOWN_ATTEMPTS}" == "1" ]] \
+  || fail "abrupt provider attempt state invalid: outcome_unknown=${OUTCOME_UNKNOWN_ATTEMPTS}"
+[[ "${UNCERTAIN_RESERVATIONS}" == "1" ]] \
+  || fail "ambiguous estimated consumption invalid: reservations=${UNCERTAIN_RESERVATIONS}"
+record_operation_event ambiguous_attempt_preserved_unknown
+kubectl --namespace hormuz-ingress delete "job/${abrupt_job}" --wait=true >/dev/null
+
+operation_provider_requests=$((SUCCESSFUL_REQUESTS + OUTCOME_UNKNOWN_ATTEMPTS))
+provider_stats "${ARTIFACT_ROOT}/provider-operation-final.json"
+assert_provider_stats \
+  "${ARTIFACT_ROOT}/provider-operation-final.json" \
+  "${operation_provider_requests}" 2
+operation_usage_event_count="$(usage_events)"
+[[ "${operation_usage_event_count}" -ge "${SUCCESSFUL_REQUESTS}" ]] \
+  || fail "multi-replica usage evidence count is incomplete"
+record_operation_event final_service_and_evidence_verified
+capture_gateway_logs operation-final
+fi
+
 kubectl --namespace hormuz-dependencies logs deployment/postgres >"${ARTIFACT_ROOT}/postgres.log"
 kubectl --namespace hormuz-dependencies logs deployment/fake-provider >"${ARTIFACT_ROOT}/fake-provider.log"
 helm get values hormuz --namespace hormuz-system --output=json >"${ARTIFACT_ROOT}/installed-values.json"
@@ -683,15 +1010,36 @@ python3 "${ROOT}/tools/verify_helm_profile.py" write-evidence \
   --chart-package-sha256 "${chart_package_sha256}" \
   --gateway-replicas 2 \
   --distinct-gateway-nodes "${distinct_gateway_nodes}" \
-  --successful-requests "${SUCCESSFUL_REQUESTS}" \
-  --policy-denials "${POLICY_DENIALS}" \
-  --provider-requests "${SUCCESSFUL_REQUESTS}" \
-  --usage-events "${usage_event_count}" >/dev/null
+  --successful-requests "${reference_successful_requests}" \
+  --policy-denials "${reference_policy_denials}" \
+  --provider-requests "${reference_successful_requests}" \
+  --usage-events "${reference_usage_events}" >/dev/null
 python3 "${ROOT}/tools/verify_helm_profile.py" validate-evidence \
   --evidence "${EVIDENCE_DIR}/summary.json" >/dev/null
+if [[ "${OPERATION_PROOF_ENABLED}" -eq 1 ]]; then
+  python3 "${ROOT}/tools/verify_multi_replica_operation.py" write-operation-proof \
+    --output "${EVIDENCE_DIR}/multi-replica-summary.json" \
+    --source-commit "${SOURCE_COMMIT}" \
+    --kubernetes-evidence "${EVIDENCE_DIR}/summary.json" \
+    --state-evidence "${EVIDENCE_DIR}/state-summary.json" \
+    --event-log "${OPERATION_EVENT_LOG}" \
+    --restrictive-rollout-convergence-ms "${RESTRICTIVE_ROLLOUT_CONVERGENCE_MS}" \
+    --rollback-convergence-ms "${ROLLBACK_CONVERGENCE_MS}" \
+    --graceful-readiness-withdrawal-ms "${GRACEFUL_READINESS_WITHDRAWAL_MS}" \
+    --graceful-inflight-drain-ms "${GRACEFUL_INFLIGHT_DRAIN_MS}" \
+    --abrupt-replacement-convergence-ms "${ABRUPT_REPLACEMENT_CONVERGENCE_MS}" \
+    --successful-requests "${SUCCESSFUL_REQUESTS}" \
+    --policy-denials "${POLICY_DENIALS}" \
+    --provider-requests "${operation_provider_requests}" \
+    --usage-events "${operation_usage_event_count}" \
+    --outcome-unknown-attempts "${OUTCOME_UNKNOWN_ATTEMPTS}" \
+    --uncertain-reservations "${UNCERTAIN_RESERVATIONS}" >/dev/null
+  python3 "${ROOT}/tools/verify_multi_replica_operation.py" validate \
+    --evidence "${EVIDENCE_DIR}/multi-replica-summary.json" >/dev/null
+fi
 python3 "${ROOT}/tools/verify_helm_profile.py" assert-no-secrets \
-  --artifact "${EVIDENCE_DIR}/summary.json" \
+  --artifact-root "${EVIDENCE_DIR}" \
   --secret-root "${SECRET_ROOT}" >/dev/null
-chmod 0600 "${EVIDENCE_DIR}/summary.json"
-printf 'verified disposable Kubernetes reference: chart=%s replicas=2 cni=cilium-%s\n' \
-  "${chart_package_sha256}" "${CILIUM_VERSION}"
+chmod 0600 "${EVIDENCE_DIR}"/*.json
+printf 'verified disposable Kubernetes reference: chart=%s replicas=2 cni=cilium-%s coordinated-events=%s\n' \
+  "${chart_package_sha256}" "${CILIUM_VERSION}" "${OPERATION_EVENT_SEQUENCE}"

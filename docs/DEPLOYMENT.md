@@ -145,6 +145,16 @@ and leaves admission fail closed. During shutdown, Hormuz stops advertising
 readiness, drains active handlers, retires its replica lease, and only then
 closes the runtime pool.
 
+The disposable Kubernetes coordinated-operation proof exercises this boundary
+through the private ClusterIP Service. A normally terminated replica must
+withdraw readiness and disappear from Service endpoints while its already
+pinned request finishes. A force-killed replica may interrupt its pinned
+request; Hormuz preserves that attempt as `outcome_unknown`, retains the
+uncertain budget reservation, and never replays provider work. A client retry
+is a new attempt because v1 defines no client idempotency key. The retained
+evidence publishes observed timing and exact nonclaims; it is not a universal
+zero-downtime or provider exactly-once promise.
+
 ## Deliberate limits
 
 This is a gateway-side ingress boundary, not proof of a customer deployment.

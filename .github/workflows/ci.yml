@@ -304,23 +304,51 @@ jobs:
     name: Kubernetes + Helm multi-replica reference
     runs-on: ubuntu-24.04
     timeout-minutes: 40
+    services:
+      postgres:
+        image: postgres@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
+        env:
+          POSTGRES_DB: hormuz_multi_replica_test
+          POSTGRES_PASSWORD: hormuz-multi-replica-test-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d hormuz_multi_replica_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Prove shared multi-replica PostgreSQL state
+        env:
+          HORMUZ_TEST_POSTGRES_DSN: postgresql://postgres:hormuz-multi-replica-test-password@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/hormuz_multi_replica_test
+        run: |
+          python -m pip install --editable '.[postgres]'
+          python tools/verify_multi_replica_operation.py run-state-proof \
+            --postgres-image 'postgres@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777' \
+            --source-commit "${GITHUB_SHA}" \
+            --output "$RUNNER_TEMP/hormuz-multi-replica-state.json"
       - name: Prove the disposable signed-image Kubernetes profile
         env:
           HORMUZ_KUBERNETES_PROOF_ACK: I_UNDERSTAND_THIS_IS_A_DISPOSABLE_KUBERNETES_REFERENCE_PROOF
           HORMUZ_KUBERNETES_EVIDENCE_DIR: ${{ runner.temp }}/hormuz-kubernetes-reference
           HORMUZ_KUBERNETES_CLUSTER_NAME: hormuz-${{ github.run_id }}-${{ github.run_attempt }}
+          HORMUZ_MULTI_REPLICA_STATE_EVIDENCE: ${{ runner.temp }}/hormuz-multi-replica-state.json
+          HORMUZ_SOURCE_COMMIT: ${{ github.sha }}
         run: ./tools/verify_helm_profile.sh
       - name: Preserve only content-free Kubernetes evidence
         if: ${{ always() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: hormuz-kubernetes-reference
-          path: ${{ runner.temp }}/hormuz-kubernetes-reference/summary.json
+          path: ${{ runner.temp }}/hormuz-kubernetes-reference/*.json
           if-no-files-found: warn
           retention-days: 7
 
