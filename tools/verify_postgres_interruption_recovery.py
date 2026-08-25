@@ -32,7 +32,7 @@ import sys
 import tempfile
 import threading
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest import mock
@@ -74,6 +74,9 @@ _REQUIRED_ENVIRON = (
     "HORMUZ_POSTGRES_INTERRUPTION_POLICY_CONTROL_PASSWORD",
 )
 _CONFIRMATION_VALUE = "I_UNDERSTAND_DISPOSABLE_DATABASE_INTERRUPTION"
+_DEFAULT_OPERATOR_READINESS_ATTEMPTS = 30
+_DEFAULT_OPERATOR_READINESS_INTERVAL_SECONDS = 0.25
+_OPERATOR_CONNECT_TIMEOUT_SECONDS = 2
 _CHECK_KEYS = (
     "initial_readiness",
     "initial_governed_request",
@@ -190,6 +193,9 @@ def run_interruption_recovery(
     _assert_database_image(container, expected_image=database_image)
     _assert_database_version(container, expected_version=database_version)
     environment = _required_environment()
+    _wait_for_operator_connection(
+        environment["HORMUZ_POSTGRES_INTERRUPTION_OPERATOR_DSN"]
+    )
     started = time.monotonic()
     _ProviderHandler.reset()
 
@@ -593,6 +599,61 @@ def _provision_restricted_roles(
                 )
     except psycopg.Error as error:
         raise InterruptionRecoveryError("interruption_role_provisioning_failed") from error
+
+
+def _wait_for_operator_connection(
+    operator_dsn: str,
+    *,
+    attempts: int = _DEFAULT_OPERATOR_READINESS_ATTEMPTS,
+    interval_seconds: float = _DEFAULT_OPERATOR_READINESS_INTERVAL_SECONDS,
+) -> None:
+    """Require the host-published database path before provisioning roles."""
+
+    try:
+        import psycopg
+    except ImportError as error:  # pragma: no cover - package-install CI covers this path
+        raise InterruptionRecoveryError("interruption_postgres_driver_unavailable") from error
+
+    def probe() -> bool:
+        try:
+            with psycopg.connect(
+                operator_dsn,
+                connect_timeout=_OPERATOR_CONNECT_TIMEOUT_SECONDS,
+            ) as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute("SELECT 1")
+                    return cursor.fetchone() == (1,)
+        except psycopg.OperationalError:
+            return False
+        except psycopg.Error as error:
+            raise InterruptionRecoveryError(
+                "interruption_operator_readiness_failed"
+            ) from error
+
+    _wait_for_operator_probe(
+        probe,
+        attempts=attempts,
+        interval_seconds=interval_seconds,
+    )
+
+
+def _wait_for_operator_probe(
+    probe: Callable[[], bool],
+    *,
+    attempts: int,
+    interval_seconds: float,
+    sleeper: Callable[[float], None] = time.sleep,
+) -> None:
+    if attempts < 1 or interval_seconds < 0:
+        raise InterruptionRecoveryError(
+            "interruption_operator_readiness_configuration_invalid"
+        )
+    for attempt in range(attempts):
+        if probe():
+            return
+        if attempt + 1 < attempts:
+            sleeper(interval_seconds)
+    raise InterruptionRecoveryError("interruption_operator_readiness_timeout")
 
 
 def _custody_control_role(policy_control_role: str) -> str:

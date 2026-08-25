@@ -139,6 +139,39 @@ class PostgresInterruptionRecoverySummaryTests(unittest.TestCase):
             "PostgreSQL interruption recovery failed: interruption_opt_in_required\n",
         )
 
+    def test_operator_readiness_retries_and_fails_closed(self) -> None:
+        responses = iter((False, False, True))
+        sleeps: list[float] = []
+
+        interruption._wait_for_operator_probe(
+            lambda: next(responses),
+            attempts=3,
+            interval_seconds=0.25,
+            sleeper=sleeps.append,
+        )
+
+        self.assertEqual(sleeps, [0.25, 0.25])
+        with self.assertRaisesRegex(
+            interruption.InterruptionRecoveryError,
+            "operator_readiness_timeout",
+        ):
+            interruption._wait_for_operator_probe(
+                lambda: False,
+                attempts=2,
+                interval_seconds=0,
+                sleeper=lambda _: None,
+            )
+        with self.assertRaisesRegex(
+            interruption.InterruptionRecoveryError,
+            "readiness_configuration_invalid",
+        ):
+            interruption._wait_for_operator_probe(
+                lambda: True,
+                attempts=0,
+                interval_seconds=0,
+                sleeper=lambda _: None,
+            )
+
     def test_wrapper_pins_one_loopback_port_across_the_container_restart(self) -> None:
         wrapper = Path(__file__).resolve().parents[1] / "tools" / "verify_postgres_interruption_recovery.sh"
         source = wrapper.read_text(encoding="utf-8")
