@@ -75,6 +75,16 @@ create_immutable_secret() {
     --type=merge --patch '{"immutable":true}' >/dev/null
 }
 
+write_random_hex_secret() {
+  local output=$1
+  local value
+  value="$(openssl rand -hex 32)"
+  [[ "${#value}" -eq 64 ]] || fail "generated secret length invalid"
+  # Secret-backed environment variables are byte-for-byte values. Do not add
+  # a line ending that would make credentials invalid as HTTP header values.
+  printf '%s' "${value}" >"${output}"
+}
+
 wait_for_deployment() {
   local namespace=$1
   local deployment=$2
@@ -98,16 +108,16 @@ emit_deployment_diagnostics() {
       "${namespace}" "${deployment}"
     kubectl --namespace "${namespace}" get deployment "${deployment}" --output=wide
     kubectl --namespace "${namespace}" get pods --output=wide
-    kubectl --namespace "${namespace}" describe deployment "${deployment}"
-    kubectl --namespace "${namespace}" describe pods \
-      --selector='app.kubernetes.io/instance=hormuz,app.kubernetes.io/component=gateway'
     kubectl --namespace "${namespace}" get events --sort-by=.metadata.creationTimestamp
     kubectl --namespace "${namespace}" logs "deployment/${deployment}" \
       --all-pods=true --all-containers=true --prefix=true
+    kubectl --namespace "${namespace}" describe deployment "${deployment}"
+    kubectl --namespace "${namespace}" describe pods \
+      --selector='app.kubernetes.io/instance=hormuz,app.kubernetes.io/component=gateway'
   } >"${diagnostic}" 2>&1 || true
   if python3 "${ROOT}/tools/verify_helm_profile.py" assert-no-secrets \
     --artifact "${diagnostic}" --secret-root "${SECRET_ROOT}" >/dev/null; then
-    sed -n '1,240p' "${diagnostic}" >&2
+    sed -n '1,480p' "${diagnostic}" >&2
   else
     printf 'deployment diagnostic withheld because secret scanning did not pass\n' >&2
   fi
@@ -307,12 +317,12 @@ for namespace in hormuz-system hormuz-dependencies hormuz-ingress hormuz-denied;
     || fail "namespace identity label missing"
 done
 
-openssl rand -hex 32 >"${SECRET_ROOT}/postgres-superuser-password"
-openssl rand -hex 32 >"${SECRET_ROOT}/postgres-runtime-password"
-openssl rand -hex 32 >"${SECRET_ROOT}/ingress-credential"
-openssl rand -hex 32 >"${SECRET_ROOT}/identity-token"
-openssl rand -hex 32 >"${SECRET_ROOT}/openai-api-key"
-openssl rand -hex 32 >"${SECRET_ROOT}/anthropic-api-key"
+write_random_hex_secret "${SECRET_ROOT}/postgres-superuser-password"
+write_random_hex_secret "${SECRET_ROOT}/postgres-runtime-password"
+write_random_hex_secret "${SECRET_ROOT}/ingress-credential"
+write_random_hex_secret "${SECRET_ROOT}/identity-token"
+write_random_hex_secret "${SECRET_ROOT}/openai-api-key"
+write_random_hex_secret "${SECRET_ROOT}/anthropic-api-key"
 python3 - "${SECRET_ROOT}" <<'PY'
 from pathlib import Path
 import sys
