@@ -254,6 +254,7 @@ def snapshot(config: GatewayConfig) -> dict[str, object]:
         schema="hormuz",
         runtime_role="hormuz_runtime",
     )
+    _stage("audit_store_initialized")
     chain = auditor.verify_audit_chain(organization_id=ORGANIZATION)
     _stage("audit_chain_completed")
     return {

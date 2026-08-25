@@ -249,11 +249,42 @@ wait_for_provider_block() {
 state_probe() {
   local command=$1
   local output=$2
-  timeout 60s kubectl --namespace hormuz-system exec pod/hormuz-postgres-ha-state --container state -- \
-    /opt/hormuz/bin/python -I /opt/hormuz-proof/state_probe.py "${command}" >"${output}"
+  if ! timeout 60s kubectl --namespace hormuz-system exec pod/hormuz-postgres-ha-state --container state -- \
+    /opt/hormuz/bin/python -I /opt/hormuz-proof/state_probe.py "${command}" >"${output}"; then
+    database_activity_snapshot
+    fail "state probe failed or timed out: ${command}"
+  fi
   python3 -c 'import json,sys; value=json.load(open(sys.argv[1],encoding="utf-8")); raise SystemExit(0 if value.get("command")==sys.argv[2] else 1)' \
     "${output}" "${command}" \
     || fail "state probe result invalid: ${command}"
+}
+
+database_activity_snapshot() {
+  local primary
+  primary="$(current_primary 2>/dev/null || true)"
+  [[ -n "${primary}" ]] || return
+  timeout 15s kubectl --namespace hormuz-dependencies exec "pod/${primary}" --container postgres -- \
+    psql --username postgres --dbname hormuz --tuples-only --no-align --command \
+    "WITH activity AS (
+       SELECT state, wait_event_type, wait_event, pg_blocking_pids(pid) AS blockers,
+              xact_start
+         FROM pg_stat_activity
+        WHERE datname = current_database()
+          AND backend_type = 'client backend'
+          AND pid <> pg_backend_pid()
+     )
+     SELECT json_build_object(
+       'schema_id', 'hormuz.postgresql-ha-session-snapshot',
+       'schema_version', 1,
+       'client_sessions', COUNT(*),
+       'active_sessions', COUNT(*) FILTER (WHERE state = 'active'),
+       'idle_in_transaction_sessions', COUNT(*) FILTER (WHERE state = 'idle in transaction'),
+       'transaction_sessions', COUNT(*) FILTER (WHERE xact_start IS NOT NULL),
+       'lock_waiting_sessions', COUNT(*) FILTER (WHERE wait_event_type = 'Lock'),
+       'blocked_sessions', COUNT(*) FILTER (WHERE cardinality(blockers) > 0),
+       'synchronous_replication_waiters', COUNT(*) FILTER (WHERE wait_event = 'SyncRep')
+     )::text
+     FROM activity" >&2 || true
 }
 
 probe() {
