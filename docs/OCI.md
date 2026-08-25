@@ -26,8 +26,8 @@ build. A fixable base vulnerability is addressed by reviewing a new base
 digest, not by resolving a package index during a release build.
 
 The Dockerfile-specific `Dockerfile.dockerignore` starts from an empty context
-and admits only the Dockerfile, core packaging files, the two OCI lock files,
-and the `hormuz/` package. It takes precedence over the repository's broader
+and admits only the Dockerfile, core packaging files including the Apache 2.0
+license, the two OCI lock files, and the `hormuz/` package. It takes precedence over the repository's broader
 Ceph-conformance ignore file. A local `hormuz.json`, `.env`, SQLite database,
 test suite, verification tool, and `experiments/context/` cannot enter the
 release build context through an incidental broad copy.

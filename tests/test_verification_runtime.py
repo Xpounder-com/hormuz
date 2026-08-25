@@ -219,6 +219,7 @@ false
         release_dockerignore = (ROOT / "Dockerfile.dockerignore").read_text(
             encoding="utf-8"
         )
+        self.assertIn("!LICENSE", release_dockerignore)
         self.assertIn("!requirements/oci-runtime-linux-amd64.lock", release_dockerignore)
         self.assertIn("!hormuz/**", release_dockerignore)
         self.assertNotIn("!tools/", release_dockerignore)

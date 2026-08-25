@@ -133,6 +133,8 @@ def verify_archives(
             raise ReproducibilityError("oci_version_label_mismatch")
         if labels.get("org.opencontainers.image.revision") != expected_commit:
             raise ReproducibilityError("oci_revision_label_mismatch")
+        if labels.get("org.opencontainers.image.licenses") != "Apache-2.0":
+            raise ReproducibilityError("oci_license_label_mismatch")
 
     return {
         "schema_id": SCHEMA_ID,
