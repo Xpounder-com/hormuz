@@ -118,6 +118,24 @@ wait_for_pod() {
     || fail "pod did not become ready: ${namespace}/${pod}"
 }
 
+wait_for_job_complete() {
+  local namespace=$1
+  local job=$2
+  local attempt state
+  for attempt in $(seq 1 300); do
+    state="$(kubectl --namespace "${namespace}" get "job/${job}" --output=json \
+      | python3 -c 'import json,sys; value=json.load(sys.stdin); conditions={item.get("type"): item.get("status") for item in value.get("status",{}).get("conditions",[])}; print("complete" if conditions.get("Complete")=="True" else "failed" if conditions.get("Failed")=="True" else "pending")')"
+    case "${state}" in
+      complete) return ;;
+      failed) fail "job failed: ${namespace}/${job}" ;;
+      pending) ;;
+      *) fail "job state invalid: ${namespace}/${job}" ;;
+    esac
+    sleep 1
+  done
+  fail "job completion timed out: ${namespace}/${job}"
+}
+
 pause_node() {
   local node=$1
   docker pause "${node}" >/dev/null
@@ -517,11 +535,35 @@ create_immutable_secret hormuz-system hormuz-postgres-ha-bootstrap \
   --from-file="custody-control-password=${SECRET_ROOT}/custody-control-password" \
   --from-file="custody-executor-password=${SECRET_ROOT}/custody-executor-password"
 kubectl apply --filename "${HA_ROOT}/bootstrap-job.yaml" >/dev/null
-kubectl --namespace hormuz-system wait --for=condition=complete \
-  job/hormuz-postgres-ha-bootstrap --timeout=5m >/dev/null \
-  || fail "PostgreSQL role and schema bootstrap failed"
+wait_for_job_complete hormuz-system hormuz-postgres-ha-bootstrap
 kubectl --namespace hormuz-system logs job/hormuz-postgres-ha-bootstrap \
   >"${ARTIFACT_ROOT}/bootstrap.json"
+python3 - "${ARTIFACT_ROOT}/bootstrap.json" <<'PY' \
+  || fail "PostgreSQL bootstrap evidence invalid"
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    value = json.load(handle)
+expected = {
+    "command",
+    "restricted_login_roles",
+    "schema",
+    "schema_complete",
+    "schema_version",
+}
+valid = (
+    set(value) == expected
+    and value["command"] == "postgres-ha-bootstrap"
+    and value["restricted_login_roles"] == 4
+    and value["schema"] == "hormuz"
+    and value["schema_complete"] is True
+    and isinstance(value["schema_version"], int)
+    and not isinstance(value["schema_version"], bool)
+    and value["schema_version"] > 0
+)
+raise SystemExit(0 if valid else 1)
+PY
 kubectl --namespace hormuz-system delete job/hormuz-postgres-ha-bootstrap \
   secret/hormuz-postgres-ha-bootstrap --wait=true >/dev/null
 

@@ -36,7 +36,7 @@ def main() -> int:
                         ).format(sql.Identifier(role), sql.Literal(_required(password_env)))
                     )
 
-    applied = migrate_postgres(
+    status = migrate_postgres(
         dsn,
         schema="hormuz",
         runtime_role="hormuz_runtime",
@@ -48,9 +48,10 @@ def main() -> int:
         json.dumps(
             {
                 "command": "postgres-ha-bootstrap",
-                "migration_count": len(applied),
                 "restricted_login_roles": len(ROLES),
                 "schema": "hormuz",
+                "schema_complete": status.complete,
+                "schema_version": status.version,
             },
             sort_keys=True,
             separators=(",", ":"),
