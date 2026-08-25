@@ -32,6 +32,7 @@ that every nearby version or platform works.
 | Host operating system | Linux is release-gated; macOS and Windows source installs are community best effort and not release-gated |
 | Official OCI image | Linux `amd64` only; the signed digest is the artifact contract |
 | Docker Compose pilot | One native Linux AMD64 VM, one gateway replica, the exact signed Hormuz digest, and one private digest-pinned PostgreSQL service; evaluation/pilots only, not HA or production certification |
+| Kubernetes + Helm reference | One disposable Linux AMD64 Kind `v0.32.0` cluster, Kubernetes `v1.36.1`, Helm `v3.21.4`, Cilium `1.20.1`, two Hormuz replicas, and customer-fixture PostgreSQL; Cilium is the first tested CNI, not a dependency, and the result is not HA/DR or production certification |
 | Native ARM64 | Not supported for the first image; tracked separately in [#109](https://github.com/Xpounder-com/hormuz/issues/109) |
 | Docker/OCI tooling | A BuildKit/buildx-capable Docker environment is used for local verification; Buildx `v0.36.1` is pinned in CI, but Hormuz does not claim every Docker Engine release |
 | Codex | `@openai/codex` `0.147.0`, installed with Node.js 24 and routed through loopback fake providers in blocking CI |

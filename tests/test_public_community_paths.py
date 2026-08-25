@@ -28,11 +28,12 @@ class PublicCommunityPathTests(unittest.TestCase):
             shutil.copy2(REPOSITORY_ROOT / name, target / name)
         shutil.copytree(REPOSITORY_ROOT / ".github", target / ".github")
         shutil.copytree(REPOSITORY_ROOT / "docs", target / "docs")
-        (target / "deploy/compose").mkdir(parents=True)
-        shutil.copy2(
-            REPOSITORY_ROOT / "deploy/compose/README.md",
-            target / "deploy/compose/README.md",
-        )
+        for profile in ("compose", "kubernetes"):
+            (target / f"deploy/{profile}").mkdir(parents=True, exist_ok=True)
+            shutil.copy2(
+                REPOSITORY_ROOT / f"deploy/{profile}/README.md",
+                target / f"deploy/{profile}/README.md",
+            )
         (target / "tools").mkdir()
         for name in (
             "verify_public_community_paths.py",

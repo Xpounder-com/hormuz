@@ -1,0 +1,13 @@
+apiVersion: v2
+name: hormuz
+description: Vendor-neutral Kubernetes deployment profile for the Hormuz AI policy gateway
+type: application
+version: 0.1.0
+appVersion: "0.1.1"
+kubeVersion: ">=1.30.0-0"
+home: https://github.com/Xpounder-com/hormuz
+sources:
+  - https://github.com/Xpounder-com/hormuz
+annotations:
+  io.hormuz.contract: hormuz.kubernetes-profile.v1
+  io.hormuz.profile: multi-replica-reference

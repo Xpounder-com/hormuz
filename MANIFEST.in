@@ -17,9 +17,13 @@ include tools/verify_dependency_licenses.py
 include tools/verify_public_disclosure_report.py
 include tools/verify_compose_profile.py
 include tools/verify_compose_profile.sh
+include tools/verify_helm_profile.py
+include tools/verify_helm_profile.sh
 recursive-include deploy/compose *.md *.yaml *.json *.sh *.py
 include deploy/compose/hormuz-compose
 prune deploy/compose/runtime
+recursive-include deploy/helm *.yaml *.json *.tpl *.txt
+recursive-include deploy/kubernetes *.md *.yaml *.json *.py
 recursive-include docs *.md
 recursive-include docs/evidence *.json
 recursive-include tests *.py *.json

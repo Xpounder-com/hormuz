@@ -1,0 +1,52 @@
+# This chart renders no Secret, PostgreSQL, ingress controller, certificate,
+# IdP, provider, or custody service. Replace the generation-scoped names below
+# with immutable customer-owned objects before installation.
+contract:
+  schema: hormuz.kubernetes-profile.v1
+  platform: linux/amd64
+
+image:
+  repository: ghcr.io/xpounder-com/hormuz
+  digest: sha256:1bbcca3490a7a5b004a880f42e8250acb91ce566a9c59f3263d7b279568efb5a
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+replicaCount: 2
+
+configuration:
+  name: replace-with-immutable-hormuz-config-v1
+  key: hormuz.json
+  sha256: sha256:0000000000000000000000000000000000000000000000000000000000000000
+
+runtimeSecret:
+  name: replace-with-immutable-hormuz-runtime-v1
+  revision: replace-with-customer-controlled-generation-v1
+  env:
+    HORMUZ_POSTGRES_DSN: postgres-runtime-dsn
+    HORMUZ_INGRESS_CREDENTIAL: hormuz-ingress-credential
+
+service:
+  port: 8787
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 256Mi
+  limits:
+    cpu: "2"
+    memory: 2Gi
+
+terminationGracePeriodSeconds: 660
+
+podDisruptionBudget:
+  minAvailable: 1
+
+topologySpread:
+  topologyKey: kubernetes.io/hostname
+
+networkPolicy:
+  enabled: true
+  # Standard networking.k8s.io/v1 NetworkPolicy rules only. Empty extension
+  # lists are intentionally fail-closed: no ingress and no dependency egress.
+  ingress: []
+  egress: []

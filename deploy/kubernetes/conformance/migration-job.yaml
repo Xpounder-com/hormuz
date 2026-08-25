@@ -1,0 +1,77 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: hormuz-migration
+  namespace: hormuz-system
+  labels:
+    io.hormuz.proof-role: migration
+spec:
+  backoffLimit: 1
+  ttlSecondsAfterFinished: 300
+  template:
+    metadata:
+      labels:
+        io.hormuz.proof-role: migration
+    spec:
+      automountServiceAccountToken: false
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: migrate
+          image: ghcr.io/xpounder-com/hormuz@sha256:1bbcca3490a7a5b004a880f42e8250acb91ce566a9c59f3263d7b279568efb5a
+          command: ["hormuz"]
+          args: ["storage", "migrate"]
+          env:
+            - name: HORMUZ_CONFIG
+              value: /etc/hormuz/hormuz.json
+            - name: HORMUZ_POSTGRES_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: hormuz-migration-v1
+                  key: postgres-runtime-dsn
+            - name: HORMUZ_POSTGRES_MIGRATION_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: hormuz-migration-v1
+                  key: postgres-migration-dsn
+            - name: HORMUZ_TOKEN
+              value: migration-identity-placeholder-not-a-credential
+            - name: HORMUZ_INGRESS_CREDENTIAL
+              value: migration-ingress-placeholder-not-a-credential
+            - name: OPENAI_API_KEY
+              value: migration-openai-placeholder-not-a-credential
+            - name: ANTHROPIC_API_KEY
+              value: migration-anthropic-placeholder-not-a-credential
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          volumeMounts:
+            - name: configuration
+              mountPath: /etc/hormuz
+              readOnly: true
+            - name: temporary
+              mountPath: /tmp
+      volumes:
+        - name: configuration
+          configMap:
+            name: hormuz-config-v1
+            defaultMode: 0440
+        - name: temporary
+          emptyDir:
+            medium: Memory
+            sizeLimit: 64Mi

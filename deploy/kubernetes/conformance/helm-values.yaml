@@ -1,0 +1,43 @@
+configuration:
+  name: hormuz-config-v1
+  sha256: sha256:0000000000000000000000000000000000000000000000000000000000000000
+runtimeSecret:
+  name: hormuz-runtime-v1
+  revision: conformance-generation-v1
+  env:
+    HORMUZ_TOKEN: hormuz-identity-token
+    OPENAI_API_KEY: openai-api-key
+    ANTHROPIC_API_KEY: anthropic-api-key
+networkPolicy:
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: hormuz-ingress
+          podSelector:
+            matchLabels:
+              io.hormuz.proof-role: ingress
+      ports:
+        - protocol: TCP
+          port: 8787
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: hormuz-dependencies
+          podSelector:
+            matchLabels:
+              io.hormuz.proof-role: postgres
+      ports:
+        - protocol: TCP
+          port: 5432
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: hormuz-dependencies
+          podSelector:
+            matchLabels:
+              io.hormuz.proof-role: fake-provider
+      ports:
+        - protocol: TCP
+          port: 8090

@@ -30,6 +30,13 @@ The first runnable customer-controlled-ingress profile is the
 only to host loopback and leaves the public proxy, certificate, DNS, firewall,
 and outbound destination policy under customer control.
 
+The optional [Kubernetes + Helm reference](../deploy/kubernetes/README.md)
+keeps the same boundary behind an internal `ClusterIP` Service. The chart
+creates no public ingress, certificate, or browser session. A customer-owned
+proxy or mesh workload must be selected by standard NetworkPolicy, overwrite
+the private-hop credential header, and remain the only admitted ingress source.
+The first executable proof uses Cilium, but the chart contains no Cilium API.
+
 ## Gateway configuration
 
 Local development is intentionally unchanged: `127.0.0.1`, `::1`, and
@@ -119,3 +126,8 @@ certificate authority integration, a proxy/WAF/firewall, DNS, private
 networking, HA/failover, production secret rotation, zero-downtime deployment,
 or a cloud-specific reference architecture. Those remain separate release
 gates under [ROADMAP.md](ROADMAP.md).
+
+The disposable Kubernetes proof additionally demonstrates the private
+authenticated hop and standard default-deny policy between synthetic Pods. It
+does not validate a customer's public TLS, ingress controller, service mesh,
+certificate operations, cluster network, CNI portability, or browser login.

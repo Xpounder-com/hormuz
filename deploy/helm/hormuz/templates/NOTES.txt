@@ -1,0 +1,12 @@
+Hormuz {{ .Chart.AppVersion }} is configured as a private ClusterIP service.
+
+The chart deliberately creates no public ingress, TLS certificate, Secret,
+PostgreSQL service, IdP, provider, or custody backend. Before admitting traffic,
+verify the exact signed image digest and provide immutable, generation-scoped:
+
+  configuration: {{ .Values.configuration.name }}
+  runtime Secret: {{ .Values.runtimeSecret.name }}
+
+Empty customer network-policy extensions are fail-closed. Public TLS and the
+authenticated private hop remain customer-controlled. OIDC is a generic bearer
+JWT resource-server contract; browser sessions are outside this profile.

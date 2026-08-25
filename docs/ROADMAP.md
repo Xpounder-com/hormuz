@@ -152,6 +152,19 @@ or certification of customer infrastructure or operations. The optional
 Kubernetes/Helm multi-replica enterprise profile remains a separate #100/#11
 gate.
 
+That optional gate,
+[#108](https://github.com/Xpounder-com/hormuz/issues/108), is implemented in
+[#138](https://github.com/Xpounder-com/hormuz/pull/138) and bounded to a
+vendor-neutral Helm chart plus an account-free disposable Kind/Cilium proof.
+The chart uses only standard Kubernetes APIs, deploys Hormuz behind an
+internal ClusterIP, and consumes customer-operated PostgreSQL through an
+existing Secret. Its first proof covers two-replica application placement,
+readiness-gated replacement, network denial, synthetic request/evidence
+persistence, Pod replacement, and clean removal. Cilium is the first tested
+CNI rather than a product dependency. HA, RPO, RTO, zone failure, broad CNI
+portability, and deeper coordinated state/admission claims remain with their
+dedicated #103/#104/#105 gates.
+
 ## Feature-freeze rule
 
 > A change is current-priority only if it removes deprecated context coupling, stabilizes the policy/evidence contract, fixes a security or correctness defect, or closes a production-readiness gate.

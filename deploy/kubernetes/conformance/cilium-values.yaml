@@ -1,0 +1,21 @@
+image:
+  repository: quay.io/cilium/cilium
+  tag: v1.20.1
+  digest: sha256:ae9ea21f7427fe24bc6ea7247eb552157a1b0a431744045d3f641545ca71d11b
+  useDigest: true
+  pullPolicy: IfNotPresent
+operator:
+  replicas: 1
+  image:
+    repository: quay.io/cilium/operator
+    tag: v1.20.1
+    genericDigest: sha256:6c3885fc7b629099fdbe2a5c87869c86feb825fa18fae299eac0f61918d16ecf
+    useDigest: true
+    pullPolicy: IfNotPresent
+ipam:
+  mode: kubernetes
+kubeProxyReplacement: "false"
+hubble:
+  enabled: false
+envoy:
+  enabled: false
