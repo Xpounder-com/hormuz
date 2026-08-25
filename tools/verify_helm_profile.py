@@ -426,6 +426,8 @@ def _validate_deployment(
         spread_item.get("whenUnsatisfiable") != "DoNotSchedule"
         or spread_item.get("topologyKey") != "kubernetes.io/hostname"
         or spread_item.get("maxSkew") != 1
+        or spread_item.get("nodeAffinityPolicy") != "Honor"
+        or spread_item.get("nodeTaintsPolicy") != "Honor"
     ):
         raise HelmProfileError("topology_spread")
 

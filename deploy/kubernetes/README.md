@@ -48,6 +48,9 @@ bounded. An init container runs `hormuz doctor` with the same immutable runtime
 inputs before a replacement can become ready. Rolling updates require zero
 unavailable replicas, the readiness contract, a disruption budget, and
 `DoNotSchedule` topology spread across `kubernetes.io/hostname` by default.
+The spread constraint honors node affinity and taints, so nodes on which the
+gateway cannot schedule do not create a rollout deadlock by being counted as
+empty topology domains.
 
 The chart schedules only on Linux AMD64 because that is the only signed Hormuz
 OCI platform currently supported. Issue

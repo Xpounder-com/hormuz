@@ -130,6 +130,8 @@ def valid_manifest() -> dict[str, object]:
                             "maxSkew": 1,
                             "topologyKey": "kubernetes.io/hostname",
                             "whenUnsatisfiable": "DoNotSchedule",
+                            "nodeAffinityPolicy": "Honor",
+                            "nodeTaintsPolicy": "Honor",
                             "labelSelector": _selector(),
                         }
                     ],
@@ -404,6 +406,18 @@ class HelmChartContractTests(unittest.TestCase):
                 expected_configuration_sha256="sha256:" + "a" * 64,
                 expected_runtime_secret=RUNTIME_SECRET,
                 expected_runtime_secret_revision="conformance-generation-v2",
+            )
+
+    def test_topology_spread_excludes_unschedulable_tainted_domains(self) -> None:
+        unsafe_spread = valid_manifest()
+        del unsafe_spread["items"][0]["spec"]["template"]["spec"][
+            "topologySpreadConstraints"
+        ][0]["nodeTaintsPolicy"]
+        with self.assertRaisesRegex(helm_profile.HelmProfileError, "topology_spread"):
+            helm_profile.validate_manifest(
+                unsafe_spread,
+                expected_configuration=CONFIGURATION,
+                expected_runtime_secret=RUNTIME_SECRET,
             )
 
     def test_public_service_and_cni_specific_api_fail_closed(self) -> None:

@@ -38,6 +38,8 @@ spec:
         - maxSkew: 1
           topologyKey: {{ .Values.topologySpread.topologyKey | quote }}
           whenUnsatisfiable: DoNotSchedule
+          nodeAffinityPolicy: Honor
+          nodeTaintsPolicy: Honor
           labelSelector:
             matchLabels:
               {{- include "hormuz.selectorLabels" . | nindent 14 }}
