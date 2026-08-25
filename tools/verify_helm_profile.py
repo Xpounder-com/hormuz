@@ -569,7 +569,14 @@ def _validate_network_policies(policies: Sequence[Mapping[str, Any]]) -> None:
         raise HelmProfileError("network_policy_roles")
 
     default = _mapping(by_role["default-deny"].get("spec"), "default_deny_spec")
-    if default.get("policyTypes") != ["Ingress", "Egress"] or default.get("ingress") != [] or default.get("egress") != []:
+    # The Kubernetes API omits explicitly empty rule lists when it canonicalizes
+    # stored NetworkPolicy objects. Absent and empty both deny every direction
+    # named in policyTypes; a null or non-empty value remains invalid.
+    if (
+        default.get("policyTypes") != ["Ingress", "Egress"]
+        or default.get("ingress", []) != []
+        or default.get("egress", []) != []
+    ):
         raise HelmProfileError("default_deny")
 
     dns = _mapping(by_role["dns-egress"].get("spec"), "dns_policy_spec")

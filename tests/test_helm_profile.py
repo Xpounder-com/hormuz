@@ -400,6 +400,15 @@ class HelmChartContractTests(unittest.TestCase):
             )
 
     def test_default_deny_and_source_restriction_fail_closed(self) -> None:
+        normalized = valid_manifest()
+        del normalized["items"][3]["spec"]["ingress"]
+        del normalized["items"][3]["spec"]["egress"]
+        helm_profile.validate_manifest(
+            normalized,
+            expected_configuration=CONFIGURATION,
+            expected_runtime_secret=RUNTIME_SECRET,
+        )
+
         opened = valid_manifest()
         opened["items"][3]["spec"]["egress"] = [{}]
         with self.assertRaisesRegex(helm_profile.HelmProfileError, "default_deny"):
