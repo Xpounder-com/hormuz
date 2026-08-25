@@ -123,6 +123,27 @@ emit_deployment_diagnostics() {
   fi
 }
 
+emit_job_diagnostics() {
+  local namespace=$1
+  local job=$2
+  local diagnostic="${ARTIFACT_ROOT}/failure-${namespace}-${job}.log"
+  {
+    printf 'probe job failed: namespace=%s job=%s\n' "${namespace}" "${job}"
+    kubectl --namespace "${namespace}" get "job/${job}" --output=wide
+    kubectl --namespace "${namespace}" get pods \
+      --selector="job-name=${job}" --output=wide
+    kubectl --namespace "${namespace}" logs "job/${job}"
+    kubectl --namespace "${namespace}" get events --sort-by=.metadata.creationTimestamp
+    kubectl --namespace "${namespace}" describe "job/${job}"
+  } >"${diagnostic}" 2>&1 || true
+  if python3 "${ROOT}/tools/verify_helm_profile.py" assert-no-secrets \
+    --artifact "${diagnostic}" --secret-root "${SECRET_ROOT}" >/dev/null; then
+    sed -n '1,320p' "${diagnostic}" >&2
+  else
+    printf 'probe diagnostic withheld because secret scanning did not pass\n' >&2
+  fi
+}
+
 run_probe() {
   local namespace=$1
   local template=$2
@@ -131,7 +152,11 @@ run_probe() {
   local job="${template}-${PROBE_SEQUENCE}"
   local output="${ARTIFACT_ROOT}/${job}.json"
   kubectl --namespace "${namespace}" create job "${job}" --from="cronjob/${template}" >/dev/null
-  kubectl --namespace "${namespace}" wait --for=condition=complete "job/${job}" --timeout=120s >/dev/null
+  if ! kubectl --namespace "${namespace}" wait --for=condition=complete \
+    "job/${job}" --timeout=30s >/dev/null; then
+    emit_job_diagnostics "${namespace}" "${job}"
+    fail "probe job did not complete: ${namespace}/${job}"
+  fi
   kubectl --namespace "${namespace}" logs "job/${job}" >"${output}"
   python3 - "${output}" "${expected_status}" <<'PY'
 import json

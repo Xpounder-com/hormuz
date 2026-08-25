@@ -281,6 +281,7 @@ class HelmChartContractTests(unittest.TestCase):
         self.assertNotIn("kind load docker-image", runner)
         self.assertNotIn("docker pull", runner)
         self.assertIn("write_random_hex_secret", runner)
+        self.assertIn("emit_job_diagnostics", runner)
         self.assertNotIn('openssl rand -hex 32 >', runner)
         self.assertNotIn("apiVersion: cilium.io/", (CHART / "templates" / "networkpolicy.yaml").read_text(encoding="utf-8"))
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
