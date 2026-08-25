@@ -18,7 +18,14 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "command",
-        choices=("health", "request", "replacement-traffic", "network-denied"),
+        choices=(
+            "ambiguous-request",
+            "blocking-request",
+            "health",
+            "request",
+            "replacement-traffic",
+            "network-denied",
+        ),
     )
     parser.add_argument("--target", required=True)
     parser.add_argument("--expected-status", type=int)
@@ -66,6 +73,13 @@ def main() -> int:
                 expected_policy=args.expected_policy,
                 duration_seconds=args.duration_seconds,
             )
+        if args.command in {"blocking-request", "ambiguous-request"}:
+            return _run_blocking_request(
+                command=args.command,
+                target=args.target,
+                headers=headers,
+                expected_policy=args.expected_policy,
+            )
         result = _governed_request(
             target=args.target,
             headers=headers,
@@ -98,10 +112,14 @@ def _governed_request(
     headers: dict[str, str],
     expected_status: int | None,
     expected_policy: str | None,
+    blocking: bool = False,
+    timeout: int = 10,
 ) -> dict[str, object]:
     payload = {
         "model": "unapproved-kubernetes-proof-model",
-        "input": f"Synthetic credential for redaction proof: {SYNTHETIC_SECRET}",
+        "input": (
+            "HORMUZ_BLOCKING_OPERATION_PROBE " if blocking else ""
+        ) + f"Synthetic credential for redaction proof: {SYNTHETIC_SECRET}",
         "max_output_tokens": 900,
         "stream": False,
     }
@@ -110,6 +128,7 @@ def _governed_request(
         f"{target}/v1/responses",
         headers=headers,
         body=json.dumps(payload, separators=(",", ":")).encode("utf-8"),
+        timeout=timeout,
     )
     policy = response_headers.get("x-hormuz-policy-decision")
     if expected_policy is not None and policy != expected_policy:
@@ -130,6 +149,40 @@ def _governed_request(
         "policy": policy,
         "redactions": int(response_headers.get("x-hormuz-redactions", "0")),
     }
+
+
+def _run_blocking_request(
+    *,
+    command: str,
+    target: str,
+    headers: dict[str, str],
+    expected_policy: str | None,
+) -> int:
+    print(json.dumps({"event": "blocking_request_started"}, separators=(",", ":")), flush=True)
+    try:
+        result = _governed_request(
+            target=target,
+            headers=headers,
+            expected_status=200,
+            expected_policy=expected_policy,
+            blocking=True,
+            timeout=90,
+        )
+    except (URLError, TimeoutError, OSError):
+        if command != "ambiguous-request":
+            raise
+        print(
+            json.dumps(
+                {"command": command, "transport_outcome": "ambiguous"},
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+        )
+        return 0
+    if command == "ambiguous-request":
+        raise SystemExit("ambiguous_request_unexpectedly_completed")
+    print(json.dumps({**result, "command": command}, sort_keys=True, separators=(",", ":")))
+    return 0
 
 
 def _run_replacement_traffic(
@@ -207,10 +260,11 @@ def _request(
     *,
     headers: dict[str, str],
     body: bytes | None = None,
+    timeout: int = 10,
 ) -> tuple[int, dict[str, str], bytes]:
     request = Request(target, data=body, headers=headers, method=method)
     try:
-        with urlopen(request, timeout=10) as response:
+        with urlopen(request, timeout=timeout) as response:
             return (
                 response.status,
                 {name.lower(): value for name, value in response.headers.items()},

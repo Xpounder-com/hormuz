@@ -164,8 +164,23 @@ existing Secret. Its first proof covers two-replica application placement,
 readiness-gated replacement, network denial, synthetic request/evidence
 persistence, Pod replacement, and clean removal. Cilium is the first tested
 CNI rather than a product dependency. HA, RPO, RTO, zone failure, broad CNI
-portability, and deeper coordinated state/admission claims remain with their
-dedicated #103/#104/#105 gates.
+portability, and deeper coordinated state/admission claims remain separately
+gated.
+
+The coordinated state/admission gate,
+[#103](https://github.com/Xpounder-com/hormuz/issues/103), adds a strict
+composite proof. Ten named PostgreSQL tests exercise atomic budgets, immutable
+policy activation, tenant isolation, the request-attempt ledger, concurrent
+audit-chain writes, custody approvals and coordinated restriction barriers,
+duplicate synchronization, stale acknowledgements, partition fencing, and
+ambiguous provider outcomes without replay. The pinned Kind run separately
+proves Service-routed graceful draining and forced replica loss, exact ready
+replacement, one durable `outcome_unknown`, one uncertain reservation, and no
+provider replay. Its content-free final artifact binds the state and
+Kubernetes summaries by digest and publishes the observed convergence/drain
+timings. This remains an application multi-replica claim, not PostgreSQL
+leader failover, a universal HA claim, or a customer SLA. Those recovery
+claims remain with #104 and #105.
 
 The final #100 recovery decision is accepted in
 [ADR 0009](decisions/0009-v1-deployment-profiles-and-recovery-objectives.md).

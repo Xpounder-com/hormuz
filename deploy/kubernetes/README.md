@@ -158,13 +158,28 @@ A platform force-kill can still interrupt a stream.
 
 ## Disposable executable proof
 
-Blocking Linux AMD64 CI runs:
+The deployment-profile proof remains directly runnable on Linux AMD64:
 
 ```bash
 HORMUZ_KUBERNETES_PROOF_ACK=I_UNDERSTAND_THIS_IS_A_DISPOSABLE_KUBERNETES_REFERENCE_PROOF \
 HORMUZ_KUBERNETES_EVIDENCE_DIR=/protected/new/output-directory \
   ./tools/verify_helm_profile.sh
 ```
+
+The #103 release gate adds a focused shared-state proof and binds it to that
+same live cluster run. CI first runs:
+
+```bash
+HORMUZ_TEST_POSTGRES_DSN="$PROTECTED_DISPOSABLE_POSTGRES_DSN" \
+  python tools/verify_multi_replica_operation.py run-state-proof \
+    --postgres-image 'postgres@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777' \
+    --source-commit "$EXACT_SOURCE_COMMIT" \
+    --output /protected/state-summary.json
+```
+
+It then supplies the protected summary and exact commit through
+`HORMUZ_MULTI_REPLICA_STATE_EVIDENCE` and `HORMUZ_SOURCE_COMMIT` when invoking
+`verify_helm_profile.sh`. Supplying only one of those inputs fails closed.
 
 The proof verifies every downloaded binary or chart against an exact SHA-256,
 creates one Kind control plane and two workers with the exact node-image
@@ -185,19 +200,44 @@ preflight logs are captured and secret-scanned before each revision change or
 deletion and once more after replacement. The proof then removes the chart and
 cluster. It contacts no model provider or external IdP.
 
-Only a strict mode-`0600` `hormuz.kubernetes-reference-proof` v1 summary is
-retained. Rendered manifests, logs, synthetic configuration, generated
-credentials, and raw observations are temporary and deleted.
+The coordinated-operation extension also runs ten named tests against a
+disposable PostgreSQL backend. They exercise two independent gateway process
+pools, atomic organization budget reservations, immutable policy activation,
+the append-only request-attempt ledger, concurrent per-tenant audit-chain
+sequencing, two-person custody approval, barrier acknowledgements, duplicate
+notification idempotence, stale acknowledgement rejection, five-second
+partition fencing, and ambiguous provider outcomes without replay.
+
+In the live cluster, one Service-routed request is held at the fake provider
+while its exact gateway Pod receives a normal termination. The proof requires
+that Pod to leave readiness and the Service, a sibling to admit new work, and
+the pinned request to finish its evidence write before the old Pod disappears.
+A second Service-routed request is held after provider egress and its exact Pod
+is force-deleted. The provider observes one call; Hormuz never replays it. Once
+the reservation reaches its stale boundary, a later request invokes the durable
+sweeper and the original attempt must remain `outcome_unknown` with one
+uncertain reservation.
+The replacement must become ready on the two-worker topology in both cases.
+
+The base run retains the strict mode-`0600`
+`hormuz.kubernetes-reference-proof` v1 summary. The coordinated gate also
+retains a strict `hormuz.multi-replica-state-proof` v1 summary and one
+`hormuz.multi-replica-operation-proof` v1 summary. The final summary binds the
+other two by SHA-256, the exact source commit, signed image digest, chart
+digest, fixed event sequence, measured rollout/drain/replacement durations,
+state counts, retry/session boundary, and nonclaims. Rendered manifests, logs,
+synthetic configuration, generated credentials, and raw observations remain
+temporary and are deleted.
 
 ## Exact nonclaims
 
 This disposable proof does not certify Kubernetes, Helm, Cilium, Kind,
 PostgreSQL, public TLS, an ingress implementation, an IdP, a model provider, a
 cloud, a customer cluster, or customer operations. It makes no broad
-CNI-portability, HA, RPO, RTO, multi-region, or zone-failure claim. It does not
-prove PostgreSQL promotion/failover, production storage durability, autoscaling,
-capacity, browser sessions, or every coordinated multi-replica state behavior.
-Those remain separate release gates under
-[#103](https://github.com/Xpounder-com/hormuz/issues/103),
-[#104](https://github.com/Xpounder-com/hormuz/issues/104), and
+CNI-portability, universal HA, RPO, RTO, multi-region, or zone-failure claim.
+It does not prove PostgreSQL promotion/failover, production storage durability,
+autoscaling, capacity, browser sessions, provider exactly-once semantics, or
+zero interruption for a force-killed in-flight stream. PostgreSQL failover and
+the complete recovery rehearsal remain separate release gates under
+[#104](https://github.com/Xpounder-com/hormuz/issues/104) and
 [#105](https://github.com/Xpounder-com/hormuz/issues/105).
