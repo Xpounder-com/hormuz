@@ -133,6 +133,9 @@ recovery_policy_control_dsn="postgresql://${POLICY_CONTROL_ROLE}:${POLICY_CONTRO
 quarantine_runtime_dsn="postgresql://${RUNTIME_ROLE}:${RUNTIME_PASSWORD}@127.0.0.1:${recovery_port}/${QUARANTINE_DATABASE}"
 quarantine_policy_control_dsn="postgresql://${POLICY_CONTROL_ROLE}:${POLICY_CONTROL_PASSWORD}@127.0.0.1:${recovery_port}/${QUARANTINE_DATABASE}"
 
+run_recovery_tool wait-ready --operator-dsn "${source_operator_dsn}" >/dev/null
+run_recovery_tool wait-ready --operator-dsn "${recovery_operator_dsn}" >/dev/null
+
 seed_started_seconds=${SECONDS}
 run_recovery_tool provision-roles \
   --operator-dsn "${source_operator_dsn}" \

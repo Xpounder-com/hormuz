@@ -139,6 +139,40 @@ class PostgresRecoverySummaryTests(unittest.TestCase):
             self.assertGreater(source.stat().st_size, corrupt.stat().st_size)
             self.assertGreater(corrupt.stat().st_size, 0)
 
+    def test_operator_readiness_retries_and_fails_closed(self) -> None:
+        responses = iter((False, False, True))
+        sleeps: list[float] = []
+
+        recovery._wait_for_operator_probe(
+            lambda: next(responses),
+            attempts=3,
+            interval_seconds=0.25,
+            sleeper=sleeps.append,
+        )
+
+        self.assertEqual(sleeps, [0.25, 0.25])
+        with self.assertRaisesRegex(recovery.RecoveryDrillError, "readiness_timeout"):
+            recovery._wait_for_operator_probe(
+                lambda: False,
+                attempts=2,
+                interval_seconds=0,
+                sleeper=lambda _: None,
+            )
+        with self.assertRaisesRegex(recovery.RecoveryDrillError, "configuration_invalid"):
+            recovery._wait_for_operator_probe(
+                lambda: True,
+                attempts=0,
+                interval_seconds=0,
+                sleeper=lambda _: None,
+            )
+
+    def test_shell_drill_waits_for_both_published_operator_connections(self) -> None:
+        script = (ROOT / "tools" / "verify_postgres_backup_restore.sh").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertEqual(script.count("run_recovery_tool wait-ready"), 2)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -15,7 +15,8 @@ import json
 import re
 import sys
 import tempfile
-from collections.abc import Mapping
+import time
+from collections.abc import Callable, Mapping
 from datetime import date, datetime
 from pathlib import Path
 
@@ -57,6 +58,9 @@ STATE_SCHEMA_VERSION = 1
 SUMMARY_SCHEMA_ID = "hormuz.postgresql-recovery-drill-summary"
 SUMMARY_SCHEMA_VERSION = 1
 SUMMARY_COVERAGE = "ephemeral_logical_backup_restore_only"
+_DEFAULT_OPERATOR_READINESS_ATTEMPTS = 30
+_DEFAULT_OPERATOR_READINESS_INTERVAL_SECONDS = 0.25
+_OPERATOR_CONNECT_TIMEOUT_SECONDS = 2
 _POSTGRES_VERSION_PATTERN = re.compile(r"\d+\.\d+(?:\.\d+)?\Z")
 _REQUIRED_RECORD_COUNT_KEYS = (
     "organizations",
@@ -140,6 +144,12 @@ def main(argv: list[str] | None = None) -> int:
     provision.add_argument("--policy-control-role", required=True)
     provision.add_argument("--policy-control-password", required=True)
 
+    wait_ready = commands.add_parser(
+        "wait-ready",
+        help="wait for the disposable operator connection to accept a read-only probe",
+    )
+    wait_ready.add_argument("--operator-dsn", required=True)
+
     seed = commands.add_parser("seed", help="migrate and seed fixed source metadata")
     _add_connection_arguments(seed, include_operator=True)
     seed.add_argument("--state-output", required=True, type=Path)
@@ -188,6 +198,10 @@ def main(argv: list[str] | None = None) -> int:
                 policy_control_password=args.policy_control_password,
             )
             print("provisioned disposable restricted PostgreSQL roles")
+            return 0
+        if args.command == "wait-ready":
+            wait_for_operator_connection(args.operator_dsn)
+            print("disposable PostgreSQL operator connection ready")
             return 0
         if args.command == "seed":
             state = seed_source_state(
@@ -275,6 +289,57 @@ def _add_connection_arguments(parser: argparse.ArgumentParser, *, include_operat
     parser.add_argument("--schema", required=True)
     parser.add_argument("--runtime-role", required=True)
     parser.add_argument("--policy-control-role", required=True)
+
+
+def wait_for_operator_connection(
+    operator_dsn: str,
+    *,
+    attempts: int = _DEFAULT_OPERATOR_READINESS_ATTEMPTS,
+    interval_seconds: float = _DEFAULT_OPERATOR_READINESS_INTERVAL_SECONDS,
+) -> None:
+    """Wait for the host-published disposable database path before mutation."""
+
+    try:
+        import psycopg
+    except ImportError as error:  # pragma: no cover - package-install gate covers this path
+        raise RecoveryDrillError("postgres_driver_unavailable") from error
+
+    def probe() -> bool:
+        try:
+            with psycopg.connect(
+                operator_dsn,
+                connect_timeout=_OPERATOR_CONNECT_TIMEOUT_SECONDS,
+            ) as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute("SELECT 1")
+                    return cursor.fetchone() == (1,)
+        except psycopg.OperationalError:
+            return False
+        except psycopg.Error as error:
+            raise RecoveryDrillError("recovery_operator_readiness_failed") from error
+
+    _wait_for_operator_probe(
+        probe,
+        attempts=attempts,
+        interval_seconds=interval_seconds,
+    )
+
+
+def _wait_for_operator_probe(
+    probe: Callable[[], bool],
+    *,
+    attempts: int,
+    interval_seconds: float,
+    sleeper: Callable[[float], None] = time.sleep,
+) -> None:
+    if attempts < 1 or interval_seconds < 0:
+        raise RecoveryDrillError("recovery_readiness_configuration_invalid")
+    for attempt in range(attempts):
+        if probe():
+            return
+        if attempt + 1 < attempts:
+            sleeper(interval_seconds)
+    raise RecoveryDrillError("recovery_operator_readiness_timeout")
 
 
 def provision_restricted_roles(
