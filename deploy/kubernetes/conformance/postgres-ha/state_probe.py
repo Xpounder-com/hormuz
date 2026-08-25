@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import sys
 from tempfile import NamedTemporaryFile
 
 from hormuz.config import GatewayConfig
@@ -29,7 +30,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=("seed", "snapshot"))
     args = parser.parse_args()
+    _stage("config_load_started")
     config = GatewayConfig.load(CONFIG_PATH)
+    _stage("config_load_completed")
     if args.command == "seed":
         result = seed(config)
     else:
@@ -129,14 +132,18 @@ def seed(config: GatewayConfig) -> dict[str, object]:
 
 
 def snapshot(config: GatewayConfig) -> dict[str, object]:
+    _stage("policy_status_started")
     policy_status = PolicyControlService(config).status(
         organization_id=ORGANIZATION,
         credential_env="HORMUZ_TOKEN",
     )
+    _stage("policy_status_completed")
+    _stage("custody_status_started")
     custody_status = CustodyControlService(config).status(
         organization_id=ORGANIZATION,
         credential_env="HORMUZ_TOKEN",
     )
+    _stage("custody_status_completed")
     if policy_status.active is None:
         raise SystemExit("policy_pointer_missing")
     if config.custody_lifecycle is None:
@@ -147,11 +154,13 @@ def snapshot(config: GatewayConfig) -> dict[str, object]:
         asset_id="anthropic-primary",
         generation=1,
     )
+    _stage("custody_projection_started")
     projection = PostgresCustodyProjectionStore(
         _required("HORMUZ_POSTGRES_DSN"),
         schema="hormuz",
         runtime_role="hormuz_runtime",
     ).load(organization_id=ORGANIZATION)
+    _stage("custody_projection_completed")
     restriction = projection.restriction_for(asset)
     if restriction != "provider_credential_disabled":
         raise SystemExit("custody_restriction_missing")
@@ -172,6 +181,7 @@ def snapshot(config: GatewayConfig) -> dict[str, object]:
         json.dumps(control_value, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
 
+    _stage("tenant_state_started")
     with postgres_transaction(
         _required("HORMUZ_POSTGRES_DSN"),
         schema="hormuz",
@@ -219,7 +229,9 @@ def snapshot(config: GatewayConfig) -> dict[str, object]:
                 """
             )
             uncertain_reservations = int(cursor.fetchone()["count"])
+    _stage("tenant_state_completed")
 
+    _stage("tenant_isolation_started")
     with postgres_transaction(
         _required("HORMUZ_POSTGRES_DSN"),
         schema="hormuz",
@@ -233,7 +245,9 @@ def snapshot(config: GatewayConfig) -> dict[str, object]:
                 "(SELECT COUNT(*) FROM gateway_request_attempts) AS count"
             )
             isolation_tenant_rows = int(cursor.fetchone()["count"])
+    _stage("tenant_isolation_completed")
 
+    _stage("audit_chain_started")
     auditor = PostgresUsageStore(
         _required("HORMUZ_POSTGRES_DSN"),
         organization_ids=(ORGANIZATION,),
@@ -241,6 +255,7 @@ def snapshot(config: GatewayConfig) -> dict[str, object]:
         runtime_role="hormuz_runtime",
     )
     chain = auditor.verify_audit_chain(organization_id=ORGANIZATION)
+    _stage("audit_chain_completed")
     return {
         "schema_id": SNAPSHOT_SCHEMA_ID,
         "schema_version": 1,
@@ -268,6 +283,12 @@ def _required(name: str) -> str:
     if not value:
         raise SystemExit("state_probe_environment_missing")
     return value
+
+
+def _stage(name: str) -> None:
+    """Emit only allowlisted operation names while preserving content-free evidence."""
+
+    print(f"postgres_ha_state_stage={name}", file=sys.stderr, flush=True)
 
 
 def _sorted_refs(values):
