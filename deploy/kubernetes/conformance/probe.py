@@ -94,10 +94,23 @@ def main() -> int:
 
 
 def _read(name: str) -> str:
-    path = Path("/run/hormuz-proof") / name
-    if path.is_symlink() or not path.is_file():
+    return _read_projected_secret(Path("/run/hormuz-proof"), name)
+
+
+def _read_projected_secret(root: Path, name: str) -> str:
+    if Path(name).name != name:
         raise SystemExit("proof_secret_unavailable")
-    value = path.read_text(encoding="utf-8").strip()
+    try:
+        mount_root = root.resolve(strict=True)
+        resolved = (mount_root / name).resolve(strict=True)
+        resolved.relative_to(mount_root)
+    except (FileNotFoundError, OSError, ValueError):
+        raise SystemExit("proof_secret_unavailable") from None
+    if not resolved.is_file():
+        raise SystemExit("proof_secret_unavailable")
+    # Kubernetes projected Secret keys are symlinks through ..data. Resolve
+    # them only when the final regular file stays inside the read-only mount.
+    value = resolved.read_text(encoding="utf-8").strip()
     if not value:
         raise SystemExit("proof_secret_empty")
     return value

@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import json
 import os
+import runpy
 import tempfile
 import unittest
 from pathlib import Path
@@ -290,6 +291,30 @@ class HelmChartContractTests(unittest.TestCase):
         self.assertNotIn("aws ", runner)
         self.assertNotIn("az ", runner)
         self.assertNotIn("gcloud ", runner)
+
+    def test_probe_accepts_projected_secret_links_but_rejects_mount_escape(self) -> None:
+        probe = runpy.run_path(
+            str(ROOT / "deploy" / "kubernetes" / "conformance" / "probe.py")
+        )
+        read_projected_secret = probe["_read_projected_secret"]
+        with tempfile.TemporaryDirectory() as temporary:
+            temporary_root = Path(temporary)
+            mount = temporary_root / "secret"
+            revision = mount / "..2026_08_25_00_00_00"
+            revision.mkdir(parents=True)
+            (revision / "identity-token").write_text("synthetic-token", encoding="utf-8")
+            (mount / "..data").symlink_to(revision.name, target_is_directory=True)
+            (mount / "identity-token").symlink_to("..data/identity-token")
+            self.assertEqual(
+                read_projected_secret(mount, "identity-token"),
+                "synthetic-token",
+            )
+
+            outside = temporary_root / "outside"
+            outside.write_text("must-not-read", encoding="utf-8")
+            (mount / "escaped").symlink_to(outside)
+            with self.assertRaisesRegex(SystemExit, "proof_secret_unavailable"):
+                read_projected_secret(mount, "escaped")
 
     def test_source_distribution_contract_includes_the_chart_and_live_proof(self) -> None:
         manifest = (ROOT / "MANIFEST.in").read_text(encoding="utf-8")
