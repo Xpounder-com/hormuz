@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "repository": "Xpounder-com/hormuz",
-  "release": "v0.1.0-public-alpha",
+  "release": "v0.1.1-public-alpha",
   "publication_status": "draft_do_not_publish",
   "publication_gate": {
     "owner_copy_approval": "required",
@@ -270,7 +270,7 @@
     },
     {
       "id": "ALPHA_BOUNDARY",
-      "text": "Hormuz v0.1.0 is a public open-source alpha for evaluation and design-partner hardening, not a production, enterprise-HA, disaster-recovery, compliance, or independent-security-review claim.",
+      "text": "Hormuz v0.1.1 is a public open-source alpha for evaluation and design-partner hardening, not a production, enterprise-HA, disaster-recovery, compliance, or independent-security-review claim.",
       "classification": "nonclaim",
       "evidence": [
         {

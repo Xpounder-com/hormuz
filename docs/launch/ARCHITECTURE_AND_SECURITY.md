@@ -89,10 +89,9 @@ profiles and gates.
 
 ## What the alpha does not establish
 
-Hormuz v0.1.0 does not establish production suitability, enterprise HA,
+Hormuz v0.1.1 does not establish production suitability, enterprise HA,
 disaster recovery, compliance, provider-invoice accuracy, cloud-specific
 certification, protection from a host-root administrator, or an independent
 security review. It should be evaluated with synthetic data until an
 organization completes its own deployment and data review.
 <!-- claims: ALPHA_BOUNDARY -->
-

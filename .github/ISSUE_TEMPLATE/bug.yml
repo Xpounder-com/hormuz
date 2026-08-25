@@ -16,7 +16,7 @@
       "attributes": {
         "label": "Hormuz version",
         "description": "Provide the commit SHA, tag, package version, or OCI digest.",
-        "placeholder": "commit abc1234 or v0.1.0"
+        "placeholder": "commit abc1234 or v0.1.1"
       },
       "validations": {"required": true}
     },

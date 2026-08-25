@@ -420,7 +420,7 @@ def validate_launch_assets(root: Path) -> dict[str, object]:
         raise LaunchAssetError("unsupported launch-manifest schema version")
     if manifest["repository"] != "Xpounder-com/hormuz":
         raise LaunchAssetError("launch repository identity changed")
-    if manifest["release"] != "v0.1.0-public-alpha":
+    if manifest["release"] != "v0.1.1-public-alpha":
         raise LaunchAssetError("launch release identity changed")
     if manifest["publication_status"] != PUBLICATION_STATUS:
         raise LaunchAssetError("draft publication status changed without approval")

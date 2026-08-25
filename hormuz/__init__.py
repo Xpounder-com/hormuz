@@ -1,6 +1,6 @@
 """Hormuz enterprise AI gateway policy and control plane."""
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 from .config import GatewayConfig, ConfigError
 from .policy import PolicyDecision, PolicyEngine

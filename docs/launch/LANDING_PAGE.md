@@ -13,7 +13,7 @@ company-controlled request path. <!-- claims: GATEWAY_SCOPE -->
 · [Book an AI Governance Review]({{AI_GOVERNANCE_REVIEW_URL}})
 · [Apply for a paid design-partner pilot]({{PAID_PILOT_URL}})
 
-Hormuz v0.1.0 is an evaluation alpha. It is not a production, compliance,
+Hormuz v0.1.1 is an evaluation alpha. It is not a production, compliance,
 enterprise-HA, disaster-recovery, or independent-security-review claim.
 <!-- claims: ALPHA_BOUNDARY -->
 
@@ -90,4 +90,3 @@ security boundary, and proposal is handled by a human.
 
 Do not submit credentials, prompts, responses, employee records, customer
 data, private hostnames, or proprietary logs through either intake path.
-
