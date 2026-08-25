@@ -1,7 +1,7 @@
 # Hormuz launch package
 
 This directory contains the evidence-grounded launch package for the Hormuz
-v0.1.0 public open-source alpha. Every public asset is currently marked
+v0.1.1 public open-source alpha. Every public asset is currently marked
 **DRAFT — DO NOT PUBLISH**. Drafting is allowed before the quiet alpha;
 publication is not.
 

@@ -21,7 +21,7 @@ from typing import Any
 
 SCHEMA_ID = "hormuz.quiet-alpha-evidence"
 SCHEMA_VERSION = 1
-PROGRAM = "hormuz-v0.1.0-quiet-alpha"
+PROGRAM = "hormuz-v0.1.1-quiet-alpha"
 PUBLICATION_STATUS = "content_free"
 
 EVIDENCE_KINDS = {"quiet_alpha_release_evidence", "synthetic_test_fixture"}
@@ -235,7 +235,7 @@ def _validate_session(value: object, index: int) -> dict[str, Any]:
     _require_date(session["session_date"], f"{label}_date")
     _require_enum(session["persona"], PERSONAS, f"{label}_persona")
     _require_pattern(session["source_commit"], _REVISION_RE, f"{label}_source_commit")
-    if session["package_version"] != "0.1.0":
+    if session["package_version"] != "0.1.1":
         raise QuietAlphaEvidenceError(f"{label}_package_version_invalid")
     _require_enum(
         session["installation_method"], INSTALLATION_METHODS, f"{label}_installation_method"

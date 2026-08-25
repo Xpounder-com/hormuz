@@ -2,7 +2,7 @@
   "schema_id": "hormuz.quiet-alpha-evidence",
   "schema_version": 1,
   "evidence_kind": "synthetic_test_fixture",
-  "program": "hormuz-v0.1.0-quiet-alpha",
+  "program": "hormuz-v0.1.1-quiet-alpha",
   "publication_status": "content_free",
   "generated_at": "2026-08-24T00:00:00Z",
   "operator_attestation": {
@@ -18,7 +18,7 @@
       "session_date": "2026-08-01",
       "persona": "developer",
       "source_commit": "1111111111111111111111111111111111111111",
-      "package_version": "0.1.0",
+      "package_version": "0.1.1",
       "installation_method": "source_checkout",
       "environment": {
         "os_family": "linux",
@@ -51,7 +51,7 @@
       "session_date": "2026-08-02",
       "persona": "security",
       "source_commit": "2222222222222222222222222222222222222222",
-      "package_version": "0.1.0",
+      "package_version": "0.1.1",
       "installation_method": "source_checkout",
       "environment": {
         "os_family": "linux",
@@ -84,7 +84,7 @@
       "session_date": "2026-08-03",
       "persona": "platform",
       "source_commit": "3333333333333333333333333333333333333333",
-      "package_version": "0.1.0",
+      "package_version": "0.1.1",
       "installation_method": "source_checkout",
       "environment": {
         "os_family": "macos",
@@ -117,7 +117,7 @@
       "session_date": "2026-08-04",
       "persona": "engineering_admin",
       "source_commit": "4444444444444444444444444444444444444444",
-      "package_version": "0.1.0",
+      "package_version": "0.1.1",
       "installation_method": "source_checkout",
       "environment": {
         "os_family": "wsl",
@@ -150,7 +150,7 @@
       "session_date": "2026-08-05",
       "persona": "developer",
       "source_commit": "5555555555555555555555555555555555555555",
-      "package_version": "0.1.0",
+      "package_version": "0.1.1",
       "installation_method": "signed_oci_digest",
       "environment": {
         "os_family": "linux",
@@ -183,7 +183,7 @@
       "session_date": "2026-08-06",
       "persona": "platform",
       "source_commit": "6666666666666666666666666666666666666666",
-      "package_version": "0.1.0",
+      "package_version": "0.1.1",
       "installation_method": "source_checkout",
       "environment": {
         "os_family": "linux",
@@ -216,7 +216,7 @@
       "session_date": "2026-08-08",
       "persona": "developer",
       "source_commit": "7777777777777777777777777777777777777777",
-      "package_version": "0.1.0",
+      "package_version": "0.1.1",
       "installation_method": "source_checkout",
       "environment": {
         "os_family": "linux",

@@ -146,7 +146,7 @@ After authenticating to the private first registry, verify the exact digest:
 
 ```bash
 image="ghcr.io/xpounder-com/hormuz@sha256:<release-digest>"
-identity="https://github.com/Xpounder-com/hormuz/.github/workflows/release-oci.yml@refs/tags/v0.1.0"
+identity="https://github.com/Xpounder-com/hormuz/.github/workflows/release-oci.yml@refs/tags/v0.1.1"
 issuer="https://token.actions.githubusercontent.com"
 commit="<release-commit-sha>"
 
@@ -154,7 +154,7 @@ certificate_claims=(
   --certificate-identity "$identity"
   --certificate-oidc-issuer "$issuer"
   --certificate-github-workflow-name "Release signed OCI digest"
-  --certificate-github-workflow-ref "refs/tags/v0.1.0"
+  --certificate-github-workflow-ref "refs/tags/v0.1.1"
   --certificate-github-workflow-repository "Xpounder-com/hormuz"
   --certificate-github-workflow-sha "$commit"
   --certificate-github-workflow-trigger "push"
