@@ -378,15 +378,15 @@ deletion and distinct ready replacement. It secret-scans gateway and preflight
 logs before each revision transition or deletion and after replacement, then
 proves clean removal. It contacts no model provider or external IdP.
 
-The same job now binds that deployment proof to a focused ten-test PostgreSQL
+The same job now binds that deployment proof to a focused eight-test PostgreSQL
 state proof. The named tests cover shared atomic budgets, immutable policy
 activation, tenant isolation, request-attempt reservations, concurrent audit
 chains, custody approval and barrier coordination, duplicated synchronization,
-stale acknowledgements, partition fencing, and ambiguous transport/stream
-outcomes without replay. In Kind, the verifier additionally holds one request
-at the fake provider during a normal Pod termination and one during a forced
-Pod deletion. It measures restrictive rollout, rollback, readiness withdrawal,
-in-flight drain, and replacement convergence. The forced-loss attempt must
+stale acknowledgements, and partition fencing. In Kind, the verifier
+additionally holds one request at the fake provider during a normal Pod
+termination and one during a forced Pod deletion. It measures restrictive
+rollout, rollback, readiness withdrawal, in-flight drain, and replacement
+convergence. The forced-loss attempt must
 become `outcome_unknown`, keep one uncertain reservation, and correspond to
 exactly one provider egress.
 

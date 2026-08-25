@@ -142,6 +142,11 @@ class MultiReplicaOperationProofTests(unittest.TestCase):
             validate_state_evidence(evidence)
         self.assertEqual(str(raised.exception), "state_database")
 
+    def test_postgresql_state_verdict_contains_only_postgresql_test_modules(self) -> None:
+        for test_id in STATE_TESTS.values():
+            with self.subTest(test_id=test_id):
+                self.assertRegex(test_id, r"^tests\.test_postgres_")
+
     def test_ci_declares_the_same_exact_postgresql_image_as_the_state_proof(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
         self.assertGreaterEqual(workflow.count(STATE_POSTGRES_IMAGE), 2)

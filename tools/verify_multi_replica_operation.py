@@ -77,14 +77,6 @@ STATE_TESTS = {
         "tests.test_postgres_custody_lifecycle.PostgresCustodyLifecycleTests."
         "test_confirmed_not_applied_resolution_releases_only_an_uncommitted_prepared_barrier"
     ),
-    "ambiguous_transport_no_replay": (
-        "tests.test_gateway.GatewayIntegrationTests."
-        "test_ambiguous_provider_transport_keeps_a_conservative_unknown_attempt"
-    ),
-    "interrupted_stream_no_replay": (
-        "tests.test_gateway.GatewayIntegrationTests."
-        "test_interrupted_provider_response_becomes_unknown_without_replay"
-    ),
 }
 
 STATE_LIMITATIONS = [

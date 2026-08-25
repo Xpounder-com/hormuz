@@ -200,13 +200,13 @@ preflight logs are captured and secret-scanned before each revision change or
 deletion and once more after replacement. The proof then removes the chart and
 cluster. It contacts no model provider or external IdP.
 
-The coordinated-operation extension also runs ten named tests against a
+The coordinated-operation extension also runs eight named tests against a
 disposable PostgreSQL backend. They exercise two independent gateway process
 pools, atomic organization budget reservations, immutable policy activation,
 the append-only request-attempt ledger, concurrent per-tenant audit-chain
 sequencing, two-person custody approval, barrier acknowledgements, duplicate
-notification idempotence, stale acknowledgement rejection, five-second
-partition fencing, and ambiguous provider outcomes without replay.
+notification idempotence, stale acknowledgement rejection, and five-second
+partition fencing.
 
 In the live cluster, one Service-routed request is held at the fake provider
 while its exact gateway Pod receives a normal termination. The proof requires

@@ -170,14 +170,13 @@ gated.
 The coordinated state/admission gate,
 [#103](https://github.com/Xpounder-com/hormuz/issues/103), is implemented in
 [#141](https://github.com/Xpounder-com/hormuz/pull/141) as a strict composite
-proof. Ten named PostgreSQL tests exercise atomic budgets, immutable
+proof. Eight named PostgreSQL tests exercise atomic budgets, immutable
 policy activation, tenant isolation, the request-attempt ledger, concurrent
 audit-chain writes, custody approvals and coordinated restriction barriers,
-duplicate synchronization, stale acknowledgements, partition fencing, and
-ambiguous provider outcomes without replay. The pinned Kind run separately
-proves Service-routed graceful draining and forced replica loss, exact ready
-replacement, one durable `outcome_unknown`, one uncertain reservation, and no
-provider replay. Its content-free final artifact binds the state and
+duplicate synchronization, stale acknowledgements, and partition fencing. The
+pinned Kind run separately proves Service-routed graceful draining and forced
+replica loss, exact ready replacement, one durable `outcome_unknown`, one
+uncertain reservation, and no provider replay. Its content-free final artifact binds the state and
 Kubernetes summaries by digest and publishes the observed convergence/drain
 timings. This remains an application multi-replica claim, not PostgreSQL
 leader failover, a universal HA claim, or a customer SLA. Those recovery
