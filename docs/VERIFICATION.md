@@ -429,8 +429,11 @@ denials with no provider egress. The proof requires a changed primary, matching
 primary Lease and read/write endpoint, gateway reconnection without process
 replacement, a former primary that rejoins as a replica, preserved policy,
 budget/request-attempt/evidence/custody/audit state, tenant isolation, one
-preserved ambiguous attempt and uncertain reservation, and zero automatic
-provider replay.
+preserved uncertain attempt and reservation, and zero automatic provider
+replay. The fake provider releases a response that was already in flight
+immediately after the primary pause. Hormuz may finish relaying that
+already-started response, but an unavailable finalization transaction must
+leave the pre-egress attempt and reservation intact for later reconciliation.
 
 The negative failure pauses the active primary and one replica. During a
 minimum 30-second observation window, failover quorum must refuse promotion,

@@ -379,7 +379,7 @@ wait_for_lease_and_rw_primary() {
 [[ "$(uname -s)" == "Linux" ]] || fail "the reference proof requires Linux"
 [[ "$(uname -m)" == "x86_64" || "$(uname -m)" == "amd64" ]] \
   || fail "the reference proof requires native AMD64"
-for command in docker curl openssl python3 sha256sum; do
+for command in docker curl grep openssl python3 sha256sum; do
   command -v "${command}" >/dev/null 2>&1 || fail "${command} is unavailable"
 done
 docker_platform="$(docker info --format '{{.OSType}}/{{.Architecture}}')"
@@ -613,7 +613,7 @@ helm template hormuz "${CHART_ROOT}" --namespace hormuz-system \
   --values "${HA_ROOT}/helm-values.yaml" \
   --set-string "configuration.sha256=${config_sha}" \
   >"${ARTIFACT_ROOT}/rendered.yaml"
-if rg -q 'kind: (Cluster|PostgreSQL|DatabaseRole)|postgresql.cnpg.io' "${ARTIFACT_ROOT}/rendered.yaml"; then
+if grep -Eq 'kind: (Cluster|PostgreSQL|DatabaseRole)|postgresql.cnpg.io' "${ARTIFACT_ROOT}/rendered.yaml"; then
   fail "Hormuz Helm chart attempted to install PostgreSQL"
 fi
 helm upgrade --install hormuz "${CHART_ROOT}" --namespace hormuz-system \
@@ -639,10 +639,10 @@ state_probe seed "${ARTIFACT_ROOT}/state-seed.json"
 record_event durable_state_seeded
 
 kubectl --namespace hormuz-ingress exec pod/hormuz-postgres-ha-probe --container probe -- \
-  /opt/hormuz/bin/python -I /opt/hormuz-proof/probe.py ambiguous-request \
+  /opt/hormuz/bin/python -I /opt/hormuz-proof/probe.py blocking-request \
   --target http://hormuz-hormuz.hormuz-system.svc.cluster.local:8787 \
   --expected-policy fallback+capped+redacted \
-  >"${ARTIFACT_ROOT}/ambiguous-request.jsonl" &
+  >"${ARTIFACT_ROOT}/inflight-request.jsonl" &
 blocking_pid=$!
 wait_for_provider_block
 state_probe snapshot "${ARTIFACT_ROOT}/state-before.json"
@@ -657,6 +657,16 @@ old_primary_node="$(pod_node "${old_primary}")"
 positive_started_ms="$(monotonic_ms)"
 pause_node "${old_primary_node}"
 record_event primary_loss_injected
+provider_control POST /control/block/release >"${ARTIFACT_ROOT}/provider-release.json"
+wait "${blocking_pid}" || fail "in-flight request did not return the provider response"
+python3 - "${ARTIFACT_ROOT}/inflight-request.jsonl" <<'PY'
+import json
+import sys
+
+values = [json.loads(line) for line in open(sys.argv[1], encoding="utf-8") if line.strip()]
+if values[-1].get("command") != "blocking-request" or values[-1].get("status") != 200:
+    raise SystemExit("inflight_request_result_invalid")
+PY
 gateway_fail_closed positive
 positive_fail_closed_ms=$(( $(monotonic_ms) - positive_started_ms ))
 record_event all_gateways_failed_closed
@@ -664,17 +674,6 @@ provider_after_positive_denials="$(provider_request_count)"
 [[ "${provider_after_positive_denials}" == "${provider_before_positive}" ]] \
   || fail "provider egress occurred during positive outage denials"
 record_event positive_outage_provider_egress_unchanged
-provider_control POST /control/block/release >"${ARTIFACT_ROOT}/provider-release.json"
-wait "${blocking_pid}" || fail "ambiguous request did not return its bounded outcome"
-python3 - "${ARTIFACT_ROOT}/ambiguous-request.jsonl" <<'PY'
-import json
-import sys
-
-values = [json.loads(line) for line in open(sys.argv[1], encoding="utf-8") if line.strip()]
-if values[-1] != {"command": "ambiguous-request", "transport_outcome": "ambiguous"}:
-    raise SystemExit("ambiguous_request_result_invalid")
-PY
-
 new_primary="$(wait_for_primary_change "${old_primary}")"
 primary_promotion_ms=$(( $(monotonic_ms) - positive_started_ms ))
 record_event safe_replica_promoted

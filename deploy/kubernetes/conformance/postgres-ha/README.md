@@ -23,7 +23,10 @@ The live verifier proves two bounded scenarios:
    and deny concurrent governed requests before provider egress. CloudNativePG
    promotes a safe replica, the Lease and read/write endpoint converge, the
    same gateway processes reconnect, durable governed state remains intact,
-   an ambiguous request remains uncertain, and no provider request is replayed.
+   and no provider request is replayed. A provider response already in flight
+   is released immediately after the pause: the client may receive that
+   already-started response, while the unavailable finalization transaction
+   leaves the pre-egress attempt and its reservation durably uncertain.
 2. After the primary and one replica worker are paused, failover quorum blocks
    promotion, the read/write endpoint has no ready address, both gateways stay
    unready and deny provider egress, and the surviving replica is not exposed

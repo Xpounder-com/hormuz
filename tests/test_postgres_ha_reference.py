@@ -209,6 +209,7 @@ class PostgresHAReferenceTests(unittest.TestCase):
         self.assertIn("docker pause", runner)
         self.assertIn("rw_ready_addresses", runner)
         self.assertIn("storage-backpressure", runner)
+        self.assertIn("blocking-request", runner)
         self.assertIn("failoverquorum", runner)
         self.assertIn("wait_for_failover_quorum_ready", runner)
         self.assertIn("wait_for_job_complete", runner)
@@ -217,6 +218,10 @@ class PostgresHAReferenceTests(unittest.TestCase):
         self.assertIn('"schema_version": status.version', bootstrap)
         self.assertIn('"schema_complete": status.complete', bootstrap)
         self.assertNotIn("len(applied)", bootstrap)
+        self.assertLess(
+            runner.index("provider_control POST /control/block/release"),
+            runner.index("gateway_fail_closed positive"),
+        )
         self.assertIn("name: PostgreSQL HA failover reference", workflow)
         self.assertIn("CloudNativePG `1.30.0`", reference)
         self.assertIn("verification infrastructure", reference)
