@@ -340,8 +340,9 @@ Hormuz or chart dependency.
 
 The proof packages and installs the vendor-neutral chart with the exact signed
 Hormuz image digest, an internal ClusterIP, two replicas on distinct workers,
-customer-fixture PostgreSQL through an existing immutable Secret, and standard
-default-deny NetworkPolicy. It proves authenticated ingress, fake-provider
+customer-fixture PostgreSQL pinned to its Linux AMD64 child-manifest digest
+through an existing immutable Secret, and standard default-deny NetworkPolicy.
+It proves authenticated ingress, fake-provider
 routing/capping/redaction, metadata-only evidence persistence, denied ingress
 and egress, readiness-gated immutable configuration/Secret replacement and
 rollback, one Pod replacement under synthetic traffic, and clean removal. It contacts no model

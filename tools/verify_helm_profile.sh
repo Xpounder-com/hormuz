@@ -10,7 +10,7 @@ EVIDENCE_DIR="${HORMUZ_KUBERNETES_EVIDENCE_DIR:-}"
 CLUSTER_NAME="${HORMUZ_KUBERNETES_CLUSTER_NAME:-hormuz-reference}"
 PROOF_ACK="I_UNDERSTAND_THIS_IS_A_DISPOSABLE_KUBERNETES_REFERENCE_PROOF"
 HORMUZ_IMAGE="ghcr.io/xpounder-com/hormuz@sha256:1bbcca3490a7a5b004a880f42e8250acb91ce566a9c59f3263d7b279568efb5a"
-POSTGRES_IMAGE="postgres@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777"
+POSTGRES_IMAGE="postgres@sha256:7a396fd264a2067788b6551122b50f162bf6136312c7fc9d74381cb92c648382"
 KIND_VERSION="v0.32.0"
 KIND_SHA256="50030de23cf40a18505f20426f6a8506bedf13c6e509244bd1fa9463721b0f54"
 KUBECTL_VERSION="v1.36.1"
@@ -73,6 +73,34 @@ create_immutable_secret() {
   kubectl --namespace "${namespace}" create secret generic "${name}" "$@" >/dev/null
   kubectl --namespace "${namespace}" patch secret "${name}" \
     --type=merge --patch '{"immutable":true}' >/dev/null
+}
+
+wait_for_deployment() {
+  local namespace=$1
+  local deployment=$2
+  local timeout=$3
+  if kubectl --namespace "${namespace}" rollout status "deployment/${deployment}" \
+    --timeout="${timeout}" >/dev/null; then
+    return
+  fi
+
+  local diagnostic="${ARTIFACT_ROOT}/failure-${namespace}-${deployment}.log"
+  {
+    printf 'deployment rollout failed: namespace=%s deployment=%s\n' \
+      "${namespace}" "${deployment}"
+    kubectl --namespace "${namespace}" get deployment "${deployment}" --output=wide
+    kubectl --namespace "${namespace}" get pods --output=wide
+    kubectl --namespace "${namespace}" get events --sort-by=.metadata.creationTimestamp
+    kubectl --namespace "${namespace}" logs "deployment/${deployment}" \
+      --all-pods=true --prefix=true
+  } >"${diagnostic}" 2>&1 || true
+  if python3 "${ROOT}/tools/verify_helm_profile.py" assert-no-secrets \
+    --artifact "${diagnostic}" --secret-root "${SECRET_ROOT}" >/dev/null; then
+    sed -n '1,240p' "${diagnostic}" >&2
+  else
+    printf 'deployment diagnostic withheld because secret scanning did not pass\n' >&2
+  fi
+  fail "deployment did not become ready: ${namespace}/${deployment}"
 }
 
 run_probe() {
@@ -301,9 +329,9 @@ create_immutable_configmap hormuz-dependencies fake-provider-v1 \
   --from-file="fake-provider.py=${FIXTURE_ROOT}/fake-provider.py"
 kubectl apply --filename "${FIXTURE_ROOT}/postgres.yaml" >/dev/null
 kubectl apply --filename "${FIXTURE_ROOT}/fake-provider.yaml" >/dev/null
-kubectl --namespace hormuz-dependencies rollout status deployment/postgres --timeout=5m >/dev/null
-kubectl --namespace hormuz-dependencies rollout status deployment/fake-provider --timeout=5m >/dev/null
-kubectl --namespace hormuz-dependencies rollout status deployment/forbidden-provider --timeout=5m >/dev/null
+wait_for_deployment hormuz-dependencies postgres 5m
+wait_for_deployment hormuz-dependencies fake-provider 5m
+wait_for_deployment hormuz-dependencies forbidden-provider 5m
 
 create_immutable_configmap hormuz-system hormuz-config-v1 \
   --from-file="hormuz.json=${FIXTURE_ROOT}/hormuz.allow.json"

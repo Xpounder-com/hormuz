@@ -268,11 +268,13 @@ class HelmChartContractTests(unittest.TestCase):
         fixture = ROOT / "deploy" / "kubernetes" / "conformance"
         kind = (fixture / "kind.yaml").read_text(encoding="utf-8")
         cilium = (fixture / "cilium-values.yaml").read_text(encoding="utf-8")
+        postgres = (fixture / "postgres.yaml").read_text(encoding="utf-8")
         runner = (ROOT / "tools" / "verify_helm_profile.sh").read_text(encoding="utf-8")
         self.assertEqual(kind.count(helm_profile.KIND_NODE_IMAGE), 3)
         self.assertIn("disableDefaultCNI: true", kind)
         self.assertIn(helm_profile.CILIUM_AGENT_IMAGE.partition("@")[2], cilium)
         self.assertIn(helm_profile.CILIUM_OPERATOR_IMAGE.partition("@")[2], cilium)
+        self.assertIn(helm_profile.POSTGRES_IMAGE, postgres)
         self.assertIn(f'KIND_VERSION="{helm_profile.KIND_VERSION}"', runner)
         self.assertIn(f'CILIUM_VERSION="{helm_profile.CILIUM_VERSION}"', runner)
         self.assertIn("kind delete cluster", runner)
