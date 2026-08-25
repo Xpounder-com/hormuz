@@ -85,3 +85,11 @@ and for the one-replica pilot lifecycle see the
 [single-VM Compose profile](../deploy/compose/README.md).
 The image health check uses `/health`; the deployment's traffic control must
 still use `/ready` and an adequate termination grace period.
+
+The optional [Kubernetes + Helm profile](../deploy/kubernetes/README.md) maps
+these same process contracts to exec probes that obtain the private-hop value
+only from the referenced Secret. Its rolling strategy waits for `/ready`, sets
+zero unavailable replicas, retains a disruption budget, and gives SIGTERM 660
+seconds before a platform force-kill. The disposable two-replica proof observes
+one Pod deletion and replacement; this is not an HA, zero-interruption,
+in-flight-request, autoscaling, RPO, RTO, or zone-failure guarantee.

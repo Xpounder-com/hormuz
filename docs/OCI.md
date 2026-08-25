@@ -276,3 +276,6 @@ TLS, a database, a cloud, customer configuration, HA, backup/PITR, disaster
 recovery, or customer operations. The separately gated
 [single-VM Compose profile](../deploy/compose/README.md) proves only its exact
 evaluation/pilot boundary and retains all of those broader nonclaims.
+The optional [Kubernetes + Helm profile](../deploy/kubernetes/README.md) uses
+this same exact digest behind a private ClusterIP and adds only its bounded
+disposable multi-replica proof; it does not change or expand the OCI contract.

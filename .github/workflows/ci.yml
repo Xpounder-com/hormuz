@@ -295,6 +295,30 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
+  kubernetes-reference:
+    name: Kubernetes + Helm multi-replica reference
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Prove the disposable signed-image Kubernetes profile
+        env:
+          HORMUZ_KUBERNETES_PROOF_ACK: I_UNDERSTAND_THIS_IS_A_DISPOSABLE_KUBERNETES_REFERENCE_PROOF
+          HORMUZ_KUBERNETES_EVIDENCE_DIR: ${{ runner.temp }}/hormuz-kubernetes-reference
+          HORMUZ_KUBERNETES_CLUSTER_NAME: hormuz-${{ github.run_id }}-${{ github.run_attempt }}
+        run: ./tools/verify_helm_profile.sh
+      - name: Preserve only content-free Kubernetes evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hormuz-kubernetes-reference
+          path: ${{ runner.temp }}/hormuz-kubernetes-reference/summary.json
+          if-no-files-found: warn
+          retention-days: 7
+
   oci-supply-chain:
     name: OCI supply-chain evidence
     runs-on: ubuntu-latest

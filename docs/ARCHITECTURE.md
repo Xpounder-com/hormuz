@@ -68,6 +68,15 @@ authenticated private proxy hop; this ingress credential is not an employee
 identity and cannot authorize policy or provider access. Forwarded headers are
 not a source of identity or tenant facts. See [DEPLOYMENT.md](DEPLOYMENT.md).
 
+The deployment hierarchy keeps the signed OCI digest as the application
+contract. The single-VM Compose pilot and optional Kubernetes/Helm profile are
+separately verified operational references. The Helm chart contains only
+standard Kubernetes resources for Hormuz, points at customer-owned immutable
+configuration and Secret generations, and uses a customer-operated PostgreSQL
+DSN. Cilium is used by the first disposable network-policy proof but is absent
+from the chart contract. See the
+[Kubernetes reference](../deploy/kubernetes/README.md).
+
 ## Compatibility boundary
 
 Hormuz implements the provider endpoints required by Codex and Claude Code rather than inventing a new employee-facing client. Provider protocol changes are compatibility risks and require executable conformance tests.

@@ -1,0 +1,116 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: hormuz-dependencies
+  labels:
+    io.hormuz.proof-role: postgres
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      io.hormuz.proof-role: postgres
+  template:
+    metadata:
+      labels:
+        io.hormuz.proof-role: postgres
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        fsGroup: 70
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: postgres
+          image: postgres@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
+          env:
+            - name: POSTGRES_DB
+              value: hormuz
+            - name: POSTGRES_USER
+              value: postgres
+            - name: POSTGRES_PASSWORD_FILE
+              value: /run/hormuz-bootstrap-secrets/postgres_superuser_password
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+              add: ["CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID"]
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+          readinessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - >-
+                  test -f /var/lib/postgresql/data/pgdata/.hormuz-roles-initialized &&
+                  exec pg_isready --username postgres --dbname hormuz
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 20
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: run
+              mountPath: /var/run/postgresql
+            - name: temporary
+              mountPath: /tmp
+            - name: bootstrap-secrets
+              mountPath: /run/hormuz-bootstrap-secrets
+              readOnly: true
+            - name: init
+              mountPath: /docker-entrypoint-initdb.d/10-hormuz-roles.sh
+              subPath: postgres-init.sh
+              readOnly: true
+      volumes:
+        - name: data
+          emptyDir:
+            sizeLimit: 2Gi
+        - name: run
+          emptyDir:
+            medium: Memory
+            sizeLimit: 32Mi
+        - name: temporary
+          emptyDir:
+            medium: Memory
+            sizeLimit: 64Mi
+        - name: bootstrap-secrets
+          secret:
+            secretName: postgres-bootstrap-v1
+            defaultMode: 0440
+            items:
+              - key: postgres-superuser-password
+                path: postgres_superuser_password
+              - key: postgres-runtime-password
+                path: postgres_runtime_password
+        - name: init
+          configMap:
+            name: postgres-init-v1
+            defaultMode: 0550
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: hormuz-dependencies
+spec:
+  type: ClusterIP
+  selector:
+    io.hormuz.proof-role: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+      protocol: TCP

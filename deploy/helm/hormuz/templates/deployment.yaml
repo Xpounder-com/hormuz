@@ -1,0 +1,159 @@
+{{- include "hormuz.validate" . }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "hormuz.fullname" . }}
+  labels:
+    {{- include "hormuz.labels" . | nindent 4 }}
+  annotations:
+    io.hormuz/contract: {{ .Values.contract.schema | quote }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  minReadySeconds: 5
+  progressDeadlineSeconds: 600
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      {{- include "hormuz.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "hormuz.selectorLabels" . | nindent 8 }}
+      annotations:
+        io.hormuz/config-sha256: {{ .Values.configuration.sha256 | quote }}
+        io.hormuz/runtime-secret-revision: {{ .Values.runtimeSecret.revision | quote }}
+        io.hormuz/image-digest: {{ .Values.image.digest | quote }}
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      nodeSelector:
+        kubernetes.io/os: linux
+        kubernetes.io/arch: amd64
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: {{ .Values.topologySpread.topologyKey | quote }}
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              {{- include "hormuz.selectorLabels" . | nindent 14 }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      initContainers:
+        - name: configuration-preflight
+          image: {{ include "hormuz.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["hormuz"]
+          args: ["doctor"]
+          env:
+            - name: HORMUZ_CONFIG
+              value: /etc/hormuz/hormuz.json
+            {{- range $name, $key := .Values.runtimeSecret.env }}
+            - name: {{ $name }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $.Values.runtimeSecret.name }}
+                  key: {{ $key }}
+            {{- end }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: configuration
+              mountPath: /etc/hormuz
+              readOnly: true
+            - name: temporary
+              mountPath: /tmp
+      containers:
+        - name: gateway
+          image: {{ include "hormuz.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["hormuz"]
+          args: ["serve"]
+          env:
+            - name: HORMUZ_CONFIG
+              value: /etc/hormuz/hormuz.json
+            {{- range $name, $key := .Values.runtimeSecret.env }}
+            - name: {{ $name }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $.Values.runtimeSecret.name }}
+                  key: {{ $key }}
+            {{- end }}
+          ports:
+            - name: http-private
+              containerPort: {{ .Values.service.port }}
+              protocol: TCP
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          livenessProbe:
+            exec:
+              command:
+                - /opt/hormuz/bin/python
+                - -I
+                - -c
+                - >-
+                  import json,os; from urllib.request import Request,urlopen;
+                  c=os.environ['HORMUZ_INGRESS_CREDENTIAL'];
+                  r=urlopen(Request('http://127.0.0.1:{{ .Values.service.port }}/health',headers={'X-Hormuz-Ingress-Credential':c}),timeout=3);
+                  v=json.loads(r.read()); raise SystemExit(0 if r.status==200 and v.get('schema_id')=='hormuz.gateway-health' and v.get('status')=='ok' else 1)
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 4
+          readinessProbe:
+            exec:
+              command:
+                - /opt/hormuz/bin/python
+                - -I
+                - -c
+                - >-
+                  import json,os; from urllib.request import Request,urlopen;
+                  c=os.environ['HORMUZ_INGRESS_CREDENTIAL'];
+                  r=urlopen(Request('http://127.0.0.1:{{ .Values.service.port }}/ready',headers={'X-Hormuz-Ingress-Credential':c}),timeout=3);
+                  v=json.loads(r.read()); raise SystemExit(0 if r.status==200 and v.get('schema_id')=='hormuz.gateway-readiness' and v.get('status')=='ready' else 1)
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 3
+          volumeMounts:
+            - name: configuration
+              mountPath: /etc/hormuz
+              readOnly: true
+            - name: temporary
+              mountPath: /tmp
+      volumes:
+        - name: configuration
+          configMap:
+            name: {{ .Values.configuration.name }}
+            defaultMode: 0440
+            items:
+              - key: {{ .Values.configuration.key }}
+                path: hormuz.json
+        - name: temporary
+          emptyDir:
+            medium: Memory
+            sizeLimit: 64Mi

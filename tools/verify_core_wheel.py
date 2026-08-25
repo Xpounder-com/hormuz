@@ -40,6 +40,20 @@ REQUIRED_COMPOSE_SDIST_PATHS = (
     "tools/verify_compose_profile.py",
     "tools/verify_compose_profile.sh",
 )
+REQUIRED_HELM_SDIST_PATHS = (
+    "deploy/helm/hormuz/Chart.yaml",
+    "deploy/helm/hormuz/values.schema.json",
+    "deploy/helm/hormuz/values.yaml",
+    "deploy/helm/hormuz/templates/deployment.yaml",
+    "deploy/helm/hormuz/templates/networkpolicy.yaml",
+    "deploy/kubernetes/README.md",
+    "deploy/kubernetes/conformance/cilium-values.yaml",
+    "deploy/kubernetes/conformance/helm-values.yaml",
+    "deploy/kubernetes/conformance/kind.yaml",
+    "deploy/kubernetes/conformance/probes.yaml",
+    "tools/verify_helm_profile.py",
+    "tools/verify_helm_profile.sh",
+)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -62,9 +76,10 @@ def main(argv: list[str] | None = None) -> int:
     _assert_archive_boundary(wheel, _wheel_members)
     _assert_archive_boundary(sdist, _sdist_members)
     _assert_compose_sdist_boundary(sdist)
+    _assert_helm_sdist_boundary(sdist)
     _verify_isolated_install(wheel, config, python)
     print(
-        "verified core distribution boundary: no context/runtime data and complete Compose profile"
+        "verified core distribution boundary: no context/runtime data and complete deployment profiles"
     )
     return 0
 
@@ -102,6 +117,19 @@ def _assert_compose_sdist_boundary(path: Path) -> None:
     if missing:
         raise RuntimeError(
             f"Compose profile incomplete in {path.name}: {', '.join(sorted(missing))}"
+        )
+
+
+def _assert_helm_sdist_boundary(path: Path) -> None:
+    members = tuple(name.lstrip("./") for name in _sdist_members(path))
+    missing = [
+        required
+        for required in REQUIRED_HELM_SDIST_PATHS
+        if not any(f"/{member}".endswith(f"/{required}") for member in members)
+    ]
+    if missing:
+        raise RuntimeError(
+            f"Helm profile incomplete in {path.name}: {', '.join(sorted(missing))}"
         )
 
 

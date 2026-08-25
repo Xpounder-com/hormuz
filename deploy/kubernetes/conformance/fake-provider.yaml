@@ -1,0 +1,148 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fake-provider
+  namespace: hormuz-dependencies
+  labels:
+    io.hormuz.proof-role: fake-provider
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      io.hormuz.proof-role: fake-provider
+  template:
+    metadata:
+      labels:
+        io.hormuz.proof-role: fake-provider
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: provider
+          image: ghcr.io/xpounder-com/hormuz@sha256:1bbcca3490a7a5b004a880f42e8250acb91ce566a9c59f3263d7b279568efb5a
+          command: ["/opt/hormuz/bin/python"]
+          args: ["-I", "/opt/hormuz-proof/fake-provider.py"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8090
+            periodSeconds: 3
+            timeoutSeconds: 2
+            failureThreshold: 20
+          volumeMounts:
+            - name: script
+              mountPath: /opt/hormuz-proof
+              readOnly: true
+            - name: temporary
+              mountPath: /tmp
+      volumes:
+        - name: script
+          configMap:
+            name: fake-provider-v1
+            defaultMode: 0440
+        - name: temporary
+          emptyDir:
+            medium: Memory
+            sizeLimit: 32Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fake-provider
+  namespace: hormuz-dependencies
+spec:
+  type: ClusterIP
+  selector:
+    io.hormuz.proof-role: fake-provider
+  ports:
+    - name: http
+      port: 8090
+      targetPort: 8090
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: forbidden-provider
+  namespace: hormuz-dependencies
+  labels:
+    io.hormuz.proof-role: forbidden-provider
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      io.hormuz.proof-role: forbidden-provider
+  template:
+    metadata:
+      labels:
+        io.hormuz.proof-role: forbidden-provider
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: provider
+          image: ghcr.io/xpounder-com/hormuz@sha256:1bbcca3490a7a5b004a880f42e8250acb91ce566a9c59f3263d7b279568efb5a
+          command: ["/opt/hormuz/bin/python"]
+          args: ["-I", "/opt/hormuz-proof/fake-provider.py"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 250m
+              memory: 128Mi
+          volumeMounts:
+            - name: script
+              mountPath: /opt/hormuz-proof
+              readOnly: true
+      volumes:
+        - name: script
+          configMap:
+            name: fake-provider-v1
+            defaultMode: 0440
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: forbidden-provider
+  namespace: hormuz-dependencies
+spec:
+  type: ClusterIP
+  selector:
+    io.hormuz.proof-role: forbidden-provider
+  ports:
+    - name: http
+      port: 8090
+      targetPort: 8090
+      protocol: TCP

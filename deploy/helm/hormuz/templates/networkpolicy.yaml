@@ -1,0 +1,80 @@
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "hormuz.fullname" . }}-default-deny
+  labels:
+    {{- include "hormuz.labels" . | nindent 4 }}
+  annotations:
+    io.hormuz/network-policy-role: default-deny
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "hormuz.selectorLabels" . | nindent 6 }}
+  policyTypes: ["Ingress", "Egress"]
+  ingress: []
+  egress: []
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "hormuz.fullname" . }}-dns
+  labels:
+    {{- include "hormuz.labels" . | nindent 4 }}
+  annotations:
+    io.hormuz/network-policy-role: dns-egress
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "hormuz.selectorLabels" . | nindent 6 }}
+  policyTypes: ["Egress"]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+{{- if .Values.networkPolicy.ingress }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "hormuz.fullname" . }}-customer-ingress
+  labels:
+    {{- include "hormuz.labels" . | nindent 4 }}
+  annotations:
+    io.hormuz/network-policy-role: customer-ingress
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "hormuz.selectorLabels" . | nindent 6 }}
+  policyTypes: ["Ingress"]
+  ingress:
+    {{- toYaml .Values.networkPolicy.ingress | nindent 4 }}
+{{- end }}
+{{- if .Values.networkPolicy.egress }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "hormuz.fullname" . }}-customer-egress
+  labels:
+    {{- include "hormuz.labels" . | nindent 4 }}
+  annotations:
+    io.hormuz/network-policy-role: customer-egress
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "hormuz.selectorLabels" . | nindent 6 }}
+  policyTypes: ["Egress"]
+  egress:
+    {{- toYaml .Values.networkPolicy.egress | nindent 4 }}
+{{- end }}
+{{- end }}

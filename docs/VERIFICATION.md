@@ -321,6 +321,40 @@ inputs to the proof and are deleted. The job contacts no OpenAI or Anthropic
 endpoint. Its exact operator workflow and nonclaims are in the
 [Compose profile](../deploy/compose/README.md).
 
+## Kubernetes + Helm multi-replica reference
+
+The `Kubernetes + Helm multi-replica reference` job invokes:
+
+```bash
+HORMUZ_KUBERNETES_PROOF_ACK=I_UNDERSTAND_THIS_IS_A_DISPOSABLE_KUBERNETES_REFERENCE_PROOF \
+HORMUZ_KUBERNETES_EVIDENCE_DIR=/protected/new/output-directory \
+  ./tools/verify_helm_profile.sh
+```
+
+The runner verifies exact SHA-256 values before executing Kind `v0.32.0`,
+kubectl/Kubernetes `v1.36.1`, Helm `v3.21.4`, and the Cilium `1.20.1` chart.
+It creates one control plane and two workers from the exact Kind node-image
+digest with the default CNI disabled, then installs the exact digest-pinned
+Cilium agent and generic operator. Cilium is the first tested CNI, not a
+Hormuz or chart dependency.
+
+The proof packages and installs the vendor-neutral chart with the exact signed
+Hormuz image digest, an internal ClusterIP, two replicas on distinct workers,
+customer-fixture PostgreSQL through an existing immutable Secret, and standard
+default-deny NetworkPolicy. It proves authenticated ingress, fake-provider
+routing/capping/redaction, metadata-only evidence persistence, denied ingress
+and egress, readiness-gated immutable configuration/Secret replacement and
+rollback, one Pod replacement under synthetic traffic, and clean removal. It contacts no model
+provider or external IdP.
+
+Only a strict mode-`0600` `hormuz.kubernetes-reference-proof` v1 summary is
+uploaded. Generated credentials, configuration, rendered resources, logs,
+fake traffic, and raw database observations stay temporary and are deleted.
+The proof makes no HA, RPO, RTO, zone-failure, broad CNI-portability, browser
+session, cloud, customer-infrastructure, or production-operations claim. See
+the exact boundary in the
+[Kubernetes profile](../deploy/kubernetes/README.md).
+
 ## OCI supply-chain evidence
 
 The `OCI supply-chain evidence` job invokes:
