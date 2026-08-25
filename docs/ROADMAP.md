@@ -153,7 +153,8 @@ Kubernetes/Helm multi-replica enterprise profile remains a separate #100/#11
 gate.
 
 That optional gate,
-[#108](https://github.com/Xpounder-com/hormuz/issues/108), is bounded to a
+[#108](https://github.com/Xpounder-com/hormuz/issues/108), is implemented in
+[#138](https://github.com/Xpounder-com/hormuz/pull/138) and bounded to a
 vendor-neutral Helm chart plus an account-free disposable Kind/Cilium proof.
 The chart uses only standard Kubernetes APIs, deploys Hormuz behind an
 internal ClusterIP, and consumes customer-operated PostgreSQL through an
