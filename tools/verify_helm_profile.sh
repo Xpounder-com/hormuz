@@ -346,6 +346,27 @@ provider_reset_block() {
   provider_control POST /control/block/reset "${ARTIFACT_ROOT}/provider-block-reset.json"
 }
 
+wait_for_provider_disconnect() {
+  local output=$1
+  local attempt
+  for attempt in $(seq 1 30); do
+    provider_control GET /control/block/status "${output}"
+    if python3 - "${output}" <<'PY' >/dev/null
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as stream:
+    value = json.load(stream)
+raise SystemExit(0 if value.get("gateway_disconnected") is True else 1)
+PY
+    then
+      return
+    fi
+    sleep 1
+  done
+  fail "force-deleted gateway connection remained open at the provider"
+}
+
 gateway_pod_for_ip() {
   local pod_ip=$1
   kubectl --namespace hormuz-system get pods \
@@ -366,18 +387,21 @@ wait_for_service_exclusion() {
       pod_ready="$(kubectl --namespace hormuz-system get pod "${pod}" \
         --output=jsonpath='{.status.conditions[?(@.type=="Ready")].status}')"
     fi
-    kubectl --namespace hormuz-system get endpoints hormuz-hormuz --output=json \
-      >"${ARTIFACT_ROOT}/service-endpoints.json"
-    if [[ "${pod_ready}" != "True" ]] && python3 - "${ARTIFACT_ROOT}/service-endpoints.json" "${pod_ip}" <<'PY' >/dev/null
+    kubectl --namespace hormuz-system get endpointslices \
+      --selector='kubernetes.io/service-name=hormuz-hormuz' --output=json \
+      >"${ARTIFACT_ROOT}/service-endpoint-slices.json"
+    if [[ "${pod_ready}" != "True" ]] && python3 - "${ARTIFACT_ROOT}/service-endpoint-slices.json" "${pod_ip}" <<'PY' >/dev/null
 import json
 import sys
 
 with open(sys.argv[1], encoding="utf-8") as stream:
     value = json.load(stream)
 addresses = {
-    address.get("ip")
-    for subset in value.get("subsets", [])
-    for address in subset.get("addresses", [])
+    address
+    for item in value.get("items", [])
+    for endpoint in item.get("endpoints", [])
+    if endpoint.get("conditions", {}).get("ready") is True
+    for address in endpoint.get("addresses", [])
 }
 raise SystemExit(1 if sys.argv[2] in addresses else 0)
 PY
@@ -912,6 +936,8 @@ abrupt_started_ms="$(monotonic_ms)"
 kubectl --namespace hormuz-system delete pod "${abrupt_pod}" \
   --grace-period=0 --force --wait=false >/dev/null
 record_operation_event owning_replica_force_deletion_requested
+wait_for_provider_disconnect "${ARTIFACT_ROOT}/abrupt-disconnect-status.json"
+record_operation_event abrupt_gateway_connection_closed
 provider_release_block
 if ! kubectl --namespace hormuz-ingress wait --for=condition=complete \
   "job/${abrupt_job}" --timeout=90s >/dev/null; then
@@ -944,9 +970,9 @@ uncertainty="$(request_attempt_uncertainty)"
 OUTCOME_UNKNOWN_ATTEMPTS="${uncertainty%%|*}"
 UNCERTAIN_RESERVATIONS="${uncertainty#*|}"
 [[ "${OUTCOME_UNKNOWN_ATTEMPTS}" == "1" ]] \
-  || fail "abrupt provider attempt was not preserved as one outcome_unknown"
+  || fail "abrupt provider attempt state invalid: outcome_unknown=${OUTCOME_UNKNOWN_ATTEMPTS}"
 [[ "${UNCERTAIN_RESERVATIONS}" == "1" ]] \
-  || fail "ambiguous estimated consumption was not preserved"
+  || fail "ambiguous estimated consumption invalid: reservations=${UNCERTAIN_RESERVATIONS}"
 record_operation_event ambiguous_attempt_preserved_unknown
 kubectl --namespace hormuz-ingress delete "job/${abrupt_job}" --wait=true >/dev/null
 

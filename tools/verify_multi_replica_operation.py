@@ -107,6 +107,7 @@ OPERATION_EVENTS = [
     "graceful_replacement_ready",
     "ambiguous_inflight_started",
     "owning_replica_force_deletion_requested",
+    "abrupt_gateway_connection_closed",
     "abrupt_replacement_ready",
     "ambiguous_attempt_preserved_unknown",
     "final_service_and_evidence_verified",

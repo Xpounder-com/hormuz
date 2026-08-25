@@ -341,6 +341,9 @@ class HelmChartContractTests(unittest.TestCase):
         self.assertIn("--from=cronjob/replacement-traffic", runner)
         self.assertIn("--from=cronjob/blocking-request", runner)
         self.assertIn("--grace-period=0 --force", runner)
+        self.assertIn("wait_for_provider_disconnect", runner)
+        self.assertIn("get endpointslices", runner)
+        self.assertNotIn("get endpoints hormuz-hormuz", runner)
         self.assertIn("write-operation-proof", runner)
         self.assertIn(
             "REQUEST_ATTEMPT_STALE_SECONDS=$((UPSTREAM_TIMEOUT_SECONDS + 60))",

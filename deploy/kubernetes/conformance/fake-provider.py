@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import json
 import re
+import select
+import socket
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 
@@ -23,6 +26,7 @@ class Provider(BaseHTTPRequestHandler):
     blocking_gateway_ip: str | None = None
     blocking_started = threading.Event()
     blocking_release = threading.Event()
+    blocking_gateway_disconnected = threading.Event()
 
     def do_GET(self) -> None:  # noqa: N802
         if self.path == "/health":
@@ -47,6 +51,7 @@ class Provider(BaseHTTPRequestHandler):
                     "started": self.blocking_started.is_set(),
                     "released": self.blocking_release.is_set(),
                     "gateway_ip": self.blocking_gateway_ip,
+                    "gateway_disconnected": self.blocking_gateway_disconnected.is_set(),
                 }
             self._send(value)
             return
@@ -65,6 +70,7 @@ class Provider(BaseHTTPRequestHandler):
                 type(self).blocking_gateway_ip = None
                 self.blocking_started.clear()
                 self.blocking_release.clear()
+                self.blocking_gateway_disconnected.clear()
             self._send({"reset": True})
             return
         if self.path.partition("?")[0] != "/v1/responses":
@@ -88,7 +94,7 @@ class Provider(BaseHTTPRequestHandler):
                 type(self).blocking_requests += 1
                 type(self).blocking_gateway_ip = self.client_address[0]
                 self.blocking_started.set()
-        if blocking and not self.blocking_release.wait(timeout=120):
+        if blocking and not self._wait_for_block_release(timeout=120):
             self._send({"error": "blocking_probe_timeout"}, status=504)
             return
         try:
@@ -114,6 +120,25 @@ class Provider(BaseHTTPRequestHandler):
             # provider response. The provider still records one egress and
             # never retries it.
             return
+
+    def _wait_for_block_release(self, *, timeout: int) -> bool:
+        deadline = time.monotonic() + timeout
+        disconnected = False
+        while time.monotonic() < deadline:
+            if self.blocking_release.wait(timeout=0.1):
+                return True
+            if disconnected:
+                continue
+            readable, _, _ = select.select([self.connection], [], [], 0)
+            if not readable:
+                continue
+            try:
+                disconnected = self.connection.recv(1, socket.MSG_PEEK) == b""
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                disconnected = True
+            if disconnected:
+                self.blocking_gateway_disconnected.set()
+        return False
 
     def _send(
         self,
