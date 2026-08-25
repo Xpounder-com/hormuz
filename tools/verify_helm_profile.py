@@ -128,6 +128,13 @@ def main(argv: list[str] | None = None) -> int:
     manifest_parser.add_argument("--runtime-secret", required=True)
     manifest_parser.add_argument("--runtime-secret-revision", required=True)
 
+    rollout_parser = subparsers.add_parser("validate-serving-generation")
+    rollout_parser.add_argument("--manifest", required=True, type=Path)
+    rollout_parser.add_argument("--configuration", required=True)
+    rollout_parser.add_argument("--configuration-sha256", required=True)
+    rollout_parser.add_argument("--runtime-secret", required=True)
+    rollout_parser.add_argument("--runtime-secret-revision", required=True)
+
     evidence_parser = subparsers.add_parser("validate-evidence")
     evidence_parser.add_argument("--evidence", required=True, type=Path)
 
@@ -174,6 +181,19 @@ def main(argv: list[str] | None = None) -> int:
             print(
                 "verified content-free Kubernetes proof: "
                 f"profile={PROFILE} verdict={value['verdict']}"
+            )
+        elif args.command == "validate-serving-generation":
+            value = load_json(args.manifest)
+            validate_serving_generation(
+                value,
+                expected_configuration=args.configuration,
+                expected_configuration_sha256=args.configuration_sha256,
+                expected_runtime_secret=args.runtime_secret,
+                expected_runtime_secret_revision=args.runtime_secret_revision,
+            )
+            print(
+                "verified serving Kubernetes generation: "
+                f"configuration_sha256={args.configuration_sha256}"
             )
         elif args.command == "assert-no-secrets":
             artifacts = list(args.artifact)
@@ -380,6 +400,161 @@ def validate_manifest(
     _validate_service(resources["Service"][0])
     _validate_pdb(resources["PodDisruptionBudget"][0], replicas=replicas)
     _validate_network_policies(resources["NetworkPolicy"])
+
+
+def validate_serving_generation(
+    value: Mapping[str, Any],
+    *,
+    expected_configuration: str,
+    expected_configuration_sha256: str,
+    expected_runtime_secret: str,
+    expected_runtime_secret_revision: str,
+) -> None:
+    """Require a complete rollout with every ready Pod on one input generation."""
+
+    if value.get("kind") != "List" or value.get("apiVersion") != "v1":
+        raise HelmProfileError("rollout_list_invalid")
+    items = _sequence(value.get("items"), "rollout_items")
+    deployments: list[Mapping[str, Any]] = []
+    pods: list[Mapping[str, Any]] = []
+    for raw in items:
+        item = _mapping(raw, "rollout_item")
+        kind = _string(item.get("kind"), "rollout_kind")
+        if kind == "Deployment":
+            deployments.append(item)
+        elif kind == "Pod":
+            pods.append(item)
+        else:
+            raise HelmProfileError("rollout_resource_set_invalid")
+    if len(deployments) != 1 or not pods:
+        raise HelmProfileError("rollout_resource_set_invalid")
+
+    deployment = deployments[0]
+    replicas = _validate_deployment(
+        deployment,
+        expected_configuration=expected_configuration,
+        expected_configuration_sha256=expected_configuration_sha256,
+        expected_runtime_secret=expected_runtime_secret,
+        expected_runtime_secret_revision=expected_runtime_secret_revision,
+    )
+    metadata = _mapping(deployment.get("metadata"), "rollout_deployment_metadata")
+    generation = _integer(metadata.get("generation"), "rollout_generation")
+    if generation < 1:
+        raise HelmProfileError("rollout_generation")
+    status = _mapping(deployment.get("status"), "rollout_deployment_status")
+    if (
+        _integer(status.get("observedGeneration"), "rollout_observed_generation")
+        != generation
+    ):
+        raise HelmProfileError("rollout_observed_generation")
+    for field, error in (
+        ("replicas", "rollout_replicas"),
+        ("updatedReplicas", "rollout_updated_replicas"),
+        ("readyReplicas", "rollout_ready_replicas"),
+        ("availableReplicas", "rollout_available_replicas"),
+    ):
+        if _integer(status.get(field), error) != replicas:
+            raise HelmProfileError(error)
+    if status.get("unavailableReplicas", 0) != 0:
+        raise HelmProfileError("rollout_unavailable_replicas")
+
+    selector = _mapping(
+        _mapping(deployment.get("spec"), "rollout_deployment_spec").get("selector"),
+        "rollout_selector",
+    )
+    match_labels = _mapping(selector.get("matchLabels"), "rollout_match_labels")
+    ready_pods: list[Mapping[str, Any]] = []
+    for pod in pods:
+        if pod.get("apiVersion") != "v1":
+            raise HelmProfileError("rollout_pod_api")
+        pod_metadata = _mapping(pod.get("metadata"), "rollout_pod_metadata")
+        if pod_metadata.get("deletionTimestamp") is not None:
+            continue
+        labels = _mapping(pod_metadata.get("labels"), "rollout_pod_labels")
+        if any(labels.get(key) != item for key, item in match_labels.items()):
+            raise HelmProfileError("rollout_pod_selector")
+        pod_status = _mapping(pod.get("status"), "rollout_pod_status")
+        conditions: dict[str, Mapping[str, Any]] = {}
+        for raw_condition in _sequence(
+            pod_status.get("conditions"), "rollout_pod_conditions"
+        ):
+            condition = _mapping(raw_condition, "rollout_pod_condition")
+            condition_type = _string(condition.get("type"), "condition_type")
+            if condition_type in conditions:
+                raise HelmProfileError("rollout_pod_condition_duplicate")
+            conditions[condition_type] = condition
+        ready = _mapping(conditions.get("Ready"), "rollout_pod_ready")
+        if pod_status.get("phase") != "Running" or ready.get("status") != "True":
+            raise HelmProfileError("rollout_pod_not_ready")
+        _validate_serving_pod(
+            pod,
+            expected_configuration=expected_configuration,
+            expected_configuration_sha256=expected_configuration_sha256,
+            expected_runtime_secret=expected_runtime_secret,
+            expected_runtime_secret_revision=expected_runtime_secret_revision,
+        )
+        ready_pods.append(pod)
+    if len(ready_pods) != replicas:
+        raise HelmProfileError("rollout_pod_count")
+
+
+def _validate_serving_pod(
+    pod: Mapping[str, Any],
+    *,
+    expected_configuration: str,
+    expected_configuration_sha256: str,
+    expected_runtime_secret: str,
+    expected_runtime_secret_revision: str,
+) -> None:
+    metadata = _mapping(pod.get("metadata"), "serving_pod_metadata")
+    annotations = _mapping(metadata.get("annotations"), "serving_pod_annotations")
+    if annotations.get("io.hormuz/config-sha256") != expected_configuration_sha256:
+        raise HelmProfileError("pod_configuration_sha256")
+    if (
+        annotations.get("io.hormuz/runtime-secret-revision")
+        != expected_runtime_secret_revision
+        or annotations.get("io.hormuz/image-digest") != HORMUZ_IMAGE.partition("@")[2]
+    ):
+        raise HelmProfileError("pod_runtime_input_annotations")
+
+    pod_spec = _mapping(pod.get("spec"), "serving_pod_spec")
+    volumes = _sequence(pod_spec.get("volumes"), "serving_pod_volumes")
+    by_name: dict[str, Mapping[str, Any]] = {}
+    for raw_volume in volumes:
+        volume = _mapping(raw_volume, "serving_pod_volume")
+        name = _string(volume.get("name"), "serving_pod_volume_name")
+        if name in by_name:
+            raise HelmProfileError("serving_pod_volume_duplicate")
+        by_name[name] = volume
+    configuration = _mapping(
+        by_name.get("configuration"), "serving_configuration_volume"
+    )
+    config_map = _mapping(
+        configuration.get("configMap"), "serving_configuration_configmap"
+    )
+    if config_map.get("name") != expected_configuration:
+        raise HelmProfileError("pod_configuration_reference")
+
+    secret_references: set[str] = set()
+    for category in ("initContainers", "containers"):
+        for raw in _sequence(pod_spec.get(category), f"serving_pod_{category}"):
+            container = _mapping(raw, "serving_pod_container")
+            if container.get("image") != HORMUZ_IMAGE:
+                raise HelmProfileError("pod_image")
+            for raw_env in _sequence(container.get("env"), "serving_pod_env"):
+                env = _mapping(raw_env, "serving_pod_env_item")
+                value_from = env.get("valueFrom")
+                if value_from is None:
+                    continue
+                secret_key = _mapping(
+                    _mapping(value_from, "serving_pod_value_from").get("secretKeyRef"),
+                    "serving_pod_secret_key_ref",
+                )
+                secret_references.add(
+                    _string(secret_key.get("name"), "serving_pod_secret_name")
+                )
+    if secret_references != {expected_runtime_secret}:
+        raise HelmProfileError("pod_runtime_secret_reference")
 
 
 def _validate_deployment(

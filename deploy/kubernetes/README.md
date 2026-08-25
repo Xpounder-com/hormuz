@@ -117,6 +117,8 @@ helm upgrade --install hormuz deploy/helm/hormuz \
   --namespace hormuz-system \
   --values /protected/hormuz-values.yaml \
   --atomic --wait --timeout 10m
+kubectl --namespace hormuz-system rollout status \
+  deployment/hormuz-hormuz --timeout=10m
 ```
 
 The rendered output must contain no Secret object or secret value. The Service
@@ -134,8 +136,11 @@ broker are outside this profile.
 Never mutate an in-use ConfigMap or Secret. Create a new immutable generation,
 validate it, update `configuration.name`, `configuration.sha256`,
 `runtimeSecret.name`, and `runtimeSecret.revision`, then run a readiness-gated
-`helm upgrade --atomic --wait`. Keep the prior immutable objects until the
-rollback window closes.
+`helm upgrade --atomic --wait`. Then require `kubectl rollout status` to report
+the Deployment complete before asserting or depending on the new policy. Helm's
+wait condition can be satisfied while old ready replicas still participate in
+a rolling replacement. Keep the prior immutable objects until the rollback
+window closes.
 
 Rollback reactivates a known Helm revision and its exact prior object names:
 
@@ -143,6 +148,8 @@ Rollback reactivates a known Helm revision and its exact prior object names:
 helm history hormuz --namespace hormuz-system
 helm rollback hormuz EXACT_REVISION \
   --namespace hormuz-system --wait --timeout 10m --cleanup-on-fail
+kubectl --namespace hormuz-system rollout status \
+  deployment/hormuz-hormuz --timeout=10m
 ```
 
 The chart's 660-second termination grace exceeds the default proof upstream
@@ -168,12 +175,15 @@ references with mutable tags. It proves two ready replicas on distinct workers,
 authenticated ingress, provider-shaped fake traffic, policy and
 metadata-only evidence persistence, ingress and egress denial, readiness-gated
 configuration/Secret replacement and rollback, and one graceful Pod deletion
-after sustained synthetic traffic has started. The proof requires that traffic
-to remain active until two distinct ready replicas—including a new Pod UID—are
-observed, then requires every request to have succeeded. Gateway and preflight
-logs are captured and secret-scanned before each revision change or deletion
-and once more after replacement. The proof then removes the chart and cluster.
-It contacts no model provider or external IdP.
+after sustained synthetic traffic has started. At each rollout boundary it
+requires the Deployment's observed generation and replica counts to be complete
+and every ready, non-terminating Pod to reference the same expected immutable
+configuration and runtime Secret generation. The proof requires replacement
+traffic to remain active until two distinct ready replicas—including a new Pod
+UID—are observed, then requires every request to have succeeded. Gateway and
+preflight logs are captured and secret-scanned before each revision change or
+deletion and once more after replacement. The proof then removes the chart and
+cluster. It contacts no model provider or external IdP.
 
 Only a strict mode-`0600` `hormuz.kubernetes-reference-proof` v1 summary is
 retained. Rendered manifests, logs, synthetic configuration, generated

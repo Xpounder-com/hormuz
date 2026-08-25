@@ -265,6 +265,40 @@ def valid_manifest() -> dict[str, object]:
     }
 
 
+def valid_serving_generation() -> dict[str, object]:
+    deployment = copy.deepcopy(valid_manifest()["items"][0])
+    deployment["metadata"]["generation"] = 2
+    deployment["status"] = {
+        "observedGeneration": 2,
+        "replicas": 2,
+        "updatedReplicas": 2,
+        "readyReplicas": 2,
+        "availableReplicas": 2,
+    }
+    template = deployment["spec"]["template"]
+    pods = []
+    for index in range(2):
+        pods.append(
+            {
+                "apiVersion": "v1",
+                "kind": "Pod",
+                "metadata": {
+                    "name": f"proof-hormuz-{index}",
+                    "labels": copy.deepcopy(template["metadata"]["labels"]),
+                    "annotations": copy.deepcopy(
+                        template["metadata"]["annotations"]
+                    ),
+                },
+                "spec": copy.deepcopy(template["spec"]),
+                "status": {
+                    "phase": "Running",
+                    "conditions": [{"type": "Ready", "status": "True"}],
+                },
+            }
+        )
+    return {"apiVersion": "v1", "kind": "List", "items": [deployment, *pods]}
+
+
 class HelmChartContractTests(unittest.TestCase):
     def test_repository_chart_satisfies_the_static_contract(self) -> None:
         digest = helm_profile.validate_chart(CHART)
@@ -301,6 +335,9 @@ class HelmChartContractTests(unittest.TestCase):
         self.assertIn("capture_gateway_logs v1-before-replica-deletion", runner)
         self.assertIn("capture_gateway_logs v1-after-replica-replacement", runner)
         self.assertIn("wait_for_job_log_marker", runner)
+        self.assertIn("wait_for_serving_generation", runner)
+        self.assertIn("validate-serving-generation", runner)
+        self.assertIn("kubectl --namespace \"${namespace}\" rollout status", runner)
         self.assertIn("--from=cronjob/replacement-traffic", runner)
         self.assertIn("synthetic traffic did not remain active", runner)
         self.assertIn("rendered-yaml-keywords.yaml", runner)
@@ -501,6 +538,45 @@ class HelmChartContractTests(unittest.TestCase):
                 expected_configuration_sha256="sha256:" + "a" * 64,
                 expected_runtime_secret=RUNTIME_SECRET,
                 expected_runtime_secret_revision="conformance-generation-v2",
+            )
+
+    def test_serving_generation_rejects_partial_or_mixed_rollouts(self) -> None:
+        expected_sha256 = "sha256:" + "a" * 64
+        rollout = valid_serving_generation()
+        helm_profile.validate_serving_generation(
+            rollout,
+            expected_configuration=CONFIGURATION,
+            expected_configuration_sha256=expected_sha256,
+            expected_runtime_secret=RUNTIME_SECRET,
+            expected_runtime_secret_revision="conformance-generation-v1",
+        )
+
+        partial = copy.deepcopy(rollout)
+        partial["items"][0]["status"]["updatedReplicas"] = 1
+        with self.assertRaisesRegex(
+            helm_profile.HelmProfileError, "rollout_updated_replicas"
+        ):
+            helm_profile.validate_serving_generation(
+                partial,
+                expected_configuration=CONFIGURATION,
+                expected_configuration_sha256=expected_sha256,
+                expected_runtime_secret=RUNTIME_SECRET,
+                expected_runtime_secret_revision="conformance-generation-v1",
+            )
+
+        mixed = copy.deepcopy(rollout)
+        mixed["items"][1]["metadata"]["annotations"][
+            "io.hormuz/config-sha256"
+        ] = "sha256:" + "b" * 64
+        with self.assertRaisesRegex(
+            helm_profile.HelmProfileError, "pod_configuration_sha256"
+        ):
+            helm_profile.validate_serving_generation(
+                mixed,
+                expected_configuration=CONFIGURATION,
+                expected_configuration_sha256=expected_sha256,
+                expected_runtime_secret=RUNTIME_SECRET,
+                expected_runtime_secret_revision="conformance-generation-v1",
             )
 
     def test_topology_spread_excludes_unschedulable_tainted_domains(self) -> None:

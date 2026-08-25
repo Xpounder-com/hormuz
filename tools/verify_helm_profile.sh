@@ -98,6 +98,39 @@ wait_for_deployment() {
   fail "deployment did not become ready: ${namespace}/${deployment}"
 }
 
+wait_for_serving_generation() {
+  local namespace=$1
+  local deployment=$2
+  local checkpoint=$3
+  local configuration=$4
+  local configuration_sha256=$5
+  local runtime_secret=$6
+  local runtime_secret_revision=$7
+  [[ "${checkpoint}" =~ ^[a-z0-9-]+$ ]] || fail "rollout checkpoint invalid"
+
+  # Helm --wait may return while old ready replicas are still participating in
+  # a rolling Deployment. Wait for Kubernetes' complete-rollout condition, then
+  # independently prove that every ready, non-terminating replica carries the
+  # exact immutable configuration and runtime Secret generation under test.
+  if ! kubectl --namespace "${namespace}" rollout status "deployment/${deployment}" \
+    --timeout=10m >/dev/null; then
+    emit_deployment_diagnostics "${namespace}" "${deployment}"
+    fail "serving generation did not finish rolling out: ${checkpoint}"
+  fi
+
+  local output="${ARTIFACT_ROOT}/serving-generation-${checkpoint}.json"
+  kubectl --namespace "${namespace}" get deployment,pod \
+    --selector='app.kubernetes.io/instance=hormuz,app.kubernetes.io/component=gateway' \
+    --output=json >"${output}"
+  python3 "${ROOT}/tools/verify_helm_profile.py" validate-serving-generation \
+    --manifest "${output}" \
+    --configuration "${configuration}" \
+    --configuration-sha256 "${configuration_sha256}" \
+    --runtime-secret "${runtime_secret}" \
+    --runtime-secret-revision "${runtime_secret_revision}" >/dev/null \
+    || fail "serving replicas do not share the expected input generation: ${checkpoint}"
+}
+
 emit_deployment_diagnostics() {
   local namespace=$1
   local deployment=$2
@@ -495,6 +528,10 @@ if ! helm upgrade --install hormuz "${CHART_ROOT}" \
   emit_deployment_diagnostics hormuz-system hormuz-hormuz
   fail "initial Hormuz release did not become ready"
 fi
+wait_for_serving_generation \
+  hormuz-system hormuz-hormuz initial-v1 \
+  hormuz-config-v1 "${config_v1_sha}" \
+  hormuz-runtime-v1 conformance-generation-v1
 kubectl --namespace hormuz-system get deployment,service,poddisruptionbudget,networkpolicy \
   --selector='app.kubernetes.io/instance=hormuz' --output=json \
   >"${ARTIFACT_ROOT}/installed-v1.json"
@@ -548,6 +585,10 @@ helm upgrade hormuz "${CHART_ROOT}" \
   --set-string "runtimeSecret.name=hormuz-runtime-v2" \
   --set-string "runtimeSecret.revision=conformance-generation-v2" \
   --atomic --wait --timeout 10m >/dev/null
+wait_for_serving_generation \
+  hormuz-system hormuz-hormuz replacement-v2 \
+  hormuz-config-v2 "${config_v2_sha}" \
+  hormuz-runtime-v2 conformance-generation-v2
 run_probe hormuz-ingress denied-request 403
 POLICY_DENIALS=$((POLICY_DENIALS + 1))
 provider_stats "${ARTIFACT_ROOT}/provider-after-deny.json"
@@ -555,6 +596,10 @@ assert_provider_stats "${ARTIFACT_ROOT}/provider-after-deny.json" "${SUCCESSFUL_
 
 capture_gateway_logs v2-before-rollback
 helm rollback hormuz 1 --namespace hormuz-system --wait --timeout 10m --cleanup-on-fail >/dev/null
+wait_for_serving_generation \
+  hormuz-system hormuz-hormuz rollback-v1 \
+  hormuz-config-v1 "${config_v1_sha}" \
+  hormuz-runtime-v1 conformance-generation-v1
 run_probe hormuz-ingress allowed-request 200
 SUCCESSFUL_REQUESTS=$((SUCCESSFUL_REQUESTS + 1))
 provider_stats "${ARTIFACT_ROOT}/provider-after-rollback.json"
