@@ -342,6 +342,8 @@ The proof packages and installs the vendor-neutral chart with the exact signed
 Hormuz image digest, an internal ClusterIP, two replicas on distinct workers,
 customer-fixture PostgreSQL pinned to its Linux AMD64 child-manifest digest
 through an existing immutable Secret, and standard default-deny NetworkPolicy.
+The cluster pulls both public workload images directly by immutable digest and
+does not substitute mutable tags or use Kind's host-side image importer.
 It proves authenticated ingress, fake-provider
 routing/capping/redaction, metadata-only evidence persistence, denied ingress
 and egress, readiness-gated immutable configuration/Secret replacement and

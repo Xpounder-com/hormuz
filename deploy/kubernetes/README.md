@@ -159,8 +159,10 @@ HORMUZ_KUBERNETES_EVIDENCE_DIR=/protected/new/output-directory \
 The proof verifies every downloaded binary or chart against an exact SHA-256,
 creates one Kind control plane and two workers with the exact node-image
 digest, installs the exact digest-pinned Cilium chart, and then installs the
-Hormuz chart from clean inputs. It proves two ready replicas on distinct
-workers, authenticated ingress, provider-shaped fake traffic, policy and
+Hormuz chart from clean inputs. Cluster nodes pull the public Hormuz and
+PostgreSQL images directly by immutable digest; the proof never replaces those
+references with mutable tags. It proves two ready replicas on distinct workers,
+authenticated ingress, provider-shaped fake traffic, policy and
 metadata-only evidence persistence, ingress and egress denial, readiness-gated
 configuration/Secret replacement and rollback, one graceful Pod deletion and
 replacement while synthetic traffic succeeds, and clean chart/cluster removal.

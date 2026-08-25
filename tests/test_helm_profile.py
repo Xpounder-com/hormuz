@@ -278,6 +278,8 @@ class HelmChartContractTests(unittest.TestCase):
         self.assertIn(f'KIND_VERSION="{helm_profile.KIND_VERSION}"', runner)
         self.assertIn(f'CILIUM_VERSION="{helm_profile.CILIUM_VERSION}"', runner)
         self.assertIn("kind delete cluster", runner)
+        self.assertNotIn("kind load docker-image", runner)
+        self.assertNotIn("docker pull", runner)
         self.assertNotIn("apiVersion: cilium.io/", (CHART / "templates" / "networkpolicy.yaml").read_text(encoding="utf-8"))
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
         self.assertIn("name: Kubernetes + Helm multi-replica reference", workflow)

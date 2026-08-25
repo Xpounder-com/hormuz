@@ -286,10 +286,10 @@ cilium_operator_image="$(kubectl --namespace kube-system get deployment cilium-o
 [[ "${cilium_agent_image}" == "${CILIUM_AGENT_IMAGE}" ]] || fail "Cilium agent image mismatch"
 [[ "${cilium_operator_image}" == "${CILIUM_OPERATOR_IMAGE}" ]] || fail "Cilium operator image mismatch"
 
-docker pull "${HORMUZ_IMAGE}" >/dev/null
-docker pull "${POSTGRES_IMAGE}" >/dev/null
-kind load docker-image --name "${CLUSTER_NAME}" "${HORMUZ_IMAGE}" >/dev/null
-kind load docker-image --name "${CLUSTER_NAME}" "${POSTGRES_IMAGE}" >/dev/null
+# Let kubelet pull the exact public digest references. Kind v0.32.0 host-side
+# image import loses the repository name for digest-only references and leaves
+# containerd with unusable import-<date> entries (kind issue #4184). Pulling by
+# digest preserves the immutable input without substituting a mutable tag.
 
 for namespace in hormuz-system hormuz-dependencies hormuz-ingress hormuz-denied; do
   kubectl create namespace "${namespace}" >/dev/null
