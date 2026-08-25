@@ -271,6 +271,30 @@ jobs:
       - name: Build and smoke-test the non-root OCI reference runtime
         run: ./tools/verify_oci_reference.sh
 
+  compose-reference:
+    name: Single-VM Compose pilot reference
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Prove the disposable signed-image Compose profile
+        env:
+          HORMUZ_COMPOSE_PROOF_ACK: I_UNDERSTAND_THIS_IS_A_DISPOSABLE_SINGLE_VM_PILOT_PROOF
+          HORMUZ_COMPOSE_EVIDENCE_DIR: ${{ runner.temp }}/hormuz-compose-reference
+          HORMUZ_COMPOSE_PROJECT_NAME: hormuz-compose-${{ github.run_id }}-${{ github.run_attempt }}
+        run: ./tools/verify_compose_profile.sh
+      - name: Preserve only content-free Compose evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hormuz-compose-reference
+          path: ${{ runner.temp }}/hormuz-compose-reference/summary.json
+          if-no-files-found: warn
+          retention-days: 7
+
   oci-supply-chain:
     name: OCI supply-chain evidence
     runs-on: ubuntu-latest

@@ -1,0 +1,20 @@
+services:
+  postgres:
+    profiles:
+      - bundled-postgres-disabled
+
+  migrate:
+    depends_on: !reset {}
+    networks: !override
+      - egress
+
+  gateway:
+    depends_on: !reset {}
+    networks: !override
+      - egress
+
+volumes:
+  postgres-data: !reset null
+
+networks:
+  database: !reset null

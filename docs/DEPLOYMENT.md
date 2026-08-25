@@ -25,6 +25,11 @@ OIDC JWT. The proxy credential proves only that the request reached Hormuz
 through the configured customer ingress; it never grants an employee identity,
 team, policy entitlement, or provider access.
 
+The first runnable customer-controlled-ingress profile is the
+[single-VM Docker Compose pilot](../deploy/compose/README.md). It binds Hormuz
+only to host loopback and leaves the public proxy, certificate, DNS, firewall,
+and outbound destination policy under customer control.
+
 ## Gateway configuration
 
 Local development is intentionally unchanged: `127.0.0.1`, `::1`, and

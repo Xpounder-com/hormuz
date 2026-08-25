@@ -1,0 +1,152 @@
+#!/bin/sh
+
+set -eu
+
+compose_root=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
+base_file="${compose_root}/compose.yaml"
+external_file="${compose_root}/compose.external-postgres.yaml"
+project_name=${HORMUZ_COMPOSE_PROJECT_NAME:-hormuz-pilot}
+secret_gid=${HORMUZ_SECRET_GID:-$(id -g)}
+
+case "${secret_gid}" in
+    ''|*[!0-9]*)
+        printf 'HORMUZ_SECRET_GID must be a numeric host group ID\n' >&2
+        exit 2
+        ;;
+esac
+export HORMUZ_SECRET_GID=${secret_gid}
+
+usage() {
+    cat <<'EOF'
+Usage: deploy/compose/hormuz-compose [bundled|external] COMMAND [ARGUMENTS]
+
+Commands:
+  prepare                 Create protected runtime configuration and secret files.
+  config                  Render the effective Compose model without secret values.
+  pull                    Pull the immutable image digest(s) for the selected mode.
+  migrate                 Apply Hormuz migrations with the operator credential.
+  doctor                  Validate configuration and runtime dependencies.
+  up                      Start one gateway and wait for readiness.
+  restart                 Restart the gateway and wait for readiness.
+  ps                      Show service state.
+  logs [SERVICE]          Show service logs (secrets are never intentionally logged).
+  backup [PATH]           Create a protected logical backup (bundled mode only).
+  restore-verify PATH     Restore a backup into a temporary database and verify it.
+  down                    Stop services while preserving PostgreSQL data.
+  purge                   Remove services and the named data volume; requires acknowledgement.
+EOF
+}
+
+mode=bundled
+if [ "${1:-}" = bundled ] || [ "${1:-}" = external ]; then
+    mode=$1
+    shift
+fi
+command_name=${1:-}
+if [ -z "${command_name}" ]; then
+    usage >&2
+    exit 2
+fi
+shift
+
+if [ "${command_name}" = prepare ]; then
+    if [ "${mode}" != bundled ] || [ "$#" -ne 0 ]; then
+        usage >&2
+        exit 2
+    fi
+    exec /bin/sh "${compose_root}/scripts/prepare.sh"
+fi
+if [ "${command_name}" = help ] || [ "${command_name}" = -h ] || [ "${command_name}" = --help ]; then
+    usage
+    exit 0
+fi
+
+compose() {
+    if [ "${mode}" = external ]; then
+        docker compose --project-directory "${compose_root}" --project-name "${project_name}" \
+            -f "${base_file}" -f "${external_file}" "$@"
+    else
+        docker compose --project-directory "${compose_root}" --project-name "${project_name}" \
+            -f "${base_file}" "$@"
+    fi
+}
+
+if [ "${command_name}" = config ]; then
+    export HORMUZ_COMPOSE_PLATFORM=linux/amd64
+    compose config "$@"
+    exit $?
+fi
+
+server_platform=$(docker info --format '{{.OSType}}/{{.Architecture}}' 2>/dev/null || true)
+if [ "${server_platform}" != linux/x86_64 ] && [ "${server_platform}" != linux/amd64 ]; then
+    printf 'Hormuz v0.1.1 Compose requires a linux/amd64 Docker host; found %s\n' \
+        "${server_platform:-unavailable}" >&2
+    exit 2
+fi
+export HORMUZ_COMPOSE_PLATFORM=linux/amd64
+
+case "${command_name}" in
+    pull)
+        if [ "${mode}" = bundled ]; then
+            compose pull gateway postgres
+        else
+            compose pull gateway
+        fi
+        ;;
+    migrate)
+        if [ "${mode}" = bundled ]; then
+            compose up --detach --wait postgres
+        fi
+        compose --profile operations run --rm migrate
+        ;;
+    doctor)
+        if [ "${mode}" = bundled ]; then
+            compose up --detach --wait postgres
+        fi
+        compose --profile operations run --rm migrate doctor
+        ;;
+    up)
+        compose up --detach --wait gateway
+        ;;
+    restart)
+        compose up --detach --wait --force-recreate --no-deps gateway
+        ;;
+    ps)
+        compose ps "$@"
+        ;;
+    logs)
+        compose logs --no-color "$@"
+        ;;
+    backup)
+        if [ "${mode}" != bundled ]; then
+            printf 'external PostgreSQL backup belongs to the customer database operator\n' >&2
+            exit 2
+        fi
+        if [ "$#" -gt 1 ]; then
+            usage >&2
+            exit 2
+        fi
+        exec /bin/sh "${compose_root}/scripts/backup.sh" "${1:-}"
+        ;;
+    restore-verify)
+        if [ "${mode}" != bundled ] || [ "$#" -ne 1 ]; then
+            usage >&2
+            exit 2
+        fi
+        exec /bin/sh "${compose_root}/scripts/restore-verify.sh" "$1"
+        ;;
+    down)
+        compose down --remove-orphans
+        ;;
+    purge)
+        if [ "${HORMUZ_COMPOSE_PURGE_ACK:-}" != I_UNDERSTAND_THIS_DELETES_PILOT_POSTGRES_DATA ]; then
+            printf 'purge requires HORMUZ_COMPOSE_PURGE_ACK=I_UNDERSTAND_THIS_DELETES_PILOT_POSTGRES_DATA\n' >&2
+            exit 2
+        fi
+        compose down --volumes --remove-orphans
+        ;;
+    *)
+        usage >&2
+        exit 2
+        ;;
+esac

@@ -31,6 +31,7 @@ that every nearby version or platform works.
 | Python source install | CPython 3.11, 3.12, 3.13, and 3.14 on GitHub-hosted `ubuntu-latest` runners |
 | Host operating system | Linux is release-gated; macOS and Windows source installs are community best effort and not release-gated |
 | Official OCI image | Linux `amd64` only; the signed digest is the artifact contract |
+| Docker Compose pilot | One native Linux AMD64 VM, one gateway replica, the exact signed Hormuz digest, and one private digest-pinned PostgreSQL service; evaluation/pilots only, not HA or production certification |
 | Native ARM64 | Not supported for the first image; tracked separately in [#109](https://github.com/Xpounder-com/hormuz/issues/109) |
 | Docker/OCI tooling | A BuildKit/buildx-capable Docker environment is used for local verification; Buildx `v0.36.1` is pinned in CI, but Hormuz does not claim every Docker Engine release |
 | Codex | `@openai/codex` `0.147.0`, installed with Node.js 24 and routed through loopback fake providers in blocking CI |

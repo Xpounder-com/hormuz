@@ -138,6 +138,20 @@ The thirteenth, [#63](https://github.com/Xpounder-com/hormuz/issues/63), is comp
 
 The fourteenth, [#66](https://github.com/Xpounder-com/hormuz/issues/66), is completed in [PR #67](https://github.com/Xpounder-com/hormuz/pull/67): a digest-pinned, disposable physical PostgreSQL WAL/PITR drill recovers exactly to a named restore point, proves the post-target marker is excluded, verifies Hormuz's restricted metadata state and RLS boundary, and fails closed for an unreachable target or missing archived WAL. It does not claim production backup retention, customer RPO/RTO, HA/failover, managed-database operations, or DR certification.
 
+The approved deployment hierarchy in [#100](https://github.com/Xpounder-com/hormuz/issues/100)
+keeps the signed OCI digest as the application contract and treats deployment
+profiles as separately verified operational references. [#101](https://github.com/Xpounder-com/hormuz/issues/101)
+is complete with the signed, anonymously pullable `v0.1.1` Linux AMD64 digest.
+The first deployment profile, [#102](https://github.com/Xpounder-com/hormuz/issues/102),
+is implemented in [PR #137](https://github.com/Xpounder-com/hormuz/pull/137):
+one hardened gateway and one private persistent PostgreSQL service on a single
+Linux AMD64 VM, plus a customer-operated external-PostgreSQL path and a clean
+native-VM proof. It is for local use, evaluation, and pilots only; it does not
+claim HA, failure-domain isolation, zero-downtime upgrades, production PITR/DR,
+or certification of customer infrastructure or operations. The optional
+Kubernetes/Helm multi-replica enterprise profile remains a separate #100/#11
+gate.
+
 ## Feature-freeze rule
 
 > A change is current-priority only if it removes deprecated context coupling, stabilizes the policy/evidence contract, fixes a security or correctness defect, or closes a production-readiness gate.

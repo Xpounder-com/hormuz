@@ -273,5 +273,6 @@ SIGTERM without contacting a model provider.
 
 Signing the image does not certify Docker Compose, Kubernetes, Helm, public
 TLS, a database, a cloud, customer configuration, HA, backup/PITR, disaster
-recovery, or customer operations. Those claims require their own deployment
-profile and release gates.
+recovery, or customer operations. The separately gated
+[single-VM Compose profile](../deploy/compose/README.md) proves only its exact
+evaluation/pilot boundary and retains all of those broader nonclaims.
