@@ -196,6 +196,31 @@ rebuild, re-sign under a different workflow, or ad hoc down-migration is not a
 rollback substitute. Registry retention and deletion must preserve every
 supported rollback digest and its referrers.
 
+Retention is an operator-owned prerequisite, not a GHCR guarantee. Before a
+digest becomes a supported rollback target, recursively copy its subject and
+complete referrer set to a retained registry, compare every resulting digest,
+and repeat the exact identity checks there. Periodic discovery must still find
+the image signature and both attestations. A missing subject or referrer makes
+that location ineligible for rollback even if a semantic tag remains.
+
+Signer-identity retirement is a trust-policy operation; it does not erase or
+rewrite historical Sigstore evidence. If the release workflow identity or its
+tag-creation authority is compromised or retired, stop that path, publish an
+advisory naming the affected identity and digests, and deny those values in
+downstream deployment policy. A future release must use a newly reviewed,
+protected workflow identity and a new immutable version tag. Existing Rekor
+entries remain historical evidence and must not be deleted or represented as
+revoked certificates. A verifier configured with a different expected
+identity must fail closed before the artifact is admitted.
+
+`v0.1.1` is the first supported signed Hormuz release, so there is no older
+signed Hormuz digest against which to claim a cross-version rollback. Its live
+release drill proves exact-digest selection, recursive mirroring, and original
+identity verification. Issue
+[#135](https://github.com/Xpounder-com/hormuz/issues/135) requires the first
+real cross-version rollback after a second supported signed release exists;
+storage rollback remains a separate compatibility and recovery boundary.
+
 ## Run with explicit runtime inputs
 
 Prepare configuration outside the image. It names environment variables such
