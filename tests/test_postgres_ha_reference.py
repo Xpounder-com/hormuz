@@ -218,6 +218,8 @@ class PostgresHAReferenceTests(unittest.TestCase):
         self.assertIn("failoverquorum", runner)
         self.assertIn("wait_for_failover_quorum_ready", runner)
         self.assertIn("wait_for_job_complete", runner)
+        self.assertIn("postgres_ha_stage=%s", runner)
+        self.assertIn("timeout 120s kubectl", runner)
         self.assertIn("for attempt in $(seq 1 120)", runner)
         self.assertIn('status.get("method") == "ANY"', runner)
         self.assertIn('"schema_version": status.version', bootstrap)

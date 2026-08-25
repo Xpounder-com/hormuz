@@ -47,6 +47,7 @@ monotonic_ms() {
 record_event() {
   EVENT_SEQUENCE=$((EVENT_SEQUENCE + 1))
   printf '%s|%s\n' "${EVENT_SEQUENCE}" "$1" >>"${ARTIFACT_ROOT}/events.log"
+  printf 'postgres_ha_stage=%s\n' "$1"
 }
 
 cleanup() {
@@ -221,14 +222,14 @@ pod_node() {
 provider_control() {
   local method=$1
   local path=$2
-  kubectl --namespace hormuz-dependencies exec deployment/fake-provider -- \
+  timeout 15s kubectl --namespace hormuz-dependencies exec deployment/fake-provider -- \
     /opt/hormuz/bin/python -I -c \
     'from urllib.request import Request,urlopen; import sys; request=Request("http://127.0.0.1:8090"+sys.argv[2],method=sys.argv[1]); print(urlopen(request,timeout=3).read().decode("utf-8"))' \
     "${method}" "${path}"
 }
 
 provider_request_count() {
-  kubectl --namespace hormuz-dependencies exec deployment/fake-provider -- \
+  timeout 15s kubectl --namespace hormuz-dependencies exec deployment/fake-provider -- \
     /opt/hormuz/bin/python -I -c \
     'import json; from urllib.request import urlopen; print(json.load(urlopen("http://127.0.0.1:8090/stats",timeout=3))["requests"])'
 }
@@ -248,7 +249,7 @@ wait_for_provider_block() {
 state_probe() {
   local command=$1
   local output=$2
-  kubectl --namespace hormuz-system exec pod/hormuz-postgres-ha-state --container state -- \
+  timeout 60s kubectl --namespace hormuz-system exec pod/hormuz-postgres-ha-state --container state -- \
     /opt/hormuz/bin/python -I /opt/hormuz-proof/state_probe.py "${command}" >"${output}"
   python3 -c 'import json,sys; value=json.load(open(sys.argv[1],encoding="utf-8")); raise SystemExit(0 if value.get("command")==sys.argv[2] else 1)' \
     "${output}" "${command}" \
@@ -272,7 +273,7 @@ probe() {
   if [[ "${command}" == "storage-backpressure" ]]; then
     args+=(--concurrency 16)
   fi
-  if ! kubectl --namespace hormuz-ingress exec pod/hormuz-postgres-ha-probe --container probe -- \
+  if ! timeout 45s kubectl --namespace hormuz-ingress exec pod/hormuz-postgres-ha-probe --container probe -- \
     "${args[@]}" >"${output}"; then
     return 1
   fi
@@ -379,7 +380,7 @@ wait_for_lease_and_rw_primary() {
 [[ "$(uname -s)" == "Linux" ]] || fail "the reference proof requires Linux"
 [[ "$(uname -m)" == "x86_64" || "$(uname -m)" == "amd64" ]] \
   || fail "the reference proof requires native AMD64"
-for command in docker curl grep openssl python3 sha256sum; do
+for command in docker curl grep openssl python3 sha256sum timeout; do
   command -v "${command}" >/dev/null 2>&1 || fail "${command} is unavailable"
 done
 docker_platform="$(docker info --format '{{.OSType}}/{{.Architecture}}')"
@@ -638,7 +639,7 @@ record_event gateway_baseline_ready
 state_probe seed "${ARTIFACT_ROOT}/state-seed.json"
 record_event durable_state_seeded
 
-kubectl --namespace hormuz-ingress exec pod/hormuz-postgres-ha-probe --container probe -- \
+timeout 120s kubectl --namespace hormuz-ingress exec pod/hormuz-postgres-ha-probe --container probe -- \
   /opt/hormuz/bin/python -I /opt/hormuz-proof/probe.py ambiguous-request \
   --target http://hormuz-hormuz.hormuz-system.svc.cluster.local:8787 \
   --expected-policy fallback+capped+redacted \
@@ -716,7 +717,7 @@ unpause_node "${old_primary_node}"
 wait_for_node_state "${old_primary_node}" True
 wait_for_cnpg_ready
 former_primary_rejoin_ms=$(( $(monotonic_ms) - rejoin_started_ms ))
-old_primary_recovery="$(kubectl --namespace hormuz-dependencies exec "pod/${old_primary}" --container postgres -- \
+old_primary_recovery="$(timeout 30s kubectl --namespace hormuz-dependencies exec "pod/${old_primary}" --container postgres -- \
   psql --username postgres --dbname postgres --tuples-only --no-align \
   --command 'SELECT pg_is_in_recovery()' | tr -d '[:space:]')"
 [[ "${old_primary_recovery}" == "t" ]] || fail "former primary did not rejoin as a fenced replica"
