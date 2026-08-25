@@ -210,13 +210,13 @@
     "legal_opinion_claimed": false
   },
   "publication": {
-    "repository_visibility": "private",
+    "repository_visibility": "public",
     "owner_authorization": "approved",
     "historical_owner_email_disposition": "owner_approved_public_disclosure",
     "actions_cache_disposition": "deleted",
     "server_unadvertised_object_scope": "accepted_explicit_nonclaim",
     "final_candidate_delta_audit": "complete",
-    "visibility_changed": false,
+    "visibility_changed": true,
     "raw_audit_material_committed": false
   },
   "blockers": [],
@@ -227,5 +227,5 @@
     "opaque_actions_cache_contents_were_scanned",
     "server_unadvertised_unreachable_objects_were_enumerated"
   ],
-  "verdict": "ready_for_public_transition"
+  "verdict": "public_transition_verified"
 }

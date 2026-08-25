@@ -21,13 +21,14 @@ class PublicDisclosureReportTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.report = disclosure.load_report(REPORT_PATH)
 
-    def test_repository_report_is_strict_content_free_and_ready_for_transition(self) -> None:
+    def test_repository_report_is_strict_content_free_and_publicly_verified(self) -> None:
         disclosure.validate_report(self.report)
 
         self.assertEqual(self.report["schema_id"], "hormuz.public-disclosure-report")
         self.assertEqual(self.report["schema_version"], 1)
-        self.assertEqual(self.report["verdict"], "ready_for_public_transition")
-        self.assertFalse(self.report["publication"]["visibility_changed"])
+        self.assertEqual(self.report["verdict"], "public_transition_verified")
+        self.assertTrue(self.report["publication"]["visibility_changed"])
+        self.assertEqual(self.report["publication"]["repository_visibility"], "public")
         self.assertFalse(self.report["publication"]["raw_audit_material_committed"])
         self.assertEqual(self.report["publication"]["owner_authorization"], "approved")
         self.assertEqual(self.report["publication"]["actions_cache_disposition"], "deleted")
@@ -74,16 +75,21 @@ class PublicDisclosureReportTests(unittest.TestCase):
             disclosure.validate_report(incomplete)
 
     def test_visibility_and_verdict_lifecycle_are_consistent(self) -> None:
-        transitioned = copy.deepcopy(self.report)
-        transitioned["publication"]["repository_visibility"] = "public"
-        transitioned["publication"]["visibility_changed"] = True
-        transitioned["verdict"] = "public_transition_verified"
-        disclosure.validate_report(transitioned)
+        ready = copy.deepcopy(self.report)
+        ready["publication"]["repository_visibility"] = "private"
+        ready["publication"]["visibility_changed"] = False
+        ready["verdict"] = "ready_for_public_transition"
+        disclosure.validate_report(ready)
 
-        inconsistent = copy.deepcopy(transitioned)
+        inconsistent = copy.deepcopy(self.report)
         inconsistent["publication"]["visibility_changed"] = False
         with self.assertRaisesRegex(disclosure.DisclosureReportError, "visibility_state"):
             disclosure.validate_report(inconsistent)
+
+        premature = copy.deepcopy(self.report)
+        premature["verdict"] = "ready_for_public_transition"
+        with self.assertRaisesRegex(disclosure.DisclosureReportError, "ready_after_visibility"):
+            disclosure.validate_report(premature)
 
 
 if __name__ == "__main__":

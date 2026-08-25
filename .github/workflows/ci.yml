@@ -104,7 +104,7 @@ jobs:
         run: |
           python tools/verify_public_disclosure_report.py \
             --report docs/evidence/public-disclosure-report-v1.json \
-            --require-verdict ready_for_public_transition
+            --require-verdict public_transition_verified
       - name: Preserve distribution evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

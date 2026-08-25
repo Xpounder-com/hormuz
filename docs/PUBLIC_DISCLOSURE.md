@@ -7,11 +7,11 @@ result alone is not proof that a repository is safe to publish.
 
 The current report is
 [`hormuz.public-disclosure-report` v1](evidence/public-disclosure-report-v1.json).
-It is marked `ready_for_public_transition`: the recorded audit has zero
-unresolved blockers and the owner supplied conditional publication
-authorization. This verdict does not claim that visibility already changed.
-Raw Git objects, GitHub API responses, workflow logs, artifacts, cache
-metadata, matched values, addresses, and local paths are not committed.
+It is marked `public_transition_verified`: the recorded audit reached zero
+unresolved blockers, the owner authorized publication, and the repository's
+public visibility and anonymous access were verified after the change. Raw Git
+objects, GitHub API responses, workflow logs, artifacts, cache metadata,
+matched values, addresses, and local paths are not committed.
 
 ## Audited boundary
 
@@ -63,7 +63,7 @@ credential forms, and private local paths:
 ```bash
 python3 tools/verify_public_disclosure_report.py \
   --report docs/evidence/public-disclosure-report-v1.json \
-  --require-verdict ready_for_public_transition
+  --require-verdict public_transition_verified
 ```
 
 ## Licensing boundary
@@ -82,14 +82,14 @@ dependencies retain their own licenses. Operating-system and base-image
 components likewise retain their own licenses and remain visible in the OCI
 SBOM. This is engineering evidence, not a legal opinion.
 
-## Final transition order
+## Completed transition evidence
 
-1. Recheck that the report candidate, exact commit, repository settings, and
-   Actions cache inventory still satisfy the recorded zero-blocker boundary.
-2. Change visibility under the recorded conditional owner authorization.
-3. Verify the repository, contribution/security paths, settings, and protected
-   rules from an anonymous environment.
-4. Record `public_transition_verified` without publishing raw audit material.
+The transition followed the recorded order: exact commit, CI, disclosure
+verdict, and zero-cache preconditions were rechecked; visibility changed under
+the owner's conditional authorization; the repository, contribution/security
+paths, Discussions, license, settings, and protected rules were then verified
+from an anonymous environment. A bounded scan covered the final PR/merge/run
+delta without publishing raw audit material.
 
 Repository publication, history rewriting, artifact or cache deletion,
 credential rotation, and package publication remain separate operations. The

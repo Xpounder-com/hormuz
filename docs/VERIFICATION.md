@@ -254,8 +254,9 @@ The package job also builds the core and separated experiment with Apache 2.0
 metadata and license files, installs every core extra into a fresh environment,
 and fails closed on an unexpected distribution, license identity, or missing
 license artifact. It validates the versioned content-free disclosure report and
-its visibility/verdict lifecycle. A `ready_for_public_transition` verdict is
-authorization evidence, not proof that the transition already occurred. See
+its visibility/verdict lifecycle. The checked-in `public_transition_verified`
+verdict records the completed transition; a pre-transition
+`ready_for_public_transition` verdict would record authorization only. See
 [PUBLIC_DISCLOSURE.md](PUBLIC_DISCLOSURE.md) for the audited surfaces,
 limitations, and transition-verification boundary.
 
