@@ -23,10 +23,10 @@ The live verifier proves two bounded scenarios:
    and deny concurrent governed requests before provider egress. CloudNativePG
    promotes a safe replica, the Lease and read/write endpoint converge, the
    same gateway processes reconnect, durable governed state remains intact,
-   and no provider request is replayed. A provider response already in flight
-   is released immediately after the pause. Hormuz may relay response bytes,
-   but the unavailable finalization transaction leaves the client outcome
-   ambiguous and preserves the pre-egress attempt and reservation as uncertain.
+   and no provider request is replayed. Immediately after the pause, the fake
+   provider records an in-flight request and closes its connection without a
+   response. The client outcome remains ambiguous while the pre-egress attempt
+   and reservation remain durably uncertain.
 2. After the primary and one replica worker are paused, failover quorum blocks
    promotion, the read/write endpoint has no ready address, both gateways stay
    unready and deny provider egress, and the surviving replica is not exposed

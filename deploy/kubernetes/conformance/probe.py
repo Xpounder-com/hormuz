@@ -210,7 +210,10 @@ def _run_blocking_request(
         )
         return 0
     except SystemExit as error:
-        if command != "ambiguous-request" or str(error) != "unexpected_status:503":
+        if command != "ambiguous-request" or str(error) not in {
+            "unexpected_status:502",
+            "unexpected_status:503",
+        }:
             raise
         print(
             json.dumps(

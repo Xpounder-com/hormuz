@@ -195,6 +195,9 @@ class PostgresHAReferenceTests(unittest.TestCase):
         values = (HA_ROOT / "helm-values.yaml").read_text(encoding="utf-8")
         runner = (ROOT / "tools" / "verify_postgres_ha_reference.sh").read_text(encoding="utf-8")
         bootstrap = (HA_ROOT / "bootstrap.py").read_text(encoding="utf-8")
+        provider = (ROOT / "deploy" / "kubernetes" / "conformance" / "fake-provider.py").read_text(
+            encoding="utf-8"
+        )
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
         reference = (HA_ROOT / "README.md").read_text(encoding="utf-8")
         self.assertIn("instances: 3", cluster)
@@ -210,6 +213,8 @@ class PostgresHAReferenceTests(unittest.TestCase):
         self.assertIn("rw_ready_addresses", runner)
         self.assertIn("storage-backpressure", runner)
         self.assertIn("ambiguous-request", runner)
+        self.assertIn("/control/block/abort", runner)
+        self.assertIn("blocking_abort", provider)
         self.assertIn("failoverquorum", runner)
         self.assertIn("wait_for_failover_quorum_ready", runner)
         self.assertIn("wait_for_job_complete", runner)
@@ -219,7 +224,7 @@ class PostgresHAReferenceTests(unittest.TestCase):
         self.assertIn('"schema_complete": status.complete', bootstrap)
         self.assertNotIn("len(applied)", bootstrap)
         self.assertLess(
-            runner.index("provider_control POST /control/block/release"),
+            runner.index("provider_control POST /control/block/abort"),
             runner.index("gateway_fail_closed positive"),
         )
         self.assertLess(

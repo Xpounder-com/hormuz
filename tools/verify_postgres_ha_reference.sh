@@ -657,7 +657,7 @@ old_primary_node="$(pod_node "${old_primary}")"
 positive_started_ms="$(monotonic_ms)"
 pause_node "${old_primary_node}"
 record_event primary_loss_injected
-provider_control POST /control/block/release >"${ARTIFACT_ROOT}/provider-release.json"
+provider_control POST /control/block/abort >"${ARTIFACT_ROOT}/provider-abort.json"
 gateway_fail_closed positive
 positive_fail_closed_ms=$(( $(monotonic_ms) - positive_started_ms ))
 record_event all_gateways_failed_closed
