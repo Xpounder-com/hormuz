@@ -21,16 +21,18 @@ class PublicDisclosureReportTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.report = disclosure.load_report(REPORT_PATH)
 
-    def test_repository_report_is_strict_content_free_and_explicitly_blocked(self) -> None:
+    def test_repository_report_is_strict_content_free_and_ready_for_transition(self) -> None:
         disclosure.validate_report(self.report)
 
         self.assertEqual(self.report["schema_id"], "hormuz.public-disclosure-report")
         self.assertEqual(self.report["schema_version"], 1)
-        self.assertEqual(self.report["verdict"], "decision_required")
+        self.assertEqual(self.report["verdict"], "ready_for_public_transition")
         self.assertFalse(self.report["publication"]["visibility_changed"])
         self.assertFalse(self.report["publication"]["raw_audit_material_committed"])
+        self.assertEqual(self.report["publication"]["owner_authorization"], "approved")
+        self.assertEqual(self.report["publication"]["actions_cache_disposition"], "deleted")
         self.assertEqual(len(self.report["findings"]), 16)
-        self.assertEqual(len(self.report["blockers"]), 5)
+        self.assertEqual(len(self.report["blockers"]), 0)
 
     def test_duplicate_keys_and_sensitive_values_fail_closed(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -56,15 +58,31 @@ class PublicDisclosureReportTests(unittest.TestCase):
             disclosure.validate_report(unknown)
 
     def test_ready_verdict_requires_no_blockers_and_owner_authorization(self) -> None:
-        premature = copy.deepcopy(self.report)
-        premature["blockers"] = []
-        premature["verdict"] = "ready_for_public_transition"
+        unauthorized = copy.deepcopy(self.report)
+        unauthorized["publication"]["owner_authorization"] = "pending"
         with self.assertRaisesRegex(disclosure.DisclosureReportError, "blocker_resolution"):
-            disclosure.validate_report(premature)
+            disclosure.validate_report(unauthorized)
 
-        inconsistent = copy.deepcopy(self.report)
-        inconsistent["verdict"] = "ready_for_public_transition"
+        incomplete = copy.deepcopy(self.report)
+        incomplete["publication"]["final_candidate_delta_audit"] = "pending"
+        incomplete["blockers"] = [{
+            "id": "final_candidate_delta_audit",
+            "status": "execution_required",
+            "required_action": "rescan_final_candidate_and_new_github_surfaces",
+        }]
         with self.assertRaisesRegex(disclosure.DisclosureReportError, "open_blockers"):
+            disclosure.validate_report(incomplete)
+
+    def test_visibility_and_verdict_lifecycle_are_consistent(self) -> None:
+        transitioned = copy.deepcopy(self.report)
+        transitioned["publication"]["repository_visibility"] = "public"
+        transitioned["publication"]["visibility_changed"] = True
+        transitioned["verdict"] = "public_transition_verified"
+        disclosure.validate_report(transitioned)
+
+        inconsistent = copy.deepcopy(transitioned)
+        inconsistent["publication"]["visibility_changed"] = False
+        with self.assertRaisesRegex(disclosure.DisclosureReportError, "visibility_state"):
             disclosure.validate_report(inconsistent)
 
 
