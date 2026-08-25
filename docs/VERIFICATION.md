@@ -302,6 +302,25 @@ contracts, and requires a clean SIGTERM exit. It uses fixed placeholders and
 does not call a model provider. Its narrow deployment boundary and remaining
 nonclaims are in [OCI.md](OCI.md).
 
+## Single-VM Compose pilot reference
+
+The `Single-VM Compose pilot reference` job runs
+`tools/verify_compose_profile.sh` on a clean GitHub-hosted Ubuntu AMD64 VM. It
+pulls the exact published Hormuz and PostgreSQL digests, starts one non-root
+read-only gateway and one private persistent database, and uses only an
+internal fake provider. It proves authenticated loopback ingress, fallback,
+output capping, pre-egress redaction, a configuration-enforced deny, durable
+metadata-only PostgreSQL evidence, gateway restart, configuration replacement
+and rollback, logical backup/restore, secret non-disclosure, and clean
+container/network/volume removal.
+
+The verifier validates a strict `hormuz.compose-reference-proof` v1 summary and
+uploads only that content-free file. Rendered models, logs, container
+inspection, request observations, and the raw logical backup are temporary
+inputs to the proof and are deleted. The job contacts no OpenAI or Anthropic
+endpoint. Its exact operator workflow and nonclaims are in the
+[Compose profile](../deploy/compose/README.md).
+
 ## OCI supply-chain evidence
 
 The `OCI supply-chain evidence` job invokes:

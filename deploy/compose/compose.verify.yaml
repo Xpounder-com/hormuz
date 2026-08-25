@@ -1,0 +1,53 @@
+services:
+  gateway:
+    networks:
+      - proof-provider
+    depends_on:
+      fake-provider:
+        condition: service_healthy
+        restart: true
+
+  fake-provider:
+    image: ghcr.io/xpounder-com/hormuz@sha256:1bbcca3490a7a5b004a880f42e8250acb91ce566a9c59f3263d7b279568efb5a
+    platform: ${HORMUZ_COMPOSE_PLATFORM:?The proof requires a linux/amd64 Docker host}
+    user: "65532:65532"
+    read_only: true
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    entrypoint: ["/opt/hormuz/bin/python", "-I", "/opt/hormuz-compose/fake-provider.py"]
+    configs:
+      - source: fake_provider
+        target: /opt/hormuz-compose/fake-provider.py
+    networks:
+      - proof-provider
+    healthcheck:
+      test:
+        - CMD
+        - /opt/hormuz/bin/python
+        - -I
+        - -c
+        - "from urllib.request import urlopen; raise SystemExit(0 if urlopen('http://127.0.0.1:8090/health', timeout=2).status == 200 else 1)"
+      interval: 2s
+      timeout: 2s
+      retries: 15
+      start_period: 2s
+    cpus: 0.5
+    mem_limit: 256m
+    pids_limit: 64
+    labels:
+      io.hormuz.compose-contract: hormuz.compose-reference.v1
+      io.hormuz.role: disposable-proof-provider
+
+networks:
+  proof-provider:
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.30.12.0/24
+
+configs:
+  fake_provider:
+    file: ./verification/fake_provider.py

@@ -25,6 +25,20 @@ FORBIDDEN_ARCHIVE_PATHS = (
     "docs/CONTEXT.md",
     "examples/context-records.jsonl",
     "experiments/context/",
+    "deploy/compose/runtime/",
+)
+REQUIRED_COMPOSE_SDIST_PATHS = (
+    "deploy/compose/README.md",
+    "deploy/compose/compose.external-postgres.yaml",
+    "deploy/compose/compose.verify.yaml",
+    "deploy/compose/compose.yaml",
+    "deploy/compose/hormuz-compose",
+    "deploy/compose/hormuz.example.json",
+    "deploy/compose/scripts/prepare.sh",
+    "deploy/compose/scripts/postgres-entrypoint.sh",
+    "deploy/compose/verification/fake_provider.py",
+    "tools/verify_compose_profile.py",
+    "tools/verify_compose_profile.sh",
 )
 
 
@@ -47,8 +61,11 @@ def main(argv: list[str] | None = None) -> int:
     python = args.python.resolve()
     _assert_archive_boundary(wheel, _wheel_members)
     _assert_archive_boundary(sdist, _sdist_members)
+    _assert_compose_sdist_boundary(sdist)
     _verify_isolated_install(wheel, config, python)
-    print("verified core wheel boundary: no context implementation or initialization")
+    print(
+        "verified core distribution boundary: no context/runtime data and complete Compose profile"
+    )
     return 0
 
 
@@ -73,6 +90,19 @@ def _sdist_members(path: Path) -> list[str]:
 def _is_forbidden_archive_path(name: str) -> bool:
     normalized = name.lstrip("./")
     return any(f"/{forbidden}" in f"/{normalized}" for forbidden in FORBIDDEN_ARCHIVE_PATHS)
+
+
+def _assert_compose_sdist_boundary(path: Path) -> None:
+    members = tuple(name.lstrip("./") for name in _sdist_members(path))
+    missing = [
+        required
+        for required in REQUIRED_COMPOSE_SDIST_PATHS
+        if not any(f"/{member}".endswith(f"/{required}") for member in members)
+    ]
+    if missing:
+        raise RuntimeError(
+            f"Compose profile incomplete in {path.name}: {', '.join(sorted(missing))}"
+        )
 
 
 def _verify_isolated_install(wheel: Path, config_template: Path, base_python: Path) -> None:

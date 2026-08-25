@@ -1,0 +1,215 @@
+name: hormuz-pilot
+
+x-hormuz-contract:
+  schema: hormuz.compose-reference.v1
+  profile: single-linux-vm-pilot
+  platform: linux/amd64
+  hormuz_image: &hormuz_image ghcr.io/xpounder-com/hormuz@sha256:1bbcca3490a7a5b004a880f42e8250acb91ce566a9c59f3263d7b279568efb5a
+  postgres_image: &postgres_image postgres@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
+
+services:
+  postgres:
+    image: *postgres_image
+    platform: ${HORMUZ_COMPOSE_PLATFORM:?Run deploy/compose/hormuz-compose on a linux/amd64 Docker host}
+    restart: unless-stopped
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+    environment:
+      POSTGRES_DB: hormuz
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD_FILE: /run/hormuz-bootstrap-secrets/postgres_superuser_password
+      PGDATA: /var/lib/postgresql/data/pgdata
+    entrypoint: ["/bin/sh", "/opt/hormuz-compose/postgres-entrypoint.sh"]
+    command: ["postgres"]
+    secrets:
+      - postgres_superuser_password
+      - postgres_runtime_password
+    configs:
+      - source: postgres_init
+        target: /docker-entrypoint-initdb.d/10-hormuz-roles.sh
+      - source: postgres_entrypoint
+        target: /opt/hormuz-compose/postgres-entrypoint.sh
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,mode=1777,size=64m
+      - /var/run/postgresql:rw,nosuid,nodev,mode=3775,size=16m
+      - /run/hormuz-bootstrap-secrets:rw,noexec,nosuid,nodev,mode=0700,size=1m
+    networks:
+      - database
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /var/lib/postgresql/data/pgdata/.hormuz-roles-initialized && pg_isready --username postgres --dbname hormuz"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+    stop_grace_period: 60s
+    cpus: 2.0
+    mem_limit: 2g
+    pids_limit: 256
+    shm_size: 256m
+    labels:
+      io.hormuz.compose-contract: hormuz.compose-reference.v1
+      io.hormuz.role: database
+
+  migrate:
+    image: *hormuz_image
+    platform: ${HORMUZ_COMPOSE_PLATFORM:?Run deploy/compose/hormuz-compose on a linux/amd64 Docker host}
+    profiles:
+      - operations
+    user: "65532:65532"
+    group_add:
+      - "${HORMUZ_SECRET_GID:?Run deploy/compose/hormuz-compose so protected files have a container-readable group}"
+    read_only: true
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    environment:
+      HORMUZ_CONFIG: /etc/hormuz/hormuz.json
+      HORMUZ_TOKEN: compose-operator-identity-placeholder-not-a-credential
+      HORMUZ_INGRESS_CREDENTIAL: compose-operator-ingress-placeholder-not-a-credential
+      OPENAI_API_KEY: compose-operator-openai-placeholder-not-a-credential
+      ANTHROPIC_API_KEY: compose-operator-anthropic-placeholder-not-a-credential
+    entrypoint: ["/bin/sh", "/opt/hormuz-compose/run-hormuz.sh"]
+    command: ["storage", "migrate"]
+    secrets:
+      - postgres_runtime_dsn
+      - postgres_migration_dsn
+    configs:
+      - source: hormuz_config
+        target: /etc/hormuz/hormuz.json
+      - source: run_hormuz
+        target: /opt/hormuz-compose/run-hormuz.sh
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,mode=1777,size=64m
+    networks:
+      - database
+      - egress
+    depends_on:
+      postgres:
+        condition: service_healthy
+        restart: true
+    cpus: 1.0
+    mem_limit: 1g
+    pids_limit: 128
+    labels:
+      io.hormuz.compose-contract: hormuz.compose-reference.v1
+      io.hormuz.role: migration
+
+  gateway:
+    image: *hormuz_image
+    platform: ${HORMUZ_COMPOSE_PLATFORM:?Run deploy/compose/hormuz-compose on a linux/amd64 Docker host}
+    user: "65532:65532"
+    group_add:
+      - "${HORMUZ_SECRET_GID:?Run deploy/compose/hormuz-compose so protected files have a container-readable group}"
+    restart: unless-stopped
+    read_only: true
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    environment:
+      HORMUZ_CONFIG: /etc/hormuz/hormuz.json
+    entrypoint: ["/bin/sh", "/opt/hormuz-compose/run-hormuz.sh"]
+    command: ["serve"]
+    secrets:
+      - postgres_runtime_dsn
+      - hormuz_identity_token
+      - hormuz_ingress_credential
+      - openai_api_key
+      - anthropic_api_key
+    configs:
+      - source: hormuz_config
+        target: /etc/hormuz/hormuz.json
+      - source: run_hormuz
+        target: /opt/hormuz-compose/run-hormuz.sh
+      - source: gateway_healthcheck
+        target: /opt/hormuz-compose/healthcheck.py
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,mode=1777,size=64m
+    ports:
+      - name: gateway-private-loopback
+        target: 8787
+        published: "8787"
+        host_ip: 127.0.0.1
+        protocol: tcp
+    networks:
+      - database
+      - egress
+    depends_on:
+      postgres:
+        condition: service_healthy
+        restart: true
+    healthcheck:
+      test: ["CMD", "/opt/hormuz/bin/python", "-I", "/opt/hormuz-compose/healthcheck.py"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+    stop_grace_period: 11m
+    cpus: 2.0
+    mem_limit: 2g
+    pids_limit: 256
+    labels:
+      io.hormuz.compose-contract: hormuz.compose-reference.v1
+      io.hormuz.role: gateway
+
+volumes:
+  postgres-data:
+    labels:
+      io.hormuz.compose-contract: hormuz.compose-reference.v1
+      io.hormuz.data-class: pilot-metadata-only
+
+networks:
+  database:
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.30.11.0/24
+  egress:
+    internal: false
+    ipam:
+      config:
+        - subnet: 172.30.10.0/24
+
+configs:
+  hormuz_config:
+    file: ./runtime/hormuz.json
+  run_hormuz:
+    file: ./scripts/run-hormuz.sh
+  gateway_healthcheck:
+    file: ./scripts/healthcheck.py
+  postgres_init:
+    file: ./scripts/postgres-init.sh
+  postgres_entrypoint:
+    file: ./scripts/postgres-entrypoint.sh
+
+secrets:
+  postgres_superuser_password:
+    file: ./runtime/secrets/postgres-superuser-password
+  postgres_runtime_password:
+    file: ./runtime/secrets/postgres-runtime-password
+  postgres_runtime_dsn:
+    file: ./runtime/secrets/postgres-runtime-dsn
+  postgres_migration_dsn:
+    file: ./runtime/secrets/postgres-migration-dsn
+  hormuz_identity_token:
+    file: ./runtime/secrets/hormuz-identity-token
+  hormuz_ingress_credential:
+    file: ./runtime/secrets/hormuz-ingress-credential
+  openai_api_key:
+    file: ./runtime/secrets/openai-api-key
+  anthropic_api_key:
+    file: ./runtime/secrets/anthropic-api-key
