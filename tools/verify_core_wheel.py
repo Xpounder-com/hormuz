@@ -51,9 +51,20 @@ REQUIRED_HELM_SDIST_PATHS = (
     "deploy/kubernetes/conformance/helm-values.yaml",
     "deploy/kubernetes/conformance/kind.yaml",
     "deploy/kubernetes/conformance/probes.yaml",
+    "deploy/kubernetes/conformance/postgres-ha/README.md",
+    "deploy/kubernetes/conformance/postgres-ha/cluster.yaml",
+    "deploy/kubernetes/conformance/postgres-ha/bootstrap-job.yaml",
+    "deploy/kubernetes/conformance/postgres-ha/bootstrap.py",
+    "deploy/kubernetes/conformance/postgres-ha/helm-values.yaml",
+    "deploy/kubernetes/conformance/postgres-ha/kind.yaml",
+    "deploy/kubernetes/conformance/postgres-ha/probes.yaml",
+    "deploy/kubernetes/conformance/postgres-ha/state-config.json",
+    "deploy/kubernetes/conformance/postgres-ha/state_probe.py",
     "tools/verify_helm_profile.py",
     "tools/verify_helm_profile.sh",
     "tools/verify_multi_replica_operation.py",
+    "tools/verify_postgres_ha_reference.py",
+    "tools/verify_postgres_ha_reference.sh",
 )
 
 

@@ -229,15 +229,53 @@ state counts, retry/session boundary, and nonclaims. Rendered manifests, logs,
 synthetic configuration, generated credentials, and raw observations remain
 temporary and are deleted.
 
+## Exact PostgreSQL HA conformance reference
+
+The separate `PostgreSQL HA failover reference` job runs the
+[issue #104 fixture](conformance/postgres-ha/README.md). CloudNativePG is
+verification infrastructure only: it is never rendered by this chart, and
+Hormuz still receives a generic PostgreSQL HA DSN through the existing runtime
+Secret.
+
+The account-free proof creates one Kind control plane, three tainted database
+workers, and two separate gateway workers. It pins CloudNativePG `1.30.0`,
+three PostgreSQL `16.15` instances, synchronous `ANY 1`, required durability,
+failover quorum, primary Lease coordination, isolation fencing, and exact OCI
+digests. Both gateway replicas retain pool bounds of 1-4 connections, a
+five-second acquisition timeout, eight queued waiters, and a 15-second
+reconnect horizon.
+
+The positive path abruptly pauses the active primary's worker while one
+provider request is in flight. Both gateways must become unready and return the
+content-free `hormuz_storage_unavailable` classification under concurrent
+load without adding provider calls. A safe replica must become primary, own
+the Lease and read/write endpoint, and serve the same two gateway processes.
+Policy activation, budget reservations, request attempts, usage/secret
+evidence, custody administrators and restrictions, audit-chain integrity, and
+tenant isolation are checked before and after promotion. The ambiguous request
+must remain pending or unknown with uncertain consumption, and Hormuz must not
+replay it. The former primary is then allowed to return only as a replica.
+
+The negative path pauses the primary and one replica. The remaining replica
+cannot satisfy failover quorum, no ready read/write endpoint may remain, and
+both gateways must stay unready and deny provider egress throughout a measured
+observation window. Recovery begins only after quorum is restored.
+
+Only the strict mode-`0600`, content-free
+`hormuz.postgresql-ha-reference-proof` v1 summary is retained. It records the
+exact source, images, manifest checksum, chart digest, topology, fixed event
+sequence, state counts, timings, checks, and nonclaims. It contains no DSN,
+credential, request content, raw state, log, or customer identifier.
+
 ## Exact nonclaims
 
 This disposable proof does not certify Kubernetes, Helm, Cilium, Kind,
 PostgreSQL, public TLS, an ingress implementation, an IdP, a model provider, a
 cloud, a customer cluster, or customer operations. It makes no broad
 CNI-portability, universal HA, RPO, RTO, multi-region, or zone-failure claim.
-It does not prove PostgreSQL promotion/failover, production storage durability,
+The exact #104 fixture proves only its pinned PostgreSQL promotion and
+quorum-loss behaviors. It does not prove production storage durability,
 autoscaling, capacity, browser sessions, provider exactly-once semantics, or
-zero interruption for a force-killed in-flight stream. PostgreSQL failover and
-the complete recovery rehearsal remain separate release gates under
-[#104](https://github.com/Xpounder-com/hormuz/issues/104) and
+zero interruption for a force-killed in-flight stream. The complete recovery
+rehearsal remains a separate release gate under
 [#105](https://github.com/Xpounder-com/hormuz/issues/105).

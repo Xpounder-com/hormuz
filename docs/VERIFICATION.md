@@ -403,6 +403,51 @@ browser-session, provider exactly-once, customer-infrastructure, or universal
 customer-SLA claim. See the exact boundary in the
 [Kubernetes profile](../deploy/kubernetes/README.md).
 
+## PostgreSQL HA failover reference
+
+The `PostgreSQL HA failover reference` job invokes:
+
+```bash
+HORMUZ_POSTGRES_HA_PROOF_ACK=I_UNDERSTAND_THIS_IS_A_DISPOSABLE_POSTGRESQL_HA_REFERENCE_PROOF \
+HORMUZ_POSTGRES_HA_EVIDENCE_DIR=/protected/new/output-directory \
+HORMUZ_SOURCE_COMMIT="$GITHUB_SHA" \
+  ./tools/verify_postgres_ha_reference.sh
+```
+
+The native Linux AMD64 runner verifies every downloaded binary, chart, and
+operator manifest against an exact SHA-256. It deploys the exact Linux AMD64
+CloudNativePG `1.30.0` operator image and three exact PostgreSQL `16.15`
+instances in disposable Kind. Required anti-affinity places the database
+instances on three tainted workers; the two Hormuz replicas are proven to run
+on two different non-database workers. The Hormuz chart never renders a
+PostgreSQL resource and receives only a restricted generic PostgreSQL DSN from
+an existing immutable Secret.
+
+The positive failure injects an unexpected active-primary worker pause. Every
+gateway replica must withdraw readiness and enforce bounded concurrent storage
+denials with no provider egress. The proof requires a changed primary, matching
+primary Lease and read/write endpoint, gateway reconnection without process
+replacement, a former primary that rejoins as a replica, preserved policy,
+budget/request-attempt/evidence/custody/audit state, tenant isolation, one
+preserved ambiguous attempt and uncertain reservation, and zero automatic
+provider replay.
+
+The negative failure pauses the active primary and one replica. During a
+minimum 30-second observation window, failover quorum must refuse promotion,
+the read/write endpoint must have no ready address, both gateways must remain
+unready and deny provider egress, and the sole surviving replica must not be
+presented as a writable primary. Recovery is accepted only after both lost
+workers return and all three instances plus the existing gateway processes are
+ready.
+
+The job uploads only a strict mode-`0600`, content-free
+`hormuz.postgresql-ha-reference-proof` v1 summary. Generated credentials,
+DSNs, manifests, raw state snapshots, fake traffic, and the cluster remain
+temporary. This is the first exact self-contained PostgreSQL HA reference, not
+a managed-provider certification, broad Kubernetes/CNI claim, production
+storage proof, backup/retention proof, RPO/RTO result, disaster-recovery
+rehearsal, or customer SLA.
+
 ## OCI supply-chain evidence
 
 The `OCI supply-chain evidence` job invokes:

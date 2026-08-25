@@ -40,7 +40,7 @@ that every nearby version or platform works.
 | Newer client releases | A non-blocking weekly canary detects drift; a green canary does not silently expand the supported-version contract |
 | Provider credentials | Ordinary tests require none; live OpenAI and Anthropic BYO-provider release evidence remains tracked in [#115](https://github.com/Xpounder-com/hormuz/issues/115) |
 | Default persistence | SQLite for one-process local evaluation; it is not a shared or HA store |
-| PostgreSQL | Optional compatibility, migration, RLS, pooling, and disposable recovery proofs exist; they are not a managed production database service or an HA/DR claim |
+| PostgreSQL | Optional compatibility, migration, RLS, pooling, and recovery proofs exist. The first exact HA reference is CloudNativePG `1.30.0` with three PostgreSQL `16.15` instances in single-host Kind; it is not a managed production database service or certification, production storage/operations, broad HA/DR, or a customer SLA |
 
 The official image and source tree expose additional self-hosted and cloud
 conformance harnesses. Those prove only the exact documented, explicitly run
