@@ -84,15 +84,26 @@ wait_for_deployment() {
     return
   fi
 
+  emit_deployment_diagnostics "${namespace}" "${deployment}"
+  fail "deployment did not become ready: ${namespace}/${deployment}"
+}
+
+emit_deployment_diagnostics() {
+  local namespace=$1
+  local deployment=$2
+
   local diagnostic="${ARTIFACT_ROOT}/failure-${namespace}-${deployment}.log"
   {
     printf 'deployment rollout failed: namespace=%s deployment=%s\n' \
       "${namespace}" "${deployment}"
     kubectl --namespace "${namespace}" get deployment "${deployment}" --output=wide
     kubectl --namespace "${namespace}" get pods --output=wide
+    kubectl --namespace "${namespace}" describe deployment "${deployment}"
+    kubectl --namespace "${namespace}" describe pods \
+      --selector='app.kubernetes.io/instance=hormuz,app.kubernetes.io/component=gateway'
     kubectl --namespace "${namespace}" get events --sort-by=.metadata.creationTimestamp
     kubectl --namespace "${namespace}" logs "deployment/${deployment}" \
-      --all-pods=true --prefix=true
+      --all-pods=true --all-containers=true --prefix=true
   } >"${diagnostic}" 2>&1 || true
   if python3 "${ROOT}/tools/verify_helm_profile.py" assert-no-secrets \
     --artifact "${diagnostic}" --secret-root "${SECRET_ROOT}" >/dev/null; then
@@ -100,7 +111,6 @@ wait_for_deployment() {
   else
     printf 'deployment diagnostic withheld because secret scanning did not pass\n' >&2
   fi
-  fail "deployment did not become ready: ${namespace}/${deployment}"
 }
 
 run_probe() {
@@ -375,11 +385,17 @@ python3 "${ROOT}/tools/verify_helm_profile.py" assert-no-secrets \
   --artifact "${ARTIFACT_ROOT}/rendered-v1.yaml" \
   --secret-root "${SECRET_ROOT}" >/dev/null
 
-helm upgrade --install hormuz "${CHART_ROOT}" \
+# Keep a failed first installation observable until its diagnostics have been
+# secret-scanned. The EXIT trap deletes the entire disposable cluster, while
+# later upgrades still prove Helm's atomic rollback behavior.
+if ! helm upgrade --install hormuz "${CHART_ROOT}" \
   --namespace hormuz-system \
   --values "${FIXTURE_ROOT}/helm-values.yaml" \
   --set-string "configuration.sha256=${config_v1_sha}" \
-  --atomic --wait --timeout 10m >/dev/null
+  --wait --timeout 10m >/dev/null; then
+  emit_deployment_diagnostics hormuz-system hormuz-hormuz
+  fail "initial Hormuz release did not become ready"
+fi
 kubectl --namespace hormuz-system get deployment,service,poddisruptionbudget,networkpolicy \
   --selector='app.kubernetes.io/instance=hormuz' --output=json \
   >"${ARTIFACT_ROOT}/installed-v1.json"
