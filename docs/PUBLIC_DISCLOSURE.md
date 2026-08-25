@@ -7,9 +7,11 @@ result alone is not proof that a repository is safe to publish.
 
 The current report is
 [`hormuz.public-disclosure-report` v1](evidence/public-disclosure-report-v1.json).
-It is intentionally marked `decision_required`. Raw Git objects, GitHub API
-responses, workflow logs, artifacts, cache metadata, matched values, addresses,
-and local paths are not committed.
+It is marked `ready_for_public_transition`: the recorded audit has zero
+unresolved blockers and the owner supplied conditional publication
+authorization. This verdict does not claim that visibility already changed.
+Raw Git objects, GitHub API responses, workflow logs, artifacts, cache
+metadata, matched values, addresses, and local paths are not committed.
 
 ## Audited boundary
 
@@ -47,8 +49,10 @@ contained no unreachable objects, but that is not evidence that GitHub retains
 no unadvertised server-only object. The report preserves that limitation rather
 than claiming impossible coverage. Expired artifact records were enumerated,
 but their deleted bytes could not be recovered. Actions cache contents are not
-downloadable through the API and remain a publication decision while any cache
-exists.
+downloadable through the API. The owner authorized deletion of the audited
+rebuildable caches, and the final snapshot contains no cache entry; any cache
+created after that snapshot must be removed or separately resolved before the
+visibility transition.
 
 Every scanner match is represented only by an allowlisted category, count, and
 classification. The report never repeats a matched value. Its strict verifier
@@ -59,7 +63,7 @@ credential forms, and private local paths:
 ```bash
 python3 tools/verify_public_disclosure_report.py \
   --report docs/evidence/public-disclosure-report-v1.json \
-  --require-verdict decision_required
+  --require-verdict ready_for_public_transition
 ```
 
 ## Licensing boundary
@@ -78,17 +82,16 @@ dependencies retain their own licenses. Operating-system and base-image
 components likewise retain their own licenses and remain visible in the OCI
 SBOM. This is engineering evidence, not a legal opinion.
 
-## Closure order
+## Final transition order
 
-1. Resolve the explicit owner decisions recorded as blockers.
-2. Merge the license and report-validation implementation while the repository
-   remains private.
-3. Rescan the resulting commit and every new GitHub surface created by the PR.
-4. Update the versioned report to zero blockers and obtain a separate explicit
-   owner authorization for the visibility transition.
-5. Change visibility, verify the public repository surfaces, and record the
-   transition without publishing raw audit material.
+1. Recheck that the report candidate, exact commit, repository settings, and
+   Actions cache inventory still satisfy the recorded zero-blocker boundary.
+2. Change visibility under the recorded conditional owner authorization.
+3. Verify the repository, contribution/security paths, settings, and protected
+   rules from an anonymous environment.
+4. Record `public_transition_verified` without publishing raw audit material.
 
 Repository publication, history rewriting, artifact or cache deletion,
-credential rotation, and package publication are separate operations. This
-document authorizes none of them.
+credential rotation, and package publication remain separate operations. The
+report records only the owner authorization and completed actions named in its
+strict publication state.

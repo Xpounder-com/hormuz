@@ -239,6 +239,14 @@ def validate_report(report: Mapping[str, Any]) -> None:
     if verdict != "decision_required":
         if publication["owner_authorization"] != "approved":
             raise DisclosureReportError("disclosure_report_ready_without_owner_authorization")
+    visibility = publication["repository_visibility"]
+    visibility_changed = publication["visibility_changed"]
+    if (visibility == "public") != visibility_changed:
+        raise DisclosureReportError("disclosure_report_visibility_state_mismatch")
+    if verdict == "ready_for_public_transition" and visibility != "private":
+        raise DisclosureReportError("disclosure_report_ready_after_visibility_change")
+    if verdict == "public_transition_verified" and visibility != "public":
+        raise DisclosureReportError("disclosure_report_transition_not_verified")
 
 
 def _validate_actions(actions: Mapping[str, Any]) -> None:
