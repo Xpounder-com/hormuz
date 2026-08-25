@@ -159,6 +159,38 @@ wait_for_cnpg_ready() {
   [[ "${ready}" == "3" ]] || fail "CloudNativePG ready instance count invalid"
 }
 
+wait_for_failover_quorum_ready() {
+  local output=$1
+  local candidate="${output}.candidate"
+  local attempt
+  for attempt in $(seq 1 120); do
+    if kubectl --namespace hormuz-dependencies get failoverquorum hormuz-postgres \
+      --output=json >"${candidate}" 2>/dev/null \
+      && python3 - "${candidate}" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    status = json.load(handle).get("status", {})
+valid = (
+    status.get("method") == "any"
+    and status.get("standbyNumber") == 1
+    and len(status.get("standbyNames", [])) == 2
+    and isinstance(status.get("primary"), str)
+    and bool(status["primary"])
+)
+raise SystemExit(0 if valid else 1)
+PY
+    then
+      mv "${candidate}" "${output}"
+      return
+    fi
+    sleep 1
+  done
+  rm -f -- "${candidate}"
+  fail "CloudNativePG failover-quorum status did not become ready"
+}
+
 current_primary() {
   kubectl --namespace hormuz-dependencies get cluster hormuz-postgres \
     --output=jsonpath='{.status.currentPrimary}'
@@ -449,9 +481,8 @@ for item in items:
     if item["metadata"]["labels"].get("io.hormuz.proof-role") != "postgres":
         raise SystemExit("postgres_network_policy_label_missing")
 PY
-failover_quorum="$(kubectl --namespace hormuz-dependencies get failoverquorum hormuz-postgres --output=json)"
-python3 -c 'import json,sys; value=json.loads(sys.argv[1]); status=value.get("status",{}); raise SystemExit(0 if status.get("method")=="any" and status.get("standbyNumber")==1 and len(status.get("standbyNames",[]))==2 and status.get("primary") else 1)' \
-  "${failover_quorum}" || fail "CloudNativePG failover-quorum status invalid"
+wait_for_failover_quorum_ready "${ARTIFACT_ROOT}/failover-quorum.json"
+failover_quorum="$(<"${ARTIFACT_ROOT}/failover-quorum.json")"
 record_event postgres_topology_ready
 
 python3 - "${SECRET_ROOT}" <<'PY'
