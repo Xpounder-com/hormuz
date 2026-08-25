@@ -1,0 +1,430 @@
+{
+  "schema_id": "hormuz.v1-deployment-contract",
+  "schema_version": 1,
+  "status": "accepted",
+  "decision_record": "https://github.com/Xpounder-com/hormuz/issues/100#issuecomment-5414302641",
+  "application_contract": {
+    "artifact": "signed_oci_manifest_digest",
+    "first_publication_registry": "ghcr.io/xpounder-com/hormuz",
+    "registry_is_product_contract": false,
+    "deployment_tooling_is_application_dependency": false,
+    "initial_supported_platform": "linux/amd64",
+    "arm64_gate": 109
+  },
+  "profiles": [
+    {
+      "id": "compose_single_vm",
+      "status": "verified_evaluation_and_pilot_reference",
+      "platforms": [
+        "linux/amd64"
+      ],
+      "gateway_replicas": 1,
+      "failure_domain": "single_vm_none",
+      "postgresql": "private_digest_pinned_same_vm_or_customer_operated_external_dsn",
+      "availability_claim": "none",
+      "required_gates": [
+        101,
+        102
+      ],
+      "nonclaims": [
+        "enterprise_high_availability",
+        "failure_domain_isolation",
+        "zero_downtime_upgrade",
+        "production_disaster_recovery",
+        "rpo_or_rto"
+      ]
+    },
+    {
+      "id": "kubernetes_enterprise_reference",
+      "status": "profile_verified_release_operations_pending",
+      "platforms": [
+        "linux/amd64"
+      ],
+      "gateway_replicas": 2,
+      "failure_domain": "two_distinct_kubernetes_nodes_by_hostname_topology_only",
+      "postgresql": "customer_operated_external_ha_endpoint",
+      "availability_claim": "gated_by_issues_103_through_107",
+      "required_gates": [
+        101,
+        108,
+        103,
+        104,
+        105,
+        106,
+        107
+      ],
+      "nonclaims": [
+        "kubernetes_or_helm_application_dependency",
+        "customer_cluster_certification",
+        "broad_cni_portability",
+        "availability_zone_failure",
+        "multi_region_operation",
+        "universal_customer_recovery_guarantee"
+      ]
+    }
+  ],
+  "support_matrix": {
+    "deployment_platforms": [
+      {
+        "platform": "linux/amd64",
+        "status": "supported",
+        "profiles": [
+          "compose_single_vm",
+          "kubernetes_enterprise_reference"
+        ]
+      },
+      {
+        "platform": "linux/arm64",
+        "status": "unsupported_until_issue_109",
+        "profiles": []
+      },
+      {
+        "platform": "darwin",
+        "status": "development_cli_only_no_verified_deployment_profile",
+        "profiles": []
+      },
+      {
+        "platform": "windows",
+        "status": "unsupported_deployment_profile",
+        "profiles": []
+      }
+    ],
+    "employee_authentication": {
+      "supported": [
+        "bootstrap_token",
+        "generic_oidc_bearer_jwt"
+      ],
+      "excluded": [
+        "browser_session_broker",
+        "cookie_session",
+        "refresh_token_custody",
+        "opaque_token_introspection"
+      ]
+    },
+    "retry_and_idempotency": {
+      "automatic_provider_replay": false,
+      "client_retry": "new_attempt",
+      "supported_client_idempotency_key": "none"
+    },
+    "provider_protocols": [
+      "openai_responses",
+      "anthropic_messages"
+    ]
+  },
+  "component_ownership": [
+    {
+      "id": "signed_oci_artifact",
+      "hormuz_responsibility": "publish and verify the immutable signed application artifact and attestations",
+      "customer_responsibility": "verify or mirror the exact digest and enforce artifact admission"
+    },
+    {
+      "id": "public_tls_and_ingress",
+      "hormuz_responsibility": "authenticate the private hop and reject untrusted direct requests",
+      "customer_responsibility": "operate certificates DNS ingress edge logging request limits and source restrictions"
+    },
+    {
+      "id": "identity_provider",
+      "hormuz_responsibility": "validate supported generic OIDC bearer JWTs and configured immutable subject mappings",
+      "customer_responsibility": "operate issuer keys clients token issuance membership and revocation controls"
+    },
+    {
+      "id": "postgresql",
+      "hormuz_responsibility": "ship migrations restricted-role contracts probes and application recovery validation",
+      "customer_responsibility": "operate enterprise availability credentials networking backup retention restore and promotion"
+    },
+    {
+      "id": "runtime_configuration_and_secrets",
+      "hormuz_responsibility": "strictly validate immutable configuration references and avoid secret-bearing diagnostics",
+      "customer_responsibility": "create protect rotate retain and recover exact configuration and secret generations"
+    },
+    {
+      "id": "provider_accounts_and_egress",
+      "hormuz_responsibility": "enforce policy replace employee credentials and relay only to configured provider routes",
+      "customer_responsibility": "own provider accounts credentials network egress policy invoices and provider-side revocation"
+    },
+    {
+      "id": "custody_and_immutable_storage",
+      "hormuz_responsibility": "implement vendor-neutral envelope and anchor interfaces plus governed metadata-only evidence",
+      "customer_responsibility": "operate keys IAM retention legal holds recovery authority and underlying storage"
+    },
+    {
+      "id": "deployment_platform_and_traffic_promotion",
+      "hormuz_responsibility": "supply reference manifests readiness draining and executable conformance tooling",
+      "customer_responsibility": "operate hosts or clusters network policy capacity monitoring rollback and traffic promotion"
+    }
+  ],
+  "state_inventory": [
+    {
+      "id": "signed_release_and_profile_manifests",
+      "class": "durable_external",
+      "authoritative_owner": "hormuz_release_publisher_and_customer_mirror",
+      "authoritative_store": "oci_registry_or_customer_mirror_and_release_checkout",
+      "replica_behavior": "all replicas run the same verified digest and profile contract",
+      "recovery_treatment": "verify and redeploy the exact signed digest and reviewed manifests",
+      "recovery_gate": 107
+    },
+    {
+      "id": "runtime_configuration_generations",
+      "class": "durable_external",
+      "authoritative_owner": "customer",
+      "authoritative_store": "protected_customer_configuration_store",
+      "replica_behavior": "replicas pin one immutable reviewed generation",
+      "recovery_treatment": "restore exact bytes and fingerprint before admission",
+      "recovery_gate": 105
+    },
+    {
+      "id": "runtime_secret_and_credential_envelopes",
+      "class": "durable_external",
+      "authoritative_owner": "customer",
+      "authoritative_store": "customer_secret_manager_or_protected_mount_and_customer_kms",
+      "replica_behavior": "replicas receive only the generation required by their configuration",
+      "recovery_treatment": "customer restores protected generations while Hormuz verifies references and fingerprints",
+      "recovery_gate": 105
+    },
+    {
+      "id": "identity_source_and_event_time_bindings",
+      "class": "external_source_with_durable_snapshot",
+      "authoritative_owner": "customer_idp_and_hormuz",
+      "authoritative_store": "customer_idp_configuration_plus_postgresql_event_snapshots",
+      "replica_behavior": "each request validates identity and durably snapshots organization team and person at event time",
+      "recovery_treatment": "restore Hormuz snapshots and revalidate the configured external issuer before admission",
+      "recovery_gate": 105
+    },
+    {
+      "id": "schema_migration_ledger",
+      "class": "durable_authoritative",
+      "authoritative_owner": "hormuz",
+      "authoritative_store": "postgresql",
+      "replica_behavior": "runtime replicas verify but never mutate schema ownership",
+      "recovery_treatment": "restore and verify a contiguous supported ledger before runtime readiness",
+      "recovery_gate": 105
+    },
+    {
+      "id": "usage_cost_and_security_evidence",
+      "class": "durable_authoritative",
+      "authoritative_owner": "hormuz",
+      "authoritative_store": "postgresql",
+      "replica_behavior": "all replicas append tenant-qualified metadata-only events",
+      "recovery_treatment": "restore events and verify schema tenant isolation counts and fingerprints",
+      "recovery_gate": 105
+    },
+    {
+      "id": "budget_reservations",
+      "class": "durable_authoritative",
+      "authoritative_owner": "hormuz",
+      "authoritative_store": "postgresql",
+      "replica_behavior": "all replicas reserve atomically under one organization boundary",
+      "recovery_treatment": "restore active and uncertain reservations without releasing ambiguous consumption",
+      "recovery_gate": 105
+    },
+    {
+      "id": "request_attempt_ledger",
+      "class": "durable_authoritative",
+      "authoritative_owner": "hormuz",
+      "authoritative_store": "postgresql",
+      "replica_behavior": "pre-egress attempt roots and terminal or unknown events are shared and never replayed automatically",
+      "recovery_treatment": "restore roots events and pending or unknown state without manufacturing outcomes",
+      "recovery_gate": 105
+    },
+    {
+      "id": "policy_authority_versions_and_activation",
+      "class": "durable_authoritative",
+      "authoritative_owner": "hormuz",
+      "authoritative_store": "postgresql",
+      "replica_behavior": "requests pin the exact active immutable version at admission without a process policy cache",
+      "recovery_treatment": "restore administrators immutable versions events and exact active pointers",
+      "recovery_gate": 105
+    },
+    {
+      "id": "audit_chain_history_and_checkpoint_metadata",
+      "class": "durable_authoritative",
+      "authoritative_owner": "hormuz",
+      "authoritative_store": "postgresql",
+      "replica_behavior": "writers append per-organization sequence entries and heads atomically",
+      "recovery_treatment": "restore epochs entries heads and checkpoint metadata then verify continuity",
+      "recovery_gate": 105
+    },
+    {
+      "id": "custody_authority_intents_approvals_and_events",
+      "class": "durable_authoritative",
+      "authoritative_owner": "hormuz",
+      "authoritative_store": "postgresql",
+      "replica_behavior": "control services use tenant-qualified immutable authorization history",
+      "recovery_treatment": "restore administrators intents approvals retention and append-only events",
+      "recovery_gate": 105
+    },
+    {
+      "id": "custody_execution_and_lifecycle_history",
+      "class": "durable_authoritative",
+      "authoritative_owner": "hormuz",
+      "authoritative_store": "postgresql",
+      "replica_behavior": "isolated executors append attempts lifecycle events asset identities and attestations",
+      "recovery_treatment": "restore original uncertainty and immutable lifecycle history without replay",
+      "recovery_gate": 105
+    },
+    {
+      "id": "custody_runtime_projection_and_coordination",
+      "class": "durable_derived",
+      "authoritative_owner": "hormuz",
+      "authoritative_store": "postgresql_derived_from_immutable_lifecycle_events",
+      "replica_behavior": "replicas acknowledge barriers and use freshness leases while restrictions remain fail closed",
+      "recovery_treatment": "rebuild or verify projection heads restrictions barriers acknowledgements and active replica leases",
+      "recovery_gate": 105
+    },
+    {
+      "id": "immutable_audit_anchor_objects",
+      "class": "durable_external",
+      "authoritative_owner": "customer",
+      "authoritative_store": "customer_object_lock_storage",
+      "replica_behavior": "anchors stay off the request path and bind per-organization chain checkpoints",
+      "recovery_treatment": "retrieve and verify the last trusted anchor without shortening retention or deleting objects",
+      "recovery_gate": 105
+    },
+    {
+      "id": "oidc_discovery_and_jwks_cache",
+      "class": "cached",
+      "authoritative_owner": "customer_idp",
+      "authoritative_store": "gateway_process_memory_derived_from_https_issuer_metadata",
+      "replica_behavior": "each replica maintains a bounded cache and refreshes unknown signing keys",
+      "recovery_treatment": "discard and rebuild from the configured issuer while failing authentication closed",
+      "recovery_gate": 103
+    },
+    {
+      "id": "custody_projection_cache_and_admission_barriers",
+      "class": "cached",
+      "authoritative_owner": "hormuz",
+      "authoritative_store": "gateway_process_memory_derived_from_postgresql_projection",
+      "replica_behavior": "each replica uses an immutable snapshot and fences itself when freshness cannot be proved",
+      "recovery_treatment": "reload a fresh snapshot install prepared barriers acknowledge and become ready only afterward",
+      "recovery_gate": 103
+    },
+    {
+      "id": "gateway_process_ephemera",
+      "class": "ephemeral",
+      "authoritative_owner": "none",
+      "authoritative_store": "gateway_process_memory",
+      "replica_behavior": "connection pools readiness counters and in-flight handlers are replica local and non-authoritative",
+      "recovery_treatment": "recreate after dependency validation while durable attempts preserve ambiguous provider work",
+      "recovery_gate": 103
+    }
+  ],
+  "recovery_objectives": {
+    "profile": "kubernetes_enterprise_reference",
+    "classification": "reference_rehearsal_acceptance_criteria",
+    "customer_sla": false,
+    "rpo": {
+      "maximum_seconds": 300,
+      "failure_event": "failure_injection_at",
+      "recovered_marker": "latest_recovered_committed_marker_at",
+      "measurement": "maximum gap across every recovery-covered Hormuz durable state class"
+    },
+    "internal_rto": {
+      "maximum_seconds": 3600,
+      "start_event": "authorized_recovery_execution_started_at",
+      "end_event": "recovered_environment_ready_for_promotion_at",
+      "measurement": "restore plus complete Hormuz admission and state validation with required recovery inputs available"
+    },
+    "end_to_end_recovery_time": {
+      "maximum_seconds": null,
+      "must_publish": true,
+      "start_event": "failure_injection_at",
+      "end_event": "first_successful_governed_request_after_promotion_at",
+      "includes": [
+        "detection",
+        "declaration",
+        "authorization",
+        "restore",
+        "validation",
+        "traffic_promotion",
+        "first_governed_request"
+      ]
+    },
+    "required_ordered_timestamps": [
+      "failure_injection_at",
+      "incident_detected_at",
+      "incident_declared_at",
+      "authorized_recovery_execution_started_at",
+      "restore_started_at",
+      "recovered_environment_ready_for_promotion_at",
+      "traffic_promoted_at",
+      "first_successful_governed_request_after_promotion_at"
+    ]
+  },
+  "child_gates": [
+    {
+      "issue": 101,
+      "profiles": [
+        "compose_single_vm",
+        "kubernetes_enterprise_reference"
+      ],
+      "claim": "signed_oci_application_contract"
+    },
+    {
+      "issue": 102,
+      "profiles": [
+        "compose_single_vm"
+      ],
+      "claim": "single_vm_evaluation_and_pilot_reference"
+    },
+    {
+      "issue": 103,
+      "profiles": [
+        "kubernetes_enterprise_reference"
+      ],
+      "claim": "coordinated_multi_replica_operation"
+    },
+    {
+      "issue": 104,
+      "profiles": [
+        "kubernetes_enterprise_reference"
+      ],
+      "claim": "postgresql_ha_failover_and_bounded_recovery"
+    },
+    {
+      "issue": 105,
+      "profiles": [
+        "kubernetes_enterprise_reference"
+      ],
+      "claim": "measured_reference_disaster_recovery"
+    },
+    {
+      "issue": 106,
+      "profiles": [
+        "compose_single_vm",
+        "kubernetes_enterprise_reference"
+      ],
+      "claim": "tenant_complete_export_and_deletion"
+    },
+    {
+      "issue": 107,
+      "profiles": [
+        "compose_single_vm",
+        "kubernetes_enterprise_reference"
+      ],
+      "claim": "release_upgrade_and_rollback"
+    },
+    {
+      "issue": 108,
+      "profiles": [
+        "kubernetes_enterprise_reference"
+      ],
+      "claim": "vendor_neutral_helm_profile_topology"
+    }
+  ],
+  "nonclaims": [
+    "compose_is_enterprise_ha",
+    "reference_targets_are_customer_slas",
+    "reference_evidence_certifies_customer_infrastructure",
+    "browser_session_brokerage_is_supported",
+    "linux_arm64_is_supported",
+    "kubernetes_or_helm_is_an_application_dependency",
+    "open_release_gates_are_already_proven"
+  ],
+  "documentation": [
+    "docs/decisions/0008-signed-oci-deployment-contract.md",
+    "docs/decisions/0009-v1-deployment-profiles-and-recovery-objectives.md",
+    "docs/DEPLOYMENT.md",
+    "deploy/compose/README.md",
+    "deploy/kubernetes/README.md"
+  ]
+}

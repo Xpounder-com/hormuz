@@ -1,4 +1,31 @@
-# Customer-controlled TLS deployment boundary
+# Deployment contract and customer-controlled boundaries
+
+## V1 deployment and recovery contract
+
+Hormuz's application contract is one signed OCI manifest digest. Docker
+Compose and Kubernetes/Helm are separately supported operational profiles, not
+application dependencies:
+
+- the single-VM Compose profile is for local use, evaluation, and pilots and
+  has no HA, zero-downtime, disaster-recovery, RPO, or RTO claim;
+- the optional Kubernetes/Helm profile is the v1 enterprise reference and uses
+  customer-operated external PostgreSQL, ingress, identity, custody, backup,
+  and recovery infrastructure.
+
+The enterprise-reference disaster-recovery rehearsal must prove an RPO of no
+more than 300 seconds and an internal RTO of no more than 3,600 seconds. It must
+also publish the complete end-to-end interval from failure injection through
+detection, authorization, restore, validation, traffic promotion, and the first
+successful governed request. These are acceptance criteria for the exact
+pinned reference rehearsal, not a customer SLA.
+
+The accepted [ADR 0009](decisions/0009-v1-deployment-profiles-and-recovery-objectives.md)
+defines the clocks and ownership boundary. The strictly validated
+[v1 deployment contract](deployment-contract-v1.json) inventories the
+supported platforms, profile claims, component owners, durable and cached
+state, recovery treatment, child gates, and nonclaims.
+
+## Customer-controlled TLS deployment boundary
 
 Hormuz does **not** manage public TLS certificates in its enterprise reference
 architecture. A customer-controlled reverse proxy, load balancer, service

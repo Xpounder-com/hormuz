@@ -23,6 +23,7 @@ An agent, test result, or convenient implementation detail cannot move a decisio
 | [0006](0006-commit-time-audit-chain-and-checkpoints.md) | Accepted | Per-organization commit-time audit chains and asynchronous checkpoints | [#72](https://github.com/Xpounder-com/hormuz/issues/72) |
 | [0007](0007-tenant-custody-authority.md) | Accepted | Tenant custody authority and governed lifecycle approvals | [#89](https://github.com/Xpounder-com/hormuz/issues/89) |
 | [0008](0008-signed-oci-deployment-contract.md) | Accepted | Signed OCI digest contract, first GHCR publication, keyless Sigstore identity, and deployment-profile separation | [#101](https://github.com/Xpounder-com/hormuz/issues/101) |
+| [0009](0009-v1-deployment-profiles-and-recovery-objectives.md) | Accepted | v1 Compose and Kubernetes profile boundaries, state ownership, and reference-rehearsal RPO/RTO objectives | [#100](https://github.com/Xpounder-com/hormuz/issues/100) |
 
 ## Acceptance record
 

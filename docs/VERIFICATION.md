@@ -302,6 +302,24 @@ contracts, and requires a clean SIGTERM exit. It uses fixed placeholders and
 does not call a model provider. Its narrow deployment boundary and remaining
 nonclaims are in [OCI.md](OCI.md).
 
+## V1 deployment-contract validation
+
+The accepted profile, ownership, state-inventory, and recovery-objective
+contract is checked with:
+
+```bash
+python tools/verify_deployment_contract.py
+```
+
+The verifier rejects unknown or duplicate JSON fields, changed platform or
+authentication support, a broadened Compose claim, a missing durable/cache
+state class, changed child-gate ownership, RPO above 300 seconds, internal RTO
+above 3,600 seconds, suppression of complete end-to-end recovery time, or any
+attempt to label the reference objectives a customer SLA. Package CI retains
+only a content-free summary containing counts, thresholds, and Boolean scope
+labels. It does not claim that issues #103 through #107 have already executed
+their operational proofs.
+
 ## Single-VM Compose pilot reference
 
 The `Single-VM Compose pilot reference` job runs
