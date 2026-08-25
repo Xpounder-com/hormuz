@@ -22,8 +22,9 @@ The live verifier proves two bounded scenarios:
 1. After an unexpected primary-worker pause, both gateways withdraw readiness
    and deny concurrent governed requests before provider egress. CloudNativePG
    promotes a safe replica, the Lease and read/write endpoint converge, the
-   same gateway processes reconnect, durable governed state remains intact,
-   and no provider request is replayed. Immediately after the pause, the fake
+   promoted primary re-establishes an `ANY 1` synchronous streaming standby,
+   the same gateway processes reconnect, durable governed state remains
+   intact, and no provider request is replayed. Immediately after the pause, the fake
    provider records an in-flight request and closes its connection without a
    response. The client outcome remains ambiguous while the pre-egress attempt
    and reservation remain durably uncertain.

@@ -401,6 +401,31 @@ wait_for_lease_and_rw_primary() {
   fail "primary Lease and read-write endpoint did not converge"
 }
 
+wait_for_synchronous_durability() {
+  local primary=$1
+  local attempt state
+  for attempt in $(seq 1 300); do
+    state="$(timeout 10s kubectl --namespace hormuz-dependencies exec "pod/${primary}" \
+      --container postgres -- psql --username postgres --dbname hormuz \
+      --tuples-only --no-align --command \
+      "SELECT
+         CASE WHEN NOT pg_is_in_recovery() THEN 1 ELSE 0 END,
+         CASE WHEN current_setting('synchronous_commit') = 'on' THEN 1 ELSE 0 END,
+         CASE WHEN current_setting('synchronous_standby_names') LIKE 'ANY 1 (%' THEN 1 ELSE 0 END,
+         (SELECT COUNT(*) FROM pg_stat_replication
+           WHERE state = 'streaming' AND sync_state = 'quorum'),
+         (SELECT COUNT(*) FROM pg_stat_activity
+           WHERE datname = current_database() AND wait_event = 'SyncRep')" 2>/dev/null || true)"
+    if python3 -c 'import sys; v=sys.argv[1].strip().split("|"); raise SystemExit(0 if len(v)==5 and [int(x) for x in v[:3]]==[1,1,1] and int(v[3])>=1 and int(v[4])==0 else 1)' \
+      "${state}" 2>/dev/null; then
+      return
+    fi
+    sleep 1
+  done
+  database_activity_snapshot
+  fail "synchronous durability did not recover after primary promotion"
+}
+
 [[ "${HORMUZ_POSTGRES_HA_PROOF_ACK:-}" == "${PROOF_ACK}" ]] \
   || fail "set HORMUZ_POSTGRES_HA_PROOF_ACK=${PROOF_ACK}"
 [[ -n "${EVIDENCE_DIR}" ]] || fail "HORMUZ_POSTGRES_HA_EVIDENCE_DIR is required"
@@ -711,6 +736,8 @@ primary_promotion_ms=$(( $(monotonic_ms) - positive_started_ms ))
 record_event safe_replica_promoted
 wait_for_lease_and_rw_primary "${new_primary}"
 record_event lease_and_rw_endpoint_converged
+wait_for_synchronous_durability "${new_primary}"
+record_event synchronous_durability_restored
 state_probe snapshot "${ARTIFACT_ROOT}/state-after-failover.json"
 record_event durable_state_continuity_verified
 
@@ -826,7 +853,7 @@ record_event negative_path_recovered
 state_probe snapshot "${ARTIFACT_ROOT}/state-after-quorum-recovery.json"
 record_event final_state_continuity_verified
 
-[[ "${EVENT_SEQUENCE}" -eq 24 ]] || fail "event sequence incomplete"
+[[ "${EVENT_SEQUENCE}" -eq 25 ]] || fail "event sequence incomplete"
 [[ "${MAXIMUM_STORAGE_DENIAL_MS}" -gt 0 ]] || fail "storage denial timing was not measured"
 
 python3 - \
@@ -900,6 +927,7 @@ value = {
         "previous_primary_changed": True,
         "lease_holder_matches_current_primary": True,
         "rw_endpoint_matches_current_primary": True,
+        "synchronous_durability_restored": True,
         "former_primary_rejoined_as_replica": True,
         "former_primary_fenced_before_rejoin": True,
         "gateway_replicas_observed": 2,

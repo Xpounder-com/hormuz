@@ -81,6 +81,7 @@ def valid_observations() -> dict[str, object]:
             "previous_primary_changed": True,
             "lease_holder_matches_current_primary": True,
             "rw_endpoint_matches_current_primary": True,
+            "synchronous_durability_restored": True,
             "former_primary_rejoined_as_replica": True,
             "former_primary_fenced_before_rejoin": True,
             "gateway_replicas_observed": 2,
@@ -217,6 +218,8 @@ class PostgresHAReferenceTests(unittest.TestCase):
         self.assertIn("blocking_abort", provider)
         self.assertIn("failoverquorum", runner)
         self.assertIn("wait_for_failover_quorum_ready", runner)
+        self.assertIn("wait_for_synchronous_durability", runner)
+        self.assertIn("sync_state = 'quorum'", runner)
         self.assertIn("wait_for_job_complete", runner)
         self.assertIn("postgres_ha_stage=%s", runner)
         self.assertIn("timeout 120s kubectl", runner)
