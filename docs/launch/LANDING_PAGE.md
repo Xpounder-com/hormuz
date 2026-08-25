@@ -1,4 +1,4 @@
-<!-- hormuz-launch-asset-v1 {"asset_id":"landing_page","publication_status":"draft_do_not_publish","claim_ids":["ALPHA_BOUNDARY","CLIENT_VERIFICATION","COST_REPORTING","EVIDENCE_BOUNDARY","GATEWAY_SCOPE","OCI_ROADMAP","POLICY_CONTROLS","PROVIDER_FREE_DEMO","SECRET_EGRESS"]} -->
+<!-- hormuz-launch-asset-v1 {"asset_id":"landing_page","publication_status":"draft_do_not_publish","claim_ids":["ALPHA_BOUNDARY","CLIENT_VERIFICATION","COST_REPORTING","EVIDENCE_BOUNDARY","GATEWAY_SCOPE","OCI_RELEASE","POLICY_CONTROLS","PROVIDER_FREE_DEMO","SECRET_EGRESS"]} -->
 
 # DRAFT — DO NOT PUBLISH
 
@@ -71,11 +71,12 @@ silently treated as free. <!-- claims: COST_REPORTING -->
 
 ## A portable release target
 
-The first image target is one signed `linux/amd64` OCI digest. Private GHCR is
-the first publication registry, not the product contract, so an organization
-can verify the digest and mirror it elsewhere. Image publication and signature
-verification are still release work, not a completed alpha claim.
-<!-- claims: OCI_ROADMAP -->
+The first published image is the signed `v0.1.1` `linux/amd64` OCI digest.
+Public GHCR is the first publication registry, not the product contract, so an
+organization can verify the exact workflow identity and recursively mirror the
+digest, signature, and attestations elsewhere. Anonymous pull, signature/Rekor,
+both attestations, and a recursive mirror were exercised for this release.
+<!-- claims: OCI_RELEASE -->
 
 ## Start with your real policy problem
 

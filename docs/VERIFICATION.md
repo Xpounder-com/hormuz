@@ -356,7 +356,9 @@ the workflow add the semantic-version registry tag.
 The final `hormuz.oci-release-evidence` summary hashes every retained evidence
 file and records the registry-portable digest contract, AMD64 boundary,
 mirroring requirements, exact signer, and explicit Rekor/attestation
-boundaries. GHCR is the first private registry, not the product contract. The
+boundaries. GHCR is the first publication registry, not the product contract.
+The workflow verifies the release while the first-registry package is private;
+the owner may make the validated package public afterward. The
 workflow artifact contains only allowlisted summaries, not raw SBOM,
 provenance, vulnerability, or Cosign verification payloads. This workflow does not
 certify Compose, Kubernetes, a customer mirror, public TLS, HA, or recovery.
