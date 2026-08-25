@@ -9,8 +9,8 @@ The account-free fixture pins CloudNativePG `1.30.0`, PostgreSQL `16.15`, Kind
 `v0.32.0` / Kubernetes `v1.36.1`, Helm `v3.21.4`, Cilium `1.20.1`, and the
 published Hormuz `linux/amd64` digest. The operator manifest is accepted only
 at its exact SHA-256 and is rewritten to the exact Linux AMD64 operator image
-manifest before installation. PostgreSQL uses the exact published image index
-and verifies the running Linux AMD64 child-manifest digest.
+manifest before installation. PostgreSQL uses and verifies the exact published
+Linux AMD64 image-manifest digest.
 
 The disposable topology contains three PostgreSQL instances on three tainted
 database workers and two Hormuz replicas on two different workers. It enables
