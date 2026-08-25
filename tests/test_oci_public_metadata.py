@@ -162,6 +162,18 @@ class OciPublicMetadataTests(unittest.TestCase):
         self.assertNotIn("trivy-vulnerabilities.json", retained)
         self.assertNotIn("/**", retained)
 
+    def test_oci_contract_keeps_trust_and_first_release_boundaries(self) -> None:
+        contract = (ROOT / "docs" / "OCI.md").read_text(encoding="utf-8")
+        normalized = " ".join(contract.split())
+
+        self.assertIn("Retention is an operator-owned prerequisite", normalized)
+        self.assertIn(
+            "Signer-identity retirement is a trust-policy operation", normalized
+        )
+        self.assertIn("must fail closed before the artifact is admitted", normalized)
+        self.assertIn("there is no older signed Hormuz digest", normalized)
+        self.assertIn("issues/135", normalized)
+
     @staticmethod
     def _provenance() -> dict[str, object]:
         ref = "refs/tags/v0.1.0"
