@@ -168,8 +168,9 @@ portability, and deeper coordinated state/admission claims remain separately
 gated.
 
 The coordinated state/admission gate,
-[#103](https://github.com/Xpounder-com/hormuz/issues/103), adds a strict
-composite proof. Ten named PostgreSQL tests exercise atomic budgets, immutable
+[#103](https://github.com/Xpounder-com/hormuz/issues/103), is implemented in
+[#141](https://github.com/Xpounder-com/hormuz/pull/141) as a strict composite
+proof. Ten named PostgreSQL tests exercise atomic budgets, immutable
 policy activation, tenant isolation, the request-attempt ledger, concurrent
 audit-chain writes, custody approvals and coordinated restriction barriers,
 duplicate synchronization, stale acknowledgements, partition fencing, and
