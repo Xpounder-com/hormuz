@@ -211,7 +211,7 @@ class PostgresHAReferenceTests(unittest.TestCase):
         self.assertIn("failoverquorum", runner)
         self.assertIn("wait_for_failover_quorum_ready", runner)
         self.assertIn("for attempt in $(seq 1 120)", runner)
-        self.assertIn('status.get("method") == "any"', runner)
+        self.assertIn('status.get("method") == "ANY"', runner)
         self.assertIn("name: PostgreSQL HA failover reference", workflow)
         self.assertIn("CloudNativePG `1.30.0`", reference)
         self.assertIn("verification infrastructure", reference)

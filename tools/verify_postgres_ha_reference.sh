@@ -173,7 +173,7 @@ import sys
 with open(sys.argv[1], encoding="utf-8") as handle:
     status = json.load(handle).get("status", {})
 valid = (
-    status.get("method") == "any"
+    status.get("method") == "ANY"
     and status.get("standbyNumber") == 1
     and len(status.get("standbyNames", [])) == 2
     and isinstance(status.get("primary"), str)
