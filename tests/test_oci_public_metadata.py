@@ -16,7 +16,7 @@ CONFIG_DIGEST = "sha256:" + ("d" * 64)
 INVOCATION_URI = "https://github.com/Xpounder-com/hormuz/actions/runs/123/attempts/1"
 ROOT_REF = (
     "pkg:oci/hormuz@"
-    f"{CONFIG_DIGEST}?arch=amd64&repository_url=ghcr.io%2Fxpounder-com%2Fhormuz"
+    f"{DIGEST}?arch=amd64&repository_url=ghcr.io%2Fxpounder-com%2Fhormuz"
 )
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -71,6 +71,18 @@ class OciPublicMetadataTests(unittest.TestCase):
             "public_metadata_repository_not_public",
         ):
             self._validate(repository_visibility="private")
+
+    def test_root_purl_uses_registry_manifest_digest_not_local_image_id(self) -> None:
+        sbom = self._sbom()
+        invalid_root_ref = ROOT_REF.replace(DIGEST, CONFIG_DIGEST)
+        sbom["metadata"]["component"]["bom-ref"] = invalid_root_ref
+        sbom["metadata"]["component"]["purl"] = invalid_root_ref
+        sbom["dependencies"][0]["ref"] = invalid_root_ref
+        with self.assertRaisesRegex(
+            public_metadata.PublicMetadataError,
+            "sbom_root_purl_invalid",
+        ):
+            self._validate(sbom=sbom)
 
     def test_unknown_schema_field_and_release_version_drift_fail_closed(self) -> None:
         sbom = self._sbom()

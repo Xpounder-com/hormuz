@@ -540,7 +540,10 @@ def _validate_sbom(
         if (
             parsed.scheme != "pkg"
             or parsed.netloc
-            or parsed.path != f"oci/hormuz@{image_id}"
+            # Trivy derives the OCI PURL version from RepoDigest, which is the
+            # registry manifest digest. ImageID is a separate daemon-local
+            # identity and can differ on a pulled registry image.
+            or parsed.path != f"oci/hormuz@{image_digest}"
             or parsed.fragment
             or qualifiers
             != {
