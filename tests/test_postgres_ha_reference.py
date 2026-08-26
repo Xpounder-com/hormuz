@@ -234,6 +234,7 @@ class PostgresHAReferenceTests(unittest.TestCase):
         self.assertIn("available_database_pods", runner)
         self.assertNotIn("ready_database_pods", runner)
         self.assertIn("rw_ready_addresses", runner)
+        self.assertEqual(runner.count('(endpoint.get("conditions") or {})'), 2)
         self.assertIn("storage-backpressure", runner)
         self.assertIn("ambiguous-request", runner)
         self.assertIn("/control/block/abort", runner)

@@ -480,7 +480,7 @@ wait_for_primary_change() {
 rw_ready_addresses() {
   kubectl --namespace hormuz-dependencies get endpointslices \
     --selector='kubernetes.io/service-name=hormuz-postgres-rw' --output=json \
-    | python3 -c 'import json,sys; value=json.load(sys.stdin); print(sum(len(endpoint.get("addresses",[])) for item in value.get("items",[]) for endpoint in item.get("endpoints",[]) if endpoint.get("conditions",{}).get("ready") is True))'
+    | python3 -c 'import json,sys; value=json.load(sys.stdin); print(sum(len(endpoint.get("addresses",[])) for item in value.get("items",[]) for endpoint in item.get("endpoints",[]) if (endpoint.get("conditions") or {}).get("ready") is True))'
 }
 
 lease_and_rw_primary_matches() {
@@ -497,7 +497,7 @@ lease_and_rw_primary_matches() {
   endpoint_json="$(kubectl --namespace hormuz-dependencies get endpointslices \
     --selector='kubernetes.io/service-name=hormuz-postgres-rw' --output=json 2>/dev/null || true)"
   [[ -n "${endpoint_json}" ]] || return 1
-  python3 -c 'import json,sys; value=json.loads(sys.argv[1]); addresses={a for item in value.get("items",[]) for endpoint in item.get("endpoints",[]) if endpoint.get("conditions",{}).get("ready") is True for a in endpoint.get("addresses",[])}; raise SystemExit(0 if addresses=={sys.argv[2]} else 1)' \
+  python3 -c 'import json,sys; value=json.loads(sys.argv[1]); addresses={a for item in value.get("items",[]) for endpoint in item.get("endpoints",[]) if (endpoint.get("conditions") or {}).get("ready") is True for a in endpoint.get("addresses",[])}; raise SystemExit(0 if addresses=={sys.argv[2]} else 1)' \
     "${endpoint_json}" "${primary_ip}"
 }
 
