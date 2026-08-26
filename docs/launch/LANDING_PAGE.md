@@ -77,8 +77,9 @@ The current published image is the signed `v0.1.3` `linux/amd64` OCI digest,
 `sha256:8ac24f5c7afb8ce09ec133616de06702f568a2e70594d8034146a131d86e5b67`.
 Public GHCR is the first publication registry, not the product contract, so an
 organization can verify the exact workflow identity and recursively mirror the
-digest, signature, and attestations elsewhere. Anonymous pull, signature/Rekor,
-both attestations, and a recursive mirror were exercised for this release.
+digest, signature, and attestations elsewhere using the documented procedure.
+Anonymous pull, signature/Rekor, and both attestations were exercised for this
+release; this does not claim a v0.1.3 destination-registry mirror proof.
 <!-- claims: OCI_RELEASE -->
 
 ## Bounded reference deployments
@@ -87,8 +88,10 @@ Account-free proofs cover a single-VM Compose pilot, multi-replica Kubernetes
 and Helm application operation, CloudNativePG failover and quorum loss, and a
 disaster-recovery rehearsal within its accepted reference targets. These are
 proofs of exact pinned combinations—not production certification, a customer
-SLA, or broad platform portability. The full boundaries are recorded in the
-[verification record](../VERIFICATION.md). <!-- claims: REFERENCE_DEPLOYMENTS -->
+SLA, or broad platform portability. The boundaries are recorded in the
+[verification record](../VERIFICATION.md) and the
+[disaster-recovery runbook](../DISASTER_RECOVERY.md).
+<!-- claims: REFERENCE_DEPLOYMENTS -->
 
 ## Start with your real policy problem
 

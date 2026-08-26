@@ -74,12 +74,15 @@ of a request.
 
 ## Deployment story
 
-The portable product contract is the signed `v0.1.3` OCI digest. Public GHCR
-is only the first publication registry. The published image is `linux/amd64`;
-a multi-architecture manifest remains blocked on separate native
-`linux/arm64` verification. Exact keyless workflow identity, public Rekor image
-signature, registry SBOM/provenance attestations, anonymous pull, and recursive
-mirroring were verified for this release.
+The portable product contract is the signed `v0.1.3` OCI digest,
+`sha256:8ac24f5c7afb8ce09ec133616de06702f568a2e70594d8034146a131d86e5b67`.
+Public GHCR is only the first publication registry. The published image is
+`linux/amd64`; a multi-architecture manifest remains blocked on separate
+native `linux/arm64` verification. Exact keyless workflow identity, public
+Rekor image signature, registry SBOM/provenance attestations, and anonymous
+pull were verified for this release. The documented recursive-mirror procedure
+requires destination verification; no v0.1.3 destination-registry proof is
+claimed here.
 <!-- claims: OCI_RELEASE -->
 
 The built-in server does not manage public TLS certificates. A customer-owned

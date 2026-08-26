@@ -10,6 +10,7 @@
     "required_closed_issues": [
       101,
       102,
+      103,
       104,
       105,
       108,
@@ -259,7 +260,7 @@
     },
     {
       "id": "OCI_RELEASE",
-      "text": "Hormuz v0.1.3 is published as signed linux/amd64 OCI digest sha256:8ac24f5c7afb8ce09ec133616de06702f568a2e70594d8034146a131d86e5b67 with anonymous GHCR pull, exact-workflow verification, a public-Rekor image signature, registry SBOM and SLSA attestations, and recursive mirror proof; GHCR remains the first registry rather than the portable artifact contract.",
+      "text": "Hormuz v0.1.3 is published as signed linux/amd64 OCI digest sha256:8ac24f5c7afb8ce09ec133616de06702f568a2e70594d8034146a131d86e5b67 with anonymous GHCR pull, exact-workflow verification, a public-Rekor image signature, and registry SBOM and SLSA attestations; GHCR remains the first registry rather than the portable artifact contract, and the documented mirror procedure requires recursive copying and destination verification.",
       "classification": "verified_alpha",
       "evidence": [
         {
@@ -288,6 +289,10 @@
         {
           "kind": "closed_issue",
           "value": "https://github.com/Xpounder-com/hormuz/issues/102"
+        },
+        {
+          "kind": "closed_issue",
+          "value": "https://github.com/Xpounder-com/hormuz/issues/103"
         },
         {
           "kind": "closed_issue",

@@ -15,6 +15,7 @@ SCHEMA_VERSION = 1
 MANIFEST_PATH = Path("docs/launch/claims-v1.json")
 PUBLICATION_STATUS = "draft_do_not_publish"
 RELEASE_ID = "v0.1.3-public-alpha"
+OCI_DIGEST = "sha256:8ac24f5c7afb8ce09ec133616de06702f568a2e70594d8034146a131d86e5b67"
 PROJECT_URL = "https://github.com/Xpounder-com/hormuz"
 ASSET_PATHS = {
     "landing_page": "docs/launch/LANDING_PAGE.md",
@@ -51,7 +52,20 @@ ANALYTIC_IDS = (
     "design_partner_conversations",
     "pilot_applications",
 )
-REQUIRED_CLOSED_ISSUES = [101, 102, 104, 105, 108, 110, 111, 113, 114, 115, 116]
+REQUIRED_CLOSED_ISSUES = [
+    101,
+    102,
+    103,
+    104,
+    105,
+    108,
+    110,
+    111,
+    113,
+    114,
+    115,
+    116,
+]
 MARKER = re.compile(r"^<!-- hormuz-launch-asset-v1 (\{.+\}) -->$")
 CLAIM_REFERENCE = re.compile(r"<!-- claims: ([A-Z0-9_ ]+) -->")
 CLAIM_ID = re.compile(r"^[A-Z][A-Z0-9_]+$")
@@ -454,6 +468,18 @@ def validate_launch_assets(root: Path) -> dict[str, object]:
     texts, used_claims = _validate_assets(
         root, manifest["assets"], claims, cta_tokens
     )
+    oci_claim = claims.get("OCI_RELEASE")
+    if (
+        oci_claim is None
+        or not isinstance(oci_claim.get("text"), str)
+        or OCI_DIGEST not in oci_claim["text"]
+    ):
+        raise LaunchAssetError("OCI release claim omits the exact digest")
+    for asset_id in ("landing_page", "architecture_security"):
+        if OCI_DIGEST not in texts[asset_id]:
+            raise LaunchAssetError(
+                f"{asset_id} omits the exact OCI release digest"
+            )
     if used_claims != set(claims):
         raise LaunchAssetError("claim ledger contains an unused public claim")
     for token in cta_tokens:

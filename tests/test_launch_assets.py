@@ -46,7 +46,7 @@ class LaunchAssetTests(unittest.TestCase):
         self.assertEqual(result["claim_count"], 11)
         self.assertEqual(result["cta_count"], 2)
         self.assertEqual(result["analytic_count"], 7)
-        self.assertEqual(result["required_closed_issue_count"], 11)
+        self.assertEqual(result["required_closed_issue_count"], 12)
         self.assertTrue(result["source_distribution_bound"])
 
     def test_missing_evidence_path_fails_closed(self) -> None:
@@ -154,6 +154,28 @@ class LaunchAssetTests(unittest.TestCase):
             required.remove(110)
             path.write_text(json.dumps(manifest), encoding="utf-8")
             with self.assertRaisesRegex(LaunchAssetError, "publication gate"):
+                validate_launch_assets(root)
+
+    def test_oci_digest_cannot_change_silently(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._copy_contract(root)
+            expected = (
+                "sha256:8ac24f5c7afb8ce09ec133616de06702"
+                "f568a2e70594d8034146a131d86e5b67"
+            )
+            changed = "sha256:" + ("0" * 64)
+            for relative in (
+                "docs/launch/claims-v1.json",
+                "docs/launch/LANDING_PAGE.md",
+                "docs/launch/ARCHITECTURE_AND_SECURITY.md",
+            ):
+                path = root / relative
+                path.write_text(
+                    path.read_text(encoding="utf-8").replace(expected, changed),
+                    encoding="utf-8",
+                )
+            with self.assertRaisesRegex(LaunchAssetError, "exact digest"):
                 validate_launch_assets(root)
 
     def test_source_manifest_must_carry_claim_ledger(self) -> None:
