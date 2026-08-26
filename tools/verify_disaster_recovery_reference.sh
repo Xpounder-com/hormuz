@@ -858,7 +858,8 @@ kubectl --namespace hormuz-system delete job/hormuz-postgres-ha-bootstrap \
 # Stream WAL before the physical backup so every post-backup commit is recoverable.
 SOURCE_PORT="$(free_port)"
 kubectl --namespace hormuz-dependencies port-forward service/hormuz-postgres-rw \
-  "127.0.0.1:${SOURCE_PORT}:5432" >"${ARTIFACT_ROOT}/port-forward.log" 2>&1 &
+  --address=127.0.0.1 "${SOURCE_PORT}:5432" \
+  >"${ARTIFACT_ROOT}/port-forward.log" 2>&1 &
 PORT_FORWARD_PID=$!
 wait_for_source_connection
 host_uid="$(id -u)"
