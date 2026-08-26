@@ -14,6 +14,7 @@ from urllib.parse import unquote, urlparse
 SCHEMA_VERSION = 1
 MANIFEST_PATH = Path("docs/launch/claims-v1.json")
 PUBLICATION_STATUS = "draft_do_not_publish"
+RELEASE_ID = "v0.1.3-public-alpha"
 PROJECT_URL = "https://github.com/Xpounder-com/hormuz"
 ASSET_PATHS = {
     "landing_page": "docs/launch/LANDING_PAGE.md",
@@ -50,7 +51,7 @@ ANALYTIC_IDS = (
     "design_partner_conversations",
     "pilot_applications",
 )
-REQUIRED_CLOSED_ISSUES = [101, 110, 113, 114, 115, 116]
+REQUIRED_CLOSED_ISSUES = [101, 102, 104, 105, 108, 110, 111, 113, 114, 115, 116]
 MARKER = re.compile(r"^<!-- hormuz-launch-asset-v1 (\{.+\}) -->$")
 CLAIM_REFERENCE = re.compile(r"<!-- claims: ([A-Z0-9_ ]+) -->")
 CLAIM_ID = re.compile(r"^[A-Z][A-Z0-9_]+$")
@@ -420,7 +421,7 @@ def validate_launch_assets(root: Path) -> dict[str, object]:
         raise LaunchAssetError("unsupported launch-manifest schema version")
     if manifest["repository"] != "Xpounder-com/hormuz":
         raise LaunchAssetError("launch repository identity changed")
-    if manifest["release"] != "v0.1.1-public-alpha":
+    if manifest["release"] != RELEASE_ID:
         raise LaunchAssetError("launch release identity changed")
     if manifest["publication_status"] != PUBLICATION_STATUS:
         raise LaunchAssetError("draft publication status changed without approval")

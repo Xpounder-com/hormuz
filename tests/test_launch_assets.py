@@ -43,10 +43,10 @@ class LaunchAssetTests(unittest.TestCase):
         self.assertEqual(result["publication_status"], "draft_do_not_publish")
         self.assertFalse(result["publishable"])
         self.assertEqual(result["asset_count"], 6)
-        self.assertEqual(result["claim_count"], 10)
+        self.assertEqual(result["claim_count"], 11)
         self.assertEqual(result["cta_count"], 2)
         self.assertEqual(result["analytic_count"], 7)
-        self.assertEqual(result["required_closed_issue_count"], 6)
+        self.assertEqual(result["required_closed_issue_count"], 11)
         self.assertTrue(result["source_distribution_bound"])
 
     def test_missing_evidence_path_fails_closed(self) -> None:
@@ -130,6 +130,30 @@ class LaunchAssetTests(unittest.TestCase):
             manifest["publication_status"] = "approved_for_publication"
             path.write_text(json.dumps(manifest), encoding="utf-8")
             with self.assertRaisesRegex(LaunchAssetError, "without approval"):
+                validate_launch_assets(root)
+
+    def test_release_identity_cannot_change_silently(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._copy_contract(root)
+            path, manifest = self._manifest(root)
+            manifest["release"] = "v0.1.1-public-alpha"
+            path.write_text(json.dumps(manifest), encoding="utf-8")
+            with self.assertRaisesRegex(LaunchAssetError, "release identity"):
+                validate_launch_assets(root)
+
+    def test_quiet_alpha_gate_cannot_be_removed_silently(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._copy_contract(root)
+            path, manifest = self._manifest(root)
+            gate = manifest["publication_gate"]
+            assert isinstance(gate, dict)
+            required = gate["required_closed_issues"]
+            assert isinstance(required, list)
+            required.remove(110)
+            path.write_text(json.dumps(manifest), encoding="utf-8")
+            with self.assertRaisesRegex(LaunchAssetError, "publication gate"):
                 validate_launch_assets(root)
 
     def test_source_manifest_must_carry_claim_ledger(self) -> None:

@@ -72,10 +72,10 @@ Use this 30-second explanation:
 Say:
 
 > The demo proves the local governed request path. Connecting a real Codex or
-> Claude Code client and a company provider credential is a separate setup and
-> release-evidence step.
+> Claude Code client and a company provider credential is a separate setup;
+> this provider-free run is not a substitute for the published live-provider
+> evidence.
 
 Do not paste a provider key, employee token, private URL, prompt, response, or
 customer identifier into a recording. Do not show shell history, environment
 variables, browser sessions, password managers, or unrelated terminal tabs.
-

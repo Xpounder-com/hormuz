@@ -1,4 +1,4 @@
-<!-- hormuz-launch-asset-v1 {"asset_id":"landing_page","publication_status":"draft_do_not_publish","claim_ids":["ALPHA_BOUNDARY","CLIENT_VERIFICATION","COST_REPORTING","EVIDENCE_BOUNDARY","GATEWAY_SCOPE","OCI_RELEASE","POLICY_CONTROLS","PROVIDER_FREE_DEMO","SECRET_EGRESS"]} -->
+<!-- hormuz-launch-asset-v1 {"asset_id":"landing_page","publication_status":"draft_do_not_publish","claim_ids":["ALPHA_BOUNDARY","CLIENT_VERIFICATION","COST_REPORTING","EVIDENCE_BOUNDARY","GATEWAY_SCOPE","OCI_RELEASE","POLICY_CONTROLS","PROVIDER_FREE_DEMO","REFERENCE_DEPLOYMENTS","SECRET_EGRESS"]} -->
 
 # DRAFT — DO NOT PUBLISH
 
@@ -13,8 +13,9 @@ company-controlled request path. <!-- claims: GATEWAY_SCOPE -->
 · [Book an AI Governance Review]({{AI_GOVERNANCE_REVIEW_URL}})
 · [Apply for a paid design-partner pilot]({{PAID_PILOT_URL}})
 
-Hormuz v0.1.1 is an evaluation alpha. It is not a production, compliance,
-enterprise-HA, disaster-recovery, or independent-security-review claim.
+Hormuz v0.1.3 is an evaluation alpha. It is not a production certification,
+universal HA/DR guarantee, compliance claim, customer SLA, or independent
+security review.
 <!-- claims: ALPHA_BOUNDARY -->
 
 ## One organizational control point
@@ -52,10 +53,11 @@ redaction, request-attempt, and SQLite evidence path. Disposable loopback
 listeners stand in for providers, so the demonstration needs no API key and
 makes no external provider call. <!-- claims: PROVIDER_FREE_DEMO -->
 
-Pinned official Codex and Claude Code clients are exercised through Hormuz
-against loopback providers in blocking CI. Real two-provider BYO release
-evidence remains a separate open gate and must close before formal launch copy
-describes that proof as complete. <!-- claims: CLIENT_VERIFICATION -->
+Pinned Codex 0.147.0 and Claude Code 2.1.233 clients are exercised through
+Hormuz against loopback providers in blocking CI. A same-revision,
+content-free live artifact also verifies governed streaming calls through
+real OpenAI and Anthropic endpoints. The proof covers the supported protocol
+paths, not every client feature. <!-- claims: CLIENT_VERIFICATION -->
 
 ## Evidence without prompt surveillance
 
@@ -71,12 +73,22 @@ silently treated as free. <!-- claims: COST_REPORTING -->
 
 ## A portable release target
 
-The first published image is the signed `v0.1.1` `linux/amd64` OCI digest.
+The current published image is the signed `v0.1.3` `linux/amd64` OCI digest,
+`sha256:8ac24f5c7afb8ce09ec133616de06702f568a2e70594d8034146a131d86e5b67`.
 Public GHCR is the first publication registry, not the product contract, so an
 organization can verify the exact workflow identity and recursively mirror the
 digest, signature, and attestations elsewhere. Anonymous pull, signature/Rekor,
 both attestations, and a recursive mirror were exercised for this release.
 <!-- claims: OCI_RELEASE -->
+
+## Bounded reference deployments
+
+Account-free proofs cover a single-VM Compose pilot, multi-replica Kubernetes
+and Helm application operation, CloudNativePG failover and quorum loss, and a
+disaster-recovery rehearsal within its accepted reference targets. These are
+proofs of exact pinned combinations—not production certification, a customer
+SLA, or broad platform portability. The full boundaries are recorded in the
+[verification record](../VERIFICATION.md). <!-- claims: REFERENCE_DEPLOYMENTS -->
 
 ## Start with your real policy problem
 
