@@ -295,6 +295,43 @@ database_activity_snapshot() {
      FROM activity" >&2 || true
 }
 
+database_replica_snapshots() {
+  local primary pod index=0 value
+  primary="$(current_primary 2>/dev/null || true)"
+  [[ -n "${primary}" ]] || return
+  kubectl --namespace hormuz-dependencies get pods \
+    --selector='cnpg.io/cluster=hormuz-postgres' --output=json \
+    | python3 -c 'import json,sys; items=json.load(sys.stdin)["items"]; print(json.dumps({"schema_id":"hormuz.postgresql-ha-pod-snapshot","schema_version":1,"pods":len(items),"running":sum(i.get("status",{}).get("phase")=="Running" for i in items),"ready":sum(any(c.get("type")=="Ready" and c.get("status")=="True" for c in i.get("status",{}).get("conditions",[])) for i in items),"terminating":sum(i.get("metadata",{}).get("deletionTimestamp") is not None for i in items),"container_restarts":sum(sum(c.get("restartCount",0) for c in i.get("status",{}).get("containerStatuses",[])) for i in items)},sort_keys=True,separators=(",",":")))' \
+    >&2 || true
+  while IFS= read -r pod; do
+    [[ "${pod}" == "${primary}" ]] && continue
+    index=$((index + 1))
+    value="$(timeout 10s kubectl --namespace hormuz-dependencies exec "pod/${pod}" \
+      --container postgres -- psql --username postgres --dbname hormuz \
+      --tuples-only --no-align --command \
+      "SELECT json_build_object(
+         'schema_id', 'hormuz.postgresql-ha-replica-snapshot',
+         'schema_version', 1,
+         'replica_index', ${index},
+         'reachable', true,
+         'in_recovery', pg_is_in_recovery(),
+         'replay_paused', pg_is_wal_replay_paused(),
+         'primary_conninfo_configured', current_setting('primary_conninfo') <> '',
+         'wal_receiver_rows', (SELECT COUNT(*) FROM pg_stat_wal_receiver),
+         'wal_receiver_streaming', (SELECT COUNT(*) FROM pg_stat_wal_receiver WHERE status = 'streaming'),
+         'received_wal', pg_last_wal_receive_lsn() IS NOT NULL
+       )::text" 2>/dev/null || true)"
+    if [[ -n "${value}" ]]; then
+      printf '%s\n' "${value}" >&2
+    else
+      printf '{"reachable":false,"replica_index":%s,"schema_id":"hormuz.postgresql-ha-replica-snapshot","schema_version":1}\n' \
+        "${index}" >&2
+    fi
+  done < <(kubectl --namespace hormuz-dependencies get pods \
+    --selector='cnpg.io/cluster=hormuz-postgres' \
+    --output=jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' | sort)
+}
+
 probe() {
   local command=$1
   local target=$2
@@ -412,7 +449,7 @@ wait_for_lease_and_rw_primary() {
 wait_for_synchronous_durability() {
   local primary=$1
   local attempt state
-  for attempt in $(seq 1 300); do
+  for attempt in $(seq 1 90); do
     state="$(timeout 10s kubectl --namespace hormuz-dependencies exec "pod/${primary}" \
       --container postgres -- psql --username postgres --dbname hormuz \
       --tuples-only --no-align --command \
@@ -441,6 +478,7 @@ wait_for_synchronous_durability() {
     fi
     sleep 1
   done
+  database_replica_snapshots
   database_activity_snapshot
   fail "synchronous durability did not recover after primary promotion"
 }
