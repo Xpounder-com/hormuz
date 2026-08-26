@@ -470,6 +470,20 @@ class DisasterRecoveryReferenceTests(unittest.TestCase):
         self.assertNotIn("fsGroup: 26", recovered_postgres)
         self.assertNotIn("26:26", runner + source_backup + recovered_postgres)
         self.assertIn("chown -R 26:102 /negative/data", runner)
+        recovery_ownership = (
+            "chown -R 26:102 /recovery/base /recovery/wal"
+        )
+        self.assertIn(recovery_ownership, runner)
+        self.assertLess(
+            runner.index('[[ "${WAL_SEGMENT_COUNT}" -ge 2 ]]'),
+            runner.index(recovery_ownership),
+        )
+        self.assertLess(
+            runner.index(recovery_ownership),
+            runner.index('FAILURE_INJECTION_AT="$(utc_now)"'),
+        )
+        self.assertIn('logs "statefulset/${statefulset}"', runner)
+        self.assertIn('--all-containers --prefix=true', runner)
         self.assertEqual(gateway_config.usage_storage.backend, "postgresql")
         self.assertEqual(gateway_config.policy_control.mode, "postgresql")
         self.assertEqual(gateway_config.custody_control.mode, "postgresql")

@@ -101,8 +101,20 @@ wait_for_deployment() {
 }
 
 wait_for_statefulset() {
-  kubectl --namespace "$1" rollout status "statefulset/$2" --timeout="${3:-10m}" >/dev/null \
-    || fail "statefulset did not become ready: $1/$2"
+  local namespace=$1
+  local statefulset=$2
+  local timeout=${3:-10m}
+  if kubectl --namespace "${namespace}" rollout status \
+    "statefulset/${statefulset}" --timeout="${timeout}" >/dev/null; then
+    return
+  fi
+  kubectl --namespace "${namespace}" logs "statefulset/${statefulset}" \
+    --all-containers --prefix=true >&2 || true
+  kubectl --namespace "${namespace}" describe \
+    "statefulset/${statefulset}" >&2 || true
+  kubectl --namespace "${namespace}" get pods \
+    --selector="io.hormuz.proof-role=${statefulset}" --output=wide >&2 || true
+  fail "statefulset did not become ready: ${namespace}/${statefulset}"
 }
 
 wait_for_pod() {
@@ -1010,6 +1022,17 @@ print(sum(1 for item in Path(sys.argv[1]).iterdir() if item.is_file() and patter
 PY
 )"
 [[ "${WAL_SEGMENT_COUNT}" -ge 2 ]] || fail "continuous WAL archive is incomplete"
+
+# Host-side evidence generation needs the runner to own the copied archive.
+# Restore the pinned PostgreSQL identity before the recovery cluster receives
+# the path read-only; otherwise restore_command cannot read archived WAL.
+docker run --rm --user root --entrypoint bash \
+  --volume "${RECOVERY_INPUTS}:/recovery:rw" "${POSTGRES_IMAGE}" -ceu '
+    chgrp 102 /recovery
+    chmod 0710 /recovery
+    chown -R 26:102 /recovery/base /recovery/wal
+    chmod -R u+rwX,go-rwx /recovery/base /recovery/wal
+  ' >/dev/null
 
 FAILURE_INJECTION_AT="$(utc_now)"
 kind delete cluster --name "${SOURCE_CLUSTER}" >/dev/null
