@@ -448,6 +448,8 @@ class DisasterRecoveryReferenceTests(unittest.TestCase):
         self.assertEqual(source_backup.count("fsGroup: 102"), 2)
         self.assertNotIn("runAsGroup: 26", source_backup)
         self.assertNotIn("fsGroup: 26", source_backup)
+        self.assertIn("chgrp 102 /recovery", source_backup)
+        self.assertIn("chmod 0710 /recovery", source_backup)
         self.assertIn("install -d -m 0700 -o 26 -g 102", source_backup)
         self.assertIn("runAsUser: 26", recovered_postgres)
         self.assertIn("runAsGroup: 102", recovered_postgres)

@@ -24,7 +24,10 @@ spec:
       image: ghcr.io/cloudnative-pg/postgresql:16.15-202608240846-minimal-trixie@sha256:e1ca593856017f1780dbdae8175add3ddd8f8d721348a3b6e8a01df67a9ece8a
       command: ["bash", "-ceu"]
       args:
-        - install -d -m 0700 -o 26 -g 102 /recovery/base /recovery/wal
+        - |
+          chgrp 102 /recovery
+          chmod 0710 /recovery
+          install -d -m 0700 -o 26 -g 102 /recovery/base /recovery/wal
       securityContext:
         runAsUser: 0
         runAsGroup: 0
