@@ -529,6 +529,8 @@ class DisasterRecoveryReferenceTests(unittest.TestCase):
             self.assertIn(f'"{failure_path}"', runner)
         self.assertIn('[[ "${provider_after_first_request}" == "1" ]]', runner)
         self.assertIn('"automatic_provider_replays": 0', runner)
+        self.assertIn("--expected-policy capped+redacted", runner)
+        self.assertNotIn("--expected-policy allowed+capped+redacted", runner)
         self.assertIn('install -m 0600 "${DR_ROOT}/hormuz.json"', runner)
         self.assertIn(
             'install_state_probe "${RECOVERY_INPUTS}/config/hormuz.json"',

@@ -1277,7 +1277,7 @@ RECOVERED_ENVIRONMENT_READY_AT="$(utc_now)"
 
 TRAFFIC_PROMOTED_AT="$(utc_now)"
 run_recovery_probe request 200 "${ARTIFACT_ROOT}/first-governed-request.json" \
-  --expected-policy allowed+capped+redacted
+  --expected-policy capped+redacted
 FIRST_GOVERNED_REQUEST_AT="$(utc_now)"
 provider_after_first_request="$(provider_request_count)"
 [[ "${provider_after_first_request}" == "1" ]] \
