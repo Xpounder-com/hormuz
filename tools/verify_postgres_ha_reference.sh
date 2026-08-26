@@ -282,7 +282,15 @@ database_activity_snapshot() {
        'transaction_sessions', COUNT(*) FILTER (WHERE xact_start IS NOT NULL),
        'lock_waiting_sessions', COUNT(*) FILTER (WHERE wait_event_type = 'Lock'),
        'blocked_sessions', COUNT(*) FILTER (WHERE cardinality(blockers) > 0),
-       'synchronous_replication_waiters', COUNT(*) FILTER (WHERE wait_event = 'SyncRep')
+       'synchronous_replication_waiters', COUNT(*) FILTER (WHERE wait_event = 'SyncRep'),
+       'primary', NOT pg_is_in_recovery(),
+       'synchronous_commit_on', current_setting('synchronous_commit') = 'on',
+       'synchronous_any_one', current_setting('synchronous_standby_names') LIKE 'ANY 1 (%',
+       'streaming_replicas', (SELECT COUNT(*) FROM pg_stat_replication WHERE state = 'streaming'),
+       'quorum_replicas', (SELECT COUNT(*) FROM pg_stat_replication WHERE state = 'streaming' AND sync_state = 'quorum'),
+       'sync_replicas', (SELECT COUNT(*) FROM pg_stat_replication WHERE state = 'streaming' AND sync_state = 'sync'),
+       'potential_replicas', (SELECT COUNT(*) FROM pg_stat_replication WHERE state = 'streaming' AND sync_state = 'potential'),
+       'async_replicas', (SELECT COUNT(*) FROM pg_stat_replication WHERE state = 'streaming' AND sync_state = 'async')
      )::text
      FROM activity" >&2 || true
 }
@@ -412,11 +420,22 @@ wait_for_synchronous_durability() {
          CASE WHEN NOT pg_is_in_recovery() THEN 1 ELSE 0 END,
          CASE WHEN current_setting('synchronous_commit') = 'on' THEN 1 ELSE 0 END,
          CASE WHEN current_setting('synchronous_standby_names') LIKE 'ANY 1 (%' THEN 1 ELSE 0 END,
+         (SELECT COUNT(*) FROM pg_stat_replication WHERE state = 'streaming'),
          (SELECT COUNT(*) FROM pg_stat_replication
            WHERE state = 'streaming' AND sync_state = 'quorum'),
+         (SELECT COUNT(*) FROM pg_stat_replication
+           WHERE state = 'streaming' AND sync_state = 'sync'),
+         (SELECT COUNT(*) FROM pg_stat_replication
+           WHERE state = 'streaming' AND sync_state = 'potential'),
+         (SELECT COUNT(*) FROM pg_stat_replication
+           WHERE state = 'streaming' AND sync_state = 'async'),
          (SELECT COUNT(*) FROM pg_stat_activity
            WHERE datname = current_database() AND wait_event = 'SyncRep')" 2>/dev/null || true)"
-    if python3 -c 'import sys; v=sys.argv[1].strip().split("|"); raise SystemExit(0 if len(v)==5 and [int(x) for x in v[:3]]==[1,1,1] and int(v[3])>=1 and int(v[4])==0 else 1)' \
+    if (( attempt % 30 == 0 )); then
+      python3 -c 'import json,sys; v=[int(x) for x in sys.argv[1].strip().split("|")]; names=("primary","synchronous_commit_on","synchronous_any_one","streaming_replicas","quorum_replicas","sync_replicas","potential_replicas","async_replicas","synchronous_replication_waiters"); print(json.dumps({"schema_id":"hormuz.postgresql-ha-replication-snapshot","schema_version":1,**dict(zip(names,v,strict=True))},sort_keys=True,separators=(",",":")))' \
+        "${state}" 2>/dev/null || true
+    fi
+    if python3 -c 'import sys; v=sys.argv[1].strip().split("|"); raise SystemExit(0 if len(v)==9 and [int(x) for x in v[:3]]==[1,1,1] and int(v[3])>=1 and int(v[4])>=1 and int(v[8])==0 else 1)' \
       "${state}" 2>/dev/null; then
       return
     fi
