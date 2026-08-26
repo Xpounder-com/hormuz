@@ -15,20 +15,21 @@ Linux AMD64 image-manifest digest.
 The disposable topology contains three PostgreSQL instances on three tainted
 database workers and two Hormuz replicas on two different workers. It enables
 synchronous `ANY 1`, required durability, failover quorum, primary Lease
-coordination, isolation fencing, and bounded 30-second eviction tolerations for
-database Pods on `NotReady` or `Unreachable` workers.
+coordination, and isolation fencing.
 
 The live verifier proves two bounded scenarios:
 
-1. After an unexpected primary-worker pause, both gateways withdraw readiness
+1. After the active primary Pod is removed abruptly on a healthy worker, both
+   gateways withdraw readiness
    and deny concurrent governed requests before provider egress. CloudNativePG
    promotes a safe replica, the Lease and read/write endpoint converge, the
    promoted primary re-establishes an `ANY 1` synchronous streaming standby,
-   the same gateway processes reconnect, durable governed state remains
-   intact, and no provider request is replayed. Immediately after the pause, the fake
-   provider records an in-flight request and closes its connection without a
-   response. The client outcome remains ambiguous while the pre-egress attempt
-   and reservation remain durably uncertain.
+   the deleted primary's old container is no longer running before promotion is
+   observed, the same gateway processes reconnect, durable governed state
+   remains intact, and no provider request is replayed. Immediately after the
+   removal, the fake provider records an in-flight request and closes its
+   connection without a response. The client outcome remains ambiguous while
+   the pre-egress attempt and reservation remain durably uncertain.
 2. After the primary and one replica worker are paused, failover quorum blocks
    promotion, the read/write endpoint has no ready address, both gateways stay
    unready and deny provider egress, and the surviving replica is not exposed
@@ -53,3 +54,7 @@ This verifies only the exact pinned single-host Kind combination. It does not
 certify customer PostgreSQL operations, managed PostgreSQL services, broad
 Kubernetes/CNI portability, hardware or zone failure, production storage,
 backup/retention, RPO/RTO, disaster recovery, or a customer SLA.
+CloudNativePG `1.30.0` automatic self-healing after an unreachable primary node
+is explicitly not verified; the positive path removes the primary Pod on a
+healthy worker, while worker isolation is exercised only in the quorum-refusal
+negative path.

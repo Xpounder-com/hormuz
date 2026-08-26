@@ -58,6 +58,7 @@ EVENTS = [
     "durable_state_seeded",
     "ambiguous_attempt_committed",
     "primary_loss_injected",
+    "former_primary_container_stopped",
     "all_gateways_failed_closed",
     "positive_outage_provider_egress_unchanged",
     "safe_replica_promoted",
@@ -67,7 +68,7 @@ EVENTS = [
     "gateways_reconnected_without_restart",
     "ambiguous_attempt_preserved",
     "no_provider_replay_verified",
-    "former_primary_fenced_and_rejoined",
+    "former_primary_replaced_and_rejoined",
     "quorum_fixture_ready",
     "primary_and_replica_loss_injected",
     "quorum_promotion_refused",
@@ -108,6 +109,7 @@ CHECKS = {
 
 LIMITATIONS = [
     "account_free_disposable_kind_environment_only",
+    "cloudnativepg_1_30_unreachable_primary_node_recovery_not_verified",
     "cloudnativepg_is_verification_infrastructure_not_product_contract",
     "compose_profile_has_no_high_availability_claim",
     "exact_pinned_combination_only",
@@ -116,8 +118,9 @@ LIMITATIONS = [
     "no_broad_kubernetes_or_cni_portability_claim",
     "no_customer_sla",
     "no_managed_postgresql_provider_certification",
+    "positive_path_uses_abrupt_primary_pod_removal",
     "single_host_kind_does_not_prove_zone_or_hardware_failure_tolerance",
-    "worker_pause_simulates_abrupt_unavailability_not_disk_destruction",
+    "worker_pause_negative_path_simulates_abrupt_unavailability_not_disk_destruction",
 ]
 
 TIMING_LIMITS_MS = {
@@ -376,10 +379,6 @@ def _validate_topology(value: Any) -> None:
         "data_durability": "required",
         "failover_quorum": True,
         "isolation_check": True,
-        "node_eviction_tolerations_seconds": {
-            "not_ready": 30,
-            "unreachable": 30,
-        },
         "primary_lease": {
             "lease_duration_seconds": 15,
             "renew_deadline_seconds": 10,
@@ -410,7 +409,7 @@ def _validate_primary_loss(value: Any) -> None:
         "rw_endpoint_matches_current_primary",
         "synchronous_durability_restored",
         "former_primary_rejoined_as_replica",
-        "former_primary_fenced_before_rejoin",
+        "former_primary_container_stopped_before_promotion",
         "gateway_replicas_observed",
         "gateways_not_ready",
         "backpressure_requests",
@@ -430,10 +429,12 @@ def _validate_primary_loss(value: Any) -> None:
         "rw_endpoint_matches_current_primary",
         "synchronous_durability_restored",
         "former_primary_rejoined_as_replica",
-        "former_primary_fenced_before_rejoin",
+        "former_primary_container_stopped_before_promotion",
         "gateway_processes_reused",
     )
-    if value["trigger"] != "unexpected_worker_pause" or not all(value[key] is True for key in required_true):
+    if value["trigger"] != "unexpected_primary_pod_deletion" or not all(
+        value[key] is True for key in required_true
+    ):
         raise PostgresHAProofError("primary_loss_outcome_invalid")
     if (
         value["gateway_replicas_observed"],

@@ -219,6 +219,56 @@ pod_node() {
   kubectl --namespace hormuz-dependencies get pod "$1" --output=jsonpath='{.spec.nodeName}'
 }
 
+pod_uid() {
+  kubectl --namespace hormuz-dependencies get pod "$1" --output=jsonpath='{.metadata.uid}'
+}
+
+postgres_container_id() {
+  local value
+  value="$(kubectl --namespace hormuz-dependencies get pod "$1" \
+    --output=jsonpath='{.status.containerStatuses[?(@.name=="postgres")].containerID}')"
+  value="${value#*://}"
+  [[ "${value}" =~ ^[0-9a-f]{64}$ ]] || fail "PostgreSQL container identity invalid"
+  printf '%s\n' "${value}"
+}
+
+wait_for_container_stopped() {
+  local node=$1
+  local container_id=$2
+  local previous_primary=$3
+  local attempt running observed_primary
+  for attempt in $(seq 1 120); do
+    if running="$(docker exec "${node}" crictl ps --quiet --state Running \
+      --id "${container_id}" 2>/dev/null)"; then
+      observed_primary="$(current_primary 2>/dev/null || true)"
+      if [[ -z "${running}" && "${observed_primary}" == "${previous_primary}" ]]; then
+        return
+      fi
+      if [[ -n "${observed_primary}" && "${observed_primary}" != "${previous_primary}" ]]; then
+        fail "replica promoted before the removed primary container stopped"
+      fi
+    fi
+    sleep 1
+  done
+  fail "removed primary container remained running"
+}
+
+wait_for_recreated_pod_ready() {
+  local pod=$1
+  local previous_uid=$2
+  local attempt current_uid ready
+  for attempt in $(seq 1 300); do
+    current_uid="$(pod_uid "${pod}" 2>/dev/null || true)"
+    ready="$(kubectl --namespace hormuz-dependencies get pod "${pod}" \
+      --output=jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || true)"
+    if [[ -n "${current_uid}" && "${current_uid}" != "${previous_uid}" && "${ready}" == "True" ]]; then
+      return
+    fi
+    sleep 1
+  done
+  fail "removed primary Pod did not return as a new ready instance"
+}
+
 provider_control() {
   local method=$1
   local path=$2
@@ -378,7 +428,8 @@ gateway_fail_closed() {
     --output=json >"${gateway_json}"
   mapfile -t gateway_ips < <(python3 -c 'import json,sys; items=json.load(open(sys.argv[1],encoding="utf-8"))["items"]; assert len(items)==2; print("\n".join(sorted(item["status"]["podIP"] for item in items)))' "${gateway_json}")
   [[ "${#gateway_ips[@]}" -eq 2 ]] || fail "gateway replica count invalid during outage"
-  local index ip attempt ready_observed
+  local index ip attempt ready_observed started elapsed pid
+  local -a probe_pids=()
   for index in 0 1; do
     ip="${gateway_ips[${index}]}"
     ready_observed=0
@@ -390,10 +441,22 @@ gateway_fail_closed() {
       sleep 1
     done
     [[ "${ready_observed}" -eq 1 ]] || fail "gateway did not withdraw readiness during outage"
-    probe storage-backpressure "http://${ip}:8787" 503 \
-      "${ARTIFACT_ROOT}/${prefix}-backpressure-${index}.json" \
-      || fail "gateway did not enforce bounded storage backpressure"
   done
+  started="$(monotonic_ms)"
+  for index in 0 1; do
+    ip="${gateway_ips[${index}]}"
+    probe storage-backpressure "http://${ip}:8787" 503 \
+      "${ARTIFACT_ROOT}/${prefix}-backpressure-${index}.json" &
+    probe_pids+=("$!")
+  done
+  for pid in "${probe_pids[@]}"; do
+    wait "${pid}" || fail "gateway did not enforce bounded storage backpressure"
+  done
+  elapsed=$(( $(monotonic_ms) - started ))
+  [[ "${elapsed}" -gt 0 ]] || elapsed=1
+  if [[ "${elapsed}" -gt "${MAXIMUM_STORAGE_DENIAL_MS}" ]]; then
+    MAXIMUM_STORAGE_DENIAL_MS="${elapsed}"
+  fi
 }
 
 wait_for_primary_change() {
@@ -768,9 +831,14 @@ gateway_uids_before="$(gateway_uids)"
 old_primary="$(current_primary)"
 [[ -n "${old_primary}" ]] || fail "current primary is unavailable"
 old_primary_node="$(pod_node "${old_primary}")"
+old_primary_uid="$(pod_uid "${old_primary}")"
+old_primary_container_id="$(postgres_container_id "${old_primary}")"
 positive_started_ms="$(monotonic_ms)"
-pause_node "${old_primary_node}"
+kubectl --namespace hormuz-dependencies delete pod "${old_primary}" \
+  --grace-period=0 --force --wait=false >/dev/null
 record_event primary_loss_injected
+wait_for_container_stopped "${old_primary_node}" "${old_primary_container_id}" "${old_primary}"
+record_event former_primary_container_stopped
 provider_control POST /control/block/abort >"${ARTIFACT_ROOT}/provider-abort.json"
 gateway_fail_closed positive
 positive_fail_closed_ms=$(( $(monotonic_ms) - positive_started_ms ))
@@ -827,16 +895,14 @@ provider_after_recovery="$(provider_request_count)"
 record_event no_provider_replay_verified
 provider_control POST /control/block/reset >"${ARTIFACT_ROOT}/provider-reset.json"
 
-rejoin_started_ms="$(monotonic_ms)"
-unpause_node "${old_primary_node}"
-wait_for_node_state "${old_primary_node}" True
+wait_for_recreated_pod_ready "${old_primary}" "${old_primary_uid}"
 wait_for_cnpg_ready
-former_primary_rejoin_ms=$(( $(monotonic_ms) - rejoin_started_ms ))
+former_primary_rejoin_ms=$(( $(monotonic_ms) - positive_started_ms ))
 old_primary_recovery="$(timeout 30s kubectl --namespace hormuz-dependencies exec "pod/${old_primary}" --container postgres -- \
   psql --username postgres --dbname postgres --tuples-only --no-align \
   --command 'SELECT pg_is_in_recovery()' | tr -d '[:space:]')"
-[[ "${old_primary_recovery}" == "t" ]] || fail "former primary did not rejoin as a fenced replica"
-record_event former_primary_fenced_and_rejoined
+[[ "${old_primary_recovery}" == "t" ]] || fail "removed primary did not rejoin as a replica"
+record_event former_primary_replaced_and_rejoined
 
 wait_for_cnpg_ready
 record_event quorum_fixture_ready
@@ -910,7 +976,7 @@ record_event negative_path_recovered
 state_probe snapshot "${ARTIFACT_ROOT}/state-after-quorum-recovery.json"
 record_event final_state_continuity_verified
 
-[[ "${EVENT_SEQUENCE}" -eq 25 ]] || fail "event sequence incomplete"
+[[ "${EVENT_SEQUENCE}" -eq 26 ]] || fail "event sequence incomplete"
 [[ "${MAXIMUM_STORAGE_DENIAL_MS}" -gt 0 ]] || fail "storage denial timing was not measured"
 
 python3 - \
@@ -965,10 +1031,6 @@ value = {
         "data_durability": "required",
         "failover_quorum": True,
         "isolation_check": True,
-        "node_eviction_tolerations_seconds": {
-            "not_ready": 30,
-            "unreachable": 30,
-        },
         "primary_lease": {
             "lease_duration_seconds": 15,
             "renew_deadline_seconds": 10,
@@ -984,13 +1046,13 @@ value = {
         "reconnect_horizon_seconds": 15,
     },
     "primary_loss": {
-        "trigger": "unexpected_worker_pause",
+        "trigger": "unexpected_primary_pod_deletion",
         "previous_primary_changed": True,
         "lease_holder_matches_current_primary": True,
         "rw_endpoint_matches_current_primary": True,
         "synchronous_durability_restored": True,
         "former_primary_rejoined_as_replica": True,
-        "former_primary_fenced_before_rejoin": True,
+        "former_primary_container_stopped_before_promotion": True,
         "gateway_replicas_observed": 2,
         "gateways_not_ready": 2,
         "backpressure_requests": 32,

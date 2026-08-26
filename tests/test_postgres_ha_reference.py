@@ -62,10 +62,6 @@ def valid_observations() -> dict[str, object]:
             "data_durability": "required",
             "failover_quorum": True,
             "isolation_check": True,
-            "node_eviction_tolerations_seconds": {
-                "not_ready": 30,
-                "unreachable": 30,
-            },
             "primary_lease": {
                 "lease_duration_seconds": 15,
                 "renew_deadline_seconds": 10,
@@ -81,13 +77,13 @@ def valid_observations() -> dict[str, object]:
             "reconnect_horizon_seconds": 15,
         },
         "primary_loss": {
-            "trigger": "unexpected_worker_pause",
+            "trigger": "unexpected_primary_pod_deletion",
             "previous_primary_changed": True,
             "lease_holder_matches_current_primary": True,
             "rw_endpoint_matches_current_primary": True,
             "synchronous_durability_restored": True,
             "former_primary_rejoined_as_replica": True,
-            "former_primary_fenced_before_rejoin": True,
+            "former_primary_container_stopped_before_promotion": True,
             "gateway_replicas_observed": 2,
             "gateways_not_ready": 2,
             "backpressure_requests": 32,
@@ -211,12 +207,14 @@ class PostgresHAReferenceTests(unittest.TestCase):
         self.assertIn("dataDurability: required", cluster)
         self.assertIn("failoverQuorum: true", cluster)
         self.assertIn("isolationCheck:", cluster)
-        self.assertEqual(cluster.count("tolerationSeconds: 30"), 2)
-        self.assertIn("node.kubernetes.io/not-ready", cluster)
-        self.assertIn("node.kubernetes.io/unreachable", cluster)
+        self.assertNotIn("tolerationSeconds:", cluster)
+        self.assertNotIn("node.kubernetes.io/not-ready", cluster)
+        self.assertNotIn("node.kubernetes.io/unreachable", cluster)
         self.assertIn(ha.POSTGRES_IMAGE, cluster)
         self.assertEqual(kind.count("role: worker"), 5)
         self.assertIn("io.hormuz.proof-role: postgres", values)
+        self.assertIn("--grace-period=0 --force --wait=false", runner)
+        self.assertIn("wait_for_container_stopped", runner)
         self.assertIn("docker pause", runner)
         self.assertIn("rw_ready_addresses", runner)
         self.assertIn("storage-backpressure", runner)
@@ -238,6 +236,10 @@ class PostgresHAReferenceTests(unittest.TestCase):
         self.assertLess(
             runner.index("provider_control POST /control/block/abort"),
             runner.index("gateway_fail_closed positive"),
+        )
+        self.assertLess(
+            runner.index('wait_for_container_stopped "${old_primary_node}"'),
+            runner.index('new_primary="$(wait_for_primary_change'),
         )
         self.assertLess(
             runner.index("gateway_fail_closed positive"),
