@@ -497,18 +497,19 @@ against that digest, and then creates keyless Cosign signature, CycloneDX, and
 bounded SLSA v1 attestations. Before any Sigstore operation, a strict validator
 requires a public repository and allowlisted, release-bound, secret-free SBOM
 and provenance shape. The image signature uses public Rekor. The two
-attestations are timestamped Fulcio identities attached only to private GHCR
-and are not uploaded to Rekor. Only after exact issuer, workflow/tag identity,
-digest, image-signature transparency, and attestation verification pass does
-the workflow add the semantic-version registry tag.
+attestations are timestamped Fulcio identities attached to public GHCR and are
+not uploaded to Rekor. Their complete registry-visible metadata is
+allowlist-validated before attachment. Only after exact issuer, workflow/tag
+identity, digest, image-signature transparency, and attestation verification
+pass does the workflow add the semantic-version registry tag.
 
 The final `hormuz.oci-release-evidence` summary hashes every retained evidence
 file and records the registry-portable digest contract, AMD64 boundary,
 mirroring requirements, exact signer, and explicit Rekor/attestation
 boundaries. GHCR is the first publication registry, not the product contract.
-The workflow verifies the release while the first-registry package is private;
-the owner may make the validated package public afterward. The
-workflow artifact contains only allowlisted summaries, not raw SBOM,
+The workflow requires the public-alpha package to remain public and records
+that visibility in release-evidence schema v2. The workflow artifact contains
+only allowlisted summaries, not raw SBOM,
 provenance, vulnerability, or Cosign verification payloads. This workflow does not
 certify Compose, Kubernetes, a customer mirror, public TLS, HA, or recovery.
 

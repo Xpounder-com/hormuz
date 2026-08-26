@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Decision date:** August 24, 2026
+- **Public-alpha amendment:** August 26, 2026 ([issue #149](https://github.com/Xpounder-com/hormuz/issues/149))
 - **Decision record:** [issue #101 comment](https://github.com/Xpounder-com/hormuz/issues/101#issuecomment-5399436923)
 - **Implementation gate:** [issue #101](https://github.com/Xpounder-com/hormuz/issues/101)
 
@@ -14,24 +15,27 @@ gateway to deployment tooling and weaken portability. The first release also
 needs a signing identity that can be verified without storing a long-lived
 private key.
 
-The repository is initially private on GitHub Team, so GitHub's private
-artifact-attestation service is not the chosen implementation. Public Sigstore
-is acceptable because Hormuz is intended to become open source, provided its
-metadata disclosure is explicit.
+The repository was initially private on GitHub Team, so GitHub's private
+artifact-attestation service was not the chosen implementation. Public
+Sigstore remains acceptable now that Hormuz is open source, provided its
+metadata disclosure is explicit. The public-alpha transition also made the
+first GHCR package public; release automation must validate that current state
+rather than retain the obsolete private-package guard.
 
 ## Decision
 
 1. The application deployment contract is the signed OCI manifest digest.
-2. `ghcr.io/xpounder-com/hormuz` is the private first publication registry,
-   not part of the product contract. Customers may mirror the exact digest and
-   all signature/attestation referrers.
+2. `ghcr.io/xpounder-com/hormuz` is the public-alpha first publication
+   registry, not part of the product contract. Customers may mirror the exact
+   digest and all signature/attestation referrers.
 3. The initial supported platform is `linux/amd64` only. Issue #109 must close
    before a multi-architecture manifest or general ARM64 claim is published.
    Ceph-specific #68 remains separate.
 4. Releases use keyless GitHub Actions OIDC through Cosign/Sigstore. The image
    signature uses public Rekor. CycloneDX and SLSA attestations use Fulcio and a
-   signed timestamp but are excluded from Rekor and initially live only as
-   referrers in private GHCR. Hormuz stores no long-lived signing private key.
+   signed timestamp but are excluded from Rekor and live as public GHCR
+   referrers. Their complete registry-visible metadata is allowlist-validated
+   before attachment. Hormuz stores no long-lived signing private key.
 5. Verification requires the GitHub OIDC issuer, exact
    `Xpounder-com/hormuz/.github/workflows/release-oci.yml` identity, expected
    protected annotated semantic-version tag, source commit, `push` trigger,
@@ -44,8 +48,9 @@ metadata disclosure is explicit.
 7. Public Rekor material may expose the artifact digest, repository name,
    workflow path, commit/ref, and signing event. It must not contain source
    code, image layers, credentials, private workspace paths, prompts/responses,
-   or customer data. The full SBOM/provenance referrers become readable only if
-   the package is later made public.
+   or customer data. The full SBOM/provenance referrers are public and expose
+   the bounded package, dependency, license, and build metadata documented in
+   the release contract.
 8. Docker Compose is the first verified single-VM deployment profile for local
    use, evaluation, and pilots. Kubernetes/Helm is an optional enterprise
    profile outside the OCI application contract and is required for Hormuz's
@@ -63,6 +68,8 @@ metadata disclosure is explicit.
   for #109 or use explicitly unsupported emulation.
 - Registry availability and retention remain operational dependencies for the
   first publication location, but not semantic parts of the signed artifact.
+- Anonymous public-alpha pulls and public signature/attestation referrers are
+  intentional disclosure boundaries, enforced before signing or attachment.
 - Compose evidence cannot be used to claim HA. Enterprise availability remains
   dependent on the optional Kubernetes profile and its dedicated gates.
 
