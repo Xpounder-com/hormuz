@@ -105,12 +105,13 @@ tag and fails unless all of these are true:
 - the keyless image signature is written and independently verified through
   public Rekor;
 - the keyless CycloneDX and SLSA v1 attestations use public Fulcio and timestamp
-  services but no Rekor service, and are attached only to the private GHCR
-  package during first publication;
+  services but no Rekor service, and their complete public-registry metadata is
+  validated before attachment;
 - certificate extensions match the release workflow name, repository, source
   tag ref, source commit, and `push` trigger in addition to the exact subject;
-- GHCR remains private and the semantic-version registry tag is either absent
-  or already resolves to the exact verified digest; it is never reassigned.
+- GHCR remains public for anonymous public-alpha pull and the semantic-version
+  registry tag is either absent or already resolves to the exact verified
+  digest; it is never reassigned.
 
 The workflow first uses the immutable `sha-<commit>` locator. It adds the
 semantic-version registry tag only after signature and attestation verification
@@ -134,16 +135,23 @@ private workspace paths, prompts/responses, or customer data. This disclosure
 is an explicit tradeoff of the approved keyless profile.
 
 The SBOM and SLSA predicate are not uploaded to Rekor. They are signed OCI
-referrers in the first registry and remain private while the GHCR package is
-private. If the package owner later makes that package public, those referrers
-expose package names, versions, dependency and license metadata, and bounded
-build metadata. The release gate therefore validates their complete schema and
-all string values before they are signed or attached. Raw SBOM, provenance,
-vulnerability, or verification payloads are not uploaded as workflow
-artifacts; the workflow retains only allowlisted content-free summaries.
+referrers in the public first registry, so they expose package names, versions,
+dependency and license metadata, and bounded build metadata as soon as they are
+attached. The release gate therefore validates their complete schema and all
+string values before either Sigstore signing or registry attachment. Raw SBOM,
+provenance, vulnerability, or verification payloads are not uploaded as
+workflow artifacts; the workflow retains only allowlisted content-free
+summaries.
 
 The `v0.1.1` package was made public only after its private release candidate
-passed the complete gate. Verify the current public-alpha digest anonymously:
+passed the complete gate. The immutable `v0.1.2` source tag records a failed
+release attempt: its workflow published only the commit-addressed candidate
+before the stale private-package guard stopped execution, so it created no
+signed supported digest, attestations, or semantic-version GHCR tag. The
+corrected public-registry gate uses the next immutable version, `v0.1.3`,
+rather than moving or reusing `v0.1.2`.
+
+Verify the current public-alpha digest anonymously:
 
 ```bash
 image="ghcr.io/xpounder-com/hormuz@sha256:1bbcca3490a7a5b004a880f42e8250acb91ce566a9c59f3263d7b279568efb5a"

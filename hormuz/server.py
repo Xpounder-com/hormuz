@@ -820,7 +820,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         headers = {
             "Content-Type": "application/json",
             "Accept": self.headers.get("Accept", "application/json"),
-            "User-Agent": self.headers.get("User-Agent", "Hormuz/0.1.1"),
+            "User-Agent": self.headers.get("User-Agent", "Hormuz/0.1.3"),
         }
         if protocol == "openai":
             headers["Authorization"] = f"Bearer {upstream_key}"
