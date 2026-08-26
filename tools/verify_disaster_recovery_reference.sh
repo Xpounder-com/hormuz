@@ -576,7 +576,7 @@ prepare_negative_recovery() {
         "host all all ::/0 scram-sha-256" \
         > /negative/data/pg_hba.conf
       touch /negative/data/recovery.signal
-      chown -R 26:26 /negative/data
+      chown -R 26:102 /negative/data
       chmod 0700 /negative/data
     ' bash "${target}" "${archive}" >/dev/null
   printf '%s\n' "${root}/data"

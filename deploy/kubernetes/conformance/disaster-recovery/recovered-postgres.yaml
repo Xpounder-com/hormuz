@@ -40,7 +40,7 @@ spec:
           operator: Exists
           effect: NoSchedule
       securityContext:
-        fsGroup: 26
+        fsGroup: 102
         fsGroupChangePolicy: OnRootMismatch
         seccompProfile:
           type: RuntimeDefault
@@ -54,7 +54,7 @@ spec:
               test -f /recovery/base/backup_manifest
               test -d /recovery/wal
               pg_verifybackup /recovery/base
-              install -d -m 0700 -o 26 -g 26 /var/lib/postgresql/data/pgdata
+              install -d -m 0700 -o 26 -g 102 /var/lib/postgresql/data/pgdata
               cp -a /recovery/base/. /var/lib/postgresql/data/pgdata/
               rm -f /var/lib/postgresql/data/pgdata/standby.signal
               cat > /var/lib/postgresql/data/pgdata/postgresql.conf <<'EOF'
@@ -78,7 +78,7 @@ spec:
               host all all ::/0 scram-sha-256
               EOF
               touch /var/lib/postgresql/data/pgdata/recovery.signal
-              chown -R 26:26 /var/lib/postgresql/data/pgdata
+              chown -R 26:102 /var/lib/postgresql/data/pgdata
               chmod 0700 /var/lib/postgresql/data/pgdata
           securityContext:
             runAsUser: 0
@@ -148,7 +148,7 @@ spec:
           securityContext:
             runAsNonRoot: true
             runAsUser: 26
-            runAsGroup: 26
+            runAsGroup: 102
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             capabilities:
