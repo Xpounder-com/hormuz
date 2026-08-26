@@ -111,9 +111,10 @@ metadata compiler, or employee-productivity system.
 | Production-ready | None claimed. The alpha is for evaluation and design-partner hardening. |
 | Implemented alpha | OpenAI/Anthropic-compatible gateway paths, policy enforcement, secret controls, identity binding, and metadata-only usage/evidence. |
 | Verified reference | Only the exact evidence-gated profiles in [SUPPORT.md](SUPPORT.md), including the Linux Python matrix and published signed `v0.1.3` `linux/amd64` OCI runtime. A verified reference is not unrestricted certification. |
+| Verified alpha evidence | Exact Codex `0.147.0` / OpenAI and Claude Code `2.1.233` / Anthropic same-revision BYO-provider evidence is recorded in [#115](https://github.com/Xpounder-com/hormuz/issues/115). It does not prove provider-invoice reconciliation, every client feature, traffic bypassing Hormuz, or enterprise production readiness. |
 | Experimental | The context experiment is a separate package and is absent from the core wheel and gateway runtime. |
 | Deferred | Organizational memory, ticketing, workflow/productivity measurement, and new reporting dimensions are outside the current core. |
-| Unfinished | Live BYO-provider release evidence, production HA/DR, cloud-specific certification, and independent review remain separate release gates. |
+| Unfinished | Quiet-alpha external validation, production HA/DR, cloud-specific certification, and independent review remain separate release gates. |
 
 ## Configure real providers and clients
 
@@ -225,6 +226,5 @@ compatibility report. Suspected vulnerabilities must follow the
 governed by the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 The evidence-grounded [launch package](docs/launch/README.md) is intentionally
-marked as a non-publishable draft until the disclosure, live-provider,
-repository, signed-image, community, quiet-alpha, commercial-URL, and owner-
-approval gates are complete.
+marked as a non-publishable draft until the quiet-alpha, owner-supplied CTA
+URLs, and final owner-approval gates are complete.

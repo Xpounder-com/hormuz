@@ -24,9 +24,14 @@ debug logs are prohibited. The runner binds evidence to an exact clean Git
 workflow secret boundary, strict evidence contract, unsupported features, and
 nonclaims.
 
-A one-provider run is explicitly partial. Closing issue #115 requires one
-successful artifact containing both real providers at the same source
-revision; provider-free CI cannot substitute for it.
+A one-provider run is explicitly partial. The completed
+[#115](https://github.com/Xpounder-com/hormuz/issues/115) gate is bound to
+[workflow run 32884601758](https://github.com/Xpounder-com/hormuz/actions/runs/32884601758):
+one `scope: complete` artifact containing both real providers on exact public
+`main` revision `49e04d2cc9a4bbc00362414145ebbe5fc15e7c35`. Provider-free CI
+cannot substitute for that evidence. The result does not establish
+provider-invoice reconciliation, every client feature, traffic bypassing
+Hormuz, or enterprise production readiness.
 
 ## Independent quiet-alpha gate
 
@@ -52,8 +57,8 @@ release evidence additionally requires the operator to attest distinct humans
 off-repository, five independent installation/demo completions across all
 four reviewer personas, a later returning-user session, and resolution plus
 independent retest of every security or installation blocker. The validator
-does not prove the off-repository identity attestation or replace issue #115's
-live-provider gate.
+does not prove the off-repository identity attestation or replace #115's
+separately completed live-provider evidence.
 
 ## Provider-free five-minute path
 
@@ -148,7 +153,12 @@ Observed result:
 - The fake upstream asserted that it received the configured provider key and never received the employee Hormuz token.
 - All eight tests in that run passed, including the installed Codex client test.
 
-This proves official Claude Code client/protocol compatibility without spending against or exposing a real Anthropic account. A live Anthropic provider call remains pending until `ANTHROPIC_API_KEY` is securely provisioned to the Hormuz service.
+This dated record proves official Claude Code client/protocol compatibility
+without spending against or exposing a real Anthropic account. At the time of
+this 2026-08-15 run, live Anthropic evidence was still pending; the later
+same-revision OpenAI and Anthropic result is recorded in
+[#115](https://github.com/Xpounder-com/hormuz/issues/115) and
+[workflow run 32884601758](https://github.com/Xpounder-com/hormuz/actions/runs/32884601758).
 
 ### Generic OIDC JWT path
 
