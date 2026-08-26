@@ -25,6 +25,7 @@ HELM_VERSION="v3.21.4"
 HELM_SHA256="61f88ab166748cb19604d7884cb100ae9ccb13804ddeb98e08af167eacbb6a14"
 CILIUM_VERSION="1.20.1"
 CILIUM_CHART_SHA256="06210eef7c23d15f7699c79e2fe3a1ec9c389024c5c5c006ea04022d322449a2"
+STORAGE_DENIAL_LIMIT_MS=15000
 
 WORK_ROOT=""
 SECRET_ROOT=""
@@ -423,8 +424,6 @@ probe() {
   local target=$2
   local expected_status=$3
   local output=$4
-  local started elapsed
-  started="$(monotonic_ms)"
   local args=(
     /opt/hormuz/bin/python -I /opt/hormuz-proof/probe.py
     "${command}" --target "${target}" --expected-status "${expected_status}"
@@ -439,10 +438,11 @@ probe() {
     "${args[@]}" >"${output}"; then
     return 1
   fi
-  elapsed=$(( $(monotonic_ms) - started ))
-  [[ "${elapsed}" -gt 0 ]] || elapsed=1
-  if [[ "${expected_status}" == "503" && "${elapsed}" -gt "${MAXIMUM_STORAGE_DENIAL_MS}" ]]; then
-    MAXIMUM_STORAGE_DENIAL_MS="${elapsed}"
+  if [[ "${command}" == "storage-backpressure" ]]; then
+    python3 -c 'import json,sys; value=json.load(open(sys.argv[1],encoding="utf-8")); maximum=value.get("maximum_request_ms"); valid=isinstance(maximum,int) and not isinstance(maximum,bool) and 0 < maximum <= int(sys.argv[3]); raise SystemExit(0 if value.get("status")==int(sys.argv[2]) and valid else 1)' \
+      "${output}" "${expected_status}" "${STORAGE_DENIAL_LIMIT_MS}" \
+      || return 1
+    return 0
   fi
   python3 -c 'import json,sys; value=json.load(open(sys.argv[1],encoding="utf-8")); raise SystemExit(0 if value.get("status")==int(sys.argv[2]) else 1)' \
     "${output}" "${expected_status}" \
@@ -480,7 +480,7 @@ gateway_fail_closed() {
     --output=json >"${gateway_json}"
   mapfile -t gateway_ips < <(python3 -c 'import json,sys; items=json.load(open(sys.argv[1],encoding="utf-8"))["items"]; assert len(items)==2; print("\n".join(sorted(item["status"]["podIP"] for item in items)))' "${gateway_json}")
   [[ "${#gateway_ips[@]}" -eq 2 ]] || fail "gateway replica count invalid during outage"
-  local index ip attempt ready_observed started elapsed pid
+  local index ip attempt ready_observed pid observed
   local -a probe_pids=()
   for index in 0 1; do
     ip="${gateway_ips[${index}]}"
@@ -494,7 +494,6 @@ gateway_fail_closed() {
     done
     [[ "${ready_observed}" -eq 1 ]] || fail "gateway did not withdraw readiness during outage"
   done
-  started="$(monotonic_ms)"
   for index in 0 1; do
     ip="${gateway_ips[${index}]}"
     probe storage-backpressure "http://${ip}:8787" 503 \
@@ -504,11 +503,13 @@ gateway_fail_closed() {
   for pid in "${probe_pids[@]}"; do
     wait "${pid}" || fail "gateway did not enforce bounded storage backpressure"
   done
-  elapsed=$(( $(monotonic_ms) - started ))
-  [[ "${elapsed}" -gt 0 ]] || elapsed=1
-  if [[ "${elapsed}" -gt "${MAXIMUM_STORAGE_DENIAL_MS}" ]]; then
-    MAXIMUM_STORAGE_DENIAL_MS="${elapsed}"
-  fi
+  for index in 0 1; do
+    observed="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1],encoding="utf-8"))["maximum_request_ms"])' \
+      "${ARTIFACT_ROOT}/${prefix}-backpressure-${index}.json")"
+    if [[ "${observed}" -gt "${MAXIMUM_STORAGE_DENIAL_MS}" ]]; then
+      MAXIMUM_STORAGE_DENIAL_MS="${observed}"
+    fi
+  done
 }
 
 observe_quorum_refusal_window() {
