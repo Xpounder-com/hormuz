@@ -119,13 +119,56 @@ wait_for_job_complete() {
       | python3 -c 'import json,sys; v=json.load(sys.stdin); c={x.get("type"):x.get("status") for x in v.get("status",{}).get("conditions",[])}; print("complete" if c.get("Complete")=="True" else "failed" if c.get("Failed")=="True" else "pending")')"
     case "${state}" in
       complete) return ;;
-      failed) fail "job failed: ${namespace}/${job}" ;;
+      failed)
+        kubectl --namespace "${namespace}" logs "job/${job}" --all-containers \
+          --prefix=true >&2 || true
+        kubectl --namespace "${namespace}" describe "job/${job}" >&2 || true
+        fail "job failed: ${namespace}/${job}"
+        ;;
       pending) ;;
       *) fail "job state invalid: ${namespace}/${job}" ;;
     esac
     sleep 1
   done
+  kubectl --namespace "${namespace}" logs "job/${job}" --all-containers \
+    --prefix=true >&2 || true
+  kubectl --namespace "${namespace}" describe "job/${job}" >&2 || true
   fail "job completion timed out: ${namespace}/${job}"
+}
+
+wait_for_source_backup_receiver() {
+  local attempt state
+  for attempt in $(seq 1 180); do
+    state="$(kubectl --namespace hormuz-dependencies get \
+      pod/hormuz-dr-wal-receiver --output=json | python3 -c '
+import json
+import sys
+value = json.load(sys.stdin)
+status = value.get("status", {})
+ready = any(
+    condition.get("type") == "Ready" and condition.get("status") == "True"
+    for condition in status.get("conditions", [])
+)
+statuses = status.get("initContainerStatuses", []) + status.get("containerStatuses", [])
+failed = status.get("phase") == "Failed" or any(
+    item.get("state", {}).get("terminated", {}).get("exitCode", 0) != 0
+    for item in statuses
+)
+print("ready" if ready else "failed" if failed else "pending")
+')"
+    case "${state}" in
+      ready) return ;;
+      failed) break ;;
+      pending) ;;
+      *) fail "source backup receiver state invalid" ;;
+    esac
+    sleep 1
+  done
+  kubectl --namespace hormuz-dependencies logs pod/hormuz-dr-wal-receiver \
+    --all-containers --prefix=true >&2 || true
+  kubectl --namespace hormuz-dependencies describe \
+    pod/hormuz-dr-wal-receiver >&2 || true
+  fail "source backup receiver did not become ready"
 }
 
 wait_for_cnpg_ready() {
@@ -874,7 +917,7 @@ host_gid="$(id -g)"
 create_immutable_configmap hormuz-dependencies hormuz-dr-source-backup \
   --from-literal="source-host=${SOURCE_PRIMARY_IP}"
 kubectl apply --filename "${DR_ROOT}/source-backup.yaml" >/dev/null
-wait_for_pod hormuz-dependencies hormuz-dr-wal-receiver 5m
+wait_for_source_backup_receiver
 kubectl --namespace hormuz-dependencies patch job/hormuz-dr-base-backup \
   --type=merge --patch '{"spec":{"suspend":false}}' >/dev/null
 wait_for_job_complete hormuz-dependencies hormuz-dr-base-backup

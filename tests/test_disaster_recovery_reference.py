@@ -434,6 +434,8 @@ class DisasterRecoveryReferenceTests(unittest.TestCase):
         self.assertIn('"        readOnly: false\\n"', runner)
         self.assertIn("source-backup.yaml", runner)
         self.assertIn("pod/hormuz-dr-wal-receiver", runner)
+        self.assertIn("wait_for_source_backup_receiver", runner)
+        self.assertIn("--all-containers --prefix=true", runner)
         self.assertIn(recovery.POSTGRES_IMAGE, source_backup)
         self.assertIn("path: /hormuz-dr-artifacts", source_backup)
         self.assertIn("suspend: true", source_backup)
