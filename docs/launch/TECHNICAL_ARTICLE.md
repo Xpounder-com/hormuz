@@ -1,4 +1,4 @@
-<!-- hormuz-launch-asset-v1 {"asset_id":"technical_article","publication_status":"draft_do_not_publish","claim_ids":["ALPHA_BOUNDARY","CLIENT_VERIFICATION","COST_REPORTING","DATA_BOUNDARY","EVIDENCE_BOUNDARY","GATEWAY_SCOPE","POLICY_CONTROLS","PROVIDER_FREE_DEMO","REFERENCE_DEPLOYMENTS","SECRET_EGRESS"]} -->
+<!-- hormuz-launch-asset-v2 {"asset_id":"technical_article","publication_status":"draft_do_not_publish","claim_ids":["ALPHA_BOUNDARY","CLIENT_VERIFICATION","COST_REPORTING","DATA_BOUNDARY","DURABLE_DATA_BOUNDARY","EVIDENCE_BOUNDARY","GATEWAY_SCOPE","POLICY_CONTROLS","PROVIDER_FREE_DEMO","REFERENCE_DEPLOYMENTS","SECRET_EGRESS"]} -->
 
 # DRAFT — DO NOT PUBLISH
 
@@ -14,6 +14,10 @@ Hormuz is an open-source, CLI-first gateway and control plane for that missing
 layer. Codex and Claude Code keep speaking supported OpenAI and Anthropic
 protocols; the organization inserts Hormuz as its company-controlled provider
 path. <!-- claims: GATEWAY_SCOPE -->
+
+This release is a **public alpha** and is **not production-ready**. **External onboarding validation pending: 0/5 independent testers.** The initial
+announcement is an invitation to test the first public experience, not a claim
+that onboarding or commercial readiness has already been validated.
 
 ### Policy should follow the authenticated person
 
@@ -67,6 +71,14 @@ or model while keeping unpriced requests and coverage limits explicit. An
 estimate is not a provider invoice, and Hormuz should never turn person-level
 consumption into a productivity score. <!-- claims: COST_REPORTING -->
 
+The public alpha is self-hosted. Hormuz does not operate a hosted customer-data
+service or a remote deletion control plane. Its versioned durable-data
+inventory enumerates every created database class and operator artifact;
+customer database and backup operators own export, retention, backup, restore,
+and deletion. Deleting one deployment does not erase provider, IdP, KMS,
+Object Lock, backup, client, or observability copies.
+<!-- claims: DURABLE_DATA_BOUNDARY -->
+
 ### A useful alpha needs an executable first experience
 
 Infrastructure projects often ask users to create accounts and secrets before
@@ -112,15 +124,17 @@ compiler, ticketing system, or employee-productivity platform. Keeping that
 surface small makes the core policy and evidence boundary easier to inspect,
 test, and operate.
 
-The current release is an open-source alpha for evaluation and design-partner
-hardening. It does not claim production suitability, universal HA/DR,
-compliance, provider-invoice accuracy, a customer SLA, or an independent
-security review. Those boundaries are part of the product claim, not
-marketing footnotes.
+The current release is an open-source public alpha for evaluation and tester
+recruitment. It does not claim validated onboarding, production suitability,
+universal HA/DR, compliance, provider-invoice accuracy, a customer SLA, or an
+independent security review. Those boundaries are part of the product claim,
+not marketing footnotes.
 <!-- claims: ALPHA_BOUNDARY -->
 
 If this is the control point your organization is missing, run the provider-
-free demo first. Then [book an AI Governance Review]({{AI_GOVERNANCE_REVIEW_URL}})
-or [apply for a paid design-partner pilot]({{PAID_PILOT_URL}}). Do not submit
-credentials, prompts, responses, employee records, or customer data through
-either intake path.
+free demo first. Then [follow the public-alpha tester
+guide](https://github.com/Xpounder-com/hormuz/blob/main/docs/QUIET_ALPHA.md)
+and use the documented issue or private-security path for failures. Do not
+submit credentials, prompts, responses, employee records, customer data, or
+participant identity mappings. Governance reviews and paid design-partner
+intake remain a later human-controlled phase after onboarding validation.

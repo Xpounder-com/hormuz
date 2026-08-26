@@ -1,16 +1,16 @@
-<!-- hormuz-launch-asset-v1 {"asset_id":"social_show_hn","publication_status":"draft_do_not_publish","claim_ids":["ALPHA_BOUNDARY","CLIENT_VERIFICATION","COST_REPORTING","GATEWAY_SCOPE","PROVIDER_FREE_DEMO"]} -->
+<!-- hormuz-launch-asset-v2 {"asset_id":"social_show_hn","publication_status":"draft_do_not_publish","claim_ids":["ALPHA_BOUNDARY","CLIENT_VERIFICATION","COST_REPORTING","GATEWAY_SCOPE","PROVIDER_FREE_DEMO"]} -->
 
 # DRAFT — DO NOT PUBLISH
 
-Publish none of these drafts until issue #110 is closed, the repository and
-release artifacts are publicly verifiable, and the owner approves the final
-copy.
+Publish none of these drafts until the repository and release artifacts are
+publicly verifiable and the owner approves the final post-change copy. Issue
+#110 remains open after publication as the onboarding-validation ledger.
 
 ## X post
 
-> I built Hormuz: an open-source AI gateway that lets teams keep Codex and
-> Claude Code while company policy governs models, budgets, and usage evidence.
-> The alpha includes a five-minute provider-free demo. Try it:
+> I built Hormuz, a public alpha for putting company policy between Codex/
+> Claude Code and model providers. Not production-ready. External onboarding
+> validation pending (0/5). Run the provider-free demo and help test it:
 > https://github.com/Xpounder-com/hormuz
 
 <!-- claims: GATEWAY_SCOPE COST_REPORTING PROVIDER_FREE_DEMO -->
@@ -39,15 +39,15 @@ loopback provider simulators, proves allow/reroute/cap/redact/deny behavior,
 validates content-free evidence, and removes the temporary state.
 <!-- claims: PROVIDER_FREE_DEMO -->
 
-This is an open-source alpha for evaluation and design-partner hardening—not a
-production certification, universal HA/DR guarantee, compliance claim,
-customer SLA, or independent security review. <!-- claims: ALPHA_BOUNDARY -->
+This is a **public alpha**, **not production-ready**. **External onboarding
+validation pending: 0/5 independent testers.** The announcement recruits
+testers; it is not a validated-onboarding, production-certification, universal
+HA/DR, compliance, customer-SLA, or independent-security-review claim.
+<!-- claims: ALPHA_BOUNDARY -->
 
 Repository: https://github.com/Xpounder-com/hormuz
 
-[Book an AI Governance Review]({{AI_GOVERNANCE_REVIEW_URL}}) or
-[apply for a paid design-partner pilot]({{PAID_PILOT_URL}}). Every review,
-qualification decision, scope, price, and proposal remains human-controlled.
+Tester guide: https://github.com/Xpounder-com/hormuz/blob/main/docs/QUIET_ALPHA.md
 
 ## Show HN
 
@@ -83,11 +83,12 @@ gateway boundary. A separate same-revision, content-free artifact verifies
 governed streaming calls through real OpenAI and Anthropic endpoints.
 <!-- claims: CLIENT_VERIFICATION -->
 
-The project is an evaluation alpha. It does not claim production suitability,
-universal HA/DR, compliance, provider-invoice accuracy, a customer SLA, or an
-independent security review. I would especially value feedback on installation
-clarity, policy semantics, and whether the content-free evidence boundary is
-understandable.
+The project is a **public alpha** and is **not production-ready**. **External onboarding validation pending: 0/5 independent testers.** It does not claim
+validated onboarding, production suitability, universal HA/DR, compliance,
+provider-invoice accuracy, a customer SLA, or an independent security review.
+I would especially value feedback on installation clarity, policy semantics,
+and whether the content-free evidence boundary is understandable.
 <!-- claims: ALPHA_BOUNDARY -->
 
 Repository: https://github.com/Xpounder-com/hormuz
+Tester guide: https://github.com/Xpounder-com/hormuz/blob/main/docs/QUIET_ALPHA.md

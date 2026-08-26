@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
-"""Validate Hormuz quiet-alpha evidence without retaining tester content.
+"""Validate post-publication onboarding evidence without retaining tester content.
 
 The aggregate records only allowlisted environment and completion metadata.
 Names, handles, email addresses, feedback text, prompts, responses, credentials,
 customer data, local paths, and identity mappings have no fields in this
 schema. Synthetic fixtures are useful for contract tests but can never satisfy
-the quiet-alpha release gate.
+the external onboarding-validation milestone. The schema-v1 `quiet-alpha`,
+`release_gate`, and `broad_promotion` names remain compatibility identifiers;
+they gate validated-onboarding and beyond-alpha claims, not the bounded initial
+tester-recruitment announcement.
 """
 
 from __future__ import annotations
@@ -24,6 +27,7 @@ SCHEMA_VERSION = 1
 PACKAGE_VERSION = "0.1.3"
 PROGRAM = f"hormuz-v{PACKAGE_VERSION}-quiet-alpha"
 PUBLICATION_STATUS = "content_free"
+RELEASE_SOURCE_COMMIT = "6b3c4b94ff0691668d624a18ba2e63cc9ab5f9ae"
 
 EVIDENCE_KINDS = {"quiet_alpha_release_evidence", "synthetic_test_fixture"}
 PERSONAS = {"developer", "security", "platform", "engineering_admin"}
@@ -235,7 +239,11 @@ def _validate_session(value: object, index: int) -> dict[str, Any]:
     _require_pattern(session["participant_id"], _PARTICIPANT_ID_RE, f"{label}_participant")
     _require_date(session["session_date"], f"{label}_date")
     _require_enum(session["persona"], PERSONAS, f"{label}_persona")
-    _require_pattern(session["source_commit"], _REVISION_RE, f"{label}_source_commit")
+    source_commit = _require_pattern(
+        session["source_commit"], _REVISION_RE, f"{label}_source_commit"
+    )
+    if source_commit != RELEASE_SOURCE_COMMIT:
+        raise QuietAlphaEvidenceError(f"{label}_source_commit_unpinned")
     if session["package_version"] != PACKAGE_VERSION:
         raise QuietAlphaEvidenceError(f"{label}_package_version_invalid")
     _require_enum(

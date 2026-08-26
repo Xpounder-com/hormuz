@@ -1,21 +1,36 @@
-<!-- hormuz-launch-asset-v1 {"asset_id":"conversion_analytics","publication_status":"draft_do_not_publish","claim_ids":["ALPHA_BOUNDARY","COST_REPORTING"]} -->
+<!-- hormuz-launch-asset-v2 {"asset_id":"conversion_analytics","publication_status":"draft_do_not_publish","claim_ids":["ALPHA_BOUNDARY","COST_REPORTING"]} -->
 
 # DRAFT — DO NOT PUBLISH
 
-## Human-controlled design-partner conversion
+## Tester recruitment and later human-controlled conversion
 
-The launch has two commercial calls to action:
+The bounded announcement has two public-alpha calls to action:
 
-1. [Book an AI Governance Review]({{AI_GOVERNANCE_REVIEW_URL}})
-2. [Apply for a paid design-partner pilot]({{PAID_PILOT_URL}})
+1. [Test the public alpha](https://github.com/Xpounder-com/hormuz/blob/main/docs/QUIET_ALPHA.md)
+2. [Report an installation problem](https://github.com/Xpounder-com/hormuz/issues/new?template=installation.yml)
 
-The URLs are deliberately unresolved until the owner selects intake surfaces
-with an appropriate privacy notice and data-handling boundary. The public copy
-must never route these buttons to a generic or unrelated product form.
+Hormuz is a **public alpha** and is **not production-ready**. External onboarding validation pending: **0/5** independent completions. Internal,
+maintainer-assisted, and synthetic runs do not increase that count. Issue #110
+continues after publication and must close before Hormuz claims validated
+onboarding, advances beyond alpha, or makes a stronger commercial-readiness
+claim. <!-- claims: ALPHA_BOUNDARY -->
+
+The announcement recruits testers; it does not announce a mature commercial
+offering. No hidden telemetry, automated outreach, or customer-data intake is
+introduced by these links. Public testing is self-service, but inclusion in the
+#110 aggregate is invitation-only through a separately agreed private channel;
+successful testers must never post participant or session IDs publicly.
+
+## Later commercial conversion
+
+An AI Governance Review and paid design-partner pilot may be offered only after
+the owner chooses appropriate intake surfaces and external onboarding has been
+validated. Those later links must have an explicit privacy notice and
+data-handling boundary and must never point to an unrelated generic form.
 
 ### AI Governance Review
 
-The review is a human-led working session for organizations evaluating whether
+The future review is a human-led working session for organizations evaluating whether
 a governed provider-egress path fits their current AI use. The agenda is:
 
 - which employee AI clients and provider families are in scope;
@@ -29,11 +44,10 @@ a governed provider-egress path fits their current AI use. The agenda is:
 The reviewer produces a content-free summary of the policy problem, blockers,
 and recommended next step. The review is not a production architecture
 approval, security certification, compliance opinion, or sales commitment.
-<!-- claims: ALPHA_BOUNDARY -->
 
 ### Paid design-partner pilot
 
-A pilot application is reviewed by a human. If there is a fit, the next steps
+A future pilot application is reviewed by a human. If there is a fit, the next steps
 are discovery, a written scope, explicit data and deployment boundaries,
 success criteria, commercial terms, and approval by both parties. Duration,
 price, support expectations, and deliverables are agreed before work begins;
@@ -93,4 +107,3 @@ For each release week, record:
 Never publish names, email addresses, organization identities, free-text intake,
 security-report contents, prompts, responses, credentials, or customer data in
 the launch readout.
-

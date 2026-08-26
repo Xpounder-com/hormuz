@@ -1,0 +1,238 @@
+{
+  "schema_id": "hormuz.durable-data-inventory",
+  "schema_version": 1,
+  "scope": "self_hosted_public_alpha",
+  "hosted_customer_data_service": false,
+  "database_classes": [
+    {
+      "id": "schema_migration_state",
+      "content_boundary": "operational_metadata",
+      "contains_prompt_or_response_body": false,
+      "sqlite_tables": [
+        "hormuz_schema_migrations"
+      ],
+      "postgresql_tables": [
+        "hormuz_schema_migrations"
+      ]
+    },
+    {
+      "id": "usage_and_secret_evidence",
+      "content_boundary": "metadata_only_evidence",
+      "contains_prompt_or_response_body": false,
+      "sqlite_tables": [
+        "gateway_secret_events",
+        "gateway_usage_events"
+      ],
+      "postgresql_tables": [
+        "gateway_secret_events",
+        "gateway_usage_events"
+      ]
+    },
+    {
+      "id": "budget_reservations",
+      "content_boundary": "operational_metadata",
+      "contains_prompt_or_response_body": false,
+      "sqlite_tables": [
+        "gateway_budget_reservations"
+      ],
+      "postgresql_tables": [
+        "gateway_budget_reservations"
+      ]
+    },
+    {
+      "id": "request_attempt_ledger",
+      "content_boundary": "metadata_only_evidence",
+      "contains_prompt_or_response_body": false,
+      "sqlite_tables": [
+        "gateway_request_attempt_events",
+        "gateway_request_attempts"
+      ],
+      "postgresql_tables": [
+        "gateway_request_attempt_events",
+        "gateway_request_attempts"
+      ]
+    },
+    {
+      "id": "audit_chain_state",
+      "content_boundary": "metadata_only_evidence",
+      "contains_prompt_or_response_body": false,
+      "sqlite_tables": [
+        "gateway_audit_chain_checkpoints",
+        "gateway_audit_chain_entries",
+        "gateway_audit_chain_epochs",
+        "gateway_audit_chain_heads"
+      ],
+      "postgresql_tables": [
+        "gateway_audit_chain_checkpoints",
+        "gateway_audit_chain_entries",
+        "gateway_audit_chain_epochs",
+        "gateway_audit_chain_heads"
+      ]
+    },
+    {
+      "id": "policy_control",
+      "content_boundary": "identity_and_policy_metadata",
+      "contains_prompt_or_response_body": false,
+      "sqlite_tables": [],
+      "postgresql_tables": [
+        "policy_active_versions",
+        "policy_administrators",
+        "policy_control_events",
+        "policy_tenants",
+        "policy_versions"
+      ]
+    },
+    {
+      "id": "custody_control",
+      "content_boundary": "custody_authorization_metadata",
+      "contains_prompt_or_response_body": false,
+      "sqlite_tables": [],
+      "postgresql_tables": [
+        "custody_administrators",
+        "custody_control_events",
+        "custody_operation_approvals",
+        "custody_operation_intents",
+        "custody_tenants"
+      ]
+    },
+    {
+      "id": "custody_execution",
+      "content_boundary": "custody_authorization_metadata",
+      "contains_prompt_or_response_body": false,
+      "sqlite_tables": [],
+      "postgresql_tables": [
+        "custody_execution_attempts",
+        "custody_execution_events"
+      ]
+    },
+    {
+      "id": "custody_lifecycle_and_projection",
+      "content_boundary": "custody_lifecycle_metadata",
+      "contains_prompt_or_response_body": false,
+      "sqlite_tables": [],
+      "postgresql_tables": [
+        "custody_envelope_attestations",
+        "custody_lifecycle_asset_identities",
+        "custody_lifecycle_chain_heads",
+        "custody_lifecycle_events",
+        "custody_runtime_projection_acks",
+        "custody_runtime_projection_barriers",
+        "custody_runtime_projection_heads",
+        "custody_runtime_projection_restrictions",
+        "custody_runtime_replicas"
+      ]
+    },
+    {
+      "id": "custody_deletion_block_evidence",
+      "content_boundary": "metadata_only_evidence",
+      "contains_prompt_or_response_body": false,
+      "sqlite_tables": [],
+      "postgresql_tables": [
+        "custody_deletion_events"
+      ]
+    }
+  ],
+  "operator_artifacts": [
+    {
+      "id": "sqlite_database_file",
+      "created_when": "gateway_startup_or_first_local_operation",
+      "storage_location": "customer_selected_local_path_or_/var/lib/hormuz/hormuz.sqlite3",
+      "content_boundary": "metadata_only_database",
+      "prompt_or_response_body_boundary": "excluded_by_hormuz_contract",
+      "customer_operator_authority": "database_export_retention_backup_restore_and_deletion"
+    },
+    {
+      "id": "postgresql_schema",
+      "created_when": "customer_operator_runs_hormuz_migrations",
+      "storage_location": "customer_operated_postgresql",
+      "content_boundary": "metadata_only_database_with_policy_documents",
+      "prompt_or_response_body_boundary": "excluded_by_hormuz_contract",
+      "customer_operator_authority": "database_export_retention_backup_restore_and_deletion"
+    },
+    {
+      "id": "audit_export_jsonl",
+      "created_when": "operator_runs_audit_export_with_a_file_output",
+      "storage_location": "operator_selected_owner_only_file",
+      "content_boundary": "metadata_only_employee_and_security_evidence",
+      "prompt_or_response_body_boundary": "excluded_by_hormuz_contract",
+      "customer_operator_authority": "file_export_retention_backup_and_deletion"
+    },
+    {
+      "id": "audit_chain_checkpoint",
+      "created_when": "operator_runs_audit_chain_anchor",
+      "storage_location": "operator_selected_owner_only_file",
+      "content_boundary": "metadata_only_tenant_chain_identifiers_and_digests",
+      "prompt_or_response_body_boundary": "excluded_by_hormuz_contract",
+      "customer_operator_authority": "file_retention_backup_and_deletion_subject_to_external_anchor_requirements"
+    },
+    {
+      "id": "encrypted_custody_envelope",
+      "created_when": "operator_runs_custody_seal_or_rewrap",
+      "storage_location": "operator_selected_owner_only_file",
+      "content_boundary": "encrypted_operator_supplied_plaintext_with_tenant_purpose_and_key_metadata",
+      "prompt_or_response_body_boundary": "encrypted_operator_supplied_plaintext_not_inspected",
+      "customer_operator_authority": "secret_file_retention_backup_rotation_and_deletion"
+    },
+    {
+      "id": "object_lock_audit_artifact",
+      "created_when": "operator_runs_audit_anchor_or_audit_chain_anchor",
+      "storage_location": "customer_operated_s3_compatible_object_lock",
+      "content_boundary": "metadata_only_audit_artifact_plaintext_or_envelope_encrypted_by_selected_adapter",
+      "prompt_or_response_body_boundary": "excluded_by_hormuz_contract",
+      "customer_operator_authority": "object_store_retention_legal_hold_backup_and_eventual_deletion"
+    },
+    {
+      "id": "public_release_artifacts",
+      "created_when": "protected_release_workflow",
+      "storage_location": "public_github_and_ghcr",
+      "content_boundary": "public_source_image_sbom_provenance_and_release_metadata",
+      "prompt_or_response_body_boundary": "not_customer_runtime_data",
+      "customer_operator_authority": "not_customer_runtime_data"
+    }
+  ],
+  "customer_operator_responsibilities": [
+    "backup",
+    "deletion",
+    "export",
+    "restore",
+    "retention"
+  ],
+  "excluded_customer_systems": [
+    {
+      "id": "provider_platform_data",
+      "authority": "customer_provider_account_and_provider",
+      "hormuz_erasure_authority": false
+    },
+    {
+      "id": "identity_provider_data",
+      "authority": "customer_identity_operator",
+      "hormuz_erasure_authority": false
+    },
+    {
+      "id": "kms_keys_and_policy",
+      "authority": "customer_kms_operator",
+      "hormuz_erasure_authority": false
+    },
+    {
+      "id": "object_lock_retained_versions",
+      "authority": "customer_object_storage_operator_and_active_retention",
+      "hormuz_erasure_authority": false
+    },
+    {
+      "id": "database_backups_wal_and_snapshots",
+      "authority": "customer_database_and_backup_operator",
+      "hormuz_erasure_authority": false
+    },
+    {
+      "id": "client_local_history",
+      "authority": "customer_client_operator_and_client_vendor",
+      "hormuz_erasure_authority": false
+    },
+    {
+      "id": "deployment_logs_metrics_and_traces",
+      "authority": "customer_observability_operator",
+      "hormuz_erasure_authority": false
+    }
+  ],
+  "universal_erasure_claim": false
+}

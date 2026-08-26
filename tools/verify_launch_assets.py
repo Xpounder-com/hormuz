@@ -11,8 +11,8 @@ from pathlib import Path
 from urllib.parse import unquote, urlparse
 
 
-SCHEMA_VERSION = 1
-MANIFEST_PATH = Path("docs/launch/claims-v1.json")
+SCHEMA_VERSION = 2
+MANIFEST_PATH = Path("docs/launch/claims-v2.json")
 PUBLICATION_STATUS = "draft_do_not_publish"
 RELEASE_ID = "v0.1.3-public-alpha"
 OCI_DIGEST = "sha256:8ac24f5c7afb8ce09ec133616de06702f568a2e70594d8034146a131d86e5b67"
@@ -34,13 +34,19 @@ CLASSIFICATIONS = {
 IMPLEMENTED_CLASSIFICATIONS = {"implemented_alpha", "verified_alpha"}
 EVIDENCE_KINDS = {"closed_issue", "open_issue", "repository_path"}
 CTA_CONTRACT = {
-    "governance_review": (
-        "Book an AI Governance Review",
-        "{{AI_GOVERNANCE_REVIEW_URL}}",
+    "test_public_alpha": (
+        "Test the public alpha",
+        "https://github.com/Xpounder-com/hormuz/blob/main/docs/QUIET_ALPHA.md",
+        "public_recruitment",
+        "self_service_test",
+        "invitation_only_private_channel",
     ),
-    "paid_pilot": (
-        "Apply for a paid design-partner pilot",
-        "{{PAID_PILOT_URL}}",
+    "report_installation": (
+        "Report an installation problem",
+        "https://github.com/Xpounder-com/hormuz/issues/new?template=installation.yml",
+        "public_recruitment",
+        "public_issue",
+        "public_content_free_issue",
     ),
 }
 ANALYTIC_IDS = (
@@ -59,14 +65,13 @@ REQUIRED_CLOSED_ISSUES = [
     104,
     105,
     108,
-    110,
     111,
     113,
     114,
     115,
     116,
 ]
-MARKER = re.compile(r"^<!-- hormuz-launch-asset-v1 (\{.+\}) -->$")
+MARKER = re.compile(r"^<!-- hormuz-launch-asset-v2 (\{.+\}) -->$")
 CLAIM_REFERENCE = re.compile(r"<!-- claims: ([A-Z0-9_ ]+) -->")
 CLAIM_ID = re.compile(r"^[A-Z][A-Z0-9_]+$")
 ISSUE_URL = re.compile(
@@ -83,10 +88,16 @@ PROHIBITED_COPY = (
     "guaranteed compliance",
 )
 SOURCE_MANIFEST_ENTRIES = (
-    "include docs/launch/claims-v1.json",
+    "include docs/launch/claims-v2.json",
     "include tools/verify_launch_assets.py",
     "recursive-include docs *.md",
     "recursive-include tests *.py *.json",
+)
+REQUIRED_RECRUITMENT_DISCLOSURES = (
+    "public alpha",
+    "not production-ready",
+    "external onboarding validation pending",
+    "0/5",
 )
 
 
@@ -345,28 +356,37 @@ def _validate_ctas(value: object) -> set[str]:
     if not isinstance(value, list) or len(value) != len(CTA_CONTRACT):
         raise LaunchAssetError("CTA set is incomplete")
     seen: set[str] = set()
-    tokens: set[str] = set()
+    urls: set[str] = set()
     for index, raw_cta in enumerate(value):
         label = f"ctas[{index}]"
         if not isinstance(raw_cta, dict):
             raise LaunchAssetError(f"{label} must be an object")
         _require_fields(
-            raw_cta, {"id", "label", "url_token", "status", "mode"}, label
+            raw_cta,
+            {"id", "label", "url", "status", "mode", "evidence_submission"},
+            label,
         )
         cta_id = _require_string(raw_cta["id"], f"{label}.id")
         if cta_id in seen or cta_id not in CTA_CONTRACT:
             raise LaunchAssetError(f"{label}.id is invalid or duplicated")
-        expected_label, expected_token = CTA_CONTRACT[cta_id]
+        (
+            expected_label,
+            expected_url,
+            expected_status,
+            expected_mode,
+            expected_evidence_submission,
+        ) = CTA_CONTRACT[cta_id]
         if (
             raw_cta["label"] != expected_label
-            or raw_cta["url_token"] != expected_token
-            or raw_cta["status"] != "owner_url_required"
-            or raw_cta["mode"] != "human_review"
+            or raw_cta["url"] != expected_url
+            or raw_cta["status"] != expected_status
+            or raw_cta["mode"] != expected_mode
+            or raw_cta["evidence_submission"] != expected_evidence_submission
         ):
             raise LaunchAssetError(f"{label} contract changed")
         seen.add(cta_id)
-        tokens.add(expected_token)
-    return tokens
+        urls.add(expected_url)
+    return urls
 
 
 def _validate_analytics(value: object) -> None:
@@ -422,6 +442,7 @@ def validate_launch_assets(root: Path) -> dict[str, object]:
             "schema_version",
             "repository",
             "release",
+            "launch_mode",
             "publication_status",
             "publication_gate",
             "assets",
@@ -437,6 +458,8 @@ def validate_launch_assets(root: Path) -> dict[str, object]:
         raise LaunchAssetError("launch repository identity changed")
     if manifest["release"] != RELEASE_ID:
         raise LaunchAssetError("launch release identity changed")
+    if manifest["launch_mode"] != "public_alpha_tester_recruitment":
+        raise LaunchAssetError("launch mode changed")
     if manifest["publication_status"] != PUBLICATION_STATUS:
         raise LaunchAssetError("draft publication status changed without approval")
 
@@ -447,26 +470,30 @@ def validate_launch_assets(root: Path) -> dict[str, object]:
         gate,
         {
             "owner_copy_approval",
-            "commercial_urls",
-            "quiet_alpha_issue",
+            "commercial_conversion",
+            "external_onboarding_validation",
+            "external_tester_count",
+            "post_publication_validation_issue",
             "required_closed_issues",
         },
         "publication_gate",
     )
     if gate != {
         "owner_copy_approval": "required",
-        "commercial_urls": "required",
-        "quiet_alpha_issue": 110,
+        "commercial_conversion": "deferred_until_validated_onboarding",
+        "external_onboarding_validation": "pending",
+        "external_tester_count": "0/5",
+        "post_publication_validation_issue": 110,
         "required_closed_issues": REQUIRED_CLOSED_ISSUES,
     }:
         raise LaunchAssetError("draft publication gate changed")
 
     claims = _validate_claims(root, manifest["claims"])
-    cta_tokens = _validate_ctas(manifest["ctas"])
+    cta_urls = _validate_ctas(manifest["ctas"])
     _validate_analytics(manifest["analytics"])
     _validate_source_manifest(root)
     texts, used_claims = _validate_assets(
-        root, manifest["assets"], claims, cta_tokens
+        root, manifest["assets"], claims, set()
     )
     oci_claim = claims.get("OCI_RELEASE")
     if (
@@ -482,23 +509,34 @@ def validate_launch_assets(root: Path) -> dict[str, object]:
             )
     if used_claims != set(claims):
         raise LaunchAssetError("claim ledger contains an unused public claim")
-    for token in cta_tokens:
+    for url in cta_urls:
         for asset_id in ("landing_page", "conversion_analytics"):
-            if token not in texts[asset_id]:
+            if url not in texts[asset_id]:
                 raise LaunchAssetError(
-                    f"{asset_id} omits an owner-controlled commercial CTA"
+                    f"{asset_id} omits a public tester-recruitment CTA"
+                )
+    for asset_id in ASSET_PATHS:
+        lowered = texts[asset_id].lower()
+        for disclosure in REQUIRED_RECRUITMENT_DISCLOSURES:
+            if disclosure not in lowered:
+                raise LaunchAssetError(
+                    f"{asset_id} omits required recruitment disclosure"
                 )
 
     return {
         "schema_version": SCHEMA_VERSION,
         "status": "passed_draft",
         "publication_status": PUBLICATION_STATUS,
+        "launch_mode": "public_alpha_tester_recruitment",
         "publishable": False,
         "asset_count": len(ASSET_PATHS),
         "claim_count": len(claims),
         "cta_count": len(CTA_CONTRACT),
         "analytic_count": len(ANALYTIC_IDS),
         "required_closed_issue_count": len(REQUIRED_CLOSED_ISSUES),
+        "post_publication_validation_issue": 110,
+        "external_onboarding_validation": "pending",
+        "external_tester_count": "0/5",
         "source_distribution_bound": True,
     }
 
