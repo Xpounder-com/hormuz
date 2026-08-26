@@ -1,10 +1,9 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: hormuz-postgres-ha-state
-  namespace: hormuz-system
+  name: hormuz-disaster-recovery-state
   labels:
-    io.hormuz.proof-role: postgres-ha-state
+    io.hormuz.proof-role: disaster-recovery-state
 spec:
   automountServiceAccountToken: false
   restartPolicy: Never
@@ -22,56 +21,61 @@ spec:
       args: ["-I", "-c", "import time; time.sleep(7200)"]
       env:
         - name: HORMUZ_CONFIG
-          value: /etc/hormuz-state/state-config.json
+          value: /etc/hormuz-recovery/state-config.json
         - name: HORMUZ_POSTGRES_DSN
           valueFrom:
             secretKeyRef:
-              name: hormuz-postgres-ha-state
+              name: hormuz-disaster-recovery-state
               key: postgres-runtime-dsn
         - name: HORMUZ_POSTGRES_MIGRATION_DSN
           valueFrom:
             secretKeyRef:
-              name: hormuz-postgres-ha-state
+              name: hormuz-disaster-recovery-state
               key: postgres-migration-dsn
         - name: HORMUZ_POLICY_CONTROL_DSN
           valueFrom:
             secretKeyRef:
-              name: hormuz-postgres-ha-state
+              name: hormuz-disaster-recovery-state
               key: postgres-policy-control-dsn
         - name: HORMUZ_CUSTODY_CONTROL_DSN
           valueFrom:
             secretKeyRef:
-              name: hormuz-postgres-ha-state
+              name: hormuz-disaster-recovery-state
               key: postgres-custody-control-dsn
         - name: HORMUZ_CUSTODY_EXECUTOR_DSN
           valueFrom:
             secretKeyRef:
-              name: hormuz-postgres-ha-state
+              name: hormuz-disaster-recovery-state
               key: postgres-custody-executor-dsn
         - name: HORMUZ_TOKEN
           valueFrom:
             secretKeyRef:
-              name: hormuz-postgres-ha-state
+              name: hormuz-disaster-recovery-state
               key: alice-token
         - name: HORMUZ_BOB_TOKEN
           valueFrom:
             secretKeyRef:
-              name: hormuz-postgres-ha-state
+              name: hormuz-disaster-recovery-state
               key: bob-token
+        - name: HORMUZ_INGRESS_CREDENTIAL
+          valueFrom:
+            secretKeyRef:
+              name: hormuz-disaster-recovery-state
+              key: ingress-credential
         - name: OPENAI_API_KEY
           valueFrom:
             secretKeyRef:
-              name: hormuz-postgres-ha-state
+              name: hormuz-disaster-recovery-state
               key: openai-api-key
         - name: ANTHROPIC_API_KEY
           valueFrom:
             secretKeyRef:
-              name: hormuz-postgres-ha-state
+              name: hormuz-disaster-recovery-state
               key: anthropic-api-key
         - name: HORMUZ_OPENBAO_TOKEN
           valueFrom:
             secretKeyRef:
-              name: hormuz-postgres-ha-state
+              name: hormuz-disaster-recovery-state
               key: openbao-token
       securityContext:
         allowPrivilegeEscalation: false
@@ -87,7 +91,7 @@ spec:
           memory: 1Gi
       volumeMounts:
         - name: state-config
-          mountPath: /etc/hormuz-state
+          mountPath: /etc/hormuz-recovery
           readOnly: true
         - name: state-script
           mountPath: /opt/hormuz-proof/state_probe.py
@@ -98,65 +102,13 @@ spec:
   volumes:
     - name: state-config
       configMap:
-        name: hormuz-postgres-ha-state-config
+        name: hormuz-disaster-recovery-state-config
         defaultMode: 0440
     - name: state-script
       configMap:
-        name: hormuz-postgres-ha-state-script
+        name: hormuz-disaster-recovery-state-script
         defaultMode: 0440
     - name: temporary
       emptyDir:
         medium: Memory
         sizeLimit: 64Mi
----
-apiVersion: v1
-kind: Pod
-metadata:
-  name: hormuz-postgres-ha-probe
-  namespace: hormuz-ingress
-  labels:
-    io.hormuz.proof-role: ingress
-spec:
-  automountServiceAccountToken: false
-  restartPolicy: Never
-  securityContext:
-    runAsNonRoot: true
-    runAsUser: 65532
-    runAsGroup: 65532
-    fsGroup: 65532
-    seccompProfile:
-      type: RuntimeDefault
-  containers:
-    - name: probe
-      image: ghcr.io/xpounder-com/hormuz@sha256:8ac24f5c7afb8ce09ec133616de06702f568a2e70594d8034146a131d86e5b67
-      command: ["/opt/hormuz/bin/python"]
-      args: ["-I", "-c", "import time; time.sleep(7200)"]
-      securityContext:
-        allowPrivilegeEscalation: false
-        readOnlyRootFilesystem: true
-        capabilities:
-          drop: ["ALL"]
-      resources:
-        requests:
-          cpu: 25m
-          memory: 32Mi
-        limits:
-          cpu: 250m
-          memory: 128Mi
-      volumeMounts:
-        - name: script
-          mountPath: /opt/hormuz-proof/probe.py
-          subPath: probe.py
-          readOnly: true
-        - name: secrets
-          mountPath: /run/hormuz-proof
-          readOnly: true
-  volumes:
-    - name: script
-      configMap:
-        name: hormuz-probe-v1
-        defaultMode: 0440
-    - name: secrets
-      secret:
-        secretName: hormuz-probe-v1
-        defaultMode: 0440

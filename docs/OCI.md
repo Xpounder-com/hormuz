@@ -154,16 +154,16 @@ rather than moving or reusing `v0.1.2`.
 Verify the current public-alpha digest anonymously:
 
 ```bash
-image="ghcr.io/xpounder-com/hormuz@sha256:1bbcca3490a7a5b004a880f42e8250acb91ce566a9c59f3263d7b279568efb5a"
-identity="https://github.com/Xpounder-com/hormuz/.github/workflows/release-oci.yml@refs/tags/v0.1.1"
+image="ghcr.io/xpounder-com/hormuz@sha256:8ac24f5c7afb8ce09ec133616de06702f568a2e70594d8034146a131d86e5b67"
+identity="https://github.com/Xpounder-com/hormuz/.github/workflows/release-oci.yml@refs/tags/v0.1.3"
 issuer="https://token.actions.githubusercontent.com"
-commit="b9388cba8945dbdc86a55d79dd92283841aeecc4"
+commit="6b3c4b94ff0691668d624a18ba2e63cc9ab5f9ae"
 
 certificate_claims=(
   --certificate-identity "$identity"
   --certificate-oidc-issuer "$issuer"
   --certificate-github-workflow-name "Release signed OCI digest"
-  --certificate-github-workflow-ref "refs/tags/v0.1.1"
+  --certificate-github-workflow-ref "refs/tags/v0.1.3"
   --certificate-github-workflow-repository "Xpounder-com/hormuz"
   --certificate-github-workflow-sha "$commit"
   --certificate-github-workflow-trigger "push"
@@ -221,13 +221,14 @@ entries remain historical evidence and must not be deleted or represented as
 revoked certificates. A verifier configured with a different expected
 identity must fail closed before the artifact is admitted.
 
-`v0.1.1` is the first supported signed Hormuz release, so there is no older
-signed Hormuz digest against which to claim a cross-version rollback. Its live
-release drill proves exact-digest selection, recursive mirroring, and original
-identity verification. Issue
-[#135](https://github.com/Xpounder-com/hormuz/issues/135) requires the first
-real cross-version rollback after a second supported signed release exists;
-storage rollback remains a separate compatibility and recovery boundary.
+`v0.1.3` is the current supported signed Hormuz release. `v0.1.1` remains the
+prior supported digest and its original signature/attestation identity remains
+part of that rollback boundary; the failed `v0.1.2` attempt is not a supported
+release. The existence of two supported signed releases does not itself prove
+cross-version rollback. Issue
+[#135](https://github.com/Xpounder-com/hormuz/issues/135) must still exercise
+the first real cross-version application rollback, while storage rollback
+remains a separate compatibility and recovery boundary.
 
 ## Run with explicit runtime inputs
 

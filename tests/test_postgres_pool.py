@@ -325,14 +325,23 @@ class GatewayPostgresPoolOwnershipTests(unittest.TestCase):
 
     def test_postgres_diagnostics_use_and_close_the_runtime_pool(self) -> None:
         config = GatewayConfig.load(
-            ROOT / "config.example.json",
-            environ={"HORMUZ_TOKEN": "test-postgres-pool-token"},
+            ROOT
+            / "deploy"
+            / "kubernetes"
+            / "conformance"
+            / "disaster-recovery"
+            / "hormuz.json",
+            environ={
+                "HORMUZ_TOKEN": "test-postgres-pool-token",
+                "HORMUZ_BOB_TOKEN": "test-postgres-pool-bob-token",
+                "HORMUZ_INGRESS_CREDENTIAL": "test-postgres-pool-ingress-credential",
+            },
         )
         pool = mock.Mock(spec=PostgresConnectionPool)
         store = mock.Mock()
         runtime = mock.Mock()
         custody_runtime = mock.Mock()
-        custody_runtime.enabled = False
+        custody_runtime.enabled = True
         custody_runtime.readiness_healthy.return_value = True
         with (
             mock.patch("hormuz.cli.create_postgres_runtime_pool", return_value=pool) as create_pool,

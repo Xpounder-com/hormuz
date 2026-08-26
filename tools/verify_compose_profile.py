@@ -20,7 +20,7 @@ PROFILE = "single-linux-vm-pilot"
 PLATFORM = "linux/amd64"
 HORMUZ_IMAGE = (
     "ghcr.io/xpounder-com/hormuz@"
-    "sha256:1bbcca3490a7a5b004a880f42e8250acb91ce566a9c59f3263d7b279568efb5a"
+    "sha256:8ac24f5c7afb8ce09ec133616de06702f568a2e70594d8034146a131d86e5b67"
 )
 POSTGRES_IMAGE = (
     "postgres@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777"

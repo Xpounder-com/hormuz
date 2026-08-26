@@ -1,0 +1,188 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: recovered-postgres
+  namespace: hormuz-dependencies
+  labels:
+    io.hormuz.proof-role: recovered-postgres
+spec:
+  selector:
+    io.hormuz.proof-role: recovered-postgres
+  ports:
+    - name: postgresql
+      port: 5432
+      targetPort: postgresql
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: recovered-postgres
+  namespace: hormuz-dependencies
+  labels:
+    io.hormuz.proof-role: recovered-postgres
+spec:
+  serviceName: recovered-postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      io.hormuz.proof-role: recovered-postgres
+  template:
+    metadata:
+      labels:
+        io.hormuz.proof-role: recovered-postgres
+    spec:
+      automountServiceAccountToken: false
+      nodeSelector:
+        node-role.kubernetes.io/control-plane: ""
+      tolerations:
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule
+      securityContext:
+        fsGroup: 102
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: restore
+          image: ghcr.io/cloudnative-pg/postgresql:16.15-202608240846-minimal-trixie@sha256:e1ca593856017f1780dbdae8175add3ddd8f8d721348a3b6e8a01df67a9ece8a
+          command: ["bash", "-ceu"]
+          args:
+            - |
+              test -f /recovery/base/PG_VERSION
+              test -f /recovery/base/backup_manifest
+              test -d /recovery/wal
+              pg_verifybackup /recovery/base
+              install -d -m 0700 -o 26 -g 102 /var/lib/postgresql/data/pgdata
+              cp -a /recovery/base/. /var/lib/postgresql/data/pgdata/
+              rm -f /var/lib/postgresql/data/pgdata/standby.signal
+              cat > /var/lib/postgresql/data/pgdata/postgresql.conf <<'EOF'
+              listen_addresses = '*'
+              port = 5432
+              unix_socket_directories = '/tmp'
+              max_connections = 100
+              max_worker_processes = 32
+              shared_buffers = '128MB'
+              ssl = off
+              restore_command = 'cp /recovery/wal/%f %p'
+              recovery_target_name = 'hormuz_dr_final'
+              recovery_target_action = 'promote'
+              EOF
+              cat > /var/lib/postgresql/data/pgdata/postgresql.auto.conf <<'EOF'
+              # Deliberately empty: the isolated recovery target does not inherit
+              # source-cluster replication or operator-local configuration.
+              EOF
+              cat > /var/lib/postgresql/data/pgdata/pg_hba.conf <<'EOF'
+              local all all trust
+              host all all 0.0.0.0/0 scram-sha-256
+              host all all ::/0 scram-sha-256
+              EOF
+              touch /var/lib/postgresql/data/pgdata/recovery.signal
+              chown -R 26:102 /var/lib/postgresql/data/pgdata
+              chmod 0700 /var/lib/postgresql/data/pgdata
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+              add: ["CHOWN", "FOWNER", "DAC_OVERRIDE"]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          volumeMounts:
+            - name: recovery-inputs
+              mountPath: /recovery
+              readOnly: true
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: temporary
+              mountPath: /tmp
+      containers:
+        - name: postgres
+          image: ghcr.io/cloudnative-pg/postgresql:16.15-202608240846-minimal-trixie@sha256:e1ca593856017f1780dbdae8175add3ddd8f8d721348a3b6e8a01df67a9ece8a
+          command: ["postgres"]
+          args: ["-D", "/var/lib/postgresql/data/pgdata"]
+          env:
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: hormuz-recovered-postgres-superuser
+                  key: password
+          ports:
+            - name: postgresql
+              containerPort: 5432
+              protocol: TCP
+          startupProbe:
+            exec:
+              command:
+                - bash
+                - -ceu
+                - test "$(psql --host=/tmp --username=postgres --dbname=hormuz --tuples-only --no-align --command='SELECT pg_is_in_recovery()')" = f
+            periodSeconds: 2
+            timeoutSeconds: 3
+            failureThreshold: 150
+          readinessProbe:
+            exec:
+              command:
+                - bash
+                - -ceu
+                - test "$(psql --host=/tmp --username=postgres --dbname=hormuz --tuples-only --no-align --command='SELECT pg_is_in_recovery()')" = f
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "--host=/tmp", "--username=postgres", "--dbname=hormuz"]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 6
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 26
+            runAsGroup: 102
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          volumeMounts:
+            - name: recovery-inputs
+              mountPath: /recovery
+              readOnly: true
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: temporary
+              mountPath: /tmp
+      volumes:
+        - name: recovery-inputs
+          hostPath:
+            path: /hormuz-dr-artifacts
+            type: Directory
+        - name: temporary
+          emptyDir:
+            medium: Memory
+            sizeLimit: 64Mi
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 2Gi

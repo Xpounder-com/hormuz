@@ -79,7 +79,7 @@ fi
 
 server_platform=$(docker info --format '{{.OSType}}/{{.Architecture}}' 2>/dev/null || true)
 if [ "${server_platform}" != linux/x86_64 ] && [ "${server_platform}" != linux/amd64 ]; then
-    printf 'Hormuz v0.1.1 Compose requires a linux/amd64 Docker host; found %s\n' \
+    printf 'Hormuz v0.1.3 Compose requires a linux/amd64 Docker host; found %s\n' \
         "${server_platform:-unavailable}" >&2
     exit 2
 fi

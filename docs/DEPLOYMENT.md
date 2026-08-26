@@ -25,6 +25,11 @@ defines the clocks and ownership boundary. The strictly validated
 supported platforms, profile claims, component owners, durable and cached
 state, recovery treatment, child gates, and nonclaims.
 
+The operator-reviewed [Kubernetes disaster-recovery runbook](DISASTER_RECOVERY.md)
+defines the backup policy, separated recovery authorities, admission checks,
+negative paths, promotion boundary, rollback procedure, and exact disposable
+rehearsal that supplies strict content-free evidence for issue #105.
+
 ## Customer-controlled TLS deployment boundary
 
 Hormuz does **not** manage public TLS certificates in its enterprise reference

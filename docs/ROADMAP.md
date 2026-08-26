@@ -141,7 +141,9 @@ The fourteenth, [#66](https://github.com/Xpounder-com/hormuz/issues/66), is comp
 The approved deployment hierarchy in [#100](https://github.com/Xpounder-com/hormuz/issues/100)
 keeps the signed OCI digest as the application contract and treats deployment
 profiles as separately verified operational references. [#101](https://github.com/Xpounder-com/hormuz/issues/101)
-is complete with the signed, anonymously pullable `v0.1.1` Linux AMD64 digest.
+is complete with the first signed, anonymously pullable `v0.1.1` Linux AMD64
+digest. The current supported artifact is the separately verified `v0.1.3`
+digest; `v0.1.1` remains the prior supported rollback target.
 The first deployment profile, [#102](https://github.com/Xpounder-com/hormuz/issues/102),
 is implemented in [PR #137](https://github.com/Xpounder-com/hormuz/pull/137):
 one hardened gateway and one private persistent PostgreSQL service on a single
@@ -191,6 +193,22 @@ first successful governed request after promotion. These thresholds are
 reference-rehearsal acceptance criteria, not customer SLAs. The versioned
 [deployment contract](deployment-contract-v1.json) freezes the supporting
 profile, ownership, platform, state-inventory, and nonclaim boundaries.
+
+The first verified #105 reference rehearsal is captured by
+[#146](https://github.com/Xpounder-com/hormuz/pull/146) at head
+`8af1c677f3097de9a05619e890275a7e85a95e8c` in
+[CI run 33004559230](https://github.com/Xpounder-com/hormuz/actions/runs/33004559230).
+Its strict `hormuz-disaster-recovery-reference` artifact has SHA-256
+`e3987ea2bf65e4d1717ff9728183831553daf5ff7919571caa58b245a9d6a27c` and
+records a maximum RPO of 37.386 seconds, an internal RTO of 132,994
+milliseconds, and a complete end-to-end recovery time of 142,028 milliseconds.
+All 13 durable state classes matched, all seven required failure paths denied
+promotion without provider egress, two recovered gateway replicas became
+ready, and the first promoted request produced exactly one provider request
+with zero automatic replay. These are measurements of that exact pinned,
+account-free disposable reference only; they are not a customer SLA,
+production certification, or broad Kubernetes, CNI, PostgreSQL, custody, or
+regional-failure claim.
 
 ## Feature-freeze rule
 

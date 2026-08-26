@@ -1,0 +1,196 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: hormuz-dr-wal-receiver
+  namespace: hormuz-dependencies
+  labels:
+    io.hormuz.proof-role: source-backup
+spec:
+  automountServiceAccountToken: false
+  restartPolicy: Never
+  nodeSelector:
+    node-role.kubernetes.io/control-plane: ""
+  tolerations:
+    - key: node-role.kubernetes.io/control-plane
+      operator: Exists
+      effect: NoSchedule
+  securityContext:
+    fsGroup: 102
+    fsGroupChangePolicy: OnRootMismatch
+    seccompProfile:
+      type: RuntimeDefault
+  initContainers:
+    - name: prepare-recovery-inputs
+      image: ghcr.io/cloudnative-pg/postgresql:16.15-202608240846-minimal-trixie@sha256:e1ca593856017f1780dbdae8175add3ddd8f8d721348a3b6e8a01df67a9ece8a
+      command: ["bash", "-ceu"]
+      args:
+        - |
+          chgrp 102 /recovery
+          chmod 0710 /recovery
+          install -d -m 0700 -o 26 -g 102 /recovery/base /recovery/wal
+      securityContext:
+        runAsUser: 0
+        runAsGroup: 0
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: ["ALL"]
+          add: ["CHOWN", "FOWNER", "DAC_OVERRIDE"]
+      resources:
+        requests:
+          cpu: 25m
+          memory: 32Mi
+        limits:
+          cpu: 250m
+          memory: 128Mi
+      volumeMounts:
+        - name: recovery-inputs
+          mountPath: /recovery
+  containers:
+    - name: wal-receiver
+      image: ghcr.io/cloudnative-pg/postgresql:16.15-202608240846-minimal-trixie@sha256:e1ca593856017f1780dbdae8175add3ddd8f8d721348a3b6e8a01df67a9ece8a
+      command: ["bash", "-ceu"]
+      args:
+        - |
+          pg_receivewal --slot=hormuz_dr_archive --create-slot --if-not-exists
+          touch /tmp/receiver-ready
+          exec pg_receivewal --directory=/recovery/wal \
+            --slot=hormuz_dr_archive --synchronous --status-interval=1
+      env:
+        - name: PGHOST
+          valueFrom:
+            configMapKeyRef:
+              name: hormuz-dr-source-backup
+              key: source-host
+        - name: PGPORT
+          value: "5432"
+        - name: PGSSLMODE
+          value: require
+        - name: PGUSER
+          value: postgres
+        - name: PGPASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: hormuz-postgres-superuser
+              key: password
+      readinessProbe:
+        exec:
+          command: ["bash", "-ceu", "test -f /tmp/receiver-ready"]
+        periodSeconds: 1
+        timeoutSeconds: 2
+        failureThreshold: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 26
+        runAsGroup: 102
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: ["ALL"]
+      resources:
+        requests:
+          cpu: 25m
+          memory: 64Mi
+        limits:
+          cpu: 500m
+          memory: 256Mi
+      volumeMounts:
+        - name: recovery-inputs
+          mountPath: /recovery
+        - name: temporary
+          mountPath: /tmp
+  volumes:
+    - name: recovery-inputs
+      hostPath:
+        path: /hormuz-dr-artifacts
+        type: Directory
+    - name: temporary
+      emptyDir:
+        medium: Memory
+        sizeLimit: 16Mi
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: hormuz-dr-base-backup
+  namespace: hormuz-dependencies
+  labels:
+    io.hormuz.proof-role: source-backup
+spec:
+  suspend: true
+  backoffLimit: 0
+  activeDeadlineSeconds: 600
+  template:
+    metadata:
+      labels:
+        io.hormuz.proof-role: source-backup
+    spec:
+      automountServiceAccountToken: false
+      restartPolicy: Never
+      nodeSelector:
+        node-role.kubernetes.io/control-plane: ""
+      tolerations:
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 26
+        runAsGroup: 102
+        fsGroup: 102
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: base-backup
+          image: ghcr.io/cloudnative-pg/postgresql:16.15-202608240846-minimal-trixie@sha256:e1ca593856017f1780dbdae8175add3ddd8f8d721348a3b6e8a01df67a9ece8a
+          command: ["bash", "-ceu"]
+          args:
+            - |
+              pg_basebackup --pgdata=/recovery/base --format=plain \
+                --wal-method=stream --checkpoint=fast --progress \
+                --manifest-checksums=SHA256
+              pg_verifybackup /recovery/base
+          env:
+            - name: PGHOST
+              valueFrom:
+                configMapKeyRef:
+                  name: hormuz-dr-source-backup
+                  key: source-host
+            - name: PGPORT
+              value: "5432"
+            - name: PGSSLMODE
+              value: require
+            - name: PGUSER
+              value: postgres
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: hormuz-postgres-superuser
+                  key: password
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          volumeMounts:
+            - name: recovery-inputs
+              mountPath: /recovery
+            - name: temporary
+              mountPath: /tmp
+      volumes:
+        - name: recovery-inputs
+          hostPath:
+            path: /hormuz-dr-artifacts
+            type: Directory
+        - name: temporary
+          emptyDir:
+            medium: Memory
+            sizeLimit: 64Mi

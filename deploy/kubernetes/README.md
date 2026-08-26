@@ -38,7 +38,7 @@ Customer operators provide and operate:
 The chart renders no Secret and no PostgreSQL resource. It never receives a
 migration DSN. The customer may mirror the signed application digest to a
 different registry by changing `image.repository`; this chart version still
-requires the exact signed digest from the `v0.1.1` OCI contract.
+requires the exact signed digest from the `v0.1.3` OCI contract.
 
 ## Security defaults
 
@@ -267,6 +267,30 @@ exact source, images, manifest checksum, chart digest, topology, fixed event
 sequence, state counts, timings, checks, and nonclaims. It contains no DSN,
 credential, request content, raw state, log, or customer identifier.
 
+## Exact disaster-recovery rehearsal
+
+The separate `Disaster recovery reference` job follows the
+[operator runbook](../../docs/DISASTER_RECOVERY.md) and the
+[issue #105 fixtures](conformance/disaster-recovery/README.md). It takes a
+verified physical base backup from the pinned #104 source topology, archives
+WAL continuously, destroys that disposable source cluster, and restores to an
+isolated target in a separate Kind cluster.
+
+Before Hormuz is installed, admission compares exact fingerprints for every
+recovery-covered PostgreSQL and customer-owned state class, verifies the
+latest external audit checkpoint and a customer-custody canary, and exercises
+missing-WAL, corrupt-backup, partial-restore, stale-checkpoint,
+custody-unavailable, failed-coordination, and cross-tenant denial paths. Only
+the admitted environment receives the Helm release. The traffic owner then
+promotes it and proves one governed provider request with no automatic replay.
+
+The strict `hormuz.disaster-recovery-reference-proof` v1 summary publishes the
+maximum achieved RPO across all state classes, internal RTO, complete
+end-to-end recovery time, phase timings, backup/retention controls, admission
+checks, negative-path outcomes, and exact pinned versions. The runtime Secret
+contains no migration, policy-control, custody-control, custody-executor, or
+KMS-administration credential.
+
 ## Exact nonclaims
 
 This disposable proof does not certify Kubernetes, Helm, Cilium, Kind,
@@ -276,6 +300,6 @@ CNI-portability, universal HA, RPO, RTO, multi-region, or zone-failure claim.
 The exact #104 fixture proves only its pinned PostgreSQL promotion and
 quorum-loss behaviors. It does not prove production storage durability,
 autoscaling, capacity, browser sessions, provider exactly-once semantics, or
-zero interruption for a force-killed in-flight stream. The complete recovery
-rehearsal remains a separate release gate under
-[#105](https://github.com/Xpounder-com/hormuz/issues/105).
+zero interruption for a force-killed in-flight stream. The exact #105 fixture
+is a rehearsal acceptance claim for its pinned combination, not a customer
+SLA, customer-infrastructure certification, or universal recovery guarantee.
