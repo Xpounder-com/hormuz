@@ -33,6 +33,7 @@ KUBECONFIG=""
 CLUSTER_CREATED=0
 EVENT_SEQUENCE=0
 MAXIMUM_STORAGE_DENIAL_MS=0
+QUORUM_OBSERVATION_CYCLES=0
 PAUSED_NODES=()
 
 fail() {
@@ -260,13 +261,27 @@ wait_for_container_stopped() {
 wait_for_recreated_pod_ready() {
   local pod=$1
   local previous_uid=$2
-  local attempt current_uid ready
+  local authoritative_primary=$3
+  local attempt current_uid ready pod_ip endpoint_json observed_primary
   for attempt in $(seq 1 300); do
     current_uid="$(pod_uid "${pod}" 2>/dev/null || true)"
     ready="$(kubectl --namespace hormuz-dependencies get pod "${pod}" \
       --output=jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || true)"
-    if [[ -n "${current_uid}" && "${current_uid}" != "${previous_uid}" && "${ready}" == "True" ]]; then
-      return
+    if [[ -n "${current_uid}" && "${current_uid}" != "${previous_uid}" ]]; then
+      observed_primary="$(current_primary 2>/dev/null || true)"
+      [[ "${observed_primary}" == "${authoritative_primary}" ]] \
+        || fail "authoritative primary changed while the former primary rejoined"
+      pod_ip="$(kubectl --namespace hormuz-dependencies get pod "${pod}" \
+        --output=jsonpath='{.status.podIP}' 2>/dev/null || true)"
+      endpoint_json="$(kubectl --namespace hormuz-dependencies get endpointslices \
+        --selector='kubernetes.io/service-name=hormuz-postgres-rw' --output=json 2>/dev/null || true)"
+      if [[ -n "${pod_ip}" && -n "${endpoint_json}" ]] && python3 -c 'import json,sys; value=json.loads(sys.argv[1]); addresses={address for item in value.get("items",[]) for endpoint in item.get("endpoints",[]) if (endpoint.get("conditions") or {}).get("ready") is True for address in endpoint.get("addresses",[])}; raise SystemExit(0 if sys.argv[2] in addresses else 1)' \
+        "${endpoint_json}" "${pod_ip}"; then
+        fail "former primary entered the read-write endpoint before standby verification"
+      fi
+      if [[ "${ready}" == "True" ]]; then
+        return
+      fi
     fi
     sleep 1
   done
@@ -409,7 +424,7 @@ probe() {
   fi
   elapsed=$(( $(monotonic_ms) - started ))
   [[ "${elapsed}" -gt 0 ]] || elapsed=1
-  if [[ "${command}" == "storage-backpressure" && "${elapsed}" -gt "${MAXIMUM_STORAGE_DENIAL_MS}" ]]; then
+  if [[ "${expected_status}" == "503" && "${elapsed}" -gt "${MAXIMUM_STORAGE_DENIAL_MS}" ]]; then
     MAXIMUM_STORAGE_DENIAL_MS="${elapsed}"
   fi
   python3 -c 'import json,sys; value=json.load(open(sys.argv[1],encoding="utf-8")); raise SystemExit(0 if value.get("status")==int(sys.argv[2]) else 1)' \
@@ -417,11 +432,27 @@ probe() {
     || return 1
 }
 
-gateway_uids() {
+gateway_runtime_identities() {
   kubectl --namespace hormuz-system get pods \
     --selector='app.kubernetes.io/instance=hormuz,app.kubernetes.io/component=gateway' \
     --output=json \
-    | python3 -c 'import json,sys; items=json.load(sys.stdin)["items"]; print("|".join(sorted(item["metadata"]["uid"] for item in items)))'
+    | python3 -c 'import json,sys; items=json.load(sys.stdin)["items"]; identities=[]
+for item in sorted(items,key=lambda value:value["metadata"]["name"]):
+ statuses=[status for status in item.get("status",{}).get("containerStatuses",[]) if status.get("name")=="gateway"]
+ assert len(statuses)==1 and isinstance(statuses[0].get("containerID"),str) and statuses[0]["containerID"] and isinstance(statuses[0].get("restartCount"),int)
+ identities.append(":".join((item["metadata"]["uid"],statuses[0]["containerID"],str(statuses[0]["restartCount"]))))
+assert len(identities)==2
+print("|".join(identities))'
+}
+
+assert_replica_in_recovery() {
+  local pod=$1
+  local recovery
+  recovery="$(timeout 15s kubectl --namespace hormuz-dependencies exec "pod/${pod}" \
+    --container postgres -- psql --username postgres --dbname postgres \
+    --tuples-only --no-align --command 'SELECT pg_is_in_recovery()' 2>/dev/null \
+    | tr -d '[:space:]' || true)"
+  [[ "${recovery}" == "t" ]] || fail "surviving PostgreSQL instance became writable without failover quorum"
 }
 
 gateway_fail_closed() {
@@ -461,6 +492,48 @@ gateway_fail_closed() {
   if [[ "${elapsed}" -gt "${MAXIMUM_STORAGE_DENIAL_MS}" ]]; then
     MAXIMUM_STORAGE_DENIAL_MS="${elapsed}"
   fi
+}
+
+observe_quorum_refusal_window() {
+  local expected_primary=$1
+  local surviving_replica=$2
+  local expected_provider_count=$3
+  local started elapsed gateway_json index ip observed_provider observed_primary
+  local -a gateway_ips=()
+  started="$(monotonic_ms)"
+  QUORUM_OBSERVATION_CYCLES=0
+  while true; do
+    QUORUM_OBSERVATION_CYCLES=$((QUORUM_OBSERVATION_CYCLES + 1))
+    gateway_json="${ARTIFACT_ROOT}/negative-observation-${QUORUM_OBSERVATION_CYCLES}-gateways.json"
+    kubectl --namespace hormuz-system get pods \
+      --selector='app.kubernetes.io/instance=hormuz,app.kubernetes.io/component=gateway' \
+      --output=json >"${gateway_json}"
+    mapfile -t gateway_ips < <(python3 -c 'import json,sys; items=json.load(open(sys.argv[1],encoding="utf-8"))["items"]; assert len(items)==2; print("\n".join(sorted(item["status"]["podIP"] for item in items)))' "${gateway_json}")
+    [[ "${#gateway_ips[@]}" -eq 2 ]] || fail "gateway replica count changed during quorum refusal"
+    for index in 0 1; do
+      ip="${gateway_ips[${index}]}"
+      probe ready "http://${ip}:8787" 503 \
+        "${ARTIFACT_ROOT}/negative-observation-${QUORUM_OBSERVATION_CYCLES}-ready-${index}.json" \
+        || fail "gateway became ready during quorum refusal"
+      probe request "http://${ip}:8787" 503 \
+        "${ARTIFACT_ROOT}/negative-observation-${QUORUM_OBSERVATION_CYCLES}-denial-${index}.json" \
+        || fail "gateway admitted provider egress during quorum refusal"
+    done
+    assert_replica_in_recovery "${surviving_replica}"
+    observed_primary="$(current_primary 2>/dev/null || true)"
+    [[ "${observed_primary}" == "${expected_primary}" ]] \
+      || fail "CloudNativePG changed primary without the required failover quorum"
+    [[ "$(rw_ready_addresses)" == "0" ]] \
+      || fail "read-write endpoint exposed an address during quorum refusal"
+    observed_provider="$(provider_request_count)"
+    [[ "${observed_provider}" == "${expected_provider_count}" ]] \
+      || fail "provider egress occurred during quorum refusal"
+    elapsed=$(( $(monotonic_ms) - started ))
+    if [[ "${elapsed}" -ge 30000 && "${QUORUM_OBSERVATION_CYCLES}" -ge 4 ]]; then
+      return
+    fi
+    sleep 3
+  done
 }
 
 wait_for_primary_change() {
@@ -831,7 +904,7 @@ record_event ambiguous_attempt_committed
 provider_before_positive="$(provider_request_count)"
 [[ "${provider_before_positive}" == "2" ]] || fail "provider baseline count invalid"
 
-gateway_uids_before="$(gateway_uids)"
+gateway_runtime_identities_before="$(gateway_runtime_identities)"
 old_primary="$(current_primary)"
 [[ -n "${old_primary}" ]] || fail "current primary is unavailable"
 old_primary_node="$(pod_node "${old_primary}")"
@@ -883,7 +956,8 @@ for index in 0 1; do
   [[ "${ready_observed}" -eq 1 ]] || fail "gateway did not reconnect after primary failover"
 done
 gateway_recovery_ms=$(( $(monotonic_ms) - positive_started_ms ))
-[[ "$(gateway_uids)" == "${gateway_uids_before}" ]] || fail "database failover restarted a gateway process"
+[[ "$(gateway_runtime_identities)" == "${gateway_runtime_identities_before}" ]] \
+  || fail "database failover restarted a gateway process"
 record_event gateways_reconnected_without_restart
 probe request "http://hormuz-hormuz.hormuz-system.svc.cluster.local:8787" 200 \
   "${ARTIFACT_ROOT}/recovered-request.json"
@@ -899,13 +973,10 @@ provider_after_recovery="$(provider_request_count)"
 record_event no_provider_replay_verified
 provider_control POST /control/block/reset >"${ARTIFACT_ROOT}/provider-reset.json"
 
-wait_for_recreated_pod_ready "${old_primary}" "${old_primary_uid}"
+wait_for_recreated_pod_ready "${old_primary}" "${old_primary_uid}" "${new_primary}"
 wait_for_cnpg_ready
 former_primary_rejoin_ms=$(( $(monotonic_ms) - positive_started_ms ))
-old_primary_recovery="$(timeout 30s kubectl --namespace hormuz-dependencies exec "pod/${old_primary}" --container postgres -- \
-  psql --username postgres --dbname postgres --tuples-only --no-align \
-  --command 'SELECT pg_is_in_recovery()' | tr -d '[:space:]')"
-[[ "${old_primary_recovery}" == "t" ]] || fail "removed primary did not rejoin as a replica"
+assert_replica_in_recovery "${old_primary}"
 record_event former_primary_replaced_and_rejoined
 
 wait_for_cnpg_ready
@@ -918,9 +989,15 @@ mapfile -t negative_replica_nodes < <(kubectl --namespace hormuz-dependencies ge
     "${negative_primary}")
 [[ "${#negative_replica_nodes[@]}" -eq 2 ]] || fail "negative replica topology invalid"
 negative_replica_node="${negative_replica_nodes[0]}"
+negative_surviving_replica="$(kubectl --namespace hormuz-dependencies get pods \
+  --selector='cnpg.io/cluster=hormuz-postgres' --output=json \
+  | python3 -c 'import json,sys; primary,paused=sys.argv[1:]; candidates=[item["metadata"]["name"] for item in json.load(sys.stdin)["items"] if item["metadata"]["name"]!=primary and item["spec"]["nodeName"]!=paused]; assert len(candidates)==1; print(candidates[0])' \
+    "${negative_primary}" "${negative_replica_node}")"
 pause_node "${negative_replica_node}"
 wait_for_node_state "${negative_replica_node}" Unknown
 provider_before_negative="$(provider_request_count)"
+[[ "${provider_before_negative}" == "${provider_after_recovery}" ]] \
+  || fail "provider replay occurred while the former primary rejoined"
 negative_started_ms="$(monotonic_ms)"
 pause_node "${negative_primary_node}"
 record_event primary_and_replica_loss_injected
@@ -940,8 +1017,12 @@ for attempt in $(seq 1 120); do
 done
 [[ "${attempt}" -lt 120 ]] || fail "read-write endpoint retained a stale primary"
 quorum_observation_started_ms="$(monotonic_ms)"
-sleep 30
+observe_quorum_refusal_window \
+  "${negative_primary}" "${negative_surviving_replica}" "${provider_before_negative}"
 quorum_refusal_observation_ms=$(( $(monotonic_ms) - quorum_observation_started_ms ))
+provider_after_negative_denials="$(provider_request_count)"
+[[ "${provider_after_negative_denials}" == "${provider_before_negative}" ]] \
+  || fail "provider egress occurred during the complete quorum-refusal window"
 [[ "$(current_primary)" == "${negative_primary}" ]] \
   || fail "CloudNativePG promoted without the required failover quorum"
 database_pods_json="$(kubectl --namespace hormuz-dependencies get pod \
@@ -950,6 +1031,7 @@ nodes_json="$(kubectl get nodes --output=json)"
 available_database_pods="$(python3 -c 'import json,sys; pods=json.loads(sys.argv[1])["items"]; nodes=json.loads(sys.argv[2])["items"]; ready_nodes={item["metadata"]["name"] for item in nodes if any(c.get("type")=="Ready" and c.get("status")=="True" for c in item.get("status",{}).get("conditions",[]))}; print(sum(1 for item in pods if item["spec"].get("nodeName") in ready_nodes and any(c.get("type")=="Ready" and c.get("status")=="True" for c in item.get("status",{}).get("conditions",[]))))' \
   "${database_pods_json}" "${nodes_json}")"
 [[ "${available_database_pods}" == "1" ]] || fail "negative quorum fixture did not leave exactly one available replica"
+assert_replica_in_recovery "${negative_surviving_replica}"
 python3 -c 'import json,sys; status=json.loads(sys.argv[1])["status"]; n=len(status["standbyNames"]); r=int(sys.argv[2]); w=status["standbyNumber"]; raise SystemExit(0 if n==2 and r==1 and w==1 and not (r+w>n) else 1)' \
   "${failover_quorum}" "${available_database_pods}" \
   || fail "failover quorum arithmetic did not block unsafe promotion"
@@ -964,7 +1046,7 @@ unpause_node "${negative_replica_node}"
 wait_for_node_state "${negative_primary_node}" True
 wait_for_node_state "${negative_replica_node}" True
 wait_for_cnpg_ready
-[[ "$(gateway_uids)" == "${gateway_uids_before}" ]] \
+[[ "$(gateway_runtime_identities)" == "${gateway_runtime_identities_before}" ]] \
   || fail "quorum-loss recovery restarted a gateway process"
 for index in 0 1; do
   gateway_ip="$(python3 -c 'import json,sys; items=sorted(json.loads(sys.argv[1])["items"],key=lambda i:i["metadata"]["name"]); print(items[int(sys.argv[2])]["status"]["podIP"])' "$(kubectl --namespace hormuz-system get pods --selector='app.kubernetes.io/instance=hormuz,app.kubernetes.io/component=gateway' --output=json)" "${index}")"
@@ -982,6 +1064,9 @@ negative_recovery_ms=$(( $(monotonic_ms) - negative_recovery_started_ms ))
 record_event negative_path_recovered
 state_probe snapshot "${ARTIFACT_ROOT}/state-after-quorum-recovery.json"
 record_event final_state_continuity_verified
+provider_after_all_recovery="$(provider_request_count)"
+[[ "${provider_after_all_recovery}" == "${provider_after_recovery}" ]] \
+  || fail "provider request was replayed during quorum recovery"
 
 [[ "${EVENT_SEQUENCE}" -eq 26 ]] || fail "event sequence incomplete"
 [[ "${MAXIMUM_STORAGE_DENIAL_MS}" -gt 0 ]] || fail "storage denial timing was not measured"
@@ -995,6 +1080,7 @@ python3 - \
   "${provider_before_positive}" "${provider_after_positive_denials}" "${provider_after_recovery}" \
   "${ambiguous_preserved}" "${uncertain_preserved}" \
   "${provider_before_negative}" "${provider_after_negative_denials}" \
+  "${provider_after_all_recovery}" "${QUORUM_OBSERVATION_CYCLES}" \
   "${ARTIFACT_ROOT}/state-before.json" "${ARTIFACT_ROOT}/state-after-failover.json" \
   "${ARTIFACT_ROOT}/state-after-recovery.json" "${ARTIFACT_ROOT}/state-after-quorum-recovery.json" \
   "${ARTIFACT_ROOT}/events.log" <<'PY'
@@ -1009,6 +1095,7 @@ from pathlib import Path
     provider_before_positive, provider_after_positive, provider_after_recovery,
     ambiguous_preserved, uncertain_preserved,
     provider_before_negative, provider_after_negative,
+    provider_after_all_recovery, quorum_observation_cycles,
     state_before, state_after_failover, state_after_recovery, state_after_quorum,
     events_path,
 ) = sys.argv[1:]
@@ -1061,6 +1148,7 @@ value = {
         "synchronous_durability_restored": True,
         "former_primary_rejoined_as_replica": True,
         "former_primary_container_stopped_before_promotion": True,
+        "former_primary_excluded_from_rw_endpoint_until_standby": True,
         "gateway_replicas_observed": 2,
         "gateways_not_ready": 2,
         "backpressure_requests": 32,
@@ -1068,6 +1156,7 @@ value = {
         "provider_requests_before_denials": int(provider_before_positive),
         "provider_requests_after_denials": int(provider_after_positive),
         "provider_requests_after_recovery": int(provider_after_recovery),
+        "provider_requests_after_all_recovery": int(provider_after_all_recovery),
         "gateway_processes_reused": True,
         "ambiguous_attempts_preserved": int(ambiguous_preserved),
         "uncertain_reservations_preserved": int(uncertain_preserved),
@@ -1078,14 +1167,18 @@ value = {
         "unavailable_postgresql_instances": 2,
         "promotion_prevented": True,
         "failover_quorum_reported_insufficient": True,
+        "surviving_instance_remained_standby": True,
         "rw_ready_addresses": 0,
         "stale_primary_endpoint_absent": True,
         "gateway_replicas_observed": 2,
         "gateways_not_ready": 2,
         "backpressure_requests": 32,
         "gateway_storage_denials": 32,
+        "observation_cycles": int(quorum_observation_cycles),
+        "observation_gateway_denials": int(quorum_observation_cycles) * 2,
         "provider_requests_before_denials": int(provider_before_negative),
         "provider_requests_after_denials": int(provider_after_negative),
+        "provider_requests_after_recovery": int(provider_after_all_recovery),
         "gateway_processes_reused_after_recovery": True,
     },
     "state": {

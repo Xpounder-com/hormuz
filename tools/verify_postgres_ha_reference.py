@@ -411,6 +411,7 @@ def _validate_primary_loss(value: Any) -> None:
         "synchronous_durability_restored",
         "former_primary_rejoined_as_replica",
         "former_primary_container_stopped_before_promotion",
+        "former_primary_excluded_from_rw_endpoint_until_standby",
         "gateway_replicas_observed",
         "gateways_not_ready",
         "backpressure_requests",
@@ -418,6 +419,7 @@ def _validate_primary_loss(value: Any) -> None:
         "provider_requests_before_denials",
         "provider_requests_after_denials",
         "provider_requests_after_recovery",
+        "provider_requests_after_all_recovery",
         "gateway_processes_reused",
         "ambiguous_attempts_preserved",
         "uncertain_reservations_preserved",
@@ -431,6 +433,7 @@ def _validate_primary_loss(value: Any) -> None:
         "synchronous_durability_restored",
         "former_primary_rejoined_as_replica",
         "former_primary_container_stopped_before_promotion",
+        "former_primary_excluded_from_rw_endpoint_until_standby",
         "gateway_processes_reused",
     )
     if value["trigger"] != "unexpected_primary_pod_deletion" or not all(
@@ -452,7 +455,11 @@ def _validate_primary_loss(value: Any) -> None:
     before = _nonnegative(value["provider_requests_before_denials"], "provider_requests_before_denials")
     after = _nonnegative(value["provider_requests_after_denials"], "provider_requests_after_denials")
     recovered = _positive(value["provider_requests_after_recovery"], "provider_requests_after_recovery")
-    if after != before or recovered != after + 1:
+    fully_recovered = _positive(
+        value["provider_requests_after_all_recovery"],
+        "provider_requests_after_all_recovery",
+    )
+    if after != before or recovered != after + 1 or fully_recovered != recovered:
         raise PostgresHAProofError("primary_loss_provider_count_invalid")
     if _positive(value["ambiguous_attempts_preserved"], "ambiguous_attempts_preserved") < 1:
         raise PostgresHAProofError("ambiguous_attempt_missing")
@@ -468,14 +475,18 @@ def _validate_quorum_loss(value: Any) -> None:
         "unavailable_postgresql_instances",
         "promotion_prevented",
         "failover_quorum_reported_insufficient",
+        "surviving_instance_remained_standby",
         "rw_ready_addresses",
         "stale_primary_endpoint_absent",
         "gateway_replicas_observed",
         "gateways_not_ready",
         "backpressure_requests",
         "gateway_storage_denials",
+        "observation_cycles",
+        "observation_gateway_denials",
         "provider_requests_before_denials",
         "provider_requests_after_denials",
+        "provider_requests_after_recovery",
         "gateway_processes_reused_after_recovery",
     }
     _exact_keys(value, expected_keys, "quorum_loss")
@@ -486,6 +497,7 @@ def _validate_quorum_loss(value: Any) -> None:
     for key in (
         "promotion_prevented",
         "failover_quorum_reported_insufficient",
+        "surviving_instance_remained_standby",
         "stale_primary_endpoint_absent",
         "gateway_processes_reused_after_recovery",
     ):
@@ -507,7 +519,15 @@ def _validate_quorum_loss(value: Any) -> None:
         raise PostgresHAProofError("quorum_loss_gateway_denial_invalid")
     before = _nonnegative(value["provider_requests_before_denials"], "provider_requests_before_denials")
     after = _nonnegative(value["provider_requests_after_denials"], "provider_requests_after_denials")
-    if after != before:
+    recovered = _nonnegative(
+        value["provider_requests_after_recovery"],
+        "provider_requests_after_recovery",
+    )
+    cycles = _positive(value["observation_cycles"], "observation_cycles")
+    denials = _positive(value["observation_gateway_denials"], "observation_gateway_denials")
+    if cycles < 4 or denials != cycles * 2:
+        raise PostgresHAProofError("quorum_loss_observation_invalid")
+    if after != before or recovered != after:
         raise PostgresHAProofError("quorum_loss_provider_egress_invalid")
 
 

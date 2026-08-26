@@ -27,16 +27,22 @@ The live verifier proves two bounded scenarios:
    promotes a safe replica, the Lease and read/write endpoint converge, the
    promoted primary re-establishes an `ANY 1` synchronous streaming standby,
    the deleted primary's old container is no longer running before promotion is
-   observed, the same gateway processes reconnect, durable governed state
-   remains intact, and no provider request is replayed. Immediately after the
+   observed, the recreated former-primary Pod is continuously excluded from the
+   read/write endpoint until it is verified as a standby, and the same gateway
+   Pod UIDs, container IDs, and restart counts reconnect. Durable governed state
+   remains intact, and provider counts stay unchanged through the final recovery,
+   proving that no provider request is replayed. Immediately after the
    removal, the fake provider records an in-flight request and closes its
    connection without a response. The client outcome remains ambiguous while
    the pre-egress attempt and reservation remain durably uncertain.
 2. After the primary and one replica worker are paused, failover quorum blocks
    promotion, the read/write endpoint has no ready address, both gateways stay
    unready and deny provider egress, and the surviving replica is not exposed
-   as a writable primary. Normal operation returns only after quorum is
-   restored.
+   as a writable primary. During the complete bounded observation window, the
+   verifier repeatedly checks every gateway's readiness and governed denial,
+   the provider request count, the empty read/write endpoint, the unchanged
+   primary identity, and `pg_is_in_recovery()` on the surviving instance. Normal
+   operation returns only after quorum is restored.
 
 Run it only on native Linux AMD64 with a disposable Docker daemon:
 

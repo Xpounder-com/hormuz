@@ -85,6 +85,7 @@ def valid_observations() -> dict[str, object]:
             "synchronous_durability_restored": True,
             "former_primary_rejoined_as_replica": True,
             "former_primary_container_stopped_before_promotion": True,
+            "former_primary_excluded_from_rw_endpoint_until_standby": True,
             "gateway_replicas_observed": 2,
             "gateways_not_ready": 2,
             "backpressure_requests": 32,
@@ -92,6 +93,7 @@ def valid_observations() -> dict[str, object]:
             "provider_requests_before_denials": 2,
             "provider_requests_after_denials": 2,
             "provider_requests_after_recovery": 3,
+            "provider_requests_after_all_recovery": 3,
             "gateway_processes_reused": True,
             "ambiguous_attempts_preserved": 1,
             "uncertain_reservations_preserved": 1,
@@ -102,14 +104,18 @@ def valid_observations() -> dict[str, object]:
             "unavailable_postgresql_instances": 2,
             "promotion_prevented": True,
             "failover_quorum_reported_insufficient": True,
+            "surviving_instance_remained_standby": True,
             "rw_ready_addresses": 0,
             "stale_primary_endpoint_absent": True,
             "gateway_replicas_observed": 2,
             "gateways_not_ready": 2,
             "backpressure_requests": 32,
             "gateway_storage_denials": 32,
+            "observation_cycles": 4,
+            "observation_gateway_denials": 8,
             "provider_requests_before_denials": 3,
             "provider_requests_after_denials": 3,
+            "provider_requests_after_recovery": 3,
             "gateway_processes_reused_after_recovery": True,
         },
         "state": {
@@ -146,13 +152,26 @@ class PostgresHAReferenceTests(unittest.TestCase):
         self.assertIn("no_customer_sla", evidence["limitations"])
 
     def test_evidence_rejects_unsafe_promotion_replay_and_state_rewrite(self) -> None:
-        for mutation in ("promotion", "replay", "state"):
+        for mutation in (
+            "promotion",
+            "replay",
+            "late_replay",
+            "standby",
+            "rejoin_endpoint",
+            "state",
+        ):
             with self.subTest(mutation=mutation):
                 value = valid_observations()
                 if mutation == "promotion":
                     value["quorum_loss"]["promotion_prevented"] = False  # type: ignore[index]
                 elif mutation == "replay":
                     value["primary_loss"]["provider_requests_after_denials"] = 3  # type: ignore[index]
+                elif mutation == "late_replay":
+                    value["primary_loss"]["provider_requests_after_all_recovery"] = 4  # type: ignore[index]
+                elif mutation == "standby":
+                    value["quorum_loss"]["surviving_instance_remained_standby"] = False  # type: ignore[index]
+                elif mutation == "rejoin_endpoint":
+                    value["primary_loss"]["former_primary_excluded_from_rw_endpoint_until_standby"] = False  # type: ignore[index]
                 else:
                     value["state"]["after_failover"]["control_fingerprint"] = "d" * 64  # type: ignore[index]
                 with self.assertRaises(ha.PostgresHAProofError):
@@ -218,6 +237,10 @@ class PostgresHAReferenceTests(unittest.TestCase):
         self.assertIn("--grace-period=0 --force --wait=false", runner)
         self.assertIn("wait_for_container_stopped", runner)
         self.assertIn("docker pause", runner)
+        self.assertIn("gateway_runtime_identities", runner)
+        self.assertIn('statuses[0].get("containerID")', runner)
+        self.assertIn('statuses[0].get("restartCount")', runner)
+        self.assertNotIn("gateway_uids", runner)
         self.assertIn(
             'wait_for_node_state "${negative_replica_node}" Unknown',
             runner,
@@ -234,8 +257,12 @@ class PostgresHAReferenceTests(unittest.TestCase):
         self.assertIn("available_database_pods", runner)
         self.assertNotIn("ready_database_pods", runner)
         self.assertIn("rw_ready_addresses", runner)
-        self.assertEqual(runner.count('(endpoint.get("conditions") or {})'), 2)
+        self.assertEqual(runner.count('(endpoint.get("conditions") or {})'), 3)
         self.assertIn("storage-backpressure", runner)
+        self.assertIn("observe_quorum_refusal_window", runner)
+        self.assertIn("assert_replica_in_recovery", runner)
+        self.assertIn("QUORUM_OBSERVATION_CYCLES", runner)
+        self.assertIn("provider_after_all_recovery", runner)
         self.assertIn("ambiguous-request", runner)
         self.assertIn("/control/block/abort", runner)
         self.assertIn("blocking_abort", provider)
