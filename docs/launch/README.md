@@ -1,7 +1,7 @@
 # Hormuz launch package
 
 This directory contains the evidence-grounded launch package for the Hormuz
-v0.1.1 public open-source alpha. Every public asset is currently marked
+v0.1.3 public open-source alpha. Every public asset is currently marked
 **DRAFT — DO NOT PUBLISH**. Drafting is allowed before the quiet alpha;
 publication is not.
 
@@ -34,8 +34,8 @@ and analytics drift.
 
 ## Publication sequence
 
-1. Close the disclosure, community, live-provider, repository, and signed-OCI
-   gates listed in the manifest.
+1. Reverify the closed disclosure, community, client/provider, repository,
+   signed-OCI, and bounded deployment-reference gates listed in the manifest.
 2. Complete the five-person quiet-alpha gate in issue #110 and resolve every
    installation or security blocker.
 3. Supply owner-controlled URLs for the AI Governance Review and paid-pilot

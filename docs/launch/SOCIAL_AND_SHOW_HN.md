@@ -15,11 +15,11 @@ copy.
 
 <!-- claims: GATEWAY_SCOPE COST_REPORTING PROVIDER_FREE_DEMO -->
 
-Suggested reply, only after the live-provider gate closes:
+Evidence note:
 
-> Pinned Codex and Claude Code clients run through Hormuz in blocking CI. The
-> release record also separates loopback compatibility from live BYO-provider
-> evidence so the claim stays inspectable.
+> Pinned Codex and Claude Code clients run through Hormuz in blocking CI. A
+> same-revision content-free artifact separately verifies governed streaming
+> calls through real OpenAI and Anthropic endpoints.
 
 <!-- claims: CLIENT_VERIFICATION -->
 
@@ -40,8 +40,8 @@ validates content-free evidence, and removes the temporary state.
 <!-- claims: PROVIDER_FREE_DEMO -->
 
 This is an open-source alpha for evaluation and design-partner hardening—not a
-production, compliance, enterprise-HA, disaster-recovery, or independent-
-security-review claim. <!-- claims: ALPHA_BOUNDARY -->
+production certification, universal HA/DR guarantee, compliance claim,
+customer SLA, or independent security review. <!-- claims: ALPHA_BOUNDARY -->
 
 Repository: https://github.com/Xpounder-com/hormuz
 
@@ -78,15 +78,16 @@ through the real HTTP, policy, redaction, request-attempt, and SQLite evidence
 path using disposable loopback providers, then removes the temporary state.
 <!-- claims: PROVIDER_FREE_DEMO -->
 
-Blocking CI exercises pinned official Codex and Claude Code clients through
-the same gateway boundary. The repository distinguishes that loopback client
-proof from the separate live BYO-provider gate. <!-- claims: CLIENT_VERIFICATION -->
+Blocking CI exercises pinned Codex and Claude Code clients through the same
+gateway boundary. A separate same-revision, content-free artifact verifies
+governed streaming calls through real OpenAI and Anthropic endpoints.
+<!-- claims: CLIENT_VERIFICATION -->
 
 The project is an evaluation alpha. It does not claim production suitability,
-HA/DR, compliance, provider-invoice accuracy, or an independent security
-review. I would especially value feedback on installation clarity, policy
-semantics, and whether the content-free evidence boundary is understandable.
+universal HA/DR, compliance, provider-invoice accuracy, a customer SLA, or an
+independent security review. I would especially value feedback on installation
+clarity, policy semantics, and whether the content-free evidence boundary is
+understandable.
 <!-- claims: ALPHA_BOUNDARY -->
 
 Repository: https://github.com/Xpounder-com/hormuz
-

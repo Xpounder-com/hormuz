@@ -1,4 +1,4 @@
-<!-- hormuz-launch-asset-v1 {"asset_id":"architecture_security","publication_status":"draft_do_not_publish","claim_ids":["ALPHA_BOUNDARY","DATA_BOUNDARY","EVIDENCE_BOUNDARY","GATEWAY_SCOPE","OCI_RELEASE","POLICY_CONTROLS","SECRET_EGRESS"]} -->
+<!-- hormuz-launch-asset-v1 {"asset_id":"architecture_security","publication_status":"draft_do_not_publish","claim_ids":["ALPHA_BOUNDARY","DATA_BOUNDARY","EVIDENCE_BOUNDARY","GATEWAY_SCOPE","OCI_RELEASE","POLICY_CONTROLS","REFERENCE_DEPLOYMENTS","SECRET_EGRESS"]} -->
 
 # DRAFT — DO NOT PUBLISH
 
@@ -74,25 +74,34 @@ of a request.
 
 ## Deployment story
 
-The portable product contract is the signed `v0.1.1` OCI digest. Public GHCR
-is only the first publication registry. The published image is `linux/amd64`;
-a multi-architecture manifest remains blocked on separate native
-`linux/arm64` verification. Exact keyless workflow identity, public Rekor image
-signature, registry SBOM/provenance attestations, anonymous pull, and recursive
-mirroring were verified for this release.
+The portable product contract is the signed `v0.1.3` OCI digest,
+`sha256:8ac24f5c7afb8ce09ec133616de06702f568a2e70594d8034146a131d86e5b67`.
+Public GHCR is only the first publication registry. The published image is
+`linux/amd64`; a multi-architecture manifest remains blocked on separate
+native `linux/arm64` verification. Exact keyless workflow identity, public
+Rekor image signature, registry SBOM/provenance attestations, and anonymous
+pull were verified for this release. The documented recursive-mirror procedure
+requires destination verification; no v0.1.3 destination-registry proof is
+claimed here.
 <!-- claims: OCI_RELEASE -->
 
 The built-in server does not manage public TLS certificates. A customer-owned
 ingress terminates TLS and connects to Hormuz over an authenticated,
-network-restricted hop. The simple reference profile is for local evaluation
-and pilots; Kubernetes/Helm and enterprise HA/recovery remain separate
-profiles and gates.
+network-restricted hop.
+
+The exact account-free reference set covers a single-VM Compose pilot,
+multi-replica Kubernetes and Helm application operation, CloudNativePG
+failover and quorum loss, and a disaster-recovery rehearsal within its
+accepted reference targets. Compose remains evaluation/pilot-only; the other
+proofs apply only to their pinned disposable combinations. None establishes a
+customer SLA, broad platform portability, or production certification.
+<!-- claims: REFERENCE_DEPLOYMENTS -->
 
 ## What the alpha does not establish
 
-Hormuz v0.1.1 does not establish production suitability, enterprise HA,
-disaster recovery, compliance, provider-invoice accuracy, cloud-specific
-certification, protection from a host-root administrator, or an independent
-security review. It should be evaluated with synthetic data until an
-organization completes its own deployment and data review.
+Hormuz v0.1.3 does not establish production suitability, a universal HA/DR
+guarantee, compliance, provider-invoice accuracy, a customer SLA,
+cloud-specific certification, protection from a host-root administrator, or
+an independent security review. It should be evaluated with synthetic data
+until an organization completes its own deployment and data review.
 <!-- claims: ALPHA_BOUNDARY -->

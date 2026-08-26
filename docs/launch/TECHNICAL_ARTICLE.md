@@ -1,4 +1,4 @@
-<!-- hormuz-launch-asset-v1 {"asset_id":"technical_article","publication_status":"draft_do_not_publish","claim_ids":["ALPHA_BOUNDARY","CLIENT_VERIFICATION","COST_REPORTING","DATA_BOUNDARY","EVIDENCE_BOUNDARY","GATEWAY_SCOPE","POLICY_CONTROLS","PROVIDER_FREE_DEMO","SECRET_EGRESS"]} -->
+<!-- hormuz-launch-asset-v1 {"asset_id":"technical_article","publication_status":"draft_do_not_publish","claim_ids":["ALPHA_BOUNDARY","CLIENT_VERIFICATION","COST_REPORTING","DATA_BOUNDARY","EVIDENCE_BOUNDARY","GATEWAY_SCOPE","POLICY_CONTROLS","PROVIDER_FREE_DEMO","REFERENCE_DEPLOYMENTS","SECRET_EGRESS"]} -->
 
 # DRAFT — DO NOT PUBLISH
 
@@ -88,11 +88,21 @@ request that makes no provider call. It validates content-free evidence and
 removes the temporary state before exiting. No provider account or external
 provider call is required. <!-- claims: PROVIDER_FREE_DEMO -->
 
-Blocking CI also installs pinned official Codex and Claude Code clients and
-routes them through Hormuz against loopback providers. That is protocol/client
-compatibility evidence, not the same as two live provider-account calls. The
-live BYO-provider gate must close separately before the formal release claims
-that proof is complete. <!-- claims: CLIENT_VERIFICATION -->
+Blocking CI also installs pinned Codex 0.147.0 and Claude Code 2.1.233 clients
+and routes them through Hormuz against loopback providers. A separate
+same-revision, content-free artifact verifies governed streaming calls through
+real OpenAI and Anthropic endpoints. That proof covers the exact supported
+paths; it does not certify every feature or future client release.
+<!-- claims: CLIENT_VERIFICATION -->
+
+### Deployment evidence should stay narrower than the marketing
+
+Exact account-free proofs now cover the single-VM Compose pilot,
+multi-replica Kubernetes and Helm application operation, CloudNativePG
+failover and quorum loss, and a disaster-recovery rehearsal within its
+accepted reference targets. They prove those pinned disposable combinations,
+not production certification, broad platform portability, or a customer SLA.
+<!-- claims: REFERENCE_DEPLOYMENTS -->
 
 ### What Hormuz is—and is not—trying to become
 
@@ -102,10 +112,11 @@ compiler, ticketing system, or employee-productivity platform. Keeping that
 surface small makes the core policy and evidence boundary easier to inspect,
 test, and operate.
 
-The first release is an open-source alpha for evaluation and design-partner
-hardening. It does not claim production suitability, enterprise HA, disaster
-recovery, compliance, provider-invoice accuracy, or an independent security
-review. Those are separate gates, not marketing footnotes.
+The current release is an open-source alpha for evaluation and design-partner
+hardening. It does not claim production suitability, universal HA/DR,
+compliance, provider-invoice accuracy, a customer SLA, or an independent
+security review. Those boundaries are part of the product claim, not
+marketing footnotes.
 <!-- claims: ALPHA_BOUNDARY -->
 
 If this is the control point your organization is missing, run the provider-
@@ -113,4 +124,3 @@ free demo first. Then [book an AI Governance Review]({{AI_GOVERNANCE_REVIEW_URL}
 or [apply for a paid design-partner pilot]({{PAID_PILOT_URL}}). Do not submit
 credentials, prompts, responses, employee records, or customer data through
 either intake path.
-
