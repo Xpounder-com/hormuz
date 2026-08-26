@@ -278,6 +278,7 @@ install_state_probe() {
     --from-file="postgres-custody-executor-dsn=${SECRET_ROOT}/postgres-custody-executor-dsn" \
     --from-file="alice-token=${SECRET_ROOT}/identity-token" \
     --from-file="bob-token=${SECRET_ROOT}/bob-token" \
+    --from-file="ingress-credential=${SECRET_ROOT}/ingress-credential" \
     --from-file="openai-api-key=${SECRET_ROOT}/openai-api-key" \
     --from-file="anthropic-api-key=${SECRET_ROOT}/anthropic-api-key" \
     --from-file="openbao-token=${SECRET_ROOT}/openbao-runtime-token"

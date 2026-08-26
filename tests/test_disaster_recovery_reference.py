@@ -426,6 +426,7 @@ class DisasterRecoveryReferenceTests(unittest.TestCase):
             },
         )
         helm_values = (DR_ROOT / "helm-values.yaml").read_text(encoding="utf-8")
+        state_pod = (DR_ROOT / "state-pod.yaml").read_text(encoding="utf-8")
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
             encoding="utf-8"
         )
@@ -509,6 +510,16 @@ class DisasterRecoveryReferenceTests(unittest.TestCase):
             'install_state_probe "${RECOVERY_INPUTS}/config/hormuz.json"',
             runner,
         )
+        state_probe_secret = runner[
+            runner.index(
+                "create_immutable_secret hormuz-system hormuz-disaster-recovery-state"
+            ) : runner.index(
+                'kubectl --namespace hormuz-system apply --filename "${DR_ROOT}/state-pod.yaml"'
+            )
+        ]
+        self.assertIn("ingress-credential", state_probe_secret)
+        self.assertIn("HORMUZ_INGRESS_CREDENTIAL", state_pod)
+        self.assertIn("key: ingress-credential", state_pod)
         self.assertNotIn('X-Vault-Token: ${', runner)
         self.assertNotIn('--env "HORMUZ_POSTGRES_DSN=', runner)
         self.assertIn('--header "@${SECRET_ROOT}/openbao-runtime-header"', runner)

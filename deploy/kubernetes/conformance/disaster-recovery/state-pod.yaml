@@ -57,6 +57,11 @@ spec:
             secretKeyRef:
               name: hormuz-disaster-recovery-state
               key: bob-token
+        - name: HORMUZ_INGRESS_CREDENTIAL
+          valueFrom:
+            secretKeyRef:
+              name: hormuz-disaster-recovery-state
+              key: ingress-credential
         - name: OPENAI_API_KEY
           valueFrom:
             secretKeyRef:
