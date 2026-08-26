@@ -226,6 +226,13 @@ class PostgresHAReferenceTests(unittest.TestCase):
             'wait_for_node_state "${negative_replica_node}" False',
             runner,
         )
+        self.assertIn(
+            'wait_for_node_state "${negative_primary_node}" Unknown',
+            runner,
+        )
+        self.assertIn("ready_nodes=", runner)
+        self.assertIn("available_database_pods", runner)
+        self.assertNotIn("ready_database_pods", runner)
         self.assertIn("rw_ready_addresses", runner)
         self.assertIn("storage-backpressure", runner)
         self.assertIn("ambiguous-request", runner)

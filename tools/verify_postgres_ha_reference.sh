@@ -930,6 +930,7 @@ record_event all_gateways_failed_closed_without_quorum
 provider_after_negative_denials="$(provider_request_count)"
 [[ "${provider_after_negative_denials}" == "${provider_before_negative}" ]] \
   || fail "provider egress occurred without PostgreSQL quorum"
+wait_for_node_state "${negative_primary_node}" Unknown
 
 for attempt in $(seq 1 120); do
   if [[ "$(rw_ready_addresses 2>/dev/null || printf 'invalid')" == "0" ]]; then
@@ -943,12 +944,14 @@ sleep 30
 quorum_refusal_observation_ms=$(( $(monotonic_ms) - quorum_observation_started_ms ))
 [[ "$(current_primary)" == "${negative_primary}" ]] \
   || fail "CloudNativePG promoted without the required failover quorum"
-ready_database_pods="$(kubectl --namespace hormuz-dependencies get pod \
-  --selector='cnpg.io/cluster=hormuz-postgres' --output=json \
-  | python3 -c 'import json,sys; print(sum(1 for item in json.load(sys.stdin)["items"] if any(c.get("type")=="Ready" and c.get("status")=="True" for c in item.get("status",{}).get("conditions",[]))))')"
-[[ "${ready_database_pods}" == "1" ]] || fail "negative quorum fixture did not leave exactly one promotable replica"
+database_pods_json="$(kubectl --namespace hormuz-dependencies get pod \
+  --selector='cnpg.io/cluster=hormuz-postgres' --output=json)"
+nodes_json="$(kubectl get nodes --output=json)"
+available_database_pods="$(python3 -c 'import json,sys; pods=json.loads(sys.argv[1])["items"]; nodes=json.loads(sys.argv[2])["items"]; ready_nodes={item["metadata"]["name"] for item in nodes if any(c.get("type")=="Ready" and c.get("status")=="True" for c in item.get("status",{}).get("conditions",[]))}; print(sum(1 for item in pods if item["spec"].get("nodeName") in ready_nodes and any(c.get("type")=="Ready" and c.get("status")=="True" for c in item.get("status",{}).get("conditions",[]))))' \
+  "${database_pods_json}" "${nodes_json}")"
+[[ "${available_database_pods}" == "1" ]] || fail "negative quorum fixture did not leave exactly one available replica"
 python3 -c 'import json,sys; status=json.loads(sys.argv[1])["status"]; n=len(status["standbyNames"]); r=int(sys.argv[2]); w=status["standbyNumber"]; raise SystemExit(0 if n==2 and r==1 and w==1 and not (r+w>n) else 1)' \
-  "${failover_quorum}" "${ready_database_pods}" \
+  "${failover_quorum}" "${available_database_pods}" \
   || fail "failover quorum arithmetic did not block unsafe promotion"
 record_event quorum_promotion_refused
 [[ "$(rw_ready_addresses)" == "0" ]] || fail "read-write endpoint exposed a stale primary"
