@@ -115,7 +115,7 @@ add notes or extra fields.
   "session_date": "YYYY-MM-DD",
   "persona": "developer | security | platform | engineering_admin",
   "source_commit": "<40 lowercase hexadecimal characters>",
-  "package_version": "0.1.1",
+  "package_version": "0.1.3",
   "installation_method": "source_checkout | signed_oci_digest",
   "environment": {
     "os_family": "linux | macos | windows | wsl",

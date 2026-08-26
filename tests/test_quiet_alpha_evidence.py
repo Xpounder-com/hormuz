@@ -7,6 +7,7 @@ import io
 import json
 import sys
 import tempfile
+import tomllib
 import unittest
 from pathlib import Path
 
@@ -54,6 +55,23 @@ class QuietAlphaEvidenceTests(unittest.TestCase):
         self.assertEqual(
             result["persona_coverage"],
             ["developer", "engineering_admin", "platform", "security"],
+        )
+
+    def test_release_identity_matches_package_guide_and_fixture(self) -> None:
+        metadata = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+        package_version = metadata["project"]["version"]
+        guide = (ROOT / "docs" / "QUIET_ALPHA.md").read_text(encoding="utf-8")
+        fixture = self._fixture()
+
+        self.assertEqual(quiet_alpha.PACKAGE_VERSION, package_version)
+        self.assertEqual(quiet_alpha.PROGRAM, f"hormuz-v{package_version}-quiet-alpha")
+        self.assertIn(f'"package_version": "{package_version}"', guide)
+        self.assertEqual(fixture["program"], quiet_alpha.PROGRAM)
+        self.assertTrue(
+            all(
+                session["package_version"] == package_version
+                for session in fixture["sessions"]
+            )
         )
 
     def test_unknown_or_content_bearing_fields_fail_closed(self) -> None:
