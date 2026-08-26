@@ -407,6 +407,7 @@ class DisasterRecoveryReferenceTests(unittest.TestCase):
         runner = (ROOT / "tools" / "verify_disaster_recovery_reference.sh").read_text(
             encoding="utf-8"
         )
+        recovery_probe_source = (DR_ROOT / "probe.py").read_text(encoding="utf-8")
         state_probe_source = (DR_ROOT / "state_probe.py").read_text(encoding="utf-8")
         recovered_postgres = (DR_ROOT / "recovered-postgres.yaml").read_text(
             encoding="utf-8"
@@ -531,6 +532,12 @@ class DisasterRecoveryReferenceTests(unittest.TestCase):
         self.assertIn('"automatic_provider_replays": 0', runner)
         self.assertIn("--expected-policy capped+redacted", runner)
         self.assertNotIn("--expected-policy allowed+capped+redacted", runner)
+        self.assertEqual(
+            recovery_probe_source.count(
+                "{name.lower(): value for name, value in "
+            ),
+            2,
+        )
         self.assertIn('install -m 0600 "${DR_ROOT}/hormuz.json"', runner)
         self.assertIn(
             'install_state_probe "${RECOVERY_INPUTS}/config/hormuz.json"',

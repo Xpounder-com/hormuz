@@ -87,9 +87,17 @@ def _request(
     request = Request(url, method=method, headers=headers, data=body)
     try:
         with urlopen(request, timeout=15) as response:
-            return response.status, dict(response.headers.items()), response.read()
+            return (
+                response.status,
+                {name.lower(): value for name, value in response.headers.items()},
+                response.read(),
+            )
     except HTTPError as error:
-        return error.code, dict(error.headers.items()), error.read()
+        return (
+            error.code,
+            {name.lower(): value for name, value in error.headers.items()},
+            error.read(),
+        )
 
 
 if __name__ == "__main__":
