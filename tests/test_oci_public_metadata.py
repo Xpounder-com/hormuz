@@ -164,7 +164,7 @@ class OciPublicMetadataTests(unittest.TestCase):
         self.assertNotIn("trivy-vulnerabilities.json", retained)
         self.assertNotIn("/**", retained)
 
-    def test_oci_contract_keeps_trust_and_first_release_boundaries(self) -> None:
+    def test_oci_contract_keeps_trust_and_cross_version_boundaries(self) -> None:
         contract = (ROOT / "docs" / "OCI.md").read_text(encoding="utf-8")
         normalized = " ".join(contract.split())
 
@@ -173,7 +173,12 @@ class OciPublicMetadataTests(unittest.TestCase):
             "Signer-identity retirement is a trust-policy operation", normalized
         )
         self.assertIn("must fail closed before the artifact is admitted", normalized)
-        self.assertIn("there is no older signed Hormuz digest", normalized)
+        self.assertIn(
+            "v0.1.3` is the current supported signed Hormuz release", normalized
+        )
+        self.assertIn("v0.1.1` remains the prior supported digest", normalized)
+        self.assertIn("failed `v0.1.2` attempt is not a supported release", normalized)
+        self.assertIn("does not itself prove cross-version rollback", normalized)
         self.assertIn("issues/135", normalized)
 
     @staticmethod

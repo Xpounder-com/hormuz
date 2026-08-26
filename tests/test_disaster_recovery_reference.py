@@ -519,6 +519,12 @@ class DisasterRecoveryReferenceTests(unittest.TestCase):
             runner.index('negative_provider_after="$(provider_request_count)"'),
             runner.index('helm upgrade --install hormuz "${CHART_ROOT}"'),
         )
+        self.assertIn('if ! helm upgrade --install hormuz "${CHART_ROOT}"', runner)
+        self.assertIn("--all-containers", runner)
+        self.assertIn("--tail=100", runner)
+        self.assertIn(
+            'fail "recovered Hormuz deployment did not become ready"', runner
+        )
         for failure_path in recovery.FAILURE_PATHS:
             self.assertIn(f'"{failure_path}"', runner)
         self.assertIn('[[ "${provider_after_first_request}" == "1" ]]', runner)

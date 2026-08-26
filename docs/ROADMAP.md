@@ -141,7 +141,9 @@ The fourteenth, [#66](https://github.com/Xpounder-com/hormuz/issues/66), is comp
 The approved deployment hierarchy in [#100](https://github.com/Xpounder-com/hormuz/issues/100)
 keeps the signed OCI digest as the application contract and treats deployment
 profiles as separately verified operational references. [#101](https://github.com/Xpounder-com/hormuz/issues/101)
-is complete with the signed, anonymously pullable `v0.1.1` Linux AMD64 digest.
+is complete with the first signed, anonymously pullable `v0.1.1` Linux AMD64
+digest. The current supported artifact is the separately verified `v0.1.3`
+digest; `v0.1.1` remains the prior supported rollback target.
 The first deployment profile, [#102](https://github.com/Xpounder-com/hormuz/issues/102),
 is implemented in [PR #137](https://github.com/Xpounder-com/hormuz/pull/137):
 one hardened gateway and one private persistent PostgreSQL service on a single

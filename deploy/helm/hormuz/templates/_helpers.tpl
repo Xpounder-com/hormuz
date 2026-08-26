@@ -29,7 +29,7 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 {{- if ne .Values.contract.platform "linux/amd64" -}}
 {{- fail "the v1 chart supports only linux/amd64" -}}
 {{- end -}}
-{{- if ne .Values.image.digest "sha256:1bbcca3490a7a5b004a880f42e8250acb91ce566a9c59f3263d7b279568efb5a" -}}
+{{- if ne .Values.image.digest "sha256:8ac24f5c7afb8ce09ec133616de06702f568a2e70594d8034146a131d86e5b67" -}}
 {{- fail "this chart version requires the exact signed Hormuz image digest" -}}
 {{- end -}}
 {{- if lt (int .Values.replicaCount) 2 -}}

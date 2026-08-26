@@ -30,7 +30,7 @@ INTERNAL_RTO_LIMIT_SECONDS = 3_600
 
 HORMUZ_IMAGE = (
     "ghcr.io/xpounder-com/hormuz@"
-    "sha256:1bbcca3490a7a5b004a880f42e8250acb91ce566a9c59f3263d7b279568efb5a"
+    "sha256:8ac24f5c7afb8ce09ec133616de06702f568a2e70594d8034146a131d86e5b67"
 )
 POSTGRES_IMAGE = (
     "ghcr.io/cloudnative-pg/postgresql:16.15-202608240846-minimal-trixie@"

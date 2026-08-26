@@ -14,7 +14,7 @@ SOURCE_CLUSTER="${HORMUZ_DR_SOURCE_CLUSTER_NAME:-hormuz-dr-source}"
 RECOVERY_CLUSTER="${HORMUZ_DR_RECOVERY_CLUSTER_NAME:-hormuz-dr-recovery}"
 PROOF_ACK="I_UNDERSTAND_THIS_IS_A_DISPOSABLE_DISASTER_RECOVERY_REFERENCE_PROOF"
 
-HORMUZ_IMAGE="ghcr.io/xpounder-com/hormuz@sha256:1bbcca3490a7a5b004a880f42e8250acb91ce566a9c59f3263d7b279568efb5a"
+HORMUZ_IMAGE="ghcr.io/xpounder-com/hormuz@sha256:8ac24f5c7afb8ce09ec133616de06702f568a2e70594d8034146a131d86e5b67"
 POSTGRES_IMAGE="ghcr.io/cloudnative-pg/postgresql:16.15-202608240846-minimal-trixie@sha256:e1ca593856017f1780dbdae8175add3ddd8f8d721348a3b6e8a01df67a9ece8a"
 OPENBAO_IMAGE="openbao/openbao@sha256:d0424c95859f7b4c1e308abf57c4cd72b9cba835bb946eb397172b799fba9477"
 CNPG_VERSION="1.30.0"
@@ -1235,10 +1235,27 @@ fi
 provider_before_promotion="$(provider_request_count)"
 [[ "${provider_before_promotion}" == "0" ]] \
   || fail "provider request occurred before traffic promotion"
-helm upgrade --install hormuz "${CHART_ROOT}" --namespace hormuz-system \
+if ! helm upgrade --install hormuz "${CHART_ROOT}" --namespace hormuz-system \
   --values "${DR_ROOT}/helm-values.yaml" \
   --set-string "configuration.sha256=${config_sha}" \
-  --wait --timeout 10m >/dev/null
+  --wait --timeout 10m >/dev/null; then
+  # This disposable proof uses generated synthetic inputs. Keep failure output
+  # bounded and in the job log; it is never added to the content-free artifact.
+  kubectl --namespace hormuz-system get deployment/hormuz-hormuz \
+    --output=wide >&2 || true
+  kubectl --namespace hormuz-system get pods \
+    --selector='app.kubernetes.io/instance=hormuz,app.kubernetes.io/component=gateway' \
+    --output=wide >&2 || true
+  while IFS= read -r pod; do
+    [[ -n "${pod}" ]] || continue
+    kubectl --namespace hormuz-system logs "${pod}" --all-containers \
+      --prefix=true --tail=100 >&2 || true
+    kubectl --namespace hormuz-system describe "${pod}" >&2 || true
+  done < <(kubectl --namespace hormuz-system get pods \
+    --selector='app.kubernetes.io/instance=hormuz,app.kubernetes.io/component=gateway' \
+    --output=name 2>/dev/null || true)
+  fail "recovered Hormuz deployment did not become ready"
+fi
 wait_for_deployment hormuz-system hormuz-hormuz 10m
 gateway_topology="$(kubectl --namespace hormuz-system get pods \
   --selector='app.kubernetes.io/instance=hormuz,app.kubernetes.io/component=gateway' \

@@ -75,7 +75,7 @@ telemetry, and a synthetic fixture can never satisfy the launch gate.
 - Bounded, duplicate-free, schema-strict configuration loading before any identity, secret, storage, provider, or listener initialization.
 - A customer-controlled TLS reference boundary: public TLS stays at customer ingress, while a non-loopback Hormuz listener requires an authenticated, network-restricted proxy hop.
 - A deterministic `linux/amd64`, non-root OCI runtime with hash-locked Python wheels, externally mounted configuration, and durable SQLite data.
-- A published `v0.1.1` `linux/amd64` OCI artifact identified by immutable digest: keyless GitHub OIDC/Cosign signing with public Rekor, strictly validated registry-only CycloneDX and bounded provenance attestations, exact-workflow verification, anonymous GHCR pull, and no mutable `latest` tag.
+- A published `v0.1.3` `linux/amd64` OCI artifact identified by immutable digest: keyless GitHub OIDC/Cosign signing with public Rekor, strictly validated registry-only CycloneDX and bounded provenance attestations, exact-workflow verification, anonymous GHCR pull, and no mutable `latest` tag.
 - OCI supply-chain evidence that blocks fixable HIGH/CRITICAL findings while retaining all other scanner observations, plus a two-build byte-for-byte reproducibility gate.
 - A versioned single-Linux-VM Docker Compose profile with one signed Hormuz digest, one private persistent PostgreSQL digest, protected file-mounted secrets, a customer-operated external-DSN path, and a provider-free clean-VM proof; it is for evaluation and pilots, not HA or production certification.
 - An optional vendor-neutral Kubernetes/Helm profile using the same signed digest, standard Kubernetes APIs, an internal ClusterIP, customer-supplied immutable inputs, customer-operated PostgreSQL, default-deny network policy, and a pinned disposable Kind/Cilium proof.
@@ -110,7 +110,7 @@ metadata compiler, or employee-productivity system.
 | --- | --- |
 | Production-ready | None claimed. The alpha is for evaluation and design-partner hardening. |
 | Implemented alpha | OpenAI/Anthropic-compatible gateway paths, policy enforcement, secret controls, identity binding, and metadata-only usage/evidence. |
-| Verified reference | Only the exact evidence-gated profiles in [SUPPORT.md](SUPPORT.md), including the Linux Python matrix and published signed `v0.1.1` `linux/amd64` OCI runtime. A verified reference is not unrestricted certification. |
+| Verified reference | Only the exact evidence-gated profiles in [SUPPORT.md](SUPPORT.md), including the Linux Python matrix and published signed `v0.1.3` `linux/amd64` OCI runtime. A verified reference is not unrestricted certification. |
 | Experimental | The context experiment is a separate package and is absent from the core wheel and gateway runtime. |
 | Deferred | Organizational memory, ticketing, workflow/productivity measurement, and new reporting dimensions are outside the current core. |
 | Unfinished | Live BYO-provider release evidence, production HA/DR, cloud-specific certification, and independent review remain separate release gates. |
@@ -214,7 +214,7 @@ The GitHub publication gate also tests Python 3.11 through 3.14, builds and inst
 
 ## Roadmap boundary
 
-The current hardening program focuses on a minimal gateway core: policy enforcement, versioned PostgreSQL policy administration, accounting, deterministic secret egress, metadata-only audit, and OIDC JWT verification. The package boundary and policy/evidence contract are explicit, the SQLite/PostgreSQL compatibility seam is tested, and the non-root OCI reference runtime is published as a signed `v0.1.1` digest with validated SBOM/provenance and a fix-aware vulnerability gate. A disposable logical PostgreSQL backup/restore exercise now proves a narrow recovery path, but it is not production backup/PITR or DR evidence. Before an enterprise release Hormuz still needs live customer-account certification, migration of every secret class, TLS and deployment hardening, shared PostgreSQL operations, production backup/PITR, multi-instance coordination, and independent review. It is not building an organizational-memory or workflow product.
+The current hardening program focuses on a minimal gateway core: policy enforcement, versioned PostgreSQL policy administration, accounting, deterministic secret egress, metadata-only audit, and OIDC JWT verification. The package boundary and policy/evidence contract are explicit, the SQLite/PostgreSQL compatibility seam is tested, and the non-root OCI reference runtime is published as a signed `v0.1.3` digest with validated SBOM/provenance and a fix-aware vulnerability gate. A disposable logical PostgreSQL backup/restore exercise now proves a narrow recovery path, but it is not production backup/PITR or DR evidence. Before an enterprise release Hormuz still needs live customer-account certification, migration of every secret class, TLS and deployment hardening, shared PostgreSQL operations, production backup/PITR, multi-instance coordination, and independent review. It is not building an organizational-memory or workflow product.
 
 ## Community and support
 

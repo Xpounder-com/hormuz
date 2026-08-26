@@ -38,7 +38,7 @@ Customer operators provide and operate:
 The chart renders no Secret and no PostgreSQL resource. It never receives a
 migration DSN. The customer may mirror the signed application digest to a
 different registry by changing `image.repository`; this chart version still
-requires the exact signed digest from the `v0.1.1` OCI contract.
+requires the exact signed digest from the `v0.1.3` OCI contract.
 
 ## Security defaults
 

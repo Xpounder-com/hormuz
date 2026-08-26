@@ -22,7 +22,7 @@ PLATFORM = "linux/amd64"
 CHART_VERSION = "0.1.0"
 HORMUZ_IMAGE = (
     "ghcr.io/xpounder-com/hormuz@"
-    "sha256:1bbcca3490a7a5b004a880f42e8250acb91ce566a9c59f3263d7b279568efb5a"
+    "sha256:8ac24f5c7afb8ce09ec133616de06702f568a2e70594d8034146a131d86e5b67"
 )
 POSTGRES_IMAGE = (
     "postgres@sha256:7a396fd264a2067788b6551122b50f162bf6136312c7fc9d74381cb92c648382"
@@ -262,7 +262,7 @@ def validate_chart(chart: Path) -> str:
         "apiVersion: v2",
         "name: hormuz",
         f"version: {CHART_VERSION}",
-        "appVersion: \"0.1.1\"",
+        "appVersion: \"0.1.3\"",
         f"  io.hormuz.contract: {CONTRACT_SCHEMA}",
     ):
         if line not in chart_yaml.splitlines():
