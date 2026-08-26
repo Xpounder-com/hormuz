@@ -195,6 +195,9 @@ class PostgresPoolUnitTests(unittest.TestCase):
 
 
 class GatewayPostgresPoolOwnershipTests(unittest.TestCase):
+    def test_listener_backlog_covers_the_bounded_storage_backpressure_window(self) -> None:
+        self.assertGreaterEqual(GatewayServer.request_queue_size, 32)
+
     def test_gateway_shares_its_runtime_pool_and_closes_it_with_the_listener(self) -> None:
         config = GatewayConfig.load(
             ROOT / "config.example.json",
