@@ -107,11 +107,12 @@ SLA, or broad platform portability. The boundaries are recorded in the
 
 ## Help validate the first public experience
 
-Follow the tester guide from a clean checkout and report only the fixed,
-content-free session fields. Installation and documentation problems belong in
-the public issue forms; suspected vulnerabilities use the private security
-path. Internal rehearsals and synthetic fixtures never increase the `0/5`
-count.
+Anyone may follow the tester guide from a clean checkout. Installation and
+documentation problems belong in the public issue forms; suspected
+vulnerabilities use the private security path. Counted session evidence is
+invitation-only and returns through a separately agreed private channel so an
+opaque participant ID is never attached to a public GitHub identity. Internal
+rehearsals and synthetic fixtures never increase the `0/5` count.
 
 [Test the public alpha](https://github.com/Xpounder-com/hormuz/blob/main/docs/QUIET_ALPHA.md)
 · [Report an installation problem](https://github.com/Xpounder-com/hormuz/issues/new?template=installation.yml)

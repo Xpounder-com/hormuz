@@ -40,7 +40,7 @@ unregistered table.
 | `postgresql_schema` | A customer operator runs Hormuz migrations. | Customer-operated PostgreSQL containing the PostgreSQL classes above. | Customer database operator owns export, retention, backup, restore, and deletion. |
 | `audit_export_jsonl` | An operator runs `audit-export` with a file output. | Operator-selected `0600` file containing metadata-only employee, usage, and security events. | Customer operator owns its downstream access, retention, backup, and deletion. |
 | `audit_chain_checkpoint` | An operator runs `audit-chain anchor`. | Operator-selected `0600` file containing tenant/chain identifiers, sequence, timestamps, and digests. | Customer operator owns the file; recovery and external-anchor requirements may require retaining a trusted copy. |
-| `encrypted_credential_envelope` | An operator runs `custody seal` or `custody rewrap`. | Operator-selected `0600` file containing ciphertext plus tenant, purpose, algorithm, and key-reference metadata. It is secret-bearing encrypted material because authorized KMS/Transit access can recover the provider credential. | Customer secret/KMS operator owns retention, backup, rotation, and deletion. |
+| `encrypted_custody_envelope` | An operator runs `custody seal` or `custody rewrap`. | Operator-selected `0600` file containing ciphertext plus tenant, purpose, algorithm, and key-reference metadata. `custody seal` accepts operator-supplied plaintext and does not inspect or constrain its data class. The encrypted payload may therefore be a credential, other secret material, or request content; Hormuz never classifies this artifact as metadata-only. | Customer secret/KMS operator owns its plaintext authorization, access, retention, backup, rotation, and deletion. |
 | `object_lock_audit_artifact` | An operator runs an audit anchor command. | Customer-operated S3-compatible Object Lock. The payload is metadata-only audit evidence; the selected adapter stores it directly with storage encryption or as an encrypted envelope. | Customer object-storage policy, retention, and legal hold are authoritative; the gateway runtime has no bypass or retention-shortening authority. |
 | `public_release_artifacts` | The protected release workflow runs. | Public GitHub/GHCR source, signed OCI image, SBOM, provenance, signature, and release metadata. These contain no customer runtime data. | They are public distribution artifacts, not tenant data. |
 
@@ -78,6 +78,7 @@ customer operators and providers remain authoritative.
 | `kms_keys_and_policy` | Customer KMS operator. |
 | `object_lock_retained_versions` | Customer object-storage operator and active retention/legal hold. |
 | `database_backups_wal_and_snapshots` | Customer database and backup operator. |
+| `client_local_history` | Customer client operator and client vendor. |
 | `deployment_logs_metrics_and_traces` | Customer observability operator. |
 
 ## Verify the inventory

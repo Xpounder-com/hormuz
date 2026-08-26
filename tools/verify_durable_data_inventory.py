@@ -27,19 +27,25 @@ CONTENT_BOUNDARIES = {
 EXPECTED_ARTIFACT_IDS = {
     "audit_chain_checkpoint",
     "audit_export_jsonl",
-    "encrypted_credential_envelope",
+    "encrypted_custody_envelope",
     "object_lock_audit_artifact",
     "postgresql_schema",
     "public_release_artifacts",
     "sqlite_database_file",
 }
 EXPECTED_EXCLUDED_SYSTEM_IDS = {
+    "client_local_history",
     "database_backups_wal_and_snapshots",
     "deployment_logs_metrics_and_traces",
     "identity_provider_data",
     "kms_keys_and_policy",
     "object_lock_retained_versions",
     "provider_platform_data",
+}
+ARTIFACT_REQUEST_CONTENT_BOUNDARIES = {
+    "excluded_by_hormuz_contract",
+    "encrypted_operator_supplied_plaintext_not_inspected",
+    "not_customer_runtime_data",
 }
 EXPECTED_RESPONSIBILITIES = ["backup", "deletion", "export", "restore", "retention"]
 REQUIRED_SOURCE_ENTRIES = {
@@ -188,7 +194,7 @@ def _validate_artifacts(value: object) -> list[str]:
                 "created_when",
                 "storage_location",
                 "content_boundary",
-                "contains_prompt_or_response_body",
+                "prompt_or_response_body_boundary",
                 "customer_operator_authority",
             },
             label,
@@ -203,7 +209,17 @@ def _validate_artifacts(value: object) -> list[str]:
         )
         if any(not isinstance(item, str) or not item for item in strings) or artifact_id in ids:
             raise DurableDataInventoryError(f"{label}_invalid")
-        if raw["contains_prompt_or_response_body"] is not False:
+        body_boundary = raw["prompt_or_response_body_boundary"]
+        if body_boundary not in ARTIFACT_REQUEST_CONTENT_BOUNDARIES:
+            raise DurableDataInventoryError(f"{label}_request_content_boundary_invalid")
+        expected_body_boundary = (
+            "encrypted_operator_supplied_plaintext_not_inspected"
+            if artifact_id == "encrypted_custody_envelope"
+            else "not_customer_runtime_data"
+            if artifact_id == "public_release_artifacts"
+            else "excluded_by_hormuz_contract"
+        )
+        if body_boundary != expected_body_boundary:
             raise DurableDataInventoryError(f"{label}_request_content_boundary_invalid")
         ids.append(artifact_id)
     if set(ids) != EXPECTED_ARTIFACT_IDS:

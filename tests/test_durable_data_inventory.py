@@ -44,7 +44,7 @@ class DurableDataInventoryTests(unittest.TestCase):
         self.assertEqual(result["sqlite_table_count"], 10)
         self.assertEqual(result["postgresql_table_count"], 32)
         self.assertEqual(result["operator_artifact_count"], 7)
-        self.assertEqual(result["excluded_customer_system_count"], 6)
+        self.assertEqual(result["excluded_customer_system_count"], 7)
         self.assertFalse(result["hosted_customer_data_service"])
         self.assertFalse(result["universal_erasure_claim"])
 
@@ -113,6 +113,43 @@ class DurableDataInventoryTests(unittest.TestCase):
             path.write_text(json.dumps(inventory), encoding="utf-8")
             with self.assertRaisesRegex(
                 DurableDataInventoryError, "universal_erasure_claim_invalid"
+            ):
+                validate_durable_data_inventory(root)
+
+    def test_encrypted_custody_envelope_cannot_claim_content_exclusion(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._copy_contract(root)
+            path, inventory = self._inventory(root)
+            artifacts = inventory["operator_artifacts"]
+            assert isinstance(artifacts, list)
+            envelope = next(
+                item
+                for item in artifacts
+                if isinstance(item, dict) and item.get("id") == "encrypted_custody_envelope"
+            )
+            envelope["prompt_or_response_body_boundary"] = "excluded_by_hormuz_contract"
+            path.write_text(json.dumps(inventory), encoding="utf-8")
+            with self.assertRaisesRegex(
+                DurableDataInventoryError, "request_content_boundary_invalid"
+            ):
+                validate_durable_data_inventory(root)
+
+    def test_client_local_history_cannot_be_omitted(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._copy_contract(root)
+            path, inventory = self._inventory(root)
+            systems = inventory["excluded_customer_systems"]
+            assert isinstance(systems, list)
+            inventory["excluded_customer_systems"] = [
+                item
+                for item in systems
+                if not isinstance(item, dict) or item.get("id") != "client_local_history"
+            ]
+            path.write_text(json.dumps(inventory), encoding="utf-8")
+            with self.assertRaisesRegex(
+                DurableDataInventoryError, "excluded_customer_system_set_invalid"
             ):
                 validate_durable_data_inventory(root)
 

@@ -80,7 +80,10 @@ python -m unittest -v tests.test_durable_data_inventory
 The inventory is a product-boundary assertion, not proof of universal erasure.
 Customer database and backup operators own export, retention, backup, restore,
 and deletion in their controlled infrastructure. Provider, IdP, KMS, Object
-Lock, backup, and observability lifecycles remain separate systems.
+Lock, backup, client-local, and observability lifecycles remain separate
+systems. Operator-sealed custody envelopes are opaque encrypted artifacts;
+Hormuz does not inspect or promise exclusion of request content from their
+operator-supplied plaintext.
 
 ## Provider-free five-minute path
 

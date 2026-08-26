@@ -38,13 +38,15 @@ CTA_CONTRACT = {
         "Test the public alpha",
         "https://github.com/Xpounder-com/hormuz/blob/main/docs/QUIET_ALPHA.md",
         "public_recruitment",
-        "self_service",
+        "self_service_test",
+        "invitation_only_private_channel",
     ),
     "report_installation": (
         "Report an installation problem",
         "https://github.com/Xpounder-com/hormuz/issues/new?template=installation.yml",
         "public_recruitment",
         "public_issue",
+        "public_content_free_issue",
     ),
 }
 ANALYTIC_IDS = (
@@ -360,7 +362,9 @@ def _validate_ctas(value: object) -> set[str]:
         if not isinstance(raw_cta, dict):
             raise LaunchAssetError(f"{label} must be an object")
         _require_fields(
-            raw_cta, {"id", "label", "url", "status", "mode"}, label
+            raw_cta,
+            {"id", "label", "url", "status", "mode", "evidence_submission"},
+            label,
         )
         cta_id = _require_string(raw_cta["id"], f"{label}.id")
         if cta_id in seen or cta_id not in CTA_CONTRACT:
@@ -370,12 +374,14 @@ def _validate_ctas(value: object) -> set[str]:
             expected_url,
             expected_status,
             expected_mode,
+            expected_evidence_submission,
         ) = CTA_CONTRACT[cta_id]
         if (
             raw_cta["label"] != expected_label
             or raw_cta["url"] != expected_url
             or raw_cta["status"] != expected_status
             or raw_cta["mode"] != expected_mode
+            or raw_cta["evidence_submission"] != expected_evidence_submission
         ):
             raise LaunchAssetError(f"{label} contract changed")
         seen.add(cta_id)

@@ -17,7 +17,7 @@
       "participant_id": "qa:00000000-0000-4000-8000-000000000001",
       "session_date": "2026-08-01",
       "persona": "developer",
-      "source_commit": "1111111111111111111111111111111111111111",
+      "source_commit": "6b3c4b94ff0691668d624a18ba2e63cc9ab5f9ae",
       "package_version": "0.1.3",
       "installation_method": "source_checkout",
       "environment": {
@@ -50,7 +50,7 @@
       "participant_id": "qa:00000000-0000-4000-8000-000000000002",
       "session_date": "2026-08-02",
       "persona": "security",
-      "source_commit": "2222222222222222222222222222222222222222",
+      "source_commit": "6b3c4b94ff0691668d624a18ba2e63cc9ab5f9ae",
       "package_version": "0.1.3",
       "installation_method": "source_checkout",
       "environment": {
@@ -83,7 +83,7 @@
       "participant_id": "qa:00000000-0000-4000-8000-000000000003",
       "session_date": "2026-08-03",
       "persona": "platform",
-      "source_commit": "3333333333333333333333333333333333333333",
+      "source_commit": "6b3c4b94ff0691668d624a18ba2e63cc9ab5f9ae",
       "package_version": "0.1.3",
       "installation_method": "source_checkout",
       "environment": {
@@ -116,7 +116,7 @@
       "participant_id": "qa:00000000-0000-4000-8000-000000000004",
       "session_date": "2026-08-04",
       "persona": "engineering_admin",
-      "source_commit": "4444444444444444444444444444444444444444",
+      "source_commit": "6b3c4b94ff0691668d624a18ba2e63cc9ab5f9ae",
       "package_version": "0.1.3",
       "installation_method": "source_checkout",
       "environment": {
@@ -149,7 +149,7 @@
       "participant_id": "qa:00000000-0000-4000-8000-000000000005",
       "session_date": "2026-08-05",
       "persona": "developer",
-      "source_commit": "5555555555555555555555555555555555555555",
+      "source_commit": "6b3c4b94ff0691668d624a18ba2e63cc9ab5f9ae",
       "package_version": "0.1.3",
       "installation_method": "signed_oci_digest",
       "environment": {
@@ -182,7 +182,7 @@
       "participant_id": "qa:00000000-0000-4000-8000-000000000006",
       "session_date": "2026-08-06",
       "persona": "platform",
-      "source_commit": "6666666666666666666666666666666666666666",
+      "source_commit": "6b3c4b94ff0691668d624a18ba2e63cc9ab5f9ae",
       "package_version": "0.1.3",
       "installation_method": "source_checkout",
       "environment": {
@@ -215,7 +215,7 @@
       "participant_id": "qa:00000000-0000-4000-8000-000000000001",
       "session_date": "2026-08-08",
       "persona": "developer",
-      "source_commit": "7777777777777777777777777777777777777777",
+      "source_commit": "6b3c4b94ff0691668d624a18ba2e63cc9ab5f9ae",
       "package_version": "0.1.3",
       "installation_method": "source_checkout",
       "environment": {

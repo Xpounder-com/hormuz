@@ -27,6 +27,7 @@ SCHEMA_VERSION = 1
 PACKAGE_VERSION = "0.1.3"
 PROGRAM = f"hormuz-v{PACKAGE_VERSION}-quiet-alpha"
 PUBLICATION_STATUS = "content_free"
+RELEASE_SOURCE_COMMIT = "6b3c4b94ff0691668d624a18ba2e63cc9ab5f9ae"
 
 EVIDENCE_KINDS = {"quiet_alpha_release_evidence", "synthetic_test_fixture"}
 PERSONAS = {"developer", "security", "platform", "engineering_admin"}
@@ -238,7 +239,11 @@ def _validate_session(value: object, index: int) -> dict[str, Any]:
     _require_pattern(session["participant_id"], _PARTICIPANT_ID_RE, f"{label}_participant")
     _require_date(session["session_date"], f"{label}_date")
     _require_enum(session["persona"], PERSONAS, f"{label}_persona")
-    _require_pattern(session["source_commit"], _REVISION_RE, f"{label}_source_commit")
+    source_commit = _require_pattern(
+        session["source_commit"], _REVISION_RE, f"{label}_source_commit"
+    )
+    if source_commit != RELEASE_SOURCE_COMMIT:
+        raise QuietAlphaEvidenceError(f"{label}_source_commit_unpinned")
     if session["package_version"] != PACKAGE_VERSION:
         raise QuietAlphaEvidenceError(f"{label}_package_version_invalid")
     _require_enum(

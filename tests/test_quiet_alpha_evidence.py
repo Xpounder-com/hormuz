@@ -66,13 +66,25 @@ class QuietAlphaEvidenceTests(unittest.TestCase):
         self.assertEqual(quiet_alpha.PACKAGE_VERSION, package_version)
         self.assertEqual(quiet_alpha.PROGRAM, f"hormuz-v{package_version}-quiet-alpha")
         self.assertIn(f'"package_version": "{package_version}"', guide)
+        self.assertIn("--branch v0.1.3", guide)
+        self.assertIn(quiet_alpha.RELEASE_SOURCE_COMMIT, guide)
         self.assertEqual(fixture["program"], quiet_alpha.PROGRAM)
         self.assertTrue(
             all(
                 session["package_version"] == package_version
+                and session["source_commit"] == quiet_alpha.RELEASE_SOURCE_COMMIT
                 for session in fixture["sessions"]
             )
         )
+
+    def test_session_source_commit_is_pinned_to_advertised_release(self) -> None:
+        value = self._release_evidence()
+        value["sessions"][0]["source_commit"] = "f" * 40  # type: ignore[index]
+
+        with self.assertRaisesRegex(
+            quiet_alpha.QuietAlphaEvidenceError, "source_commit_unpinned"
+        ):
+            quiet_alpha.validate_evidence(value)
 
     def test_unknown_or_content_bearing_fields_fail_closed(self) -> None:
         value = self._release_evidence()

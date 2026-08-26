@@ -138,7 +138,7 @@
       "created_when": "gateway_startup_or_first_local_operation",
       "storage_location": "customer_selected_local_path_or_/var/lib/hormuz/hormuz.sqlite3",
       "content_boundary": "metadata_only_database",
-      "contains_prompt_or_response_body": false,
+      "prompt_or_response_body_boundary": "excluded_by_hormuz_contract",
       "customer_operator_authority": "database_export_retention_backup_restore_and_deletion"
     },
     {
@@ -146,7 +146,7 @@
       "created_when": "customer_operator_runs_hormuz_migrations",
       "storage_location": "customer_operated_postgresql",
       "content_boundary": "metadata_only_database_with_policy_documents",
-      "contains_prompt_or_response_body": false,
+      "prompt_or_response_body_boundary": "excluded_by_hormuz_contract",
       "customer_operator_authority": "database_export_retention_backup_restore_and_deletion"
     },
     {
@@ -154,7 +154,7 @@
       "created_when": "operator_runs_audit_export_with_a_file_output",
       "storage_location": "operator_selected_owner_only_file",
       "content_boundary": "metadata_only_employee_and_security_evidence",
-      "contains_prompt_or_response_body": false,
+      "prompt_or_response_body_boundary": "excluded_by_hormuz_contract",
       "customer_operator_authority": "file_export_retention_backup_and_deletion"
     },
     {
@@ -162,15 +162,15 @@
       "created_when": "operator_runs_audit_chain_anchor",
       "storage_location": "operator_selected_owner_only_file",
       "content_boundary": "metadata_only_tenant_chain_identifiers_and_digests",
-      "contains_prompt_or_response_body": false,
+      "prompt_or_response_body_boundary": "excluded_by_hormuz_contract",
       "customer_operator_authority": "file_retention_backup_and_deletion_subject_to_external_anchor_requirements"
     },
     {
-      "id": "encrypted_credential_envelope",
+      "id": "encrypted_custody_envelope",
       "created_when": "operator_runs_custody_seal_or_rewrap",
       "storage_location": "operator_selected_owner_only_file",
-      "content_boundary": "encrypted_secret_material_with_tenant_purpose_and_key_metadata",
-      "contains_prompt_or_response_body": false,
+      "content_boundary": "encrypted_operator_supplied_plaintext_with_tenant_purpose_and_key_metadata",
+      "prompt_or_response_body_boundary": "encrypted_operator_supplied_plaintext_not_inspected",
       "customer_operator_authority": "secret_file_retention_backup_rotation_and_deletion"
     },
     {
@@ -178,7 +178,7 @@
       "created_when": "operator_runs_audit_anchor_or_audit_chain_anchor",
       "storage_location": "customer_operated_s3_compatible_object_lock",
       "content_boundary": "metadata_only_audit_artifact_plaintext_or_envelope_encrypted_by_selected_adapter",
-      "contains_prompt_or_response_body": false,
+      "prompt_or_response_body_boundary": "excluded_by_hormuz_contract",
       "customer_operator_authority": "object_store_retention_legal_hold_backup_and_eventual_deletion"
     },
     {
@@ -186,7 +186,7 @@
       "created_when": "protected_release_workflow",
       "storage_location": "public_github_and_ghcr",
       "content_boundary": "public_source_image_sbom_provenance_and_release_metadata",
-      "contains_prompt_or_response_body": false,
+      "prompt_or_response_body_boundary": "not_customer_runtime_data",
       "customer_operator_authority": "not_customer_runtime_data"
     }
   ],
@@ -221,6 +221,11 @@
     {
       "id": "database_backups_wal_and_snapshots",
       "authority": "customer_database_and_backup_operator",
+      "hormuz_erasure_authority": false
+    },
+    {
+      "id": "client_local_history",
+      "authority": "customer_client_operator_and_client_vendor",
       "hormuz_erasure_authority": false
     },
     {

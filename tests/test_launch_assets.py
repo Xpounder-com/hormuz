@@ -101,6 +101,19 @@ class LaunchAssetTests(unittest.TestCase):
             with self.assertRaisesRegex(LaunchAssetError, "unapproved template"):
                 validate_launch_assets(root)
 
+    def test_public_test_evidence_submission_remains_invitation_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._copy_contract(root)
+            path, manifest = self._manifest(root)
+            ctas = manifest["ctas"]
+            assert isinstance(ctas, list) and isinstance(ctas[0], dict)
+            ctas[0]["evidence_submission"] = "public_issue"
+            path.write_text(json.dumps(manifest), encoding="utf-8")
+
+            with self.assertRaisesRegex(LaunchAssetError, "ctas.*changed"):
+                validate_launch_assets(root)
+
     def test_positive_readiness_copy_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

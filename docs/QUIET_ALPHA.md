@@ -13,6 +13,12 @@ validated onboarding, advances beyond alpha, or makes stronger
 commercial-readiness claims. Internal, maintainer-assisted, and synthetic runs
 do not count toward the five independent completions.
 
+Anyone may run the public test and file a sanitized installation report. To
+keep opaque participant IDs from becoming a durable GitHub-identity mapping,
+submission into the #110 aggregate is invitation-only: a maintainer must first
+contact the tester through a separately agreed private channel. The public CTA
+does not itself create or promise a private completion-submission channel.
+
 This is a release-verification exercise, not employee monitoring, a usability
 study containing recordings, or a request for company data. Participation
 must use synthetic data. The aggregate evidence contains no names, GitHub
@@ -34,8 +40,9 @@ the supported platform contract in [SUPPORT.md](../SUPPORT.md).
 
 ## Privacy and consent boundary
 
-The invitation assigns or asks you to generate a random participant ID. It is
-not an account and Hormuz never receives it during normal gateway use. Keep it
+For a counted session, the invitation assigns or asks you to generate a random
+participant ID. It is not an account and Hormuz never receives it during
+normal gateway use. Keep it
 so a later session can be recognized as a return without recording your
 identity in the repository:
 
@@ -49,9 +56,11 @@ Generate a new session ID for each attempt:
 python3 -c 'import uuid; print("qas:" + str(uuid.uuid4()))'
 ```
 
-Return the allowlisted session block through the same private invitation
-channel. Do not put the participant ID in a public issue because a GitHub
-account could then become a durable identity mapping. The maintainer may
+Return the allowlisted session block only through the same private invitation
+channel. If you were not invited, do not submit a session block; you may still
+run the test and file a sanitized public report. Do not put the participant ID
+in a public issue because a GitHub account could then become a durable identity
+mapping. The maintainer may
 verify privately that participant IDs belong to distinct people, but must not
 commit or publish that mapping.
 
@@ -63,13 +72,14 @@ use and report problems with Hormuz normally.
 
 ## Independent provider-free run
 
-Start with a clean checkout. Do not configure an OpenAI or Anthropic key for
-this required path.
+Start with a clean checkout of the exact advertised `v0.1.3` source tag. Do not
+configure an OpenAI or Anthropic key for this required path. Evidence from a
+different or mixed revision is rejected.
 
 ```bash
-git clone https://github.com/Xpounder-com/hormuz.git
+git clone --branch v0.1.3 --depth 1 https://github.com/Xpounder-com/hormuz.git
 cd hormuz
-git rev-parse HEAD
+test "$(git rev-parse HEAD)" = "6b3c4b94ff0691668d624a18ba2e63cc9ab5f9ae"
 python3 --version
 python3 -m venv .venv
 . .venv/bin/activate
@@ -121,7 +131,7 @@ add notes or extra fields.
   "participant_id": "qa:<persistent random UUID>",
   "session_date": "YYYY-MM-DD",
   "persona": "developer | security | platform | engineering_admin",
-  "source_commit": "<40 lowercase hexadecimal characters>",
+  "source_commit": "6b3c4b94ff0691668d624a18ba2e63cc9ab5f9ae",
   "package_version": "0.1.3",
   "installation_method": "source_checkout | signed_oci_digest",
   "environment": {

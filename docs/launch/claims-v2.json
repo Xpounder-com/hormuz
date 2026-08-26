@@ -265,7 +265,7 @@
     },
     {
       "id": "DURABLE_DATA_BOUNDARY",
-      "text": "Hormuz's public alpha is self-hosted, does not operate a hosted customer-data service, leaves database export, retention, backup, restore, and deletion to customer operators, and makes no universal-erasure claim across provider, IdP, KMS, Object Lock, backup, or observability systems.",
+      "text": "Hormuz's public alpha is self-hosted, does not operate a hosted customer-data service, leaves database export, retention, backup, restore, and deletion to customer operators, and makes no universal-erasure claim across provider, IdP, KMS, Object Lock, backup, client-local, or observability systems.",
       "classification": "nonclaim",
       "evidence": [
         {
@@ -378,14 +378,16 @@
       "label": "Test the public alpha",
       "url": "https://github.com/Xpounder-com/hormuz/blob/main/docs/QUIET_ALPHA.md",
       "status": "public_recruitment",
-      "mode": "self_service"
+      "mode": "self_service_test",
+      "evidence_submission": "invitation_only_private_channel"
     },
     {
       "id": "report_installation",
       "label": "Report an installation problem",
       "url": "https://github.com/Xpounder-com/hormuz/issues/new?template=installation.yml",
       "status": "public_recruitment",
-      "mode": "public_issue"
+      "mode": "public_issue",
+      "evidence_submission": "public_content_free_issue"
     }
   ],
   "analytics": [

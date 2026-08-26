@@ -40,6 +40,8 @@ and analytics drift.
    signed-OCI, and bounded deployment-reference gates listed in the manifest.
 2. Confirm issue #110 remains open, report the external tester count honestly
    as 0/5, and do not count internal, maintainer-assisted, or synthetic runs.
+   Public testing is self-service; evidence submission into the aggregate is
+   invitation-only through a separately agreed private channel.
 3. Review the final copy against the exact release evidence, update the
    manifest to the approved publication state in a focused pull request, and
    record owner approval.

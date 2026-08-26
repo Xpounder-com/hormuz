@@ -17,7 +17,9 @@ claim. <!-- claims: ALPHA_BOUNDARY -->
 
 The announcement recruits testers; it does not announce a mature commercial
 offering. No hidden telemetry, automated outreach, or customer-data intake is
-introduced by these links.
+introduced by these links. Public testing is self-service, but inclusion in the
+#110 aggregate is invitation-only through a separately agreed private channel;
+successful testers must never post participant or session IDs publicly.
 
 ## Later commercial conversion
 
