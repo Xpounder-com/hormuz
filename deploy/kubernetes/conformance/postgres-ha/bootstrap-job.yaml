@@ -1,0 +1,83 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: hormuz-postgres-ha-bootstrap
+  namespace: hormuz-system
+  labels:
+    io.hormuz.proof-role: postgres-ha-bootstrap
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 300
+  template:
+    metadata:
+      labels:
+        io.hormuz.proof-role: postgres-ha-bootstrap
+    spec:
+      automountServiceAccountToken: false
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: bootstrap
+          image: ghcr.io/xpounder-com/hormuz@sha256:1bbcca3490a7a5b004a880f42e8250acb91ce566a9c59f3263d7b279568efb5a
+          command: ["/opt/hormuz/bin/python"]
+          args: ["-I", "/opt/hormuz-proof/bootstrap.py"]
+          env:
+            - name: HORMUZ_POSTGRES_MIGRATION_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: hormuz-postgres-ha-bootstrap
+                  key: postgres-migration-dsn
+            - name: HORMUZ_RUNTIME_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: hormuz-postgres-ha-bootstrap
+                  key: runtime-password
+            - name: HORMUZ_POLICY_CONTROL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: hormuz-postgres-ha-bootstrap
+                  key: policy-control-password
+            - name: HORMUZ_CUSTODY_CONTROL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: hormuz-postgres-ha-bootstrap
+                  key: custody-control-password
+            - name: HORMUZ_CUSTODY_EXECUTOR_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: hormuz-postgres-ha-bootstrap
+                  key: custody-executor-password
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          volumeMounts:
+            - name: script
+              mountPath: /opt/hormuz-proof/bootstrap.py
+              subPath: bootstrap.py
+              readOnly: true
+            - name: temporary
+              mountPath: /tmp
+      volumes:
+        - name: script
+          configMap:
+            name: hormuz-postgres-ha-bootstrap
+            defaultMode: 0440
+        - name: temporary
+          emptyDir:
+            medium: Memory
+            sizeLimit: 64Mi

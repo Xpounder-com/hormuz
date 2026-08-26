@@ -26,6 +26,7 @@ class Provider(BaseHTTPRequestHandler):
     blocking_gateway_ip: str | None = None
     blocking_started = threading.Event()
     blocking_release = threading.Event()
+    blocking_abort = threading.Event()
     blocking_gateway_disconnected = threading.Event()
 
     def do_GET(self) -> None:  # noqa: N802
@@ -50,6 +51,7 @@ class Provider(BaseHTTPRequestHandler):
                 value = {
                     "started": self.blocking_started.is_set(),
                     "released": self.blocking_release.is_set(),
+                    "aborted": self.blocking_abort.is_set(),
                     "gateway_ip": self.blocking_gateway_ip,
                     "gateway_disconnected": self.blocking_gateway_disconnected.is_set(),
                 }
@@ -62,6 +64,11 @@ class Provider(BaseHTTPRequestHandler):
             self.blocking_release.set()
             self._send({"released": True})
             return
+        if self.path == "/control/block/abort":
+            self.blocking_abort.set()
+            self.blocking_release.set()
+            self._send({"aborted": True})
+            return
         if self.path == "/control/block/reset":
             with self.lock:
                 if self.blocking_started.is_set() and not self.blocking_release.is_set():
@@ -70,6 +77,7 @@ class Provider(BaseHTTPRequestHandler):
                 type(self).blocking_gateway_ip = None
                 self.blocking_started.clear()
                 self.blocking_release.clear()
+                self.blocking_abort.clear()
                 self.blocking_gateway_disconnected.clear()
             self._send({"reset": True})
             return
@@ -96,6 +104,14 @@ class Provider(BaseHTTPRequestHandler):
                 self.blocking_started.set()
         if blocking and not self._wait_for_block_release(timeout=120):
             self._send({"error": "blocking_probe_timeout"}, status=504)
+            return
+        if blocking and self.blocking_abort.is_set():
+            self.close_connection = True
+            try:
+                self.connection.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            self.connection.close()
             return
         try:
             self._send(

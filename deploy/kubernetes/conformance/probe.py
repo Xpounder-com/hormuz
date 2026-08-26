@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 import json
 import time
 from pathlib import Path
@@ -22,8 +23,10 @@ def main() -> int:
             "ambiguous-request",
             "blocking-request",
             "health",
+            "ready",
             "request",
             "replacement-traffic",
+            "storage-backpressure",
             "network-denied",
         ),
     )
@@ -31,6 +34,7 @@ def main() -> int:
     parser.add_argument("--expected-status", type=int)
     parser.add_argument("--expected-policy")
     parser.add_argument("--duration-seconds", type=int)
+    parser.add_argument("--concurrency", type=int)
     parser.add_argument("--without-ingress", action="store_true")
     args = parser.parse_args()
 
@@ -47,12 +51,23 @@ def main() -> int:
     headers: dict[str, str] = {}
     if not args.without_ingress:
         headers["X-Hormuz-Ingress-Credential"] = _read("ingress-credential")
-    if args.command == "health":
-        status, response_headers, body = _request("GET", f"{args.target}/health", headers=headers)
+    if args.command in {"health", "ready"}:
+        path = "/health" if args.command == "health" else "/ready"
+        status, response_headers, body = _request("GET", f"{args.target}{path}", headers=headers)
         if status == 200:
             value = json.loads(body)
-            if value.get("schema_id") != "hormuz.gateway-health" or value.get("status") != "ok":
-                raise SystemExit("health_contract_invalid")
+            expected_schema = "hormuz.gateway-health" if args.command == "health" else "hormuz.gateway-readiness"
+            expected_value = "ok" if args.command == "health" else "ready"
+            if value.get("schema_id") != expected_schema or value.get("status") != expected_value:
+                raise SystemExit(f"{args.command}_contract_invalid")
+        elif status == 503 and args.command == "ready":
+            value = json.loads(body)
+            if (
+                value.get("schema_id") != "hormuz.gateway-readiness"
+                or value.get("status") != "not_ready"
+                or value.get("reason") != "dependency_unavailable"
+            ):
+                raise SystemExit("ready_contract_invalid")
         elif status == 401:
             value = json.loads(body)
             if value.get("error", {}).get("code") != "unauthorized":
@@ -80,6 +95,15 @@ def main() -> int:
                 headers=headers,
                 expected_policy=args.expected_policy,
             )
+        if args.command == "storage-backpressure":
+            if args.concurrency is None or not 8 <= args.concurrency <= 64:
+                raise SystemExit("storage_backpressure_concurrency_invalid")
+            return _run_storage_backpressure(
+                target=args.target,
+                headers=headers,
+                concurrency=args.concurrency,
+                expected_status=args.expected_status,
+            )
         result = _governed_request(
             target=args.target,
             headers=headers,
@@ -91,18 +115,20 @@ def main() -> int:
 
     if status != args.expected_status:
         raise SystemExit(f"unexpected_status:{status}")
-    print(
-        json.dumps(
+    result: dict[str, object] = {
+        "command": args.command,
+        "status": status,
+        "policy": response_headers.get("x-hormuz-policy-decision"),
+        "redactions": int(response_headers.get("x-hormuz-redactions", "0")),
+    }
+    if args.command == "ready":
+        result.update(
             {
-                "command": args.command,
-                "status": status,
-                "policy": response_headers.get("x-hormuz-policy-decision"),
-                "redactions": int(response_headers.get("x-hormuz-redactions", "0")),
-            },
-            sort_keys=True,
-            separators=(",", ":"),
+                "readiness": value.get("status"),
+                "reason": value.get("reason"),
+            }
         )
-    )
+    print(json.dumps(result, sort_keys=True, separators=(",", ":")))
     return 0
 
 
@@ -130,6 +156,8 @@ def _governed_request(
         body=json.dumps(payload, separators=(",", ":")).encode("utf-8"),
         timeout=timeout,
     )
+    if status != expected_status:
+        raise SystemExit(f"unexpected_status:{status}")
     policy = response_headers.get("x-hormuz-policy-decision")
     if expected_policy is not None and policy != expected_policy:
         raise SystemExit("policy_decision_invalid")
@@ -141,8 +169,10 @@ def _governed_request(
         value = json.loads(body)
         if value.get("error", {}).get("code") != "hormuz_secret_detected":
             raise SystemExit("deny_contract_invalid")
-    if status != expected_status:
-        raise SystemExit(f"unexpected_status:{status}")
+    elif status == 503:
+        value = json.loads(body)
+        if value.get("error", {}).get("code") != "hormuz_storage_unavailable":
+            raise SystemExit("storage_denial_contract_invalid")
     return {
         "command": "request",
         "status": status,
@@ -170,6 +200,20 @@ def _run_blocking_request(
         )
     except (URLError, TimeoutError, OSError):
         if command != "ambiguous-request":
+            raise
+        print(
+            json.dumps(
+                {"command": command, "transport_outcome": "ambiguous"},
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+        )
+        return 0
+    except SystemExit as error:
+        if command != "ambiguous-request" or str(error) not in {
+            "unexpected_status:502",
+            "unexpected_status:503",
+        }:
             raise
         print(
             json.dumps(
@@ -223,6 +267,47 @@ def _run_replacement_traffic(
                 "command": "replacement-traffic",
                 "failed_requests": failed_requests,
                 "successful_requests": successful_requests,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+    )
+    return 0
+
+
+def _run_storage_backpressure(
+    *,
+    target: str,
+    headers: dict[str, str],
+    concurrency: int,
+    expected_status: int | None,
+) -> int:
+    if expected_status != 503:
+        raise SystemExit("storage_backpressure_status_invalid")
+    started = time.monotonic_ns()
+
+    def request(_: int) -> dict[str, object]:
+        return _governed_request(
+            target=target,
+            headers=headers,
+            expected_status=503,
+            expected_policy=None,
+            timeout=15,
+        )
+
+    with ThreadPoolExecutor(max_workers=concurrency) as executor:
+        results = list(executor.map(request, range(concurrency)))
+    duration_ms = max(1, (time.monotonic_ns() - started + 999_999) // 1_000_000)
+    if any(result.get("status") != 503 for result in results):
+        raise SystemExit("storage_backpressure_result_invalid")
+    print(
+        json.dumps(
+            {
+                "command": "storage-backpressure",
+                "duration_ms": duration_ms,
+                "requests": concurrency,
+                "status": 503,
+                "storage_denials": len(results),
             },
             sort_keys=True,
             separators=(",", ":"),

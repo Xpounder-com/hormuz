@@ -22,6 +22,8 @@ include tools/verify_compose_profile.sh
 include tools/verify_helm_profile.py
 include tools/verify_helm_profile.sh
 include tools/verify_multi_replica_operation.py
+include tools/verify_postgres_ha_reference.py
+include tools/verify_postgres_ha_reference.sh
 recursive-include deploy/compose *.md *.yaml *.json *.sh *.py
 include deploy/compose/hormuz-compose
 prune deploy/compose/runtime

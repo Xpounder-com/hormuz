@@ -1,0 +1,64 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: hormuz-postgres
+  namespace: hormuz-dependencies
+  labels:
+    io.hormuz.proof-role: postgres-ha-cluster
+spec:
+  instances: 3
+  failoverDelay: 30
+  imageName: ghcr.io/cloudnative-pg/postgresql:16.15-202608240846-minimal-trixie@sha256:e1ca593856017f1780dbdae8175add3ddd8f8d721348a3b6e8a01df67a9ece8a
+  enableSuperuserAccess: true
+  superuserSecret:
+    name: hormuz-postgres-superuser
+  bootstrap:
+    initdb:
+      database: hormuz
+      owner: hormuz_owner
+      secret:
+        name: hormuz-postgres-owner
+  inheritedMetadata:
+    labels:
+      io.hormuz.proof-role: postgres
+  affinity:
+    enablePodAntiAffinity: true
+    topologyKey: kubernetes.io/hostname
+    podAntiAffinityType: required
+    nodeSelector:
+      kubernetes.io/os: linux
+      kubernetes.io/arch: amd64
+      io.hormuz.postgres-node: "true"
+    tolerations:
+      - key: io.hormuz/postgres-node
+        operator: Equal
+        value: "true"
+        effect: NoSchedule
+  primaryLease:
+    leaseDurationSeconds: 15
+    renewDeadlineSeconds: 10
+    retryPeriodSeconds: 2
+    releasedLeaseDurationSeconds: 1
+  probes:
+    liveness:
+      isolationCheck:
+        enabled: true
+        connectionTimeout: 1000
+        requestTimeout: 1000
+  postgresql:
+    parameters:
+      synchronous_commit: "on"
+    synchronous:
+      method: any
+      number: 1
+      dataDurability: required
+      failoverQuorum: true
+  storage:
+    size: 1Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
