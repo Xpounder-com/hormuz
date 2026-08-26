@@ -56,7 +56,7 @@ class OciReleaseEvidenceTests(unittest.TestCase):
                     "https://github.com/Xpounder-com/hormuz/.github/workflows/"
                     "release-oci.yml@refs/tags/v0.1.0"
                 ),
-                first_publication_visibility="private",
+                first_publication_visibility="public",
                 evidence_paths=paths,
             )
             with self.assertRaisesRegex(
@@ -71,7 +71,7 @@ class OciReleaseEvidenceTests(unittest.TestCase):
                         "https://github.com/Xpounder-com/hormuz/.github/workflows/"
                         "release-oci.yml@refs/tags/v0.1.0"
                     ),
-                    first_publication_visibility="public",
+                    first_publication_visibility="private",
                     evidence_paths=paths,
                 )
             paths["public_metadata_validation"].write_text(
@@ -98,11 +98,16 @@ class OciReleaseEvidenceTests(unittest.TestCase):
                         "https://github.com/Xpounder-com/hormuz/.github/workflows/"
                         "release-oci.yml@refs/tags/v0.1.0"
                     ),
-                    first_publication_visibility="private",
+                    first_publication_visibility="public",
                     evidence_paths=paths,
                 )
 
         self.assertEqual(summary["artifact"]["contract"], "signed_oci_digest")
+        self.assertEqual(summary["schema_version"], 2)
+        self.assertEqual(
+            summary["artifact"]["first_publication_registry_visibility"],
+            "public",
+        )
         self.assertFalse(summary["artifact"]["registry_is_product_contract"])
         self.assertEqual(summary["signing"]["key_management"], "keyless_github_oidc")
         self.assertEqual(summary["disclosure"]["public_rekor_may_expose"], [
@@ -123,7 +128,7 @@ class OciReleaseEvidenceTests(unittest.TestCase):
                 tag="v0.1.0",
                 commit="b" * 40,
                 workflow_identity="https://github.com/fork/hormuz/workflow",
-                first_publication_visibility="private",
+                first_publication_visibility="public",
                 evidence_paths={},
             )
 

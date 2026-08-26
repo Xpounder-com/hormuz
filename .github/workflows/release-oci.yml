@@ -141,14 +141,14 @@ jobs:
           printf 'digest=%s\n' "$digest" >> "$GITHUB_OUTPUT"
           printf 'candidate=%s\n' "$candidate" >> "$GITHUB_OUTPUT"
 
-      - name: Confirm the first GHCR publication remains private
+      - name: Confirm the public-alpha GHCR package remains public
         id: registry
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           visibility="$(gh api /orgs/Xpounder-com/packages/container/hormuz --jq .visibility)"
-          [[ "$visibility" == "private" ]] || {
-            echo "GHCR package visibility is not private" >&2
+          [[ "$visibility" == "public" ]] || {
+            echo "GHCR package visibility is not public" >&2
             exit 1
           }
           printf 'visibility=%s\n' "$visibility" >> "$GITHUB_OUTPUT"
@@ -230,7 +230,7 @@ jobs:
               select(type == "string" and test("rekor"; "i"))] | length) == 0
           ' "$RUNNER_TEMP/hormuz-attestation-signing-config.json" >/dev/null
 
-      - name: Sign through public Rekor and attach attestations only to private GHCR
+      - name: Sign through public Rekor and attach validated public attestations
         env:
           DIGEST: ${{ steps.publish.outputs.digest }}
         run: |

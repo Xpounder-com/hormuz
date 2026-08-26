@@ -25,7 +25,7 @@ except ModuleNotFoundError:  # Direct execution resolves helpers beside this scr
 
 
 SCHEMA_ID = "hormuz.oci-release-evidence"
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 IMAGE = "ghcr.io/xpounder-com/hormuz"
 ISSUER = "https://token.actions.githubusercontent.com"
 TAG_PATTERN = re.compile(r"v[0-9]+\.[0-9]+\.[0-9]+\Z")
@@ -105,7 +105,7 @@ def create_summary(
     )
     if workflow_identity != expected_identity:
         raise ReleaseEvidenceError("release_workflow_identity_mismatch")
-    if first_publication_visibility != "private":
+    if first_publication_visibility != "public":
         raise ReleaseEvidenceError("first_publication_visibility_mismatch")
     expected_names = {
         "preflight",

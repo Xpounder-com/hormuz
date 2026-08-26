@@ -154,6 +154,8 @@ class OciPublicMetadataTests(unittest.TestCase):
             2,
         )
         self.assertEqual(workflow.count("jq -er '.manifest.digest'"), 2)
+        self.assertIn('[[ "$visibility" == "public" ]]', workflow)
+        self.assertNotIn('[[ "$visibility" == "private" ]]', workflow)
         self.assertNotIn("sha256sum", workflow)
 
         retained = workflow.split("- name: Preserve metadata-only release evidence", 1)[1]
