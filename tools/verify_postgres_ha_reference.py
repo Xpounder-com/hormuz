@@ -376,6 +376,10 @@ def _validate_topology(value: Any) -> None:
         "data_durability": "required",
         "failover_quorum": True,
         "isolation_check": True,
+        "node_eviction_tolerations_seconds": {
+            "not_ready": 30,
+            "unreachable": 30,
+        },
         "primary_lease": {
             "lease_duration_seconds": 15,
             "renew_deadline_seconds": 10,

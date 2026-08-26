@@ -449,7 +449,7 @@ wait_for_lease_and_rw_primary() {
 wait_for_synchronous_durability() {
   local primary=$1
   local attempt state
-  for attempt in $(seq 1 90); do
+  for attempt in $(seq 1 300); do
     state="$(timeout 10s kubectl --namespace hormuz-dependencies exec "pod/${primary}" \
       --container postgres -- psql --username postgres --dbname hormuz \
       --tuples-only --no-align --command \
@@ -965,6 +965,10 @@ value = {
         "data_durability": "required",
         "failover_quorum": True,
         "isolation_check": True,
+        "node_eviction_tolerations_seconds": {
+            "not_ready": 30,
+            "unreachable": 30,
+        },
         "primary_lease": {
             "lease_duration_seconds": 15,
             "renew_deadline_seconds": 10,

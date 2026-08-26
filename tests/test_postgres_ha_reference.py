@@ -62,6 +62,10 @@ def valid_observations() -> dict[str, object]:
             "data_durability": "required",
             "failover_quorum": True,
             "isolation_check": True,
+            "node_eviction_tolerations_seconds": {
+                "not_ready": 30,
+                "unreachable": 30,
+            },
             "primary_lease": {
                 "lease_duration_seconds": 15,
                 "renew_deadline_seconds": 10,
@@ -207,6 +211,9 @@ class PostgresHAReferenceTests(unittest.TestCase):
         self.assertIn("dataDurability: required", cluster)
         self.assertIn("failoverQuorum: true", cluster)
         self.assertIn("isolationCheck:", cluster)
+        self.assertEqual(cluster.count("tolerationSeconds: 30"), 2)
+        self.assertIn("node.kubernetes.io/not-ready", cluster)
+        self.assertIn("node.kubernetes.io/unreachable", cluster)
         self.assertIn(ha.POSTGRES_IMAGE, cluster)
         self.assertEqual(kind.count("role: worker"), 5)
         self.assertIn("io.hormuz.proof-role: postgres", values)
