@@ -286,18 +286,17 @@ def _run_storage_backpressure(
         raise SystemExit("storage_backpressure_status_invalid")
     started = time.monotonic_ns()
 
-    def request(_: int) -> dict[str, object]:
-        return _governed_request(
+    def request(_: int) -> tuple[dict[str, object], int]:
+        return _timed_storage_request(
             target=target,
             headers=headers,
-            expected_status=503,
-            expected_policy=None,
-            timeout=15,
         )
 
     with ThreadPoolExecutor(max_workers=concurrency) as executor:
-        results = list(executor.map(request, range(concurrency)))
+        timed_results = list(executor.map(request, range(concurrency)))
     duration_ms = max(1, (time.monotonic_ns() - started + 999_999) // 1_000_000)
+    results = [result for result, _ in timed_results]
+    maximum_request_ms = max(elapsed for _, elapsed in timed_results)
     if any(result.get("status") != 503 for result in results):
         raise SystemExit("storage_backpressure_result_invalid")
     print(
@@ -305,6 +304,7 @@ def _run_storage_backpressure(
             {
                 "command": "storage-backpressure",
                 "duration_ms": duration_ms,
+                "maximum_request_ms": maximum_request_ms,
                 "requests": concurrency,
                 "status": 503,
                 "storage_denials": len(results),
@@ -314,6 +314,23 @@ def _run_storage_backpressure(
         )
     )
     return 0
+
+
+def _timed_storage_request(
+    *,
+    target: str,
+    headers: dict[str, str],
+) -> tuple[dict[str, object], int]:
+    started = time.monotonic_ns()
+    result = _governed_request(
+        target=target,
+        headers=headers,
+        expected_status=503,
+        expected_policy=None,
+        timeout=15,
+    )
+    elapsed_ms = max(1, (time.monotonic_ns() - started + 999_999) // 1_000_000)
+    return result, elapsed_ms
 
 
 def _read(name: str) -> str:

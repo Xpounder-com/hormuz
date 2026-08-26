@@ -259,6 +259,9 @@ class PostgresHAReferenceTests(unittest.TestCase):
         self.assertIn("rw_ready_addresses", runner)
         self.assertEqual(runner.count('(endpoint.get("conditions") or {})'), 3)
         self.assertIn("storage-backpressure", runner)
+        self.assertIn('value.get("maximum_request_ms")', runner)
+        self.assertIn('["maximum_request_ms"]', runner)
+        self.assertNotIn('if [[ "${expected_status}" == "503"', runner)
         self.assertIn("observe_quorum_refusal_window", runner)
         self.assertIn("assert_replica_in_recovery", runner)
         self.assertIn("monitor_recreated_pod_as_standby", runner)
@@ -343,9 +346,9 @@ class PostgresHAReferenceTests(unittest.TestCase):
             str(ROOT / "deploy" / "kubernetes" / "conformance" / "probe.py")
         )
         run_backpressure = probe["_run_storage_backpressure"]
-        request = mock.Mock(return_value={"status": 503})
-        original = run_backpressure.__globals__["_governed_request"]
-        run_backpressure.__globals__["_governed_request"] = request
+        request = mock.Mock(return_value=({"status": 503}, 5_000))
+        original = run_backpressure.__globals__["_timed_storage_request"]
+        run_backpressure.__globals__["_timed_storage_request"] = request
         output = io.StringIO()
         try:
             with (
@@ -362,19 +365,51 @@ class PostgresHAReferenceTests(unittest.TestCase):
                     0,
                 )
         finally:
-            run_backpressure.__globals__["_governed_request"] = original
+            run_backpressure.__globals__["_timed_storage_request"] = original
         value = json.loads(output.getvalue())
         self.assertEqual(
             value,
             {
                 "command": "storage-backpressure",
                 "duration_ms": 6000,
+                "maximum_request_ms": 5000,
                 "requests": 16,
                 "status": 503,
                 "storage_denials": 16,
             },
         )
         self.assertEqual(request.call_count, 16)
+
+    def test_storage_backpressure_times_the_request_not_probe_orchestration(self) -> None:
+        probe = runpy.run_path(
+            str(ROOT / "deploy" / "kubernetes" / "conformance" / "probe.py")
+        )
+        timed_request = probe["_timed_storage_request"]
+        request = mock.Mock(return_value={"status": 503})
+        original = timed_request.__globals__["_governed_request"]
+        timed_request.__globals__["_governed_request"] = request
+        try:
+            with mock.patch.object(
+                probe["time"],
+                "monotonic_ns",
+                side_effect=(0, 5_000_000_000),
+            ):
+                self.assertEqual(
+                    timed_request(
+                        target="http://hormuz.invalid",
+                        headers={"Authorization": "synthetic"},
+                    ),
+                    ({"status": 503}, 5_000),
+                )
+        finally:
+            timed_request.__globals__["_governed_request"] = original
+        request.assert_called_once_with(
+            target="http://hormuz.invalid",
+            headers={"Authorization": "synthetic"},
+            expected_status=503,
+            expected_policy=None,
+            timeout=15,
+        )
 
 
 if __name__ == "__main__":
