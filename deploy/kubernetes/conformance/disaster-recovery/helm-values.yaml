@@ -1,0 +1,56 @@
+configuration:
+  name: hormuz-recovery-config-v1
+  sha256: sha256:0000000000000000000000000000000000000000000000000000000000000000
+runtimeSecret:
+  name: hormuz-recovery-runtime-v1
+  revision: disaster-recovery-generation-v1
+  env:
+    HORMUZ_POSTGRES_DSN: postgres-runtime-dsn
+    HORMUZ_TOKEN: alice-token
+    HORMUZ_BOB_TOKEN: bob-token
+    HORMUZ_INGRESS_CREDENTIAL: ingress-credential
+    OPENAI_API_KEY: openai-api-key
+    ANTHROPIC_API_KEY: anthropic-api-key
+networkPolicy:
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: hormuz-ingress
+          podSelector:
+            matchLabels:
+              io.hormuz.proof-role: recovery-ingress
+      ports:
+        - protocol: TCP
+          port: 8787
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: hormuz-dependencies
+          podSelector:
+            matchLabels:
+              io.hormuz.proof-role: recovered-postgres
+      ports:
+        - protocol: TCP
+          port: 5432
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: hormuz-dependencies
+          podSelector:
+            matchLabels:
+              io.hormuz.proof-role: fake-provider
+      ports:
+        - protocol: TCP
+          port: 8090
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: hormuz-dependencies
+          podSelector:
+            matchLabels:
+              io.hormuz.proof-role: openbao
+      ports:
+        - protocol: TCP
+          port: 8200

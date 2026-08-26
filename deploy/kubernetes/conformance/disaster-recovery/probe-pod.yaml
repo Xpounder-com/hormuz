@@ -1,0 +1,51 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: hormuz-disaster-recovery-probe
+  namespace: hormuz-ingress
+  labels:
+    io.hormuz.proof-role: recovery-ingress
+spec:
+  automountServiceAccountToken: false
+  restartPolicy: Never
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65532
+    runAsGroup: 65532
+    fsGroup: 65532
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: probe
+      image: ghcr.io/xpounder-com/hormuz@sha256:1bbcca3490a7a5b004a880f42e8250acb91ce566a9c59f3263d7b279568efb5a
+      command: ["/opt/hormuz/bin/python"]
+      args: ["-I", "-c", "import time; time.sleep(7200)"]
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: ["ALL"]
+      resources:
+        requests:
+          cpu: 25m
+          memory: 32Mi
+        limits:
+          cpu: 250m
+          memory: 128Mi
+      volumeMounts:
+        - name: script
+          mountPath: /opt/hormuz-proof/probe.py
+          subPath: probe.py
+          readOnly: true
+        - name: secrets
+          mountPath: /run/hormuz-proof
+          readOnly: true
+  volumes:
+    - name: script
+      configMap:
+        name: hormuz-disaster-recovery-probe
+        defaultMode: 0440
+    - name: secrets
+      secret:
+        secretName: hormuz-disaster-recovery-probe
+        defaultMode: 0440
