@@ -41,6 +41,10 @@ from .custody_runtime import (
     resolve_upstream_credentials,
     write_envelope_file,
 )
+from .custody_runtime_projection import (
+    CustodyRuntimeProjection,
+    CustodyRuntimeProjectionError,
+)
 from .evidence import EvidenceStorageError
 from .contracts import (
     ALLOCATION_BASIS_DIRECT_GATEWAY_REQUEST,
@@ -467,6 +471,9 @@ def main(argv: list[str] | None = None) -> int:
     except CustodyControlError as error:
         print(f"custody control error: {error.code}", file=sys.stderr)
         return 2
+    except CustodyRuntimeProjectionError as error:
+        print(f"custody runtime error: {error.code}", file=sys.stderr)
+        return 2
     except (CustodyExecutionError, CustodyLifecycleError) as error:
         print(f"custody executor error: {error.code}", file=sys.stderr)
         return 2
@@ -597,15 +604,24 @@ def _doctor(config: GatewayConfig) -> int:
     print(f"secret egress control: {config.secret_controls.mode}")
     print(f"usage storage: {config.usage_storage.backend}")
     runtime_pool = create_postgres_runtime_pool(config)
+    custody_runtime: CustodyRuntimeProjection | None = None
     try:
         create_usage_store(config, connection_pool=runtime_pool)
         print("usage storage: verified")
         PolicyRuntime(config, connection_pool=runtime_pool).verify_active_policies()
         print(f"policy control: {config.policy_control.mode} verified")
-        if config.custody_control.mode == "postgresql":
-            CustodyControlService(config)
-        print(f"custody control: {config.custody_control.mode} verified")
+        custody_runtime = CustodyRuntimeProjection(
+            config,
+            connection_pool=runtime_pool,
+            start_background=False,
+        )
+        if not custody_runtime.readiness_healthy():
+            raise CustodyRuntimeProjectionError("custody_runtime_projection_unavailable")
+        custody_state = "enabled" if custody_runtime.enabled else "disabled"
+        print(f"custody runtime projection: {custody_state} verified")
     finally:
+        if custody_runtime is not None:
+            custody_runtime.close()
         _close_runtime_pool(runtime_pool)
     if config.oidc_issuers:
         try:

@@ -331,10 +331,17 @@ class GatewayPostgresPoolOwnershipTests(unittest.TestCase):
         pool = mock.Mock(spec=PostgresConnectionPool)
         store = mock.Mock()
         runtime = mock.Mock()
+        custody_runtime = mock.Mock()
+        custody_runtime.enabled = False
+        custody_runtime.readiness_healthy.return_value = True
         with (
             mock.patch("hormuz.cli.create_postgres_runtime_pool", return_value=pool) as create_pool,
             mock.patch("hormuz.cli.create_usage_store", return_value=store) as create_store,
             mock.patch("hormuz.cli.PolicyRuntime", return_value=runtime) as create_runtime,
+            mock.patch(
+                "hormuz.cli.CustodyRuntimeProjection", return_value=custody_runtime
+            ) as create_custody_runtime,
+            mock.patch("hormuz.cli.CustodyControlService") as custody_control,
             mock.patch("hormuz.cli.resolve_upstream_credentials", return_value={"openai": "key", "anthropic": "key"}),
         ):
             self.assertEqual(_doctor(config), 0)
@@ -342,6 +349,14 @@ class GatewayPostgresPoolOwnershipTests(unittest.TestCase):
         create_store.assert_called_once_with(config, connection_pool=pool)
         create_runtime.assert_called_once_with(config, connection_pool=pool)
         runtime.verify_active_policies.assert_called_once_with()
+        create_custody_runtime.assert_called_once_with(
+            config,
+            connection_pool=pool,
+            start_background=False,
+        )
+        custody_runtime.readiness_healthy.assert_called_once_with()
+        custody_runtime.close.assert_called_once_with()
+        custody_control.assert_not_called()
         pool.close.assert_called_once_with()
 
     def test_postgres_storage_verification_uses_and_closes_the_runtime_pool(self) -> None:
