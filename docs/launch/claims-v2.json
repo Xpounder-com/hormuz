@@ -1,12 +1,15 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "repository": "Xpounder-com/hormuz",
   "release": "v0.1.3-public-alpha",
+  "launch_mode": "public_alpha_tester_recruitment",
   "publication_status": "draft_do_not_publish",
   "publication_gate": {
     "owner_copy_approval": "required",
-    "commercial_urls": "required",
-    "quiet_alpha_issue": 110,
+    "commercial_conversion": "deferred_until_validated_onboarding",
+    "external_onboarding_validation": "pending",
+    "external_tester_count": "0/5",
+    "post_publication_validation_issue": 110,
     "required_closed_issues": [
       101,
       102,
@@ -14,7 +17,6 @@
       104,
       105,
       108,
-      110,
       111,
       113,
       114,
@@ -30,6 +32,7 @@
         "ALPHA_BOUNDARY",
         "CLIENT_VERIFICATION",
         "COST_REPORTING",
+        "DURABLE_DATA_BOUNDARY",
         "EVIDENCE_BOUNDARY",
         "GATEWAY_SCOPE",
         "OCI_RELEASE",
@@ -53,6 +56,7 @@
       "claim_ids": [
         "ALPHA_BOUNDARY",
         "DATA_BOUNDARY",
+        "DURABLE_DATA_BOUNDARY",
         "EVIDENCE_BOUNDARY",
         "GATEWAY_SCOPE",
         "OCI_RELEASE",
@@ -69,6 +73,7 @@
         "CLIENT_VERIFICATION",
         "COST_REPORTING",
         "DATA_BOUNDARY",
+        "DURABLE_DATA_BOUNDARY",
         "EVIDENCE_BOUNDARY",
         "GATEWAY_SCOPE",
         "POLICY_CONTROLS",
@@ -259,6 +264,29 @@
       ]
     },
     {
+      "id": "DURABLE_DATA_BOUNDARY",
+      "text": "Hormuz's public alpha is self-hosted, does not operate a hosted customer-data service, leaves database export, retention, backup, restore, and deletion to customer operators, and makes no universal-erasure claim across provider, IdP, KMS, Object Lock, backup, or observability systems.",
+      "classification": "nonclaim",
+      "evidence": [
+        {
+          "kind": "open_issue",
+          "value": "https://github.com/Xpounder-com/hormuz/issues/106"
+        },
+        {
+          "kind": "repository_path",
+          "value": "docs/DURABLE_DATA.md"
+        },
+        {
+          "kind": "repository_path",
+          "value": "docs/durable-data-v1.json"
+        },
+        {
+          "kind": "repository_path",
+          "value": "tests/test_durable_data_inventory.py"
+        }
+      ]
+    },
+    {
       "id": "OCI_RELEASE",
       "text": "Hormuz v0.1.3 is published as signed linux/amd64 OCI digest sha256:8ac24f5c7afb8ce09ec133616de06702f568a2e70594d8034146a131d86e5b67 with anonymous GHCR pull, exact-workflow verification, a public-Rekor image signature, and registry SBOM and SLSA attestations; GHCR remains the first registry rather than the portable artifact contract, and the documented mirror procedure requires recursive copying and destination verification.",
       "classification": "verified_alpha",
@@ -322,7 +350,7 @@
     },
     {
       "id": "ALPHA_BOUNDARY",
-      "text": "Hormuz v0.1.3 is a public open-source alpha for evaluation and design-partner hardening, not a production certification, universal HA or disaster-recovery guarantee, compliance claim, customer SLA, or independent security review.",
+      "text": "Hormuz v0.1.3 is a public open-source alpha for evaluation and tester-led hardening, not a production certification, universal HA or disaster-recovery guarantee, compliance claim, customer SLA, or independent security review.",
       "classification": "nonclaim",
       "evidence": [
         {
@@ -346,18 +374,18 @@
   ],
   "ctas": [
     {
-      "id": "governance_review",
-      "label": "Book an AI Governance Review",
-      "url_token": "{{AI_GOVERNANCE_REVIEW_URL}}",
-      "status": "owner_url_required",
-      "mode": "human_review"
+      "id": "test_public_alpha",
+      "label": "Test the public alpha",
+      "url": "https://github.com/Xpounder-com/hormuz/blob/main/docs/QUIET_ALPHA.md",
+      "status": "public_recruitment",
+      "mode": "self_service"
     },
     {
-      "id": "paid_pilot",
-      "label": "Apply for a paid design-partner pilot",
-      "url_token": "{{PAID_PILOT_URL}}",
-      "status": "owner_url_required",
-      "mode": "human_review"
+      "id": "report_installation",
+      "label": "Report an installation problem",
+      "url": "https://github.com/Xpounder-com/hormuz/issues/new?template=installation.yml",
+      "status": "public_recruitment",
+      "mode": "public_issue"
     }
   ],
   "analytics": [

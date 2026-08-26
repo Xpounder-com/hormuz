@@ -1,10 +1,17 @@
-# Quiet-alpha verification
+# Public-alpha onboarding validation
 
-Hormuz uses a small, maintainer-invited quiet alpha before broad public
-promotion. The gate asks whether independent developers, security reviewers,
-platform engineers, and engineering administrators can install the public
-checkout and finish the provider-free demonstration using only public
-repository material.
+Hormuz may publish a bounded public-alpha announcement to recruit testers while
+this validation is incomplete. Hormuz is not production-ready. External
+onboarding validation pending: **0/5** independent completions. Issue #110
+tracks whether independent developers, security reviewers, platform engineers,
+and engineering administrators can install the public checkout and finish the
+provider-free demonstration using only public repository material.
+
+This is a post-publication validation milestone. It does not block the initial
+tester-recruitment announcement, but it must close before Hormuz claims
+validated onboarding, advances beyond alpha, or makes stronger
+commercial-readiness claims. Internal, maintainer-assisted, and synthetic runs
+do not count toward the five independent completions.
 
 This is a release-verification exercise, not employee monitoring, a usability
 study containing recordings, or a request for company data. Participation
@@ -150,7 +157,7 @@ other than `none`. An initial session must attempt installation. A returning
 session reuses the participant ID, gets a new session ID, and occurs on a
 later date; reinstalling from a clean checkout is preferred.
 
-## Maintainer aggregation and gate
+## Maintainer aggregation and validation milestone
 
 The maintainer converts consented blocks into one strict
 `hormuz.quiet-alpha-evidence` v1 aggregate. Useful findings are represented
@@ -165,7 +172,7 @@ Validate an aggregate with:
 python tools/verify_quiet_alpha_evidence.py /private/path/quiet-alpha-evidence.json
 ```
 
-The command exits successfully for release evidence only when all of these
+The command exits successfully for validated-onboarding evidence only when all of these
 conditions hold:
 
 1. five to ten distinct people are attested privately;
@@ -176,7 +183,9 @@ conditions hold:
    another independent session;
 5. every security or installation blocker has a resolution commit and a
    successful independent retest; and
-6. broad promotion has not started.
+6. stronger promotion claiming validated onboarding, beyond-alpha readiness, or
+   commercial readiness has not started. The bounded public-alpha
+   tester-recruitment announcement is allowed and does not set this flag.
 
 The repository's fixture is deliberately synthetic:
 
@@ -187,7 +196,10 @@ python tools/verify_quiet_alpha_evidence.py \
 ```
 
 It can prove that the contract and validator execute. It always reports
-`"ready_for_broad_promotion": false` and can never close the quiet-alpha gate.
-The aggregate also cannot cryptographically prove distinct humanity, live
-provider behavior, security, productivity, production readiness, or traffic
-that bypassed Hormuz.
+`"ready_for_broad_promotion": false` and can never satisfy the external
+onboarding-validation milestone. The v1 field name is retained for
+compatibility: `ready_for_broad_promotion` means eligible to make stronger
+validated-onboarding, beyond-alpha, or commercial-readiness claims; it does not
+control the bounded tester-recruitment announcement. The aggregate also cannot
+cryptographically prove distinct humanity, live provider behavior, security,
+productivity, production readiness, or traffic that bypassed Hormuz.

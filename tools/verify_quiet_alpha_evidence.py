@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
-"""Validate Hormuz quiet-alpha evidence without retaining tester content.
+"""Validate post-publication onboarding evidence without retaining tester content.
 
 The aggregate records only allowlisted environment and completion metadata.
 Names, handles, email addresses, feedback text, prompts, responses, credentials,
 customer data, local paths, and identity mappings have no fields in this
 schema. Synthetic fixtures are useful for contract tests but can never satisfy
-the quiet-alpha release gate.
+the external onboarding-validation milestone. The schema-v1 `quiet-alpha`,
+`release_gate`, and `broad_promotion` names remain compatibility identifiers;
+they gate validated-onboarding and beyond-alpha claims, not the bounded initial
+tester-recruitment announcement.
 """
 
 from __future__ import annotations

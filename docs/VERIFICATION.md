@@ -33,7 +33,7 @@ cannot substitute for that evidence. The result does not establish
 provider-invoice reconciliation, every client feature, traffic bypassing
 Hormuz, or enterprise production readiness.
 
-## Independent quiet-alpha gate
+## Post-publication onboarding-validation milestone
 
 The invited-reviewer procedure and strict content-free aggregate are defined
 in [QUIET_ALPHA.md](QUIET_ALPHA.md). The evidence contract allows only opaque
@@ -53,12 +53,34 @@ python tools/verify_quiet_alpha_evidence.py \
 ```
 
 Synthetic evidence always reports `ready_for_broad_promotion: false`. Actual
-release evidence additionally requires the operator to attest distinct humans
-off-repository, five independent installation/demo completions across all
-four reviewer personas, a later returning-user session, and resolution plus
-independent retest of every security or installation blocker. The validator
-does not prove the off-repository identity attestation or replace #115's
-separately completed live-provider evidence.
+validated-onboarding evidence additionally requires the operator to attest
+distinct humans off-repository, five independent installation/demo completions
+across all four reviewer personas, a later returning-user session, and
+resolution plus independent retest of every security or installation blocker.
+Hormuz may publish a bounded public-alpha tester-recruitment announcement while
+the honest count remains 0/5. Internal and synthetic runs do not count. Closing
+#110 remains mandatory before any validated-onboarding, beyond-alpha, or
+stronger commercial-readiness claim. The validator does not prove the
+off-repository identity attestation or replace #115's separately completed
+live-provider evidence.
+
+## Durable-data inventory boundary
+
+The self-hosted public-alpha data boundary is documented in
+[DURABLE_DATA.md](DURABLE_DATA.md) and its strict versioned inventory. Verify
+that every SQLite and PostgreSQL table is registered, operator-created
+artifacts are named, prompt and response bodies remain outside the claimed
+durable stores, and external-system deletion is not overclaimed with:
+
+```bash
+python tools/verify_durable_data_inventory.py
+python -m unittest -v tests.test_durable_data_inventory
+```
+
+The inventory is a product-boundary assertion, not proof of universal erasure.
+Customer database and backup operators own export, retention, backup, restore,
+and deletion in their controlled infrastructure. Provider, IdP, KMS, Object
+Lock, backup, and observability lifecycles remain separate systems.
 
 ## Provider-free five-minute path
 
@@ -88,7 +110,7 @@ OpenAI/Anthropic compatibility or a production deployment claim.
 
 ## Launch-claim boundary
 
-The formal-launch drafts and their schema-v1 claim ledger live under
+The tester-recruitment drafts and their schema-v2 claim ledger live under
 [`docs/launch`](launch/README.md). Validate them with:
 
 ```bash
@@ -99,10 +121,12 @@ python -m unittest -v tests.test_launch_assets
 The draft verifier returns `"publishable": false` by design. It requires every
 asset to carry the do-not-publish marker, binds implemented and verified-alpha
 claims to closed issues plus repository evidence, labels roadmap and nonclaim
-statements separately, rejects unapproved commercial URL tokens, and freezes
+statements separately, rejects unapproved links or template tokens, and freezes
 the privacy-bounded launch measures. It does not query GitHub or prove that an
-issue remains closed; final publication requires a fresh remote review, the
-quiet-alpha gate, owner-supplied intake URLs, and recorded owner approval.
+issue remains closed; final publication requires a fresh remote review and
+recorded owner approval. Issue #110 remains an explicitly pending
+post-publication validation milestone at 0/5, not a prerequisite for the
+bounded tester-recruitment announcement.
 
 ## 2026-08-15
 

@@ -1,4 +1,4 @@
-<!-- hormuz-launch-asset-v1 {"asset_id":"landing_page","publication_status":"draft_do_not_publish","claim_ids":["ALPHA_BOUNDARY","CLIENT_VERIFICATION","COST_REPORTING","EVIDENCE_BOUNDARY","GATEWAY_SCOPE","OCI_RELEASE","POLICY_CONTROLS","PROVIDER_FREE_DEMO","REFERENCE_DEPLOYMENTS","SECRET_EGRESS"]} -->
+<!-- hormuz-launch-asset-v2 {"asset_id":"landing_page","publication_status":"draft_do_not_publish","claim_ids":["ALPHA_BOUNDARY","CLIENT_VERIFICATION","COST_REPORTING","DURABLE_DATA_BOUNDARY","EVIDENCE_BOUNDARY","GATEWAY_SCOPE","OCI_RELEASE","POLICY_CONTROLS","PROVIDER_FREE_DEMO","REFERENCE_DEPLOYMENTS","SECRET_EGRESS"]} -->
 
 # DRAFT — DO NOT PUBLISH
 
@@ -10,12 +10,14 @@ Anthropic. Employees keep the tools they already use; Hormuz becomes the
 company-controlled request path. <!-- claims: GATEWAY_SCOPE -->
 
 [Run the five-minute provider-free demo](../../README.md#try-the-real-gateway-without-a-provider-account)
-· [Book an AI Governance Review]({{AI_GOVERNANCE_REVIEW_URL}})
-· [Apply for a paid design-partner pilot]({{PAID_PILOT_URL}})
+· [Test the public alpha](https://github.com/Xpounder-com/hormuz/blob/main/docs/QUIET_ALPHA.md)
+· [Report an installation problem](https://github.com/Xpounder-com/hormuz/issues/new?template=installation.yml)
 
-Hormuz v0.1.3 is an evaluation alpha. It is not a production certification,
-universal HA/DR guarantee, compliance claim, customer SLA, or independent
-security review.
+Hormuz v0.1.3 is a **public alpha**. It is **not production-ready**.
+**External onboarding validation pending: 0/5 independent testers.** This
+announcement recruits early testers; it does not claim validated onboarding,
+a production certification, universal HA/DR guarantee, compliance, a customer
+SLA, or an independent security review.
 <!-- claims: ALPHA_BOUNDARY -->
 
 ## One organizational control point
@@ -71,6 +73,16 @@ consumed within Hormuz's capture and pricing boundary. Estimated cost is not a
 provider invoice, and unpriced requests remain visible rather than being
 silently treated as free. <!-- claims: COST_REPORTING -->
 
+## Your deployment owns its durable data
+
+The public alpha is self-hosted; Hormuz does not operate a hosted customer-data
+service. The versioned [durable-data inventory](../DURABLE_DATA.md) names every
+SQLite/PostgreSQL class and operator-created artifact. Customer database and
+backup operators own export, retention, backup, restore, and deletion. Hormuz
+does not claim universal erasure across provider, IdP, KMS, Object Lock,
+backup, client, or observability systems.
+<!-- claims: DURABLE_DATA_BOUNDARY -->
+
 ## A portable release target
 
 The current published image is the signed `v0.1.3` `linux/amd64` OCI digest,
@@ -93,16 +105,18 @@ SLA, or broad platform portability. The boundaries are recorded in the
 [disaster-recovery runbook](../DISASTER_RECOVERY.md).
 <!-- claims: REFERENCE_DEPLOYMENTS -->
 
-## Start with your real policy problem
+## Help validate the first public experience
 
-Book an AI Governance Review to map the clients, model choices, budget
-boundaries, identity facts, and secret-egress risks that matter in your
-organization. If Hormuz fits the bounded problem, apply for a paid
-design-partner pilot. Every review, qualification decision, scope, price,
-security boundary, and proposal is handled by a human.
+Follow the tester guide from a clean checkout and report only the fixed,
+content-free session fields. Installation and documentation problems belong in
+the public issue forms; suspected vulnerabilities use the private security
+path. Internal rehearsals and synthetic fixtures never increase the `0/5`
+count.
 
-[Book an AI Governance Review]({{AI_GOVERNANCE_REVIEW_URL}})
-· [Apply for a paid design-partner pilot]({{PAID_PILOT_URL}})
+[Test the public alpha](https://github.com/Xpounder-com/hormuz/blob/main/docs/QUIET_ALPHA.md)
+· [Report an installation problem](https://github.com/Xpounder-com/hormuz/issues/new?template=installation.yml)
 
 Do not submit credentials, prompts, responses, employee records, customer
-data, private hostnames, or proprietary logs through either intake path.
+data, private hostnames, proprietary logs, or participant identity mappings.
+Governance reviews and paid design-partner applications remain a later,
+human-controlled phase after onboarding validation.

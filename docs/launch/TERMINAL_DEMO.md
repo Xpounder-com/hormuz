@@ -1,4 +1,4 @@
-<!-- hormuz-launch-asset-v1 {"asset_id":"terminal_demo","publication_status":"draft_do_not_publish","claim_ids":["ALPHA_BOUNDARY","PROVIDER_FREE_DEMO"]} -->
+<!-- hormuz-launch-asset-v2 {"asset_id":"terminal_demo","publication_status":"draft_do_not_publish","claim_ids":["ALPHA_BOUNDARY","PROVIDER_FREE_DEMO"]} -->
 
 # DRAFT — DO NOT PUBLISH
 
@@ -17,9 +17,9 @@ Say:
 > provider simulators. It does not need an OpenAI or Anthropic account, spend
 > money, or send a prompt outside this machine.
 
-The alpha is for evaluation and design-partner hardening. Do not describe the
-demo as production deployment, live-provider certification, HA, recovery, or
-an independent security review. <!-- claims: ALPHA_BOUNDARY -->
+This is a public alpha, not production-ready. External onboarding validation pending: 0/5 independent testers. Do not describe the demo as validated
+onboarding, production deployment, live-provider certification, HA, recovery,
+or an independent security review. <!-- claims: ALPHA_BOUNDARY -->
 
 ### 2. Install from the clean checkout
 
@@ -74,7 +74,8 @@ Say:
 > The demo proves the local governed request path. Connecting a real Codex or
 > Claude Code client and a company provider credential is a separate setup;
 > this provider-free run is not a substitute for the published live-provider
-> evidence.
+> evidence. The public alpha is recruiting independent installation and demo
+> testers through the repository guide.
 
 Do not paste a provider key, employee token, private URL, prompt, response, or
 customer identifier into a recording. Do not show shell history, environment

@@ -10,8 +10,9 @@ budgets, and secret-egress rules apply, routes allowed traffic to OpenAI or
 Anthropic, and records versioned metadata-only evidence. Employees keep their
 existing AI clients; company provider credentials stay on the Hormuz service.
 
-Hormuz is a **public open-source alpha**, not a production-ready or
-enterprise-HA release. Use it with synthetic data for evaluation. Its current
+Hormuz is a **public open-source alpha** and is **not production-ready** or an
+enterprise-HA release. External onboarding validation pending: **0/5**
+independent testers. Use it with synthetic data for evaluation. Its current
 proofs do not establish production security, availability, disaster recovery,
 provider-invoice accuracy, or suitability for customer secrets.
 
@@ -48,10 +49,12 @@ exits. It is an executable product tour, not a provider-compatibility or
 production-deployment claim. Its `PASS` lines are human diagnostic output, not
 a new machine-readable compatibility contract.
 
-Invited independent reviewers should follow the
-[quiet-alpha verification guide](docs/QUIET_ALPHA.md). Its strict aggregate
-uses opaque participant IDs and fixed metadata enums; Hormuz adds no product
-telemetry, and a synthetic fixture can never satisfy the launch gate.
+Independent testers should follow the
+[public-alpha onboarding guide](docs/QUIET_ALPHA.md). Its strict aggregate uses
+opaque participant IDs and fixed metadata enums; Hormuz adds no product
+telemetry, and internal or synthetic runs cannot satisfy external onboarding
+validation. Issue #110 remains open after publication and must close before
+Hormuz claims validated onboarding or advances beyond alpha.
 
 ## What works
 
@@ -64,6 +67,7 @@ telemetry, and a synthetic fixture can never satisfy the launch gate.
 - Per-person attribution using unique bootstrap tokens or generic OIDC JWT access tokens mapped by issuer and subject.
 - Input, output, cache-read, cache-write, and reasoning-token accounting when providers report them.
 - Metadata-only usage ledger: SQLite by default, with an optional PostgreSQL adapter for the same narrow usage/evidence contract. Prompts and responses are relayed, not persisted.
+- A strict [durable-data inventory](docs/DURABLE_DATA.md) naming every Hormuz-created database class and operator artifact; the self-hosted alpha leaves export, retention, backup, restore, and deletion to customer operators and makes no universal-erasure claim across external systems.
 - Metadata-only JSONL audit export for usage and secret-egress evidence, with private file permissions and a SHA-256 checksum.
 - Per-organization commit-time audit chains for new metadata-only usage and secret-egress events, with explicit recovery epochs and optional asynchronous Object Lock checkpoints.
 - Pre-provider secret redaction or denial with built-in detectors, custom environment-provided values, and metadata-only detection evidence.
@@ -108,13 +112,13 @@ metadata compiler, or employee-productivity system.
 
 | Status | Public-alpha boundary |
 | --- | --- |
-| Production-ready | None claimed. The alpha is for evaluation and design-partner hardening. |
+| Production-ready | None claimed. The alpha is for evaluation and tester-led hardening. |
 | Implemented alpha | OpenAI/Anthropic-compatible gateway paths, policy enforcement, secret controls, identity binding, and metadata-only usage/evidence. |
 | Verified reference | Only the exact evidence-gated profiles in [SUPPORT.md](SUPPORT.md), including the Linux Python matrix and published signed `v0.1.3` `linux/amd64` OCI runtime. A verified reference is not unrestricted certification. |
 | Verified alpha evidence | Exact Codex `0.147.0` / OpenAI and Claude Code `2.1.233` / Anthropic same-revision BYO-provider evidence is recorded in [#115](https://github.com/Xpounder-com/hormuz/issues/115). It does not prove provider-invoice reconciliation, every client feature, traffic bypassing Hormuz, or enterprise production readiness. |
 | Experimental | The context experiment is a separate package and is absent from the core wheel and gateway runtime. |
 | Deferred | Organizational memory, ticketing, workflow/productivity measurement, and new reporting dimensions are outside the current core. |
-| Unfinished | Quiet-alpha external validation, production HA/DR, cloud-specific certification, and independent review remain separate release gates. |
+| Unfinished | External onboarding validation, production HA/DR, cloud-specific certification, and independent review remain separate milestones. The initial bounded tester-recruitment announcement does not imply their completion. |
 
 ## Configure real providers and clients
 
@@ -226,5 +230,6 @@ compatibility report. Suspected vulnerabilities must follow the
 governed by the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 The evidence-grounded [launch package](docs/launch/README.md) is intentionally
-marked as a non-publishable draft until the quiet-alpha, owner-supplied CTA
-URLs, and final owner-approval gates are complete.
+marked as a non-publishable draft until the final post-change copy audit and
+owner approval. Its initial publication recruits public-alpha testers; #110
+continues afterward as the external onboarding-validation milestone.

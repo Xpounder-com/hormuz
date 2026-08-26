@@ -18,7 +18,7 @@ class LaunchAssetTests(unittest.TestCase):
         shutil.copytree(launch_source, target / "docs/launch")
         shutil.copy2(REPOSITORY_ROOT / "MANIFEST.in", target / "MANIFEST.in")
         manifest = json.loads(
-            (launch_source / "claims-v1.json").read_text(encoding="utf-8")
+            (launch_source / "claims-v2.json").read_text(encoding="utf-8")
         )
         evidence_paths = {
             item["value"]
@@ -33,20 +33,24 @@ class LaunchAssetTests(unittest.TestCase):
             shutil.copy2(source, destination)
 
     def _manifest(self, root: Path) -> tuple[Path, dict[str, object]]:
-        path = root / "docs/launch/claims-v1.json"
+        path = root / "docs/launch/claims-v2.json"
         return path, json.loads(path.read_text(encoding="utf-8"))
 
     def test_launch_draft_passes_strict_validation(self) -> None:
         result = validate_launch_assets(REPOSITORY_ROOT)
-        self.assertEqual(result["schema_version"], 1)
+        self.assertEqual(result["schema_version"], 2)
         self.assertEqual(result["status"], "passed_draft")
         self.assertEqual(result["publication_status"], "draft_do_not_publish")
+        self.assertEqual(result["launch_mode"], "public_alpha_tester_recruitment")
         self.assertFalse(result["publishable"])
         self.assertEqual(result["asset_count"], 6)
-        self.assertEqual(result["claim_count"], 11)
+        self.assertEqual(result["claim_count"], 12)
         self.assertEqual(result["cta_count"], 2)
         self.assertEqual(result["analytic_count"], 7)
-        self.assertEqual(result["required_closed_issue_count"], 12)
+        self.assertEqual(result["required_closed_issue_count"], 11)
+        self.assertEqual(result["post_publication_validation_issue"], 110)
+        self.assertEqual(result["external_onboarding_validation"], "pending")
+        self.assertEqual(result["external_tester_count"], "0/5")
         self.assertTrue(result["source_distribution_bound"])
 
     def test_missing_evidence_path_fails_closed(self) -> None:
@@ -142,7 +146,19 @@ class LaunchAssetTests(unittest.TestCase):
             with self.assertRaisesRegex(LaunchAssetError, "release identity"):
                 validate_launch_assets(root)
 
-    def test_quiet_alpha_gate_cannot_be_removed_silently(self) -> None:
+    def test_post_publication_validation_contract_cannot_change_silently(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._copy_contract(root)
+            path, manifest = self._manifest(root)
+            gate = manifest["publication_gate"]
+            assert isinstance(gate, dict)
+            gate["post_publication_validation_issue"] = 999
+            path.write_text(json.dumps(manifest), encoding="utf-8")
+            with self.assertRaisesRegex(LaunchAssetError, "publication gate"):
+                validate_launch_assets(root)
+
+    def test_quiet_alpha_is_not_a_required_closed_publication_gate(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             self._copy_contract(root)
@@ -151,9 +167,21 @@ class LaunchAssetTests(unittest.TestCase):
             assert isinstance(gate, dict)
             required = gate["required_closed_issues"]
             assert isinstance(required, list)
-            required.remove(110)
+            required.append(110)
             path.write_text(json.dumps(manifest), encoding="utf-8")
             with self.assertRaisesRegex(LaunchAssetError, "publication gate"):
+                validate_launch_assets(root)
+
+    def test_recruitment_disclosures_cannot_be_removed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._copy_contract(root)
+            landing = root / "docs/launch/LANDING_PAGE.md"
+            landing.write_text(
+                landing.read_text(encoding="utf-8").replace("0/5", "unknown"),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(LaunchAssetError, "recruitment disclosure"):
                 validate_launch_assets(root)
 
     def test_oci_digest_cannot_change_silently(self) -> None:
@@ -166,7 +194,7 @@ class LaunchAssetTests(unittest.TestCase):
             )
             changed = "sha256:" + ("0" * 64)
             for relative in (
-                "docs/launch/claims-v1.json",
+                "docs/launch/claims-v2.json",
                 "docs/launch/LANDING_PAGE.md",
                 "docs/launch/ARCHITECTURE_AND_SECURITY.md",
             ):
@@ -185,7 +213,7 @@ class LaunchAssetTests(unittest.TestCase):
             source_manifest = root / "MANIFEST.in"
             source_manifest.write_text(
                 source_manifest.read_text(encoding="utf-8").replace(
-                    "include docs/launch/claims-v1.json\n", "", 1
+                    "include docs/launch/claims-v2.json\n", "", 1
                 ),
                 encoding="utf-8",
             )

@@ -1,4 +1,4 @@
-<!-- hormuz-launch-asset-v1 {"asset_id":"architecture_security","publication_status":"draft_do_not_publish","claim_ids":["ALPHA_BOUNDARY","DATA_BOUNDARY","EVIDENCE_BOUNDARY","GATEWAY_SCOPE","OCI_RELEASE","POLICY_CONTROLS","REFERENCE_DEPLOYMENTS","SECRET_EGRESS"]} -->
+<!-- hormuz-launch-asset-v2 {"asset_id":"architecture_security","publication_status":"draft_do_not_publish","claim_ids":["ALPHA_BOUNDARY","DATA_BOUNDARY","DURABLE_DATA_BOUNDARY","EVIDENCE_BOUNDARY","GATEWAY_SCOPE","OCI_RELEASE","POLICY_CONTROLS","REFERENCE_DEPLOYMENTS","SECRET_EGRESS"]} -->
 
 # DRAFT — DO NOT PUBLISH
 
@@ -72,6 +72,14 @@ Hormuz into an employee-productivity or organizational-memory system. It does
 not prove traffic that bypassed Hormuz, provider invoice totals, or the content
 of a request.
 
+The alpha is self-hosted and has no Hormuz-operated customer-data service. Its
+versioned [durable-data inventory](../DURABLE_DATA.md) binds every created
+SQLite/PostgreSQL table and operator-requested artifact to a content boundary.
+Customer operators remain responsible for database export, retention, backup,
+restore, and deletion. Hormuz has no universal-erasure authority over provider,
+IdP, KMS, Object Lock, backup, client, or observability systems.
+<!-- claims: DURABLE_DATA_BOUNDARY -->
+
 ## Deployment story
 
 The portable product contract is the signed `v0.1.3` OCI digest,
@@ -99,9 +107,10 @@ customer SLA, broad platform portability, or production certification.
 
 ## What the alpha does not establish
 
-Hormuz v0.1.3 does not establish production suitability, a universal HA/DR
+Hormuz v0.1.3 is a public alpha and is not production-ready. External onboarding validation pending: 0/5 independent testers. It does not
+establish validated onboarding, production suitability, a universal HA/DR
 guarantee, compliance, provider-invoice accuracy, a customer SLA,
 cloud-specific certification, protection from a host-root administrator, or
-an independent security review. It should be evaluated with synthetic data
-until an organization completes its own deployment and data review.
+an independent security review. Evaluate it with synthetic data and report
+installation or comprehension failures through the documented public paths.
 <!-- claims: ALPHA_BOUNDARY -->
