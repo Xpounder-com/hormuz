@@ -53,6 +53,12 @@ class GatewayServer(ThreadingHTTPServer):
     daemon_threads = False
     block_on_close = True
     allow_reuse_address = True
+    # ``TCPServer`` defaults to a five-connection accept backlog. That can
+    # reset otherwise bounded concurrent requests before Hormuz reaches its
+    # governed PostgreSQL pool and returns the stable storage-unavailable
+    # response. Keep the listener queue bounded, but large enough for the
+    # runtime's explicitly bounded backpressure path.
+    request_queue_size = 128
 
     def __init__(self, config: GatewayConfig, *, environ: Mapping[str, str] | None = None):
         self.config = config
