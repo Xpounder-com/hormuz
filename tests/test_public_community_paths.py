@@ -101,6 +101,34 @@ class PublicCommunityPathTests(unittest.TestCase):
             with self.assertRaisesRegex(CommunityPathError, "placeholder"):
                 validate_public_community_paths(root)
 
+    def test_stale_live_provider_status_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._copy_contract(root)
+            readme = root / "README.md"
+            readme.write_text(
+                readme.read_text(encoding="utf-8")
+                + "\nLive BYO-provider release evidence, production HA remains open.\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(CommunityPathError, "stale live-provider"):
+                validate_public_community_paths(root)
+
+    def test_live_provider_evidence_run_cannot_disappear_silently(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._copy_contract(root)
+            support = root / "SUPPORT.md"
+            support.write_text(
+                support.read_text(encoding="utf-8").replace(
+                    "https://github.com/Xpounder-com/hormuz/actions/runs/32884601758",
+                    "https://github.com/Xpounder-com/hormuz/actions/runs/1",
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(CommunityPathError, "evidence run"):
+                validate_public_community_paths(root)
+
 
 if __name__ == "__main__":
     unittest.main()

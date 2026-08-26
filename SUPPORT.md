@@ -38,7 +38,7 @@ that every nearby version or platform works.
 | Codex | `@openai/codex` `0.147.0`, installed with Node.js 24 and routed through loopback fake providers in blocking CI |
 | Claude Code | `@anthropic-ai/claude-code` `2.1.233`, installed with Node.js 24 and routed through loopback fake providers in blocking CI |
 | Newer client releases | A non-blocking weekly canary detects drift; a green canary does not silently expand the supported-version contract |
-| Provider credentials | Ordinary tests require none; live OpenAI and Anthropic BYO-provider release evidence remains tracked in [#115](https://github.com/Xpounder-com/hormuz/issues/115) |
+| Provider credentials | Ordinary tests require none. Exact same-revision live Codex/OpenAI and Claude Code/Anthropic BYO-provider evidence is recorded in [#115](https://github.com/Xpounder-com/hormuz/issues/115) and [workflow run 32884601758](https://github.com/Xpounder-com/hormuz/actions/runs/32884601758). It does not establish provider-invoice reconciliation, every client feature, traffic bypassing Hormuz, or enterprise production readiness. |
 | Default persistence | SQLite for one-process local evaluation; it is not a shared or HA store |
 | PostgreSQL | Optional compatibility, migration, RLS, pooling, and recovery proofs exist. The first exact HA reference is CloudNativePG `1.30.0` with three PostgreSQL `16.15` instances in single-host Kind; it is not a managed production database service or certification, production storage/operations, broad HA/DR, or a customer SLA |
 

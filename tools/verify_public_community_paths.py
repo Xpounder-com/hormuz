@@ -44,6 +44,15 @@ PROHIBITED_PLACEHOLDERS = (
 )
 MARKDOWN_LINK = re.compile(r"(?<!!)\[[^\]]+\]\(([^)]+)\)")
 FORM_ID = re.compile(r"^[A-Za-z0-9_-]+$")
+LIVE_PROVIDER_ISSUE = "https://github.com/Xpounder-com/hormuz/issues/115"
+LIVE_PROVIDER_RUN = "https://github.com/Xpounder-com/hormuz/actions/runs/32884601758"
+LIVE_PROVIDER_REVISION = "49e04d2cc9a4bbc00362414145ebbe5fc15e7c35"
+STALE_LIVE_PROVIDER_STATUS = (
+    "live byo-provider release evidence, production",
+    "live openai and anthropic byo-provider release evidence remains tracked",
+    "a live anthropic provider call remains pending",
+    "disclosure, live-provider,\nrepository, signed-image, community, quiet-alpha",
+)
 
 
 class CommunityPathError(ValueError):
@@ -262,6 +271,32 @@ def _validate_support_matrix(root: Path, support: str) -> None:
         raise CommunityPathError("SUPPORT.md OCI platform boundary drifted")
 
 
+def _validate_live_provider_status(root: Path, readme: str, support: str) -> None:
+    verification = _read_text(root / "docs/VERIFICATION.md")
+    combined = "\n".join((readme, support, verification)).lower()
+    for phrase in STALE_LIVE_PROVIDER_STATUS:
+        if phrase in combined:
+            raise CommunityPathError("public docs contain stale live-provider status")
+
+    if LIVE_PROVIDER_ISSUE not in readme or LIVE_PROVIDER_ISSUE not in support:
+        raise CommunityPathError("public overview omits completed live-provider issue")
+    if LIVE_PROVIDER_RUN not in support or LIVE_PROVIDER_RUN not in verification:
+        raise CommunityPathError("public docs omit completed live-provider evidence run")
+    if LIVE_PROVIDER_REVISION not in verification:
+        raise CommunityPathError("verification record omits live-provider source revision")
+    for text in (readme, support):
+        lowered = text.lower()
+        if "provider-invoice reconciliation" not in lowered:
+            raise CommunityPathError("public overview omits live-provider cost nonclaim")
+        if (
+            "every client feature" not in lowered
+            or "traffic bypassing hormuz" not in lowered
+        ):
+            raise CommunityPathError("public overview omits live-provider coverage nonclaim")
+        if "enterprise production readiness" not in lowered:
+            raise CommunityPathError("public overview omits live-provider maturity nonclaim")
+
+
 def validate_public_community_paths(root: Path) -> dict[str, object]:
     root = root.resolve()
     markdown_paths = [root / name for name in REQUIRED_DOCUMENTS]
@@ -311,6 +346,7 @@ def validate_public_community_paths(root: Path) -> dict[str, object]:
         if phrase not in support:
             raise CommunityPathError(f"SUPPORT.md omits boundary phrase: {phrase}")
     _validate_support_matrix(root, support)
+    _validate_live_provider_status(root, markdown["README.md"], support)
 
     manifest = _read_text(root / "MANIFEST.in")
     for name in (*REQUIRED_DOCUMENTS, "tools/verify_public_community_paths.py"):
