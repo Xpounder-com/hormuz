@@ -152,6 +152,10 @@ wait_for_node_state() {
   local node=$1
   local expected=$2
   local attempt actual
+  case "${expected}" in
+    True|False|Unknown) ;;
+    *) fail "node Ready expectation is invalid" ;;
+  esac
   for attempt in $(seq 1 120); do
     actual="$(kubectl get node "${node}" --output=jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || true)"
     if [[ "${actual}" == "${expected}" ]]; then
@@ -915,7 +919,7 @@ mapfile -t negative_replica_nodes < <(kubectl --namespace hormuz-dependencies ge
 [[ "${#negative_replica_nodes[@]}" -eq 2 ]] || fail "negative replica topology invalid"
 negative_replica_node="${negative_replica_nodes[0]}"
 pause_node "${negative_replica_node}"
-wait_for_node_state "${negative_replica_node}" False
+wait_for_node_state "${negative_replica_node}" Unknown
 provider_before_negative="$(provider_request_count)"
 negative_started_ms="$(monotonic_ms)"
 pause_node "${negative_primary_node}"

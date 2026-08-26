@@ -218,6 +218,14 @@ class PostgresHAReferenceTests(unittest.TestCase):
         self.assertIn("--grace-period=0 --force --wait=false", runner)
         self.assertIn("wait_for_container_stopped", runner)
         self.assertIn("docker pause", runner)
+        self.assertIn(
+            'wait_for_node_state "${negative_replica_node}" Unknown',
+            runner,
+        )
+        self.assertNotIn(
+            'wait_for_node_state "${negative_replica_node}" False',
+            runner,
+        )
         self.assertIn("rw_ready_addresses", runner)
         self.assertIn("storage-backpressure", runner)
         self.assertIn("ambiguous-request", runner)
