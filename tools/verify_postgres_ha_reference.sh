@@ -1026,6 +1026,7 @@ value = {
         "postgresql_instances": 3,
         "distinct_postgresql_nodes": 3,
         "gateway_replicas": 2,
+        "failover_delay_seconds": 30,
         "synchronous_method": "any",
         "synchronous_number": 1,
         "data_durability": "required",

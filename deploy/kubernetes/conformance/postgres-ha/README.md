@@ -15,7 +15,9 @@ Linux AMD64 image-manifest digest.
 The disposable topology contains three PostgreSQL instances on three tainted
 database workers and two Hormuz replicas on two different workers. It enables
 synchronous `ANY 1`, required durability, failover quorum, primary Lease
-coordination, and isolation fencing.
+coordination, isolation fencing, and a bounded 30-second failover delay. The
+delay makes the fail-closed admission window observable on every gateway
+replica before the supported promotion proceeds.
 
 The live verifier proves two bounded scenarios:
 

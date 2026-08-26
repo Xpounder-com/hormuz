@@ -7,6 +7,7 @@ metadata:
     io.hormuz.proof-role: postgres-ha-cluster
 spec:
   instances: 3
+  failoverDelay: 30
   imageName: ghcr.io/cloudnative-pg/postgresql:16.15-202608240846-minimal-trixie@sha256:e1ca593856017f1780dbdae8175add3ddd8f8d721348a3b6e8a01df67a9ece8a
   enableSuperuserAccess: true
   superuserSecret:

@@ -57,6 +57,7 @@ def valid_observations() -> dict[str, object]:
             "postgresql_instances": 3,
             "distinct_postgresql_nodes": 3,
             "gateway_replicas": 2,
+            "failover_delay_seconds": 30,
             "synchronous_method": "any",
             "synchronous_number": 1,
             "data_durability": "required",
@@ -202,6 +203,7 @@ class PostgresHAReferenceTests(unittest.TestCase):
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
         reference = (HA_ROOT / "README.md").read_text(encoding="utf-8")
         self.assertIn("instances: 3", cluster)
+        self.assertIn("failoverDelay: 30", cluster)
         self.assertIn("method: any", cluster)
         self.assertIn("number: 1", cluster)
         self.assertIn("dataDurability: required", cluster)
