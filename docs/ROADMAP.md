@@ -194,6 +194,22 @@ reference-rehearsal acceptance criteria, not customer SLAs. The versioned
 [deployment contract](deployment-contract-v1.json) freezes the supporting
 profile, ownership, platform, state-inventory, and nonclaim boundaries.
 
+The first verified #105 reference rehearsal is captured by
+[#146](https://github.com/Xpounder-com/hormuz/pull/146) at head
+`8af1c677f3097de9a05619e890275a7e85a95e8c` in
+[CI run 33004559230](https://github.com/Xpounder-com/hormuz/actions/runs/33004559230).
+Its strict `hormuz-disaster-recovery-reference` artifact has SHA-256
+`e3987ea2bf65e4d1717ff9728183831553daf5ff7919571caa58b245a9d6a27c` and
+records a maximum RPO of 37.386 seconds, an internal RTO of 132,994
+milliseconds, and a complete end-to-end recovery time of 142,028 milliseconds.
+All 13 durable state classes matched, all seven required failure paths denied
+promotion without provider egress, two recovered gateway replicas became
+ready, and the first promoted request produced exactly one provider request
+with zero automatic replay. These are measurements of that exact pinned,
+account-free disposable reference only; they are not a customer SLA,
+production certification, or broad Kubernetes, CNI, PostgreSQL, custody, or
+regional-failure claim.
+
 ## Feature-freeze rule
 
 > A change is current-priority only if it removes deprecated context coupling, stabilizes the policy/evidence contract, fixes a security or correctness defect, or closes a production-readiness gate.
