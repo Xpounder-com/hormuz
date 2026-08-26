@@ -413,6 +413,7 @@ class DisasterRecoveryReferenceTests(unittest.TestCase):
         recovery_kind = (DR_ROOT / "kind-recovery.yaml.tmpl").read_text(
             encoding="utf-8"
         )
+        source_backup = (DR_ROOT / "source-backup.yaml").read_text(encoding="utf-8")
         helm_values = (DR_ROOT / "helm-values.yaml").read_text(encoding="utf-8")
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
             encoding="utf-8"
@@ -424,16 +425,20 @@ class DisasterRecoveryReferenceTests(unittest.TestCase):
         )
         for image in (recovery.HORMUZ_IMAGE, recovery.POSTGRES_IMAGE, recovery.OPENBAO_IMAGE):
             self.assertIn(image, runner)
+        backup_contract = runner + source_backup
         for operation in ("pg_receivewal", "pg_basebackup", "pg_verifybackup"):
-            self.assertIn(operation, runner)
-        self.assertIn(
-            'port-forward "pod/${SOURCE_PRIMARY}" \\\n'
-            '  --address=127.0.0.1 "${SOURCE_PORT}:5432"',
-            runner,
-        )
+            self.assertIn(operation, backup_contract)
         self.assertIn("'{.status.currentPrimary}'", runner)
-        self.assertNotIn("port-forward service/hormuz-postgres-rw", runner)
-        self.assertNotIn('"127.0.0.1:${SOURCE_PORT}:5432"', runner)
+        self.assertNotIn("port-forward", runner)
+        self.assertIn('containerPath: /hormuz-dr-artifacts', runner)
+        self.assertIn('"        readOnly: false\\n"', runner)
+        self.assertIn("source-backup.yaml", runner)
+        self.assertIn("pod/hormuz-dr-wal-receiver", runner)
+        self.assertIn(recovery.POSTGRES_IMAGE, source_backup)
+        self.assertIn("path: /hormuz-dr-artifacts", source_backup)
+        self.assertIn("suspend: true", source_backup)
+        self.assertIn('--patch \'{"spec":{"suspend":false}}\'', runner)
+        self.assertIn("readOnly: true", recovery_kind)
         self.assertIn("pg_create_restore_point('hormuz_dr_partial')", runner)
         self.assertIn("pg_create_restore_point('hormuz_dr_final')", runner)
         self.assertLess(

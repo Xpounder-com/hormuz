@@ -6,6 +6,10 @@ Hormuz Helm chart.
 
 - `state_probe.py` seeds and fingerprints every PostgreSQL-backed recovery
   class through its restricted service or repository role.
+- `source-backup.yaml` runs the pinned PostgreSQL backup and continuous-WAL
+  clients inside the disposable source cluster. Its control plane alone mounts
+  the fresh recovery-input directory read/write; the gateway runtime has no
+  access to that mount or the backup credential.
 - `recovered-postgres.yaml` restores a verified physical backup and continuous
   WAL into an isolated PostgreSQL target on the disposable recovery cluster.
 - `kind-recovery.yaml.tmpl` mounts the operator-owned recovery inputs read-only

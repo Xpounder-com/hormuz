@@ -37,8 +37,7 @@ RECOVERY_INPUTS=""
 KUBECONFIG=""
 ACTIVE_CLUSTER=""
 CLUSTER_CREATED=0
-PORT_FORWARD_PID=""
-WAL_RECEIVER_CONTAINER=""
+SOURCE_PRIMARY=""
 OPENBAO_CONTAINER=""
 NEGATIVE_NETWORK=""
 NEGATIVE_CONTAINERS=()
@@ -144,15 +143,6 @@ wait_for_cnpg_ready() {
   [[ "${count}" == "3" ]] || fail "CloudNativePG source instance count invalid"
 }
 
-free_port() {
-  python3 - <<'PY'
-import socket
-with socket.socket() as sock:
-    sock.bind(("127.0.0.1", 0))
-    print(sock.getsockname()[1])
-PY
-}
-
 remove_disposable_container() {
   local container=$1
   local label
@@ -165,13 +155,6 @@ remove_disposable_container() {
 cleanup() {
   local status=$?
   set +e
-  if [[ -n "${PORT_FORWARD_PID}" ]]; then
-    kill "${PORT_FORWARD_PID}" >/dev/null 2>&1
-    wait "${PORT_FORWARD_PID}" >/dev/null 2>&1
-  fi
-  if [[ -n "${WAL_RECEIVER_CONTAINER}" ]]; then
-    remove_disposable_container "${WAL_RECEIVER_CONTAINER}"
-  fi
   local container
   for container in "${NEGATIVE_CONTAINERS[@]:-}"; do
     [[ -n "${container}" ]] && remove_disposable_container "${container}"
@@ -276,20 +259,10 @@ PY
 }
 
 source_sql() {
-  docker run --rm --platform linux/amd64 --network host \
-    --env-file "${SECRET_ROOT}/postgres-superuser.env" \
-    --entrypoint psql "${POSTGRES_IMAGE}" \
-    --host=127.0.0.1 --port="${SOURCE_PORT}" --username=postgres --dbname=hormuz \
+  [[ -n "${SOURCE_PRIMARY}" ]] || fail "source PostgreSQL primary is unavailable"
+  kubectl --namespace hormuz-dependencies exec pod/hormuz-dr-wal-receiver \
+    --container wal-receiver -- psql --username=postgres --dbname=hormuz \
     --set=ON_ERROR_STOP=on --tuples-only --no-align --command "$1"
-}
-
-wait_for_source_connection() {
-  local attempt
-  for attempt in $(seq 1 60); do
-    if source_sql 'SELECT 1' >/dev/null 2>&1; then return; fi
-    sleep 1
-  done
-  fail "source PostgreSQL port-forward did not become ready"
 }
 
 archive_current_wal() {
@@ -298,7 +271,9 @@ archive_current_wal() {
   [[ "${wal_file}" =~ ^[0-9A-F]{24}$ ]] || fail "source WAL identifier invalid"
   source_sql 'SELECT pg_switch_wal()' >/dev/null
   for attempt in $(seq 1 120); do
-    if [[ -f "${RECOVERY_INPUTS}/wal/${wal_file}" ]]; then
+    if kubectl --namespace hormuz-dependencies exec pod/hormuz-dr-wal-receiver \
+      --container wal-receiver -- test -f "/recovery/wal/${wal_file}" \
+      >/dev/null 2>&1; then
       printf '%s\n' "${wal_file}"
       return
     fi
@@ -773,14 +748,38 @@ for secret_name in \
   write_random_hex_secret "${SECRET_ROOT}/${secret_name}"
 done
 chmod 0600 "${SECRET_ROOT}"/*
-printf 'PGPASSWORD=%s\n' "$(<"${SECRET_ROOT}/postgres-superuser-password")" \
-  >"${SECRET_ROOT}/postgres-superuser.env"
 
 start_openbao
 
 # Build the pre-disaster source on the exact #104 CloudNativePG reference.
 ACTIVE_CLUSTER="${SOURCE_CLUSTER}"
-kind create cluster --name "${SOURCE_CLUSTER}" --config "${HA_ROOT}/kind.yaml" \
+python3 - "${HA_ROOT}/kind.yaml" "${WORK_ROOT}/kind-source.yaml" \
+  "${RECOVERY_INPUTS}" <<'PY'
+import json
+from pathlib import Path
+import sys
+
+source_path, output_path, recovery_path = map(Path, sys.argv[1:])
+source = source_path.read_text(encoding="utf-8")
+lines = source.splitlines(keepends=True)
+marker = "  - role: control-plane\n"
+if lines.count(marker) != 1:
+    raise SystemExit("source_kind_control_plane_invalid")
+index = lines.index(marker)
+if index + 1 >= len(lines) or not lines[index + 1].startswith("    image: kindest/node:"):
+    raise SystemExit("source_kind_image_invalid")
+path = recovery_path.resolve()
+if not path.is_dir() or path.is_symlink():
+    raise SystemExit("source_recovery_inputs_invalid")
+lines[index + 2:index + 2] = [
+    "    extraMounts:\n",
+    f"      - hostPath: {json.dumps(str(path))}\n",
+    "        containerPath: /hormuz-dr-artifacts\n",
+    "        readOnly: false\n",
+]
+output_path.write_text("".join(lines), encoding="utf-8")
+PY
+kind create cluster --name "${SOURCE_CLUSTER}" --config "${WORK_ROOT}/kind-source.yaml" \
   --kubeconfig "${KUBECONFIG}" >/dev/null
 CLUSTER_CREATED=1
 install_cilium
@@ -861,40 +860,24 @@ SOURCE_PRIMARY="$(kubectl --namespace hormuz-dependencies get cluster hormuz-pos
 [[ "${SOURCE_PRIMARY}" =~ ^hormuz-postgres-[0-9]+$ ]] \
   || fail "source PostgreSQL primary identity invalid"
 wait_for_pod hormuz-dependencies "${SOURCE_PRIMARY}" 5m
-SOURCE_PORT="$(free_port)"
-kubectl --namespace hormuz-dependencies port-forward "pod/${SOURCE_PRIMARY}" \
-  --address=127.0.0.1 "${SOURCE_PORT}:5432" \
-  >"${ARTIFACT_ROOT}/port-forward.log" 2>&1 &
-PORT_FORWARD_PID=$!
-wait_for_source_connection
+SOURCE_PRIMARY_IP="$(kubectl --namespace hormuz-dependencies get \
+  "pod/${SOURCE_PRIMARY}" --output=jsonpath='{.status.podIP}')"
+python3 - "${SOURCE_PRIMARY_IP}" <<'PY'
+from ipaddress import ip_address
+import sys
+value = ip_address(sys.argv[1])
+if value.version != 4 or not value.is_private:
+    raise SystemExit("source_primary_ip_invalid")
+PY
 host_uid="$(id -u)"
 host_gid="$(id -g)"
-docker run --rm --platform linux/amd64 --user "${host_uid}:${host_gid}" \
-  --network host --env-file "${SECRET_ROOT}/postgres-superuser.env" \
-  --entrypoint pg_receivewal "${POSTGRES_IMAGE}" \
-  --host=127.0.0.1 --port="${SOURCE_PORT}" --username=postgres \
-  --slot=hormuz_dr_archive --create-slot --if-not-exists >/dev/null
-WAL_RECEIVER_CONTAINER="hormuz-dr-wal-${RANDOM}${RANDOM}"
-docker run --detach --name "${WAL_RECEIVER_CONTAINER}" \
-  --label "${DISPOSABLE_LABEL}=true" --platform linux/amd64 \
-  --user "${host_uid}:${host_gid}" --network host \
-  --env-file "${SECRET_ROOT}/postgres-superuser.env" \
-  --volume "${RECOVERY_INPUTS}/wal:/archive:rw" \
-  --entrypoint pg_receivewal "${POSTGRES_IMAGE}" \
-  --host=127.0.0.1 --port="${SOURCE_PORT}" --username=postgres \
-  --directory=/archive --slot=hormuz_dr_archive --synchronous \
-  --status-interval=1 >/dev/null
-
-docker run --rm --platform linux/amd64 --user "${host_uid}:${host_gid}" \
-  --network host --env-file "${SECRET_ROOT}/postgres-superuser.env" \
-  --volume "${RECOVERY_INPUTS}:/recovery:rw" \
-  --entrypoint pg_basebackup "${POSTGRES_IMAGE}" \
-  --host=127.0.0.1 --port="${SOURCE_PORT}" --username=postgres \
-  --pgdata=/recovery/base --format=plain --wal-method=stream \
-  --checkpoint=fast --progress --manifest-checksums=SHA256 >/dev/null
-docker run --rm --platform linux/amd64 --user "${host_uid}:${host_gid}" \
-  --volume "${RECOVERY_INPUTS}:/recovery:ro" \
-  --entrypoint pg_verifybackup "${POSTGRES_IMAGE}" /recovery/base >/dev/null
+create_immutable_configmap hormuz-dependencies hormuz-dr-source-backup \
+  --from-literal="source-host=${SOURCE_PRIMARY_IP}"
+kubectl apply --filename "${DR_ROOT}/source-backup.yaml" >/dev/null
+wait_for_pod hormuz-dependencies hormuz-dr-wal-receiver 5m
+kubectl --namespace hormuz-dependencies patch job/hormuz-dr-base-backup \
+  --type=merge --patch '{"spec":{"suspend":false}}' >/dev/null
+wait_for_job_complete hormuz-dependencies hormuz-dr-base-backup
 BASE_BACKUP_COMPLETED_AT="$(utc_now)"
 
 source_sql "SELECT pg_create_restore_point('hormuz_dr_partial')" >/dev/null
@@ -921,12 +904,18 @@ FINAL_WAL_FILE="$(archive_current_wal)"
 [[ "${PARTIAL_WAL_FILE}" != "${FINAL_WAL_FILE}" ]] \
   || fail "partial and final recovery points did not span distinct archived WAL"
 
-docker stop --time 15 "${WAL_RECEIVER_CONTAINER}" >/dev/null
-remove_disposable_container "${WAL_RECEIVER_CONTAINER}"
-WAL_RECEIVER_CONTAINER=""
-kill "${PORT_FORWARD_PID}" >/dev/null 2>&1 || true
-wait "${PORT_FORWARD_PID}" >/dev/null 2>&1 || true
-PORT_FORWARD_PID=""
+kubectl --namespace hormuz-dependencies delete pod/hormuz-dr-wal-receiver \
+  --grace-period=15 --wait=true >/dev/null
+kubectl --namespace hormuz-dependencies delete job/hormuz-dr-base-backup \
+  configmap/hormuz-dr-source-backup --wait=true >/dev/null
+docker run --rm --user root --entrypoint bash \
+  --volume "${RECOVERY_INPUTS}:/recovery:rw" "${POSTGRES_IMAGE}" -ceu '
+    chown -R "$1:$2" /recovery/base /recovery/wal
+    chmod -R u+rwX,go-rwx /recovery/base /recovery/wal
+  ' bash "${host_uid}" "${host_gid}" >/dev/null
+docker run --rm --platform linux/amd64 --user "${host_uid}:${host_gid}" \
+  --volume "${RECOVERY_INPUTS}:/recovery:ro" \
+  --entrypoint pg_verifybackup "${POSTGRES_IMAGE}" /recovery/base >/dev/null
 
 CONFIG_MARKER_AT="$(utc_now)"
 SECRET_MARKER_AT="${CONFIG_MARKER_AT}"
