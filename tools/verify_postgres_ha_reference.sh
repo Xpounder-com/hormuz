@@ -17,6 +17,7 @@ POSTGRES_AMD64_DIGEST="sha256:e1ca593856017f1780dbdae8175add3ddd8f8d721348a3b6e8
 CNPG_VERSION="1.30.0"
 CNPG_MANIFEST_SHA256="f8bede43fe4ee0d478c2355b204a36876b2ae4faac60f2a9452280b293da3b88"
 CNPG_OPERATOR_IMAGE="ghcr.io/cloudnative-pg/cloudnative-pg:1.30.0@sha256:091d306935cfdf646debfe78010d59ebfb572150eb6eb922b0203873c0c68841"
+CNPG_INSTANCE_SELECTOR='cnpg.io/cluster=hormuz-postgres,cnpg.io/podRole=instance'
 KIND_VERSION="v0.32.0"
 KIND_SHA256="50030de23cf40a18505f20426f6a8506bedf13c6e509244bd1fa9463721b0f54"
 KUBECTL_VERSION="v1.36.1"
@@ -177,16 +178,19 @@ wait_for_cnpg_ready() {
   kubectl --namespace hormuz-dependencies wait \
     --for=condition=Ready cluster/hormuz-postgres --timeout=10m >/dev/null \
     || fail "CloudNativePG cluster did not become ready"
-  kubectl --namespace hormuz-dependencies wait \
-    --for=condition=Ready pod --selector='cnpg.io/cluster=hormuz-postgres' \
-    --timeout=10m >/dev/null \
-    || fail "CloudNativePG instances did not become ready"
-  local ready
-  ready="$(kubectl --namespace hormuz-dependencies get pod \
-    --selector='cnpg.io/cluster=hormuz-postgres' \
-    --field-selector=status.phase=Running --output=json \
-    | python3 -c 'import json,sys; print(sum(1 for item in json.load(sys.stdin)["items"] if any(c.get("type")=="Ready" and c.get("status")=="True" for c in item.get("status",{}).get("conditions",[]))))')"
-  [[ "${ready}" == "3" ]] || fail "CloudNativePG ready instance count invalid"
+  local attempt
+  for attempt in $(seq 1 600); do
+    if kubectl --namespace hormuz-dependencies get pods \
+      --selector="${CNPG_INSTANCE_SELECTOR}" --output=json 2>/dev/null \
+      | python3 -c 'import json,sys; items=json.load(sys.stdin)["items"]; ready=len(items)==3 and all(item.get("status",{}).get("phase")=="Running" and any(c.get("type")=="Ready" and c.get("status")=="True" for c in item.get("status",{}).get("conditions",[])) for item in items); raise SystemExit(0 if ready else 1)' \
+        2>/dev/null; then
+      return
+    fi
+    sleep 1
+  done
+  kubectl --namespace hormuz-dependencies get pods \
+    --selector="${CNPG_INSTANCE_SELECTOR}" --output=wide >&2 || true
+  fail "CloudNativePG instances did not become ready"
 }
 
 wait_for_failover_quorum_ready() {
@@ -387,7 +391,7 @@ database_replica_snapshots() {
   primary="$(current_primary 2>/dev/null || true)"
   [[ -n "${primary}" ]] || return
   kubectl --namespace hormuz-dependencies get pods \
-    --selector='cnpg.io/cluster=hormuz-postgres' --output=json \
+    --selector="${CNPG_INSTANCE_SELECTOR}" --output=json \
     | python3 -c 'import json,sys; items=json.load(sys.stdin)["items"]; print(json.dumps({"schema_id":"hormuz.postgresql-ha-pod-snapshot","schema_version":1,"pods":len(items),"running":sum(i.get("status",{}).get("phase")=="Running" for i in items),"ready":sum(any(c.get("type")=="Ready" and c.get("status")=="True" for c in i.get("status",{}).get("conditions",[])) for i in items),"terminating":sum(i.get("metadata",{}).get("deletionTimestamp") is not None for i in items),"container_restarts":sum(sum(c.get("restartCount",0) for c in i.get("status",{}).get("containerStatuses",[])) for i in items)},sort_keys=True,separators=(",",":")))' \
     >&2 || true
   while IFS= read -r pod; do
@@ -415,7 +419,7 @@ database_replica_snapshots() {
         "${index}" >&2
     fi
   done < <(kubectl --namespace hormuz-dependencies get pods \
-    --selector='cnpg.io/cluster=hormuz-postgres' \
+    --selector="${CNPG_INSTANCE_SELECTOR}" \
     --output=jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' | sort)
 }
 
@@ -750,7 +754,7 @@ kubectl --namespace hormuz-dependencies patch secret hormuz-postgres-owner \
 kubectl apply --filename "${HA_ROOT}/cluster.yaml" >/dev/null
 wait_for_cnpg_ready
 kubectl --namespace hormuz-dependencies get pod \
-  --selector='cnpg.io/cluster=hormuz-postgres' --output=json \
+  --selector="${CNPG_INSTANCE_SELECTOR}" --output=json \
   >"${ARTIFACT_ROOT}/postgres-topology.json"
 python3 - "${ARTIFACT_ROOT}/postgres-topology.json" "${POSTGRES_IMAGE}" "${POSTGRES_AMD64_DIGEST}" \
   "${worker_nodes[0]}" "${worker_nodes[1]}" "${worker_nodes[2]}" <<'PY'
@@ -1009,13 +1013,13 @@ record_event quorum_fixture_ready
 negative_primary="$(current_primary)"
 negative_primary_node="$(pod_node "${negative_primary}")"
 mapfile -t negative_replica_nodes < <(kubectl --namespace hormuz-dependencies get pods \
-  --selector='cnpg.io/cluster=hormuz-postgres' --output=json \
+  --selector="${CNPG_INSTANCE_SELECTOR}" --output=json \
   | python3 -c 'import json,sys; primary=sys.argv[1]; print("\n".join(sorted(item["spec"]["nodeName"] for item in json.load(sys.stdin)["items"] if item["metadata"]["name"]!=primary)))' \
     "${negative_primary}")
 [[ "${#negative_replica_nodes[@]}" -eq 2 ]] || fail "negative replica topology invalid"
 negative_replica_node="${negative_replica_nodes[0]}"
 negative_surviving_replica="$(kubectl --namespace hormuz-dependencies get pods \
-  --selector='cnpg.io/cluster=hormuz-postgres' --output=json \
+  --selector="${CNPG_INSTANCE_SELECTOR}" --output=json \
   | python3 -c 'import json,sys; primary,paused=sys.argv[1:]; candidates=[item["metadata"]["name"] for item in json.load(sys.stdin)["items"] if item["metadata"]["name"]!=primary and item["spec"]["nodeName"]!=paused]; assert len(candidates)==1; print(candidates[0])' \
     "${negative_primary}" "${negative_replica_node}")"
 pause_node "${negative_replica_node}"
@@ -1051,7 +1055,7 @@ provider_after_negative_denials="$(provider_request_count)"
 [[ "$(current_primary)" == "${negative_primary}" ]] \
   || fail "CloudNativePG promoted without the required failover quorum"
 database_pods_json="$(kubectl --namespace hormuz-dependencies get pod \
-  --selector='cnpg.io/cluster=hormuz-postgres' --output=json)"
+  --selector="${CNPG_INSTANCE_SELECTOR}" --output=json)"
 nodes_json="$(kubectl get nodes --output=json)"
 available_database_pods="$(python3 -c 'import json,sys; pods=json.loads(sys.argv[1])["items"]; nodes=json.loads(sys.argv[2])["items"]; ready_nodes={item["metadata"]["name"] for item in nodes if any(c.get("type")=="Ready" and c.get("status")=="True" for c in item.get("status",{}).get("conditions",[]))}; print(sum(1 for item in pods if item["spec"].get("nodeName") in ready_nodes and any(c.get("type")=="Ready" and c.get("status")=="True" for c in item.get("status",{}).get("conditions",[]))))' \
   "${database_pods_json}" "${nodes_json}")"

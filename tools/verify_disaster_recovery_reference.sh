@@ -20,6 +20,7 @@ OPENBAO_IMAGE="openbao/openbao@sha256:d0424c95859f7b4c1e308abf57c4cd72b9cba835bb
 CNPG_VERSION="1.30.0"
 CNPG_MANIFEST_SHA256="f8bede43fe4ee0d478c2355b204a36876b2ae4faac60f2a9452280b293da3b88"
 CNPG_OPERATOR_IMAGE="ghcr.io/cloudnative-pg/cloudnative-pg:1.30.0@sha256:091d306935cfdf646debfe78010d59ebfb572150eb6eb922b0203873c0c68841"
+CNPG_INSTANCE_SELECTOR='cnpg.io/cluster=hormuz-postgres,cnpg.io/podRole=instance'
 KIND_VERSION="v0.32.0"
 KIND_SHA256="50030de23cf40a18505f20426f6a8506bedf13c6e509244bd1fa9463721b0f54"
 KUBECTL_VERSION="v1.36.1"
@@ -187,15 +188,19 @@ wait_for_cnpg_ready() {
   kubectl --namespace hormuz-dependencies wait \
     --for=condition=Ready cluster/hormuz-postgres --timeout=10m >/dev/null \
     || fail "CloudNativePG source cluster did not become ready"
-  kubectl --namespace hormuz-dependencies wait \
-    --for=condition=Ready pod --selector='cnpg.io/cluster=hormuz-postgres' \
-    --timeout=10m >/dev/null \
-    || fail "CloudNativePG source instances did not become ready"
-  local count
-  count="$(kubectl --namespace hormuz-dependencies get pods \
-    --selector='cnpg.io/cluster=hormuz-postgres' --output=json \
-    | python3 -c 'import json,sys; print(sum(1 for x in json.load(sys.stdin)["items"] if any(c.get("type")=="Ready" and c.get("status")=="True" for c in x.get("status",{}).get("conditions",[]))))')"
-  [[ "${count}" == "3" ]] || fail "CloudNativePG source instance count invalid"
+  local attempt
+  for attempt in $(seq 1 600); do
+    if kubectl --namespace hormuz-dependencies get pods \
+      --selector="${CNPG_INSTANCE_SELECTOR}" --output=json 2>/dev/null \
+      | python3 -c 'import json,sys; items=json.load(sys.stdin)["items"]; ready=len(items)==3 and all(item.get("status",{}).get("phase")=="Running" and any(c.get("type")=="Ready" and c.get("status")=="True" for c in item.get("status",{}).get("conditions",[])) for item in items); raise SystemExit(0 if ready else 1)' \
+        2>/dev/null; then
+      return
+    fi
+    sleep 1
+  done
+  kubectl --namespace hormuz-dependencies get pods \
+    --selector="${CNPG_INSTANCE_SELECTOR}" --output=wide >&2 || true
+  fail "CloudNativePG source instances did not become ready"
 }
 
 remove_disposable_container() {
@@ -901,7 +906,7 @@ kubectl apply --filename "${WORK_ROOT}/source-postgres.yaml" >/dev/null
 wait_for_cnpg_ready
 
 source_topology="$(kubectl --namespace hormuz-dependencies get pods \
-  --selector='cnpg.io/cluster=hormuz-postgres' --output=json)"
+  --selector="${CNPG_INSTANCE_SELECTOR}" --output=json)"
 python3 - "${source_topology}" "${POSTGRES_IMAGE}" <<'PY'
 import json
 import sys

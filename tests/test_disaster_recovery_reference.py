@@ -448,6 +448,19 @@ class DisasterRecoveryReferenceTests(unittest.TestCase):
         self.assertIn("source-backup.yaml", runner)
         self.assertIn("pod/hormuz-dr-wal-receiver", runner)
         self.assertIn("wait_for_source_backup_receiver", runner)
+        self.assertIn(
+            "CNPG_INSTANCE_SELECTOR='cnpg.io/cluster=hormuz-postgres,cnpg.io/podRole=instance'",
+            runner,
+        )
+        self.assertNotIn(
+            "--for=condition=Ready pod --selector='cnpg.io/cluster=hormuz-postgres'",
+            runner,
+        )
+        self.assertNotIn(
+            "--selector='cnpg.io/cluster=hormuz-postgres'",
+            runner,
+        )
+        self.assertIn("ready=len(items)==3", runner)
         self.assertIn("--all-containers --prefix=true", runner)
         self.assertIn("hostssl replication postgres", runner)
         self.assertIn('ip_network("10.244.0.0/16")', runner)

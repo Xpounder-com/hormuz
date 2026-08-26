@@ -276,6 +276,19 @@ class PostgresHAReferenceTests(unittest.TestCase):
         self.assertIn("wait_for_synchronous_durability", runner)
         self.assertIn("sync_state = 'quorum'", runner)
         self.assertIn("wait_for_job_complete", runner)
+        self.assertIn(
+            "CNPG_INSTANCE_SELECTOR='cnpg.io/cluster=hormuz-postgres,cnpg.io/podRole=instance'",
+            runner,
+        )
+        self.assertNotIn(
+            "--for=condition=Ready pod --selector='cnpg.io/cluster=hormuz-postgres'",
+            runner,
+        )
+        self.assertNotIn(
+            "--selector='cnpg.io/cluster=hormuz-postgres'",
+            runner,
+        )
+        self.assertIn("ready=len(items)==3", runner)
         self.assertIn("postgres_ha_stage=%s", runner)
         self.assertIn("timeout 120s kubectl", runner)
         self.assertIn("for attempt in $(seq 1 120)", runner)
