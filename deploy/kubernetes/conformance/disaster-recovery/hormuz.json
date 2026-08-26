@@ -1,0 +1,186 @@
+{
+  "listen": {
+    "host": "0.0.0.0",
+    "port": 8787
+  },
+  "ingress": {
+    "mode": "external_tls_proxy",
+    "trusted_proxy_cidrs": ["127.0.0.1/32", "10.244.0.0/16"],
+    "credential_env": "HORMUZ_INGRESS_CREDENTIAL"
+  },
+  "max_request_bytes": 1048576,
+  "upstream_timeout_seconds": 45,
+  "usage_storage": {
+    "backend": "postgresql",
+    "postgres_dsn_env": "HORMUZ_POSTGRES_DSN",
+    "postgres_migration_dsn_env": "HORMUZ_POSTGRES_MIGRATION_DSN",
+    "postgres_schema": "hormuz",
+    "postgres_runtime_role": "hormuz_runtime",
+    "postgres_pool": {
+      "min_connections": 1,
+      "max_connections": 4,
+      "acquire_timeout_seconds": 5,
+      "max_waiting": 8,
+      "max_lifetime_seconds": 3600,
+      "max_idle_seconds": 300
+    }
+  },
+  "upstreams": {
+    "openai": {
+      "base_url": "http://fake-provider.hormuz-dependencies.svc.cluster.local:8090",
+      "api_key_env": "OPENAI_API_KEY",
+      "allow_response_storage": false,
+      "allow_background": false
+    },
+    "anthropic": {
+      "base_url": "http://fake-provider.hormuz-dependencies.svc.cluster.local:8090",
+      "api_key_env": "ANTHROPIC_API_KEY"
+    }
+  },
+  "authentication": {
+    "oidc": {
+      "issuers": []
+    }
+  },
+  "identities": [
+    {
+      "token_env": "HORMUZ_TOKEN",
+      "actor_id": "ha-proof-alice",
+      "actor_name": "HA Proof Alice",
+      "team_id": "ha-proof-team",
+      "team_name": "HA Proof Team",
+      "organization_id": "kubernetes-proof-organization",
+      "identity_type": "human",
+      "clearance": "internal",
+      "allowed_clients": ["codex"]
+    },
+    {
+      "token_env": "HORMUZ_BOB_TOKEN",
+      "actor_id": "ha-proof-bob",
+      "actor_name": "HA Proof Bob",
+      "team_id": "ha-proof-team",
+      "team_name": "HA Proof Team",
+      "organization_id": "kubernetes-proof-organization",
+      "identity_type": "human",
+      "clearance": "internal",
+      "allowed_clients": ["codex"]
+    }
+  ],
+  "model_routes": {
+    "gpt-ha-proof": {
+      "protocol": "openai",
+      "upstream_model": "gpt-ha-proof",
+      "input_cost_per_million": 1,
+      "output_cost_per_million": 2
+    },
+    "claude-ha-proof": {
+      "protocol": "anthropic",
+      "upstream_model": "claude-ha-proof",
+      "input_cost_per_million": 1,
+      "output_cost_per_million": 2
+    }
+  },
+  "egress_controls": {
+    "secrets": {
+      "mode": "redact",
+      "builtins": true,
+      "custom_secret_envs": []
+    }
+  },
+  "policy_control": {
+    "mode": "postgresql",
+    "postgres_control_dsn_env": "HORMUZ_POLICY_CONTROL_DSN",
+    "postgres_control_role": "hormuz_policy_control",
+    "bootstrap_administrators": [
+      {
+        "organization_id": "kubernetes-proof-organization",
+        "actor_id": "ha-proof-alice"
+      }
+    ]
+  },
+  "key_custody": {
+    "backend": "openbao-transit",
+    "endpoint_url": "https://openbao.hormuz-dependencies.svc.cluster.local:8200",
+    "token_env": "HORMUZ_OPENBAO_TOKEN",
+    "transit_mount": "transit",
+    "key_references": {
+      "provider_credential": "ha-provider-key",
+      "identity_connector_secret": "ha-identity-key",
+      "session_material": "ha-session-key",
+      "approval_fingerprint": "ha-approval-key",
+      "data_encryption": "ha-data-key"
+    }
+  },
+  "custody_control": {
+    "mode": "postgresql",
+    "postgres_control_dsn_env": "HORMUZ_CUSTODY_CONTROL_DSN",
+    "postgres_control_role": "hormuz_custody_control",
+    "authorization_ttl_seconds": 900,
+    "bootstrap_administrators": [
+      {
+        "organization_id": "kubernetes-proof-organization",
+        "actor_id": "ha-proof-alice"
+      },
+      {
+        "organization_id": "kubernetes-proof-organization",
+        "actor_id": "ha-proof-bob"
+      }
+    ]
+  },
+  "custody_retention": {
+    "retention_days": 365,
+    "legal_hold": false
+  },
+  "custody_executor": {
+    "postgres_executor_dsn_env": "HORMUZ_CUSTODY_EXECUTOR_DSN",
+    "postgres_executor_role": "hormuz_custody_executor",
+    "pending_attempt_ttl_seconds": 900
+  },
+  "custody_lifecycle": {
+    "freshness_lease_seconds": 5,
+    "assets": [
+      {
+        "asset_type": "provider_credential",
+        "asset_id": "openai-primary",
+        "generation": 1,
+        "binding": {"protocol": "openai"}
+      },
+      {
+        "asset_type": "provider_credential",
+        "asset_id": "anthropic-primary",
+        "generation": 1,
+        "binding": {"protocol": "anthropic"}
+      },
+      {
+        "asset_type": "key_reference",
+        "asset_id": "provider-credential-current",
+        "generation": 1,
+        "binding": {"purpose": "provider_credential", "key_reference": "ha-provider-key"}
+      },
+      {
+        "asset_type": "key_reference",
+        "asset_id": "identity-connector-secret-current",
+        "generation": 1,
+        "binding": {"purpose": "identity_connector_secret", "key_reference": "ha-identity-key"}
+      },
+      {
+        "asset_type": "key_reference",
+        "asset_id": "session-material-current",
+        "generation": 1,
+        "binding": {"purpose": "session_material", "key_reference": "ha-session-key"}
+      },
+      {
+        "asset_type": "key_reference",
+        "asset_id": "approval-fingerprint-current",
+        "generation": 1,
+        "binding": {"purpose": "approval_fingerprint", "key_reference": "ha-approval-key"}
+      },
+      {
+        "asset_type": "key_reference",
+        "asset_id": "data-encryption-current",
+        "generation": 1,
+        "binding": {"purpose": "data_encryption", "key_reference": "ha-data-key"}
+      }
+    ]
+  }
+}

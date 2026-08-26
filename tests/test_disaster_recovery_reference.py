@@ -8,6 +8,7 @@ import unittest
 from copy import deepcopy
 from pathlib import Path
 
+from hormuz.config import GatewayConfig
 from tools import verify_disaster_recovery_reference as recovery
 
 
@@ -414,6 +415,16 @@ class DisasterRecoveryReferenceTests(unittest.TestCase):
             encoding="utf-8"
         )
         source_backup = (DR_ROOT / "source-backup.yaml").read_text(encoding="utf-8")
+        config_path = DR_ROOT / "hormuz.json"
+        config_document = json.loads(config_path.read_text(encoding="utf-8"))
+        gateway_config = GatewayConfig.load(
+            config_path,
+            environ={
+                "HORMUZ_TOKEN": "disaster-recovery-alice-token",
+                "HORMUZ_BOB_TOKEN": "disaster-recovery-bob-token",
+                "HORMUZ_INGRESS_CREDENTIAL": "disaster-recovery-ingress-credential",
+            },
+        )
         helm_values = (DR_ROOT / "helm-values.yaml").read_text(encoding="utf-8")
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
             encoding="utf-8"
@@ -458,6 +469,17 @@ class DisasterRecoveryReferenceTests(unittest.TestCase):
         self.assertNotIn("fsGroup: 26", recovered_postgres)
         self.assertNotIn("26:26", runner + source_backup + recovered_postgres)
         self.assertIn("chown -R 26:102 /negative/data", runner)
+        self.assertEqual(gateway_config.usage_storage.backend, "postgresql")
+        self.assertEqual(gateway_config.policy_control.mode, "postgresql")
+        self.assertEqual(gateway_config.custody_control.mode, "postgresql")
+        self.assertEqual(
+            config_document["upstreams"]["openai"]["base_url"],
+            "http://fake-provider.hormuz-dependencies.svc.cluster.local:8090",
+        )
+        self.assertEqual(
+            config_document["key_custody"]["endpoint_url"],
+            "https://openbao.hormuz-dependencies.svc.cluster.local:8200",
+        )
         self.assertIn('--patch \'{"spec":{"suspend":false}}\'', runner)
         self.assertIn("readOnly: true", recovery_kind)
         self.assertIn("pg_create_restore_point('hormuz_dr_partial')", runner)
