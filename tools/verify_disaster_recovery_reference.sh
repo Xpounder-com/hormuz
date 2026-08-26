@@ -857,7 +857,33 @@ kubectl --namespace hormuz-dependencies create secret generic hormuz-postgres-ow
   --from-file="password=${SECRET_ROOT}/postgres-owner-password" >/dev/null
 kubectl --namespace hormuz-dependencies patch secret hormuz-postgres-owner \
   --type=merge --patch '{"immutable":true}' >/dev/null
-kubectl apply --filename "${HA_ROOT}/cluster.yaml" >/dev/null
+SOURCE_BACKUP_CIDR="$(kubectl get nodes \
+  --selector='node-role.kubernetes.io/control-plane' \
+  --output=jsonpath='{.items[0].spec.podCIDR}')"
+python3 - "${HA_ROOT}/cluster.yaml" "${WORK_ROOT}/source-postgres.yaml" \
+  "${SOURCE_BACKUP_CIDR}" <<'PY'
+from ipaddress import ip_network
+from pathlib import Path
+import sys
+
+source_path, output_path = map(Path, sys.argv[1:3])
+network = ip_network(sys.argv[3], strict=True)
+allowed = ip_network("10.244.0.0/16")
+if network.version != 4 or network.prefixlen < 24 or not network.subnet_of(allowed):
+    raise SystemExit("source_backup_cidr_invalid")
+source = source_path.read_text(encoding="utf-8")
+needle = "  postgresql:\n    parameters:\n"
+if source.count(needle) != 1:
+    raise SystemExit("source_postgresql_manifest_invalid")
+replacement = (
+    "  postgresql:\n"
+    "    pg_hba:\n"
+    f"      - hostssl replication postgres {network} scram-sha-256\n"
+    "    parameters:\n"
+)
+output_path.write_text(source.replace(needle, replacement), encoding="utf-8")
+PY
+kubectl apply --filename "${WORK_ROOT}/source-postgres.yaml" >/dev/null
 wait_for_cnpg_ready
 
 source_topology="$(kubectl --namespace hormuz-dependencies get pods \

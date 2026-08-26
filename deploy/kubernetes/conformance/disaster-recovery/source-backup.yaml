@@ -61,6 +61,8 @@ spec:
               key: source-host
         - name: PGPORT
           value: "5432"
+        - name: PGSSLMODE
+          value: require
         - name: PGUSER
           value: postgres
         - name: PGPASSWORD
@@ -154,6 +156,8 @@ spec:
                   key: source-host
             - name: PGPORT
               value: "5432"
+            - name: PGSSLMODE
+              value: require
             - name: PGUSER
               value: postgres
             - name: PGPASSWORD

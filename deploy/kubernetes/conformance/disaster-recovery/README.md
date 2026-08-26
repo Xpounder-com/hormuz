@@ -9,7 +9,8 @@ Hormuz Helm chart.
 - `source-backup.yaml` runs the pinned PostgreSQL backup and continuous-WAL
   clients inside the disposable source cluster. Its control plane alone mounts
   the fresh recovery-input directory read/write; the gateway runtime has no
-  access to that mount or the backup credential.
+  access to that mount or the backup credential. A source-only TLS replication
+  rule is restricted to that control-plane node's assigned Pod CIDR.
 - `recovered-postgres.yaml` restores a verified physical backup and continuous
   WAL into an isolated PostgreSQL target on the disposable recovery cluster.
 - `kind-recovery.yaml.tmpl` mounts the operator-owned recovery inputs read-only
