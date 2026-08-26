@@ -856,8 +856,13 @@ kubectl --namespace hormuz-system delete job/hormuz-postgres-ha-bootstrap \
   secret/hormuz-postgres-ha-bootstrap --wait=true >/dev/null
 
 # Stream WAL before the physical backup so every post-backup commit is recoverable.
+SOURCE_PRIMARY="$(kubectl --namespace hormuz-dependencies get cluster hormuz-postgres \
+  --output=jsonpath='{.status.currentPrimary}')"
+[[ "${SOURCE_PRIMARY}" =~ ^hormuz-postgres-[0-9]+$ ]] \
+  || fail "source PostgreSQL primary identity invalid"
+wait_for_pod hormuz-dependencies "${SOURCE_PRIMARY}" 5m
 SOURCE_PORT="$(free_port)"
-kubectl --namespace hormuz-dependencies port-forward service/hormuz-postgres-rw \
+kubectl --namespace hormuz-dependencies port-forward "pod/${SOURCE_PRIMARY}" \
   --address=127.0.0.1 "${SOURCE_PORT}:5432" \
   >"${ARTIFACT_ROOT}/port-forward.log" 2>&1 &
 PORT_FORWARD_PID=$!

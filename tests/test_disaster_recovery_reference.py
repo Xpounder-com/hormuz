@@ -427,10 +427,12 @@ class DisasterRecoveryReferenceTests(unittest.TestCase):
         for operation in ("pg_receivewal", "pg_basebackup", "pg_verifybackup"):
             self.assertIn(operation, runner)
         self.assertIn(
-            'port-forward service/hormuz-postgres-rw \\\n'
+            'port-forward "pod/${SOURCE_PRIMARY}" \\\n'
             '  --address=127.0.0.1 "${SOURCE_PORT}:5432"',
             runner,
         )
+        self.assertIn("'{.status.currentPrimary}'", runner)
+        self.assertNotIn("port-forward service/hormuz-postgres-rw", runner)
         self.assertNotIn('"127.0.0.1:${SOURCE_PORT}:5432"', runner)
         self.assertIn("pg_create_restore_point('hormuz_dr_partial')", runner)
         self.assertIn("pg_create_restore_point('hormuz_dr_final')", runner)
