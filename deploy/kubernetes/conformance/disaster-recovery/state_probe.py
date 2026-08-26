@@ -529,7 +529,7 @@ def _anchor_checkpoint(store: PostgresUsageStore, checkpoint_id: str) -> dict[st
     artifact = serialize_audit_chain_checkpoint(checkpoint)
     store.record_audit_chain_checkpoint(
         checkpoint=checkpoint,
-        artifact_sha256="sha256:" + hashlib.sha256(artifact).hexdigest(),
+        artifact_sha256=hashlib.sha256(artifact).hexdigest(),
         anchor_backend="disposable_protected_reference",
         object_version=checkpoint_id,
         anchored_at=created_at,

@@ -520,6 +520,11 @@ class DisasterRecoveryReferenceTests(unittest.TestCase):
         self.assertIn("ingress-credential", state_probe_secret)
         self.assertIn("HORMUZ_INGRESS_CREDENTIAL", state_pod)
         self.assertIn("key: ingress-credential", state_pod)
+        self.assertIn(
+            "artifact_sha256=hashlib.sha256(artifact).hexdigest()",
+            state_probe_source,
+        )
+        self.assertNotIn('artifact_sha256="sha256:"', state_probe_source)
         self.assertNotIn('X-Vault-Token: ${', runner)
         self.assertNotIn('--env "HORMUZ_POSTGRES_DSN=', runner)
         self.assertIn('--header "@${SECRET_ROOT}/openbao-runtime-header"', runner)
