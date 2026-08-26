@@ -34,6 +34,7 @@ CLUSTER_CREATED=0
 EVENT_SEQUENCE=0
 MAXIMUM_STORAGE_DENIAL_MS=0
 QUORUM_OBSERVATION_CYCLES=0
+FORMER_PRIMARY_MONITOR_PID=""
 PAUSED_NODES=()
 
 fail() {
@@ -55,6 +56,10 @@ cleanup() {
   local status=$?
   set +e
   local node
+  if [[ -n "${FORMER_PRIMARY_MONITOR_PID}" ]]; then
+    kill "${FORMER_PRIMARY_MONITOR_PID}" >/dev/null 2>&1
+    wait "${FORMER_PRIMARY_MONITOR_PID}" >/dev/null 2>&1
+  fi
   for node in "${PAUSED_NODES[@]:-}"; do
     docker unpause "${node}" >/dev/null 2>&1
   done
@@ -258,34 +263,46 @@ wait_for_container_stopped() {
   fail "removed primary container remained running"
 }
 
-wait_for_recreated_pod_ready() {
+monitor_recreated_pod_as_standby() {
   local pod=$1
   local previous_uid=$2
-  local authoritative_primary=$3
-  local attempt current_uid ready pod_ip endpoint_json observed_primary
-  for attempt in $(seq 1 300); do
-    current_uid="$(pod_uid "${pod}" 2>/dev/null || true)"
-    ready="$(kubectl --namespace hormuz-dependencies get pod "${pod}" \
+  local output=$3
+  local attempt current_uid ready pod_ip endpoint_json recovery
+  for attempt in $(seq 1 1200); do
+    current_uid="$(timeout 10s kubectl --namespace hormuz-dependencies get pod "${pod}" \
+      --output=jsonpath='{.metadata.uid}' 2>/dev/null || true)"
+    ready="$(timeout 10s kubectl --namespace hormuz-dependencies get pod "${pod}" \
       --output=jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || true)"
     if [[ -n "${current_uid}" && "${current_uid}" != "${previous_uid}" ]]; then
-      observed_primary="$(current_primary 2>/dev/null || true)"
-      [[ "${observed_primary}" == "${authoritative_primary}" ]] \
-        || fail "authoritative primary changed while the former primary rejoined"
-      pod_ip="$(kubectl --namespace hormuz-dependencies get pod "${pod}" \
+      pod_ip="$(timeout 10s kubectl --namespace hormuz-dependencies get pod "${pod}" \
         --output=jsonpath='{.status.podIP}' 2>/dev/null || true)"
-      endpoint_json="$(kubectl --namespace hormuz-dependencies get endpointslices \
+      endpoint_json="$(timeout 10s kubectl --namespace hormuz-dependencies get endpointslices \
         --selector='kubernetes.io/service-name=hormuz-postgres-rw' --output=json 2>/dev/null || true)"
       if [[ -n "${pod_ip}" && -n "${endpoint_json}" ]] && python3 -c 'import json,sys; value=json.loads(sys.argv[1]); addresses={address for item in value.get("items",[]) for endpoint in item.get("endpoints",[]) if (endpoint.get("conditions") or {}).get("ready") is True for address in endpoint.get("addresses",[])}; raise SystemExit(0 if sys.argv[2] in addresses else 1)' \
         "${endpoint_json}" "${pod_ip}"; then
-        fail "former primary entered the read-write endpoint before standby verification"
+        printf 'former primary entered the read-write endpoint before standby verification\n' >&2
+        return 1
       fi
       if [[ "${ready}" == "True" ]]; then
-        return
+        recovery="$(timeout 15s kubectl --namespace hormuz-dependencies exec "pod/${pod}" \
+          --container postgres -- psql --username postgres --dbname postgres \
+          --tuples-only --no-align --command 'SELECT pg_is_in_recovery()' 2>/dev/null \
+          | tr -d '[:space:]' || true)"
+        if [[ "${recovery}" == "t" ]]; then
+          printf '{"excluded_from_rw_endpoint":true,"replacement_uid_observed":true,"standby_verified":true}\n' \
+            >"${output}"
+          return
+        fi
+        if [[ "${recovery}" == "f" ]]; then
+          printf 'former primary replacement became writable\n' >&2
+          return 1
+        fi
       fi
     fi
-    sleep 1
+    sleep 0.5
   done
-  fail "removed primary Pod did not return as a new ready instance"
+  printf 'removed primary Pod did not return as a verified standby\n' >&2
+  return 1
 }
 
 provider_control() {
@@ -916,6 +933,9 @@ kubectl --namespace hormuz-dependencies delete pod "${old_primary}" \
 record_event primary_loss_injected
 wait_for_container_stopped "${old_primary_node}" "${old_primary_container_id}" "${old_primary}"
 record_event former_primary_container_stopped
+monitor_recreated_pod_as_standby \
+  "${old_primary}" "${old_primary_uid}" "${ARTIFACT_ROOT}/former-primary-fence.json" &
+FORMER_PRIMARY_MONITOR_PID=$!
 provider_control POST /control/block/abort >"${ARTIFACT_ROOT}/provider-abort.json"
 gateway_fail_closed positive
 positive_fail_closed_ms=$(( $(monotonic_ms) - positive_started_ms ))
@@ -973,7 +993,11 @@ provider_after_recovery="$(provider_request_count)"
 record_event no_provider_replay_verified
 provider_control POST /control/block/reset >"${ARTIFACT_ROOT}/provider-reset.json"
 
-wait_for_recreated_pod_ready "${old_primary}" "${old_primary_uid}" "${new_primary}"
+if ! wait "${FORMER_PRIMARY_MONITOR_PID}"; then
+  FORMER_PRIMARY_MONITOR_PID=""
+  fail "former primary replacement was not continuously fenced as a standby"
+fi
+FORMER_PRIMARY_MONITOR_PID=""
 wait_for_cnpg_ready
 former_primary_rejoin_ms=$(( $(monotonic_ms) - positive_started_ms ))
 assert_replica_in_recovery "${old_primary}"

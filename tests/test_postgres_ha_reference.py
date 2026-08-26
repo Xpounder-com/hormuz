@@ -261,6 +261,8 @@ class PostgresHAReferenceTests(unittest.TestCase):
         self.assertIn("storage-backpressure", runner)
         self.assertIn("observe_quorum_refusal_window", runner)
         self.assertIn("assert_replica_in_recovery", runner)
+        self.assertIn("monitor_recreated_pod_as_standby", runner)
+        self.assertIn("FORMER_PRIMARY_MONITOR_PID", runner)
         self.assertIn("QUORUM_OBSERVATION_CYCLES", runner)
         self.assertIn("provider_after_all_recovery", runner)
         self.assertIn("ambiguous-request", runner)
@@ -289,6 +291,10 @@ class PostgresHAReferenceTests(unittest.TestCase):
         self.assertLess(
             runner.index("provider_control POST /control/block/abort"),
             runner.index("gateway_fail_closed positive"),
+        )
+        self.assertLess(
+            runner.rindex("monitor_recreated_pod_as_standby"),
+            runner.index("provider_control POST /control/block/abort"),
         )
         self.assertLess(
             runner.index('wait_for_container_stopped "${old_primary_node}"'),
