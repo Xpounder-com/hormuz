@@ -156,6 +156,8 @@ def _governed_request(
         body=json.dumps(payload, separators=(",", ":")).encode("utf-8"),
         timeout=timeout,
     )
+    if status != expected_status:
+        raise SystemExit(f"unexpected_status:{status}")
     policy = response_headers.get("x-hormuz-policy-decision")
     if expected_policy is not None and policy != expected_policy:
         raise SystemExit("policy_decision_invalid")
@@ -171,8 +173,6 @@ def _governed_request(
         value = json.loads(body)
         if value.get("error", {}).get("code") != "hormuz_storage_unavailable":
             raise SystemExit("storage_denial_contract_invalid")
-    if status != expected_status:
-        raise SystemExit(f"unexpected_status:{status}")
     return {
         "command": "request",
         "status": status,

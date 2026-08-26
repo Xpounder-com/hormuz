@@ -487,6 +487,34 @@ class HelmChartContractTests(unittest.TestCase):
             ],
         )
 
+    def test_governed_probe_classifies_status_before_validating_success_policy(self) -> None:
+        probe = runpy.run_path(
+            str(ROOT / "deploy" / "kubernetes" / "conformance" / "probe.py")
+        )
+        governed_request = probe["_governed_request"]
+        request = mock.Mock(return_value=(502, {}, b""))
+        original_request = governed_request.__globals__["_request"]
+        governed_request.__globals__["_request"] = request
+        try:
+            with self.assertRaisesRegex(SystemExit, "^unexpected_status:502$"):
+                governed_request(
+                    target="http://hormuz.invalid",
+                    headers={"Authorization": "synthetic"},
+                    expected_status=200,
+                    expected_policy="fallback+capped+redacted",
+                )
+
+            request.return_value = (200, {}, b'{"model":"gpt-kubernetes-proof"}')
+            with self.assertRaisesRegex(SystemExit, "^policy_decision_invalid$"):
+                governed_request(
+                    target="http://hormuz.invalid",
+                    headers={"Authorization": "synthetic"},
+                    expected_status=200,
+                    expected_policy="fallback+capped+redacted",
+                )
+        finally:
+            governed_request.__globals__["_request"] = original_request
+
     def test_source_distribution_contract_includes_the_chart_and_live_proof(self) -> None:
         manifest = (ROOT / "MANIFEST.in").read_text(encoding="utf-8")
         self.assertIn("recursive-include deploy/helm", manifest)
