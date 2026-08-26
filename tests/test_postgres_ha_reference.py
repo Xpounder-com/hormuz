@@ -247,6 +247,14 @@ class PostgresHAReferenceTests(unittest.TestCase):
         self.assertIn("timeout 120s kubectl", runner)
         self.assertIn("for attempt in $(seq 1 120)", runner)
         self.assertIn('status.get("method") == "ANY"', runner)
+        self.assertEqual(
+            [
+                line.removeprefix("record_event ")
+                for line in runner.splitlines()
+                if line.startswith("record_event ")
+            ],
+            ha.EVENTS,
+        )
         self.assertIn('"schema_version": status.version', bootstrap)
         self.assertIn('"schema_complete": status.complete', bootstrap)
         self.assertNotIn("len(applied)", bootstrap)
