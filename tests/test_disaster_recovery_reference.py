@@ -484,6 +484,10 @@ class DisasterRecoveryReferenceTests(unittest.TestCase):
         )
         self.assertIn('logs "statefulset/${statefulset}"', runner)
         self.assertIn('--all-containers --prefix=true', runner)
+        self.assertEqual(
+            (runner + recovered_postgres).count("max_worker_processes = 32"),
+            2,
+        )
         self.assertEqual(gateway_config.usage_storage.backend, "postgresql")
         self.assertEqual(gateway_config.policy_control.mode, "postgresql")
         self.assertEqual(gateway_config.custody_control.mode, "postgresql")

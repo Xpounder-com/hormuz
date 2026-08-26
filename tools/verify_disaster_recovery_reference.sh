@@ -576,6 +576,7 @@ prepare_negative_recovery() {
         "listen_addresses = '\''*'\''" \
         "port = 5432" \
         "max_connections = 100" \
+        "max_worker_processes = 32" \
         "shared_buffers = '\''128MB'\''" \
         "ssl = off" \
         "restore_command = '\''cp ${archive}/%f %p'\''" \

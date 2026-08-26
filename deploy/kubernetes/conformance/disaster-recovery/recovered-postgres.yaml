@@ -62,6 +62,7 @@ spec:
               port = 5432
               unix_socket_directories = '/tmp'
               max_connections = 100
+              max_worker_processes = 32
               shared_buffers = '128MB'
               ssl = off
               restore_command = 'cp /recovery/wal/%f %p'

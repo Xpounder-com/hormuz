@@ -88,6 +88,9 @@ recovery resolution, retention changes, and destructive post-incident cleanup.
 5. Restore the pre-disaster physical backup and WAL into a new, isolated
    PostgreSQL target. The runtime credential is never used by `pg_basebackup`,
    `pg_receivewal`, `pg_verifybackup`, recovery configuration, or promotion.
+   Recovery-critical PostgreSQL settings must be at least the values recorded
+   by the source primary; the pinned CloudNativePG reference requires
+   `max_worker_processes = 32`.
 6. Run the Hormuz state probe through restricted PostgreSQL roles. It verifies
    the migration ledger, event-time identity snapshots, usage/security events,
    budgets and uncertain reservations, request-attempt history, policy
