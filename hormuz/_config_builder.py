@@ -30,6 +30,7 @@ from .config import (
     ModelRoute,
     OIDCIssuerConfig,
     Policy,
+    PolicyAnalysisContext,
     PolicyControlConfig,
     PolicyValidationContext,
     PostgresPoolConfig,
@@ -87,6 +88,28 @@ def build_policy_validation_context(
         organization_ids=config.organization_ids,
         identities_by_actor=dict(config.identities_by_actor),
         model_routes=dict(config.model_routes),
+    )
+
+
+def build_policy_analysis_context(
+    config_type: type[GatewayConfig],
+    path: str | Path,
+) -> PolicyAnalysisContext:
+    """Project strict configuration into credential-free local analysis facts."""
+
+    config = _build_gateway_config(
+        config_type,
+        path,
+        environ=None,
+        resolve_credentials=False,
+    )
+    return PolicyAnalysisContext(
+        organization_ids=config.organization_ids,
+        identities_by_actor=dict(config.identities_by_actor),
+        model_routes=dict(config.model_routes),
+        database_path=config.database_path,
+        usage_storage=config.usage_storage,
+        audit_chain=config.audit_chain,
     )
 
 

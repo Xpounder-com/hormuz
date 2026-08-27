@@ -26,7 +26,7 @@ from .audit_chain import (
     parse_audit_chain_checkpoint,
     serialize_audit_chain_checkpoint,
 )
-from .config import ConfigError, GatewayConfig, PolicyValidationContext
+from .config import ConfigError, GatewayConfig, PolicyAnalysisContext, PolicyValidationContext
 from .custody import (
     KEY_PURPOSES,
     CustodyError,
@@ -112,7 +112,7 @@ from .policy_repository import (
 from .policy_runtime import PolicyRuntime
 from .postgres import PostgresConnectionPool, PostgresStorageError, migrate_postgres
 from .server import GatewayServer
-from .store import MonthlyTotals, StorageSchemaError
+from .store import MonthlyTotals, StorageSchemaError, UsageRepository, UsageStore
 from .store_router import create_postgres_runtime_pool, create_usage_store, postgres_migration_dsn
 
 
@@ -734,6 +734,14 @@ def main(argv: list[str] | None = None) -> int:
             if args.policy_control_command == "create":
                 return _policy_create(context, args)
             return _policy_validate(context, args.file)
+        if (
+            args.command == "policy"
+            and args.policy_control_command in {"compare", "preview", "evaluate"}
+            and _policy_analysis_requests_local_documents(args)
+        ):
+            analysis_context = GatewayConfig.load_policy_analysis_context(args.config)
+            if analysis_context.usage_storage.backend == "sqlite":
+                return _policy_analysis(analysis_context, args)
         config = GatewayConfig.load(args.config)
         if args.command == "serve":
             return _serve(config)
@@ -935,7 +943,8 @@ def _run_policy_demo(root: Path, *, retain_artifacts: bool) -> PolicyDemoResult:
     evaluation_path = root / "evaluation.json"
 
     _write_policy_demo_json(config_path, _policy_demo_config())
-    context = GatewayConfig.load_policy_validation_context(config_path)
+    analysis_context = GatewayConfig.load_policy_analysis_context(config_path)
+    context: PolicyValidationContext = analysis_context
     baseline = create_policy_document(
         template_name="standard",
         context=context,
@@ -987,11 +996,7 @@ def _run_policy_demo(root: Path, *, retain_artifacts: bool) -> PolicyDemoResult:
     write_policy_scenario_suite(scenarios_path, suite, force=False)
     suite = load_policy_scenario_suite(scenarios_path)
 
-    config = GatewayConfig.load(
-        config_path,
-        environ={_POLICY_DEMO_IDENTITY_ENV: "local-policy-demo-identity"},
-    )
-    create_usage_store(config)
+    UsageStore(database_path)
     try:
         os.chmod(database_path, 0o600)
     except OSError as error:
@@ -999,7 +1004,7 @@ def _run_policy_demo(root: Path, *, retain_artifacts: bool) -> PolicyDemoResult:
             "policy_demo_storage_unavailable",
             "the disposable SQLite store could not be protected",
         ) from error
-    usage_store = create_usage_store(config, read_only=True)
+    usage_store = _policy_analysis_usage_store(analysis_context)
     if usage_store.monthly_totals(organization_id=_POLICY_DEMO_ORGANIZATION_ID) != MonthlyTotals():
         raise PolicyDemoError(
             "policy_demo_usage_not_zero",
@@ -1007,7 +1012,7 @@ def _run_policy_demo(root: Path, *, retain_artifacts: bool) -> PolicyDemoResult:
         )
 
     evaluation = evaluate_policy_scenario_suite(
-        config=config,
+        config=analysis_context,
         usage_store=usage_store,
         suite=suite,
         baseline=baseline,
@@ -1750,13 +1755,19 @@ def _policy_control(config: GatewayConfig, args: argparse.Namespace) -> int:
     raise ConfigError("unsupported policy control command")
 
 
-def _policy_analysis(config: GatewayConfig, args: argparse.Namespace) -> int:
+def _policy_analysis(
+    config: GatewayConfig | PolicyAnalysisContext,
+    args: argparse.Namespace,
+) -> int:
     """Compare or evaluate pinned policies through an explicit trust mode."""
 
     command = args.policy_control_command
-    offline = _policy_analysis_is_offline(config, args)
+    offline = isinstance(config, PolicyAnalysisContext)
+    if offline and not _policy_analysis_is_offline(config, args):
+        raise PolicyAnalysisError("policy_analysis_managed_mode_required")
     service: PolicyControlService | None = None
     if not offline:
+        assert isinstance(config, GatewayConfig)
         service = PolicyControlService(config)
         # Authenticate and confirm persisted administrator authority before
         # any managed policy lookup or PostgreSQL usage-store construction.
@@ -1785,7 +1796,7 @@ def _policy_analysis(config: GatewayConfig, args: argparse.Namespace) -> int:
             raise PolicyAnalysisError("policy_preview_output_tokens_invalid")
         preview = preview_policy_request(
             config=config,
-            usage_store=create_usage_store(config, read_only=True),
+            usage_store=_policy_analysis_usage_store(config),
             identity=identity,
             baseline=baseline,
             candidate=candidate,
@@ -1808,7 +1819,7 @@ def _policy_analysis(config: GatewayConfig, args: argparse.Namespace) -> int:
             raise PolicyAnalysisError("policy_evaluation_organization_mismatch")
         evaluation = evaluate_policy_scenario_suite(
             config=config,
-            usage_store=create_usage_store(config, read_only=True),
+            usage_store=_policy_analysis_usage_store(config),
             suite=suite,
             baseline=baseline,
             candidate=candidate,
@@ -1823,19 +1834,47 @@ def _policy_analysis(config: GatewayConfig, args: argparse.Namespace) -> int:
     raise PolicyAnalysisError("policy_analysis_command_unsupported")
 
 
-def _policy_analysis_is_offline(config: GatewayConfig, args: argparse.Namespace) -> bool:
+def _policy_analysis_requests_local_documents(args: argparse.Namespace) -> bool:
+    """Return whether both policy inputs were explicitly selected as files."""
+
+    return args.baseline_file is not None and args.candidate_version is None
+
+
+def _policy_analysis_is_offline(
+    config: GatewayConfig | PolicyAnalysisContext,
+    args: argparse.Namespace,
+) -> bool:
     """Return whether every policy and usage dependency is local and bounded."""
 
     return (
-        args.baseline_file is not None
-        and args.candidate_version is None
+        isinstance(config, PolicyAnalysisContext)
+        and _policy_analysis_requests_local_documents(args)
         and config.usage_storage.backend == "sqlite"
+    )
+
+
+def _policy_analysis_usage_store(
+    config: GatewayConfig | PolicyAnalysisContext,
+) -> UsageRepository:
+    """Open current usage without widening an offline context into runtime config."""
+
+    if isinstance(config, GatewayConfig):
+        return create_usage_store(config, read_only=True)
+    if config.usage_storage.backend != "sqlite":
+        raise PolicyAnalysisError("policy_analysis_managed_mode_required")
+    return UsageStore(
+        config.database_path,
+        audit_chain_maximum_anchor_age_seconds=(
+            config.audit_chain.maximum_anchor_age_seconds if config.audit_chain is not None else None
+        ),
+        audit_chain_organization_ids=config.organization_ids,
+        read_only=True,
     )
 
 
 def _policy_baseline_document(
     service: PolicyControlService | None,
-    config: GatewayConfig,
+    config: GatewayConfig | PolicyAnalysisContext,
     args: argparse.Namespace,
 ) -> PolicyDocument:
     if args.baseline_file is not None:
@@ -1855,7 +1894,7 @@ def _policy_baseline_document(
 
 def _policy_candidate_document(
     service: PolicyControlService | None,
-    config: GatewayConfig,
+    config: GatewayConfig | PolicyAnalysisContext,
     args: argparse.Namespace,
 ) -> PolicyDocument:
     if args.candidate_version is not None:

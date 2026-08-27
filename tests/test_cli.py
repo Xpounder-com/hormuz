@@ -609,9 +609,12 @@ class ClientConfigTests(unittest.TestCase):
             with redirect_stdout(io.StringIO()):
                 self.assertEqual(main(["policy", "demo", "--output", str(retained)]), 0)
 
-            environment = {"HORMUZ_POLICY_DEMO_IDENTITY": "local-policy-demo-identity"}
             with (
-                mock.patch.dict(os.environ, environment, clear=True),
+                mock.patch.dict(os.environ, {}, clear=True),
+                mock.patch(
+                    "hormuz.cli.GatewayConfig.load",
+                    side_effect=AssertionError("runtime credentials must not be loaded"),
+                ) as runtime_load,
                 mock.patch("hormuz.cli.PolicyControlService") as service,
             ):
                 comparison_output = io.StringIO()
@@ -676,6 +679,7 @@ class ClientConfigTests(unittest.TestCase):
                     )
 
             service.assert_not_called()
+            runtime_load.assert_not_called()
             self.assertEqual(comparison_result, 1)
             self.assertEqual(preview_result, 0)
             self.assertEqual(evaluation_result, 1)
@@ -703,12 +707,20 @@ class ClientConfigTests(unittest.TestCase):
             self.config,
             usage_storage=replace(self.config.usage_storage, backend="postgresql"),
         )
+        postgres_analysis_context = replace(
+            GatewayConfig.load_policy_analysis_context(ROOT / "config.example.json"),
+            usage_storage=replace(self.config.usage_storage, backend="postgresql"),
+        )
         usage_store = mock.Mock()
         usage_store.monthly_totals.return_value = MonthlyTotals()
         order: list[str] = []
 
         with (
             tempfile.TemporaryDirectory() as temporary,
+            mock.patch(
+                "hormuz.cli.GatewayConfig.load_policy_analysis_context",
+                return_value=postgres_analysis_context,
+            ) as analysis_load,
             mock.patch("hormuz.cli.GatewayConfig.load", return_value=postgres_config),
             mock.patch("hormuz.cli.PolicyControlService") as service_type,
             mock.patch("hormuz.cli.create_usage_store") as create_store,
@@ -750,6 +762,7 @@ class ClientConfigTests(unittest.TestCase):
                     0,
                 )
             self.assertLess(order.index("authorize"), order.index("usage"))
+            analysis_load.assert_called_once()
             service.authorize.assert_called_once_with(
                 organization_id="xpounder",
                 credential_env="HORMUZ_POLICY_ADMIN_TOKEN",
