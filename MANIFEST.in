@@ -13,6 +13,7 @@ include tools/verify_secret_inventory.py
 include tools/verify_public_community_paths.py
 include tools/verify_launch_assets.py
 include tools/verify_quiet_alpha_evidence.py
+include tools/verify_policy_admin_usability_evidence.py
 include tools/verify_deployment_contract.py
 include tools/verify_durable_data_inventory.py
 include tools/oidc_reference_conformance.py
@@ -34,6 +35,8 @@ prune deploy/compose/runtime
 recursive-include deploy/helm *.yaml *.json *.tpl *.txt
 recursive-include deploy/kubernetes *.md *.yaml *.json *.py
 recursive-include docs *.md
+include examples/policy-admin-usability-baseline.json
+include examples/policy-admin-usability-scenarios.json
 recursive-include docs/evidence *.json
 recursive-include tests *.py *.json
 recursive-include hormuz/migrations/postgresql *.sql

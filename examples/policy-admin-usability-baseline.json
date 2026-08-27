@@ -1,0 +1,29 @@
+{
+  "schema_id": "hormuz.policy-document",
+  "schema_version": 1,
+  "organization_id": "xpounder",
+  "policies": {
+    "organization": {
+      "allowed_clients": ["claude-code", "codex"],
+      "allowed_models": [
+        "claude-opus-5",
+        "claude-sonnet-5",
+        "gpt-5.4",
+        "gpt-5.4-mini",
+        "gpt-5.5"
+      ],
+      "max_output_tokens": 16000
+    },
+    "teams": {},
+    "actors": {}
+  },
+  "egress_controls": {
+    "openai": {
+      "allow_response_storage": false,
+      "allow_background": false
+    },
+    "secrets": {
+      "mode": "redact"
+    }
+  }
+}

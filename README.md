@@ -75,6 +75,13 @@ for a separately configured managed deployment, but never executes them. This
 is a policy-UX milestone, not evidence that the enterprise v1 release gate is
 complete.
 
+The separate [independent administrator protocol](docs/POLICY_ADMIN_USABILITY.md)
+holds the v1 usability claim at **0/5** offline and **0/3** PostgreSQL
+participants until qualifying external evidence exists. Its strict aggregate
+checks exact task order, unaided completion, timing, apply/rollback state, and
+blocker retests without retaining policy, request, credential, identity, or
+free-form content. Synthetic and internal runs never count.
+
 Independent testers should follow the
 [public-alpha onboarding guide](docs/QUIET_ALPHA.md). Its strict aggregate uses
 opaque participant IDs and fixed metadata enums; Hormuz adds no product

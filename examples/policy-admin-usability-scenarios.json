@@ -1,0 +1,15 @@
+{
+  "schema_id": "hormuz.policy-scenario-suite",
+  "schema_version": 1,
+  "organization_id": "xpounder",
+  "scenarios": [
+    {
+      "id": "output-cap",
+      "actor_id": "alice",
+      "client": "codex",
+      "protocol": "openai",
+      "requested_model": "gpt-5.4-mini",
+      "requested_output_tokens": 8000
+    }
+  ]
+}

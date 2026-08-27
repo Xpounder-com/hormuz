@@ -306,6 +306,11 @@ and `policy rollback` lines are real managed commands shown for the operator;
 the demo does not execute them. This proves only the policy-administration UX,
 not completion of the enterprise v1 release gate.
 
+The independent v1 gate and its fixed offline/PostgreSQL task cards are defined
+in [POLICY_ADMIN_USABILITY.md](POLICY_ADMIN_USABILITY.md). The gate remains at
+0/5 offline and 0/3 PostgreSQL participants until qualifying external evidence
+exists; the demo and synthetic contract fixture cannot increase either count.
+
 ## Compare and preview a candidate
 
 Compare a local candidate with the active version by default before staging or
