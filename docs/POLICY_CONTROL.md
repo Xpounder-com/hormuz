@@ -90,6 +90,43 @@ schema_id, schema_version, organization_id, policies, egress_controls
 
 `policies` contains organization, team, and actor overlays for allowed clients/models, fallbacks, output caps, and token/budget limits. `egress_controls` contains only the supported OpenAI storage/background flags and secret-detection mode. Prompts, responses, filenames, sources, notes, arbitrary JSON, detector values, and provider credentials are rejected.
 
+Start from a built-in policy instead of authoring the v1 JSON structure by
+hand:
+
+```bash
+hormuz policy templates
+
+hormuz --config /etc/hormuz/hormuz.json policy create \
+  --template standard \
+  --output engineering-standard.json
+```
+
+`standard` uses the configured identity client allowlists and model aliases,
+redacts detected secrets, disables OpenAI response storage/background mode,
+and caps each response at 16,000 output tokens. `strict` uses the same
+configured allowlists with secret denial and a 4,000-token cap. `lockdown`
+uses empty client and model allowlists to deny every request. None of the
+templates invents provider credentials, team or actor scopes, fallback routes,
+or monetary budgets.
+
+Add optional organization-level budget limits at creation time when they are
+part of the intended policy:
+
+```bash
+hormuz --config /etc/hormuz/hormuz.json policy create \
+  --template strict \
+  --monthly-budget-usd 250 \
+  --per-actor-monthly-budget-usd 25 \
+  --output engineering-strict.json
+```
+
+Creation loads only credential-free configuration facts and validates the
+result through the same policy-document parser used by validation and staging.
+With one configured organization, Hormuz selects it automatically. With more
+than one, pass `--organization`. The explicit output is owner-only, existing
+files are preserved unless `--force` is passed, and symbolic-link targets are
+always refused.
+
 Validate a candidate before staging it:
 
 ```bash

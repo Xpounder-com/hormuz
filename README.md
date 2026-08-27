@@ -158,6 +158,25 @@ and retain its strict content-free artifact before issue #105 can close.
 
 ## Policies and usage
 
+List the built-in starting points and create a complete v1 policy document
+without loading runtime, provider, database, or policy-administrator
+credentials:
+
+```bash
+python3 -m hormuz policy templates
+python3 -m hormuz --config hormuz.json policy create \
+  --template standard \
+  --output engineering-standard.json
+```
+
+The built-ins are `standard` (configured clients/models, secret redaction,
+16,000-token output cap), `strict` (configured clients/models, secret denial,
+4,000-token cap), and `lockdown` (deny every client and model). They do not
+invent fallbacks, tenant scopes, credentials, or monetary budgets. Optional
+`--monthly-budget-usd` and `--per-actor-monthly-budget-usd` flags add explicit
+budget limits. One configured organization is selected automatically; a
+multi-organization configuration requires `--organization`.
+
 Validate a managed-policy document locally without loading runtime, provider,
 database, or policy-administrator credentials:
 

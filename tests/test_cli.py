@@ -44,6 +44,7 @@ from hormuz.audit_chain import (
     parse_audit_chain_checkpoint,
     serialize_audit_chain_checkpoint,
 )
+from hormuz.policy_document import PolicyDocument
 from hormuz.store import UsageStore
 
 
@@ -427,6 +428,228 @@ class ClientConfigTests(unittest.TestCase):
         self.assertIn("policy validation failed: policy_document_unavailable", stderr.getvalue())
         self.assertIn("hint: Check that the path exists", stderr.getvalue())
         self.assertNotIn(str(missing), stderr.getvalue())
+
+    def test_policy_templates_is_stable_and_requires_no_configuration(self) -> None:
+        output = io.StringIO()
+        with (
+            mock.patch("hormuz.cli.GatewayConfig.load") as runtime_load,
+            mock.patch("hormuz.cli.GatewayConfig.load_policy_validation_context") as context_load,
+            redirect_stdout(output),
+        ):
+            self.assertEqual(main(["policy", "templates"]), 0)
+
+        runtime_load.assert_not_called()
+        context_load.assert_not_called()
+        self.assertEqual(
+            output.getvalue(),
+            "Available policy templates:\n"
+            "  standard  Balanced daily-use policy using configured clients and models, "
+            "secret redaction, and a 16,000-token output cap.\n"
+            "  strict    Conservative policy using configured clients and models, secret denial, "
+            "and a 4,000-token output cap.\n"
+            "  lockdown  Emergency deny-all policy with empty client and model allowlists and "
+            "secret denial.\n",
+        )
+
+    def test_policy_create_is_offline_private_and_matches_validation(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            output_path = Path(temporary) / "standard.json"
+            output = io.StringIO()
+            with (
+                mock.patch.dict(os.environ, {}, clear=True),
+                mock.patch("hormuz.cli.GatewayConfig.load") as runtime_load,
+                mock.patch("hormuz.cli.PolicyControlService") as service,
+                redirect_stdout(output),
+            ):
+                result = main(
+                    [
+                        "--config",
+                        str(ROOT / "config.example.json"),
+                        "policy",
+                        "create",
+                        "--output",
+                        str(output_path),
+                    ]
+                )
+
+            self.assertEqual(result, 0)
+            runtime_load.assert_not_called()
+            service.assert_not_called()
+            self.assertEqual(os.stat(output_path).st_mode & 0o777, 0o600)
+            context = GatewayConfig.load_policy_validation_context(ROOT / "config.example.json")
+            document = PolicyDocument.from_json_bytes(output_path.read_bytes(), config=context)
+            self.assertEqual(document.organization_id, "xpounder")
+            self.assertEqual(document.organization_policy.allowed_clients, ("claude-code", "codex"))
+            self.assertEqual(
+                document.organization_policy.allowed_models,
+                ("claude-opus-5", "claude-sonnet-5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.5"),
+            )
+            self.assertEqual(document.organization_policy.max_output_tokens, 16_000)
+            self.assertIsNone(document.organization_policy.monthly_budget_usd)
+            self.assertIsNone(document.organization_policy.fallback_models)
+            self.assertEqual(document.secret_mode, "redact")
+            self.assertIn(f"template=standard organization=xpounder version={document.version_id}", output.getvalue())
+
+            validation = io.StringIO()
+            with (
+                mock.patch.dict(os.environ, {}, clear=True),
+                redirect_stdout(validation),
+            ):
+                self.assertEqual(
+                    main(
+                        [
+                            "--config",
+                            str(ROOT / "config.example.json"),
+                            "policy",
+                            "validate",
+                            str(output_path),
+                        ]
+                    ),
+                    0,
+                )
+            self.assertIn(document.version_id, validation.getvalue())
+
+    def test_policy_create_requires_explicit_tenant_for_multitenant_config(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config_value = json.loads((ROOT / "config.example.json").read_text(encoding="utf-8"))
+            second_identity = dict(config_value["identities"][0])
+            second_identity.update(
+                {
+                    "token_env": "SECOND_ORGANIZATION_TOKEN",
+                    "actor_id": "bob",
+                    "actor_name": "Bob Example",
+                    "team_id": "operations",
+                    "team_name": "Operations",
+                    "organization_id": "second-organization",
+                    "allowed_clients": ["claude-code"],
+                }
+            )
+            config_value["identities"].append(second_identity)
+            config_path = root / "multitenant.json"
+            config_path.write_text(json.dumps(config_value), encoding="utf-8")
+            output_path = root / "policy.json"
+
+            stderr = io.StringIO()
+            with mock.patch.dict(os.environ, {}, clear=True), redirect_stderr(stderr):
+                result = main(
+                    [
+                        "--config",
+                        str(config_path),
+                        "policy",
+                        "create",
+                        "--output",
+                        str(output_path),
+                    ]
+                )
+            self.assertEqual(result, 2)
+            self.assertIn("policy creation failed: policy_template_organization_required", stderr.getvalue())
+            self.assertIn("hint: Pass --organization", stderr.getvalue())
+            self.assertNotIn("xpounder", stderr.getvalue())
+            self.assertNotIn("second-organization", stderr.getvalue())
+            self.assertFalse(output_path.exists())
+
+            with mock.patch.dict(os.environ, {}, clear=True), redirect_stdout(io.StringIO()):
+                self.assertEqual(
+                    main(
+                        [
+                            "--config",
+                            str(config_path),
+                            "policy",
+                            "create",
+                            "--organization",
+                            "second-organization",
+                            "--output",
+                            str(output_path),
+                        ]
+                    ),
+                    0,
+                )
+            context = GatewayConfig.load_policy_validation_context(config_path)
+            document = PolicyDocument.from_json_bytes(output_path.read_bytes(), config=context)
+            self.assertEqual(document.organization_id, "second-organization")
+            self.assertEqual(document.organization_policy.allowed_clients, ("claude-code",))
+
+    def test_policy_create_refuses_overwrite_and_symlinks_unless_safe(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            output_path = root / "policy.json"
+            base_args = [
+                "--config",
+                str(ROOT / "config.example.json"),
+                "policy",
+                "create",
+                "--output",
+                str(output_path),
+            ]
+            with mock.patch.dict(os.environ, {}, clear=True), redirect_stdout(io.StringIO()):
+                self.assertEqual(main(base_args), 0)
+            original = output_path.read_bytes()
+
+            stderr = io.StringIO()
+            with mock.patch.dict(os.environ, {}, clear=True), redirect_stderr(stderr):
+                self.assertEqual(main([*base_args, "--template", "strict"]), 2)
+            self.assertIn("policy creation failed: policy_output_exists", stderr.getvalue())
+            self.assertNotIn(str(output_path), stderr.getvalue())
+            self.assertEqual(output_path.read_bytes(), original)
+
+            with mock.patch.dict(os.environ, {}, clear=True), redirect_stdout(io.StringIO()):
+                self.assertEqual(main([*base_args, "--template", "strict", "--force"]), 0)
+            self.assertNotEqual(output_path.read_bytes(), original)
+
+            symlink_target = root / "must-not-change.json"
+            symlink_target.write_text("preserve me", encoding="utf-8")
+            symlink_path = root / "policy-link.json"
+            symlink_path.symlink_to(symlink_target)
+            symlink_args = [
+                "--config",
+                str(ROOT / "config.example.json"),
+                "policy",
+                "create",
+                "--output",
+                str(symlink_path),
+                "--force",
+            ]
+            stderr = io.StringIO()
+            with mock.patch.dict(os.environ, {}, clear=True), redirect_stderr(stderr):
+                self.assertEqual(main(symlink_args), 2)
+            self.assertIn("policy creation failed: policy_output_symlink_refused", stderr.getvalue())
+            self.assertNotIn(str(symlink_path), stderr.getvalue())
+            self.assertEqual(symlink_target.read_text(encoding="utf-8"), "preserve me")
+
+    def test_policy_create_failures_do_not_repeat_submitted_values(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            output_path = Path(temporary) / "policy.json"
+            base_args = [
+                "--config",
+                str(ROOT / "config.example.json"),
+                "policy",
+                "create",
+                "--output",
+                str(output_path),
+            ]
+
+            stderr = io.StringIO()
+            with mock.patch.dict(os.environ, {}, clear=True), redirect_stderr(stderr):
+                self.assertEqual(main([*base_args, "--template", "private-template-name"]), 2)
+            self.assertIn("policy creation failed: policy_template_unknown", stderr.getvalue())
+            self.assertNotIn("private-template-name", stderr.getvalue())
+            self.assertNotIn(str(output_path), stderr.getvalue())
+
+            stderr = io.StringIO()
+            with mock.patch.dict(os.environ, {}, clear=True), redirect_stderr(stderr):
+                self.assertEqual(main([*base_args, "--organization", "private-tenant-name"]), 2)
+            self.assertIn("policy creation failed: policy_template_organization_unknown", stderr.getvalue())
+            self.assertNotIn("private-tenant-name", stderr.getvalue())
+            self.assertNotIn(str(output_path), stderr.getvalue())
+
+            stderr = io.StringIO()
+            with mock.patch.dict(os.environ, {}, clear=True), redirect_stderr(stderr):
+                self.assertEqual(main([*base_args, "--monthly-budget-usd", "nan"]), 2)
+            self.assertIn("policy creation failed: policy_document_invalid", stderr.getvalue())
+            self.assertNotIn("nan", stderr.getvalue().lower())
+            self.assertNotIn(str(output_path), stderr.getvalue())
+            self.assertFalse(output_path.exists())
 
     def test_usage_report_budget_matches_policy_scope(self) -> None:
         self.assertEqual(
