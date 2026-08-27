@@ -249,13 +249,38 @@ def build_parser() -> argparse.ArgumentParser:
     _policy_control_auth_arguments(stage)
     stage.add_argument("--file", required=True, help="Policy-document JSON path")
 
+    apply_policy = policy_control_subparsers.add_parser(
+        "apply",
+        help="Validate, stage, and atomically activate a policy document",
+    )
+    _policy_control_auth_arguments(apply_policy)
+    apply_policy.add_argument("file", help="Policy-document JSON path")
+    apply_policy.add_argument(
+        "--if-active",
+        help="Proceed only if this immutable sha256 policy version is active",
+    )
+
     activate = policy_control_subparsers.add_parser("activate", help="Atomically activate a staged policy version")
     _policy_control_auth_arguments(activate)
     activate.add_argument("--version", required=True, help="Immutable sha256 policy version")
+    activate.add_argument(
+        "--if-active",
+        help="Proceed only if this immutable sha256 policy version is active",
+    )
 
-    rollback = policy_control_subparsers.add_parser("rollback", help="Reactivate a previously active policy version")
+    rollback = policy_control_subparsers.add_parser(
+        "rollback",
+        help="Undo the latest activation generation, or reactivate a selected prior version",
+    )
     _policy_control_auth_arguments(rollback)
-    rollback.add_argument("--version", required=True, help="Previously active sha256 policy version")
+    rollback.add_argument(
+        "--version",
+        help="Previously active sha256 policy version (default: prior activation generation)",
+    )
+    rollback.add_argument(
+        "--if-active",
+        help="Proceed only if this immutable sha256 policy version is active",
+    )
 
     policy_status = policy_control_subparsers.add_parser("status", help="Show tenant policy-control metadata")
     _policy_control_auth_arguments(policy_status)
@@ -1107,11 +1132,21 @@ def _policy_control(config: GatewayConfig, args: argparse.Namespace) -> int:
         )
         _print_policy_version("policy staged", version)
         return 0
+    if command == "apply":
+        activation = service.apply(
+            organization_id=args.organization,
+            credential_env=args.credential_env,
+            policy_path=args.file,
+            if_active_version_id=args.if_active,
+        )
+        _print_policy_activation("policy applied", activation)
+        return 0
     if command == "activate":
         activation = service.activate(
             organization_id=args.organization,
             credential_env=args.credential_env,
             version_id=args.version,
+            if_active_version_id=args.if_active,
         )
         _print_policy_activation("policy activated", activation)
         return 0
@@ -1120,6 +1155,7 @@ def _policy_control(config: GatewayConfig, args: argparse.Namespace) -> int:
             organization_id=args.organization,
             credential_env=args.credential_env,
             version_id=args.version,
+            if_active_version_id=args.if_active,
         )
         _print_policy_activation("policy rolled back", activation)
         return 0

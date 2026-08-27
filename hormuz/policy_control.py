@@ -110,17 +110,41 @@ class PolicyControlService:
             document=document,
         )
 
+    def apply(
+        self,
+        *,
+        organization_id: str,
+        credential_env: str,
+        policy_path: str | Path,
+        if_active_version_id: str | None = None,
+    ) -> PolicyActivation:
+        """Validate locally, then atomically stage and activate the document."""
+
+        self._require_configured_organization(organization_id)
+        caller = self._authenticated_administrator(organization_id=organization_id, credential_env=credential_env)
+        # File access, parsing, validation, and canonicalization deliberately
+        # happen before the repository acquires the tenant transaction lock.
+        document = load_policy_document(self._config, policy_path)
+        return self._repository.apply(
+            organization_id=organization_id,
+            caller=caller,
+            document=document,
+            expected_active_version_id=_optional_version_id(if_active_version_id),
+        )
+
     def activate(
         self,
         *,
         organization_id: str,
         credential_env: str,
         version_id: str,
+        if_active_version_id: str | None = None,
     ) -> PolicyActivation:
         return self._repository.activate(
             organization_id=organization_id,
             caller=self._authenticated_administrator(organization_id=organization_id, credential_env=credential_env),
             version_id=_version_id(version_id),
+            expected_active_version_id=_optional_version_id(if_active_version_id),
         )
 
     def rollback(
@@ -128,12 +152,14 @@ class PolicyControlService:
         *,
         organization_id: str,
         credential_env: str,
-        version_id: str,
+        version_id: str | None = None,
+        if_active_version_id: str | None = None,
     ) -> PolicyActivation:
         return self._repository.rollback(
             organization_id=organization_id,
             caller=self._authenticated_administrator(organization_id=organization_id, credential_env=credential_env),
-            version_id=_version_id(version_id),
+            version_id=_optional_version_id(version_id),
+            expected_active_version_id=_optional_version_id(if_active_version_id),
         )
 
     def grant_oidc_administrator(
@@ -348,3 +374,7 @@ def _version_id(value: str) -> str:
     if any(character not in "0123456789abcdef" for character in digest):
         raise PolicyControlError("policy_version_invalid")
     return value
+
+
+def _optional_version_id(value: str | None) -> str | None:
+    return _version_id(value) if value is not None else None
