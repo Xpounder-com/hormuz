@@ -377,6 +377,27 @@ class PostgresPolicyControlTests(PostgresTestCase):
                 json.dumps(self._policy_document(actor_blocked=True)),
                 encoding="utf-8",
             )
+            scenarios_path = Path(temporary) / "scenarios.json"
+            scenarios_path.write_text(
+                json.dumps(
+                    {
+                        "schema_id": "hormuz.policy-scenario-suite",
+                        "schema_version": 1,
+                        "organization_id": "xpounder",
+                        "scenarios": [
+                            {
+                                "id": "codex-default",
+                                "actor_id": "alice",
+                                "client": "codex",
+                                "protocol": "openai",
+                                "requested_model": "gpt-5.4-mini",
+                                "requested_output_tokens": 1000,
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
             with mock.patch.dict(os.environ, environment, clear=True):
                 bootstrap_output = io.StringIO()
                 with redirect_stdout(bootstrap_output):
@@ -512,6 +533,36 @@ class PostgresPolicyControlTests(PostgresTestCase):
                 self.assertTrue(preview["baseline"]["decision"]["allowed"])
                 self.assertFalse(preview["candidate"]["decision"]["allowed"])
                 self.assertEqual(preview["usage_basis"], "current")
+                self.assertEqual(self._schema_v4_snapshot(self.schema), usage_before)
+
+                evaluation_output = io.StringIO()
+                with redirect_stdout(evaluation_output):
+                    self.assertEqual(
+                        main(
+                            [
+                                "--config",
+                                str(config.source_path),
+                                "policy",
+                                "evaluate",
+                                str(candidate_path),
+                                "--organization",
+                                "xpounder",
+                                "--credential-env",
+                                "HORMUZ_POLICY_ADMIN_TOKEN",
+                                "--scenarios",
+                                str(scenarios_path),
+                                "--json",
+                            ]
+                        ),
+                        1,
+                    )
+                evaluation = json.loads(evaluation_output.getvalue())
+                validate_contract(evaluation)
+                self.assertEqual(evaluation["baseline"]["version_id"], version_id)
+                self.assertEqual(evaluation["summary"]["changed_count"], 1)
+                self.assertTrue(evaluation["scenarios"][0]["baseline"]["decision"]["allowed"])
+                self.assertFalse(evaluation["scenarios"][0]["candidate"]["decision"]["allowed"])
+                self.assertEqual(evaluation["usage_basis"], "current")
                 self.assertEqual(self._schema_v4_snapshot(self.schema), usage_before)
                 status_output = io.StringIO()
                 with redirect_stdout(status_output):

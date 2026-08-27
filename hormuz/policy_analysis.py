@@ -12,6 +12,7 @@ from typing import cast
 from .config import GatewayConfig, Identity
 from .policy import PolicyDecision, PolicyEngine
 from .policy_document import PolicyDocument
+from .policy_scenarios import PolicyScenario, PolicyScenarioSuite
 from .store import MonthlyTotals, UsageRepository
 
 
@@ -79,6 +80,47 @@ class PolicyPreview:
     baseline_decision: PolicyDecision
     candidate: PolicyVersionIdentity
     candidate_decision: PolicyDecision
+
+
+@dataclass(frozen=True)
+class PolicyScenarioResult:
+    scenario: PolicyScenario
+    baseline_decision: PolicyDecision
+    candidate_decision: PolicyDecision
+
+    @property
+    def changed(self) -> bool:
+        return _policy_decision_behavior(self.baseline_decision) != _policy_decision_behavior(
+            self.candidate_decision
+        )
+
+
+@dataclass(frozen=True)
+class PolicyEvaluation:
+    organization_id: str
+    evaluated_at: datetime
+    usage_period: UsagePeriod
+    usage_basis: str
+    suite: PolicyScenarioSuite
+    baseline: PolicyVersionIdentity
+    candidate: PolicyVersionIdentity
+    scenarios: tuple[PolicyScenarioResult, ...]
+
+    @property
+    def changed_count(self) -> int:
+        return sum(result.changed for result in self.scenarios)
+
+    @property
+    def identical(self) -> bool:
+        return self.changed_count == 0
+
+    @property
+    def baseline_allowed_count(self) -> int:
+        return sum(result.baseline_decision.allowed for result in self.scenarios)
+
+    @property
+    def candidate_allowed_count(self) -> int:
+        return sum(result.candidate_decision.allowed for result in self.scenarios)
 
 
 def compare_policy_documents(
@@ -180,6 +222,87 @@ def preview_policy_request(
         baseline_decision=baseline_decision,
         candidate=PolicyVersionIdentity.from_document(candidate),
         candidate_decision=candidate_decision,
+    )
+
+
+def evaluate_policy_scenario_suite(
+    *,
+    config: GatewayConfig,
+    usage_store: UsageRepository,
+    suite: PolicyScenarioSuite,
+    baseline: PolicyDocument,
+    candidate: PolicyDocument,
+    evaluated_at: datetime | None = None,
+) -> PolicyEvaluation:
+    """Evaluate two pinned documents across one explicit bounded scenario set."""
+
+    if (
+        baseline.organization_id != candidate.organization_id
+        or baseline.organization_id != suite.organization_id
+    ):
+        raise PolicyAnalysisError("policy_evaluation_organization_mismatch")
+    identities: dict[str, Identity] = {}
+    for scenario in suite.scenarios:
+        identity = config.identities_by_actor.get(scenario.actor_id)
+        if identity is None:
+            raise PolicyAnalysisError("policy_evaluation_actor_not_found")
+        if identity.organization_id != suite.organization_id:
+            raise PolicyAnalysisError("policy_evaluation_actor_organization_mismatch")
+        identities[scenario.actor_id] = identity
+
+    current = evaluated_at or datetime.now(timezone.utc)
+    if current.tzinfo is None:
+        raise PolicyAnalysisError("policy_evaluation_time_invalid")
+    current = current.astimezone(timezone.utc)
+    usage_period = _utc_month_period(current)
+    usage_by_actor = {
+        actor_id: _CurrentUsageSnapshot.capture(
+            usage_store,
+            identity=identities[actor_id],
+            usage_period=usage_period,
+        )
+        for actor_id in sorted(identities)
+    }
+
+    results: list[PolicyScenarioResult] = []
+    for scenario in suite.scenarios:
+        identity = identities[scenario.actor_id]
+        engine = PolicyEngine(
+            config,
+            cast(UsageRepository, usage_by_actor[scenario.actor_id]),
+        )
+        baseline_decision = engine.evaluate(
+            identity=identity,
+            client=scenario.client,
+            protocol=scenario.protocol,
+            requested_model=scenario.requested_model,
+            requested_output_tokens=scenario.requested_output_tokens,
+            snapshot=baseline.snapshot_for(identity),
+        )
+        candidate_decision = engine.evaluate(
+            identity=identity,
+            client=scenario.client,
+            protocol=scenario.protocol,
+            requested_model=scenario.requested_model,
+            requested_output_tokens=scenario.requested_output_tokens,
+            snapshot=candidate.snapshot_for(identity),
+        )
+        results.append(
+            PolicyScenarioResult(
+                scenario=scenario,
+                baseline_decision=baseline_decision,
+                candidate_decision=candidate_decision,
+            )
+        )
+    return PolicyEvaluation(
+        organization_id=suite.organization_id,
+        evaluated_at=current,
+        usage_period=usage_period,
+        usage_basis="current",
+        suite=suite,
+        baseline=PolicyVersionIdentity.from_document(baseline),
+        candidate=PolicyVersionIdentity.from_document(candidate),
+        scenarios=tuple(results),
     )
 
 
@@ -326,6 +449,18 @@ def _render_policy_path(path: tuple[str, ...]) -> str:
         else:
             result += f"[{json.dumps(segment, ensure_ascii=True)}]"
     return result
+
+
+def _policy_decision_behavior(decision: PolicyDecision) -> tuple[object, ...]:
+    return (
+        decision.allowed,
+        decision.action,
+        decision.reason,
+        decision.requested_model,
+        decision.resolved_alias,
+        decision.route.upstream_model if decision.route is not None else None,
+        decision.max_output_tokens,
+    )
 
 
 def _utc_month_period(value: datetime) -> UsagePeriod:

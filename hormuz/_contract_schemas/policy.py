@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import math
 from collections.abc import Mapping
 from datetime import datetime, timedelta, timezone
@@ -27,11 +29,16 @@ from .constants import (
     POLICY_DECISION_SCHEMA_ID,
     POLICY_DOCUMENT_SCHEMA_ID,
     POLICY_DOCUMENT_SCHEMA_VERSION,
+    POLICY_EVALUATION_SCHEMA_ID,
+    POLICY_EVALUATION_SCHEMA_VERSION,
     POLICY_HISTORY_SCHEMA_ID,
     POLICY_HISTORY_SCHEMA_VERSION,
     POLICY_HISTORY_MAX_LIMIT,
     POLICY_PREVIEW_SCHEMA_ID,
     POLICY_PREVIEW_SCHEMA_VERSION,
+    POLICY_SCENARIO_MAX_COUNT,
+    POLICY_SCENARIO_SUITE_SCHEMA_ID,
+    POLICY_SCENARIO_SUITE_SCHEMA_VERSION,
     _POLICY_COMPARISON_CHANGE_TYPES,
     _POLICY_LIFECYCLE_EVENT_TYPES,
     _POLICY_ACTIONS,
@@ -90,6 +97,30 @@ def policy_schema_entries() -> list[dict[str, object]]:
                 "request",
                 "baseline",
                 "candidate",
+            ],
+        ),
+        _manifest_schema(
+            POLICY_SCENARIO_SUITE_SCHEMA_ID,
+            POLICY_SCENARIO_SUITE_SCHEMA_VERSION,
+            "cli-output",
+            ["schema_id", "schema_version", "organization_id", "scenarios"],
+        ),
+        _manifest_schema(
+            POLICY_EVALUATION_SCHEMA_ID,
+            POLICY_EVALUATION_SCHEMA_VERSION,
+            "cli-output",
+            [
+                "schema_id",
+                "schema_version",
+                "organization_id",
+                "evaluated_at",
+                "usage_period",
+                "usage_basis",
+                "suite",
+                "baseline",
+                "candidate",
+                "summary",
+                "scenarios",
             ],
         ),
         _manifest_schema(
@@ -393,6 +424,282 @@ def _validate_policy_preview(value: Mapping[str, Any]) -> None:
             raise ContractValidationError(f"{name}.decision.policy_version does not match version_id")
         if _value_string(decision, "requested_model", path=f"{name}.decision") != requested_model:
             raise ContractValidationError(f"{name}.decision.requested_model does not match request")
+
+
+def _validate_policy_scenario_suite(value: Mapping[str, Any]) -> None:
+    """Validate one portable, bounded set of explicit policy requests."""
+
+    _exact_keys(
+        value,
+        {"schema_id", "schema_version", "organization_id", "scenarios"},
+    )
+    _bounded_policy_string(value, "organization_id", path="value")
+    scenarios = value.get("scenarios")
+    if not isinstance(scenarios, list):
+        raise ContractValidationError("scenarios must be an array")
+    if not 1 <= len(scenarios) <= POLICY_SCENARIO_MAX_COUNT:
+        raise ContractValidationError(
+            f"scenarios must contain between 1 and {POLICY_SCENARIO_MAX_COUNT} entries"
+        )
+    scenario_ids: list[str] = []
+    for index, scenario in enumerate(scenarios):
+        item_path = f"scenarios[{index}]"
+        if not isinstance(scenario, Mapping):
+            raise ContractValidationError(f"{item_path} must be an object")
+        _exact_keys(
+            scenario,
+            {
+                "id",
+                "actor_id",
+                "client",
+                "protocol",
+                "requested_model",
+                "requested_output_tokens",
+            },
+            path=item_path,
+        )
+        scenario_ids.append(_policy_scenario_id(scenario, "id", path=item_path))
+        _validate_policy_request_dimensions(scenario, path=item_path)
+    if len(scenario_ids) != len(set(scenario_ids)):
+        raise ContractValidationError("scenarios must use unique IDs")
+
+
+def _validate_policy_evaluation(value: Mapping[str, Any]) -> None:
+    """Validate one bounded current-usage comparison across saved scenarios."""
+
+    _exact_keys(
+        value,
+        {
+            "schema_id",
+            "schema_version",
+            "organization_id",
+            "evaluated_at",
+            "usage_period",
+            "usage_basis",
+            "suite",
+            "baseline",
+            "candidate",
+            "summary",
+            "scenarios",
+        },
+    )
+    _bounded_policy_string(value, "organization_id", path="value")
+    evaluated_at = _policy_timestamp(_value_string(value, "evaluated_at"), "evaluated_at")
+    if evaluated_at.utcoffset() != timedelta(0):
+        raise ContractValidationError("evaluated_at must use UTC")
+    if _value_string(value, "usage_basis") != "current":
+        raise ContractValidationError("usage_basis is unsupported")
+    usage_period = _value_mapping(value, "usage_period")
+    _exact_keys(usage_period, {"starts_at", "ends_before"}, path="usage_period")
+    starts_at = _policy_timestamp(
+        _value_string(usage_period, "starts_at", path="usage_period"),
+        "usage_period.starts_at",
+    )
+    ends_before = _policy_timestamp(
+        _value_string(usage_period, "ends_before", path="usage_period"),
+        "usage_period.ends_before",
+    )
+    if starts_at.utcoffset() != timedelta(0) or ends_before.utcoffset() != timedelta(0):
+        raise ContractValidationError("usage_period must use UTC")
+    expected_start = evaluated_at.astimezone(timezone.utc).replace(
+        day=1,
+        hour=0,
+        minute=0,
+        second=0,
+        microsecond=0,
+    )
+    expected_end = (
+        expected_start.replace(year=expected_start.year + 1, month=1)
+        if expected_start.month == 12
+        else expected_start.replace(month=expected_start.month + 1)
+    )
+    if starts_at != expected_start or ends_before != expected_end:
+        raise ContractValidationError("usage_period must be the evaluated UTC month")
+
+    suite = _value_mapping(value, "suite")
+    _exact_keys(suite, {"suite_id", "content_sha256", "scenario_count"}, path="suite")
+    suite_id = _value_string(suite, "suite_id", path="suite")
+    suite_digest = _value_string(suite, "content_sha256", path="suite")
+    _policy_version_identifier(suite_id, "suite.suite_id")
+    _sha256_digest(suite_digest, "suite.content_sha256")
+    if suite_id != f"sha256:{suite_digest}":
+        raise ContractValidationError("suite.suite_id does not match content_sha256")
+    suite_count = _value_integer(suite, "scenario_count", minimum=1, path="suite")
+    if suite_count > POLICY_SCENARIO_MAX_COUNT:
+        raise ContractValidationError("suite.scenario_count exceeds the supported maximum")
+
+    baseline = _value_mapping(value, "baseline")
+    candidate = _value_mapping(value, "candidate")
+    _exact_keys(baseline, {"version_id", "content_sha256"}, path="baseline")
+    _exact_keys(candidate, {"version_id", "content_sha256"}, path="candidate")
+    baseline_version = _validate_policy_version_identity(baseline, path="baseline")
+    candidate_version = _validate_policy_version_identity(candidate, path="candidate")
+
+    scenarios = value.get("scenarios")
+    if not isinstance(scenarios, list):
+        raise ContractValidationError("scenarios must be an array")
+    if len(scenarios) != suite_count:
+        raise ContractValidationError("scenarios must match suite.scenario_count")
+    scenario_ids: list[str] = []
+    suite_scenarios: list[dict[str, object]] = []
+    changed_count = 0
+    baseline_allowed_count = 0
+    candidate_allowed_count = 0
+    for index, scenario in enumerate(scenarios):
+        item_path = f"scenarios[{index}]"
+        if not isinstance(scenario, Mapping):
+            raise ContractValidationError(f"{item_path} must be an object")
+        _exact_keys(
+            scenario,
+            {"scenario_id", "request", "changed", "baseline", "candidate"},
+            path=item_path,
+        )
+        scenario_ids.append(_policy_scenario_id(scenario, "scenario_id", path=item_path))
+        request = _value_mapping(scenario, "request", path=item_path)
+        _exact_keys(
+            request,
+            {"actor_id", "client", "protocol", "requested_model", "requested_output_tokens"},
+            path=f"{item_path}.request",
+        )
+        _validate_policy_request_dimensions(request, path=f"{item_path}.request")
+        requested_model = _value_string(request, "requested_model", path=f"{item_path}.request")
+        suite_scenarios.append(
+            {
+                "id": scenario_ids[-1],
+                "actor_id": request["actor_id"],
+                "client": request["client"],
+                "protocol": request["protocol"],
+                "requested_model": request["requested_model"],
+                "requested_output_tokens": request["requested_output_tokens"],
+            }
+        )
+        decisions: dict[str, Mapping[str, Any]] = {}
+        for name, expected_version in (
+            ("baseline", baseline_version),
+            ("candidate", candidate_version),
+        ):
+            result = _value_mapping(scenario, name, path=item_path)
+            _exact_keys(result, {"decision"}, path=f"{item_path}.{name}")
+            decision = _value_mapping(result, "decision", path=f"{item_path}.{name}")
+            _validate_policy_decision(decision)
+            if (
+                _value_string(
+                    decision,
+                    "policy_version",
+                    path=f"{item_path}.{name}.decision",
+                )
+                != expected_version
+            ):
+                raise ContractValidationError(
+                    f"{item_path}.{name}.decision.policy_version does not match {name}"
+                )
+            if (
+                _value_string(
+                    decision,
+                    "requested_model",
+                    path=f"{item_path}.{name}.decision",
+                )
+                != requested_model
+            ):
+                raise ContractValidationError(
+                    f"{item_path}.{name}.decision.requested_model does not match request"
+                )
+            decisions[name] = decision
+        changed = scenario.get("changed")
+        if not isinstance(changed, bool):
+            raise ContractValidationError(f"{item_path}.changed must be a boolean")
+        expected_changed = _policy_decision_behavior(decisions["baseline"]) != _policy_decision_behavior(
+            decisions["candidate"]
+        )
+        if changed != expected_changed:
+            raise ContractValidationError(f"{item_path}.changed does not match decision behavior")
+        changed_count += int(changed)
+        baseline_allowed_count += int(decisions["baseline"].get("allowed") is True)
+        candidate_allowed_count += int(decisions["candidate"].get("allowed") is True)
+
+    if scenario_ids != sorted(scenario_ids) or len(scenario_ids) != len(set(scenario_ids)):
+        raise ContractValidationError("scenarios must use unique sorted scenario IDs")
+    canonical_suite = {
+        "schema_id": POLICY_SCENARIO_SUITE_SCHEMA_ID,
+        "schema_version": POLICY_SCENARIO_SUITE_SCHEMA_VERSION,
+        "organization_id": value["organization_id"],
+        "scenarios": suite_scenarios,
+    }
+    expected_suite_digest = hashlib.sha256(
+        json.dumps(
+            canonical_suite,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+        ).encode("utf-8")
+    ).hexdigest()
+    if suite_digest != expected_suite_digest:
+        raise ContractValidationError("suite.content_sha256 does not match scenarios")
+
+    summary = _value_mapping(value, "summary")
+    _exact_keys(
+        summary,
+        {
+            "scenario_count",
+            "changed_count",
+            "unchanged_count",
+            "baseline_allowed_count",
+            "candidate_allowed_count",
+        },
+        path="summary",
+    )
+    expected_summary = {
+        "scenario_count": suite_count,
+        "changed_count": changed_count,
+        "unchanged_count": suite_count - changed_count,
+        "baseline_allowed_count": baseline_allowed_count,
+        "candidate_allowed_count": candidate_allowed_count,
+    }
+    for field, expected in expected_summary.items():
+        if _value_integer(summary, field, minimum=0, path="summary") != expected:
+            raise ContractValidationError(f"summary.{field} does not match scenarios")
+
+
+def _validate_policy_request_dimensions(value: Mapping[str, Any], *, path: str) -> None:
+    _bounded_policy_string(value, "actor_id", path=path)
+    if _value_string(value, "client", path=path) not in {"codex", "claude-code"}:
+        raise ContractValidationError(f"{path}.client is unsupported")
+    if _value_string(value, "protocol", path=path) not in {"openai", "anthropic"}:
+        raise ContractValidationError(f"{path}.protocol is unsupported")
+    _bounded_policy_string(value, "requested_model", path=path)
+    _nullable_integer(value, "requested_output_tokens", minimum=1, path=path)
+
+
+def _bounded_policy_string(value: Mapping[str, Any], field: str, *, path: str) -> str:
+    result = _value_string(value, field, path=path)
+    if len(result) > 256 or any(character in result for character in ("\x00", "\n", "\r")):
+        raise ContractValidationError(f"{path}.{field} must be a bounded single-line string")
+    return result
+
+
+def _policy_scenario_id(value: Mapping[str, Any], field: str, *, path: str) -> str:
+    result = _value_string(value, field, path=path)
+    allowed = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-"
+    if len(result) > 128 or not result[0].isalnum() or any(character not in allowed for character in result):
+        raise ContractValidationError(
+            f"{path}.{field} must start with an alphanumeric character and use only letters, numbers, dot, underscore, or hyphen"
+        )
+    return result
+
+
+def _policy_decision_behavior(value: Mapping[str, Any]) -> tuple[object, ...]:
+    return tuple(
+        value.get(field)
+        for field in (
+            "allowed",
+            "action",
+            "reason",
+            "requested_model",
+            "resolved_alias",
+            "routed_model",
+            "max_output_tokens",
+        )
+    )
 
 
 def _validate_policy_version_identity(value: Mapping[str, Any], *, path: str) -> str:

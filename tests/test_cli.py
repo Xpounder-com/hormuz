@@ -939,6 +939,257 @@ class ClientConfigTests(unittest.TestCase):
         create_store.assert_called_once_with(self.config, read_only=True)
         self.assertEqual(usage_store.monthly_totals.call_count, 3)
 
+    def test_policy_scenarios_create_add_and_validate_are_offline_and_canonical(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            suite_path = Path(temporary) / "scenarios.json"
+            with (
+                mock.patch("hormuz.cli.GatewayConfig.load") as runtime_load,
+                mock.patch("hormuz.cli.GatewayConfig.load_policy_validation_context") as context_load,
+                mock.patch("hormuz.cli.PolicyControlService") as service,
+            ):
+                created = io.StringIO()
+                with redirect_stdout(created):
+                    self.assertEqual(
+                        main(
+                            [
+                                "--config",
+                                str(Path(temporary) / "missing-config.json"),
+                                "policy",
+                                "scenarios",
+                                "create",
+                                "--organization",
+                                "xpounder",
+                                "--id",
+                                "z-large",
+                                "--actor",
+                                "alice",
+                                "--client",
+                                "codex",
+                                "--protocol",
+                                "openai",
+                                "--model",
+                                "gpt-5.4-mini",
+                                "--max-output-tokens",
+                                "20000",
+                                "--output",
+                                str(suite_path),
+                            ]
+                        ),
+                        0,
+                    )
+                added = io.StringIO()
+                with redirect_stdout(added):
+                    self.assertEqual(
+                        main(
+                            [
+                                "policy",
+                                "scenarios",
+                                "add",
+                                str(suite_path),
+                                "--id",
+                                "a-default",
+                                "--actor",
+                                "alice",
+                                "--client",
+                                "codex",
+                                "--protocol",
+                                "openai",
+                                "--model",
+                                "gpt-5.4-mini",
+                                "--max-output-tokens",
+                                "1000",
+                            ]
+                        ),
+                        0,
+                    )
+                validated = io.StringIO()
+                with redirect_stdout(validated):
+                    self.assertEqual(
+                        main(["policy", "scenarios", "validate", str(suite_path)]),
+                        0,
+                    )
+
+            runtime_load.assert_not_called()
+            context_load.assert_not_called()
+            service.assert_not_called()
+            self.assertEqual(stat.S_IMODE(suite_path.stat().st_mode), 0o600)
+            suite = json.loads(suite_path.read_text(encoding="utf-8"))
+            validate_contract(suite)
+            self.assertEqual(suite["schema_id"], "hormuz.policy-scenario-suite")
+            self.assertEqual(
+                [scenario["id"] for scenario in suite["scenarios"]],
+                ["a-default", "z-large"],
+            )
+            self.assertIn("scenarios=1", created.getvalue())
+            self.assertIn("scenarios=2", added.getvalue())
+            self.assertIn("policy scenarios valid", validated.getvalue())
+
+    def test_policy_evaluate_pins_versions_emits_contract_and_securely_saves_it(self) -> None:
+        context = GatewayConfig.load_policy_validation_context(ROOT / "config.example.json")
+        fixture = json.loads(
+            (ROOT / "tests" / "fixtures" / "policies" / "policy-document-v1.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        baseline_document = PolicyDocument.from_mapping(fixture, config=context)
+        candidate_mapping = json.loads(json.dumps(fixture))
+        candidate_mapping["policies"]["actors"]["alice"] = {"allowed_models": []}
+        candidate_document = PolicyDocument.from_mapping(candidate_mapping, config=context)
+        created_at = datetime(2026, 8, 27, tzinfo=timezone.utc)
+
+        def version(document: PolicyDocument) -> PolicyVersionRecord:
+            return PolicyVersionRecord(
+                organization_id="xpounder",
+                version_id=document.version_id,
+                content_sha256=document.content_sha256,
+                created_at=created_at,
+                author_kind="static",
+                author_identity_key="static:" + "a" * 64,
+                change_summary=document.redacted_change_summary(),
+                document=document,
+            )
+
+        usage_store = mock.Mock()
+        usage_store.monthly_totals.return_value = MonthlyTotals()
+        with (
+            tempfile.TemporaryDirectory() as temporary,
+            mock.patch("hormuz.cli.GatewayConfig.load", return_value=self.config),
+            mock.patch("hormuz.cli.PolicyControlService") as service_type,
+            mock.patch("hormuz.cli.create_usage_store", return_value=usage_store) as create_store,
+        ):
+            suite_path = Path(temporary) / "scenarios.json"
+            suite_path.write_text(
+                json.dumps(
+                    {
+                        "schema_id": "hormuz.policy-scenario-suite",
+                        "schema_version": 1,
+                        "organization_id": "xpounder",
+                        "scenarios": [
+                            {
+                                "id": "codex-default",
+                                "actor_id": "alice",
+                                "client": "codex",
+                                "protocol": "openai",
+                                "requested_model": "gpt-5.4-mini",
+                                "requested_output_tokens": 1000,
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            result_path = Path(temporary) / "evaluation.json"
+            service = service_type.return_value
+            service.policy_version.side_effect = [version(baseline_document), version(candidate_document)]
+            output = io.StringIO()
+            stderr = io.StringIO()
+            with redirect_stdout(output), redirect_stderr(stderr):
+                result = main(
+                    [
+                        "policy",
+                        "evaluate",
+                        "--version",
+                        candidate_document.version_id,
+                        "--organization",
+                        "xpounder",
+                        "--scenarios",
+                        str(suite_path),
+                        "--output",
+                        str(result_path),
+                        "--json",
+                    ]
+                )
+
+            self.assertEqual(result, 1)
+            evaluation = json.loads(output.getvalue())
+            validate_contract(evaluation)
+            self.assertEqual(evaluation, json.loads(result_path.read_text(encoding="utf-8")))
+            self.assertEqual(stat.S_IMODE(result_path.stat().st_mode), 0o600)
+            self.assertEqual(evaluation["schema_id"], "hormuz.policy-evaluation")
+            self.assertEqual(evaluation["summary"]["changed_count"], 1)
+            self.assertTrue(evaluation["scenarios"][0]["baseline"]["decision"]["allowed"])
+            self.assertFalse(evaluation["scenarios"][0]["candidate"]["decision"]["allowed"])
+            self.assertIn("policy evaluation saved:", stderr.getvalue())
+            self.assertEqual(
+                service.policy_version.call_args_list,
+                [
+                    mock.call(
+                        organization_id="xpounder",
+                        credential_env="HORMUZ_POLICY_ADMIN_TOKEN",
+                        version_id=None,
+                    ),
+                    mock.call(
+                        organization_id="xpounder",
+                        credential_env="HORMUZ_POLICY_ADMIN_TOKEN",
+                        version_id=candidate_document.version_id,
+                    ),
+                ],
+            )
+            create_store.assert_called_once_with(self.config, read_only=True)
+            self.assertEqual(usage_store.monthly_totals.call_count, 3)
+
+    def test_policy_evaluate_returns_zero_when_behavior_is_unchanged(self) -> None:
+        context = GatewayConfig.load_policy_validation_context(ROOT / "config.example.json")
+        document = PolicyDocument.from_json_bytes(
+            (ROOT / "tests" / "fixtures" / "policies" / "policy-document-v1.json").read_bytes(),
+            config=context,
+        )
+        version = PolicyVersionRecord(
+            organization_id="xpounder",
+            version_id=document.version_id,
+            content_sha256=document.content_sha256,
+            created_at=datetime(2026, 8, 27, tzinfo=timezone.utc),
+            author_kind="static",
+            author_identity_key="static:" + "a" * 64,
+            change_summary=document.redacted_change_summary(),
+            document=document,
+        )
+        usage_store = mock.Mock()
+        usage_store.monthly_totals.return_value = MonthlyTotals()
+        with (
+            tempfile.TemporaryDirectory() as temporary,
+            mock.patch("hormuz.cli.GatewayConfig.load", return_value=self.config),
+            mock.patch("hormuz.cli.PolicyControlService") as service_type,
+            mock.patch("hormuz.cli.create_usage_store", return_value=usage_store),
+        ):
+            suite_path = Path(temporary) / "scenarios.json"
+            suite_path.write_text(
+                json.dumps(
+                    {
+                        "schema_id": "hormuz.policy-scenario-suite",
+                        "schema_version": 1,
+                        "organization_id": "xpounder",
+                        "scenarios": [
+                            {
+                                "id": "same",
+                                "actor_id": "alice",
+                                "client": "codex",
+                                "protocol": "openai",
+                                "requested_model": "gpt-5.4-mini",
+                                "requested_output_tokens": None,
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            service_type.return_value.policy_version.side_effect = [version, version]
+            with redirect_stdout(io.StringIO()):
+                result = main(
+                    [
+                        "policy",
+                        "evaluate",
+                        "--version",
+                        document.version_id,
+                        "--organization",
+                        "xpounder",
+                        "--scenarios",
+                        str(suite_path),
+                    ]
+                )
+
+        self.assertEqual(result, 0)
+
     def test_legacy_policy_check_output_remains_byte_for_byte_compatible(self) -> None:
         usage_store = mock.Mock()
         usage_store.monthly_totals.return_value = MonthlyTotals()

@@ -279,6 +279,37 @@ loading, so a concurrent activation cannot mix policy versions. Preview is a
 point-in-time evaluation; later usage or reservations can change live
 admission.
 
+Save repeatable requests in a portable suite without loading configuration,
+credentials, or PostgreSQL, then evaluate the complete suite against a
+candidate:
+
+```bash
+python3 -m hormuz policy scenarios create \
+  --organization xpounder \
+  --id codex-default \
+  --actor alice \
+  --client codex \
+  --protocol openai \
+  --model gpt-5.4-mini \
+  --max-output-tokens 1000 \
+  --output engineering-scenarios.json
+
+python3 -m hormuz --config hormuz.json policy evaluate engineering-strict.json \
+  --organization xpounder \
+  --scenarios engineering-scenarios.json \
+  --output engineering-evaluation.json \
+  --json
+```
+
+Use `policy scenarios add` for additional explicit requests and `policy
+scenarios validate` to identify a suite by its canonical SHA-256 digest. A
+suite contains at most 100 scenarios, has no prompt or response field, and is
+written atomically with mode `0600`. Evaluation pins both policies once, takes
+one current-usage snapshot per referenced actor, and makes no provider call,
+reservation, usage write, or policy change. Exit status is `0` when behavior
+is unchanged across the suite, `1` when any scenario changes, and `2` on error;
+an intentional denial is evaluation data rather than a command failure.
+
 Evaluate the active policy only, using the long-standing automation contract:
 
 ```bash
