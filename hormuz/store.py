@@ -47,6 +47,7 @@ from ._persistence import (
     normalize_audit_chain_head,
     normalize_request_attempt_result,
     normalize_request_attempt_state,
+    monthly_usage_bounds,
     require_pending_request_attempt_state,
     require_terminal_request_attempt_state,
     should_mark_request_attempt_unknown,
@@ -81,8 +82,10 @@ class UsageStore:
         maximum_supported_schema_version: int | None = None,
         audit_chain_maximum_anchor_age_seconds: int | None = None,
         audit_chain_organization_ids: tuple[str, ...] = (),
+        read_only: bool = False,
     ):
         self.path = path
+        self.read_only = read_only
         self.maximum_supported_schema_version = (
             self.schema_version
             if maximum_supported_schema_version is None
@@ -101,12 +104,24 @@ class UsageStore:
         self.audit_chain_organization_ids = tuple(sorted(set(audit_chain_organization_ids)))
         if any(not isinstance(organization_id, str) or not organization_id for organization_id in self.audit_chain_organization_ids):
             raise StorageSchemaError("audit_chain_configuration_invalid")
-        self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
-        self._initialize()
+        if self.read_only:
+            with self._lock, self._connection() as connection:
+                verify_sqlite_schema_ready(
+                    connection,
+                    schema_version=self.schema_version,
+                    maximum_supported_schema_version=self.maximum_supported_schema_version,
+                    error_factory=StorageSchemaError,
+                )
+        else:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self._initialize()
 
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.path, timeout=30)
+        if self.read_only:
+            connection = sqlite3.connect(f"{self.path.resolve().as_uri()}?mode=ro", uri=True, timeout=30)
+        else:
+            connection = sqlite3.connect(self.path, timeout=30)
         connection.row_factory = sqlite3.Row
         return connection
 
@@ -1072,10 +1087,15 @@ class UsageStore:
         actor_id: str | None = None,
         team_id: str | None = None,
         organization_id: str | None = None,
+        starts_at: datetime | None = None,
+        ends_before: datetime | None = None,
     ) -> MonthlyTotals:
-        start = datetime.now(timezone.utc).replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat()
+        start, end = monthly_usage_bounds(starts_at=starts_at, ends_before=ends_before)
         clauses = ["occurred_at >= ?"]
-        parameters: list[object] = [start]
+        parameters: list[object] = [start.isoformat()]
+        if end is not None:
+            clauses.append("occurred_at < ?")
+            parameters.append(end.isoformat())
         if organization_id is not None:
             clauses.append("organization_id = ?")
             parameters.append(organization_id)

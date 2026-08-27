@@ -153,6 +153,30 @@ class UsageRepository(Protocol):
 
     def audit_chain_anchor_status(self, **kwargs: object) -> AuditChainAnchorStatus: ...
 
+
+def monthly_usage_bounds(
+    *,
+    starts_at: datetime | None,
+    ends_before: datetime | None,
+) -> tuple[datetime, datetime | None]:
+    """Return one explicit UTC period or the existing current-month default."""
+
+    if starts_at is None and ends_before is None:
+        current = datetime.now(timezone.utc)
+        return current.replace(day=1, hour=0, minute=0, second=0, microsecond=0), None
+    if (
+        not isinstance(starts_at, datetime)
+        or not isinstance(ends_before, datetime)
+        or starts_at.tzinfo is None
+        or ends_before.tzinfo is None
+    ):
+        raise ValueError("usage period requires timezone-aware bounds")
+    normalized_start = starts_at.astimezone(timezone.utc)
+    normalized_end = ends_before.astimezone(timezone.utc)
+    if normalized_start >= normalized_end:
+        raise ValueError("usage period must have a positive duration")
+    return normalized_start, normalized_end
+
     def record_audit_chain_checkpoint(self, **kwargs: object) -> None: ...
 
     def begin_audit_chain_epoch(self, **kwargs: object) -> AuditChainHead: ...

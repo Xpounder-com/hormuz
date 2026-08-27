@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from .common import (
@@ -20,12 +22,17 @@ from .constants import (
     POLICY_CONTROL_EVENT_SCHEMA_ID,
     POLICY_CONTROL_EVENT_SCHEMA_VERSION,
     POLICY_CONTROL_STATUS_SCHEMA_ID,
+    POLICY_COMPARISON_SCHEMA_ID,
+    POLICY_COMPARISON_SCHEMA_VERSION,
     POLICY_DECISION_SCHEMA_ID,
     POLICY_DOCUMENT_SCHEMA_ID,
     POLICY_DOCUMENT_SCHEMA_VERSION,
     POLICY_HISTORY_SCHEMA_ID,
     POLICY_HISTORY_SCHEMA_VERSION,
     POLICY_HISTORY_MAX_LIMIT,
+    POLICY_PREVIEW_SCHEMA_ID,
+    POLICY_PREVIEW_SCHEMA_VERSION,
+    _POLICY_COMPARISON_CHANGE_TYPES,
     _POLICY_LIFECYCLE_EVENT_TYPES,
     _POLICY_ACTIONS,
     _POLICY_BREAK_GLASS_REASONS,
@@ -62,6 +69,28 @@ def policy_schema_entries() -> list[dict[str, object]]:
             1,
             "cli-output",
             ["schema_id", "schema_version", "organization_id", "initialized", "active", "versions", "administrators"],
+        ),
+        _manifest_schema(
+            POLICY_COMPARISON_SCHEMA_ID,
+            POLICY_COMPARISON_SCHEMA_VERSION,
+            "cli-output",
+            ["schema_id", "schema_version", "organization_id", "baseline", "candidate", "identical", "changes"],
+        ),
+        _manifest_schema(
+            POLICY_PREVIEW_SCHEMA_ID,
+            POLICY_PREVIEW_SCHEMA_VERSION,
+            "cli-output",
+            [
+                "schema_id",
+                "schema_version",
+                "organization_id",
+                "evaluated_at",
+                "usage_period",
+                "usage_basis",
+                "request",
+                "baseline",
+                "candidate",
+            ],
         ),
         _manifest_schema(
             POLICY_HISTORY_SCHEMA_ID,
@@ -222,6 +251,10 @@ def _validate_policy_decision(value: Mapping[str, Any]) -> None:
             "policy_version",
         },
     )
+    if _value_string(value, "schema_id") != POLICY_DECISION_SCHEMA_ID:
+        raise ContractValidationError("policy decision schema_id is unsupported")
+    if _value_integer(value, "schema_version", minimum=1) != 1:
+        raise ContractValidationError("policy decision schema_version is unsupported")
     if not isinstance(value.get("allowed"), bool):
         raise ContractValidationError("allowed must be a boolean")
     validate_policy_action(_value_string(value, "action"))
@@ -231,6 +264,186 @@ def _validate_policy_decision(value: Mapping[str, Any]) -> None:
     _nullable_string(value, "routed_model")
     _nullable_integer(value, "max_output_tokens", minimum=1)
     _value_string(value, "policy_version")
+
+
+def _validate_policy_comparison(value: Mapping[str, Any]) -> None:
+    """Validate a value-bearing administrator-only semantic comparison."""
+
+    _exact_keys(
+        value,
+        {"schema_id", "schema_version", "organization_id", "baseline", "candidate", "identical", "changes"},
+    )
+    _value_string(value, "organization_id")
+    baseline = _value_mapping(value, "baseline")
+    candidate = _value_mapping(value, "candidate")
+    _exact_keys(baseline, {"version_id", "content_sha256"}, path="baseline")
+    _exact_keys(candidate, {"version_id", "content_sha256"}, path="candidate")
+    _validate_policy_version_identity(baseline, path="baseline")
+    _validate_policy_version_identity(candidate, path="candidate")
+    identical = value.get("identical")
+    if not isinstance(identical, bool):
+        raise ContractValidationError("identical must be a boolean")
+    changes = value.get("changes")
+    if not isinstance(changes, list):
+        raise ContractValidationError("changes must be an array")
+    paths: list[str] = []
+    for index, change in enumerate(changes):
+        item_path = f"changes[{index}]"
+        if not isinstance(change, Mapping):
+            raise ContractValidationError(f"{item_path} must be an object")
+        _exact_keys(change, {"path", "change_type", "before", "after"}, path=item_path)
+        policy_path = _value_string(change, "path", path=item_path)
+        if (
+            len(policy_path) > 4096
+            or "\x00" in policy_path
+            or "\n" in policy_path
+            or "\r" in policy_path
+            or not policy_path.startswith(("policies.", "policies[", "egress_controls."))
+        ):
+            raise ContractValidationError(f"{item_path}.path is invalid")
+        paths.append(policy_path)
+        change_type = _value_string(change, "change_type", path=item_path)
+        if change_type not in _POLICY_COMPARISON_CHANGE_TYPES:
+            raise ContractValidationError(f"{item_path}.change_type is unsupported")
+        before = change.get("before")
+        after = change.get("after")
+        _validate_policy_comparison_value(before, path=f"{item_path}.before")
+        _validate_policy_comparison_value(after, path=f"{item_path}.after")
+        if change_type == "added" and (before is not None or after is None):
+            raise ContractValidationError(f"{item_path} has invalid added values")
+        if change_type == "removed" and (before is None or after is not None):
+            raise ContractValidationError(f"{item_path} has invalid removed values")
+        if change_type == "changed" and (before is None or after is None or before == after):
+            raise ContractValidationError(f"{item_path} has invalid changed values")
+    if paths != sorted(paths) or len(paths) != len(set(paths)):
+        raise ContractValidationError("changes must use unique sorted paths")
+    if identical != (len(changes) == 0):
+        raise ContractValidationError("identical must match changes")
+
+
+def _validate_policy_preview(value: Mapping[str, Any]) -> None:
+    """Validate one current-usage request preview against pinned documents."""
+
+    _exact_keys(
+        value,
+        {
+            "schema_id",
+            "schema_version",
+            "organization_id",
+            "evaluated_at",
+            "usage_period",
+            "usage_basis",
+            "request",
+            "baseline",
+            "candidate",
+        },
+    )
+    _value_string(value, "organization_id")
+    evaluated_at = _policy_timestamp(_value_string(value, "evaluated_at"), "evaluated_at")
+    if evaluated_at.utcoffset() != timedelta(0):
+        raise ContractValidationError("evaluated_at must use UTC")
+    if _value_string(value, "usage_basis") != "current":
+        raise ContractValidationError("usage_basis is unsupported")
+    usage_period = _value_mapping(value, "usage_period")
+    _exact_keys(usage_period, {"starts_at", "ends_before"}, path="usage_period")
+    starts_at = _policy_timestamp(_value_string(usage_period, "starts_at", path="usage_period"), "usage_period.starts_at")
+    ends_before = _policy_timestamp(
+        _value_string(usage_period, "ends_before", path="usage_period"),
+        "usage_period.ends_before",
+    )
+    if starts_at.utcoffset() != timedelta(0) or ends_before.utcoffset() != timedelta(0):
+        raise ContractValidationError("usage_period must use UTC")
+    expected_start = evaluated_at.astimezone(timezone.utc).replace(
+        day=1,
+        hour=0,
+        minute=0,
+        second=0,
+        microsecond=0,
+    )
+    expected_end = (
+        expected_start.replace(year=expected_start.year + 1, month=1)
+        if expected_start.month == 12
+        else expected_start.replace(month=expected_start.month + 1)
+    )
+    if starts_at != expected_start or ends_before != expected_end:
+        raise ContractValidationError("usage_period must be the evaluated UTC month")
+
+    request = _value_mapping(value, "request")
+    _exact_keys(
+        request,
+        {"actor_id", "client", "protocol", "requested_model", "requested_output_tokens"},
+        path="request",
+    )
+    _value_string(request, "actor_id", path="request")
+    if _value_string(request, "client", path="request") not in {"codex", "claude-code"}:
+        raise ContractValidationError("request.client is unsupported")
+    if _value_string(request, "protocol", path="request") not in {"openai", "anthropic"}:
+        raise ContractValidationError("request.protocol is unsupported")
+    requested_model = _value_string(request, "requested_model", path="request")
+    _nullable_integer(request, "requested_output_tokens", minimum=1, path="request")
+
+    baseline = _value_mapping(value, "baseline")
+    candidate = _value_mapping(value, "candidate")
+    for name, result in (("baseline", baseline), ("candidate", candidate)):
+        _exact_keys(result, {"version_id", "content_sha256", "decision"}, path=name)
+        version_id = _validate_policy_version_identity(result, path=name)
+        decision = _value_mapping(result, "decision", path=name)
+        _validate_policy_decision(decision)
+        if _value_string(decision, "policy_version", path=f"{name}.decision") != version_id:
+            raise ContractValidationError(f"{name}.decision.policy_version does not match version_id")
+        if _value_string(decision, "requested_model", path=f"{name}.decision") != requested_model:
+            raise ContractValidationError(f"{name}.decision.requested_model does not match request")
+
+
+def _validate_policy_version_identity(value: Mapping[str, Any], *, path: str) -> str:
+    version_id = _value_string(value, "version_id", path=path)
+    content_sha256 = _value_string(value, "content_sha256", path=path)
+    _policy_version_identifier(version_id, f"{path}.version_id")
+    _sha256_digest(content_sha256, f"{path}.content_sha256")
+    if version_id != f"sha256:{content_sha256}":
+        raise ContractValidationError(f"{path}.version_id does not match content_sha256")
+    return version_id
+
+
+def _validate_policy_comparison_value(value: object, *, path: str) -> None:
+    if value is None or isinstance(value, bool):
+        return
+    if isinstance(value, (int, float)):
+        try:
+            normalized = float(value)
+        except OverflowError:
+            raise ContractValidationError(f"{path} has an invalid number") from None
+        if not math.isfinite(normalized) or value < 0:
+            raise ContractValidationError(f"{path} has an invalid number")
+        return
+    if isinstance(value, str):
+        if not value or len(value) > 1024 or "\x00" in value or "\n" in value or "\r" in value:
+            raise ContractValidationError(f"{path} has an invalid string")
+        return
+    if isinstance(value, list):
+        if (
+            len(value) > 10_000
+            or any(not isinstance(item, str) for item in value)
+            or value != sorted(value)
+            or len(value) != len(set(value))
+        ):
+            raise ContractValidationError(f"{path} has an invalid allowlist")
+        for index, item in enumerate(value):
+            _validate_policy_comparison_value(item, path=f"{path}[{index}]")
+        return
+    if isinstance(value, Mapping) and not value:
+        return
+    raise ContractValidationError(f"{path} has an unsupported value")
+
+
+def _policy_timestamp(value: str, path: str) -> datetime:
+    try:
+        result = datetime.fromisoformat(value)
+    except ValueError as error:
+        raise ContractValidationError(f"{path} must be an ISO-8601 timestamp") from error
+    if result.tzinfo is None:
+        raise ContractValidationError(f"{path} must include a timezone")
+    return result
 
 
 def _validate_policy_control_status(value: Mapping[str, Any]) -> None:

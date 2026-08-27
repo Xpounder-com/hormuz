@@ -74,7 +74,7 @@ After that marker exists, the bootstrap command stops before consulting the conf
 Static identities are permitted only as bootstrap records. A current policy administrator can retire one through the governed service, but cannot grant a new static administrator:
 
 ```bash
-hormuz --config /etc/hormuz/hormuz.json policy administrator revoke-static \
+hormuz --config /etc/hormuz/hormuz.json policy administrator retire static \
   --organization xpounder \
   --credential-env HORMUZ_POLICY_ADMIN_TOKEN \
   --actor-id alice
@@ -229,6 +229,61 @@ refused. `--version sha256:...` exports an exact non-active version. These
 inspection commands remain policy-administrator-only in v1; a narrower policy
 auditor role is intentionally deferred.
 
+## Compare and preview a candidate
+
+Compare a local candidate with the active version before staging or
+activation:
+
+```bash
+hormuz --config /etc/hormuz/hormuz.json policy compare engineering-strict.json \
+  --organization xpounder \
+  --credential-env HORMUZ_POLICY_ADMIN_TOKEN \
+  --json
+```
+
+`policy compare` normalizes the policy document and reports stable semantic
+paths such as `policies.organization.max_output_tokens`, with `before`,
+`after`, and `added`, `removed`, or `changed`. Object key order and the order
+of allowlist values do not create changes. The baseline and candidate each
+include an immutable version ID and content digest; a local candidate receives
+its digest before it is staged. Use `--version sha256:...` to select a saved
+candidate and `--against-version sha256:...` to select a non-active baseline.
+
+The versioned JSON contract is `hormuz.policy-comparison` v1. Exit status is
+`0` for semantically identical documents, `1` for differences, and `2` for an
+error, so scripts can distinguish an expected change from a failed comparison.
+
+Preview one explicit request against the active baseline and a local or saved
+candidate:
+
+```bash
+hormuz --config /etc/hormuz/hormuz.json policy preview engineering-strict.json \
+  --organization xpounder \
+  --credential-env HORMUZ_POLICY_ADMIN_TOKEN \
+  --actor alice \
+  --client codex \
+  --protocol openai \
+  --model gpt-5.4-mini \
+  --max-output-tokens 1000 \
+  --json
+```
+
+Preview pins the active immutable version before loading the candidate. Both
+decisions then use that pinned baseline/candidate pair and one read-only
+set of the current actor, team, and organization monthly totals. It does
+not call a provider, reserve budget, write usage evidence, or activate a
+policy. The `hormuz.policy-preview` v1 contract includes `evaluated_at`, the
+UTC billing/usage period, `usage_basis: current`, the request dimensions, and
+the baseline and candidate decisions with their version IDs and digests. Exit
+status is `0` when the candidate allows the request, `3` when it denies, and
+`2` on error; the baseline decision is context and does not select the exit
+status. Preview is a point-in-time administrative evaluation; concurrent usage
+or reservations can still affect whether a later live request is admitted.
+
+An organization-wide scan is intentionally outside v1. Saved evaluations can
+later compose explicit scenarios without requiring identity enumeration,
+unbounded pagination, or implicit assumptions about which requests matter.
+
 ## Administrator changes
 
 An existing policy administrator can add or remove a verified OIDC identity by its stable issuer/subject pair:
@@ -250,7 +305,7 @@ Hormuz refuses to revoke the final active administrator. Use `policy status --js
 Break-glass is disabled unless explicitly configured. It is not a normal authentication path and can run only when the tenant has zero active policy administrators. Recovery requires the separately managed secret named by `break_glass.token_env`, a configured issuer/subject pair for the recovered administrator, and one of the fixed reason codes:
 
 ```bash
-hormuz --config /etc/hormuz/hormuz.json policy break-glass recover \
+hormuz --config /etc/hormuz/hormuz.json policy recover \
   --organization xpounder \
   --issuer https://identity.example.com \
   --subject recovery-administrator \
@@ -258,6 +313,11 @@ hormuz --config /etc/hormuz/hormuz.json policy break-glass recover \
 ```
 
 The command prompts for the recovery secret without echoing it; do not put it in an argument, environment-variable reference, command history, or checked-in file. Hormuz compares that transient value to the separately managed secret named by `break_glass.token_env` and records a `break_glass_recovered` event without logging either value. Organizations should store that configured secret under a distinct emergency-access process and test recovery in an isolated environment. This mechanism is a recovery control, not a substitute for KMS, audited custody, or operational incident procedures.
+
+Primary CLI command names use separate words. Earlier hyphenated command
+spellings remain hidden v1 compatibility aliases so existing scripts continue
+to receive their prior output and exit behavior; new documentation and help
+use only the spaced command tree.
 
 ## Interface and current boundary
 

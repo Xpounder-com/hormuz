@@ -290,7 +290,7 @@ missing table, noncontiguous migration ledger, or newer binary/database mismatch
 fails closed. Do not create the tables by hand or edit the migration ledger.
 
 For a restore or migration that resumes from a protected checkpoint, start a
-new explicit epoch with `hormuz audit-chain epoch`; then verify using the same
+new explicit epoch with `hormuz audit chain epoch`; then verify using the same
 canonical checkpoint artifact. A recovered older backup that lacks the
 checkpointed event cannot pass verification without that explicit external
 bridge. This is deliberate evidence of the recovery boundary, not a missing
@@ -373,7 +373,7 @@ Before starting a gateway with lifecycle enforcement, run the machine-only
 catalog registration under the executor deployment credential:
 
 ~~~bash
-hormuz --config /etc/hormuz/hormuz.json custody-executor register-assets
+hormuz --config /etc/hormuz/hormuz.json custody executor register assets
 ~~~
 
 Startup verifies every configured identity, synchronizes the active projection
@@ -410,7 +410,7 @@ updated tenant chain head in one transaction. A missing source/entry pair rolls
 back. The runtime role cannot write or delete custody source records, shorten
 custody retention, or bypass the v2 source checks. A tenant-scoped custody-evidence export is available through the
 authenticated custody-control service; there is no delete endpoint. A
-deletion-check records `deletion_blocked` with the retention, legal-hold, or
+`custody evidence deletion check` records `deletion_blocked` with the retention, legal-hold, or
 strong-approval reason without authorizing destructive deletion.
 
 Version 8 remains PostgreSQL-only because custody authority and retention
@@ -425,7 +425,7 @@ Use a stopped or drained gateway and a tested backup/snapshot as the starting po
 
 1. Record the current Hormuz package version and configuration revision.
 2. Create a recoverable SQLite copy or PostgreSQL backup/snapshot using the database platform's supported procedure.
-3. Run the candidate package against an isolated copy first: storage migrate, storage verify, a tenant-scoped policy-check, and metadata-only audit validation.
+3. Run the candidate package against an isolated copy first: `storage migrate`, `storage verify`, a tenant-scoped `policy check`, and metadata-only audit validation.
 4. Apply the PostgreSQL migration with the migration credential, then verify with the runtime credential.
 5. Start a bounded canary only after verification succeeds.
 

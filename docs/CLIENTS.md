@@ -16,7 +16,7 @@ real-provider release gate and its metadata-only evidence boundary.
 Generate the configuration from the running Hormuz configuration:
 
 ```bash
-hormuz --config /etc/hormuz/hormuz.json client-config codex \
+hormuz --config /etc/hormuz/hormuz.json client config codex \
   --url https://hormuz.example.com
 ```
 
@@ -51,7 +51,7 @@ Some Codex versions probe the custom provider's `/v1/models` endpoint. Hormuz do
 Generate the shell configuration:
 
 ```bash
-hormuz --config /etc/hormuz/hormuz.json client-config claude \
+hormuz --config /etc/hormuz/hormuz.json client config claude \
   --url https://hormuz.example.com
 ```
 
@@ -76,7 +76,7 @@ See Anthropic's [LLM gateway reference](https://code.claude.com/docs/en/llm-gate
 
 ## Generic OIDC credentials
 
-After configuring the issuer and explicit subject mapping described in [OIDC.md](OIDC.md), add `--actor` and `--auth-mode oidc` to either `client-config` command. The Codex output uses its command-backed bearer-token configuration. The Claude output uses `apiKeyHelper`. Both invoke:
+After configuring the issuer and explicit subject mapping described in [OIDC.md](OIDC.md), add `--actor` and `--auth-mode oidc` to either `client config` command. The Codex output uses its command-backed bearer-token configuration. The Claude output uses `apiKeyHelper`. Both invoke:
 
 ```bash
 hormuz auth token --env HORMUZ_OIDC_ACCESS_TOKEN

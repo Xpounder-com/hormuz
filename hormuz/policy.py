@@ -41,8 +41,9 @@ class PolicyEngine:
         protocol: str,
         requested_model: str,
         requested_output_tokens: int | None,
+        snapshot: PolicySnapshot | None = None,
     ) -> PolicyDecision:
-        snapshot = self.policy_runtime.snapshot_for(identity)
+        snapshot = snapshot or self.policy_runtime.snapshot_for(identity)
         policy = snapshot.effective_policy
 
         if identity.allowed_clients and client not in identity.allowed_clients:

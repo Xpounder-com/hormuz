@@ -27,7 +27,7 @@ check also fails closed if a tenant has committed metadata-only audit events
 older than that bound without a successful local external-checkpoint receipt.
 This is an anchor-age alert, not an Object Lock availability probe: `/ready`
 never contacts S3, AWS, Ceph, or another custody service. Use a separate
-scheduled `hormuz audit-chain anchor` job and monitor its result. An idle
+scheduled `hormuz audit chain anchor` job and monitor its result. An idle
 tenant with no chain entries is not overdue.
 
 Handling either endpoint does not authenticate a caller, resolve an upstream

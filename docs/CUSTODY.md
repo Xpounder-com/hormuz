@@ -55,7 +55,7 @@ The object store must provide Object Lock `COMPLIANCE` retention. The
 - Object Lock enabled for the bucket;
 - the configured bucket region.
 
-Every `audit-anchor` write requests `COMPLIANCE` retention and optional legal
+Every `audit anchor` write requests `COMPLIANCE` retention and optional legal
 hold. The opt-in live conformance test is the evidence that a particular
 storage product actually enforces those operations.
 
@@ -243,11 +243,11 @@ closed; it does not cause a fallback to plaintext environment credentials.
 
 ## Anchor audit evidence
 
-Anchoring is intentionally separate from local `audit-export` and runs only
+Anchoring is intentionally separate from local `audit export` and runs only
 when an operator asks for it:
 
 ```bash
-hormuz --config /etc/hormuz/hormuz.json audit-anchor \
+hormuz --config /etc/hormuz/hormuz.json audit anchor \
   --kind all \
   --since 2026-08-01T00:00:00Z
 ```
@@ -290,7 +290,7 @@ configured:
 ```
 
 The value is a minimum of 60 seconds and maximum of 31 days. `GET /ready` and
-`audit-chain status` inspect only local chain entries and successful local
+`audit chain status` inspects only local chain entries and successful local
 checkpoint receipts. They never make an Object Lock request. Readiness reports
 an evidence-health failure only when there are unanchored committed events
 older than the bound; an idle tenant with no events is not overdue.
@@ -298,7 +298,7 @@ older than the bound; an idle tenant with no events is not overdue.
 Run a checkpoint on the customer-controlled schedule:
 
 ```bash
-hormuz --config /etc/hormuz/hormuz.json audit-chain anchor \
+hormuz --config /etc/hormuz/hormuz.json audit chain anchor \
   --output /var/lib/hormuz/checkpoints/20260823T120000Z.json
 ```
 
@@ -314,7 +314,7 @@ overwrite a recovery artifact.
 
 For a restore or migration epoch, use only the exact checkpoint recovered from
 the protected Object Lock version and preserve its independent receipt/version
-evidence. The local `audit-chain epoch` command validates canonical format and
+evidence. The local `audit chain epoch` command validates canonical format and
 chain binding; it does not by itself establish that a supplied local file was
 externally retained.
 

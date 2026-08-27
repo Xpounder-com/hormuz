@@ -21,6 +21,55 @@ from hormuz.store import (
 
 
 class UsageStoreMigrationTests(unittest.TestCase):
+    def test_explicit_read_only_store_never_creates_or_writes_the_database(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "usage.sqlite3"
+            with self.assertRaises(sqlite3.OperationalError):
+                UsageStore(path, read_only=True)
+            self.assertFalse(path.exists())
+
+            identity = Identity(
+                token_env="TEST_TOKEN",
+                token="employee-token-long",
+                actor_id="alice",
+                actor_name="Alice",
+                team_id="engineering",
+                team_name="Engineering",
+                organization_id="xpounder",
+            )
+            writable = UsageStore(path)
+            writable.record(
+                identity=identity,
+                client="codex",
+                protocol="openai",
+                requested_model="gpt-test",
+                resolved_alias="gpt-test",
+                upstream_model="gpt-test",
+                policy_action="allowed",
+                status="succeeded",
+            )
+
+            read_only = UsageStore(path, read_only=True)
+            self.assertEqual(
+                read_only.monthly_totals(organization_id="xpounder").requests,
+                1,
+            )
+            with self.assertRaises(sqlite3.OperationalError):
+                read_only.record(
+                    identity=identity,
+                    client="codex",
+                    protocol="openai",
+                    requested_model="gpt-test",
+                    resolved_alias="gpt-test",
+                    upstream_model="gpt-test",
+                    policy_action="allowed",
+                    status="succeeded",
+                )
+            self.assertEqual(
+                writable.monthly_totals(organization_id="xpounder").requests,
+                1,
+            )
+
     def test_readiness_check_is_read_only_and_detects_a_tampered_migration_ledger(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "usage.sqlite3"

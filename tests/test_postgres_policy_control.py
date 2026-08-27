@@ -233,6 +233,11 @@ class PostgresPolicyControlTests(PostgresTestCase):
         with tempfile.TemporaryDirectory() as temporary:
             policy_path = Path(temporary) / "policy.json"
             policy_path.write_text(json.dumps(self._policy_document()), encoding="utf-8")
+            candidate_path = Path(temporary) / "candidate.json"
+            candidate_path.write_text(
+                json.dumps(self._policy_document(actor_blocked=True)),
+                encoding="utf-8",
+            )
             with mock.patch.dict(os.environ, environment, clear=True):
                 bootstrap_output = io.StringIO()
                 with redirect_stdout(bootstrap_output):
@@ -298,7 +303,8 @@ class PostgresPolicyControlTests(PostgresTestCase):
                             [
                                 "--config",
                                 str(config.source_path),
-                                "client-config",
+                                "client",
+                                "config",
                                 "codex",
                                 "--url",
                                 "https://hormuz.example",
@@ -307,6 +313,67 @@ class PostgresPolicyControlTests(PostgresTestCase):
                         0,
                     )
                 self.assertIn('model = "gpt-5.4-mini"', client_output.getvalue())
+                usage_before = self._schema_v4_snapshot(self.schema)
+                compare_output = io.StringIO()
+                with redirect_stdout(compare_output):
+                    self.assertEqual(
+                        main(
+                            [
+                                "--config",
+                                str(config.source_path),
+                                "policy",
+                                "compare",
+                                str(candidate_path),
+                                "--organization",
+                                "xpounder",
+                                "--credential-env",
+                                "HORMUZ_POLICY_ADMIN_TOKEN",
+                                "--json",
+                            ]
+                        ),
+                        1,
+                    )
+                comparison = json.loads(compare_output.getvalue())
+                validate_contract(comparison)
+                self.assertEqual(comparison["baseline"]["version_id"], version_id)
+                self.assertEqual(comparison["changes"][0]["path"], "policies.actors.alice.allowed_models")
+
+                preview_output = io.StringIO()
+                with redirect_stdout(preview_output):
+                    self.assertEqual(
+                        main(
+                            [
+                                "--config",
+                                str(config.source_path),
+                                "policy",
+                                "preview",
+                                str(candidate_path),
+                                "--organization",
+                                "xpounder",
+                                "--credential-env",
+                                "HORMUZ_POLICY_ADMIN_TOKEN",
+                                "--actor",
+                                "alice",
+                                "--client",
+                                "codex",
+                                "--protocol",
+                                "openai",
+                                "--model",
+                                "gpt-5.4-mini",
+                                "--max-output-tokens",
+                                "1000",
+                                "--json",
+                            ]
+                        ),
+                        3,
+                    )
+                preview = json.loads(preview_output.getvalue())
+                validate_contract(preview)
+                self.assertEqual(preview["baseline"]["version_id"], version_id)
+                self.assertTrue(preview["baseline"]["decision"]["allowed"])
+                self.assertFalse(preview["candidate"]["decision"]["allowed"])
+                self.assertEqual(preview["usage_basis"], "current")
+                self.assertEqual(self._schema_v4_snapshot(self.schema), usage_before)
                 status_output = io.StringIO()
                 with redirect_stdout(status_output):
                     self.assertEqual(

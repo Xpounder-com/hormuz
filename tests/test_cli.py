@@ -24,6 +24,7 @@ from hormuz.cli import (
     _auth_token,
     _budget_for_scope,
     _client_config,
+    _normalize_command_argv,
     _serve,
     _status,
     _write_audit_chain_checkpoint,
@@ -48,7 +49,7 @@ from hormuz.audit_chain import (
 )
 from hormuz.policy_document import PolicyDocument
 from hormuz.policy_repository import PolicyHistory, PolicyLifecycleEvent, PolicyVersionRecord
-from hormuz.store import UsageStore
+from hormuz.store import MonthlyTotals, UsageStore
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -307,10 +308,63 @@ class ClientConfigTests(unittest.TestCase):
     def test_contract_manifest_requires_no_configuration(self) -> None:
         output = io.StringIO()
         with redirect_stdout(output):
-            self.assertEqual(main(["contract-manifest"]), 0)
+            self.assertEqual(main(["contract", "manifest"]), 0)
         manifest = json.loads(output.getvalue())
         self.assertEqual(manifest["schema_id"], "hormuz.policy-evidence-manifest")
         self.assertEqual(manifest["schema_version"], 1)
+
+    def test_hidden_hyphenated_commands_normalize_to_the_spaced_tree(self) -> None:
+        aliases = (
+            (["contract-manifest"], ["contract", "manifest"]),
+            (["policy-check"], ["policy", "check"]),
+            (["client-config"], ["client", "config"]),
+            (["audit-export"], ["audit", "export"]),
+            (["audit-anchor"], ["audit", "anchor"]),
+            (["audit-chain"], ["audit", "chain"]),
+            (["custody-executor"], ["custody", "executor"]),
+            (
+                ["policy", "break-glass", "recover"],
+                ["policy", "recover"],
+            ),
+            (
+                ["policy", "administrator", "revoke-static"],
+                ["policy", "administrator", "retire", "static"],
+            ),
+            (
+                ["custody", "administrator", "revoke-static"],
+                ["custody", "administrator", "retire", "static"],
+            ),
+            (
+                ["custody", "evidence", "deletion-check"],
+                ["custody", "evidence", "deletion", "check"],
+            ),
+            (
+                ["custody", "executor", "register-assets"],
+                ["custody", "executor", "register", "assets"],
+            ),
+        )
+        for legacy, primary in aliases:
+            with self.subTest(legacy=legacy):
+                self.assertEqual(
+                    _normalize_command_argv(["--config", "hormuz.json", *legacy]),
+                    ["--config", "hormuz.json", *primary],
+                )
+
+    def test_every_primary_command_token_is_a_separate_unhyphenated_word(self) -> None:
+        pending = [build_parser()]
+        paths: list[tuple[str, ...]] = [()]
+        while pending:
+            parser = pending.pop()
+            prefix = paths.pop()
+            for action in parser._actions:
+                if not isinstance(action, argparse._SubParsersAction):
+                    continue
+                for command, child in action.choices.items():
+                    path = (*prefix, command)
+                    with self.subTest(command=" ".join(path)):
+                        self.assertNotIn("-", command)
+                    pending.append(child)
+                    paths.append(path)
 
     def test_status_json_uses_the_versioned_usage_report_envelope(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -579,6 +633,253 @@ class ClientConfigTests(unittest.TestCase):
                     2,
                 )
             self.assertIn("policy export failed: policy_output_exists", stderr.getvalue())
+
+    def test_policy_compare_emits_semantic_contract_and_uses_document_exit_codes(self) -> None:
+        context = GatewayConfig.load_policy_validation_context(ROOT / "config.example.json")
+        fixture = json.loads(
+            (ROOT / "tests" / "fixtures" / "policies" / "policy-document-v1.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        baseline_document = PolicyDocument.from_mapping(fixture, config=context)
+        candidate_mapping = json.loads(json.dumps(fixture))
+        candidate_mapping["policies"]["organization"]["max_output_tokens"] = 4_000
+        candidate_mapping["policies"]["teams"]["0team"] = {"allowed_clients": ["codex"]}
+        candidate_mapping["policies"]["teams"]["alpha"] = {"allowed_clients": ["codex"]}
+        candidate_document = PolicyDocument.from_mapping(candidate_mapping, config=context)
+        created_at = datetime(2026, 8, 27, tzinfo=timezone.utc)
+        baseline = PolicyVersionRecord(
+            organization_id="xpounder",
+            version_id=baseline_document.version_id,
+            content_sha256=baseline_document.content_sha256,
+            created_at=created_at,
+            author_kind="static",
+            author_identity_key="static:" + "a" * 64,
+            change_summary=baseline_document.redacted_change_summary(),
+            document=baseline_document,
+        )
+
+        with (
+            tempfile.TemporaryDirectory() as temporary,
+            mock.patch("hormuz.cli.GatewayConfig.load", return_value=self.config),
+            mock.patch("hormuz.cli.PolicyControlService") as service_type,
+        ):
+            candidate_path = Path(temporary) / "candidate.json"
+            candidate_path.write_text(json.dumps(candidate_mapping), encoding="utf-8")
+            service_type.return_value.policy_version.return_value = baseline
+            output = io.StringIO()
+            with redirect_stdout(output):
+                result = main(
+                    [
+                        "policy",
+                        "compare",
+                        str(candidate_path),
+                        "--organization",
+                        "xpounder",
+                        "--json",
+                    ]
+                )
+
+        self.assertEqual(result, 1)
+        comparison = json.loads(output.getvalue())
+        validate_contract(comparison)
+        self.assertEqual(comparison["schema_id"], "hormuz.policy-comparison")
+        self.assertEqual(comparison["baseline"]["version_id"], baseline_document.version_id)
+        self.assertEqual(comparison["candidate"]["version_id"], candidate_document.version_id)
+        self.assertEqual(
+            comparison["changes"],
+            [
+                {
+                    "after": 4_000,
+                    "before": 32_000,
+                    "change_type": "changed",
+                    "path": "policies.organization.max_output_tokens",
+                },
+                {
+                    "after": ["codex"],
+                    "before": None,
+                    "change_type": "added",
+                    "path": "policies.teams.alpha.allowed_clients",
+                },
+                {
+                    "after": ["codex"],
+                    "before": None,
+                    "change_type": "added",
+                    "path": 'policies.teams["0team"].allowed_clients',
+                },
+            ],
+        )
+        service_type.return_value.policy_version.assert_called_once_with(
+            organization_id="xpounder",
+            credential_env="HORMUZ_POLICY_ADMIN_TOKEN",
+            version_id=None,
+        )
+
+    def test_policy_compare_returns_zero_for_reordered_allowlists(self) -> None:
+        context = GatewayConfig.load_policy_validation_context(ROOT / "config.example.json")
+        fixture = json.loads(
+            (ROOT / "tests" / "fixtures" / "policies" / "policy-document-v1.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        baseline_document = PolicyDocument.from_mapping(fixture, config=context)
+        candidate_mapping = json.loads(json.dumps(fixture))
+        candidate_mapping["policies"]["organization"]["allowed_clients"].reverse()
+        candidate_mapping["policies"]["organization"]["allowed_models"].reverse()
+        candidate_document = PolicyDocument.from_mapping(candidate_mapping, config=context)
+        baseline = PolicyVersionRecord(
+            organization_id="xpounder",
+            version_id=baseline_document.version_id,
+            content_sha256=baseline_document.content_sha256,
+            created_at=datetime(2026, 8, 27, tzinfo=timezone.utc),
+            author_kind="static",
+            author_identity_key="static:" + "a" * 64,
+            change_summary=baseline_document.redacted_change_summary(),
+            document=baseline_document,
+        )
+
+        with (
+            tempfile.TemporaryDirectory() as temporary,
+            mock.patch("hormuz.cli.GatewayConfig.load", return_value=self.config),
+            mock.patch("hormuz.cli.PolicyControlService") as service_type,
+        ):
+            candidate_path = Path(temporary) / "candidate.json"
+            candidate_path.write_text(json.dumps(candidate_mapping), encoding="utf-8")
+            service_type.return_value.policy_version.return_value = baseline
+            output = io.StringIO()
+            with redirect_stdout(output):
+                result = main(
+                    [
+                        "policy",
+                        "compare",
+                        str(candidate_path),
+                        "--organization",
+                        "xpounder",
+                        "--json",
+                    ]
+                )
+
+        self.assertEqual(result, 0)
+        comparison = json.loads(output.getvalue())
+        validate_contract(comparison)
+        self.assertTrue(comparison["identical"])
+        self.assertEqual(comparison["changes"], [])
+        self.assertNotEqual(candidate_document.version_id, baseline_document.version_id)
+        self.assertEqual(comparison["candidate"]["version_id"], candidate_document.version_id)
+
+    def test_policy_preview_pins_active_before_saved_candidate_and_denies_with_three(self) -> None:
+        context = GatewayConfig.load_policy_validation_context(ROOT / "config.example.json")
+        fixture = json.loads(
+            (ROOT / "tests" / "fixtures" / "policies" / "policy-document-v1.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        baseline_document = PolicyDocument.from_mapping(fixture, config=context)
+        candidate_mapping = json.loads(json.dumps(fixture))
+        candidate_mapping["policies"]["actors"]["alice"] = {"allowed_models": []}
+        candidate_document = PolicyDocument.from_mapping(candidate_mapping, config=context)
+        created_at = datetime(2026, 8, 27, tzinfo=timezone.utc)
+
+        def version(document: PolicyDocument) -> PolicyVersionRecord:
+            return PolicyVersionRecord(
+                organization_id="xpounder",
+                version_id=document.version_id,
+                content_sha256=document.content_sha256,
+                created_at=created_at,
+                author_kind="static",
+                author_identity_key="static:" + "a" * 64,
+                change_summary=document.redacted_change_summary(),
+                document=document,
+            )
+
+        usage_store = mock.Mock()
+        usage_store.monthly_totals.return_value = MonthlyTotals()
+        with (
+            mock.patch("hormuz.cli.GatewayConfig.load", return_value=self.config),
+            mock.patch("hormuz.cli.PolicyControlService") as service_type,
+            mock.patch("hormuz.cli.create_usage_store", return_value=usage_store) as create_store,
+        ):
+            service = service_type.return_value
+            service.policy_version.side_effect = [version(baseline_document), version(candidate_document)]
+            output = io.StringIO()
+            with redirect_stdout(output):
+                result = main(
+                    [
+                        "policy",
+                        "preview",
+                        "--version",
+                        candidate_document.version_id,
+                        "--organization",
+                        "xpounder",
+                        "--actor",
+                        "alice",
+                        "--client",
+                        "codex",
+                        "--protocol",
+                        "openai",
+                        "--model",
+                        "gpt-5.4-mini",
+                        "--max-output-tokens",
+                        "1000",
+                        "--json",
+                    ]
+                )
+
+        self.assertEqual(result, 3)
+        preview = json.loads(output.getvalue())
+        validate_contract(preview)
+        self.assertEqual(preview["schema_id"], "hormuz.policy-preview")
+        self.assertEqual(preview["usage_basis"], "current")
+        self.assertTrue(preview["baseline"]["decision"]["allowed"])
+        self.assertFalse(preview["candidate"]["decision"]["allowed"])
+        self.assertEqual(
+            service.policy_version.call_args_list,
+            [
+                mock.call(
+                    organization_id="xpounder",
+                    credential_env="HORMUZ_POLICY_ADMIN_TOKEN",
+                    version_id=None,
+                ),
+                mock.call(
+                    organization_id="xpounder",
+                    credential_env="HORMUZ_POLICY_ADMIN_TOKEN",
+                    version_id=candidate_document.version_id,
+                ),
+            ],
+        )
+        create_store.assert_called_once_with(self.config, read_only=True)
+        self.assertEqual(usage_store.monthly_totals.call_count, 3)
+
+    def test_legacy_policy_check_output_remains_byte_for_byte_compatible(self) -> None:
+        usage_store = mock.Mock()
+        usage_store.monthly_totals.return_value = MonthlyTotals()
+        request = [
+            "--actor",
+            "alice",
+            "--client",
+            "codex",
+            "--protocol",
+            "openai",
+            "--model",
+            "gpt-5.4-mini",
+            "--max-output-tokens",
+            "1000",
+        ]
+        with (
+            mock.patch("hormuz.cli.GatewayConfig.load", return_value=self.config),
+            mock.patch("hormuz.cli.create_usage_store", return_value=usage_store),
+        ):
+            legacy = io.StringIO()
+            with redirect_stdout(legacy):
+                legacy_result = main(["policy-check", *request])
+            primary = io.StringIO()
+            with redirect_stdout(primary):
+                primary_result = main(["policy", "check", *request])
+
+        self.assertEqual(legacy_result, primary_result)
+        self.assertEqual(legacy.getvalue(), primary.getvalue())
+        validate_contract(json.loads(legacy.getvalue()))
+        self.assertEqual(json.loads(legacy.getvalue())["schema_id"], "hormuz.policy-decision")
 
     def test_policy_create_is_offline_private_and_matches_validation(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -1056,16 +1357,19 @@ class ClientConfigTests(unittest.TestCase):
         )
         self.assertEqual(seal.command, "custody")
         self.assertEqual(seal.custody_command, "seal")
-        custody_executor = build_parser().parse_args(["custody-executor", "register-assets"])
-        self.assertEqual(custody_executor.command, "custody-executor")
+        custody_executor = build_parser().parse_args(["custody", "executor", "register", "assets"])
+        self.assertEqual(custody_executor.command, "custody")
+        self.assertEqual(custody_executor.custody_command, "executor")
         self.assertEqual(custody_executor.custody_executor_command, "register-assets")
-        anchor = build_parser().parse_args(["audit-anchor", "--kind", "security"])
-        self.assertEqual(anchor.command, "audit-anchor")
+        anchor = build_parser().parse_args(["audit", "anchor", "--kind", "security"])
+        self.assertEqual(anchor.command, "audit")
+        self.assertEqual(anchor.audit_command, "anchor")
         self.assertEqual(anchor.kind, "security")
         chain = build_parser().parse_args(
-            ["audit-chain", "epoch", "--checkpoint", "/secure/checkpoint.json", "--reason", "restore", "--confirm", "START_NEW_AUDIT_CHAIN_EPOCH"]
+            ["audit", "chain", "epoch", "--checkpoint", "/secure/checkpoint.json", "--reason", "restore", "--confirm", "START_NEW_AUDIT_CHAIN_EPOCH"]
         )
-        self.assertEqual(chain.command, "audit-chain")
+        self.assertEqual(chain.command, "audit")
+        self.assertEqual(chain.audit_command, "chain")
         self.assertEqual(chain.audit_chain_command, "epoch")
 
 if __name__ == "__main__":

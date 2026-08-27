@@ -38,7 +38,7 @@ explicitly in deployment configuration.
    checks owner-only permissions, decrypts it in process memory, and makes it a
    protected redaction value. It fails closed rather than falling back to an
    environment source.
-5. `audit-anchor` is an explicit operator command. It accepts only current,
+5. `audit anchor` is an explicit operator command. It accepts only current,
    metadata-only tenant audit events, creates a versioned SHA-256 hash chain,
    verifies it, and writes one S3 object under Object Lock `COMPLIANCE` mode
    with optional legal hold. The AWS profile uses SSE-KMS; the self-hosted

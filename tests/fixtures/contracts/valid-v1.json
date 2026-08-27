@@ -128,6 +128,78 @@
       }
     ]
   },
+  "policy_comparison": {
+    "schema_id": "hormuz.policy-comparison",
+    "schema_version": 1,
+    "organization_id": "xpounder",
+    "baseline": {
+      "version_id": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "content_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    },
+    "candidate": {
+      "version_id": "sha256:1123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "content_sha256": "1123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    },
+    "identical": false,
+    "changes": [
+      {
+        "path": "policies.organization.max_output_tokens",
+        "change_type": "changed",
+        "before": 16000,
+        "after": 4000
+      }
+    ]
+  },
+  "policy_preview": {
+    "schema_id": "hormuz.policy-preview",
+    "schema_version": 1,
+    "organization_id": "xpounder",
+    "evaluated_at": "2026-08-27T05:30:00+00:00",
+    "usage_period": {
+      "starts_at": "2026-08-01T00:00:00+00:00",
+      "ends_before": "2026-09-01T00:00:00+00:00"
+    },
+    "usage_basis": "current",
+    "request": {
+      "actor_id": "alice",
+      "client": "codex",
+      "protocol": "openai",
+      "requested_model": "gpt-5.4-mini",
+      "requested_output_tokens": 1000
+    },
+    "baseline": {
+      "version_id": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "content_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "decision": {
+        "schema_id": "hormuz.policy-decision",
+        "schema_version": 1,
+        "allowed": true,
+        "action": "allowed",
+        "reason": "Requested model is allowed by policy.",
+        "requested_model": "gpt-5.4-mini",
+        "resolved_alias": "gpt-5.4-mini",
+        "routed_model": "gpt-5.4-mini",
+        "max_output_tokens": 16000,
+        "policy_version": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+      }
+    },
+    "candidate": {
+      "version_id": "sha256:1123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "content_sha256": "1123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "decision": {
+        "schema_id": "hormuz.policy-decision",
+        "schema_version": 1,
+        "allowed": false,
+        "action": "denied",
+        "reason": "Policy does not allow this model.",
+        "requested_model": "gpt-5.4-mini",
+        "resolved_alias": null,
+        "routed_model": null,
+        "max_output_tokens": null,
+        "policy_version": "sha256:1123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+      }
+    }
+  },
   "policy_history": {
     "schema_id": "hormuz.policy-history",
     "schema_version": 1,

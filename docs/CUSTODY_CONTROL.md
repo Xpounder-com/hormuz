@@ -301,7 +301,7 @@ loads one tenant-qualified projection snapshot. The machine-only initial
 registration command is:
 
 ```bash
-hormuz --config /etc/hormuz/hormuz.json custody-executor register-assets
+hormuz --config /etc/hormuz/hormuz.json custody executor register assets
 ```
 
 Run it only in the executor deployment where
@@ -367,7 +367,7 @@ authorization field. It authenticates through the Hormuz service boundary. In
 managed mode, the legacy direct `custody verify`, `custody seal`, and `custody
 rewrap` commands fail with `custody_governed_executor_required`; an approval is
 not silently executed by the administrator CLI process. The separate
-`custody-executor register-assets` command is deliberately machine-only and
+`custody executor register assets` command is deliberately machine-only and
 does not accept administrator credentials or execution input.
 
 ### Custody evidence export and deletion denials
@@ -393,7 +393,7 @@ content-free check which records a new immutable `hormuz.custody-deletion-event`
 v1 with `decision: deletion_blocked`:
 
 ```bash
-hormuz --config /etc/hormuz/hormuz.json custody evidence deletion-check \
+hormuz --config /etc/hormuz/hormuz.json custody evidence deletion check \
   --organization acme \
   --source-schema-id hormuz.custody-control-event \
   --source-schema-version 1 \
@@ -427,7 +427,7 @@ v1 and `hormuz.custody-deletion-event` v1 are strict metadata-only source
 records. Each is wrapped only by the strict source-allowlisted
 `hormuz.commit-audit-chain-entry` v2 format; version-1 chain entries remain
 untouched for historical gateway evidence. All are listed in `hormuz
-contract-manifest` and covered by compatibility fixtures.
+`contract manifest` and covered by compatibility fixtures.
 
 This checkpoint proves governed destructive lifecycle authorization,
 two-current-administrator enforcement, immutable asset generation identity,

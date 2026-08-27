@@ -333,7 +333,8 @@ class CustodyControlUnitTests(unittest.TestCase):
             [
                 "custody",
                 "evidence",
-                "deletion-check",
+                "deletion",
+                "check",
                 "--organization",
                 "xpounder",
                 "--source-schema-id",
@@ -348,9 +349,10 @@ class CustodyControlUnitTests(unittest.TestCase):
         self.assertFalse(hasattr(deletion_check, "delete"))
 
     def test_machine_catalog_registration_has_no_human_or_plaintext_arguments(self) -> None:
-        parsed = build_parser().parse_args(["custody-executor", "register-assets"])
+        parsed = build_parser().parse_args(["custody", "executor", "register", "assets"])
 
-        self.assertEqual(parsed.command, "custody-executor")
+        self.assertEqual(parsed.command, "custody")
+        self.assertEqual(parsed.custody_command, "executor")
         self.assertEqual(parsed.custody_executor_command, "register-assets")
         self.assertFalse(hasattr(parsed, "actor"))
         self.assertFalse(hasattr(parsed, "credential_env"))
@@ -369,7 +371,10 @@ class CustodyControlUnitTests(unittest.TestCase):
             mock.patch("hormuz.cli.CustodyExecutorService", executor_factory),
             redirect_stdout(output),
         ):
-            self.assertEqual(main(["--config", "ignored.json", "custody-executor", "register-assets"]), 0)
+            self.assertEqual(
+                main(["--config", "ignored.json", "custody", "executor", "register", "assets"]),
+                0,
+            )
         executor_factory.assert_called_once_with(config)
         service.register_asset_catalog.assert_called_once_with()
         self.assertEqual(output.getvalue(), "custody asset catalog registered: organizations=1 assets=2\n")
