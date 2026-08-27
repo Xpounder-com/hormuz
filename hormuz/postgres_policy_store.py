@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Iterator
 from uuid import uuid4
 
@@ -200,51 +200,57 @@ class PostgresPolicyControlStore(PostgresPolicyRuntimeStore):
         with self._transaction(organization_id) as connection:
             with connection.cursor() as cursor:
                 self._require_administrator(cursor, organization_id=organization_id, caller=caller)
-                cursor.execute(
-                    """
-                    INSERT INTO policy_versions (
-                        organization_id, version_id, content_sha256, document_json, change_summary,
-                        created_at, author_kind, author_identity_key
-                    ) VALUES (%s, %s, %s, %s::jsonb, %s::jsonb, %s, %s, %s)
-                    ON CONFLICT (organization_id, content_sha256) DO NOTHING
-                    RETURNING organization_id, version_id, content_sha256, document_json, change_summary,
-                              created_at, author_kind, author_identity_key
-                    """,
-                    (
-                        organization_id,
-                        document.version_id,
-                        document.content_sha256,
-                        document.canonical_json,
-                        json.dumps(document.redacted_change_summary(), sort_keys=True, separators=(",", ":")),
-                        now,
-                        caller.authentication_kind,
-                        _identity_key(caller),
-                    ),
-                )
-                row = cursor.fetchone()
-                if row is None:
-                    cursor.execute(
-                        """
-                        SELECT organization_id, version_id, content_sha256, document_json, change_summary,
-                               created_at, author_kind, author_identity_key
-                        FROM policy_versions
-                        WHERE organization_id = %s AND content_sha256 = %s
-                        """,
-                        (organization_id, document.content_sha256),
-                    )
-                    row = cursor.fetchone()
-                    if row is None:  # pragma: no cover - protected by unique constraint
-                        raise PostgresStorageError("policy_version_unavailable")
-                    return _version_from_row(row, config=self._config)
-                self._record_event(
+                version, _inserted = self._stage_version_locked(
                     cursor,
                     organization_id=organization_id,
-                    event_type="policy_staged",
-                    actor=caller,
-                    version_id=document.version_id,
-                    change_summary=document.redacted_change_summary(),
+                    caller=caller,
+                    document=document,
+                    occurred_at=now,
                 )
-        return _version_from_row(row, config=self._config)
+        return version
+
+    def apply(
+        self,
+        *,
+        organization_id: str,
+        caller: PolicyAdministrator,
+        document: PolicyDocument,
+        expected_active_version_id: str | None = None,
+    ) -> PolicyActivation:
+        """Atomically stage, when needed, and activate a validated document."""
+
+        if document.organization_id != organization_id:
+            raise PolicyControlError("policy_document_organization_mismatch")
+        with self._transaction(organization_id) as connection:
+            with connection.cursor() as cursor:
+                self._lock_tenant(cursor, organization_id)
+                self._require_administrator(cursor, organization_id=organization_id, caller=caller)
+                existing = self._active_activation_row(cursor, organization_id=organization_id)
+                self._require_expected_active(existing, expected_active_version_id)
+                if existing is not None and str(existing["version_id"]) == document.version_id:
+                    return _activation_from_row(existing, action="policy_activated")
+
+                staged_at = datetime.now(timezone.utc)
+                self._stage_version_locked(
+                    cursor,
+                    organization_id=organization_id,
+                    caller=caller,
+                    document=document,
+                    occurred_at=staged_at,
+                )
+                activated_at = datetime.now(timezone.utc)
+                if activated_at <= staged_at:
+                    activated_at = staged_at + timedelta(microseconds=1)
+                return self._activate_version_locked(
+                    cursor,
+                    organization_id=organization_id,
+                    caller=caller,
+                    version_id=document.version_id,
+                    event_type="policy_activated",
+                    require_previously_active=False,
+                    existing=existing,
+                    occurred_at=activated_at,
+                )
 
     def activate(
         self,
@@ -252,6 +258,7 @@ class PostgresPolicyControlStore(PostgresPolicyRuntimeStore):
         organization_id: str,
         caller: PolicyAdministrator,
         version_id: str,
+        expected_active_version_id: str | None = None,
     ) -> PolicyActivation:
         return self._set_active_version(
             organization_id=organization_id,
@@ -259,6 +266,7 @@ class PostgresPolicyControlStore(PostgresPolicyRuntimeStore):
             version_id=version_id,
             event_type="policy_activated",
             require_previously_active=False,
+            expected_active_version_id=expected_active_version_id,
         )
 
     def rollback(
@@ -266,15 +274,43 @@ class PostgresPolicyControlStore(PostgresPolicyRuntimeStore):
         *,
         organization_id: str,
         caller: PolicyAdministrator,
-        version_id: str,
+        version_id: str | None = None,
+        expected_active_version_id: str | None = None,
     ) -> PolicyActivation:
-        return self._set_active_version(
-            organization_id=organization_id,
-            caller=caller,
-            version_id=version_id,
-            event_type="policy_rolled_back",
-            require_previously_active=True,
-        )
+        with self._transaction(organization_id) as connection:
+            with connection.cursor() as cursor:
+                self._lock_tenant(cursor, organization_id)
+                self._require_administrator(cursor, organization_id=organization_id, caller=caller)
+                existing = self._active_activation_row(cursor, organization_id=organization_id)
+                self._require_expected_active(existing, expected_active_version_id)
+                target_version_id = version_id
+                if target_version_id is None:
+                    if existing is None or int(existing["generation"]) <= 1:
+                        raise PolicyControlError("policy_rollback_predecessor_unavailable")
+                    cursor.execute(
+                        """
+                        SELECT version_id
+                        FROM policy_control_events
+                        WHERE organization_id = %s
+                          AND generation = %s
+                          AND event_type IN ('policy_activated', 'policy_rolled_back')
+                        """,
+                        (organization_id, int(existing["generation"]) - 1),
+                    )
+                    predecessors = cursor.fetchall()
+                    if len(predecessors) != 1 or predecessors[0]["version_id"] is None:
+                        raise PolicyControlError("policy_rollback_predecessor_unavailable")
+                    target_version_id = str(predecessors[0]["version_id"])
+                return self._activate_version_locked(
+                    cursor,
+                    organization_id=organization_id,
+                    caller=caller,
+                    version_id=target_version_id,
+                    event_type="policy_rolled_back",
+                    require_previously_active=True,
+                    existing=existing,
+                    occurred_at=datetime.now(timezone.utc),
+                )
 
     def grant_administrator(
         self,
@@ -575,83 +611,180 @@ class PostgresPolicyControlStore(PostgresPolicyRuntimeStore):
         version_id: str,
         event_type: str,
         require_previously_active: bool,
+        expected_active_version_id: str | None,
     ) -> PolicyActivation:
-        now = datetime.now(timezone.utc)
         with self._transaction(organization_id) as connection:
             with connection.cursor() as cursor:
                 self._lock_tenant(cursor, organization_id)
                 self._require_administrator(cursor, organization_id=organization_id, caller=caller)
-                cursor.execute(
-                    "SELECT 1 FROM policy_versions WHERE organization_id = %s AND version_id = %s",
-                    (organization_id, version_id),
-                )
-                if cursor.fetchone() is None:
-                    raise PolicyControlError("policy_version_not_found")
-                if require_previously_active:
-                    cursor.execute(
-                        """
-                        SELECT 1 FROM policy_control_events
-                        WHERE organization_id = %s
-                          AND version_id = %s
-                          AND event_type IN ('policy_activated', 'policy_rolled_back')
-                        """,
-                        (organization_id, version_id),
-                    )
-                    if cursor.fetchone() is None:
-                        raise PolicyControlError("policy_rollback_target_not_previously_active")
-                cursor.execute(
-                    """
-                    SELECT organization_id, version_id, generation, activated_at,
-                           activated_by_kind, activated_by_identity_key
-                    FROM policy_active_versions
-                    WHERE organization_id = %s
-                    FOR UPDATE
-                    """,
-                    (organization_id,),
-                )
-                existing = cursor.fetchone()
-                if existing is not None and str(existing["version_id"]) == version_id:
-                    return _activation_from_row(existing, action=event_type)
-                generation = 1 if existing is None else int(existing["generation"]) + 1
-                cursor.execute(
-                    """
-                    INSERT INTO policy_active_versions (
-                        organization_id, version_id, generation, activated_at,
-                        activated_by_kind, activated_by_identity_key
-                    ) VALUES (%s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (organization_id) DO UPDATE
-                    SET version_id = EXCLUDED.version_id,
-                        generation = EXCLUDED.generation,
-                        activated_at = EXCLUDED.activated_at,
-                        activated_by_kind = EXCLUDED.activated_by_kind,
-                        activated_by_identity_key = EXCLUDED.activated_by_identity_key
-                    """,
-                    (
-                        organization_id,
-                        version_id,
-                        generation,
-                        now,
-                        caller.authentication_kind,
-                        _identity_key(caller),
-                    ),
-                )
-                activation = PolicyActivation(
-                    organization_id=organization_id,
-                    version_id=version_id,
-                    generation=generation,
-                    activated_at=now,
-                    activated_by_kind=caller.authentication_kind,
-                    activated_by_identity_key=_identity_key(caller),
-                    action=event_type,
-                )
-                self._record_event(
+                existing = self._active_activation_row(cursor, organization_id=organization_id)
+                self._require_expected_active(existing, expected_active_version_id)
+                return self._activate_version_locked(
                     cursor,
                     organization_id=organization_id,
-                    event_type=event_type,
-                    actor=caller,
+                    caller=caller,
                     version_id=version_id,
-                    generation=generation,
+                    event_type=event_type,
+                    require_previously_active=require_previously_active,
+                    existing=existing,
+                    occurred_at=datetime.now(timezone.utc),
                 )
+
+    def _stage_version_locked(
+        self,
+        cursor: Any,
+        *,
+        organization_id: str,
+        caller: PolicyAdministrator,
+        document: PolicyDocument,
+        occurred_at: datetime,
+    ) -> tuple[PolicyVersionRecord, bool]:
+        change_summary = document.redacted_change_summary()
+        cursor.execute(
+            """
+            INSERT INTO policy_versions (
+                organization_id, version_id, content_sha256, document_json, change_summary,
+                created_at, author_kind, author_identity_key
+            ) VALUES (%s, %s, %s, %s::jsonb, %s::jsonb, %s, %s, %s)
+            ON CONFLICT (organization_id, content_sha256) DO NOTHING
+            RETURNING organization_id, version_id, content_sha256, document_json, change_summary,
+                      created_at, author_kind, author_identity_key
+            """,
+            (
+                organization_id,
+                document.version_id,
+                document.content_sha256,
+                document.canonical_json,
+                json.dumps(change_summary, sort_keys=True, separators=(",", ":")),
+                occurred_at,
+                caller.authentication_kind,
+                _identity_key(caller),
+            ),
+        )
+        row = cursor.fetchone()
+        if row is None:
+            cursor.execute(
+                """
+                SELECT organization_id, version_id, content_sha256, document_json, change_summary,
+                       created_at, author_kind, author_identity_key
+                FROM policy_versions
+                WHERE organization_id = %s AND content_sha256 = %s
+                """,
+                (organization_id, document.content_sha256),
+            )
+            row = cursor.fetchone()
+            if row is None:  # pragma: no cover - protected by unique constraint
+                raise PostgresStorageError("policy_version_unavailable")
+            return _version_from_row(row, config=self._config), False
+        self._record_event(
+            cursor,
+            organization_id=organization_id,
+            event_type="policy_staged",
+            actor=caller,
+            version_id=document.version_id,
+            change_summary=change_summary,
+            occurred_at=occurred_at,
+        )
+        return _version_from_row(row, config=self._config), True
+
+    def _active_activation_row(self, cursor: Any, *, organization_id: str) -> dict[str, object] | None:
+        cursor.execute(
+            """
+            SELECT organization_id, version_id, generation, activated_at,
+                   activated_by_kind, activated_by_identity_key
+            FROM policy_active_versions
+            WHERE organization_id = %s
+            FOR UPDATE
+            """,
+            (organization_id,),
+        )
+        return cursor.fetchone()
+
+    def _require_expected_active(
+        self,
+        existing: dict[str, object] | None,
+        expected_active_version_id: str | None,
+    ) -> None:
+        if expected_active_version_id is None:
+            return
+        if existing is None or str(existing["version_id"]) != expected_active_version_id:
+            raise PolicyControlError("policy_active_version_mismatch")
+
+    def _activate_version_locked(
+        self,
+        cursor: Any,
+        *,
+        organization_id: str,
+        caller: PolicyAdministrator,
+        version_id: str,
+        event_type: str,
+        require_previously_active: bool,
+        existing: dict[str, object] | None,
+        occurred_at: datetime,
+    ) -> PolicyActivation:
+        cursor.execute(
+            "SELECT 1 FROM policy_versions WHERE organization_id = %s AND version_id = %s",
+            (organization_id, version_id),
+        )
+        if cursor.fetchone() is None:
+            raise PolicyControlError("policy_version_not_found")
+        if require_previously_active:
+            cursor.execute(
+                """
+                SELECT 1 FROM policy_control_events
+                WHERE organization_id = %s
+                  AND version_id = %s
+                  AND event_type IN ('policy_activated', 'policy_rolled_back')
+                """,
+                (organization_id, version_id),
+            )
+            if cursor.fetchone() is None:
+                raise PolicyControlError("policy_rollback_target_not_previously_active")
+        if existing is not None and str(existing["version_id"]) == version_id:
+            return _activation_from_row(existing, action=event_type)
+
+        generation = 1 if existing is None else int(existing["generation"]) + 1
+        identity_key = _identity_key(caller)
+        cursor.execute(
+            """
+            INSERT INTO policy_active_versions (
+                organization_id, version_id, generation, activated_at,
+                activated_by_kind, activated_by_identity_key
+            ) VALUES (%s, %s, %s, %s, %s, %s)
+            ON CONFLICT (organization_id) DO UPDATE
+            SET version_id = EXCLUDED.version_id,
+                generation = EXCLUDED.generation,
+                activated_at = EXCLUDED.activated_at,
+                activated_by_kind = EXCLUDED.activated_by_kind,
+                activated_by_identity_key = EXCLUDED.activated_by_identity_key
+            """,
+            (
+                organization_id,
+                version_id,
+                generation,
+                occurred_at,
+                caller.authentication_kind,
+                identity_key,
+            ),
+        )
+        activation = PolicyActivation(
+            organization_id=organization_id,
+            version_id=version_id,
+            generation=generation,
+            activated_at=occurred_at,
+            activated_by_kind=caller.authentication_kind,
+            activated_by_identity_key=identity_key,
+            action=event_type,
+        )
+        self._record_event(
+            cursor,
+            organization_id=organization_id,
+            event_type=event_type,
+            actor=caller,
+            version_id=version_id,
+            generation=generation,
+            occurred_at=occurred_at,
+        )
         return activation
 
     def _lock_tenant(self, cursor: Any, organization_id: str) -> None:
@@ -715,12 +848,14 @@ class PostgresPolicyControlStore(PostgresPolicyRuntimeStore):
         generation: int | None = None,
         reason_code: str | None = None,
         change_summary: dict[str, object] | None = None,
+        occurred_at: datetime | None = None,
     ) -> None:
+        event_time = datetime.now(timezone.utc) if occurred_at is None else occurred_at
         event = {
             "event_schema_id": POLICY_CONTROL_EVENT_SCHEMA_ID,
             "event_schema_version": POLICY_CONTROL_EVENT_SCHEMA_VERSION,
             "organization_id": organization_id,
-            "occurred_at": datetime.now(timezone.utc).isoformat(),
+            "occurred_at": event_time.isoformat(),
             "event_type": event_type,
             "actor_kind": actor.authentication_kind if actor is not None else "break_glass",
             "actor_identity_key": _identity_key(actor) if actor is not None else "break_glass",

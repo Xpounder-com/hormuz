@@ -189,11 +189,41 @@ Invalid documents return a schema-owned field path, a content-safe reason, and
 an actionable hint when one is available; submitted policy values are never
 repeated in the diagnostic.
 
-After staging and activation, an authenticated policy administrator can inspect
-the active document, read a bounded lifecycle timeline, or export an owner-only
-copy. `show` and `export` accept `--version sha256:...` to select a non-active
-immutable version. History defaults to the latest 20 events and is capped at
-100:
+Apply a reviewed candidate in one command. File reading, validation, and
+canonicalization finish before Hormuz acquires the tenant database lock; staging
+and activation then commit atomically:
+
+```bash
+python3 -m hormuz --config hormuz.json policy apply engineering-standard.json \
+  --organization xpounder \
+  --if-active sha256:...
+```
+
+`--if-active` is optional and prevents replacing a version another
+administrator activated after the review. Applying the active document changes
+neither its generation nor its history. Applying an already staged inactive
+document records only activation; applying a new document records staging and
+then activation in deterministic order. The command never prompts: use
+`policy compare` and `policy preview` as the deliberate review steps.
+
+Undo the latest activation generation without looking up a timestamp or staged
+version:
+
+```bash
+python3 -m hormuz --config hormuz.json policy rollback \
+  --organization xpounder \
+  --if-active sha256:...
+```
+
+Rollback is a new audited activation of the version used by the immediately
+preceding generation. Consequently, running rollback repeatedly can toggle
+between the version just left and the version just restored. Advanced workflows
+may still select an earlier active version with `--version sha256:...`.
+
+After activation, an authenticated policy administrator can inspect the active
+document, read a bounded lifecycle timeline, or export an owner-only copy.
+`show` and `export` accept `--version sha256:...` to select a non-active immutable
+version. History defaults to the latest 20 events and is capped at 100:
 
 ```bash
 python3 -m hormuz --config hormuz.json policy show \

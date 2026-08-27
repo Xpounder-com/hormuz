@@ -142,6 +142,37 @@ a safe reason, with a correction hint when one is available. Diagnostics never
 repeat submitted field names, scope IDs, model aliases, budget values, or other
 policy values.
 
+The normal administrator path applies a reviewed candidate in one command:
+
+```bash
+hormuz --config /etc/hormuz/hormuz.json policy apply engineering-standard.json \
+  --organization xpounder \
+  --credential-env HORMUZ_POLICY_ADMIN_TOKEN \
+  --if-active sha256:...
+```
+
+Hormuz reads, validates, canonicalizes, and hashes the file before acquiring the
+tenant database lock. Inside one locked transaction it checks the optional
+`--if-active` guard, stages the immutable document when needed, and advances the
+active pointer. A guard mismatch returns the stable
+`policy_active_version_mismatch` error without staging the candidate.
+
+Apply has exact retry behavior:
+
+- If the candidate is already active, the command succeeds without an event or
+  generation change.
+- If the candidate is already staged but inactive, only an activation event is
+  added.
+- If the candidate is new, staging and activation events are committed in that
+  deterministic order.
+
+No policy-control command asks for interactive confirmation. Use `policy
+compare` and `policy preview` before apply when an administrator needs a
+deliberate review path.
+
+The separate commands remain available for advanced workflows that deliberately
+stage now and activate later:
+
 ```bash
 hormuz --config /etc/hormuz/hormuz.json policy stage \
   --organization xpounder \
@@ -151,19 +182,35 @@ hormuz --config /etc/hormuz/hormuz.json policy stage \
 hormuz --config /etc/hormuz/hormuz.json policy activate \
   --organization xpounder \
   --credential-env HORMUZ_POLICY_ADMIN_TOKEN \
-  --version sha256:...
+  --version sha256:... \
+  --if-active sha256:...
 ```
 
-Staging validates the policy against configured provider routes, canonicalizes it, hashes it, stores the immutable document with its author/time, and records only a structural change summary. The summary has field names and scope counts; it never includes model aliases, budget values, source content, or credentials. Duplicate JSON keys and non-finite numeric values are rejected before a version is created.
+Staging validates the policy against configured provider routes, canonicalizes
+it, hashes it, stores the immutable document with its author/time, and records
+only a structural change summary. The summary has field names and scope counts;
+it never includes model aliases, budget values, source content, or credentials.
+Duplicate JSON keys and non-finite numeric values are rejected before a version
+is created.
 
-Activation atomically advances one tenant's active-version pointer and records a new event. Repeating activation of the already active version is idempotent. Rollback means a new, audited activation of a previously active immutable version; it never edits history:
+By default, rollback is a one-step undo based exclusively on activation
+generation. Hormuz resolves the version used by generation `current - 1` and
+activates it in the same locked transaction:
 
 ```bash
 hormuz --config /etc/hormuz/hormuz.json policy rollback \
   --organization xpounder \
   --credential-env HORMUZ_POLICY_ADMIN_TOKEN \
-  --version sha256:...
+  --if-active sha256:...
 ```
+
+Rollback never edits history. It creates a new audited activation generation,
+so repeated rollback can toggle to the version just left. For example, undoing
+`A -> B` activates `A`; immediately undoing again uses the preceding generation
+and activates `B`. If no predecessor generation exists, Hormuz returns
+`policy_rollback_predecessor_unavailable`. An advanced administrator can still
+reactivate a selected previously active immutable version with `--version
+sha256:...`.
 
 The gateway reads the active PostgreSQL pointer when it begins each request and pins that exact version for routing, egress controls, budget reservation, and durable usage evidence. There is intentionally no managed-policy process cache, so instances converge on the next request after a committed activation. A request already in flight keeps its original snapshot.
 
@@ -330,7 +377,15 @@ The control plane is a bounded shared-state implementation, not a completed prod
 ```bash
 python3 -m unittest -v tests.test_policy_document tests.test_contracts
 HORMUZ_TEST_POSTGRES_DSN='postgresql://operator@host:5432/hormuz_test' \
-  python3 -m unittest -v tests.test_postgres
+  python3 -m unittest -v tests.test_postgres_policy_control
 ```
 
-The PostgreSQL suite proves bootstrap is transactional and one-time, non-administrators are denied, configuration drift cannot create a new root authority, immutable version activation/rollback is audited, durable control events validate against their explicit schema, separate database roles enforce their boundaries, break-glass needs administrator loss, and two runtime instances observe the committed active version.
+The PostgreSQL suite proves bootstrap is transactional and one-time,
+non-administrators are denied, configuration drift cannot create a new root
+authority, apply retries have exact event semantics, guard failures cannot
+stage a candidate, staging and activation roll back together on failure,
+generation rollback resolves and activates under one tenant lock, immutable
+version activation/rollback is audited, durable control events validate against
+their explicit schema, separate database roles enforce their boundaries,
+break-glass needs administrator loss, and two runtime instances observe the
+committed active version.

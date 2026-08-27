@@ -48,7 +48,7 @@ from hormuz.audit_chain import (
     serialize_audit_chain_checkpoint,
 )
 from hormuz.policy_document import PolicyDocument
-from hormuz.policy_repository import PolicyHistory, PolicyLifecycleEvent, PolicyVersionRecord
+from hormuz.policy_repository import PolicyActivation, PolicyHistory, PolicyLifecycleEvent, PolicyVersionRecord
 from hormuz.store import MonthlyTotals, UsageStore
 
 
@@ -633,6 +633,95 @@ class ClientConfigTests(unittest.TestCase):
                     2,
                 )
             self.assertIn("policy export failed: policy_output_exists", stderr.getvalue())
+
+    def test_policy_apply_and_rollback_expose_guarded_intuitive_commands(self) -> None:
+        active_version = "sha256:" + "a" * 64
+        candidate_version = "sha256:" + "b" * 64
+        activation = PolicyActivation(
+            organization_id="xpounder",
+            version_id=candidate_version,
+            generation=7,
+            activated_at=datetime(2026, 8, 27, tzinfo=timezone.utc),
+            activated_by_kind="static",
+            activated_by_identity_key="static:" + "c" * 64,
+            action="policy_activated",
+        )
+        with (
+            mock.patch("hormuz.cli.GatewayConfig.load", return_value=mock.sentinel.config),
+            mock.patch("hormuz.cli.PolicyControlService") as service_type,
+        ):
+            service = service_type.return_value
+            service.apply.return_value = activation
+            service.activate.return_value = activation
+            service.rollback.return_value = activation
+
+            output = io.StringIO()
+            with redirect_stdout(output):
+                self.assertEqual(
+                    main(
+                        [
+                            "policy",
+                            "apply",
+                            "candidate.json",
+                            "--organization",
+                            "xpounder",
+                            "--if-active",
+                            active_version,
+                        ]
+                    ),
+                    0,
+                )
+            self.assertIn(f"policy applied: organization=xpounder version={candidate_version}", output.getvalue())
+            service.apply.assert_called_once_with(
+                organization_id="xpounder",
+                credential_env="HORMUZ_POLICY_ADMIN_TOKEN",
+                policy_path="candidate.json",
+                if_active_version_id=active_version,
+            )
+
+            with redirect_stdout(io.StringIO()):
+                self.assertEqual(
+                    main(
+                        [
+                            "policy",
+                            "rollback",
+                            "--organization",
+                            "xpounder",
+                            "--if-active",
+                            candidate_version,
+                        ]
+                    ),
+                    0,
+                )
+            service.rollback.assert_called_once_with(
+                organization_id="xpounder",
+                credential_env="HORMUZ_POLICY_ADMIN_TOKEN",
+                version_id=None,
+                if_active_version_id=candidate_version,
+            )
+
+            with redirect_stdout(io.StringIO()):
+                self.assertEqual(
+                    main(
+                        [
+                            "policy",
+                            "activate",
+                            "--organization",
+                            "xpounder",
+                            "--version",
+                            candidate_version,
+                            "--if-active",
+                            active_version,
+                        ]
+                    ),
+                    0,
+                )
+            service.activate.assert_called_once_with(
+                organization_id="xpounder",
+                credential_env="HORMUZ_POLICY_ADMIN_TOKEN",
+                version_id=candidate_version,
+                if_active_version_id=active_version,
+            )
 
     def test_policy_compare_emits_semantic_contract_and_uses_document_exit_codes(self) -> None:
         context = GatewayConfig.load_policy_validation_context(ROOT / "config.example.json")

@@ -144,12 +144,22 @@ class PolicyControlRepository(PolicyRuntimeRepository, Protocol):
         document: PolicyDocument,
     ) -> PolicyVersionRecord: ...
 
+    def apply(
+        self,
+        *,
+        organization_id: str,
+        caller: PolicyAdministrator,
+        document: PolicyDocument,
+        expected_active_version_id: str | None = None,
+    ) -> PolicyActivation: ...
+
     def activate(
         self,
         *,
         organization_id: str,
         caller: PolicyAdministrator,
         version_id: str,
+        expected_active_version_id: str | None = None,
     ) -> PolicyActivation: ...
 
     def rollback(
@@ -157,7 +167,8 @@ class PolicyControlRepository(PolicyRuntimeRepository, Protocol):
         *,
         organization_id: str,
         caller: PolicyAdministrator,
-        version_id: str,
+        version_id: str | None = None,
+        expected_active_version_id: str | None = None,
     ) -> PolicyActivation: ...
 
     def grant_administrator(

@@ -228,6 +228,145 @@ class PostgresPolicyControlTests(PostgresTestCase):
             validate_policy_control_event(event_payload)
         staged_summaries = [event[11] for event in events if event[4] == "policy_staged"]
         self.assertTrue(all("gpt-5.4" not in summary and "10000" not in summary for summary in staged_summaries))
+
+    def test_atomic_apply_idempotency_guard_and_generation_rollback(self) -> None:
+        config, environment, _issuer = self._managed_config()
+        service = PolicyControlService(config, environ=environment)
+        service.bootstrap(organization_id="xpounder", credential_env="HORMUZ_POLICY_ADMIN_TOKEN")
+
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        path = Path(temporary.name) / "policy.json"
+
+        def apply(
+            document: dict[str, object],
+            *,
+            if_active_version_id: str | None = None,
+        ):
+            path.write_text(json.dumps(document), encoding="utf-8")
+            return service.apply(
+                organization_id="xpounder",
+                credential_env="HORMUZ_POLICY_ADMIN_TOKEN",
+                policy_path=path,
+                if_active_version_id=if_active_version_id,
+            )
+
+        first = apply(self._policy_document())
+        self.assertEqual(first.generation, 1)
+        with self.assertRaises(PolicyControlError) as raised:
+            service.rollback(
+                organization_id="xpounder",
+                credential_env="HORMUZ_POLICY_ADMIN_TOKEN",
+            )
+        self.assertEqual(raised.exception.code, "policy_rollback_predecessor_unavailable")
+
+        repeated = apply(self._policy_document(), if_active_version_id=first.version_id)
+        self.assertEqual((repeated.version_id, repeated.generation), (first.version_id, 1))
+
+        second_record = self._stage(
+            service,
+            environment=environment,
+            document=self._policy_document(openai_model="gpt-5.4"),
+        )
+        second = apply(
+            self._policy_document(openai_model="gpt-5.4"),
+            if_active_version_id=first.version_id,
+        )
+        self.assertEqual((second.version_id, second.generation), (second_record.version_id, 2))
+
+        third_document = self._policy_document(actor_blocked=True)
+        with self.assertRaises(PolicyControlError) as raised:
+            apply(third_document, if_active_version_id=first.version_id)
+        self.assertEqual(raised.exception.code, "policy_active_version_mismatch")
+        status = service.status(organization_id="xpounder", credential_env="HORMUZ_POLICY_ADMIN_TOKEN")
+        self.assertEqual(status.active.version_id if status.active else None, second.version_id)
+        self.assertEqual(len(status.versions), 2)
+
+        third = apply(third_document, if_active_version_id=second.version_id)
+        self.assertEqual(third.generation, 3)
+
+        with self.assertRaises(PolicyControlError) as raised:
+            service.activate(
+                organization_id="xpounder",
+                credential_env="HORMUZ_POLICY_ADMIN_TOKEN",
+                version_id=first.version_id,
+                if_active_version_id=first.version_id,
+            )
+        self.assertEqual(raised.exception.code, "policy_active_version_mismatch")
+
+        undone = service.rollback(
+            organization_id="xpounder",
+            credential_env="HORMUZ_POLICY_ADMIN_TOKEN",
+            if_active_version_id=third.version_id,
+        )
+        self.assertEqual((undone.version_id, undone.generation), (second.version_id, 4))
+        toggled = service.rollback(
+            organization_id="xpounder",
+            credential_env="HORMUZ_POLICY_ADMIN_TOKEN",
+            if_active_version_id=second.version_id,
+        )
+        self.assertEqual((toggled.version_id, toggled.generation), (third.version_id, 5))
+        with self.assertRaises(PolicyControlError) as raised:
+            service.rollback(
+                organization_id="xpounder",
+                credential_env="HORMUZ_POLICY_ADMIN_TOKEN",
+                if_active_version_id=first.version_id,
+            )
+        self.assertEqual(raised.exception.code, "policy_active_version_mismatch")
+
+        history = service.history(
+            organization_id="xpounder",
+            credential_env="HORMUZ_POLICY_ADMIN_TOKEN",
+            limit=20,
+        )
+        self.assertEqual(
+            [(event.event_type, event.version_id, event.generation) for event in reversed(history.events)],
+            [
+                ("policy_staged", first.version_id, None),
+                ("policy_activated", first.version_id, 1),
+                ("policy_staged", second.version_id, None),
+                ("policy_activated", second.version_id, 2),
+                ("policy_staged", third.version_id, None),
+                ("policy_activated", third.version_id, 3),
+                ("policy_rolled_back", second.version_id, 4),
+                ("policy_rolled_back", third.version_id, 5),
+            ],
+        )
+
+        repository = service._repository
+        original_record_event = repository._record_event
+
+        def fail_activation_event(cursor, **kwargs):
+            if kwargs["event_type"] == "policy_activated":
+                raise PolicyControlError("forced_activation_failure")
+            return original_record_event(cursor, **kwargs)
+
+        failed_document = self._policy_document()
+        organization_policy = failed_document["policies"]
+        assert isinstance(organization_policy, dict)
+        organization_policy = organization_policy["organization"]
+        assert isinstance(organization_policy, dict)
+        organization_policy["max_output_tokens"] = 31_000
+        before_failure = service.status(
+            organization_id="xpounder",
+            credential_env="HORMUZ_POLICY_ADMIN_TOKEN",
+        )
+        with (
+            mock.patch.object(repository, "_record_event", side_effect=fail_activation_event),
+            self.assertRaises(PolicyControlError) as raised,
+        ):
+            apply(failed_document, if_active_version_id=third.version_id)
+        self.assertEqual(raised.exception.code, "forced_activation_failure")
+        after_failure = service.status(
+            organization_id="xpounder",
+            credential_env="HORMUZ_POLICY_ADMIN_TOKEN",
+        )
+        self.assertEqual(after_failure.active, before_failure.active)
+        self.assertEqual(
+            {version.version_id for version in after_failure.versions},
+            {version.version_id for version in before_failure.versions},
+        )
+
     def test_policy_cli_uses_the_authenticated_service_boundary(self) -> None:
         config, environment, _issuer = self._managed_config()
         with tempfile.TemporaryDirectory() as temporary:

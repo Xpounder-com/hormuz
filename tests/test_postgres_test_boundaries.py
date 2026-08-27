@@ -31,6 +31,7 @@ EXPECTED_OWNERS = {
     "test_postgres_policy_control": (
         "PostgresPolicyControlTests",
         {
+            "test_atomic_apply_idempotency_guard_and_generation_rollback",
             "test_policy_control_bootstrap_activation_rollback_and_request_pinning",
             "test_policy_cli_uses_the_authenticated_service_boundary",
             "test_policy_bootstrap_cannot_drift_and_non_administrator_cannot_change_policy",
@@ -148,7 +149,7 @@ class PostgresTestBoundaryTests(unittest.TestCase):
             suite = unittest.defaultTestLoader.loadTestsFromName(f"{module_name}.{class_name}")
             self.assertEqual(suite.countTestCases(), len(expected_methods), module_name)
 
-        self.assertEqual(len(owned), 59)
+        self.assertEqual(len(owned), 60)
         self.assertFalse((ROOT / "tests" / "test_postgres.py").exists())
         self.assertFalse(
             any(name.startswith("test_") for name in PostgresTestCase.__dict__),
