@@ -21,7 +21,7 @@ FIXTURE_PATH = (
     / "tests"
     / "fixtures"
     / "policy_admin_usability"
-    / "complete-synthetic-v1.json"
+    / "complete-synthetic-v2.json"
 )
 _SPEC = importlib.util.spec_from_file_location(
     "verify_policy_admin_usability_evidence", TOOL_PATH
@@ -36,9 +36,9 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
     def _fixture(self) -> dict[str, object]:
         return json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
 
-    def _release_evidence(self) -> dict[str, object]:
+    def _candidate_evidence(self) -> dict[str, object]:
         value = self._fixture()
-        value["evidence_kind"] = "release_gate_evidence"
+        value["evidence_kind"] = "candidate_gate_evidence"
         value["operator_attestation"][  # type: ignore[index]
             "distinct_humans_verified_off_repository"
         ] = True
@@ -64,7 +64,7 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
     ) -> tuple[dict[str, object], dict[str, object]]:
         origin = copy.deepcopy(self._sessions(value, "offline")[0])
         origin["session_id"] = "paus:30000000-0000-4000-8000-000000000001"
-        origin["release_artifact_digest"] = (
+        origin["candidate_artifact_digest"] = (
             "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
         )
         origin["started_at"] = "2026-08-27T09:00:00Z"
@@ -84,16 +84,16 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
         if status == "resolved":
             correction = {
                 "resolution_commit": "c" * 40,
-                "corrected_release_source_commit": value["release"][  # type: ignore[index]
+                "corrected_candidate_source_commit": value["candidate"][  # type: ignore[index]
                     "source_commit"
                 ],
-                "corrected_release_digest": value["release"]["artifact_digest"],  # type: ignore[index]
-                "corrected_release_published_at": corrected_at,
+                "corrected_candidate_digest": value["candidate"]["artifact_digest"],  # type: ignore[index]
+                "corrected_candidate_frozen_at": corrected_at,
                 "resolution_commit_ancestor_verified": True,
                 "automated_regression_url": (
                     "https://github.com/Xpounder-com/hormuz/actions/runs/123456789"
                 ),
-                "automated_regression_source_commit": value["release"][  # type: ignore[index]
+                "automated_regression_source_commit": value["candidate"][  # type: ignore[index]
                     "source_commit"
                 ],
                 "automated_regression_workflow_path": ".github/workflows/ci.yml",
@@ -148,7 +148,7 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
     ) -> None:
         result = usability.validate_evidence(self._fixture())
 
-        self.assertFalse(result["ready_for_v1_policy_admin_claim"])
+        self.assertFalse(result["eligible_for_v1_0_0_promotion"])
         self.assertEqual(result["status"], "not_ready")
         self.assertEqual(result["offline_participant_count"], 5)
         self.assertEqual(result["offline_completed_unaided_count"], 5)
@@ -158,15 +158,25 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
         self.assertIn("synthetic_fixture", result["reasons"])
         self.assertIn("distinct_humans_not_attested", result["reasons"])
 
-    def test_complete_release_evidence_satisfies_exact_thresholds(self) -> None:
-        value = self._release_evidence()
+    def test_complete_candidate_evidence_satisfies_exact_thresholds(self) -> None:
+        value = self._candidate_evidence()
         result = usability.validate_evidence(value)
 
-        self.assertTrue(result["ready_for_v1_policy_admin_claim"])
-        self.assertEqual(result["status"], "passed_release_gate")
+        self.assertTrue(result["eligible_for_v1_0_0_promotion"])
+        self.assertEqual(result["status"], "eligible_for_unchanged_promotion")
         self.assertEqual(result["reasons"], [])
         self.assertEqual(result["offline_over_25_minutes_count"], 0)
-        self.assertEqual(value["release"]["version"], "v1.0")
+        self.assertEqual(value["candidate"]["target_version"], "v1.0.0")
+        self.assertEqual(result["target_version"], "v1.0.0")
+        self.assertEqual(
+            result["candidate_artifact_digest"],
+            value["candidate"]["artifact_digest"],
+        )
+        self.assertTrue(result["promotion_requires_exact_candidate_digest"])
+        self.assertEqual(
+            result["claim_scope"],
+            "administrator_workflow_usability_and_state_correctness",
+        )
 
     def test_preregistered_cohort_completeness_and_no_replacement_are_attested(
         self,
@@ -187,39 +197,76 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
         )
         for field, reason in requirements:
             with self.subTest(field=field):
-                value = self._release_evidence()
+                value = self._candidate_evidence()
                 value["operator_attestation"][field] = False
 
                 result = usability.validate_evidence(value)
 
-                self.assertFalse(result["ready_for_v1_policy_admin_claim"])
+                self.assertFalse(result["eligible_for_v1_0_0_promotion"])
                 self.assertIn(reason, result["reasons"])
 
-    def test_release_label_uses_stable_v1_naming(self) -> None:
-        for version in ("v1.0-alpha", "v1.1", "1.0"):
+    def test_candidate_target_version_is_exact_v1_0_0(self) -> None:
+        for version in ("v1.0", "v1.0-alpha", "v1.0.1", "1.0.0"):
             with self.subTest(version=version):
-                value = self._release_evidence()
-                value["release"]["version"] = version
+                value = self._candidate_evidence()
+                value["candidate"]["target_version"] = version
                 with self.assertRaisesRegex(
                     usability.PolicyAdminUsabilityEvidenceError,
-                    "release_version_invalid",
+                    "candidate_target_version_invalid",
                 ):
                     usability.validate_evidence(value)
+
+    def test_candidate_digest_requires_operator_verification(self) -> None:
+        value = self._candidate_evidence()
+        value["operator_attestation"]["candidate_artifact_digest_verified"] = False
+
+        result = usability.validate_evidence(value)
+
+        self.assertFalse(result["eligible_for_v1_0_0_promotion"])
+        self.assertIn("candidate_artifact_digest_not_attested", result["reasons"])
+
+    def test_schema_v1_is_rejected_instead_of_silently_reinterpreted(self) -> None:
+        value = self._candidate_evidence()
+        value["schema_version"] = 1
+
+        with self.assertRaisesRegex(
+            usability.PolicyAdminUsabilityEvidenceError,
+            "schema_identity_invalid",
+        ):
+            usability.validate_evidence(value)
+
+    def test_candidate_must_be_frozen_before_its_sessions(self) -> None:
+        value = self._candidate_evidence()
+        self._sessions(value, "offline")[0]["started_at"] = "2026-08-27T09:59:59Z"
+
+        with self.assertRaisesRegex(
+            usability.PolicyAdminUsabilityEvidenceError,
+            "session_before_candidate_frozen",
+        ):
+            usability.validate_evidence(value)
+
+        value = self._candidate_evidence()
+        value["candidate"]["frozen_at"] = "2026-08-27T20:01:00Z"
+        with self.assertRaisesRegex(
+            usability.PolicyAdminUsabilityEvidenceError,
+            "candidate_frozen_after_generation",
+        ):
+            usability.validate_evidence(value)
 
     def test_v1_gate_accepts_only_the_complete_source_archive_kit(self) -> None:
         self.assertEqual(usability.ARTIFACT_KINDS, {"source_archive"})
         for artifact_kind in ("wheel", "signed_oci"):
             with self.subTest(artifact_kind=artifact_kind):
-                value = self._release_evidence()
-                value["release"]["artifact_kind"] = artifact_kind
+                value = self._candidate_evidence()
+                value["candidate"]["artifact_kind"] = artifact_kind
                 with self.assertRaisesRegex(
                     usability.PolicyAdminUsabilityEvidenceError,
-                    "release_artifact_kind_invalid",
+                    "candidate_artifact_kind_invalid",
                 ):
                     usability.validate_evidence(value)
 
     def test_overlap_between_offline_and_postgresql_participants_is_allowed(self) -> None:
-        value = self._release_evidence()
+        value = self._candidate_evidence()
         offline_ids = {
             session["participant_id"] for session in self._sessions(value, "offline")
         }
@@ -229,11 +276,11 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
 
         self.assertEqual(len(offline_ids & postgresql_ids), 3)
         self.assertTrue(
-            usability.validate_evidence(value)["ready_for_v1_policy_admin_claim"]
+            usability.validate_evidence(value)["eligible_for_v1_0_0_promotion"]
         )
 
     def test_same_participant_sessions_must_not_overlap_in_time(self) -> None:
-        value = self._release_evidence()
+        value = self._candidate_evidence()
         postgresql = self._sessions(value, "postgresql")[0]
         postgresql["started_at"] = "2026-08-27T11:05:00Z"
         with self.assertRaisesRegex(
@@ -242,9 +289,42 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
         ):
             usability.validate_evidence(value)
 
-        postgresql["started_at"] = "2026-08-27T11:10:00Z"
+        postgresql["started_at"] = "2026-08-27T12:55:00Z"
         self.assertTrue(
-            usability.validate_evidence(value)["ready_for_v1_policy_admin_claim"]
+            usability.validate_evidence(value)["eligible_for_v1_0_0_promotion"]
+        )
+
+    def test_postgresql_cohort_starts_after_the_complete_offline_gate(self) -> None:
+        value = self._candidate_evidence()
+        postgresql = self._sessions(value, "postgresql")[0]
+        postgresql["started_at"] = "2026-08-27T12:54:59Z"
+
+        result = usability.validate_evidence(value)
+
+        self.assertFalse(result["eligible_for_v1_0_0_promotion"])
+        self.assertIn(
+            "postgresql_started_before_offline_gate_completed",
+            result["reasons"],
+        )
+
+        postgresql["started_at"] = "2026-08-27T12:55:00Z"
+        result = usability.validate_evidence(value)
+        self.assertNotIn(
+            "postgresql_started_before_offline_gate_completed",
+            result["reasons"],
+        )
+        self.assertTrue(result["eligible_for_v1_0_0_promotion"])
+
+    def test_postgresql_cohort_cannot_start_after_a_failed_offline_cohort(self) -> None:
+        value = self._candidate_evidence()
+        self._sessions(value, "offline")[0]["independence"]["assistance_count"] = 1
+
+        result = usability.validate_evidence(value)
+
+        self.assertIn("offline_completion_count_not_five", result["reasons"])
+        self.assertIn(
+            "postgresql_started_before_offline_gate_completed",
+            result["reasons"],
         )
 
     def test_offline_completion_is_bound_to_shipped_assets_and_expected_results(
@@ -288,7 +368,7 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
         )
         for label, mutation, expected_error in mutations:
             with self.subTest(label=label):
-                value = self._release_evidence()
+                value = self._candidate_evidence()
                 session = self._sessions(value, "offline")[0]
                 mutation(session["offline_verification"])
                 with self.assertRaisesRegex(
@@ -297,7 +377,7 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
                 ):
                     usability.validate_evidence(value)
 
-        value = self._release_evidence()
+        value = self._candidate_evidence()
         self._sessions(value, "offline")[0]["offline_verification"] = None
         with self.assertRaisesRegex(
             usability.PolicyAdminUsabilityEvidenceError,
@@ -306,7 +386,7 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
             usability.validate_evidence(value)
 
     def test_unknown_content_fields_and_misordered_stages_fail_closed(self) -> None:
-        value = self._release_evidence()
+        value = self._candidate_evidence()
         self._sessions(value, "offline")[0]["policy_document"] = {"content": "forbidden"}
         with self.assertRaisesRegex(
             usability.PolicyAdminUsabilityEvidenceError,
@@ -314,7 +394,7 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
         ):
             usability.validate_evidence(value)
 
-        value = self._release_evidence()
+        value = self._candidate_evidence()
         value["feedback"] = "free text must never enter the aggregate"
         with self.assertRaisesRegex(
             usability.PolicyAdminUsabilityEvidenceError,
@@ -322,7 +402,7 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
         ):
             usability.validate_evidence(value)
 
-        value = self._release_evidence()
+        value = self._candidate_evidence()
         self._sessions(value, "postgresql")[0]["postgresql_verification"]["history"][
             "actor_id"
         ] = "private-identity"
@@ -332,7 +412,7 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
         ):
             usability.validate_evidence(value)
 
-        value = self._release_evidence()
+        value = self._candidate_evidence()
         self._sessions(value, "offline")[0]["content_free_attestations"][
             "free_text_absent"
         ] = False
@@ -342,7 +422,7 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
         ):
             usability.validate_evidence(value)
 
-        value = self._release_evidence()
+        value = self._candidate_evidence()
         stages = self._sessions(value, "offline")[0]["stages"]
         stages[0], stages[1] = stages[1], stages[0]  # type: ignore[index]
         with self.assertRaisesRegex(
@@ -365,14 +445,14 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
         )
         for label, mutation in mutations:
             with self.subTest(label=label):
-                value = self._release_evidence()
+                value = self._candidate_evidence()
                 mutation(self._sessions(value, "offline")[0])
                 result = usability.validate_evidence(value)
                 self.assertEqual(result["offline_completed_unaided_count"], 4)
-                self.assertFalse(result["ready_for_v1_policy_admin_claim"])
+                self.assertFalse(result["eligible_for_v1_0_0_promotion"])
                 self.assertIn("offline_completion_count_not_five", result["reasons"])
 
-        value = self._release_evidence()
+        value = self._candidate_evidence()
         self._sessions(value, "offline")[0]["guidance_usage"].update(
             sources=["command_help", "shipped_documentation"],
             lookup_count=1,
@@ -384,7 +464,7 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
             usability.validate_evidence(value)
 
     def test_offline_time_boundaries_are_inclusive_and_enforced(self) -> None:
-        value = self._release_evidence()
+        value = self._candidate_evidence()
         result = usability.validate_evidence(value)
         self.assertEqual(result["offline_within_15_minutes_count"], 4)
         self.assertEqual(result["offline_over_25_minutes_count"], 0)
@@ -398,7 +478,7 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
         self.assertIn("offline_duration_over_25_minutes", result["reasons"])
 
     def test_aggregate_generation_cannot_precede_session_completion(self) -> None:
-        value = self._release_evidence()
+        value = self._candidate_evidence()
         value["generated_at"] = "2026-08-27T14:45:00Z"
         with self.assertRaisesRegex(
             usability.PolicyAdminUsabilityEvidenceError,
@@ -408,13 +488,13 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
 
         value["generated_at"] = "2026-08-27T14:50:00Z"
         self.assertTrue(
-            usability.validate_evidence(value)["ready_for_v1_policy_admin_claim"]
+            usability.validate_evidence(value)["eligible_for_v1_0_0_promotion"]
         )
 
     def test_future_dated_aggregate_cannot_pass_before_sessions_occur(self) -> None:
-        value = self._release_evidence()
+        value = self._candidate_evidence()
         value["generated_at"] = "2099-08-27T20:00:00Z"
-        value["release"]["published_at"] = "2099-08-27T10:00:00Z"  # type: ignore[index]
+        value["candidate"]["frozen_at"] = "2099-08-27T10:00:00Z"  # type: ignore[index]
         for session in value["sessions"]:  # type: ignore[union-attr]
             session["started_at"] = session["started_at"].replace("2026", "2099")
 
@@ -425,7 +505,7 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
             usability.validate_evidence(value)
 
     def test_exact_participant_counts_prevent_cherry_picking_extra_runs(self) -> None:
-        value = self._release_evidence()
+        value = self._candidate_evidence()
         extra = copy.deepcopy(self._sessions(value, "offline")[0])
         extra["session_id"] = "paus:10000000-0000-4000-8000-000000000006"
         extra["participant_id"] = "pau:00000000-0000-4000-8000-000000000006"
@@ -438,7 +518,7 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
         self.assertIn("offline_participant_count_not_five", result["reasons"])
 
     def test_postgresql_version_digest_generation_and_history_are_computed(self) -> None:
-        value = self._release_evidence()
+        value = self._candidate_evidence()
         session = self._sessions(value, "postgresql")[0]
         verification = session["postgresql_verification"]
         verification["apply"]["observed_version_id"] = "sha256:" + "3" * 64  # type: ignore[index]
@@ -461,7 +541,7 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
         )
         self.assertIn("blocker_open", result["reasons"])
 
-        value = self._release_evidence()
+        value = self._candidate_evidence()
         session = self._sessions(value, "postgresql")[0]
         session["postgresql_verification"]["history"]["rollback_generation"] = 4
         self._add_postgresql_blocker(
@@ -474,7 +554,7 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
         self.assertEqual(result["postgresql_completed_verified_count"], 2)
         self.assertIn("blocker_open", result["reasons"])
 
-        value = self._release_evidence()
+        value = self._candidate_evidence()
         session = self._sessions(value, "postgresql")[0]
         session["postgresql_verification"]["history"]["apply_event_type"] = (
             "policy_staged"
@@ -490,7 +570,7 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
         self.assertIn("blocker_open", result["reasons"])
 
     def test_postgresql_sessions_require_unique_isolated_tenant_scopes(self) -> None:
-        value = self._release_evidence()
+        value = self._candidate_evidence()
         self._sessions(value, "postgresql")[0]["postgresql_isolation"][
             "isolated_tenant_attested"
         ] = False
@@ -500,7 +580,7 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
         ):
             usability.validate_evidence(value)
 
-        value = self._release_evidence()
+        value = self._candidate_evidence()
         sessions = self._sessions(value, "postgresql")
         sessions[1]["postgresql_isolation"]["run_scope_id"] = sessions[0][
             "postgresql_isolation"
@@ -511,7 +591,7 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
         ):
             usability.validate_evidence(value)
 
-        value = self._release_evidence()
+        value = self._candidate_evidence()
         self._sessions(value, "offline")[0]["postgresql_isolation"] = {
             "run_scope_id": "pauscope:60000000-0000-4000-8000-000000000001",
             "isolated_tenant_attested": True,
@@ -523,7 +603,7 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
             usability.validate_evidence(value)
 
     def test_postgresql_completion_requires_both_active_version_guards(self) -> None:
-        value = self._release_evidence()
+        value = self._candidate_evidence()
         session = self._sessions(value, "postgresql")[0]
         verification = session["postgresql_verification"]
         verification["apply"]["if_active_guard_used"] = False  # type: ignore[index]
@@ -540,7 +620,7 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
         self.assertEqual(result["postgresql_completed_verified_count"], 2)
         self.assertIn("blocker_open", result["reasons"])
 
-        value = self._release_evidence()
+        value = self._candidate_evidence()
         verification = self._sessions(value, "postgresql")[0][
             "postgresql_verification"
         ]
@@ -561,11 +641,11 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
         )
         for blocker_reason in offline_reasons:
             with self.subTest(blocker_reason=blocker_reason):
-                value = self._release_evidence()
+                value = self._candidate_evidence()
                 self._add_blocked_origin(value, blocker_reason=blocker_reason)
                 result = usability.validate_evidence(value)
                 self.assertIn("blocker_open", result["reasons"])
-                self.assertFalse(result["ready_for_v1_policy_admin_claim"])
+                self.assertFalse(result["eligible_for_v1_0_0_promotion"])
 
         categories = {
             "authentication_bypass": "authentication",
@@ -574,7 +654,7 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
         }
         for blocker_reason in usability._POSTGRESQL_ONLY_BLOCKER_REASONS:
             with self.subTest(blocker_reason=blocker_reason):
-                value = self._release_evidence()
+                value = self._candidate_evidence()
                 session = self._sessions(value, "postgresql")[0]
                 self._add_postgresql_blocker(
                     value,
@@ -584,12 +664,12 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
                 )
                 result = usability.validate_evidence(value)
                 self.assertIn("blocker_open", result["reasons"])
-                self.assertFalse(result["ready_for_v1_policy_admin_claim"])
+                self.assertFalse(result["eligible_for_v1_0_0_promotion"])
 
     def test_postgresql_only_blockers_are_rejected_for_offline_sessions(self) -> None:
         for blocker_reason in usability._POSTGRESQL_ONLY_BLOCKER_REASONS:
             with self.subTest(blocker_reason=blocker_reason):
-                value = self._release_evidence()
+                value = self._candidate_evidence()
                 self._add_blocked_origin(value, blocker_reason=blocker_reason)
                 with self.assertRaisesRegex(
                     usability.PolicyAdminUsabilityEvidenceError,
@@ -598,7 +678,7 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
                     usability.validate_evidence(value)
 
     def test_postgresql_blocker_before_state_verification_needs_no_fake_state(self) -> None:
-        value = self._release_evidence()
+        value = self._candidate_evidence()
         session = self._sessions(value, "postgresql")[0]
         session["postgresql_verification"] = None
         session["stages"][0]["status"] = "failed"
@@ -616,8 +696,8 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
         self.assertEqual(result["postgresql_completed_verified_count"], 2)
         self.assertIn("blocker_open", result["reasons"])
 
-    def test_resolved_nonblocking_friction_needs_no_release_retest(self) -> None:
-        value = self._release_evidence()
+    def test_resolved_nonblocking_friction_needs_no_candidate_retest(self) -> None:
+        value = self._candidate_evidence()
         session = self._sessions(value, "offline")[0]
         finding_id = "pauf:60000000-0000-4000-8000-000000000001"
         session["friction_categories"] = ["command_discovery"]
@@ -638,7 +718,7 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
 
         result = usability.validate_evidence(value)
 
-        self.assertTrue(result["ready_for_v1_policy_admin_claim"])
+        self.assertTrue(result["eligible_for_v1_0_0_promotion"])
         self.assertEqual(result["finding_count"], 1)
 
         finding = value["findings"][0]
@@ -653,7 +733,7 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
             usability.validate_evidence(value)
 
     def test_one_session_can_record_every_observed_finding(self) -> None:
-        value = self._release_evidence()
+        value = self._candidate_evidence()
         origin, _ = self._add_blocked_origin(value)
         second_id = "pauf:40000000-0000-4000-8000-000000000002"
         origin["finding_ids"].append(second_id)  # type: ignore[union-attr]
@@ -689,15 +769,15 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
             usability.validate_evidence(value)
 
     def test_resolved_blocker_requires_regression_and_fresh_independent_retest(self) -> None:
-        value = self._release_evidence()
+        value = self._candidate_evidence()
         _, finding = self._add_blocked_origin(value, status="resolved")
 
         result = usability.validate_evidence(value)
 
-        self.assertTrue(result["ready_for_v1_policy_admin_claim"])
+        self.assertTrue(result["eligible_for_v1_0_0_promotion"])
         self.assertEqual(result["resolved_blocker_count"], 1)
 
-        value = self._release_evidence()
+        value = self._candidate_evidence()
         _, finding = self._add_blocked_origin(value, status="resolved")
         finding["correction"]["automated_regression_url"] = "manual-check"
         with self.assertRaisesRegex(
@@ -706,7 +786,7 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
         ):
             usability.validate_evidence(value)
 
-        value = self._release_evidence()
+        value = self._candidate_evidence()
         _, finding = self._add_blocked_origin(value, status="resolved")
         finding["correction"]["automated_regression_conclusion"] = "failure"
         with self.assertRaisesRegex(
@@ -715,16 +795,16 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
         ):
             usability.validate_evidence(value)
 
-        value = self._release_evidence()
+        value = self._candidate_evidence()
         _, finding = self._add_blocked_origin(value, status="resolved")
         finding["correction"]["automated_regression_source_commit"] = "d" * 40
         with self.assertRaisesRegex(
             usability.PolicyAdminUsabilityEvidenceError,
-            "finding_regression_not_for_gated_release",
+            "finding_regression_not_for_gated_candidate",
         ):
             usability.validate_evidence(value)
 
-        value = self._release_evidence()
+        value = self._candidate_evidence()
         _, finding = self._add_blocked_origin(value, status="resolved")
         finding["correction"]["automated_regression_workflow_path"] = (
             ".github/workflows/release.yml"
@@ -735,7 +815,7 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
         ):
             usability.validate_evidence(value)
 
-        value = self._release_evidence()
+        value = self._candidate_evidence()
         _, finding = self._add_blocked_origin(value, status="resolved")
         finding["correction"]["automated_regression_binding_verified"] = False
         with self.assertRaisesRegex(
@@ -744,21 +824,21 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
         ):
             usability.validate_evidence(value)
 
-        value = self._release_evidence()
+        value = self._candidate_evidence()
         _, finding = self._add_blocked_origin(value, status="resolved")
         retest_started_at = self._sessions(value, "offline")[0]["started_at"]
-        value["release"]["published_at"] = retest_started_at
-        finding["correction"]["corrected_release_published_at"] = retest_started_at
+        value["candidate"]["frozen_at"] = retest_started_at
+        finding["correction"]["corrected_candidate_frozen_at"] = retest_started_at
         with self.assertRaisesRegex(
             usability.PolicyAdminUsabilityEvidenceError,
             "finding_retest_invalid",
         ):
             usability.validate_evidence(value)
 
-        value = self._release_evidence()
+        value = self._candidate_evidence()
         origin, finding = self._add_blocked_origin(value, status="resolved")
-        origin["release_artifact_digest"] = finding["correction"][
-            "corrected_release_digest"
+        origin["candidate_artifact_digest"] = finding["correction"][
+            "corrected_candidate_digest"
         ]
         origin["participant_id"] = "pau:00000000-0000-4000-8000-000000000006"
         origin["started_at"] = "2026-08-27T10:15:00Z"
@@ -768,10 +848,10 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
         ):
             usability.validate_evidence(value)
 
-        value = self._release_evidence()
+        value = self._candidate_evidence()
         origin, finding = self._add_blocked_origin(value, status="resolved")
         origin["started_at"] = finding["correction"][
-            "corrected_release_published_at"
+            "corrected_candidate_frozen_at"
         ]
         with self.assertRaisesRegex(
             usability.PolicyAdminUsabilityEvidenceError,
@@ -779,7 +859,7 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
         ):
             usability.validate_evidence(value)
 
-        value = self._release_evidence()
+        value = self._candidate_evidence()
         _, finding = self._add_blocked_origin(value, status="resolved")
         finding["correction"]["resolution_commit_ancestor_verified"] = False
         with self.assertRaisesRegex(
@@ -788,35 +868,35 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
         ):
             usability.validate_evidence(value)
 
-    def test_resolved_blocker_is_bound_to_the_exact_gated_release(self) -> None:
+    def test_resolved_blocker_is_bound_to_the_exact_gated_candidate(self) -> None:
         mutations = (
             (
                 "artifact digest",
-                "corrected_release_digest",
+                "corrected_candidate_digest",
                 "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
             ),
-            ("source commit", "corrected_release_source_commit", "d" * 40),
+            ("source commit", "corrected_candidate_source_commit", "d" * 40),
             (
                 "publication time",
-                "corrected_release_published_at",
+                "corrected_candidate_frozen_at",
                 "2026-08-27T10:01:00Z",
             ),
         )
         for label, field, replacement in mutations:
             with self.subTest(label=label):
-                value = self._release_evidence()
+                value = self._candidate_evidence()
                 _, finding = self._add_blocked_origin(value, status="resolved")
                 finding["correction"][field] = replacement
                 with self.assertRaisesRegex(
                     usability.PolicyAdminUsabilityEvidenceError,
-                    "finding_correction_not_in_gated_release",
+                    "finding_correction_not_in_gated_candidate",
                 ):
                     usability.validate_evidence(value)
 
     def test_broad_change_requires_every_current_session_in_affected_track_to_rerun(
         self,
     ) -> None:
-        value = self._release_evidence()
+        value = self._candidate_evidence()
         _, finding = self._add_blocked_origin(
             value,
             status="resolved",
@@ -824,27 +904,27 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
             corrected_at="2026-08-27T11:30:00Z",
             retest_session_id="paus:10000000-0000-4000-8000-000000000003",
         )
-        value["release"]["published_at"] = "2026-08-27T11:30:00Z"
+        value["candidate"]["frozen_at"] = "2026-08-27T11:30:00Z"
         offline_sessions = self._sessions(value, "offline")
-        offline_sessions[0]["release_artifact_digest"] = (
+        offline_sessions[0]["candidate_artifact_digest"] = (
             "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
         )
-        offline_sessions[1]["release_artifact_digest"] = (
+        offline_sessions[1]["candidate_artifact_digest"] = (
             "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
         )
         offline_sessions[3]["started_at"] = "2026-08-27T11:30:00Z"
 
         result = usability.validate_evidence(value)
 
-        self.assertIn("broad_workflow_gate_not_fully_rerun", result["reasons"])
-
         for index, session in enumerate(offline_sessions[:5]):
-            session["release_artifact_digest"] = value["release"]["artifact_digest"]
+            session["candidate_artifact_digest"] = value["candidate"]["artifact_digest"]
             session["started_at"] = f"2026-08-27T1{3 + index}:00:00Z"
+        for index, session in enumerate(self._sessions(value, "postgresql")):
+            session["started_at"] = f"2026-08-27T18:{index * 20:02d}:00Z"
         value["generated_at"] = "2026-08-27T20:00:00Z"
         result = usability.validate_evidence(value)
         self.assertNotIn("broad_workflow_gate_not_fully_rerun", result["reasons"])
-        self.assertTrue(result["ready_for_v1_policy_admin_claim"])
+        self.assertTrue(result["eligible_for_v1_0_0_promotion"])
 
     def test_cli_exit_codes_distinguish_error_incomplete_and_passed(self) -> None:
         stderr = io.StringIO()
@@ -859,12 +939,12 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
                 0,
             )
         self.assertFalse(
-            json.loads(stdout.getvalue())["ready_for_v1_policy_admin_claim"]
+            json.loads(stdout.getvalue())["eligible_for_v1_0_0_promotion"]
         )
 
         with tempfile.TemporaryDirectory() as temporary:
-            path = Path(temporary) / "release.json"
-            incomplete = self._release_evidence()
+            path = Path(temporary) / "candidate-evidence.json"
+            incomplete = self._candidate_evidence()
             incomplete["operator_attestation"][  # type: ignore[index]
                 "distinct_humans_verified_off_repository"
             ] = False
@@ -872,7 +952,7 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
             with contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(usability.main([str(path)]), 1)
 
-            path.write_text(json.dumps(self._release_evidence()), encoding="utf-8")
+            path.write_text(json.dumps(self._candidate_evidence()), encoding="utf-8")
             with contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(usability.main([str(path)]), 0)
 
@@ -981,6 +1061,10 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
         self.assertIn("0/3", guide)
         self.assertIn("Issue #110", guide)
         self.assertIn("separate", guide)
+        self.assertIn("v1.0.0", guide)
+        self.assertIn("promote the exact tested archive and digest", guide)
+        self.assertIn("before starting any measured\nPostgreSQL session", guide)
+        self.assertIn("administrator workflow's usability", guide)
         self.assertEqual(
             set(verify_core_wheel.REQUIRED_POLICY_ADMIN_USABILITY_SDIST_PATHS),
             {

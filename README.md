@@ -78,9 +78,13 @@ complete.
 The separate [independent administrator protocol](docs/POLICY_ADMIN_USABILITY.md)
 holds the v1 usability claim at **0/5** offline and **0/3** PostgreSQL
 participants until qualifying external evidence exists. Its strict aggregate
-checks exact task order, unaided completion, timing, apply/rollback state, and
-blocker retests without retaining policy, request, credential, identity, or
-free-form content. Synthetic and internal runs never count.
+checks one frozen `v1.0.0` source-archive candidate, exact task order, unaided
+completion, offline-cohort completion before PostgreSQL, apply/rollback state,
+and blocker retests without retaining policy, request, credential, identity, or
+free-form content. A passing candidate must be promoted with exactly the tested
+bytes and SHA-256 digest; it is never rebuilt after the gate. Synthetic and
+internal runs never count. Passing proves only administrator-workflow usability
+and state correctness, not complete enterprise readiness or market validation.
 
 Independent testers should follow the
 [public-alpha onboarding guide](docs/QUIET_ALPHA.md). Its strict aggregate uses
