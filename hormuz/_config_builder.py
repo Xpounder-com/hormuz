@@ -31,6 +31,7 @@ from .config import (
     OIDCIssuerConfig,
     Policy,
     PolicyControlConfig,
+    PolicyValidationContext,
     PostgresPoolConfig,
     SecretControls,
     UpstreamConfig,
@@ -61,6 +62,42 @@ def build_gateway_config(
     environ: dict[str, str] | None = None,
 ) -> GatewayConfig:
     """Construct typed runtime configuration after strict input validation."""
+
+    return _build_gateway_config(
+        config_type,
+        path,
+        environ=environ,
+        resolve_credentials=True,
+    )
+
+
+def build_policy_validation_context(
+    config_type: type[GatewayConfig],
+    path: str | Path,
+) -> PolicyValidationContext:
+    """Project strict configuration into a credential-free policy validation view."""
+
+    config = _build_gateway_config(
+        config_type,
+        path,
+        environ=None,
+        resolve_credentials=False,
+    )
+    return PolicyValidationContext(
+        organization_ids=config.organization_ids,
+        identities_by_actor=dict(config.identities_by_actor),
+        model_routes=dict(config.model_routes),
+    )
+
+
+def _build_gateway_config(
+    config_type: type[GatewayConfig],
+    path: str | Path,
+    *,
+    environ: dict[str, str] | None,
+    resolve_credentials: bool,
+) -> GatewayConfig:
+    """Construct and validate configuration, optionally resolving credential values."""
 
     cls = config_type
     source_path = Path(path).expanduser().resolve()
@@ -608,6 +645,8 @@ def build_gateway_config(
     )
     config.validate_references()
     _validate_dedicated_ingress_credential_env(config)
+    if not resolve_credentials:
+        return config
     env = os.environ if environ is None else environ
     identities_by_token = _resolve_static_identity_tokens(tuple(static_identities), env)
     resolved_ingress = _resolve_ingress_credential(config.ingress, env)
@@ -619,7 +658,6 @@ def build_gateway_config(
         identities_by_token=identities_by_token,
         secret_controls=_resolve_secret_controls(config.secret_controls, env),
     )
-
 
 
 def _policy(value: Any, path: str) -> Policy:

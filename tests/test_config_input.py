@@ -7,6 +7,7 @@ import tempfile
 import unittest
 from contextlib import redirect_stderr
 from pathlib import Path
+from unittest import mock
 
 from hormuz.cli import main
 from hormuz.config import (
@@ -51,6 +52,14 @@ class ConfigurationInputTests(unittest.TestCase):
 
         self.assertEqual(config.listen.host, "127.0.0.1")
         self.assertIn("gpt-5.4-mini", config.model_routes)
+
+    def test_policy_validation_context_never_resolves_credentials(self) -> None:
+        with mock.patch("hormuz._config_builder.os.environ", _EnvironmentMustNotBeRead()):
+            context = GatewayConfig.load_policy_validation_context(ROOT / "config.example.json")
+
+        self.assertEqual(context.organization_ids, ("xpounder",))
+        self.assertEqual(tuple(context.identities_by_actor), ("alice",))
+        self.assertIn("gpt-5.4-mini", context.model_routes)
 
     def test_unavailable_configuration_path_is_content_free(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

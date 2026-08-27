@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Mapping
 
 from .auth import AuthenticationError, Authenticator, ControlPrincipal
-from .config import BootstrapAdministrator, GatewayConfig
+from .config import BootstrapAdministrator, GatewayConfig, PolicyValidationContext
 from .policy_document import PolicyDocument
 from .policy_repository import (
     PolicyActivation,
@@ -29,6 +29,23 @@ from .postgres_policy_store import PostgresPolicyControlStore
 
 _MAX_POLICY_DOCUMENT_BYTES = 1024 * 1024
 _BREAK_GLASS_REASON_CODES = frozenset({"all_administrators_lost", "administrator_store_recovered"})
+
+
+def load_policy_document(
+    config: GatewayConfig | PolicyValidationContext,
+    policy_path: str | Path,
+) -> PolicyDocument:
+    """Read and validate one bounded policy file without opening control-plane storage."""
+
+    path = Path(policy_path).expanduser()
+    try:
+        with path.open("rb") as source:
+            content = source.read(_MAX_POLICY_DOCUMENT_BYTES + 1)
+    except OSError as error:
+        raise PolicyControlError("policy_document_unavailable") from error
+    if len(content) > _MAX_POLICY_DOCUMENT_BYTES:
+        raise PolicyControlError("policy_document_too_large")
+    return PolicyDocument.from_json_bytes(content, config=config)
 
 
 class PolicyControlService:
@@ -84,7 +101,7 @@ class PolicyControlService:
     ) -> PolicyVersionRecord:
         self._require_configured_organization(organization_id)
         caller = self._authenticated_administrator(organization_id=organization_id, credential_env=credential_env)
-        document = self._read_document(policy_path)
+        document = load_policy_document(self._config, policy_path)
         return self._repository.stage(
             organization_id=organization_id,
             caller=caller,
@@ -240,18 +257,6 @@ class PolicyControlService:
             issuer=issuer,
             subject=subject,
         )
-
-    def _read_document(self, policy_path: str | Path) -> PolicyDocument:
-        path = Path(policy_path).expanduser()
-        try:
-            with path.open("rb") as source:
-                content = source.read(_MAX_POLICY_DOCUMENT_BYTES + 1)
-        except OSError as error:
-            raise PolicyControlError("policy_document_unavailable") from error
-        if len(content) > _MAX_POLICY_DOCUMENT_BYTES:
-            raise PolicyControlError("policy_document_too_large")
-        return PolicyDocument.from_json_bytes(content, config=self._config)
-
 
 def _bootstrap_to_administrator(value: BootstrapAdministrator) -> PolicyAdministrator:
     return PolicyAdministrator(

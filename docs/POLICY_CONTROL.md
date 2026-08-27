@@ -90,6 +90,21 @@ schema_id, schema_version, organization_id, policies, egress_controls
 
 `policies` contains organization, team, and actor overlays for allowed clients/models, fallbacks, output caps, and token/budget limits. `egress_controls` contains only the supported OpenAI storage/background flags and secret-detection mode. Prompts, responses, filenames, sources, notes, arbitrary JSON, detector values, and provider credentials are rejected.
 
+Validate a candidate before staging it:
+
+```bash
+hormuz --config /etc/hormuz/hormuz.json policy validate engineering-standard.json
+```
+
+This command reads only the local configuration and candidate file. It does
+not resolve configured credentials, open policy-control PostgreSQL,
+authenticate a policy administrator, stage a version, or change the active
+policy. A valid document reports its canonical SHA-256 version plus team and
+actor scope counts. An invalid document reports a schema-owned field path and
+a safe reason, with a correction hint when one is available. Diagnostics never
+repeat submitted field names, scope IDs, model aliases, budget values, or other
+policy values.
+
 ```bash
 hormuz --config /etc/hormuz/hormuz.json policy stage \
   --organization xpounder \

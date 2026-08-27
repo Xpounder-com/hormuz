@@ -24,7 +24,7 @@ from .audit_chain import (
     parse_audit_chain_checkpoint,
     serialize_audit_chain_checkpoint,
 )
-from .config import ConfigError, GatewayConfig
+from .config import ConfigError, GatewayConfig, PolicyValidationContext
 from .custody import (
     KEY_PURPOSES,
     CustodyError,
@@ -68,7 +68,7 @@ from .custody_repository import (
     CustodyControlStatus,
     CustodyOperationIntent,
 )
-from .policy_control import PolicyControlService
+from .policy_control import PolicyControlService, load_policy_document
 from .policy_document import PolicyDocumentError
 from .policy_repository import PolicyActivation, PolicyControlError, PolicyControlStatus, PolicyVersionRecord
 from .policy_runtime import PolicyRuntime
@@ -125,6 +125,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Bootstrap and administer immutable tenant policy versions",
     )
     policy_control_subparsers = policy_control.add_subparsers(dest="policy_control_command", required=True)
+
+    validate = policy_control_subparsers.add_parser(
+        "validate",
+        help="Validate a policy file offline without credentials or PostgreSQL",
+    )
+    validate.add_argument("file", help="Policy-document JSON path")
 
     bootstrap = policy_control_subparsers.add_parser(
         "bootstrap",
@@ -427,6 +433,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "demo":
         return _provider_free_demo()
     try:
+        if args.command == "policy" and args.policy_control_command == "validate":
+            context = GatewayConfig.load_policy_validation_context(args.config)
+            return _policy_validate(context, args.file)
         config = GatewayConfig.load(args.config)
         if args.command == "serve":
             return _serve(config)
@@ -477,7 +486,10 @@ def main(argv: list[str] | None = None) -> int:
     except (CustodyExecutionError, CustodyLifecycleError) as error:
         print(f"custody executor error: {error.code}", file=sys.stderr)
         return 2
-    except (PolicyControlError, PolicyDocumentError) as error:
+    except PolicyDocumentError as error:
+        _print_policy_document_failure(error.code, error.reason, hint=error.hint)
+        return 2
+    except PolicyControlError as error:
         print(f"policy control error: {error.code}", file=sys.stderr)
         return 2
     except (OSError, sqlite3.Error):
@@ -855,8 +867,10 @@ def _policy_check(config: GatewayConfig, args: argparse.Namespace) -> int:
 def _policy_control(config: GatewayConfig, args: argparse.Namespace) -> int:
     """Run a CLI command through the authenticated policy-control service."""
 
-    service = PolicyControlService(config)
     command = args.policy_control_command
+    if command == "validate":
+        return _policy_validate(config, args.file)
+    service = PolicyControlService(config)
     if command == "bootstrap":
         administrators = service.bootstrap(
             organization_id=args.organization,
@@ -943,6 +957,44 @@ def _policy_control(config: GatewayConfig, args: argparse.Namespace) -> int:
         )
         return 0
     raise ConfigError("unsupported policy control command")
+
+
+def _policy_validate(config: GatewayConfig | PolicyValidationContext, policy_path: str) -> int:
+    """Validate one policy document without requiring managed-policy infrastructure."""
+
+    try:
+        document = load_policy_document(config, policy_path)
+    except PolicyDocumentError as error:
+        _print_policy_document_failure(error.code, error.reason, hint=error.hint)
+        return 2
+    except PolicyControlError as error:
+        if error.code == "policy_document_unavailable":
+            _print_policy_document_failure(
+                error.code,
+                "the policy file could not be read",
+                hint="Check that the path exists and the current user can read it.",
+            )
+            return 2
+        if error.code == "policy_document_too_large":
+            _print_policy_document_failure(
+                error.code,
+                "the policy file exceeds the 1 MiB limit",
+                hint="Remove unsupported content and keep only the policy schema fields.",
+            )
+            return 2
+        raise
+    print(
+        f"policy valid: organization={document.organization_id} version={document.version_id} "
+        f"teams={len(document.team_policies)} actors={len(document.actor_policies)}"
+    )
+    return 0
+
+
+def _print_policy_document_failure(code: str, reason: str, *, hint: str | None = None) -> None:
+    print(f"policy validation failed: {code}", file=sys.stderr)
+    print(f"reason: {reason}", file=sys.stderr)
+    if hint is not None:
+        print(f"hint: {hint}", file=sys.stderr)
 
 
 def _print_policy_version(prefix: str, version: PolicyVersionRecord) -> None:
