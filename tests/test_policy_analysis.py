@@ -255,14 +255,15 @@ class PolicyAnalysisTests(unittest.TestCase):
         usage_store.monthly_totals.return_value = MonthlyTotals()
         evaluated_at = datetime(2026, 8, 27, 5, 30, tzinfo=timezone.utc)
 
-        evaluation = evaluate_policy_scenario_suite(
-            config=config,
-            usage_store=usage_store,
-            suite=suite,
-            baseline=baseline,
-            candidate=candidate,
-            evaluated_at=evaluated_at,
-        )
+        with mock.patch("hormuz.policy.PolicyRuntime") as create_policy_runtime:
+            evaluation = evaluate_policy_scenario_suite(
+                config=config,
+                usage_store=usage_store,
+                suite=suite,
+                baseline=baseline,
+                candidate=candidate,
+                evaluated_at=evaluated_at,
+            )
 
         self.assertEqual(
             [result.scenario.scenario_id for result in evaluation.scenarios],
@@ -282,6 +283,7 @@ class PolicyAnalysisTests(unittest.TestCase):
             sorted(call.kwargs["actor_id"] for call in actor_reads),
             ["alice", "bob"],
         )
+        create_policy_runtime.assert_not_called()
 
     def test_scenario_evaluation_rejects_every_unknown_actor_before_usage_reads(self) -> None:
         document = self._document()

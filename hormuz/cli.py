@@ -92,10 +92,9 @@ from .policy_templates import (
 )
 from .policy_scenarios import (
     PolicyScenarioError,
-    create_policy_scenario,
+    add_policy_scenario_to_suite,
     create_policy_scenario_suite,
     load_policy_scenario_suite,
-    replace_policy_scenario_suite,
     write_policy_evaluation,
     write_policy_scenario_suite,
 )
@@ -1470,9 +1469,8 @@ def _policy_scenarios(args: argparse.Namespace) -> int:
         return 0
     if command == "add":
         path = Path(args.file).expanduser().absolute()
-        suite = load_policy_scenario_suite(path)
-        scenario = create_policy_scenario(
-            organization_id=suite.organization_id,
+        updated = add_policy_scenario_to_suite(
+            path,
             scenario_id=args.id,
             actor_id=args.actor,
             client=args.client,
@@ -1480,8 +1478,6 @@ def _policy_scenarios(args: argparse.Namespace) -> int:
             requested_model=args.model,
             requested_output_tokens=args.max_output_tokens,
         )
-        updated = suite.with_scenario(scenario)
-        replace_policy_scenario_suite(path, updated)
         print(
             f"policy scenario added: organization={updated.organization_id} "
             f"suite={updated.suite_id} scenarios={len(updated.scenarios)}"

@@ -263,14 +263,18 @@ def evaluate_policy_scenario_suite(
         )
         for actor_id in sorted(identities)
     }
+    engines_by_actor = {
+        actor_id: PolicyEngine(
+            config,
+            cast(UsageRepository, usage_by_actor[actor_id]),
+        )
+        for actor_id in sorted(identities)
+    }
 
     results: list[PolicyScenarioResult] = []
     for scenario in suite.scenarios:
         identity = identities[scenario.actor_id]
-        engine = PolicyEngine(
-            config,
-            cast(UsageRepository, usage_by_actor[scenario.actor_id]),
-        )
+        engine = engines_by_actor[scenario.actor_id]
         baseline_decision = engine.evaluate(
             identity=identity,
             client=scenario.client,

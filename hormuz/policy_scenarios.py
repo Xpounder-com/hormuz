@@ -12,6 +12,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+try:  # pragma: no cover - unavailable only on non-POSIX platforms
+    import fcntl as _fcntl
+except ImportError:  # pragma: no cover - optimistic digest guard remains
+    _fcntl = None
+
 from .contracts import (
     ContractValidationError,
     POLICY_SCENARIO_MAX_COUNT,
@@ -22,6 +27,7 @@ from .contracts import (
 
 
 _MAX_POLICY_SCENARIO_BYTES = 1024 * 1024
+_MAX_POLICY_SCENARIO_UPDATE_RETRIES = 8
 
 
 class PolicyScenarioError(ValueError):
@@ -201,6 +207,80 @@ def create_policy_scenario(
     ).scenarios[0]
 
 
+def add_policy_scenario_to_suite(
+    path: str | Path,
+    *,
+    scenario_id: str,
+    actor_id: str,
+    client: str,
+    protocol: str,
+    requested_model: str,
+    requested_output_tokens: int | None,
+) -> PolicyScenarioSuite:
+    """Serialize a complete read-modify-write add and reject outside edits."""
+
+    selected = Path(path).expanduser()
+    for _ in range(_MAX_POLICY_SCENARIO_UPDATE_RETRIES):
+        descriptor: int | None = None
+        try:
+            _validate_input_path(selected)
+            descriptor = os.open(
+                selected,
+                os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+            )
+            if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+                raise PolicyScenarioError(
+                    "policy_scenario_suite_not_regular",
+                    "the scenario suite path is not a regular file",
+                    hint="Choose a regular JSON file.",
+                )
+            if _fcntl is not None:
+                _fcntl.flock(descriptor, _fcntl.LOCK_EX)
+            if not _descriptor_matches_path(descriptor, selected):
+                continue
+            suite = PolicyScenarioSuite.from_json_bytes(_read_policy_scenario_bytes(descriptor))
+            scenario = create_policy_scenario(
+                organization_id=suite.organization_id,
+                scenario_id=scenario_id,
+                actor_id=actor_id,
+                client=client,
+                protocol=protocol,
+                requested_model=requested_model,
+                requested_output_tokens=requested_output_tokens,
+            )
+            updated = suite.with_scenario(scenario)
+            replace_policy_scenario_suite(
+                selected,
+                updated,
+                expected_content_sha256=suite.content_sha256,
+            )
+            return updated
+        except PolicyScenarioError:
+            raise
+        except OSError:
+            raise PolicyScenarioError(
+                "policy_scenario_suite_unavailable",
+                "the scenario suite could not be updated",
+                hint="Check that the path and its directory are writable, then retry.",
+            ) from None
+        finally:
+            if descriptor is not None:
+                if _fcntl is not None:
+                    try:
+                        _fcntl.flock(descriptor, _fcntl.LOCK_UN)
+                    except OSError:
+                        pass
+                try:
+                    os.close(descriptor)
+                except OSError:
+                    pass
+    raise PolicyScenarioError(
+        "policy_scenario_concurrent_update",
+        "the scenario suite changed repeatedly during the add operation",
+        hint="Retry after other scenario editors have finished.",
+    )
+
+
 def load_policy_scenario_suite(path: str | Path) -> PolicyScenarioSuite:
     """Read one bounded regular file without following a symbolic link."""
 
@@ -218,12 +298,7 @@ def load_policy_scenario_suite(path: str | Path) -> PolicyScenarioSuite:
                 "the scenario suite path is not a regular file",
                 hint="Choose a regular JSON file.",
             )
-        content = bytearray()
-        while len(content) <= _MAX_POLICY_SCENARIO_BYTES:
-            chunk = os.read(descriptor, min(64 * 1024, _MAX_POLICY_SCENARIO_BYTES + 1 - len(content)))
-            if not chunk:
-                break
-            content.extend(chunk)
+        content = _read_policy_scenario_bytes(descriptor)
     except PolicyScenarioError:
         raise
     except OSError:
@@ -238,13 +313,7 @@ def load_policy_scenario_suite(path: str | Path) -> PolicyScenarioSuite:
                 os.close(descriptor)
             except OSError:
                 pass
-    if len(content) > _MAX_POLICY_SCENARIO_BYTES:
-        raise PolicyScenarioError(
-            "policy_scenario_suite_too_large",
-            "the scenario suite exceeds the 1 MiB limit",
-            hint=f"Keep no more than {POLICY_SCENARIO_MAX_COUNT} explicit request scenarios.",
-        )
-    return PolicyScenarioSuite.from_json_bytes(bytes(content))
+    return PolicyScenarioSuite.from_json_bytes(content)
 
 
 def write_policy_scenario_suite(
@@ -255,13 +324,31 @@ def write_policy_scenario_suite(
 ) -> None:
     """Create or explicitly replace one canonical owner-only suite file."""
 
-    _atomic_publish_json(path, suite.to_mapping(), overwrite=force, require_existing=False)
+    _atomic_publish_json(
+        path,
+        suite.to_mapping(),
+        overwrite=force,
+        require_existing=False,
+        maximum_bytes=_MAX_POLICY_SCENARIO_BYTES,
+    )
 
 
-def replace_policy_scenario_suite(path: Path, suite: PolicyScenarioSuite) -> None:
+def replace_policy_scenario_suite(
+    path: Path,
+    suite: PolicyScenarioSuite,
+    *,
+    expected_content_sha256: str,
+) -> None:
     """Atomically replace the regular suite file that was explicitly edited."""
 
-    _atomic_publish_json(path, suite.to_mapping(), overwrite=True, require_existing=True)
+    _atomic_publish_json(
+        path,
+        suite.to_mapping(),
+        overwrite=True,
+        require_existing=True,
+        maximum_bytes=_MAX_POLICY_SCENARIO_BYTES,
+        expected_content_sha256=expected_content_sha256,
+    )
 
 
 def write_policy_evaluation(path: Path, value: Mapping[str, Any], *, force: bool) -> None:
@@ -276,6 +363,41 @@ def write_policy_evaluation(path: Path, value: Mapping[str, Any], *, force: bool
             hint=str(error),
         ) from None
     _atomic_publish_json(path, value, overwrite=force, require_existing=False)
+
+
+def _read_policy_scenario_bytes(descriptor: int) -> bytes:
+    os.lseek(descriptor, 0, os.SEEK_SET)
+    content = bytearray()
+    while len(content) <= _MAX_POLICY_SCENARIO_BYTES:
+        chunk = os.read(
+            descriptor,
+            min(64 * 1024, _MAX_POLICY_SCENARIO_BYTES + 1 - len(content)),
+        )
+        if not chunk:
+            break
+        content.extend(chunk)
+    if len(content) > _MAX_POLICY_SCENARIO_BYTES:
+        raise PolicyScenarioError(
+            "policy_scenario_suite_too_large",
+            "the scenario suite exceeds the 1 MiB limit",
+            hint=f"Keep no more than {POLICY_SCENARIO_MAX_COUNT} explicit request scenarios.",
+        )
+    return bytes(content)
+
+
+def _descriptor_matches_path(descriptor: int, path: Path) -> bool:
+    """Return whether a locked descriptor is still the path's current inode."""
+
+    try:
+        descriptor_target = os.fstat(descriptor)
+        path_target = os.lstat(path)
+    except OSError:
+        return False
+    return (
+        stat.S_ISREG(path_target.st_mode)
+        and descriptor_target.st_dev == path_target.st_dev
+        and descriptor_target.st_ino == path_target.st_ino
+    )
 
 
 def _validate_input_path(path: Path) -> None:
@@ -313,9 +435,21 @@ def _atomic_publish_json(
     *,
     overwrite: bool,
     require_existing: bool,
+    maximum_bytes: int | None = None,
+    expected_content_sha256: str | None = None,
 ) -> None:
     _validate_output_target(path, overwrite=overwrite, require_existing=require_existing)
-    serialized = _pretty_json(value)
+    try:
+        serialized = _pretty_json(value)
+    except (OverflowError, RecursionError, ValueError):
+        if maximum_bytes is not None:
+            raise _policy_scenario_suite_too_large() from None
+        raise PolicyScenarioError(
+            "policy_scenario_output_unavailable",
+            "the scenario artifact could not be serialized",
+        ) from None
+    if maximum_bytes is not None and len(serialized) > maximum_bytes:
+        raise _policy_scenario_suite_too_large()
     descriptor: int | None = None
     temporary_path: str | None = None
     try:
@@ -337,6 +471,14 @@ def _atomic_publish_json(
         descriptor = None
         if overwrite:
             _validate_output_target(path, overwrite=True, require_existing=require_existing)
+            if expected_content_sha256 is not None:
+                current = load_policy_scenario_suite(path)
+                if current.content_sha256 != expected_content_sha256:
+                    raise PolicyScenarioError(
+                        "policy_scenario_concurrent_update",
+                        "the scenario suite changed during the add operation",
+                        hint="Reload the suite and retry after other editors have finished.",
+                    )
             os.replace(temporary_path, path)
         else:
             try:
@@ -408,6 +550,14 @@ def _validate_output_target(path: Path, *, overwrite: bool, require_existing: bo
             "the selected output path already exists",
             hint="Choose another path or pass --force to replace a regular file.",
         )
+
+
+def _policy_scenario_suite_too_large() -> PolicyScenarioError:
+    return PolicyScenarioError(
+        "policy_scenario_suite_too_large",
+        "the scenario suite exceeds the 1 MiB limit",
+        hint=f"Keep no more than {POLICY_SCENARIO_MAX_COUNT} explicit request scenarios.",
+    )
 
 
 def _canonical_json(value: Mapping[str, Any]) -> bytes:

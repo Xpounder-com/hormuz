@@ -31,7 +31,22 @@ class PolicyEngine:
     ):
         self.config = config
         self.store = store
-        self.policy_runtime = policy_runtime or PolicyRuntime(config)
+        # Explicit-snapshot analysis must not initialize managed policy
+        # storage. The gateway still resolves this property during startup,
+        # while compare/preview/evaluate paths can remain strictly read-only.
+        self._policy_runtime = policy_runtime
+
+    @property
+    def policy_runtime(self) -> PolicyRuntime:
+        runtime = self._policy_runtime
+        if runtime is None:
+            runtime = PolicyRuntime(self.config)
+            self._policy_runtime = runtime
+        return runtime
+
+    @policy_runtime.setter
+    def policy_runtime(self, value: PolicyRuntime) -> None:
+        self._policy_runtime = value
 
     def evaluate(
         self,
