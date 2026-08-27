@@ -345,6 +345,89 @@ class ClientConfigTests(unittest.TestCase):
         self.assertEqual(first.policy_version, second.policy_version)
         self.assertNotIn("first-static-credential", first.policy_version)
 
+    def test_policy_validate_is_local_and_reports_the_immutable_version(self) -> None:
+        output = io.StringIO()
+        fixture = ROOT / "tests" / "fixtures" / "policies" / "policy-document-v1.json"
+        with (
+            mock.patch.dict(os.environ, {}, clear=True),
+            mock.patch("hormuz.cli.GatewayConfig.load") as runtime_load,
+            mock.patch("hormuz.cli.PolicyControlService") as service,
+            redirect_stdout(output),
+        ):
+            result = main(
+                [
+                    "--config",
+                    str(ROOT / "config.example.json"),
+                    "policy",
+                    "validate",
+                    str(fixture),
+                ]
+            )
+
+        self.assertEqual(result, 0)
+        runtime_load.assert_not_called()
+        service.assert_not_called()
+        self.assertRegex(
+            output.getvalue(),
+            r"^policy valid: organization=xpounder version=sha256:[0-9a-f]{64} teams=1 actors=0\n$",
+        )
+
+    def test_policy_validate_reports_actionable_content_safe_errors(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "invalid-policy.json"
+            value = json.loads(
+                (ROOT / "tests" / "fixtures" / "policies" / "policy-document-v1.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            value["policies"]["teams"] = {
+                "do-not-echo-sensitive-team": {"allowed_models": "do-not-echo-sensitive-value"}
+            }
+            path.write_text(json.dumps(value), encoding="utf-8")
+
+            stderr = io.StringIO()
+            with (
+                mock.patch.dict(os.environ, {}, clear=True),
+                redirect_stderr(stderr),
+            ):
+                result = main(
+                    [
+                        "--config",
+                        str(ROOT / "config.example.json"),
+                        "policy",
+                        "validate",
+                        str(path),
+                    ]
+                )
+
+        self.assertEqual(result, 2)
+        self.assertIn("policy validation failed: policy_document_invalid", stderr.getvalue())
+        self.assertIn("reason: policies.teams.*.allowed_models must be an array", stderr.getvalue())
+        self.assertNotIn("do-not-echo-sensitive-team", stderr.getvalue())
+        self.assertNotIn("do-not-echo-sensitive-value", stderr.getvalue())
+
+    def test_policy_validate_explains_an_unreadable_path(self) -> None:
+        stderr = io.StringIO()
+        missing = ROOT / "missing-policy-document.json"
+        with (
+            mock.patch.dict(os.environ, {}, clear=True),
+            redirect_stderr(stderr),
+        ):
+            result = main(
+                [
+                    "--config",
+                    str(ROOT / "config.example.json"),
+                    "policy",
+                    "validate",
+                    str(missing),
+                ]
+            )
+
+        self.assertEqual(result, 2)
+        self.assertIn("policy validation failed: policy_document_unavailable", stderr.getvalue())
+        self.assertIn("hint: Check that the path exists", stderr.getvalue())
+        self.assertNotIn(str(missing), stderr.getvalue())
+
     def test_usage_report_budget_matches_policy_scope(self) -> None:
         self.assertEqual(
             _budget_for_scope(self.config, "organization", {"scope_id": "organization"}),

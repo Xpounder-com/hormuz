@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import ipaddress
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -287,6 +288,15 @@ class ModelRoute:
 
 
 @dataclass(frozen=True)
+class PolicyValidationContext:
+    """Credential-free configuration facts needed to validate a policy document."""
+
+    organization_ids: tuple[str, ...]
+    identities_by_actor: Mapping[str, Identity]
+    model_routes: Mapping[str, ModelRoute]
+
+
+@dataclass(frozen=True)
 class Policy:
     allowed_clients: tuple[str, ...] | None = None
     allowed_models: tuple[str, ...] | None = None
@@ -351,6 +361,14 @@ class GatewayConfig:
         from ._config_builder import build_gateway_config
 
         return build_gateway_config(cls, path, environ=environ)
+
+    @classmethod
+    def load_policy_validation_context(cls, path: str | Path) -> PolicyValidationContext:
+        """Load only non-secret facts required for offline policy validation."""
+
+        from ._config_builder import build_policy_validation_context
+
+        return build_policy_validation_context(cls, path)
 
     def validate_references(self) -> None:
         if self.custody_control.mode == "postgresql" and self.custody_retention is None:

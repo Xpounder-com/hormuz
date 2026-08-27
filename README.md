@@ -158,6 +158,18 @@ and retain its strict content-free artifact before issue #105 can close.
 
 ## Policies and usage
 
+Validate a managed-policy document locally without loading runtime, provider,
+database, or policy-administrator credentials:
+
+```bash
+python3 -m hormuz --config hormuz.json policy validate engineering-standard.json
+```
+
+Successful validation prints the immutable policy digest and scope counts.
+Invalid documents return a schema-owned field path, a content-safe reason, and
+an actionable hint when one is available; submitted policy values are never
+repeated in the diagnostic.
+
 Evaluate a request without calling a model:
 
 ```bash

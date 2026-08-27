@@ -13,7 +13,7 @@ import math
 from dataclasses import dataclass
 from typing import Any, Mapping
 
-from .config import GatewayConfig, Identity, Policy
+from .config import GatewayConfig, Identity, Policy, PolicyValidationContext
 from .contracts import POLICY_DOCUMENT_SCHEMA_ID, POLICY_DOCUMENT_SCHEMA_VERSION
 
 
@@ -33,9 +33,14 @@ _EGRESS_FIELDS = ("openai.allow_background", "openai.allow_response_storage", "s
 
 
 class PolicyDocumentError(ValueError):
-    """A stable validation error which does not repeat submitted content."""
+    """A stable, operator-readable error which never repeats submitted values."""
 
     code = "policy_document_invalid"
+
+    def __init__(self, reason: str, *, hint: str | None = None) -> None:
+        super().__init__(reason)
+        self.reason = reason
+        self.hint = hint
 
 
 @dataclass(frozen=True)
@@ -68,19 +73,33 @@ class PolicyDocument:
     secret_mode: str
 
     @classmethod
-    def from_mapping(cls, value: Mapping[str, Any], *, config: GatewayConfig) -> "PolicyDocument":
+    def from_mapping(
+        cls,
+        value: Mapping[str, Any],
+        *,
+        config: GatewayConfig | PolicyValidationContext,
+    ) -> "PolicyDocument":
         _exact_keys(
             value,
             {"schema_id", "schema_version", "organization_id", "policies", "egress_controls"},
             "policy document",
         )
         if _string(value.get("schema_id"), "schema_id") != POLICY_DOCUMENT_SCHEMA_ID:
-            raise PolicyDocumentError("policy document schema_id is unsupported")
+            raise PolicyDocumentError(
+                "policy document schema_id is unsupported",
+                hint=f'Set schema_id to "{POLICY_DOCUMENT_SCHEMA_ID}".',
+            )
         if _integer(value.get("schema_version"), "schema_version", minimum=1) != POLICY_DOCUMENT_SCHEMA_VERSION:
-            raise PolicyDocumentError("policy document schema_version is unsupported")
+            raise PolicyDocumentError(
+                "policy document schema_version is unsupported",
+                hint=f"Set schema_version to {POLICY_DOCUMENT_SCHEMA_VERSION}.",
+            )
         organization_id = _identifier(value.get("organization_id"), "organization_id")
         if organization_id not in config.organization_ids:
-            raise PolicyDocumentError("policy document organization is not configured")
+            raise PolicyDocumentError(
+                "policy document organization_id is not configured",
+                hint="Use an organization_id already present in the Hormuz identity configuration.",
+            )
 
         policies = _mapping(value.get("policies"), "policies")
         _exact_keys(policies, {"organization", "teams", "actors"}, "policies")
@@ -102,7 +121,10 @@ class PolicyDocument:
         _exact_keys(secrets, {"mode"}, "egress_controls.secrets")
         secret_mode = _string(secrets.get("mode"), "egress_controls.secrets.mode")
         if secret_mode not in {"off", "redact", "deny"}:
-            raise PolicyDocumentError("egress_controls.secrets.mode is unsupported")
+            raise PolicyDocumentError(
+                "egress_controls.secrets.mode is unsupported",
+                hint="Choose one of: off, redact, deny.",
+            )
 
         document = cls(
             organization_id=organization_id,
@@ -116,13 +138,24 @@ class PolicyDocument:
         return document
 
     @classmethod
-    def from_json_bytes(cls, value: bytes, *, config: GatewayConfig) -> "PolicyDocument":
+    def from_json_bytes(
+        cls,
+        value: bytes,
+        *,
+        config: GatewayConfig | PolicyValidationContext,
+    ) -> "PolicyDocument":
         try:
             decoded = json.loads(value.decode("utf-8"), object_pairs_hook=_unique_json_object)
         except (UnicodeDecodeError, json.JSONDecodeError, RecursionError, ValueError) as error:
-            raise PolicyDocumentError("policy document is not valid JSON") from error
+            raise PolicyDocumentError(
+                "policy document is not valid JSON",
+                hint="Check JSON syntax, duplicate object keys, and non-finite numeric values.",
+            ) from error
         if not isinstance(decoded, Mapping):
-            raise PolicyDocumentError("policy document must be a JSON object")
+            raise PolicyDocumentError(
+                "policy document must be a JSON object",
+                hint="Start the policy document with an object containing its schema, organization, policies, and egress controls.",
+            )
         return cls.from_mapping(decoded, config=config)
 
     @property
@@ -200,19 +233,28 @@ class PolicyDocument:
             secret_mode=self.secret_mode,
         )
 
-    def _validate_references(self, config: GatewayConfig) -> None:
+    def _validate_references(self, config: GatewayConfig | PolicyValidationContext) -> None:
         policies = [self.organization_policy, *self.team_policies.values(), *self.actor_policies.values()]
         for policy in policies:
             for alias in policy.allowed_models or ():
                 if alias not in config.model_routes:
-                    raise PolicyDocumentError("policy document references an unknown model alias")
+                    raise PolicyDocumentError(
+                        "policy document references an unknown model alias",
+                        hint="Use only model aliases declared under model_routes in the Hormuz configuration.",
+                    )
             if policy.fallback_model is not None:
                 if policy.fallback_model not in config.model_routes:
-                    raise PolicyDocumentError("policy document references an unknown fallback model")
+                    raise PolicyDocumentError(
+                        "policy document references an unknown fallback model",
+                        hint="Use a fallback alias declared under model_routes in the Hormuz configuration.",
+                    )
             for protocol, alias in (policy.fallback_models or {}).items():
                 route = config.model_routes.get(alias)
                 if route is None or route.protocol != protocol:
-                    raise PolicyDocumentError("policy document fallback does not match an available provider route")
+                    raise PolicyDocumentError(
+                        "policy document fallback does not match an available provider route",
+                        hint="Choose a configured fallback whose route protocol matches openai or anthropic.",
+                    )
         for identity in config.identities_by_actor.values():
             if identity.organization_id != self.organization_id:
                 continue
@@ -227,7 +269,10 @@ class PolicyDocument:
                 for policy in (snapshot.organization_policy, snapshot.team_policy, snapshot.actor_policy)
             )
             if bounded and snapshot.effective_policy.max_output_tokens is None:
-                raise PolicyDocumentError("a budgeted identity needs an effective max_output_tokens policy")
+                raise PolicyDocumentError(
+                    "a budgeted identity needs an effective max_output_tokens policy",
+                    hint="Set max_output_tokens at the organization, matching team, or matching actor scope.",
+                )
 
 
 def local_policy_snapshot(config: GatewayConfig, identity: Identity) -> PolicySnapshot:
@@ -251,7 +296,7 @@ def local_policy_snapshot(config: GatewayConfig, identity: Identity) -> PolicySn
 def _policy_map(value: object, path: str) -> dict[str, Policy]:
     mapping = _mapping(value, path)
     return {
-        _identifier(scope_id, f"{path} key"): _policy(raw_policy, f"{path}.{scope_id}")
+        _identifier(scope_id, f"{path} key"): _policy(raw_policy, f"{path}.*")
         for scope_id, raw_policy in mapping.items()
     }
 
@@ -348,12 +393,14 @@ def _mapping(value: object, path: str) -> Mapping[str, Any]:
 
 def _exact_keys(value: Mapping[str, Any], expected: set[str], path: str) -> None:
     if set(value) != expected:
-        raise PolicyDocumentError(f"{path} has unsupported or missing fields")
+        fields = ", ".join(sorted(expected))
+        raise PolicyDocumentError(f"{path} must contain exactly these fields: {fields}")
 
 
 def _subset_keys(value: Mapping[str, Any], allowed: set[str], path: str) -> None:
     if set(value).difference(allowed):
-        raise PolicyDocumentError(f"{path} has unsupported fields")
+        fields = ", ".join(sorted(allowed))
+        raise PolicyDocumentError(f"{path} accepts only these fields: {fields}")
 
 
 def _string(value: object, path: str) -> str:
@@ -371,7 +418,7 @@ def _identifier(value: object, path: str) -> str:
 
 def _integer(value: object, path: str, *, minimum: int) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
-        raise PolicyDocumentError(f"{path} must be an integer")
+        raise PolicyDocumentError(f"{path} must be an integer of at least {minimum}")
     return value
 
 
@@ -431,6 +478,9 @@ def _optional_fallback_models(item: Mapping[str, Any], path: str) -> dict[str, s
         return None
     value = _mapping(item["fallback_models"], f"{path}.fallback_models")
     if set(value).difference({"openai", "anthropic"}):
-        raise PolicyDocumentError(f"{path}.fallback_models has unsupported provider")
+        raise PolicyDocumentError(
+            f"{path}.fallback_models has an unsupported provider",
+            hint="Use only openai and anthropic fallback keys.",
+        )
     result = {protocol: _identifier(alias, f"{path}.fallback_models.{protocol}") for protocol, alias in value.items()}
     return result or None
