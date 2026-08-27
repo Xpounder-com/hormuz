@@ -53,6 +53,7 @@ from .contracts import (
     COVERAGE_GATEWAY_CAPTURED_REQUESTS_ONLY,
     POLICY_CONTROL_STATUS_SCHEMA_ID,
     POLICY_COMPARISON_SCHEMA_ID,
+    POLICY_EVALUATION_SCHEMA_ID,
     POLICY_HISTORY_SCHEMA_ID,
     POLICY_PREVIEW_SCHEMA_ID,
     CUSTODY_CONTROL_STATUS_SCHEMA_ID,
@@ -65,9 +66,11 @@ from .policy import PolicyDecision, PolicyEngine
 from .policy_analysis import (
     PolicyAnalysisError,
     PolicyComparison,
+    PolicyEvaluation,
     PolicyPreview,
     PolicyVersionIdentity,
     compare_policy_documents,
+    evaluate_policy_scenario_suite,
     preview_policy_request,
 )
 from .custody_control import CustodyControlService
@@ -86,6 +89,14 @@ from .policy_templates import (
     PolicyTemplateError,
     create_policy_document,
     policy_templates as available_policy_templates,
+)
+from .policy_scenarios import (
+    PolicyScenarioError,
+    add_policy_scenario_to_suite,
+    create_policy_scenario_suite,
+    load_policy_scenario_suite,
+    write_policy_evaluation,
+    write_policy_scenario_suite,
 )
 from .policy_repository import (
     POLICY_HISTORY_DEFAULT_LIMIT,
@@ -238,6 +249,45 @@ def build_parser() -> argparse.ArgumentParser:
     _policy_candidate_arguments(preview)
     _policy_request_arguments(preview)
     preview.add_argument("--json", action="store_true", help="Emit the versioned preview contract")
+
+    scenarios = policy_control_subparsers.add_parser(
+        "scenarios",
+        help="Create, extend, and validate portable policy request suites",
+    )
+    scenario_subparsers = scenarios.add_subparsers(dest="policy_scenarios_command", required=True)
+    scenario_create = scenario_subparsers.add_parser(
+        "create",
+        help="Create a canonical scenario suite from one explicit request",
+    )
+    scenario_create.add_argument("--organization", required=True, help="Tenant organization ID")
+    _policy_scenario_arguments(scenario_create)
+    scenario_create.add_argument("--output", required=True, help="New scenario-suite JSON path")
+    scenario_create.add_argument("--force", action="store_true", help="Replace an existing regular output file")
+
+    scenario_add = scenario_subparsers.add_parser(
+        "add",
+        help="Atomically add one explicit request to a scenario suite",
+    )
+    scenario_add.add_argument("file", help="Existing scenario-suite JSON path")
+    _policy_scenario_arguments(scenario_add)
+
+    scenario_validate = scenario_subparsers.add_parser(
+        "validate",
+        help="Validate and identify a scenario suite without credentials or PostgreSQL",
+    )
+    scenario_validate.add_argument("file", help="Scenario-suite JSON path")
+
+    evaluate = policy_control_subparsers.add_parser(
+        "evaluate",
+        help="Evaluate a saved scenario suite against two pinned policies",
+    )
+    _policy_control_auth_arguments(evaluate)
+    _policy_candidate_arguments(evaluate)
+    evaluate.add_argument("--against-version", help="Immutable baseline version (default: active)")
+    evaluate.add_argument("--scenarios", required=True, help="Portable scenario-suite JSON path")
+    evaluate.add_argument("--json", action="store_true", help="Emit the versioned evaluation contract")
+    evaluate.add_argument("--output", help="Atomically save the versioned evaluation contract")
+    evaluate.add_argument("--force", action="store_true", help="Replace an existing regular result file")
 
     bootstrap = policy_control_subparsers.add_parser(
         "bootstrap",
@@ -552,6 +602,11 @@ def _policy_request_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--max-output-tokens", type=int)
 
 
+def _policy_scenario_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--id", required=True, help="Stable scenario ID")
+    _policy_request_arguments(parser)
+
+
 def _policy_candidate_arguments(parser: argparse.ArgumentParser) -> None:
     candidate = parser.add_mutually_exclusive_group(required=True)
     candidate.add_argument("file", nargs="?", help="Local policy-document JSON candidate")
@@ -623,6 +678,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "policy" and args.policy_control_command == "templates":
         return _policy_template_catalog()
     try:
+        if args.command == "policy" and args.policy_control_command == "scenarios":
+            return _policy_scenarios(args)
         if args.command == "policy" and args.policy_control_command in {"create", "validate"}:
             context = GatewayConfig.load_policy_validation_context(args.config)
             if args.policy_control_command == "create":
@@ -685,6 +742,9 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     except PolicyAnalysisError as error:
         print(f"policy analysis error: {error.code}", file=sys.stderr)
+        return 2
+    except PolicyScenarioError as error:
+        _print_policy_scenario_failure(error.code, error.reason, hint=error.hint)
         return 2
     except (OSError, sqlite3.Error):
         print("storage error: storage_unavailable", file=sys.stderr)
@@ -1240,6 +1300,38 @@ def _policy_control(config: GatewayConfig, args: argparse.Namespace) -> int:
         )
         _print_policy_preview(preview, as_json=args.json)
         return 0 if preview.candidate_decision.allowed else 3
+    if command == "evaluate":
+        if args.force and args.output is None:
+            raise PolicyScenarioError(
+                "policy_evaluation_output_required",
+                "--force requires an explicit --output path",
+                hint="Remove --force or select a regular result file with --output.",
+            )
+        # Pin both immutable policy identities once. A concurrent activation
+        # cannot mix baselines across scenarios after these lookups complete.
+        baseline = service.policy_version(
+            organization_id=args.organization,
+            credential_env=args.credential_env,
+            version_id=args.against_version,
+        )
+        candidate = _policy_candidate_document(service, config, args)
+        suite = load_policy_scenario_suite(args.scenarios)
+        if suite.organization_id != args.organization:
+            raise PolicyAnalysisError("policy_evaluation_organization_mismatch")
+        evaluation = evaluate_policy_scenario_suite(
+            config=config,
+            usage_store=create_usage_store(config, read_only=True),
+            suite=suite,
+            baseline=baseline.document,
+            candidate=candidate,
+        )
+        payload = _policy_evaluation_payload(evaluation)
+        if args.output is not None:
+            output_path = Path(args.output).expanduser().absolute()
+            write_policy_evaluation(output_path, payload, force=args.force)
+            print(f"policy evaluation saved: {output_path}", file=sys.stderr)
+        _print_policy_evaluation(evaluation, payload=payload, as_json=args.json)
+        return 0 if evaluation.identical else 1
     if command == "administrator":
         if args.policy_administrator_command == "grant":
             administrator = service.grant_oidc_administrator(
@@ -1349,6 +1441,59 @@ def _policy_template_catalog() -> int:
     for template in available_policy_templates():
         print(f"  {template.name:<9} {template.description}")
     return 0
+
+
+def _policy_scenarios(args: argparse.Namespace) -> int:
+    """Create and inspect portable scenario files without runtime credentials."""
+
+    command = args.policy_scenarios_command
+    if command == "create":
+        suite = create_policy_scenario_suite(
+            organization_id=args.organization,
+            scenario_id=args.id,
+            actor_id=args.actor,
+            client=args.client,
+            protocol=args.protocol,
+            requested_model=args.model,
+            requested_output_tokens=args.max_output_tokens,
+        )
+        write_policy_scenario_suite(
+            Path(args.output).expanduser().absolute(),
+            suite,
+            force=args.force,
+        )
+        print(
+            f"policy scenarios created: organization={suite.organization_id} "
+            f"suite={suite.suite_id} scenarios={len(suite.scenarios)}"
+        )
+        return 0
+    if command == "add":
+        path = Path(args.file).expanduser().absolute()
+        updated = add_policy_scenario_to_suite(
+            path,
+            scenario_id=args.id,
+            actor_id=args.actor,
+            client=args.client,
+            protocol=args.protocol,
+            requested_model=args.model,
+            requested_output_tokens=args.max_output_tokens,
+        )
+        print(
+            f"policy scenario added: organization={updated.organization_id} "
+            f"suite={updated.suite_id} scenarios={len(updated.scenarios)}"
+        )
+        return 0
+    if command == "validate":
+        suite = load_policy_scenario_suite(args.file)
+        print(
+            f"policy scenarios valid: organization={suite.organization_id} "
+            f"suite={suite.suite_id} scenarios={len(suite.scenarios)}"
+        )
+        return 0
+    raise PolicyScenarioError(
+        "policy_scenario_command_unsupported",
+        "the selected policy scenario command is unsupported",
+    )
 
 
 def _policy_create(context: PolicyValidationContext, args: argparse.Namespace) -> int:
@@ -1489,6 +1634,13 @@ def _print_policy_export_failure(code: str, reason: str, *, hint: str | None = N
 
 def _print_policy_document_failure(code: str, reason: str, *, hint: str | None = None) -> None:
     print(f"policy validation failed: {code}", file=sys.stderr)
+    print(f"reason: {reason}", file=sys.stderr)
+    if hint is not None:
+        print(f"hint: {hint}", file=sys.stderr)
+
+
+def _print_policy_scenario_failure(code: str, reason: str, *, hint: str | None = None) -> None:
+    print(f"policy scenario failed: {code}", file=sys.stderr)
     print(f"reason: {reason}", file=sys.stderr)
     if hint is not None:
         print(f"hint: {hint}", file=sys.stderr)
@@ -1657,6 +1809,88 @@ def _print_policy_preview(preview: PolicyPreview, *, as_json: bool) -> None:
     )
     _print_policy_preview_decision("baseline", preview.baseline, preview.baseline_decision)
     _print_policy_preview_decision("candidate", preview.candidate, preview.candidate_decision)
+
+
+def _policy_evaluation_payload(evaluation: PolicyEvaluation) -> dict[str, object]:
+    scenario_count = len(evaluation.scenarios)
+    return contract_envelope(
+        POLICY_EVALUATION_SCHEMA_ID,
+        {
+            "organization_id": evaluation.organization_id,
+            "evaluated_at": evaluation.evaluated_at.isoformat(),
+            "usage_period": {
+                "starts_at": evaluation.usage_period.starts_at.isoformat(),
+                "ends_before": evaluation.usage_period.ends_before.isoformat(),
+            },
+            "usage_basis": evaluation.usage_basis,
+            "suite": {
+                "suite_id": evaluation.suite.suite_id,
+                "content_sha256": evaluation.suite.content_sha256,
+                "scenario_count": scenario_count,
+            },
+            "baseline": _policy_version_identity_payload(evaluation.baseline),
+            "candidate": _policy_version_identity_payload(evaluation.candidate),
+            "summary": {
+                "scenario_count": scenario_count,
+                "changed_count": evaluation.changed_count,
+                "unchanged_count": scenario_count - evaluation.changed_count,
+                "baseline_allowed_count": evaluation.baseline_allowed_count,
+                "candidate_allowed_count": evaluation.candidate_allowed_count,
+            },
+            "scenarios": [
+                {
+                    "scenario_id": result.scenario.scenario_id,
+                    "request": {
+                        "actor_id": result.scenario.actor_id,
+                        "client": result.scenario.client,
+                        "protocol": result.scenario.protocol,
+                        "requested_model": result.scenario.requested_model,
+                        "requested_output_tokens": result.scenario.requested_output_tokens,
+                    },
+                    "changed": result.changed,
+                    "baseline": {"decision": _policy_decision_contract(result.baseline_decision)},
+                    "candidate": {"decision": _policy_decision_contract(result.candidate_decision)},
+                }
+                for result in evaluation.scenarios
+            ],
+        },
+    )
+
+
+def _print_policy_evaluation(
+    evaluation: PolicyEvaluation,
+    *,
+    payload: dict[str, object],
+    as_json: bool,
+) -> None:
+    if as_json:
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return
+    print(f"organization: {evaluation.organization_id}")
+    print(
+        f"suite: {evaluation.suite.suite_id} scenarios={len(evaluation.scenarios)}"
+    )
+    _print_policy_version_identity("baseline", evaluation.baseline)
+    _print_policy_version_identity("candidate", evaluation.candidate)
+    print(f"evaluated at: {evaluation.evaluated_at.isoformat()}")
+    print(
+        "usage: current "
+        f"[{evaluation.usage_period.starts_at.isoformat()}, {evaluation.usage_period.ends_before.isoformat()})"
+    )
+    print(
+        f"behavior changes: {evaluation.changed_count} "
+        f"unchanged={len(evaluation.scenarios) - evaluation.changed_count}"
+    )
+    for result in evaluation.scenarios:
+        status = "changed" if result.changed else "unchanged"
+        scenario = result.scenario
+        print(
+            f"{status} {scenario.scenario_id}: actor={scenario.actor_id} client={scenario.client} "
+            f"protocol={scenario.protocol} model={scenario.requested_model} "
+            f"max_output_tokens={scenario.requested_output_tokens or '-'}"
+        )
+        _print_policy_preview_decision("  baseline", evaluation.baseline, result.baseline_decision)
+        _print_policy_preview_decision("  candidate", evaluation.candidate, result.candidate_decision)
 
 
 def _policy_version_identity_payload(identity: PolicyVersionIdentity) -> dict[str, str]:

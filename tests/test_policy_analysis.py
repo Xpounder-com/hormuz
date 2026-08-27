@@ -1,14 +1,21 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timezone
 import json
 from pathlib import Path
 import unittest
 from unittest import mock
 
-from hormuz.config import GatewayConfig
-from hormuz.policy_analysis import PolicyAnalysisError, compare_policy_documents, preview_policy_request
+from hormuz.config import GatewayConfig, Identity
+from hormuz.policy_analysis import (
+    PolicyAnalysisError,
+    compare_policy_documents,
+    evaluate_policy_scenario_suite,
+    preview_policy_request,
+)
 from hormuz.policy_document import PolicyDocument
+from hormuz.policy_scenarios import PolicyScenarioSuite
 from hormuz.store import MonthlyTotals
 
 
@@ -185,6 +192,130 @@ class PolicyAnalysisTests(unittest.TestCase):
                 preview_policy_request(**arguments)
             self.assertEqual(raised.exception.code, code)
 
+        usage_store.monthly_totals.assert_not_called()
+
+    def test_scenario_evaluation_pins_one_usage_snapshot_per_actor(self) -> None:
+        alice = self.config.identities_by_actor["alice"]
+        bob = Identity(
+            token_env="HORMUZ_BOB_TOKEN",
+            token="bob-token",
+            actor_id="bob",
+            actor_name="Bob Example",
+            team_id=alice.team_id,
+            team_name=alice.team_name,
+            organization_id=alice.organization_id,
+            allowed_clients=("codex",),
+        )
+        config = replace(
+            self.config,
+            identities_by_token={**self.config.identities_by_token, bob.token: bob},
+        )
+        baseline = self._document()
+        candidate_mapping = self._mapping()
+        policies = candidate_mapping["policies"]
+        assert isinstance(policies, dict)
+        actors = policies["actors"]
+        assert isinstance(actors, dict)
+        actors["alice"] = {"allowed_models": []}
+        candidate = self._document(candidate_mapping)
+        suite = PolicyScenarioSuite.from_mapping(
+            {
+                "schema_id": "hormuz.policy-scenario-suite",
+                "schema_version": 1,
+                "organization_id": "xpounder",
+                "scenarios": [
+                    {
+                        "id": "alice-large",
+                        "actor_id": "alice",
+                        "client": "codex",
+                        "protocol": "openai",
+                        "requested_model": "gpt-5.4-mini",
+                        "requested_output_tokens": 20_000,
+                    },
+                    {
+                        "id": "bob-default",
+                        "actor_id": "bob",
+                        "client": "codex",
+                        "protocol": "openai",
+                        "requested_model": "gpt-5.4-mini",
+                        "requested_output_tokens": 1_000,
+                    },
+                    {
+                        "id": "alice-default",
+                        "actor_id": "alice",
+                        "client": "codex",
+                        "protocol": "openai",
+                        "requested_model": "gpt-5.4-mini",
+                        "requested_output_tokens": 1_000,
+                    },
+                ],
+            }
+        )
+        usage_store = mock.Mock()
+        usage_store.monthly_totals.return_value = MonthlyTotals()
+        evaluated_at = datetime(2026, 8, 27, 5, 30, tzinfo=timezone.utc)
+
+        with mock.patch("hormuz.policy.PolicyRuntime") as create_policy_runtime:
+            evaluation = evaluate_policy_scenario_suite(
+                config=config,
+                usage_store=usage_store,
+                suite=suite,
+                baseline=baseline,
+                candidate=candidate,
+                evaluated_at=evaluated_at,
+            )
+
+        self.assertEqual(
+            [result.scenario.scenario_id for result in evaluation.scenarios],
+            ["alice-default", "alice-large", "bob-default"],
+        )
+        self.assertEqual(evaluation.changed_count, 2)
+        self.assertEqual(evaluation.baseline_allowed_count, 3)
+        self.assertEqual(evaluation.candidate_allowed_count, 1)
+        self.assertFalse(evaluation.identical)
+        self.assertEqual(usage_store.monthly_totals.call_count, 6)
+        actor_reads = [
+            call
+            for call in usage_store.monthly_totals.call_args_list
+            if call.kwargs["actor_id"] is not None
+        ]
+        self.assertEqual(
+            sorted(call.kwargs["actor_id"] for call in actor_reads),
+            ["alice", "bob"],
+        )
+        create_policy_runtime.assert_not_called()
+
+    def test_scenario_evaluation_rejects_every_unknown_actor_before_usage_reads(self) -> None:
+        document = self._document()
+        suite = PolicyScenarioSuite.from_mapping(
+            {
+                "schema_id": "hormuz.policy-scenario-suite",
+                "schema_version": 1,
+                "organization_id": "xpounder",
+                "scenarios": [
+                    {
+                        "id": "missing-actor",
+                        "actor_id": "missing",
+                        "client": "codex",
+                        "protocol": "openai",
+                        "requested_model": "gpt-5.4-mini",
+                        "requested_output_tokens": 1_000,
+                    }
+                ],
+            }
+        )
+        usage_store = mock.Mock()
+
+        with self.assertRaises(PolicyAnalysisError) as raised:
+            evaluate_policy_scenario_suite(
+                config=self.config,
+                usage_store=usage_store,
+                suite=suite,
+                baseline=document,
+                candidate=document,
+            )
+
+        self.assertEqual(raised.exception.code, "policy_evaluation_actor_not_found")
         usage_store.monthly_totals.assert_not_called()
 
 

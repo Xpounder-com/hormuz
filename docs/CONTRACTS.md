@@ -35,6 +35,8 @@ The current Hormuz-owned JSON schemas are:
 | `hormuz policy history --json` | `hormuz.policy-history` v1 |
 | `hormuz policy compare --json` | `hormuz.policy-comparison` v1 |
 | `hormuz policy preview --json` | `hormuz.policy-preview` v1 |
+| portable policy scenario file | `hormuz.policy-scenario-suite` v1 |
+| `hormuz policy evaluate --json` | `hormuz.policy-evaluation` v1 |
 | `hormuz custody status --json` | `hormuz.custody-control-status` v3 |
 | `hormuz status --json` | `hormuz.usage-report` v1 |
 | audit JSONL events | `hormuz.audit-event` v2 |
@@ -99,7 +101,7 @@ Every durable v2 event snapshots the authenticated identity at request time:
 
 In local mode, `policy_version` is a deterministic content-free fingerprint of the policy-relevant configuration, prefixed `local-config-`. In managed PostgreSQL mode it is the exact immutable staged-policy digest, prefixed `sha256:`. A gateway reads and pins the active managed version when a request begins; activation cannot rewrite an in-flight request or its durable evidence. Neither form contains a credential value or request content.
 
-Managed policy control has five administrator-facing strict contracts in
+Managed policy control has seven administrator-facing strict contracts in
 addition to its durable control events. `hormuz.policy-document` v1 accepts
 only allowlisted routing, cap, budget, and egress-control fields.
 `hormuz.policy-control-status` v1 returns administration metadata for a current
@@ -119,10 +121,18 @@ an `added`, `removed`, or `changed` classification. Object order and allowlist
 order are not policy changes. `hormuz.policy-preview` v1 is also
 administrator-only and value-bearing. It records the evaluation timestamp,
 current UTC usage period and basis, explicit request dimensions, and complete
-versioned decisions for one pinned active baseline and one candidate. These
-two CLI outputs may contain model aliases, limits, budgets, policy paths, and
-decision reasons. They are not durable metadata-only audit evidence and must
-not be copied into policy-control event rows.
+versioned decisions for one pinned active baseline and one candidate.
+
+`hormuz.policy-scenario-suite` v1 is a portable file containing one to 100
+explicit, uniquely identified request dimensions. Canonical scenario ordering
+gives the suite a stable SHA-256 identity without accepting prompts, responses,
+credentials, or arbitrary notes. `hormuz.policy-evaluation` v1 applies one
+suite to pinned baseline and candidate versions with current usage, then
+reports complete decisions, semantic behavior-change flags, and bounded
+summary counts. The scenario suite and these three analysis outputs may
+contain actor IDs, model aliases, limits, budgets, policy paths, and decision
+reasons. They are not durable metadata-only audit evidence and must not be
+copied into policy-control event rows.
 
 PostgreSQL `hormuz.policy-control-event` v1 records bootstrap, administrator,
 stage, activation, rollback, and break-glass events. It stores both an

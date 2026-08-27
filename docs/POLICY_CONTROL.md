@@ -327,9 +327,87 @@ status is `0` when the candidate allows the request, `3` when it denies, and
 status. Preview is a point-in-time administrative evaluation; concurrent usage
 or reservations can still affect whether a later live request is admitted.
 
-An organization-wide scan is intentionally outside v1. Saved evaluations can
-later compose explicit scenarios without requiring identity enumeration,
-unbounded pagination, or implicit assumptions about which requests matter.
+## Saved scenario suites
+
+Create a portable suite from one explicit request without loading runtime
+configuration, provider credentials, policy-administrator credentials, or
+PostgreSQL:
+
+```bash
+hormuz policy scenarios create \
+  --organization xpounder \
+  --id codex-default \
+  --actor alice \
+  --client codex \
+  --protocol openai \
+  --model gpt-5.4-mini \
+  --max-output-tokens 1000 \
+  --output engineering-scenarios.json
+```
+
+Add another explicit request atomically, or validate and identify the complete
+suite later:
+
+```bash
+hormuz policy scenarios add engineering-scenarios.json \
+  --id claude-large \
+  --actor alice \
+  --client claude-code \
+  --protocol anthropic \
+  --model claude-sonnet-5 \
+  --max-output-tokens 16000
+
+hormuz policy scenarios validate engineering-scenarios.json
+```
+
+`hormuz.policy-scenario-suite` v1 contains one to 100 scenarios with unique
+IDs. Each scenario stores only actor, client, protocol, model alias, and an
+optional output-token request. Prompt text, system instructions, responses,
+credentials, and arbitrary notes are not accepted. Object order and scenario
+order do not affect the canonical suite digest. Creation, addition, and forced
+replacement are atomic owner-only writes with mode `0600`; symbolic links,
+directories, and special files are refused. Suite files are bounded to 1 MiB
+on both read and write. Concurrent add commands are serialized; if another
+editor replaces the loaded suite, the add fails with
+`policy_scenario_concurrent_update` instead of discarding either change. On a
+platform without advisory file locking, add fails closed with
+`policy_scenario_lock_unavailable`; use an explicitly reviewed replacement
+rather than accepting a possible lost update.
+
+Evaluate the active baseline and one local or saved candidate across the whole
+suite:
+
+```bash
+hormuz --config /etc/hormuz/hormuz.json policy evaluate engineering-strict.json \
+  --organization xpounder \
+  --credential-env HORMUZ_POLICY_ADMIN_TOKEN \
+  --scenarios engineering-scenarios.json \
+  --output engineering-evaluation.json \
+  --json
+```
+
+The active baseline and candidate are each pinned once before evaluation. Use
+`--against-version sha256:...` for a selected baseline and `--version
+sha256:...` for a saved candidate. Every configured actor referenced by the
+suite receives one read-only snapshot of current actor, team, and organization
+monthly totals, reused for both policies and every scenario for that actor.
+No provider call, budget reservation, usage record, policy-control event,
+stage, or activation occurs.
+
+`hormuz.policy-evaluation` v1 records the suite identity, both policy version
+IDs and digests, `evaluated_at`, UTC usage period, `usage_basis: current`,
+per-scenario baseline/candidate decisions, semantic behavior-change flags, and
+bounded summary counts. Policy-version identity alone is not a behavior
+change; allow/deny, action, reason, resolved route, and output cap are. Exit
+status is `0` when every evaluated behavior is unchanged, `1` when one or more
+scenarios change, and `2` on error. An expected denial is result data, not an
+execution error. `--output` uses an atomic `0600` write and requires `--force`
+to replace an existing regular file.
+
+Evaluation remains a point-in-time current-usage result rather than durable
+historical evidence. An organization-wide scan is intentionally outside v1:
+explicit suites avoid identity enumeration, unbounded pagination, and implicit
+assumptions about which requests matter.
 
 ## Administrator changes
 

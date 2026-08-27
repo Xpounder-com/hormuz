@@ -34,10 +34,14 @@ from hormuz.contracts import (
     ERROR_SCHEMA_VERSION,
     POLICY_COMPARISON_SCHEMA_ID,
     POLICY_COMPARISON_SCHEMA_VERSION,
+    POLICY_EVALUATION_SCHEMA_ID,
+    POLICY_EVALUATION_SCHEMA_VERSION,
     POLICY_HISTORY_SCHEMA_ID,
     POLICY_HISTORY_SCHEMA_VERSION,
     POLICY_PREVIEW_SCHEMA_ID,
     POLICY_PREVIEW_SCHEMA_VERSION,
+    POLICY_SCENARIO_SUITE_SCHEMA_ID,
+    POLICY_SCENARIO_SUITE_SCHEMA_VERSION,
     READINESS_SCHEMA_ID,
     READINESS_SCHEMA_VERSION,
     REQUEST_ATTEMPT_EVENT_SCHEMA_ID,
@@ -84,6 +88,8 @@ class PolicyEvidenceContractTests(unittest.TestCase):
             "policy_control_status",
             "policy_comparison",
             "policy_preview",
+            "policy_scenario_suite",
+            "policy_evaluation",
             "policy_history",
             "custody_control_status",
             "custody_control_status_v2",
@@ -166,6 +172,23 @@ class PolicyEvidenceContractTests(unittest.TestCase):
         invalid_preview_version["candidate"]["decision"]["policy_version"] = invalid_preview_version["baseline"]["version_id"]
         with self.assertRaises(ContractValidationError):
             validate_contract(invalid_preview_version)
+        invalid_suite = json.loads(json.dumps(valid["policy_scenario_suite"]))
+        invalid_suite["scenarios"].append(json.loads(json.dumps(invalid_suite["scenarios"][0])))
+        with self.assertRaises(ContractValidationError):
+            validate_contract(invalid_suite)
+        invalid_evaluation = json.loads(json.dumps(valid["policy_evaluation"]))
+        invalid_evaluation["scenarios"][0]["changed"] = False
+        with self.assertRaises(ContractValidationError):
+            validate_contract(invalid_evaluation)
+        invalid_evaluation_summary = json.loads(json.dumps(valid["policy_evaluation"]))
+        invalid_evaluation_summary["summary"]["changed_count"] = 0
+        with self.assertRaises(ContractValidationError):
+            validate_contract(invalid_evaluation_summary)
+        invalid_evaluation_suite = json.loads(json.dumps(valid["policy_evaluation"]))
+        invalid_evaluation_suite["suite"]["suite_id"] = "sha256:" + "f" * 64
+        invalid_evaluation_suite["suite"]["content_sha256"] = "f" * 64
+        with self.assertRaises(ContractValidationError):
+            validate_contract(invalid_evaluation_suite)
         invalid_custody_event = json.loads(json.dumps(valid["custody_control_event"]))
         invalid_custody_event["plaintext"] = "must-never-appear"
         with self.assertRaises(ContractValidationError):
@@ -239,6 +262,8 @@ class PolicyEvidenceContractTests(unittest.TestCase):
         self.assertIn(("hormuz.policy-control-status", 1), schemas)
         self.assertIn((POLICY_COMPARISON_SCHEMA_ID, POLICY_COMPARISON_SCHEMA_VERSION), schemas)
         self.assertIn((POLICY_PREVIEW_SCHEMA_ID, POLICY_PREVIEW_SCHEMA_VERSION), schemas)
+        self.assertIn((POLICY_SCENARIO_SUITE_SCHEMA_ID, POLICY_SCENARIO_SUITE_SCHEMA_VERSION), schemas)
+        self.assertIn((POLICY_EVALUATION_SCHEMA_ID, POLICY_EVALUATION_SCHEMA_VERSION), schemas)
         self.assertIn((POLICY_HISTORY_SCHEMA_ID, POLICY_HISTORY_SCHEMA_VERSION), schemas)
         self.assertIn(("hormuz.policy-document", 1), schemas)
         self.assertIn(("hormuz.policy-control-event", 1), schemas)
