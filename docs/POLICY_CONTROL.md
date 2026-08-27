@@ -276,9 +276,39 @@ refused. `--version sha256:...` exports an exact non-active version. These
 inspection commands remain policy-administrator-only in v1; a narrower policy
 auditor role is intentionally deferred.
 
+## Zero-network administrator demo
+
+Run the complete local policy-UX path without a provider account, network
+access, policy-administrator credential, or PostgreSQL:
+
+```bash
+hormuz policy demo
+```
+
+The command creates standard and strict-derived local policy files, validates
+them, performs a semantic comparison, creates two explicit request scenarios,
+and evaluates them against a disposable SQLite database. That database begins
+with exactly zero current usage. The documented changes concern model access
+and output caps; the demo does not manufacture budget consumption. It makes no
+provider call and never stages, activates, or rolls back a policy.
+
+Temporary state is deleted by default. Retain a new owner-only workspace for
+inspection with:
+
+```bash
+hormuz policy demo --output ./policy-demo
+```
+
+The output path must not exist. Hormuz creates it with mode `0700`, writes all
+artifacts with mode `0600`, and refuses to overwrite an existing file,
+directory, link, or special path. The final `policy apply`, `policy history`,
+and `policy rollback` lines are real managed commands shown for the operator;
+the demo does not execute them. This proves only the policy-administration UX,
+not completion of the enterprise v1 release gate.
+
 ## Compare and preview a candidate
 
-Compare a local candidate with the active version before staging or
+Compare a local candidate with the active version by default before staging or
 activation:
 
 ```bash
@@ -296,12 +326,30 @@ include an immutable version ID and content digest; a local candidate receives
 its digest before it is staged. Use `--version sha256:...` to select a saved
 candidate and `--against-version sha256:...` to select a non-active baseline.
 
+Use `--baseline FILE` to select a local baseline. Policy analysis is
+credential-free only when the baseline and candidate are both local files and
+the configured usage backend is SQLite:
+
+```bash
+hormuz --config ./policy-demo/hormuz.json policy compare \
+  ./policy-demo/candidate.json \
+  --baseline ./policy-demo/baseline.json \
+  --organization demo-organization \
+  --json
+```
+
+An active or saved baseline, a saved candidate, or PostgreSQL usage storage
+switches the operation to managed mode. Hormuz then verifies current persisted
+policy-administrator authority before any policy lookup or usage-store access.
+Missing credentials, unsupported policy-control configuration, and mixed
+inputs fail closed; Hormuz never silently reinterprets them as offline mode.
+
 The versioned JSON contract is `hormuz.policy-comparison` v1. Exit status is
 `0` for semantically identical documents, `1` for differences, and `2` for an
 error, so scripts can distinguish an expected change from a failed comparison.
 
-Preview one explicit request against the active baseline and a local or saved
-candidate:
+Preview one explicit request against the active baseline by default, or select
+a local/saved baseline and a local/saved candidate:
 
 ```bash
 hormuz --config /etc/hormuz/hormuz.json policy preview engineering-strict.json \
@@ -315,7 +363,7 @@ hormuz --config /etc/hormuz/hormuz.json policy preview engineering-strict.json \
   --json
 ```
 
-Preview pins the active immutable version before loading the candidate. Both
+Preview pins the selected baseline before loading the candidate. Both
 decisions then use that pinned baseline/candidate pair and one read-only
 set of the current actor, team, and organization monthly totals. It does
 not call a provider, reserve budget, write usage evidence, or activate a
@@ -326,6 +374,7 @@ status is `0` when the candidate allows the request, `3` when it denies, and
 `2` on error; the baseline decision is context and does not select the exit
 status. Preview is a point-in-time administrative evaluation; concurrent usage
 or reservations can still affect whether a later live request is admitted.
+`--baseline FILE` applies the same local-versus-managed authentication rules.
 
 ## Saved scenario suites
 
@@ -386,11 +435,14 @@ hormuz --config /etc/hormuz/hormuz.json policy evaluate engineering-strict.json 
   --json
 ```
 
-The active baseline and candidate are each pinned once before evaluation. Use
+The selected baseline and candidate are each pinned once before evaluation. Use
 `--against-version sha256:...` for a selected baseline and `--version
-sha256:...` for a saved candidate. Every configured actor referenced by the
-suite receives one read-only snapshot of current actor, team, and organization
-monthly totals, reused for both policies and every scenario for that actor.
+sha256:...` for a saved candidate, or `--baseline FILE` for a local baseline.
+Credential-free evaluation requires both local files and SQLite; saved policy
+state or PostgreSQL usage remains administrator-authenticated. Every configured
+actor referenced by the suite receives one read-only snapshot of current actor,
+team, and organization monthly totals, reused for both policies and every
+scenario for that actor.
 No provider call, budget reservation, usage record, policy-control event,
 stage, or activation occurs.
 

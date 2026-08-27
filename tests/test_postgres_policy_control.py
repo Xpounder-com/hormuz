@@ -602,6 +602,16 @@ class PostgresPolicyControlTests(PostgresTestCase):
         config, environment, _issuer = self._managed_config(include_bob=True)
         service = PolicyControlService(config, environ=environment)
         service.bootstrap(organization_id="xpounder", credential_env="HORMUZ_POLICY_ADMIN_TOKEN")
+        service.authorize(
+            organization_id="xpounder",
+            credential_env="HORMUZ_POLICY_ADMIN_TOKEN",
+        )
+        with self.assertRaises(PolicyControlError) as raised:
+            service.authorize(
+                organization_id="xpounder",
+                credential_env="HORMUZ_POLICY_BOB_TOKEN",
+            )
+        self.assertEqual(raised.exception.code, "policy_administrator_required")
 
         # The initialization marker is the first post-bootstrap authority
         # lookup. Even a later configuration that no longer describes the

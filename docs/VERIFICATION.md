@@ -111,6 +111,36 @@ also run the command, so a source-only import path cannot satisfy the
 quickstart release gate. These are provider-free product-path proofs, not live
 OpenAI/Anthropic compatibility or a production deployment claim.
 
+## Zero-network policy-administrator path
+
+The separate administrator demonstration exercises local policy authoring and
+read-only analysis without PostgreSQL, a policy-administrator credential, a
+provider credential, or any network call:
+
+```bash
+hormuz policy demo
+```
+
+It creates and validates a local baseline and candidate, compares their
+normalized policy semantics, creates two explicit request scenarios, and
+evaluates those scenarios against a disposable SQLite ledger whose current
+usage is exactly zero. The observed behavior changes are a model denial and an
+output-token cap; no synthetic budget consumption is inserted. The command
+does not stage, activate, or roll back a policy.
+
+Temporary artifacts are deleted by default. To retain a newly created
+owner-only directory for inspection, run:
+
+```bash
+hormuz policy demo --output ./policy-demo
+```
+
+The directory is mode `0700`, every artifact is mode `0600`, and an existing
+path is never overwritten. The managed `policy apply`, `policy history`, and
+`policy rollback` commands printed at the end are guidance only and are not
+executed. This is evidence for the policy-administration UX milestone, not for
+completion of the enterprise v1 release gate.
+
 ## Launch-claim boundary
 
 The tester-recruitment drafts and their schema-v2 claim ledger live under

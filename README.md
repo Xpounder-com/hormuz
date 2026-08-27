@@ -49,6 +49,32 @@ exits. It is an executable product tour, not a provider-compatibility or
 production-deployment claim. Its `PASS` lines are human diagnostic output, not
 a new machine-readable compatibility contract.
 
+## Try policy administration without PostgreSQL
+
+Run the separate zero-network administrator workflow:
+
+```bash
+hormuz policy demo
+```
+
+It creates and validates local baseline/candidate policies, reports their
+semantic changes, creates two explicit scenarios, and evaluates current
+behavior against a disposable SQLite ledger containing exactly zero usage. It
+demonstrates a real model denial and an 8,000-token request being capped at
+4,000; it does not invent budget usage, contact a provider, or simulate policy
+activation. Temporary files are removed by default. To inspect owner-only
+artifacts without replacing anything that already exists:
+
+```bash
+hormuz policy demo --output ./policy-demo
+```
+
+The new directory is mode `0700` and every artifact is mode `0600`. The demo
+ends with real `policy apply`, `policy history`, and `policy rollback` commands
+for a separately configured managed deployment, but never executes them. This
+is a policy-UX milestone, not evidence that the enterprise v1 release gate is
+complete.
+
 Independent testers should follow the
 [public-alpha onboarding guide](docs/QUIET_ALPHA.md). Its strict aggregate uses
 opaque participant IDs and fixed metadata enums; Hormuz adds no product
@@ -255,10 +281,25 @@ python3 -m hormuz --config hormuz.json policy compare engineering-strict.json \
 
 Exit status is `0` when the documents are semantically identical, `1` when
 they differ, and `2` on error. Use `--version sha256:...` for a saved candidate
-and `--against-version sha256:...` for a non-active baseline.
+and `--against-version sha256:...` for a non-active baseline. To compare two
+local files against SQLite-backed local state without a policy-administrator
+credential, select the baseline explicitly:
 
-Preview one explicit request against the pinned active policy and a candidate,
-without calling a model or reserving budget:
+```bash
+python3 -m hormuz --config hormuz.json policy compare engineering-strict.json \
+  --baseline engineering-standard.json \
+  --organization xpounder \
+  --json
+```
+
+Credential-free mode requires all three conditions: a local `--baseline`, a
+local positional candidate, and SQLite usage storage. Selecting an active or
+saved baseline, selecting a saved candidate, or configuring PostgreSQL usage
+requires current persisted policy-administrator authorization. Mixed modes do
+not fall back to offline operation.
+
+Preview one explicit request against a pinned baseline (active by default) and
+a candidate, without calling a model or reserving budget:
 
 ```bash
 python3 -m hormuz --config hormuz.json policy preview engineering-strict.json \
@@ -274,10 +315,11 @@ python3 -m hormuz --config hormuz.json policy preview engineering-strict.json \
 The `hormuz.policy-preview` v1 result includes `evaluated_at`, the current UTC
 usage period, `usage_basis: current`, and separate baseline/candidate
 decisions. Exit status is `0` when the candidate allows the request, `3` when
-it denies, and `2` on error. The active baseline is pinned before candidate
+it denies, and `2` on error. The selected baseline is pinned before candidate
 loading, so a concurrent activation cannot mix policy versions. Preview is a
 point-in-time evaluation; later usage or reservations can change live
-admission.
+admission. `--baseline FILE` selects a local baseline under the same explicit
+offline/authentication rules described above.
 
 Save repeatable requests in a portable suite without loading configuration,
 credentials, or PostgreSQL, then evaluate the complete suite against a
@@ -309,6 +351,9 @@ one current-usage snapshot per referenced actor, and makes no provider call,
 reservation, usage write, or policy change. Exit status is `0` when behavior
 is unchanged across the suite, `1` when any scenario changes, and `2` on error;
 an intentional denial is evaluation data rather than a command failure.
+`--baseline FILE` permits local baseline/candidate evaluation against current
+SQLite usage without policy-administrator credentials; any saved version or
+PostgreSQL usage access remains authenticated and fails closed otherwise.
 
 Evaluate the active policy only, using the long-standing automation contract:
 

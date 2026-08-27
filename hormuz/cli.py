@@ -13,6 +13,7 @@ import stat
 import sys
 import tempfile
 import threading
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlparse
@@ -93,6 +94,7 @@ from .policy_templates import (
 from .policy_scenarios import (
     PolicyScenarioError,
     add_policy_scenario_to_suite,
+    create_policy_scenario,
     create_policy_scenario_suite,
     load_policy_scenario_suite,
     write_policy_evaluation,
@@ -110,12 +112,34 @@ from .policy_repository import (
 from .policy_runtime import PolicyRuntime
 from .postgres import PostgresConnectionPool, PostgresStorageError, migrate_postgres
 from .server import GatewayServer
-from .store import StorageSchemaError
+from .store import MonthlyTotals, StorageSchemaError
 from .store_router import create_postgres_runtime_pool, create_usage_store, postgres_migration_dsn
 
 
 _DEPRECATED_CONTEXT_COMMANDS = frozenset({"context-pack"})
 _CONTEXT_EXPERIMENT_MOVED_ERROR = "context_experiment_moved"
+_POLICY_DEMO_ORGANIZATION_ID = "demo-organization"
+_POLICY_DEMO_ACTOR_ID = "demo-administrator"
+_POLICY_DEMO_IDENTITY_ENV = "HORMUZ_POLICY_DEMO_IDENTITY"
+
+
+class PolicyDemoError(RuntimeError):
+    """Content-safe failure for the zero-network administrator demo."""
+
+    def __init__(self, code: str, reason: str, *, hint: str | None = None) -> None:
+        super().__init__(reason)
+        self.code = code
+        self.reason = reason
+        self.hint = hint
+
+
+@dataclass(frozen=True)
+class PolicyDemoResult:
+    artifact_directory: Path | None
+    comparison_change_count: int
+    scenario_count: int
+    changed_count: int
+    candidate_version_id: str
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -166,6 +190,15 @@ def build_parser() -> argparse.ArgumentParser:
     policy_control_subparsers.add_parser(
         "templates",
         help="List built-in policy templates without loading configuration",
+    )
+
+    policy_demo = policy_control_subparsers.add_parser(
+        "demo",
+        help="Run the zero-network policy administrator workflow",
+    )
+    policy_demo.add_argument(
+        "--output",
+        help="Create a new owner-only directory and retain the demo artifacts",
     )
 
     create = policy_control_subparsers.add_parser(
@@ -238,7 +271,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _policy_control_auth_arguments(compare)
     _policy_candidate_arguments(compare)
-    compare.add_argument("--against-version", help="Immutable baseline version (default: active)")
+    _policy_baseline_arguments(compare)
     compare.add_argument("--json", action="store_true", help="Emit the versioned comparison contract")
 
     preview = policy_control_subparsers.add_parser(
@@ -247,6 +280,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _policy_control_auth_arguments(preview)
     _policy_candidate_arguments(preview)
+    _policy_baseline_arguments(preview)
     _policy_request_arguments(preview)
     preview.add_argument("--json", action="store_true", help="Emit the versioned preview contract")
 
@@ -283,7 +317,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _policy_control_auth_arguments(evaluate)
     _policy_candidate_arguments(evaluate)
-    evaluate.add_argument("--against-version", help="Immutable baseline version (default: active)")
+    _policy_baseline_arguments(evaluate)
     evaluate.add_argument("--scenarios", required=True, help="Portable scenario-suite JSON path")
     evaluate.add_argument("--json", action="store_true", help="Emit the versioned evaluation contract")
     evaluate.add_argument("--output", help="Atomically save the versioned evaluation contract")
@@ -613,6 +647,19 @@ def _policy_candidate_arguments(parser: argparse.ArgumentParser) -> None:
     candidate.add_argument("--version", dest="candidate_version", help="Saved immutable candidate version")
 
 
+def _policy_baseline_arguments(parser: argparse.ArgumentParser) -> None:
+    baseline = parser.add_mutually_exclusive_group()
+    baseline.add_argument(
+        "--baseline",
+        dest="baseline_file",
+        help="Local policy-document JSON baseline",
+    )
+    baseline.add_argument(
+        "--against-version",
+        help="Saved immutable baseline version (default without --baseline: active)",
+    )
+
+
 def _client_config_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("client", choices=["codex", "claude"])
     parser.add_argument("--url", help="Externally reachable gateway URL; defaults to configured listener")
@@ -678,6 +725,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "policy" and args.policy_control_command == "templates":
         return _policy_template_catalog()
     try:
+        if args.command == "policy" and args.policy_control_command == "demo":
+            return _policy_demo(args)
         if args.command == "policy" and args.policy_control_command == "scenarios":
             return _policy_scenarios(args)
         if args.command == "policy" and args.policy_control_command in {"create", "validate"}:
@@ -745,6 +794,9 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     except PolicyScenarioError as error:
         _print_policy_scenario_failure(error.code, error.reason, hint=error.hint)
+        return 2
+    except PolicyDemoError as error:
+        _print_policy_demo_failure(error.code, error.reason, hint=error.hint)
         return 2
     except (OSError, sqlite3.Error):
         print("storage error: storage_unavailable", file=sys.stderr)
@@ -836,6 +888,390 @@ def _context_experiment_moved() -> int:
         file=sys.stderr,
     )
     return 2
+
+
+def _policy_demo(args: argparse.Namespace) -> int:
+    """Run the honest local administrator workflow and print managed next steps."""
+
+    try:
+        if args.output is None:
+            with tempfile.TemporaryDirectory(prefix="hormuz-policy-demo-") as temporary:
+                result = _run_policy_demo(Path(temporary), retain_artifacts=False)
+        else:
+            root = _create_policy_demo_directory(Path(args.output))
+            result = _run_policy_demo(root, retain_artifacts=True)
+    except PolicyDemoError:
+        raise
+    except (
+        ConfigError,
+        EvidenceStorageError,
+        OSError,
+        PolicyAnalysisError,
+        PolicyControlError,
+        PolicyDocumentError,
+        PolicyScenarioError,
+        PolicyTemplateError,
+        StorageSchemaError,
+        sqlite3.Error,
+    ) as error:
+        raise PolicyDemoError(
+            "policy_demo_execution_failed",
+            "the local policy workflow could not be completed",
+            hint="Rerun the demo; use a new --output path if retaining artifacts.",
+        ) from error
+    _print_policy_demo(result)
+    return 0
+
+
+def _run_policy_demo(root: Path, *, retain_artifacts: bool) -> PolicyDemoResult:
+    """Exercise authoring and read-only analysis without managed state or network."""
+
+    config_path = root / "hormuz.json"
+    database_path = root / "usage.sqlite3"
+    baseline_path = root / "baseline.json"
+    candidate_path = root / "candidate.json"
+    comparison_path = root / "comparison.json"
+    scenarios_path = root / "scenarios.json"
+    evaluation_path = root / "evaluation.json"
+
+    _write_policy_demo_json(config_path, _policy_demo_config())
+    context = GatewayConfig.load_policy_validation_context(config_path)
+    baseline = create_policy_document(
+        template_name="standard",
+        context=context,
+        organization_id=_POLICY_DEMO_ORGANIZATION_ID,
+    )
+    strict = create_policy_document(
+        template_name="strict",
+        context=context,
+        organization_id=_POLICY_DEMO_ORGANIZATION_ID,
+    )
+    candidate_mapping = strict.to_mapping()
+    policies = candidate_mapping.get("policies")
+    if not isinstance(policies, dict):
+        raise PolicyDemoError("policy_demo_candidate_invalid", "the generated candidate is invalid")
+    organization_policy = policies.get("organization")
+    if not isinstance(organization_policy, dict):
+        raise PolicyDemoError("policy_demo_candidate_invalid", "the generated candidate is invalid")
+    organization_policy["allowed_models"] = ["demo-fast"]
+    candidate = PolicyDocument.from_mapping(candidate_mapping, config=context)
+
+    _write_policy_document(baseline_path, baseline, force=False)
+    _write_policy_document(candidate_path, candidate, force=False)
+    baseline = load_policy_document(context, baseline_path)
+    candidate = load_policy_document(context, candidate_path)
+
+    comparison = compare_policy_documents(baseline, candidate)
+    comparison_payload = _policy_comparison_payload(comparison)
+    _write_policy_demo_json(comparison_path, comparison_payload)
+
+    suite = create_policy_scenario_suite(
+        organization_id=_POLICY_DEMO_ORGANIZATION_ID,
+        scenario_id="output-cap",
+        actor_id=_POLICY_DEMO_ACTOR_ID,
+        client="codex",
+        protocol="openai",
+        requested_model="demo-fast",
+        requested_output_tokens=8_000,
+    ).with_scenario(
+        create_policy_scenario(
+            organization_id=_POLICY_DEMO_ORGANIZATION_ID,
+            scenario_id="model-denial",
+            actor_id=_POLICY_DEMO_ACTOR_ID,
+            client="codex",
+            protocol="openai",
+            requested_model="demo-deep",
+            requested_output_tokens=1_000,
+        )
+    )
+    write_policy_scenario_suite(scenarios_path, suite, force=False)
+    suite = load_policy_scenario_suite(scenarios_path)
+
+    config = GatewayConfig.load(
+        config_path,
+        environ={_POLICY_DEMO_IDENTITY_ENV: "local-policy-demo-identity"},
+    )
+    create_usage_store(config)
+    try:
+        os.chmod(database_path, 0o600)
+    except OSError as error:
+        raise PolicyDemoError(
+            "policy_demo_storage_unavailable",
+            "the disposable SQLite store could not be protected",
+        ) from error
+    usage_store = create_usage_store(config, read_only=True)
+    if usage_store.monthly_totals(organization_id=_POLICY_DEMO_ORGANIZATION_ID) != MonthlyTotals():
+        raise PolicyDemoError(
+            "policy_demo_usage_not_zero",
+            "the disposable SQLite store did not begin with zero current usage",
+        )
+
+    evaluation = evaluate_policy_scenario_suite(
+        config=config,
+        usage_store=usage_store,
+        suite=suite,
+        baseline=baseline,
+        candidate=candidate,
+    )
+    _require_policy_demo_behavior(evaluation)
+    write_policy_evaluation(
+        evaluation_path,
+        _policy_evaluation_payload(evaluation),
+        force=False,
+    )
+    _protect_policy_demo_artifacts(root)
+    return PolicyDemoResult(
+        artifact_directory=root if retain_artifacts else None,
+        comparison_change_count=len(comparison.changes),
+        scenario_count=len(evaluation.scenarios),
+        changed_count=evaluation.changed_count,
+        candidate_version_id=candidate.version_id,
+    )
+
+
+def _require_policy_demo_behavior(evaluation: PolicyEvaluation) -> None:
+    results = {result.scenario.scenario_id: result for result in evaluation.scenarios}
+    output_cap = results.get("output-cap")
+    model_denial = results.get("model-denial")
+    if (
+        output_cap is None
+        or not output_cap.baseline_decision.allowed
+        or not output_cap.candidate_decision.allowed
+        or output_cap.baseline_decision.max_output_tokens != 16_000
+        or output_cap.candidate_decision.max_output_tokens != 4_000
+        or model_denial is None
+        or not model_denial.baseline_decision.allowed
+        or model_denial.candidate_decision.allowed
+    ):
+        raise PolicyDemoError(
+            "policy_demo_behavior_mismatch",
+            "the generated policies did not produce the documented model and output changes",
+        )
+
+
+def _policy_demo_config() -> dict[str, object]:
+    return {
+        "listen": {"host": "127.0.0.1", "port": 8787},
+        "database": "./usage.sqlite3",
+        "upstreams": {
+            "openai": {
+                "base_url": "https://unused.invalid",
+                "api_key_env": "HORMUZ_POLICY_DEMO_UNUSED_PROVIDER_KEY",
+                "allow_response_storage": False,
+                "allow_background": False,
+            },
+            "anthropic": {
+                "base_url": "https://unused.invalid",
+                "api_key_env": "HORMUZ_POLICY_DEMO_UNUSED_ANTHROPIC_KEY",
+            },
+        },
+        "authentication": {"oidc": {"issuers": []}},
+        "identities": [
+            {
+                "token_env": _POLICY_DEMO_IDENTITY_ENV,
+                "actor_id": _POLICY_DEMO_ACTOR_ID,
+                "actor_name": "Demo Administrator",
+                "team_id": "platform",
+                "team_name": "Platform",
+                "organization_id": _POLICY_DEMO_ORGANIZATION_ID,
+                "identity_type": "human",
+                "clearance": "confidential",
+                "allowed_clients": ["codex"],
+            }
+        ],
+        "model_routes": {
+            "demo-fast": {"protocol": "openai", "upstream_model": "demo-fast"},
+            "demo-deep": {"protocol": "openai", "upstream_model": "demo-deep"},
+        },
+        "egress_controls": {
+            "secrets": {"mode": "redact", "builtins": True, "custom_secret_envs": []}
+        },
+        "policies": {
+            "organization": {
+                "allowed_clients": ["codex"],
+                "allowed_models": ["demo-fast", "demo-deep"],
+                "max_output_tokens": 16_000,
+            },
+            "teams": {},
+            "actors": {},
+        },
+    }
+
+
+def _create_policy_demo_directory(path: Path) -> Path:
+    selected = path.expanduser().absolute()
+    try:
+        os.mkdir(selected, 0o700)
+        os.chmod(selected, 0o700)
+    except FileExistsError:
+        raise PolicyDemoError(
+            "policy_demo_output_exists",
+            "the selected output path already exists",
+            hint="Choose a new directory; policy demo never replaces an existing path.",
+        ) from None
+    except OSError:
+        raise PolicyDemoError(
+            "policy_demo_output_unavailable",
+            "the owner-only output directory could not be created",
+            hint="Choose a new path under an existing writable parent directory.",
+        ) from None
+    return selected
+
+
+def _write_policy_demo_json(path: Path, value: dict[str, object]) -> None:
+    try:
+        serialized = (json.dumps(value, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    except (OverflowError, RecursionError, ValueError):
+        raise PolicyDemoError(
+            "policy_demo_artifact_invalid",
+            "a generated policy demo artifact could not be serialized",
+        ) from None
+    if len(serialized) > 1024 * 1024:
+        raise PolicyDemoError(
+            "policy_demo_artifact_too_large",
+            "a generated policy demo artifact exceeds the 1 MiB limit",
+        )
+    descriptor: int | None = None
+    created = False
+    try:
+        descriptor = os.open(
+            path,
+            os.O_WRONLY
+            | os.O_CREAT
+            | os.O_EXCL
+            | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0),
+            0o600,
+        )
+        created = True
+        if hasattr(os, "fchmod"):
+            os.fchmod(descriptor, 0o600)
+        remaining = memoryview(serialized)
+        while remaining:
+            written = os.write(descriptor, remaining)
+            if written <= 0:
+                raise OSError("policy demo artifact write made no progress")
+            remaining = remaining[written:]
+        os.fsync(descriptor)
+    except FileExistsError:
+        raise PolicyDemoError(
+            "policy_demo_artifact_exists",
+            "a policy demo artifact path already exists",
+            hint="Choose a new --output directory.",
+        ) from None
+    except OSError:
+        if created:
+            try:
+                path.unlink()
+            except OSError:
+                pass
+        raise PolicyDemoError(
+            "policy_demo_artifact_unavailable",
+            "a policy demo artifact could not be written",
+        ) from None
+    finally:
+        if descriptor is not None:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+
+
+def _protect_policy_demo_artifacts(root: Path) -> None:
+    try:
+        artifacts = tuple(root.iterdir())
+    except OSError as error:
+        raise PolicyDemoError(
+            "policy_demo_artifact_unavailable",
+            "the policy demo artifacts could not be inspected",
+        ) from error
+    for artifact in artifacts:
+        try:
+            target = os.lstat(artifact)
+            if not stat.S_ISREG(target.st_mode):
+                raise PolicyDemoError(
+                    "policy_demo_artifact_not_regular",
+                    "the policy demo produced a non-regular artifact",
+                )
+            os.chmod(artifact, 0o600)
+        except PolicyDemoError:
+            raise
+        except OSError as error:
+            raise PolicyDemoError(
+                "policy_demo_artifact_unavailable",
+                "a policy demo artifact could not be protected",
+            ) from error
+
+
+def _print_policy_demo(result: PolicyDemoResult) -> None:
+    print("Hormuz zero-network policy administrator demo")
+    print("PASS created standard baseline and strict local candidate policies")
+    print("PASS validated both local policy documents")
+    print(f"PASS semantic comparison found {result.comparison_change_count} policy changes")
+    print(f"PASS created {result.scenario_count} explicit policy scenarios")
+    print("PASS disposable SQLite current usage: 0 requests, 0 tokens, USD 0")
+    print(
+        f"PASS evaluated {result.scenario_count} scenarios with {result.changed_count} behavior changes: "
+        "8000-token request uncapped -> capped at 4000; demo-deep allowed -> denied"
+    )
+    print("PASS network calls: 0; provider credentials: 0; policy mutations: 0")
+    if result.artifact_directory is None:
+        print("Temporary artifacts removed; rerun with --output DIRECTORY to inspect owner-only files")
+        candidate_path = Path("policy-demo") / "candidate.json"
+        print("Retain the local candidate before applying it:")
+        print("  hormuz policy demo --output policy-demo")
+    else:
+        print(f"Owner-only artifacts retained in: {result.artifact_directory}")
+        candidate_path = result.artifact_directory / "candidate.json"
+    print("This policy-UX demo is not evidence that the enterprise v1 release gate is complete.")
+    print("Managed next steps (shown only; never executed by this demo):")
+    print(
+        "  "
+        + shlex.join(
+            [
+                "hormuz",
+                "--config",
+                "hormuz.json",
+                "policy",
+                "apply",
+                str(candidate_path),
+                "--organization",
+                _POLICY_DEMO_ORGANIZATION_ID,
+            ]
+        )
+    )
+    print(
+        "  "
+        + shlex.join(
+            [
+                "hormuz",
+                "--config",
+                "hormuz.json",
+                "policy",
+                "history",
+                "--organization",
+                _POLICY_DEMO_ORGANIZATION_ID,
+                "--limit",
+                "20",
+            ]
+        )
+    )
+    print(
+        "  "
+        + shlex.join(
+            [
+                "hormuz",
+                "--config",
+                "hormuz.json",
+                "policy",
+                "rollback",
+                "--organization",
+                _POLICY_DEMO_ORGANIZATION_ID,
+                "--if-active",
+                result.candidate_version_id,
+            ]
+        )
+    )
 
 
 def _provider_free_demo() -> int:
@@ -1176,6 +1612,8 @@ def _policy_control(config: GatewayConfig, args: argparse.Namespace) -> int:
     command = args.policy_control_command
     if command == "validate":
         return _policy_validate(config, args.file)
+    if command in {"compare", "preview", "evaluate"}:
+        return _policy_analysis(config, args)
     service = PolicyControlService(config)
     if command == "bootstrap":
         administrators = service.bootstrap(
@@ -1259,79 +1697,6 @@ def _policy_control(config: GatewayConfig, args: argparse.Namespace) -> int:
             return 2
         _print_policy_version("policy exported", version)
         return 0
-    if command == "compare":
-        # Resolve and retain the baseline before reading the candidate so an
-        # activation racing this command cannot change the comparison halfway.
-        baseline = service.policy_version(
-            organization_id=args.organization,
-            credential_env=args.credential_env,
-            version_id=args.against_version,
-        )
-        candidate = _policy_candidate_document(service, config, args)
-        comparison = compare_policy_documents(baseline.document, candidate)
-        _print_policy_comparison(comparison, as_json=args.json)
-        return 0 if comparison.identical else 1
-    if command == "preview":
-        # The active version is pinned before candidate loading and reused for
-        # the complete baseline evaluation.
-        baseline = service.policy_version(
-            organization_id=args.organization,
-            credential_env=args.credential_env,
-            version_id=None,
-        )
-        candidate = _policy_candidate_document(service, config, args)
-        identity = config.identities_by_actor.get(args.actor)
-        if identity is None:
-            raise PolicyAnalysisError("policy_preview_actor_not_found")
-        if identity.organization_id != args.organization:
-            raise PolicyAnalysisError("policy_preview_actor_organization_mismatch")
-        if args.max_output_tokens is not None and args.max_output_tokens < 1:
-            raise PolicyAnalysisError("policy_preview_output_tokens_invalid")
-        preview = preview_policy_request(
-            config=config,
-            usage_store=create_usage_store(config, read_only=True),
-            identity=identity,
-            baseline=baseline.document,
-            candidate=candidate,
-            client=args.client,
-            protocol=args.protocol,
-            requested_model=args.model,
-            requested_output_tokens=args.max_output_tokens,
-        )
-        _print_policy_preview(preview, as_json=args.json)
-        return 0 if preview.candidate_decision.allowed else 3
-    if command == "evaluate":
-        if args.force and args.output is None:
-            raise PolicyScenarioError(
-                "policy_evaluation_output_required",
-                "--force requires an explicit --output path",
-                hint="Remove --force or select a regular result file with --output.",
-            )
-        # Pin both immutable policy identities once. A concurrent activation
-        # cannot mix baselines across scenarios after these lookups complete.
-        baseline = service.policy_version(
-            organization_id=args.organization,
-            credential_env=args.credential_env,
-            version_id=args.against_version,
-        )
-        candidate = _policy_candidate_document(service, config, args)
-        suite = load_policy_scenario_suite(args.scenarios)
-        if suite.organization_id != args.organization:
-            raise PolicyAnalysisError("policy_evaluation_organization_mismatch")
-        evaluation = evaluate_policy_scenario_suite(
-            config=config,
-            usage_store=create_usage_store(config, read_only=True),
-            suite=suite,
-            baseline=baseline.document,
-            candidate=candidate,
-        )
-        payload = _policy_evaluation_payload(evaluation)
-        if args.output is not None:
-            output_path = Path(args.output).expanduser().absolute()
-            write_policy_evaluation(output_path, payload, force=args.force)
-            print(f"policy evaluation saved: {output_path}", file=sys.stderr)
-        _print_policy_evaluation(evaluation, payload=payload, as_json=args.json)
-        return 0 if evaluation.identical else 1
     if command == "administrator":
         if args.policy_administrator_command == "grant":
             administrator = service.grant_oidc_administrator(
@@ -1385,12 +1750,117 @@ def _policy_control(config: GatewayConfig, args: argparse.Namespace) -> int:
     raise ConfigError("unsupported policy control command")
 
 
+def _policy_analysis(config: GatewayConfig, args: argparse.Namespace) -> int:
+    """Compare or evaluate pinned policies through an explicit trust mode."""
+
+    command = args.policy_control_command
+    offline = _policy_analysis_is_offline(config, args)
+    service: PolicyControlService | None = None
+    if not offline:
+        service = PolicyControlService(config)
+        # Authenticate and confirm persisted administrator authority before
+        # any managed policy lookup or PostgreSQL usage-store construction.
+        service.authorize(
+            organization_id=args.organization,
+            credential_env=args.credential_env,
+        )
+
+    # Resolve and retain the baseline before the candidate. Managed versions
+    # are immutable, and an activation racing this command cannot mix the
+    # baseline across one preview or scenario-suite evaluation.
+    baseline = _policy_baseline_document(service, config, args)
+    candidate = _policy_candidate_document(service, config, args)
+
+    if command == "compare":
+        comparison = compare_policy_documents(baseline, candidate)
+        _print_policy_comparison(comparison, as_json=args.json)
+        return 0 if comparison.identical else 1
+    if command == "preview":
+        identity = config.identities_by_actor.get(args.actor)
+        if identity is None:
+            raise PolicyAnalysisError("policy_preview_actor_not_found")
+        if identity.organization_id != args.organization:
+            raise PolicyAnalysisError("policy_preview_actor_organization_mismatch")
+        if args.max_output_tokens is not None and args.max_output_tokens < 1:
+            raise PolicyAnalysisError("policy_preview_output_tokens_invalid")
+        preview = preview_policy_request(
+            config=config,
+            usage_store=create_usage_store(config, read_only=True),
+            identity=identity,
+            baseline=baseline,
+            candidate=candidate,
+            client=args.client,
+            protocol=args.protocol,
+            requested_model=args.model,
+            requested_output_tokens=args.max_output_tokens,
+        )
+        _print_policy_preview(preview, as_json=args.json)
+        return 0 if preview.candidate_decision.allowed else 3
+    if command == "evaluate":
+        if args.force and args.output is None:
+            raise PolicyScenarioError(
+                "policy_evaluation_output_required",
+                "--force requires an explicit --output path",
+                hint="Remove --force or select a regular result file with --output.",
+            )
+        suite = load_policy_scenario_suite(args.scenarios)
+        if suite.organization_id != args.organization:
+            raise PolicyAnalysisError("policy_evaluation_organization_mismatch")
+        evaluation = evaluate_policy_scenario_suite(
+            config=config,
+            usage_store=create_usage_store(config, read_only=True),
+            suite=suite,
+            baseline=baseline,
+            candidate=candidate,
+        )
+        payload = _policy_evaluation_payload(evaluation)
+        if args.output is not None:
+            output_path = Path(args.output).expanduser().absolute()
+            write_policy_evaluation(output_path, payload, force=args.force)
+            print(f"policy evaluation saved: {output_path}", file=sys.stderr)
+        _print_policy_evaluation(evaluation, payload=payload, as_json=args.json)
+        return 0 if evaluation.identical else 1
+    raise PolicyAnalysisError("policy_analysis_command_unsupported")
+
+
+def _policy_analysis_is_offline(config: GatewayConfig, args: argparse.Namespace) -> bool:
+    """Return whether every policy and usage dependency is local and bounded."""
+
+    return (
+        args.baseline_file is not None
+        and args.candidate_version is None
+        and config.usage_storage.backend == "sqlite"
+    )
+
+
+def _policy_baseline_document(
+    service: PolicyControlService | None,
+    config: GatewayConfig,
+    args: argparse.Namespace,
+) -> PolicyDocument:
+    if args.baseline_file is not None:
+        baseline = load_policy_document(config, args.baseline_file)
+    else:
+        if service is None:
+            raise PolicyAnalysisError("policy_analysis_managed_mode_required")
+        baseline = service.policy_version(
+            organization_id=args.organization,
+            credential_env=args.credential_env,
+            version_id=args.against_version,
+        ).document
+    if baseline.organization_id != args.organization:
+        raise PolicyAnalysisError("policy_baseline_organization_mismatch")
+    return baseline
+
+
 def _policy_candidate_document(
-    service: PolicyControlService,
+    service: PolicyControlService | None,
     config: GatewayConfig,
     args: argparse.Namespace,
 ) -> PolicyDocument:
     if args.candidate_version is not None:
+        if service is None:
+            raise PolicyAnalysisError("policy_analysis_managed_mode_required")
         candidate = service.policy_version(
             organization_id=args.organization,
             credential_env=args.credential_env,
@@ -1646,6 +2116,13 @@ def _print_policy_scenario_failure(code: str, reason: str, *, hint: str | None =
         print(f"hint: {hint}", file=sys.stderr)
 
 
+def _print_policy_demo_failure(code: str, reason: str, *, hint: str | None = None) -> None:
+    print(f"policy demo failed: {code}", file=sys.stderr)
+    print(f"reason: {reason}", file=sys.stderr)
+    if hint is not None:
+        print(f"hint: {hint}", file=sys.stderr)
+
+
 def _print_policy_version(prefix: str, version: PolicyVersionRecord) -> None:
     print(
         f"{prefix}: organization={version.organization_id} version={version.version_id} "
@@ -1737,24 +2214,31 @@ def _print_policy_history(history: PolicyHistory, *, as_json: bool) -> None:
         )
 
 
+def _policy_comparison_payload(comparison: PolicyComparison) -> dict[str, object]:
+    return contract_envelope(
+        POLICY_COMPARISON_SCHEMA_ID,
+        {
+            "organization_id": comparison.organization_id,
+            "baseline": _policy_version_identity_payload(comparison.baseline),
+            "candidate": _policy_version_identity_payload(comparison.candidate),
+            "identical": comparison.identical,
+            "changes": [
+                {
+                    "path": change.path,
+                    "change_type": change.change_type,
+                    "before": change.before,
+                    "after": change.after,
+                }
+                for change in comparison.changes
+            ],
+        },
+    )
+
+
 def _print_policy_comparison(comparison: PolicyComparison, *, as_json: bool) -> None:
-    payload = {
-        "organization_id": comparison.organization_id,
-        "baseline": _policy_version_identity_payload(comparison.baseline),
-        "candidate": _policy_version_identity_payload(comparison.candidate),
-        "identical": comparison.identical,
-        "changes": [
-            {
-                "path": change.path,
-                "change_type": change.change_type,
-                "before": change.before,
-                "after": change.after,
-            }
-            for change in comparison.changes
-        ],
-    }
+    payload = _policy_comparison_payload(comparison)
     if as_json:
-        print(json.dumps(contract_envelope(POLICY_COMPARISON_SCHEMA_ID, payload), indent=2, sort_keys=True))
+        print(json.dumps(payload, indent=2, sort_keys=True))
         return
     print(f"organization: {comparison.organization_id}")
     _print_policy_version_identity("baseline", comparison.baseline)
