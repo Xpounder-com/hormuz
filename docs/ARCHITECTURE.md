@@ -56,7 +56,8 @@ Custody authorization (managed PostgreSQL mode)
 - `hormuz/custody.py` owns provider-neutral encrypted-envelope and audit-anchor contracts; `hormuz/aws_custody.py` provides the optional AWS reference adapters, while `hormuz/openbao_custody.py` and `hormuz/self_hosted_custody.py` provide the optional OpenBao and S3-compatible Object Lock adapters. `hormuz/custody_runtime.py` resolves owner-only encrypted provider credentials at gateway startup; `hormuz/custody_runtime_projection.py` owns the locally enforced lifecycle view, prepared admission barriers, replica acknowledgements, and five-second partition fence without adding a PostgreSQL read to each request.
 - `hormuz/usage.py` parses provider usage metadata without storing response content.
 - `hormuz/redaction.py` transforms provider-bound JSON values using configured secret controls.
-- `hormuz/cli.py` exposes serving, diagnostics, policy checks, client configuration, and usage reporting.
+- `hormuz/cli.py` owns the public `main` and `build_parser` entry points, legacy argv normalization, top-level dispatch, and shared CLI error conventions.
+- `hormuz/commands/policy.py` owns policy command registration, execution, formatting, and safe local policy-artifact handling behind a narrow dispatch-time dependency seam. It does not import the CLI façade or introduce a command framework.
 
 ## Trust boundary
 
