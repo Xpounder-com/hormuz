@@ -9,6 +9,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -562,9 +563,12 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
                 usability._read_evidence(oversized)
 
             nested = root / "nested.json"
-            nested.write_text("[" * 40_000 + "0" + "]" * 40_000, encoding="utf-8")
+            nested.write_text("[]", encoding="utf-8")
             stderr = io.StringIO()
-            with contextlib.redirect_stderr(stderr):
+            with (
+                mock.patch.object(usability.json, "loads", side_effect=RecursionError),
+                contextlib.redirect_stderr(stderr),
+            ):
                 self.assertEqual(usability.main([str(nested)]), 2)
             self.assertIn("evidence_invalid_json", stderr.getvalue())
 
