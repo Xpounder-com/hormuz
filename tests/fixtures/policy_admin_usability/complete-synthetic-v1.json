@@ -1,0 +1,426 @@
+{
+  "schema_id": "hormuz.policy-admin-usability-evidence",
+  "schema_version": 1,
+  "evidence_kind": "synthetic_test_fixture",
+  "gate_issue": "https://github.com/Xpounder-com/hormuz/issues/173",
+  "generated_at": "2026-08-27T20:00:00Z",
+  "release": {
+    "version": "v1.0",
+    "artifact_kind": "signed_oci",
+    "artifact_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "source_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "published_at": "2026-08-27T10:00:00Z"
+  },
+  "operator_attestation": {
+    "distinct_humans_verified_off_repository": false,
+    "identity_mapping_not_committed": true,
+    "raw_intake_not_committed": true,
+    "release_artifact_digest_verified": true
+  },
+  "sessions": [
+    {
+      "session_id": "paus:10000000-0000-4000-8000-000000000001",
+      "participant_id": "pau:00000000-0000-4000-8000-000000000001",
+      "track": "offline",
+      "release_artifact_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "started_at": "2026-08-27T11:00:00Z",
+      "duration_seconds": 600,
+      "setup_excluded_from_duration": true,
+      "independence": {
+        "workflow_author_or_reviewer": false,
+        "prior_private_walkthrough": false,
+        "assistance_count": 0
+      },
+      "guidance_usage": {
+        "sources": ["command_help", "shipped_documentation", "shipped_examples"],
+        "lookup_count": 4
+      },
+      "stages": [
+        {"name": "create_from_template", "status": "completed"},
+        {"name": "modify_policy", "status": "completed"},
+        {"name": "validate_policy", "status": "completed"},
+        {"name": "compare_policy", "status": "completed"},
+        {"name": "run_saved_scenarios", "status": "completed"},
+        {"name": "evaluate_policy", "status": "completed"}
+      ],
+      "outcome": "completed",
+      "friction_category": "none",
+      "finding_id": null,
+      "postgresql_verification": null,
+      "content_free_attestations": {
+        "policy_or_request_content_absent": true,
+        "credential_or_token_absent": true,
+        "personal_identity_absent": true,
+        "identity_mapping_absent": true,
+        "local_path_absent": true,
+        "free_text_absent": true
+      }
+    },
+    {
+      "session_id": "paus:10000000-0000-4000-8000-000000000002",
+      "participant_id": "pau:00000000-0000-4000-8000-000000000002",
+      "track": "offline",
+      "release_artifact_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "started_at": "2026-08-27T11:20:00Z",
+      "duration_seconds": 720,
+      "setup_excluded_from_duration": true,
+      "independence": {
+        "workflow_author_or_reviewer": false,
+        "prior_private_walkthrough": false,
+        "assistance_count": 0
+      },
+      "guidance_usage": {
+        "sources": ["command_help", "shipped_documentation"],
+        "lookup_count": 3
+      },
+      "stages": [
+        {"name": "create_from_template", "status": "completed"},
+        {"name": "modify_policy", "status": "completed"},
+        {"name": "validate_policy", "status": "completed"},
+        {"name": "compare_policy", "status": "completed"},
+        {"name": "run_saved_scenarios", "status": "completed"},
+        {"name": "evaluate_policy", "status": "completed"}
+      ],
+      "outcome": "completed",
+      "friction_category": "none",
+      "finding_id": null,
+      "postgresql_verification": null,
+      "content_free_attestations": {
+        "policy_or_request_content_absent": true,
+        "credential_or_token_absent": true,
+        "personal_identity_absent": true,
+        "identity_mapping_absent": true,
+        "local_path_absent": true,
+        "free_text_absent": true
+      }
+    },
+    {
+      "session_id": "paus:10000000-0000-4000-8000-000000000003",
+      "participant_id": "pau:00000000-0000-4000-8000-000000000003",
+      "track": "offline",
+      "release_artifact_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "started_at": "2026-08-27T11:40:00Z",
+      "duration_seconds": 840,
+      "setup_excluded_from_duration": true,
+      "independence": {
+        "workflow_author_or_reviewer": false,
+        "prior_private_walkthrough": false,
+        "assistance_count": 0
+      },
+      "guidance_usage": {
+        "sources": ["shipped_documentation", "shipped_examples"],
+        "lookup_count": 2
+      },
+      "stages": [
+        {"name": "create_from_template", "status": "completed"},
+        {"name": "modify_policy", "status": "completed"},
+        {"name": "validate_policy", "status": "completed"},
+        {"name": "compare_policy", "status": "completed"},
+        {"name": "run_saved_scenarios", "status": "completed"},
+        {"name": "evaluate_policy", "status": "completed"}
+      ],
+      "outcome": "completed",
+      "friction_category": "none",
+      "finding_id": null,
+      "postgresql_verification": null,
+      "content_free_attestations": {
+        "policy_or_request_content_absent": true,
+        "credential_or_token_absent": true,
+        "personal_identity_absent": true,
+        "identity_mapping_absent": true,
+        "local_path_absent": true,
+        "free_text_absent": true
+      }
+    },
+    {
+      "session_id": "paus:10000000-0000-4000-8000-000000000004",
+      "participant_id": "pau:00000000-0000-4000-8000-000000000004",
+      "track": "offline",
+      "release_artifact_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "started_at": "2026-08-27T12:00:00Z",
+      "duration_seconds": 900,
+      "setup_excluded_from_duration": true,
+      "independence": {
+        "workflow_author_or_reviewer": false,
+        "prior_private_walkthrough": false,
+        "assistance_count": 0
+      },
+      "guidance_usage": {
+        "sources": ["command_help"],
+        "lookup_count": 1
+      },
+      "stages": [
+        {"name": "create_from_template", "status": "completed"},
+        {"name": "modify_policy", "status": "completed"},
+        {"name": "validate_policy", "status": "completed"},
+        {"name": "compare_policy", "status": "completed"},
+        {"name": "run_saved_scenarios", "status": "completed"},
+        {"name": "evaluate_policy", "status": "completed"}
+      ],
+      "outcome": "completed",
+      "friction_category": "none",
+      "finding_id": null,
+      "postgresql_verification": null,
+      "content_free_attestations": {
+        "policy_or_request_content_absent": true,
+        "credential_or_token_absent": true,
+        "personal_identity_absent": true,
+        "identity_mapping_absent": true,
+        "local_path_absent": true,
+        "free_text_absent": true
+      }
+    },
+    {
+      "session_id": "paus:10000000-0000-4000-8000-000000000005",
+      "participant_id": "pau:00000000-0000-4000-8000-000000000005",
+      "track": "offline",
+      "release_artifact_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "started_at": "2026-08-27T12:30:00Z",
+      "duration_seconds": 1500,
+      "setup_excluded_from_duration": true,
+      "independence": {
+        "workflow_author_or_reviewer": false,
+        "prior_private_walkthrough": false,
+        "assistance_count": 0
+      },
+      "guidance_usage": {
+        "sources": [],
+        "lookup_count": 0
+      },
+      "stages": [
+        {"name": "create_from_template", "status": "completed"},
+        {"name": "modify_policy", "status": "completed"},
+        {"name": "validate_policy", "status": "completed"},
+        {"name": "compare_policy", "status": "completed"},
+        {"name": "run_saved_scenarios", "status": "completed"},
+        {"name": "evaluate_policy", "status": "completed"}
+      ],
+      "outcome": "completed",
+      "friction_category": "none",
+      "finding_id": null,
+      "postgresql_verification": null,
+      "content_free_attestations": {
+        "policy_or_request_content_absent": true,
+        "credential_or_token_absent": true,
+        "personal_identity_absent": true,
+        "identity_mapping_absent": true,
+        "local_path_absent": true,
+        "free_text_absent": true
+      }
+    },
+    {
+      "session_id": "paus:20000000-0000-4000-8000-000000000001",
+      "participant_id": "pau:00000000-0000-4000-8000-000000000001",
+      "track": "postgresql",
+      "release_artifact_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "started_at": "2026-08-27T14:00:00Z",
+      "duration_seconds": 480,
+      "setup_excluded_from_duration": true,
+      "independence": {
+        "workflow_author_or_reviewer": false,
+        "prior_private_walkthrough": false,
+        "assistance_count": 0
+      },
+      "guidance_usage": {
+        "sources": ["command_help", "shipped_documentation"],
+        "lookup_count": 3
+      },
+      "stages": [
+        {"name": "authenticate_administrator", "status": "completed"},
+        {"name": "apply_policy", "status": "completed"},
+        {"name": "verify_apply_state", "status": "completed"},
+        {"name": "inspect_history", "status": "completed"},
+        {"name": "rollback_policy", "status": "completed"},
+        {"name": "verify_rollback_state", "status": "completed"}
+      ],
+      "outcome": "completed",
+      "friction_category": "none",
+      "finding_id": null,
+      "postgresql_verification": {
+        "apply": {
+          "previous_version_id": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+          "previous_content_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "previous_generation": 1,
+          "expected_version_id": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+          "expected_content_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "observed_version_id": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+          "observed_content_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "observed_generation": 2
+        },
+        "rollback": {
+          "expected_version_id": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+          "expected_content_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "expected_predecessor_generation": 1,
+          "observed_version_id": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+          "observed_content_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "observed_generation": 3
+        },
+        "history": {
+          "predecessor_event_type": "policy_activated",
+          "predecessor_version_id": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+          "predecessor_content_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "predecessor_generation": 1,
+          "apply_event_type": "policy_activated",
+          "apply_version_id": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+          "apply_content_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "apply_generation": 2,
+          "rollback_event_type": "policy_rolled_back",
+          "rollback_version_id": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+          "rollback_content_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "rollback_generation": 3
+        }
+      },
+      "content_free_attestations": {
+        "policy_or_request_content_absent": true,
+        "credential_or_token_absent": true,
+        "personal_identity_absent": true,
+        "identity_mapping_absent": true,
+        "local_path_absent": true,
+        "free_text_absent": true
+      }
+    },
+    {
+      "session_id": "paus:20000000-0000-4000-8000-000000000002",
+      "participant_id": "pau:00000000-0000-4000-8000-000000000002",
+      "track": "postgresql",
+      "release_artifact_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "started_at": "2026-08-27T14:20:00Z",
+      "duration_seconds": 540,
+      "setup_excluded_from_duration": true,
+      "independence": {
+        "workflow_author_or_reviewer": false,
+        "prior_private_walkthrough": false,
+        "assistance_count": 0
+      },
+      "guidance_usage": {
+        "sources": ["shipped_documentation"],
+        "lookup_count": 2
+      },
+      "stages": [
+        {"name": "authenticate_administrator", "status": "completed"},
+        {"name": "apply_policy", "status": "completed"},
+        {"name": "verify_apply_state", "status": "completed"},
+        {"name": "inspect_history", "status": "completed"},
+        {"name": "rollback_policy", "status": "completed"},
+        {"name": "verify_rollback_state", "status": "completed"}
+      ],
+      "outcome": "completed",
+      "friction_category": "none",
+      "finding_id": null,
+      "postgresql_verification": {
+        "apply": {
+          "previous_version_id": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+          "previous_content_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "previous_generation": 4,
+          "expected_version_id": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+          "expected_content_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "observed_version_id": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+          "observed_content_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "observed_generation": 5
+        },
+        "rollback": {
+          "expected_version_id": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+          "expected_content_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "expected_predecessor_generation": 4,
+          "observed_version_id": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+          "observed_content_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "observed_generation": 6
+        },
+        "history": {
+          "predecessor_event_type": "policy_activated",
+          "predecessor_version_id": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+          "predecessor_content_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "predecessor_generation": 4,
+          "apply_event_type": "policy_activated",
+          "apply_version_id": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+          "apply_content_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "apply_generation": 5,
+          "rollback_event_type": "policy_rolled_back",
+          "rollback_version_id": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+          "rollback_content_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "rollback_generation": 6
+        }
+      },
+      "content_free_attestations": {
+        "policy_or_request_content_absent": true,
+        "credential_or_token_absent": true,
+        "personal_identity_absent": true,
+        "identity_mapping_absent": true,
+        "local_path_absent": true,
+        "free_text_absent": true
+      }
+    },
+    {
+      "session_id": "paus:20000000-0000-4000-8000-000000000003",
+      "participant_id": "pau:00000000-0000-4000-8000-000000000003",
+      "track": "postgresql",
+      "release_artifact_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "started_at": "2026-08-27T14:40:00Z",
+      "duration_seconds": 600,
+      "setup_excluded_from_duration": true,
+      "independence": {
+        "workflow_author_or_reviewer": false,
+        "prior_private_walkthrough": false,
+        "assistance_count": 0
+      },
+      "guidance_usage": {
+        "sources": ["command_help", "shipped_examples"],
+        "lookup_count": 2
+      },
+      "stages": [
+        {"name": "authenticate_administrator", "status": "completed"},
+        {"name": "apply_policy", "status": "completed"},
+        {"name": "verify_apply_state", "status": "completed"},
+        {"name": "inspect_history", "status": "completed"},
+        {"name": "rollback_policy", "status": "completed"},
+        {"name": "verify_rollback_state", "status": "completed"}
+      ],
+      "outcome": "completed",
+      "friction_category": "none",
+      "finding_id": null,
+      "postgresql_verification": {
+        "apply": {
+          "previous_version_id": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+          "previous_content_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "previous_generation": 7,
+          "expected_version_id": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+          "expected_content_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "observed_version_id": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+          "observed_content_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "observed_generation": 8
+        },
+        "rollback": {
+          "expected_version_id": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+          "expected_content_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "expected_predecessor_generation": 7,
+          "observed_version_id": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+          "observed_content_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "observed_generation": 9
+        },
+        "history": {
+          "predecessor_event_type": "policy_activated",
+          "predecessor_version_id": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+          "predecessor_content_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "predecessor_generation": 7,
+          "apply_event_type": "policy_activated",
+          "apply_version_id": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+          "apply_content_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "apply_generation": 8,
+          "rollback_event_type": "policy_rolled_back",
+          "rollback_version_id": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+          "rollback_content_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "rollback_generation": 9
+        }
+      },
+      "content_free_attestations": {
+        "policy_or_request_content_absent": true,
+        "credential_or_token_absent": true,
+        "personal_identity_absent": true,
+        "identity_mapping_absent": true,
+        "local_path_absent": true,
+        "free_text_absent": true
+      }
+    }
+  ],
+  "findings": []
+}
