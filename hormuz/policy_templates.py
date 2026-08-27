@@ -91,17 +91,29 @@ def create_policy_document(
         )
     selected_organization = _select_organization(context, organization_id)
     if template.deny_all:
-        allowed_clients: tuple[str, ...] = ()
+        allowed_clients: tuple[str, ...] | None = ()
         allowed_models: tuple[str, ...] = ()
     else:
-        allowed_clients = tuple(
-            sorted(
-                {
-                    client
-                    for identity in context.identities_by_actor.values()
-                    if identity.organization_id == selected_organization
-                    for client in identity.allowed_clients
-                }
+        organization_identities = tuple(
+            identity
+            for identity in context.identities_by_actor.values()
+            if identity.organization_id == selected_organization
+        )
+        # An empty identity allowlist means unrestricted client access. The
+        # organization-level equivalent is None: any concrete union would
+        # accidentally narrow that identity, while individual non-empty
+        # identity allowlists continue to enforce their own restrictions.
+        allowed_clients = (
+            None
+            if any(not identity.allowed_clients for identity in organization_identities)
+            else tuple(
+                sorted(
+                    {
+                        client
+                        for identity in organization_identities
+                        for client in identity.allowed_clients
+                    }
+                )
             )
         )
         allowed_models = tuple(sorted(context.model_routes))

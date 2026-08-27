@@ -5,6 +5,7 @@ import io
 import json
 import os
 import signal
+import stat
 import tempfile
 import tomllib
 import unittest
@@ -616,6 +617,25 @@ class ClientConfigTests(unittest.TestCase):
             self.assertIn("policy creation failed: policy_output_symlink_refused", stderr.getvalue())
             self.assertNotIn(str(symlink_path), stderr.getvalue())
             self.assertEqual(symlink_target.read_text(encoding="utf-8"), "preserve me")
+
+            if hasattr(os, "mkfifo"):
+                fifo_path = root / "policy.fifo"
+                os.mkfifo(fifo_path)
+                fifo_args = [
+                    "--config",
+                    str(ROOT / "config.example.json"),
+                    "policy",
+                    "create",
+                    "--output",
+                    str(fifo_path),
+                    "--force",
+                ]
+                stderr = io.StringIO()
+                with mock.patch.dict(os.environ, {}, clear=True), redirect_stderr(stderr):
+                    self.assertEqual(main(fifo_args), 2)
+                self.assertIn("policy creation failed: policy_output_not_regular", stderr.getvalue())
+                self.assertNotIn(str(fifo_path), stderr.getvalue())
+                self.assertTrue(stat.S_ISFIFO(os.lstat(fifo_path).st_mode))
 
     def test_policy_create_failures_do_not_repeat_submitted_values(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

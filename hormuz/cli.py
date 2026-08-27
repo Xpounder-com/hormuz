@@ -9,6 +9,7 @@ import os
 import sqlite3
 import shlex
 import signal
+import stat
 import sys
 import tempfile
 import threading
@@ -1073,12 +1074,7 @@ def _write_generated_policy_document(
 ) -> None:
     """Atomically publish an owner-only policy document without following links."""
 
-    if path.is_symlink():
-        raise PolicyTemplateError(
-            "policy_output_symlink_refused",
-            "the selected output path is a symbolic link",
-            hint="Choose a regular file path; Hormuz never follows policy output links.",
-        )
+    _validate_policy_output_target(path, force=force)
     serialized = (json.dumps(document.to_mapping(), indent=2, sort_keys=True) + "\n").encode("utf-8")
     descriptor: int | None = None
     temporary_path: str | None = None
@@ -1100,15 +1096,9 @@ def _write_generated_policy_document(
         os.close(descriptor)
         descriptor = None
         if force:
-            # Recheck immediately before publication. A race that substitutes
-            # a link after this check is still safe: replace removes the link
-            # itself and never opens its target.
-            if path.is_symlink():
-                raise PolicyTemplateError(
-                    "policy_output_symlink_refused",
-                    "the selected output path is a symbolic link",
-                    hint="Choose a regular file path; Hormuz never follows policy output links.",
-                )
+            # Recheck immediately before publication so --force remains
+            # limited to an absent target or an existing regular file.
+            _validate_policy_output_target(path, force=True)
             os.replace(temporary_path, path)
         else:
             try:
@@ -1143,6 +1133,33 @@ def _write_generated_policy_document(
                 os.unlink(temporary_path)
             except OSError:
                 pass
+
+
+def _validate_policy_output_target(path: Path, *, force: bool) -> None:
+    """Refuse links and limit forced replacement to regular files."""
+
+    try:
+        target = os.lstat(path)
+    except FileNotFoundError:
+        return
+    except OSError:
+        raise PolicyTemplateError(
+            "policy_output_unavailable",
+            "the policy output path could not be inspected",
+            hint="Check that the output directory exists and is accessible.",
+        ) from None
+    if stat.S_ISLNK(target.st_mode):
+        raise PolicyTemplateError(
+            "policy_output_symlink_refused",
+            "the selected output path is a symbolic link",
+            hint="Choose a regular file path; Hormuz never follows policy output links.",
+        )
+    if force and not stat.S_ISREG(target.st_mode):
+        raise PolicyTemplateError(
+            "policy_output_not_regular",
+            "the selected output path is not a regular file",
+            hint="Choose a regular file path; --force never replaces special files or directories.",
+        )
 
 
 def _print_policy_creation_failure(code: str, reason: str, *, hint: str | None = None) -> None:

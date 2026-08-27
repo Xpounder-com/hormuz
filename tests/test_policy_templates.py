@@ -76,6 +76,24 @@ class PolicyTemplateTests(unittest.TestCase):
         self.assertEqual(document.team_policies, {})
         self.assertEqual(document.actor_policies, {})
 
+    def test_unrestricted_identity_keeps_organization_client_access_unrestricted(self) -> None:
+        context = _context()
+        identities = dict(context.identities_by_actor)
+        identities["unrestricted"] = _identity("unrestricted", "acme")
+        context = PolicyValidationContext(
+            organization_ids=context.organization_ids,
+            identities_by_actor=identities,
+            model_routes=context.model_routes,
+        )
+
+        document = create_policy_document(template_name="standard", context=context)
+
+        self.assertIsNone(document.organization_policy.allowed_clients)
+        self.assertEqual(
+            document.snapshot_for(identities["alice"]).effective_policy.allowed_clients,
+            None,
+        )
+
     def test_strict_applies_optional_budget_overrides(self) -> None:
         document = create_policy_document(
             template_name="strict",
