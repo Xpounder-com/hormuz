@@ -32,6 +32,7 @@ The current Hormuz-owned JSON schemas are:
 | Hormuz-generated HTTP errors | `hormuz.gateway-error` v3 |
 | `hormuz policy-check` output | `hormuz.policy-decision` v1 |
 | `hormuz policy status --json` | `hormuz.policy-control-status` v1 |
+| `hormuz policy history --json` | `hormuz.policy-history` v1 |
 | `hormuz custody status --json` | `hormuz.custody-control-status` v3 |
 | `hormuz status --json` | `hormuz.usage-report` v1 |
 | audit JSONL events | `hormuz.audit-event` v2 |
@@ -96,7 +97,7 @@ Every durable v2 event snapshots the authenticated identity at request time:
 
 In local mode, `policy_version` is a deterministic content-free fingerprint of the policy-relevant configuration, prefixed `local-config-`. In managed PostgreSQL mode it is the exact immutable staged-policy digest, prefixed `sha256:`. A gateway reads and pins the active managed version when a request begins; activation cannot rewrite an in-flight request or its durable evidence. Neither form contains a credential value or request content.
 
-Managed policy control has two additional strict contracts. `hormuz.policy-document` v1 accepts only allowlisted routing, cap, budget, and egress-control fields. `hormuz.policy-control-status` v1 returns administration metadata for a current policy administrator: the active digest/generation, immutable version metadata, structural redacted change summaries, and stable administrator keys. PostgreSQL `hormuz.policy-control-event` v1 records bootstrap, administrator, stage, activation, rollback, and break-glass events. It stores both an explicit durable schema ID/version and opaque actor identity keys plus structural metadata only; Hormuz validates the exact event shape before it inserts the row, and the compatibility fixture exercises that durable schema. See [POLICY_CONTROL.md](POLICY_CONTROL.md) for authorization and lifecycle semantics.
+Managed policy control has three additional strict contracts. `hormuz.policy-document` v1 accepts only allowlisted routing, cap, budget, and egress-control fields. `hormuz.policy-control-status` v1 returns administration metadata for a current policy administrator: the active digest/generation, immutable version metadata, structural redacted change summaries, and stable administrator keys. The additive `hormuz.policy-history` v1 CLI contract is a bounded, newest-first lifecycle timeline containing only stage, activation, and rollback events. Each event binds the immutable version ID to its digest, timestamp, opaque actor key, nullable activation generation, and structural change summary. Its requested limit is explicit, the fixed maximum is 100, and `has_more` reports truncation. PostgreSQL `hormuz.policy-control-event` v1 records bootstrap, administrator, stage, activation, rollback, and break-glass events. It stores both an explicit durable schema ID/version and opaque actor identity keys plus structural metadata only; Hormuz validates the exact event shape before it inserts the row, and the compatibility fixture exercises that durable schema. See [POLICY_CONTROL.md](POLICY_CONTROL.md) for authorization and lifecycle semantics.
 
 Managed custody control adds `hormuz.custody-control-status` v3 and
 `hormuz.custody-control-event` v1. Status contains tenant-qualified

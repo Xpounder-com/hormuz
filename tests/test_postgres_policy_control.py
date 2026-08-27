@@ -36,6 +36,13 @@ class PostgresPolicyControlTests(PostgresTestCase):
         self.assertEqual(len(administrators), 1)
         self.assertEqual(administrators[0].actor_id, "alice")
 
+        with self.assertRaises(PolicyControlError) as raised:
+            service.policy_version(
+                organization_id="xpounder",
+                credential_env="HORMUZ_POLICY_ADMIN_TOKEN",
+            )
+        self.assertEqual(raised.exception.code, "policy_active_version_unavailable")
+
         first = self._stage(service, environment=environment, document=self._policy_document())
         first_activation = service.activate(
             organization_id="xpounder",
@@ -106,6 +113,77 @@ class PostgresPolicyControlTests(PostgresTestCase):
         self.assertTrue(status.initialized)
         self.assertEqual(status.active.version_id if status.active else None, first.version_id)
         self.assertEqual({version.version_id for version in status.versions}, {first.version_id, second.version_id})
+
+        self.assertEqual(
+            service.policy_version(
+                organization_id="xpounder",
+                credential_env="HORMUZ_POLICY_ADMIN_TOKEN",
+            ).version_id,
+            first.version_id,
+        )
+        self.assertEqual(
+            service.policy_version(
+                organization_id="xpounder",
+                credential_env="HORMUZ_POLICY_ADMIN_TOKEN",
+                version_id=second.version_id,
+            ).document.to_mapping(),
+            second.document.to_mapping(),
+        )
+        with self.assertRaises(PolicyControlError) as raised:
+            service.policy_version(
+                organization_id="xpounder",
+                credential_env="HORMUZ_POLICY_ADMIN_TOKEN",
+                version_id="sha256:" + "f" * 64,
+            )
+        self.assertEqual(raised.exception.code, "policy_version_not_found")
+
+        history = service.history(
+            organization_id="xpounder",
+            credential_env="HORMUZ_POLICY_ADMIN_TOKEN",
+            limit=2,
+        )
+        self.assertEqual(history.limit, 2)
+        self.assertTrue(history.has_more)
+        self.assertEqual(
+            [event.event_type for event in history.events],
+            ["policy_rolled_back", "policy_activated"],
+        )
+        self.assertEqual([event.generation for event in history.events], [3, 2])
+        self.assertEqual(history.events[0].content_sha256, first.content_sha256)
+        self.assertEqual(history.events[1].content_sha256, second.content_sha256)
+        self.assertEqual(
+            [event.change_summary for event in history.events],
+            [first.change_summary, second.change_summary],
+        )
+        self.assertTrue(all("gpt-5.4" not in json.dumps(event.change_summary) for event in history.events))
+        complete_history = service.history(
+            organization_id="xpounder",
+            credential_env="HORMUZ_POLICY_ADMIN_TOKEN",
+            limit=20,
+        )
+        self.assertFalse(complete_history.has_more)
+        self.assertEqual(
+            [event.event_type for event in complete_history.events],
+            [
+                "policy_rolled_back",
+                "policy_activated",
+                "policy_staged",
+                "policy_activated",
+                "policy_staged",
+            ],
+        )
+        self.assertEqual(
+            [event.generation for event in complete_history.events],
+            [3, 2, None, 1, None],
+        )
+        for invalid_limit in (0, 101):
+            with self.assertRaises(PolicyControlError) as raised:
+                service.history(
+                    organization_id="xpounder",
+                    credential_env="HORMUZ_POLICY_ADMIN_TOKEN",
+                    limit=invalid_limit,
+                )
+            self.assertEqual(raised.exception.code, "policy_history_limit_invalid")
 
         with self.psycopg.connect(self.owner_dsn) as connection:
             with connection.cursor() as cursor:
@@ -291,6 +369,19 @@ class PostgresPolicyControlTests(PostgresTestCase):
                 environment=environment,
                 credential_env="HORMUZ_POLICY_BOB_TOKEN",
                 document=self._policy_document(),
+            )
+        self.assertEqual(raised.exception.code, "policy_administrator_required")
+        with self.assertRaises(PolicyControlError) as raised:
+            service.history(
+                organization_id="xpounder",
+                credential_env="HORMUZ_POLICY_BOB_TOKEN",
+                limit=20,
+            )
+        self.assertEqual(raised.exception.code, "policy_administrator_required")
+        with self.assertRaises(PolicyControlError) as raised:
+            service.policy_version(
+                organization_id="xpounder",
+                credential_env="HORMUZ_POLICY_BOB_TOKEN",
             )
         self.assertEqual(raised.exception.code, "policy_administrator_required")
 

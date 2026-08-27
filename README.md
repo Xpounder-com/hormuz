@@ -189,6 +189,30 @@ Invalid documents return a schema-owned field path, a content-safe reason, and
 an actionable hint when one is available; submitted policy values are never
 repeated in the diagnostic.
 
+After staging and activation, an authenticated policy administrator can inspect
+the active document, read a bounded lifecycle timeline, or export an owner-only
+copy. `show` and `export` accept `--version sha256:...` to select a non-active
+immutable version. History defaults to the latest 20 events and is capped at
+100:
+
+```bash
+python3 -m hormuz --config hormuz.json policy show \
+  --organization xpounder
+python3 -m hormuz --config hormuz.json policy history \
+  --organization xpounder \
+  --limit 20 \
+  --json
+python3 -m hormuz --config hormuz.json policy export \
+  --organization xpounder \
+  --output active-policy.json
+```
+
+The `hormuz.policy-history` v1 contract contains only staged, activated, and
+rolled-back lifecycle metadata: immutable version/digest, time, opaque actor
+reference, activation generation, and a structural change summary. Export is
+atomic with mode `0600`, refuses links and special files, and requires
+`--force` to replace a regular file.
+
 Evaluate a request without calling a model:
 
 ```bash

@@ -17,10 +17,13 @@ from .contracts import (
 )
 from .policy_document import PolicyDocument, PolicyDocumentError, validate_redacted_change_summary
 from .policy_repository import (
+    POLICY_HISTORY_MAX_LIMIT,
     PolicyActivation,
     PolicyAdministrator,
     PolicyControlError,
     PolicyControlStatus,
+    PolicyHistory,
+    PolicyLifecycleEvent,
     PolicyVersionRecord,
 )
 from .postgres import PostgresConnectionPool, PostgresStorageError, postgres_transaction, verify_postgres_schema
@@ -482,6 +485,88 @@ class PostgresPolicyControlStore(PostgresPolicyRuntimeStore):
             administrators=administrators,
         )
 
+    def policy_version(
+        self,
+        *,
+        organization_id: str,
+        caller: PolicyAdministrator,
+        version_id: str | None,
+    ) -> PolicyVersionRecord:
+        """Return one immutable version after authorizing the administrator."""
+
+        with self._transaction(organization_id) as connection:
+            with connection.cursor() as cursor:
+                self._require_administrator(cursor, organization_id=organization_id, caller=caller)
+                if version_id is None:
+                    cursor.execute(
+                        """
+                        SELECT versions.organization_id, versions.version_id, versions.content_sha256,
+                               versions.document_json, versions.change_summary, versions.created_at,
+                               versions.author_kind, versions.author_identity_key
+                        FROM policy_active_versions AS active
+                        JOIN policy_versions AS versions
+                          ON versions.organization_id = active.organization_id
+                         AND versions.version_id = active.version_id
+                        WHERE active.organization_id = %s
+                        """,
+                        (organization_id,),
+                    )
+                else:
+                    cursor.execute(
+                        """
+                        SELECT organization_id, version_id, content_sha256, document_json,
+                               change_summary, created_at, author_kind, author_identity_key
+                        FROM policy_versions
+                        WHERE organization_id = %s AND version_id = %s
+                        """,
+                        (organization_id, version_id),
+                    )
+                row = cursor.fetchone()
+        if row is None:
+            raise PolicyControlError(
+                "policy_active_version_unavailable" if version_id is None else "policy_version_not_found"
+            )
+        return _version_from_row(row, config=self._config)
+
+    def history(
+        self,
+        *,
+        organization_id: str,
+        caller: PolicyAdministrator,
+        limit: int,
+    ) -> PolicyHistory:
+        """Return a bounded newest-first lifecycle timeline without policy values."""
+
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= POLICY_HISTORY_MAX_LIMIT:
+            raise PolicyControlError("policy_history_limit_invalid")
+        with self._transaction(organization_id) as connection:
+            with connection.cursor() as cursor:
+                self._require_administrator(cursor, organization_id=organization_id, caller=caller)
+                cursor.execute(
+                    """
+                    SELECT events.organization_id, events.event_type, events.version_id,
+                           versions.content_sha256, events.occurred_at, events.actor_kind,
+                           events.actor_identity_key, events.generation, versions.change_summary,
+                           events.change_summary AS event_change_summary
+                    FROM policy_control_events AS events
+                    LEFT JOIN policy_versions AS versions
+                      ON versions.organization_id = events.organization_id
+                     AND versions.version_id = events.version_id
+                    WHERE events.organization_id = %s
+                      AND events.event_type IN ('policy_staged', 'policy_activated', 'policy_rolled_back')
+                    ORDER BY events.occurred_at DESC, events.event_id DESC
+                    LIMIT %s
+                    """,
+                    (organization_id, limit + 1),
+                )
+                rows = cursor.fetchall()
+        return PolicyHistory(
+            organization_id=organization_id,
+            limit=limit,
+            has_more=len(rows) > limit,
+            events=tuple(_lifecycle_event_from_row(row) for row in rows[:limit]),
+        )
+
     def _set_active_version(
         self,
         *,
@@ -739,6 +824,73 @@ def _version_from_row(row: dict[str, object], *, config: GatewayConfig) -> Polic
         author_identity_key=author_identity_key,
         change_summary=raw_summary,
         document=document,
+    )
+
+
+def _lifecycle_event_from_row(row: dict[str, object]) -> PolicyLifecycleEvent:
+    event_type = str(row["event_type"])
+    if event_type not in {"policy_staged", "policy_activated", "policy_rolled_back"}:
+        raise PostgresStorageError("policy_control_history_invalid")
+    content_sha256 = str(row["content_sha256"])
+    version_id = str(row["version_id"])
+    if (
+        len(content_sha256) != 64
+        or any(character not in "0123456789abcdef" for character in content_sha256)
+        or version_id != f"sha256:{content_sha256}"
+    ):
+        raise PostgresStorageError("policy_control_history_invalid")
+    occurred_at = row["occurred_at"]
+    if not isinstance(occurred_at, datetime):
+        raise PostgresStorageError("policy_control_history_invalid")
+    actor_kind = str(row["actor_kind"])
+    actor_identity_key = str(row["actor_identity_key"])
+    if not _is_opaque_identity_key(actor_kind, actor_identity_key):
+        raise PostgresStorageError("policy_control_history_invalid")
+    generation_value = row["generation"]
+    generation = int(generation_value) if generation_value is not None else None
+    if (event_type == "policy_staged" and generation is not None) or (
+        event_type != "policy_staged" and (generation is None or generation < 1)
+    ):
+        raise PostgresStorageError("policy_control_history_invalid")
+    change_summary = row["change_summary"]
+    if isinstance(change_summary, str):
+        try:
+            change_summary = json.loads(change_summary)
+        except json.JSONDecodeError as error:
+            raise PostgresStorageError("policy_control_history_invalid") from error
+    if not isinstance(change_summary, dict):
+        raise PostgresStorageError("policy_control_history_invalid")
+    try:
+        validate_redacted_change_summary(change_summary)
+    except PolicyDocumentError as error:
+        raise PostgresStorageError("policy_control_history_invalid") from error
+    event_change_summary = row["event_change_summary"]
+    if isinstance(event_change_summary, str):
+        try:
+            event_change_summary = json.loads(event_change_summary)
+        except json.JSONDecodeError as error:
+            raise PostgresStorageError("policy_control_history_invalid") from error
+    if event_type == "policy_staged":
+        if not isinstance(event_change_summary, dict):
+            raise PostgresStorageError("policy_control_history_invalid")
+        try:
+            validate_redacted_change_summary(event_change_summary)
+        except PolicyDocumentError as error:
+            raise PostgresStorageError("policy_control_history_invalid") from error
+        if event_change_summary != change_summary:
+            raise PostgresStorageError("policy_control_history_invalid")
+    elif event_change_summary is not None:
+        raise PostgresStorageError("policy_control_history_invalid")
+    return PolicyLifecycleEvent(
+        organization_id=str(row["organization_id"]),
+        event_type=event_type,
+        version_id=version_id,
+        content_sha256=content_sha256,
+        occurred_at=occurred_at,
+        actor_kind=actor_kind,
+        actor_identity_key=actor_identity_key,
+        generation=generation,
+        change_summary=change_summary,
     )
 
 

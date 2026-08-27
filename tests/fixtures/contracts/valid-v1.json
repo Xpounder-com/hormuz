@@ -128,6 +128,33 @@
       }
     ]
   },
+  "policy_history": {
+    "schema_id": "hormuz.policy-history",
+    "schema_version": 1,
+    "organization_id": "xpounder",
+    "limit": 20,
+    "has_more": false,
+    "events": [
+      {
+        "event_type": "policy_activated",
+        "version_id": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "content_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "occurred_at": "2026-08-21T00:00:00+00:00",
+        "actor_kind": "oidc",
+        "actor_identity_key": "oidc:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "generation": 2,
+        "change_summary": {
+          "summary_version": 1,
+          "scopes": {
+            "organization": {"fields": ["allowed_models", "max_output_tokens"]},
+            "teams": {"count": 1, "fields": ["allowed_models"]},
+            "actors": {"count": 0, "fields": []}
+          },
+          "egress_fields": ["openai.allow_background", "openai.allow_response_storage", "secrets.mode"]
+        }
+      }
+    ]
+  },
   "policy_control_event": {
     "event_schema_id": "hormuz.policy-control-event",
     "event_schema_version": 1,
