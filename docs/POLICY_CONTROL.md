@@ -167,6 +167,68 @@ hormuz --config /etc/hormuz/hormuz.json policy rollback \
 
 The gateway reads the active PostgreSQL pointer when it begins each request and pins that exact version for routing, egress controls, budget reservation, and durable usage evidence. There is intentionally no managed-policy process cache, so instances converge on the next request after a committed activation. A request already in flight keeps its original snapshot.
 
+## Inspect and export policy versions
+
+Current policy administrators can print the active immutable document, or
+select an exact staged version, without loading every historical document:
+
+```bash
+hormuz --config /etc/hormuz/hormuz.json policy show \
+  --organization xpounder \
+  --credential-env HORMUZ_POLICY_ADMIN_TOKEN
+
+hormuz --config /etc/hormuz/hormuz.json policy show \
+  --organization xpounder \
+  --credential-env HORMUZ_POLICY_ADMIN_TOKEN \
+  --version sha256:...
+```
+
+`policy show` writes only the selected `hormuz.policy-document` v1 JSON to
+standard output, so it can be inspected or piped without parsing prose. If no
+version is supplied, the active pointer is resolved in the same authenticated
+tenant-scoped query. Hormuz returns a stable error when no policy is active or
+when an explicit version does not exist.
+
+The lifecycle timeline is a separate bounded view rather than an alias for
+`policy status`:
+
+```bash
+hormuz --config /etc/hormuz/hormuz.json policy history \
+  --organization xpounder \
+  --credential-env HORMUZ_POLICY_ADMIN_TOKEN \
+  --limit 20
+
+hormuz --config /etc/hormuz/hormuz.json policy history \
+  --organization xpounder \
+  --credential-env HORMUZ_POLICY_ADMIN_TOKEN \
+  --limit 20 \
+  --json
+```
+
+History returns only `policy_staged`, `policy_activated`, and
+`policy_rolled_back` events, newest first. Each event includes the immutable
+version ID and digest, timestamp, opaque actor identity reference, activation
+generation when applicable, and the version's metadata-only structural change
+summary. The default limit is 20, the maximum is 100, and the versioned
+`hormuz.policy-history` v1 JSON contract sets `has_more` when older events were
+not returned. Policy values, model aliases, budget amounts, subjects, prompts,
+responses, and credentials are not timeline fields.
+
+Export uses the same selection semantics and writes an owner-only copy:
+
+```bash
+hormuz --config /etc/hormuz/hormuz.json policy export \
+  --organization xpounder \
+  --credential-env HORMUZ_POLICY_ADMIN_TOKEN \
+  --output active-policy.json
+```
+
+The write is atomic with mode `0600`. Existing files are preserved unless
+`--force` is supplied; symbolic links, directories, and special files are
+refused. `--version sha256:...` exports an exact non-active version. These
+inspection commands remain policy-administrator-only in v1; a narrower policy
+auditor role is intentionally deferred.
+
 ## Administrator changes
 
 An existing policy administrator can add or remove a verified OIDC identity by its stable issuer/subject pair:

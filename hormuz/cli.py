@@ -52,6 +52,7 @@ from .contracts import (
     COST_BASIS_CONFIGURED_RATE_CARD_ESTIMATE,
     COVERAGE_GATEWAY_CAPTURED_REQUESTS_ONLY,
     POLICY_CONTROL_STATUS_SCHEMA_ID,
+    POLICY_HISTORY_SCHEMA_ID,
     CUSTODY_CONTROL_STATUS_SCHEMA_ID,
     POLICY_DECISION_SCHEMA_ID,
     USAGE_REPORT_SCHEMA_ID,
@@ -76,7 +77,15 @@ from .policy_templates import (
     create_policy_document,
     policy_templates as available_policy_templates,
 )
-from .policy_repository import PolicyActivation, PolicyControlError, PolicyControlStatus, PolicyVersionRecord
+from .policy_repository import (
+    POLICY_HISTORY_DEFAULT_LIMIT,
+    POLICY_HISTORY_MAX_LIMIT,
+    PolicyActivation,
+    PolicyControlError,
+    PolicyControlStatus,
+    PolicyHistory,
+    PolicyVersionRecord,
+)
 from .policy_runtime import PolicyRuntime
 from .postgres import PostgresConnectionPool, PostgresStorageError, migrate_postgres
 from .server import GatewayServer
@@ -168,6 +177,38 @@ def build_parser() -> argparse.ArgumentParser:
         help="Validate a policy file offline without credentials or PostgreSQL",
     )
     validate.add_argument("file", help="Policy-document JSON path")
+
+    show = policy_control_subparsers.add_parser(
+        "show",
+        help="Print the active or selected immutable policy document",
+    )
+    _policy_control_auth_arguments(show)
+    show.add_argument("--version", help="Immutable sha256 policy version (default: active)")
+
+    history = policy_control_subparsers.add_parser(
+        "history",
+        help="Show the bounded policy lifecycle timeline",
+    )
+    _policy_control_auth_arguments(history)
+    history.add_argument(
+        "--limit",
+        type=int,
+        default=POLICY_HISTORY_DEFAULT_LIMIT,
+        help=(
+            f"Maximum newest lifecycle events to return "
+            f"(default: {POLICY_HISTORY_DEFAULT_LIMIT}; max: {POLICY_HISTORY_MAX_LIMIT})"
+        ),
+    )
+    history.add_argument("--json", action="store_true", help="Emit the versioned metadata-only JSON contract")
+
+    export = policy_control_subparsers.add_parser(
+        "export",
+        help="Export the active or selected immutable policy document",
+    )
+    _policy_control_auth_arguments(export)
+    export.add_argument("--version", help="Immutable sha256 policy version (default: active)")
+    export.add_argument("--output", required=True, help="New policy-document JSON path")
+    export.add_argument("--force", action="store_true", help="Replace an existing regular output file")
 
     bootstrap = policy_control_subparsers.add_parser(
         "bootstrap",
@@ -950,6 +991,39 @@ def _policy_control(config: GatewayConfig, args: argparse.Namespace) -> int:
         )
         _print_policy_status(status, as_json=args.json)
         return 0
+    if command == "show":
+        version = service.policy_version(
+            organization_id=args.organization,
+            credential_env=args.credential_env,
+            version_id=args.version,
+        )
+        print(json.dumps(version.document.to_mapping(), indent=2, sort_keys=True))
+        return 0
+    if command == "history":
+        history = service.history(
+            organization_id=args.organization,
+            credential_env=args.credential_env,
+            limit=args.limit,
+        )
+        _print_policy_history(history, as_json=args.json)
+        return 0
+    if command == "export":
+        version = service.policy_version(
+            organization_id=args.organization,
+            credential_env=args.credential_env,
+            version_id=args.version,
+        )
+        try:
+            _write_policy_document(
+                Path(args.output).expanduser().absolute(),
+                version.document,
+                force=args.force,
+            )
+        except PolicyTemplateError as error:
+            _print_policy_export_failure(error.code, error.reason, hint=error.hint)
+            return 2
+        _print_policy_version("policy exported", version)
+        return 0
     if command == "administrator":
         if args.policy_administrator_command == "grant":
             administrator = service.grant_oidc_administrator(
@@ -1051,7 +1125,7 @@ def _policy_create(context: PolicyValidationContext, args: argparse.Namespace) -
             monthly_budget_usd=args.monthly_budget_usd,
             per_actor_monthly_budget_usd=args.per_actor_monthly_budget_usd,
         )
-        _write_generated_policy_document(
+        _write_policy_document(
             Path(args.output).expanduser().absolute(),
             document,
             force=args.force,
@@ -1066,7 +1140,7 @@ def _policy_create(context: PolicyValidationContext, args: argparse.Namespace) -
     return 0
 
 
-def _write_generated_policy_document(
+def _write_policy_document(
     path: Path,
     document: PolicyDocument,
     *,
@@ -1169,6 +1243,13 @@ def _print_policy_creation_failure(code: str, reason: str, *, hint: str | None =
         print(f"hint: {hint}", file=sys.stderr)
 
 
+def _print_policy_export_failure(code: str, reason: str, *, hint: str | None = None) -> None:
+    print(f"policy export failed: {code}", file=sys.stderr)
+    print(f"reason: {reason}", file=sys.stderr)
+    if hint is not None:
+        print(f"hint: {hint}", file=sys.stderr)
+
+
 def _print_policy_document_failure(code: str, reason: str, *, hint: str | None = None) -> None:
     print(f"policy validation failed: {code}", file=sys.stderr)
     print(f"reason: {reason}", file=sys.stderr)
@@ -1228,6 +1309,43 @@ def _print_policy_status(status: PolicyControlStatus, *, as_json: bool) -> None:
     print(f"active generation: {active['generation'] if isinstance(active, dict) else '-'}")
     print(f"policy versions: {len(status.versions)}")
     print(f"active policy administrators: {len(status.administrators)}")
+
+
+def _print_policy_history(history: PolicyHistory, *, as_json: bool) -> None:
+    payload = {
+        "organization_id": history.organization_id,
+        "limit": history.limit,
+        "has_more": history.has_more,
+        "events": [
+            {
+                "event_type": event.event_type,
+                "version_id": event.version_id,
+                "content_sha256": event.content_sha256,
+                "occurred_at": event.occurred_at.isoformat(),
+                "actor_kind": event.actor_kind,
+                "actor_identity_key": event.actor_identity_key,
+                "generation": event.generation,
+                "change_summary": event.change_summary,
+            }
+            for event in history.events
+        ],
+    }
+    if as_json:
+        print(json.dumps(contract_envelope(POLICY_HISTORY_SCHEMA_ID, payload), indent=2, sort_keys=True))
+        return
+    print(f"organization: {history.organization_id}")
+    print(f"lifecycle events: {len(history.events)} (limit={history.limit} has_more={str(history.has_more).lower()})")
+    for event in history.events:
+        generation = str(event.generation) if event.generation is not None else "-"
+        print(
+            f"{event.occurred_at.isoformat()} {event.event_type} version={event.version_id} "
+            f"digest={event.content_sha256} generation={generation} "
+            f"actor={event.actor_identity_key}"
+        )
+        print(
+            "  change_summary="
+            + json.dumps(event.change_summary, sort_keys=True, separators=(",", ":"))
+        )
 
 
 def _client_config(

@@ -19,6 +19,14 @@ from .common import (
 from .constants import (
     POLICY_CONTROL_EVENT_SCHEMA_ID,
     POLICY_CONTROL_EVENT_SCHEMA_VERSION,
+    POLICY_CONTROL_STATUS_SCHEMA_ID,
+    POLICY_DECISION_SCHEMA_ID,
+    POLICY_DOCUMENT_SCHEMA_ID,
+    POLICY_DOCUMENT_SCHEMA_VERSION,
+    POLICY_HISTORY_SCHEMA_ID,
+    POLICY_HISTORY_SCHEMA_VERSION,
+    POLICY_HISTORY_MAX_LIMIT,
+    _POLICY_LIFECYCLE_EVENT_TYPES,
     _POLICY_ACTIONS,
     _POLICY_BREAK_GLASS_REASONS,
     _POLICY_CHANGE_FIELDS,
@@ -26,6 +34,81 @@ from .constants import (
     _POLICY_EGRESS_FIELDS,
     _REQUEST_STATUSES,
 )
+
+
+def policy_schema_entries() -> list[dict[str, object]]:
+    """Return manifest entries owned by the policy schema family."""
+
+    return [
+        _manifest_schema(
+            POLICY_DECISION_SCHEMA_ID,
+            1,
+            "cli-output",
+            [
+                "schema_id",
+                "schema_version",
+                "allowed",
+                "action",
+                "reason",
+                "requested_model",
+                "resolved_alias",
+                "routed_model",
+                "max_output_tokens",
+                "policy_version",
+            ],
+        ),
+        _manifest_schema(
+            POLICY_CONTROL_STATUS_SCHEMA_ID,
+            1,
+            "cli-output",
+            ["schema_id", "schema_version", "organization_id", "initialized", "active", "versions", "administrators"],
+        ),
+        _manifest_schema(
+            POLICY_HISTORY_SCHEMA_ID,
+            POLICY_HISTORY_SCHEMA_VERSION,
+            "cli-output",
+            ["schema_id", "schema_version", "organization_id", "limit", "has_more", "events"],
+        ),
+        _manifest_schema(
+            POLICY_DOCUMENT_SCHEMA_ID,
+            POLICY_DOCUMENT_SCHEMA_VERSION,
+            "durable-evidence",
+            ["schema_id", "schema_version", "organization_id", "policies", "egress_controls"],
+        ),
+        _manifest_schema(
+            POLICY_CONTROL_EVENT_SCHEMA_ID,
+            POLICY_CONTROL_EVENT_SCHEMA_VERSION,
+            "durable-evidence",
+            [
+                "event_schema_id",
+                "event_schema_version",
+                "event_type",
+                "organization_id",
+                "occurred_at",
+                "opaque actor identity key",
+                "version_id",
+                "generation",
+                "reason_code",
+                "content-free structural metadata",
+            ],
+        ),
+    ]
+
+
+def _manifest_schema(
+    schema_id: str,
+    schema_version: int,
+    delivery: str,
+    fields: list[str],
+) -> dict[str, object]:
+    return {
+        "schema_id": schema_id,
+        "schema_version": schema_version,
+        "delivery": delivery,
+        "ownership": "hormuz",
+        "legacy": False,
+        "fields": fields,
+    }
 
 
 def validate_policy_control_event(value: Mapping[str, Any]) -> None:
@@ -236,6 +319,61 @@ def _validate_policy_control_status(value: Mapping[str, Any]) -> None:
         if kind == "oidc" and actor_id is None and issuer is not None and subject is not None:
             continue
         raise ContractValidationError(f"administrators[{index}] has an invalid stable identity key")
+
+
+def _validate_policy_history(value: Mapping[str, Any]) -> None:
+    """Validate the bounded metadata-only policy lifecycle timeline."""
+
+    _exact_keys(
+        value,
+        {"schema_id", "schema_version", "organization_id", "limit", "has_more", "events"},
+    )
+    _value_string(value, "organization_id")
+    limit = _value_integer(value, "limit", minimum=1)
+    if limit > POLICY_HISTORY_MAX_LIMIT:
+        raise ContractValidationError(f"limit must be at most {POLICY_HISTORY_MAX_LIMIT}")
+    if not isinstance(value.get("has_more"), bool):
+        raise ContractValidationError("has_more must be a boolean")
+    events = value.get("events")
+    if not isinstance(events, list):
+        raise ContractValidationError("events must be an array")
+    if len(events) > limit:
+        raise ContractValidationError("events must not exceed limit")
+    for index, event in enumerate(events):
+        path = f"events[{index}]"
+        if not isinstance(event, Mapping):
+            raise ContractValidationError(f"{path} must be an object")
+        _exact_keys(
+            event,
+            {
+                "event_type",
+                "version_id",
+                "content_sha256",
+                "occurred_at",
+                "actor_kind",
+                "actor_identity_key",
+                "generation",
+                "change_summary",
+            },
+            path=path,
+        )
+        event_type = _value_string(event, "event_type", path=path)
+        if event_type not in _POLICY_LIFECYCLE_EVENT_TYPES:
+            raise ContractValidationError(f"{path}.event_type is unsupported")
+        version_id = _value_string(event, "version_id", path=path)
+        _policy_version_identifier(version_id, f"{path}.version_id")
+        content_sha256 = _value_string(event, "content_sha256", path=path)
+        _sha256_digest(content_sha256, f"{path}.content_sha256")
+        if version_id != f"sha256:{content_sha256}":
+            raise ContractValidationError(f"{path}.version_id does not match content_sha256")
+        _value_string(event, "occurred_at", path=path)
+        _administrator_key_fields(event, prefix="actor_", path=path)
+        generation = _nullable_integer(event, "generation", minimum=1, path=path)
+        if event_type == "policy_staged" and generation is not None:
+            raise ContractValidationError(f"{path}.generation must be null for policy_staged")
+        if event_type != "policy_staged" and generation is None:
+            raise ContractValidationError(f"{path}.generation is required for activation events")
+        _validate_redacted_change_summary(_value_mapping(event, "change_summary", path=path))
 
 
 def _administrator_key_fields(value: Mapping[str, Any], *, prefix: str, path: str) -> None:

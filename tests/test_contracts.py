@@ -32,6 +32,8 @@ from hormuz.contracts import (
     CUSTODY_EVIDENCE_EXPORT_SCHEMA_VERSION,
     ERROR_SCHEMA_ID,
     ERROR_SCHEMA_VERSION,
+    POLICY_HISTORY_SCHEMA_ID,
+    POLICY_HISTORY_SCHEMA_VERSION,
     READINESS_SCHEMA_ID,
     READINESS_SCHEMA_VERSION,
     REQUEST_ATTEMPT_EVENT_SCHEMA_ID,
@@ -76,6 +78,7 @@ class PolicyEvidenceContractTests(unittest.TestCase):
             "error_v3",
             "policy_decision",
             "policy_control_status",
+            "policy_history",
             "custody_control_status",
             "custody_control_status_v2",
             "custody_control_status_v3",
@@ -114,6 +117,14 @@ class PolicyEvidenceContractTests(unittest.TestCase):
         invalid_event["change_summary"]["scopes"]["organization"]["fields"] = ["do-not-store-content"]
         with self.assertRaises(ContractValidationError):
             validate_policy_control_event(invalid_event)
+        invalid_history = json.loads(json.dumps(valid["policy_history"]))
+        invalid_history["events"][0]["plaintext"] = "must-never-appear"
+        with self.assertRaises(ContractValidationError):
+            validate_contract(invalid_history)
+        invalid_history_generation = json.loads(json.dumps(valid["policy_history"]))
+        invalid_history_generation["events"][0]["generation"] = None
+        with self.assertRaises(ContractValidationError):
+            validate_contract(invalid_history_generation)
         invalid_custody_event = json.loads(json.dumps(valid["custody_control_event"]))
         invalid_custody_event["plaintext"] = "must-never-appear"
         with self.assertRaises(ContractValidationError):
@@ -185,6 +196,7 @@ class PolicyEvidenceContractTests(unittest.TestCase):
         self.assertIn((READINESS_SCHEMA_ID, READINESS_SCHEMA_VERSION), schemas)
         self.assertIn(("hormuz.policy-decision", 1), schemas)
         self.assertIn(("hormuz.policy-control-status", 1), schemas)
+        self.assertIn((POLICY_HISTORY_SCHEMA_ID, POLICY_HISTORY_SCHEMA_VERSION), schemas)
         self.assertIn(("hormuz.policy-document", 1), schemas)
         self.assertIn(("hormuz.policy-control-event", 1), schemas)
         self.assertIn((CUSTODY_CONTROL_STATUS_SCHEMA_ID, CUSTODY_CONTROL_STATUS_SCHEMA_VERSION), schemas)

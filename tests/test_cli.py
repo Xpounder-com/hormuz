@@ -13,6 +13,7 @@ from unittest import mock
 from contextlib import redirect_stdout
 from contextlib import redirect_stderr
 from dataclasses import replace
+from datetime import datetime, timezone
 from pathlib import Path
 
 from hormuz.cli import (
@@ -46,6 +47,7 @@ from hormuz.audit_chain import (
     serialize_audit_chain_checkpoint,
 )
 from hormuz.policy_document import PolicyDocument
+from hormuz.policy_repository import PolicyHistory, PolicyLifecycleEvent, PolicyVersionRecord
 from hormuz.store import UsageStore
 
 
@@ -451,6 +453,132 @@ class ClientConfigTests(unittest.TestCase):
             "  lockdown  Emergency deny-all policy with empty client and model allowlists and "
             "secret denial.\n",
         )
+
+    def test_policy_show_history_and_export_use_stable_admin_surfaces(self) -> None:
+        context = GatewayConfig.load_policy_validation_context(ROOT / "config.example.json")
+        document = PolicyDocument.from_json_bytes(
+            (ROOT / "tests" / "fixtures" / "policies" / "policy-document-v1.json").read_bytes(),
+            config=context,
+        )
+        identity_key = "static:" + "a" * 64
+        created_at = datetime(2026, 8, 27, tzinfo=timezone.utc)
+        version = PolicyVersionRecord(
+            organization_id="xpounder",
+            version_id=document.version_id,
+            content_sha256=document.content_sha256,
+            created_at=created_at,
+            author_kind="static",
+            author_identity_key=identity_key,
+            change_summary=document.redacted_change_summary(),
+            document=document,
+        )
+        history = PolicyHistory(
+            organization_id="xpounder",
+            limit=1,
+            has_more=True,
+            events=(
+                PolicyLifecycleEvent(
+                    organization_id="xpounder",
+                    event_type="policy_activated",
+                    version_id=document.version_id,
+                    content_sha256=document.content_sha256,
+                    occurred_at=created_at,
+                    actor_kind="static",
+                    actor_identity_key=identity_key,
+                    generation=1,
+                    change_summary=document.redacted_change_summary(),
+                ),
+            ),
+        )
+        with (
+            tempfile.TemporaryDirectory() as temporary,
+            mock.patch("hormuz.cli.GatewayConfig.load", return_value=mock.sentinel.config),
+            mock.patch("hormuz.cli.PolicyControlService") as service_type,
+        ):
+            service = service_type.return_value
+            service.policy_version.return_value = version
+            service.history.return_value = history
+
+            show_output = io.StringIO()
+            with redirect_stdout(show_output):
+                self.assertEqual(
+                    main(
+                        [
+                            "policy",
+                            "show",
+                            "--organization",
+                            "xpounder",
+                            "--version",
+                            document.version_id,
+                        ]
+                    ),
+                    0,
+                )
+            self.assertEqual(json.loads(show_output.getvalue()), document.to_mapping())
+            service.policy_version.assert_called_with(
+                organization_id="xpounder",
+                credential_env="HORMUZ_POLICY_ADMIN_TOKEN",
+                version_id=document.version_id,
+            )
+
+            history_output = io.StringIO()
+            with redirect_stdout(history_output):
+                self.assertEqual(
+                    main(["policy", "history", "--organization", "xpounder", "--limit", "1", "--json"]),
+                    0,
+                )
+            history_contract = json.loads(history_output.getvalue())
+            validate_contract(history_contract)
+            self.assertEqual(history_contract["schema_id"], "hormuz.policy-history")
+            self.assertEqual(history_contract["events"][0]["event_type"], "policy_activated")
+            self.assertTrue(history_contract["has_more"])
+            service.history.assert_called_once_with(
+                organization_id="xpounder",
+                credential_env="HORMUZ_POLICY_ADMIN_TOKEN",
+                limit=1,
+            )
+
+            export_path = Path(temporary) / "active-policy.json"
+            export_output = io.StringIO()
+            with redirect_stdout(export_output):
+                self.assertEqual(
+                    main(
+                        [
+                            "policy",
+                            "export",
+                            "--organization",
+                            "xpounder",
+                            "--output",
+                            str(export_path),
+                        ]
+                    ),
+                    0,
+                )
+            self.assertEqual(os.stat(export_path).st_mode & 0o777, 0o600)
+            self.assertEqual(json.loads(export_path.read_text(encoding="utf-8")), document.to_mapping())
+            self.assertIn(f"policy exported: organization=xpounder version={document.version_id}", export_output.getvalue())
+            service.policy_version.assert_called_with(
+                organization_id="xpounder",
+                credential_env="HORMUZ_POLICY_ADMIN_TOKEN",
+                version_id=None,
+            )
+
+            stderr = io.StringIO()
+            with redirect_stderr(stderr):
+                self.assertEqual(
+                    main(
+                        [
+                            "policy",
+                            "export",
+                            "--organization",
+                            "xpounder",
+                            "--output",
+                            str(export_path),
+                        ]
+                    ),
+                    2,
+                )
+            self.assertIn("policy export failed: policy_output_exists", stderr.getvalue())
 
     def test_policy_create_is_offline_private_and_matches_validation(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
+from ._contract_schemas.constants import POLICY_HISTORY_DEFAULT_LIMIT, POLICY_HISTORY_MAX_LIMIT
 from .policy_document import PolicyDocument
 
 
@@ -61,6 +62,27 @@ class PolicyVersionRecord:
     author_identity_key: str
     change_summary: dict[str, object]
     document: PolicyDocument
+
+
+@dataclass(frozen=True)
+class PolicyLifecycleEvent:
+    organization_id: str
+    event_type: str
+    version_id: str
+    content_sha256: str
+    occurred_at: datetime
+    actor_kind: str
+    actor_identity_key: str
+    generation: int | None
+    change_summary: dict[str, object]
+
+
+@dataclass(frozen=True)
+class PolicyHistory:
+    organization_id: str
+    limit: int
+    has_more: bool
+    events: tuple[PolicyLifecycleEvent, ...]
 
 
 @dataclass(frozen=True)
@@ -163,3 +185,19 @@ class PolicyControlRepository(PolicyRuntimeRepository, Protocol):
     ) -> PolicyAdministrator: ...
 
     def status(self, *, organization_id: str, caller: PolicyAdministrator) -> PolicyControlStatus: ...
+
+    def policy_version(
+        self,
+        *,
+        organization_id: str,
+        caller: PolicyAdministrator,
+        version_id: str | None,
+    ) -> PolicyVersionRecord: ...
+
+    def history(
+        self,
+        *,
+        organization_id: str,
+        caller: PolicyAdministrator,
+        limit: int,
+    ) -> PolicyHistory: ...

@@ -17,10 +17,12 @@ from .auth import AuthenticationError, Authenticator, ControlPrincipal
 from .config import BootstrapAdministrator, GatewayConfig, PolicyValidationContext
 from .policy_document import PolicyDocument
 from .policy_repository import (
+    POLICY_HISTORY_MAX_LIMIT,
     PolicyActivation,
     PolicyAdministrator,
     PolicyControlError,
     PolicyControlStatus,
+    PolicyHistory,
     PolicyVersionRecord,
 )
 from .postgres import PostgresStorageError
@@ -195,6 +197,39 @@ class PolicyControlService:
         return self._repository.status(
             organization_id=organization_id,
             caller=self._authenticated_administrator(organization_id=organization_id, credential_env=credential_env),
+        )
+
+    def policy_version(
+        self,
+        *,
+        organization_id: str,
+        credential_env: str,
+        version_id: str | None = None,
+    ) -> PolicyVersionRecord:
+        """Return the active or explicitly selected immutable policy version."""
+
+        selected_version = _version_id(version_id) if version_id is not None else None
+        return self._repository.policy_version(
+            organization_id=organization_id,
+            caller=self._authenticated_administrator(organization_id=organization_id, credential_env=credential_env),
+            version_id=selected_version,
+        )
+
+    def history(
+        self,
+        *,
+        organization_id: str,
+        credential_env: str,
+        limit: int,
+    ) -> PolicyHistory:
+        """Return the bounded metadata-only lifecycle timeline."""
+
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= POLICY_HISTORY_MAX_LIMIT:
+            raise PolicyControlError("policy_history_limit_invalid")
+        return self._repository.history(
+            organization_id=organization_id,
+            caller=self._authenticated_administrator(organization_id=organization_id, credential_env=credential_env),
+            limit=limit,
         )
 
     def break_glass_recover(
