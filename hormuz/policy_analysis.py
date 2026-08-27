@@ -93,6 +93,11 @@ def compare_policy_documents(
     candidate_mapping = _semantic_policy_mapping(candidate)
     changes: list[PolicyChange] = []
     _compare_values(baseline_mapping, candidate_mapping, (), changes)
+    # Traversal order follows raw mapping keys, while the public contract is
+    # ordered by rendered semantic paths. A simple identifier such as
+    # ``alpha`` renders with dot notation and therefore sorts before a key
+    # such as ``0team`` that renders with bracket notation.
+    changes.sort(key=lambda change: change.path)
     return PolicyComparison(
         organization_id=baseline.organization_id,
         baseline=PolicyVersionIdentity.from_document(baseline),

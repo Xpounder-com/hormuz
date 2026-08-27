@@ -66,6 +66,8 @@ class PolicyAnalysisTests(unittest.TestCase):
         organization["max_output_tokens"] = 4_000
         organization.pop("monthly_budget_usd")
         actors["alice"] = {"allowed_models": []}
+        teams["0team"] = {"allowed_clients": ["codex"]}
+        teams["alpha"] = {"allowed_clients": ["codex"]}
         teams["platform.ai"] = {"allowed_clients": ["codex"]}
         candidate = self._document(changed)
 
@@ -84,6 +86,14 @@ class PolicyAnalysisTests(unittest.TestCase):
         self.assertEqual(changes["policies.actors.alice.allowed_models"].change_type, "added")
         self.assertEqual(
             changes['policies.teams["platform.ai"].allowed_clients'].change_type,
+            "added",
+        )
+        self.assertEqual(
+            changes["policies.teams.alpha.allowed_clients"].change_type,
+            "added",
+        )
+        self.assertEqual(
+            changes['policies.teams["0team"].allowed_clients'].change_type,
             "added",
         )
 

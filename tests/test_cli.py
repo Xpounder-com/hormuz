@@ -644,6 +644,8 @@ class ClientConfigTests(unittest.TestCase):
         baseline_document = PolicyDocument.from_mapping(fixture, config=context)
         candidate_mapping = json.loads(json.dumps(fixture))
         candidate_mapping["policies"]["organization"]["max_output_tokens"] = 4_000
+        candidate_mapping["policies"]["teams"]["0team"] = {"allowed_clients": ["codex"]}
+        candidate_mapping["policies"]["teams"]["alpha"] = {"allowed_clients": ["codex"]}
         candidate_document = PolicyDocument.from_mapping(candidate_mapping, config=context)
         created_at = datetime(2026, 8, 27, tzinfo=timezone.utc)
         baseline = PolicyVersionRecord(
@@ -692,7 +694,19 @@ class ClientConfigTests(unittest.TestCase):
                     "before": 32_000,
                     "change_type": "changed",
                     "path": "policies.organization.max_output_tokens",
-                }
+                },
+                {
+                    "after": ["codex"],
+                    "before": None,
+                    "change_type": "added",
+                    "path": "policies.teams.alpha.allowed_clients",
+                },
+                {
+                    "after": ["codex"],
+                    "before": None,
+                    "change_type": "added",
+                    "path": 'policies.teams["0team"].allowed_clients',
+                },
             ],
         )
         service_type.return_value.policy_version.assert_called_once_with(
