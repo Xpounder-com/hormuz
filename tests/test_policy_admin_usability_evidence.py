@@ -88,6 +88,11 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
                 "automated_regression_url": (
                     "https://github.com/Xpounder-com/hormuz/actions/runs/123456789"
                 ),
+                "automated_regression_source_commit": value["release"][  # type: ignore[index]
+                    "source_commit"
+                ],
+                "automated_regression_workflow_path": ".github/workflows/ci.yml",
+                "automated_regression_binding_verified": True,
                 "automated_regression_conclusion": "success",
                 "retest_session_id": retest_session_id,
                 "broad_workflow_change": broad,
@@ -393,6 +398,39 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
         self.assertEqual(result["postgresql_completed_verified_count"], 2)
         self.assertIn("blocker_open", result["reasons"])
 
+    def test_postgresql_sessions_require_unique_isolated_tenant_scopes(self) -> None:
+        value = self._release_evidence()
+        self._sessions(value, "postgresql")[0]["postgresql_isolation"][
+            "isolated_tenant_attested"
+        ] = False
+        with self.assertRaisesRegex(
+            usability.PolicyAdminUsabilityEvidenceError,
+            "postgresql_isolation_not_attested",
+        ):
+            usability.validate_evidence(value)
+
+        value = self._release_evidence()
+        sessions = self._sessions(value, "postgresql")
+        sessions[1]["postgresql_isolation"]["run_scope_id"] = sessions[0][
+            "postgresql_isolation"
+        ]["run_scope_id"]
+        with self.assertRaisesRegex(
+            usability.PolicyAdminUsabilityEvidenceError,
+            "postgresql_run_scope_ids_duplicated",
+        ):
+            usability.validate_evidence(value)
+
+        value = self._release_evidence()
+        self._sessions(value, "offline")[0]["postgresql_isolation"] = {
+            "run_scope_id": "pauscope:60000000-0000-4000-8000-000000000001",
+            "isolated_tenant_attested": True,
+        }
+        with self.assertRaisesRegex(
+            usability.PolicyAdminUsabilityEvidenceError,
+            "postgresql_isolation_unexpected",
+        ):
+            usability.validate_evidence(value)
+
     def test_each_approved_blocker_reason_blocks_the_gate(self) -> None:
         for blocker_reason in usability.BLOCKER_REASONS - {"none"}:
             with self.subTest(blocker_reason=blocker_reason):
@@ -481,6 +519,35 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
         with self.assertRaisesRegex(
             usability.PolicyAdminUsabilityEvidenceError,
             "automated_regression_conclusion_invalid",
+        ):
+            usability.validate_evidence(value)
+
+        value = self._release_evidence()
+        _, finding = self._add_blocked_origin(value, status="resolved")
+        finding["correction"]["automated_regression_source_commit"] = "d" * 40
+        with self.assertRaisesRegex(
+            usability.PolicyAdminUsabilityEvidenceError,
+            "finding_regression_not_for_gated_release",
+        ):
+            usability.validate_evidence(value)
+
+        value = self._release_evidence()
+        _, finding = self._add_blocked_origin(value, status="resolved")
+        finding["correction"]["automated_regression_workflow_path"] = (
+            ".github/workflows/release.yml"
+        )
+        with self.assertRaisesRegex(
+            usability.PolicyAdminUsabilityEvidenceError,
+            "automated_regression_workflow_invalid",
+        ):
+            usability.validate_evidence(value)
+
+        value = self._release_evidence()
+        _, finding = self._add_blocked_origin(value, status="resolved")
+        finding["correction"]["automated_regression_binding_verified"] = False
+        with self.assertRaisesRegex(
+            usability.PolicyAdminUsabilityEvidenceError,
+            "automated_regression_binding_not_verified",
         ):
             usability.validate_evidence(value)
 

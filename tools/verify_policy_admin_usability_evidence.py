@@ -87,6 +87,7 @@ BLOCKER_REASONS = {
 REFERENCE_TYPES = {"public_issue", "private_security_advisory"}
 FINDING_STATUSES = {"open", "resolved"}
 HISTORY_EVENT_TYPES = {"policy_staged", "policy_activated", "policy_rolled_back"}
+REGRESSION_WORKFLOW_PATH = ".github/workflows/ci.yml"
 
 _ROOT_FIELDS = {
     "schema_id",
@@ -129,6 +130,7 @@ _SESSION_FIELDS = {
     "outcome",
     "friction_category",
     "finding_id",
+    "postgresql_isolation",
     "postgresql_verification",
     "content_free_attestations",
 }
@@ -146,6 +148,10 @@ _CONTENT_FREE_FIELDS = {
     "identity_mapping_absent",
     "local_path_absent",
     "free_text_absent",
+}
+_POSTGRESQL_ISOLATION_FIELDS = {
+    "run_scope_id",
+    "isolated_tenant_attested",
 }
 _POSTGRESQL_FIELDS = {"apply", "rollback", "history"}
 _APPLY_FIELDS = {
@@ -198,6 +204,9 @@ _CORRECTION_FIELDS = {
     "corrected_release_published_at",
     "resolution_commit_ancestor_verified",
     "automated_regression_url",
+    "automated_regression_source_commit",
+    "automated_regression_workflow_path",
+    "automated_regression_binding_verified",
     "automated_regression_conclusion",
     "retest_session_id",
     "broad_workflow_change",
@@ -207,6 +216,7 @@ _CORRECTION_FIELDS = {
 _UUID = r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}"
 _SESSION_ID_RE = re.compile(rf"paus:{_UUID}\Z")
 _PARTICIPANT_ID_RE = re.compile(rf"pau:{_UUID}\Z")
+_RUN_SCOPE_ID_RE = re.compile(rf"pauscope:{_UUID}\Z")
 _FINDING_ID_RE = re.compile(rf"pauf:{_UUID}\Z")
 _PRIVATE_ADVISORY_RE = re.compile(rf"private-advisory:{_UUID}\Z")
 _ISSUE_RE = re.compile(r"https://github\.com/Xpounder-com/hormuz/issues/[1-9][0-9]*\Z")
@@ -569,12 +579,33 @@ def _validate_session(value: object, index: int) -> dict[str, Any]:
 
     verification = session["postgresql_verification"]
     if track == "offline":
+        if session["postgresql_isolation"] is not None:
+            raise PolicyAdminUsabilityEvidenceError(
+                f"{label}_postgresql_isolation_unexpected"
+            )
         if verification is not None:
             raise PolicyAdminUsabilityEvidenceError(f"{label}_postgresql_unexpected")
-    elif verification is not None:
-        _validate_postgresql(verification, label)
-    elif _actions_complete(session):
-        raise PolicyAdminUsabilityEvidenceError(f"{label}_postgresql_verification_missing")
+    else:
+        isolation = _require_fields(
+            session["postgresql_isolation"],
+            _POSTGRESQL_ISOLATION_FIELDS,
+            f"{label}_postgresql_isolation",
+        )
+        _require_pattern(
+            isolation["run_scope_id"],
+            _RUN_SCOPE_ID_RE,
+            f"{label}_postgresql_run_scope",
+        )
+        if isolation["isolated_tenant_attested"] is not True:
+            raise PolicyAdminUsabilityEvidenceError(
+                f"{label}_postgresql_isolation_not_attested"
+            )
+        if verification is not None:
+            _validate_postgresql(verification, label)
+        elif _actions_complete(session):
+            raise PolicyAdminUsabilityEvidenceError(
+                f"{label}_postgresql_verification_missing"
+            )
 
     attestations = _require_fields(
         session["content_free_attestations"], _CONTENT_FREE_FIELDS, f"{label}_content_free"
@@ -613,6 +644,19 @@ def _validate_correction(value: object, label: str) -> dict[str, Any]:
         _ACTIONS_RUN_RE,
         f"{label}_automated_regression",
     )
+    _require_pattern(
+        correction["automated_regression_source_commit"],
+        _REVISION_RE,
+        f"{label}_automated_regression_source_commit",
+    )
+    if correction["automated_regression_workflow_path"] != REGRESSION_WORKFLOW_PATH:
+        raise PolicyAdminUsabilityEvidenceError(
+            f"{label}_automated_regression_workflow_invalid"
+        )
+    if correction["automated_regression_binding_verified"] is not True:
+        raise PolicyAdminUsabilityEvidenceError(
+            f"{label}_automated_regression_binding_not_verified"
+        )
     if correction["automated_regression_conclusion"] != "success":
         raise PolicyAdminUsabilityEvidenceError(
             f"{label}_automated_regression_conclusion_invalid"
@@ -700,6 +744,13 @@ def validate_evidence(value: object) -> dict[str, object]:
     ]
     if len(session_keys) != len(set(session_keys)):
         raise PolicyAdminUsabilityEvidenceError("participant_track_release_duplicated")
+    postgresql_scope_ids = [
+        session["postgresql_isolation"]["run_scope_id"]
+        for session in sessions
+        if session["track"] == "postgresql"
+    ]
+    if len(postgresql_scope_ids) != len(set(postgresql_scope_ids)):
+        raise PolicyAdminUsabilityEvidenceError("postgresql_run_scope_ids_duplicated")
     for session in sessions:
         started_at = _require_timestamp(session["started_at"], "session_started_at")
         if started_at > generated_at:
@@ -783,6 +834,10 @@ def validate_evidence(value: object) -> dict[str, object]:
         ):
             raise PolicyAdminUsabilityEvidenceError(
                 "finding_correction_not_in_gated_release"
+            )
+        if correction["automated_regression_source_commit"] != release["source_commit"]:
+            raise PolicyAdminUsabilityEvidenceError(
+                "finding_regression_not_for_gated_release"
             )
         if (
             _require_timestamp(origin["started_at"], "origin_started_at") >= corrected_at

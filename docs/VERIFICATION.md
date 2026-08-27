@@ -163,11 +163,13 @@ current-artifact PostgreSQL participants. It computes unaided completion, the
 apply/history/rollback version, digest, and generation relationships. It also
 requires preregistration, complete started-session inclusion, no-replacement
 attestations, and aggregate generation no earlier than any computed session
-end. Open blockers prevent readiness. Corrections require an automated
-regression, an exact digest/source/publication-time match to the release being
-gated, attested correction-commit ancestry, and a later independent retest. A
-broad workflow change requires every participant in the affected track to
-rerun.
+end. PostgreSQL runs also require unique opaque run scopes and tenant-isolation
+attestations. Open blockers prevent readiness. Corrections require an automated
+regression whose Actions source commit and canonical CI workflow are attested
+and bound to the exact corrected release, an exact
+digest/source/publication-time match to the release being gated, attested
+correction-commit ancestry, and a later independent retest. A broad workflow
+change requires every participant in the affected track to rerun.
 
 Synthetic and internal results never satisfy the human gate. The current count
 remains 0/5 offline and 0/3 PostgreSQL. This administrator-usability evidence is

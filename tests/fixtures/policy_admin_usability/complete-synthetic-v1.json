@@ -49,6 +49,7 @@
       "outcome": "completed",
       "friction_category": "none",
       "finding_id": null,
+      "postgresql_isolation": null,
       "postgresql_verification": null,
       "content_free_attestations": {
         "policy_or_request_content_absent": true,
@@ -87,6 +88,7 @@
       "outcome": "completed",
       "friction_category": "none",
       "finding_id": null,
+      "postgresql_isolation": null,
       "postgresql_verification": null,
       "content_free_attestations": {
         "policy_or_request_content_absent": true,
@@ -125,6 +127,7 @@
       "outcome": "completed",
       "friction_category": "none",
       "finding_id": null,
+      "postgresql_isolation": null,
       "postgresql_verification": null,
       "content_free_attestations": {
         "policy_or_request_content_absent": true,
@@ -163,6 +166,7 @@
       "outcome": "completed",
       "friction_category": "none",
       "finding_id": null,
+      "postgresql_isolation": null,
       "postgresql_verification": null,
       "content_free_attestations": {
         "policy_or_request_content_absent": true,
@@ -201,6 +205,7 @@
       "outcome": "completed",
       "friction_category": "none",
       "finding_id": null,
+      "postgresql_isolation": null,
       "postgresql_verification": null,
       "content_free_attestations": {
         "policy_or_request_content_absent": true,
@@ -239,6 +244,10 @@
       "outcome": "completed",
       "friction_category": "none",
       "finding_id": null,
+      "postgresql_isolation": {
+        "run_scope_id": "pauscope:60000000-0000-4000-8000-000000000001",
+        "isolated_tenant_attested": true
+      },
       "postgresql_verification": {
         "apply": {
           "previous_version_id": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
@@ -310,6 +319,10 @@
       "outcome": "completed",
       "friction_category": "none",
       "finding_id": null,
+      "postgresql_isolation": {
+        "run_scope_id": "pauscope:60000000-0000-4000-8000-000000000002",
+        "isolated_tenant_attested": true
+      },
       "postgresql_verification": {
         "apply": {
           "previous_version_id": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
@@ -381,6 +394,10 @@
       "outcome": "completed",
       "friction_category": "none",
       "finding_id": null,
+      "postgresql_isolation": {
+        "run_scope_id": "pauscope:60000000-0000-4000-8000-000000000003",
+        "isolated_tenant_attested": true
+      },
       "postgresql_verification": {
         "apply": {
           "previous_version_id": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
