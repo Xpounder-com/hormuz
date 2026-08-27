@@ -21,9 +21,11 @@ from typing import Any
 
 
 SCHEMA_ID = "hormuz.policy-admin-usability-evidence"
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 GATE_ISSUE = "https://github.com/Xpounder-com/hormuz/issues/173"
-EVIDENCE_KINDS = {"release_gate_evidence", "synthetic_test_fixture"}
+EVIDENCE_KINDS = {"candidate_gate_evidence", "synthetic_test_fixture"}
+TARGET_VERSION = "v1.0.0"
+CLAIM_SCOPE = "administrator_workflow_usability_and_state_correctness"
 # The v1 participant kit includes the protocol, configuration, examples, and
 # evidence validator. Only the source archive ships that complete kit.
 ARTIFACT_KINDS = {"source_archive"}
@@ -96,17 +98,17 @@ _ROOT_FIELDS = {
     "evidence_kind",
     "gate_issue",
     "generated_at",
-    "release",
+    "candidate",
     "operator_attestation",
     "sessions",
     "findings",
 }
-_RELEASE_FIELDS = {
-    "version",
+_CANDIDATE_FIELDS = {
+    "target_version",
     "artifact_kind",
     "artifact_digest",
     "source_commit",
-    "published_at",
+    "frozen_at",
 }
 _OPERATOR_FIELDS = {
     "distinct_humans_verified_off_repository",
@@ -115,13 +117,13 @@ _OPERATOR_FIELDS = {
     "participant_replacement_absent",
     "identity_mapping_not_committed",
     "raw_intake_not_committed",
-    "release_artifact_digest_verified",
+    "candidate_artifact_digest_verified",
 }
 _SESSION_FIELDS = {
     "session_id",
     "participant_id",
     "track",
-    "release_artifact_digest",
+    "candidate_artifact_digest",
     "started_at",
     "duration_seconds",
     "setup_excluded_from_duration",
@@ -242,9 +244,9 @@ _FINDING_FIELDS = {
 }
 _CORRECTION_FIELDS = {
     "resolution_commit",
-    "corrected_release_source_commit",
-    "corrected_release_digest",
-    "corrected_release_published_at",
+    "corrected_candidate_source_commit",
+    "corrected_candidate_digest",
+    "corrected_candidate_frozen_at",
     "resolution_commit_ancestor_verified",
     "automated_regression_url",
     "automated_regression_source_commit",
@@ -267,9 +269,6 @@ _ACTIONS_RUN_RE = re.compile(r"https://github\.com/Xpounder-com/hormuz/actions/r
 _REVISION_RE = re.compile(r"[0-9a-f]{40}\Z")
 _SHA256_RE = re.compile(r"sha256:[0-9a-f]{64}\Z")
 _CONTENT_SHA256_RE = re.compile(r"[0-9a-f]{64}\Z")
-_V1_VERSION_RE = re.compile(
-    r"v1\.0(?:\.(?:0|[1-9][0-9]*))?\Z"
-)
 _MAX_EVIDENCE_BYTES = 1024 * 1024
 _MAX_GENERATION = 9_223_372_036_854_775_807
 # These identities bind a qualifying offline session to the exact public task
@@ -419,13 +418,20 @@ def _require_sorted_patterns(
     return value
 
 
-def _validate_release(value: object) -> tuple[dict[str, Any], datetime]:
-    release = _require_fields(value, _RELEASE_FIELDS, "release")
-    _require_pattern(release["version"], _V1_VERSION_RE, "release_version")
-    _require_enum(release["artifact_kind"], ARTIFACT_KINDS, "release_artifact_kind")
-    _require_pattern(release["artifact_digest"], _SHA256_RE, "release_artifact_digest")
-    _require_pattern(release["source_commit"], _REVISION_RE, "release_source_commit")
-    return release, _require_timestamp(release["published_at"], "release_published_at")
+def _validate_candidate(value: object) -> tuple[dict[str, Any], datetime]:
+    candidate = _require_fields(value, _CANDIDATE_FIELDS, "candidate")
+    if candidate["target_version"] != TARGET_VERSION:
+        raise PolicyAdminUsabilityEvidenceError("candidate_target_version_invalid")
+    _require_enum(
+        candidate["artifact_kind"], ARTIFACT_KINDS, "candidate_artifact_kind"
+    )
+    _require_pattern(
+        candidate["artifact_digest"], _SHA256_RE, "candidate_artifact_digest"
+    )
+    _require_pattern(
+        candidate["source_commit"], _REVISION_RE, "candidate_source_commit"
+    )
+    return candidate, _require_timestamp(candidate["frozen_at"], "candidate_frozen_at")
 
 
 def _validate_independence(value: object, label: str) -> None:
@@ -835,7 +841,9 @@ def _validate_session(value: object, index: int) -> dict[str, Any]:
     _require_pattern(session["participant_id"], _PARTICIPANT_ID_RE, f"{label}_participant")
     track = _require_enum(session["track"], TRACKS, f"{label}_track")
     _require_pattern(
-        session["release_artifact_digest"], _SHA256_RE, f"{label}_release_digest"
+        session["candidate_artifact_digest"],
+        _SHA256_RE,
+        f"{label}_candidate_digest",
     )
     _require_timestamp(session["started_at"], f"{label}_started_at")
     _require_int(session["duration_seconds"], 1, 86_400, f"{label}_duration")
@@ -924,17 +932,17 @@ def _validate_correction(value: object, label: str) -> dict[str, Any]:
         correction["resolution_commit"], _REVISION_RE, f"{label}_resolution_commit"
     )
     _require_pattern(
-        correction["corrected_release_source_commit"],
+        correction["corrected_candidate_source_commit"],
         _REVISION_RE,
-        f"{label}_corrected_release_source_commit",
+        f"{label}_corrected_candidate_source_commit",
     )
     _require_pattern(
-        correction["corrected_release_digest"],
+        correction["corrected_candidate_digest"],
         _SHA256_RE,
-        f"{label}_corrected_release_digest",
+        f"{label}_corrected_candidate_digest",
     )
     _require_timestamp(
-        correction["corrected_release_published_at"], f"{label}_corrected_release_at"
+        correction["corrected_candidate_frozen_at"], f"{label}_corrected_candidate_at"
     )
     if correction["resolution_commit_ancestor_verified"] is not True:
         raise PolicyAdminUsabilityEvidenceError(
@@ -1029,9 +1037,9 @@ def validate_evidence(value: object) -> dict[str, object]:
     validation_time = datetime.now(timezone.utc).replace(tzinfo=None)
     if generated_at > validation_time + _MAX_FUTURE_CLOCK_SKEW:
         raise PolicyAdminUsabilityEvidenceError("generation_in_future")
-    release, release_published_at = _validate_release(root["release"])
-    if release_published_at > generated_at:
-        raise PolicyAdminUsabilityEvidenceError("release_after_generation")
+    candidate, candidate_frozen_at = _validate_candidate(root["candidate"])
+    if candidate_frozen_at > generated_at:
+        raise PolicyAdminUsabilityEvidenceError("candidate_frozen_after_generation")
 
     attestation = _require_fields(root["operator_attestation"], _OPERATOR_FIELDS, "operator")
     for field in _OPERATOR_FIELDS:
@@ -1045,11 +1053,11 @@ def validate_evidence(value: object) -> dict[str, object]:
     if len(session_ids) != len(set(session_ids)):
         raise PolicyAdminUsabilityEvidenceError("session_ids_duplicated")
     session_keys = [
-        (session["participant_id"], session["track"], session["release_artifact_digest"])
+        (session["participant_id"], session["track"], session["candidate_artifact_digest"])
         for session in sessions
     ]
     if len(session_keys) != len(set(session_keys)):
-        raise PolicyAdminUsabilityEvidenceError("participant_track_release_duplicated")
+        raise PolicyAdminUsabilityEvidenceError("participant_track_candidate_duplicated")
     postgresql_scope_ids = [
         session["postgresql_isolation"]["run_scope_id"]
         for session in sessions
@@ -1058,6 +1066,7 @@ def validate_evidence(value: object) -> dict[str, object]:
     if len(postgresql_scope_ids) != len(set(postgresql_scope_ids)):
         raise PolicyAdminUsabilityEvidenceError("postgresql_run_scope_ids_duplicated")
     participant_intervals: dict[str, list[tuple[datetime, datetime]]] = {}
+    session_intervals: dict[str, tuple[datetime, datetime]] = {}
     for session in sessions:
         started_at = _require_timestamp(session["started_at"], "session_started_at")
         if started_at > generated_at:
@@ -1073,11 +1082,12 @@ def validate_evidence(value: object) -> dict[str, object]:
         participant_intervals.setdefault(session["participant_id"], []).append(
             (started_at, completed_at)
         )
+        session_intervals[session["session_id"]] = (started_at, completed_at)
         if (
-            session["release_artifact_digest"] == release["artifact_digest"]
-            and started_at < release_published_at
+            session["candidate_artifact_digest"] == candidate["artifact_digest"]
+            and started_at < candidate_frozen_at
         ):
-            raise PolicyAdminUsabilityEvidenceError("session_before_release")
+            raise PolicyAdminUsabilityEvidenceError("session_before_candidate_frozen")
     for intervals in participant_intervals.values():
         ordered = sorted(intervals)
         for (_, previous_end), (current_start, _) in zip(
@@ -1148,25 +1158,27 @@ def validate_evidence(value: object) -> dict[str, object]:
         ]:
             raise PolicyAdminUsabilityEvidenceError("finding_affected_tracks_invalid")
         corrected_at = _require_timestamp(
-            correction["corrected_release_published_at"], "corrected_release_at"
+            correction["corrected_candidate_frozen_at"], "corrected_candidate_at"
         )
         if corrected_at > generated_at:
             raise PolicyAdminUsabilityEvidenceError("correction_after_generation")
         if (
-            correction["corrected_release_digest"] != release["artifact_digest"]
-            or correction["corrected_release_source_commit"] != release["source_commit"]
-            or corrected_at != release_published_at
+            correction["corrected_candidate_digest"] != candidate["artifact_digest"]
+            or correction["corrected_candidate_source_commit"]
+            != candidate["source_commit"]
+            or corrected_at != candidate_frozen_at
         ):
             raise PolicyAdminUsabilityEvidenceError(
-                "finding_correction_not_in_gated_release"
+                "finding_correction_not_in_gated_candidate"
             )
-        if correction["automated_regression_source_commit"] != release["source_commit"]:
+        if correction["automated_regression_source_commit"] != candidate["source_commit"]:
             raise PolicyAdminUsabilityEvidenceError(
-                "finding_regression_not_for_gated_release"
+                "finding_regression_not_for_gated_candidate"
             )
         if (
             _require_timestamp(origin["started_at"], "origin_started_at") >= corrected_at
-            or origin["release_artifact_digest"] == correction["corrected_release_digest"]
+            or origin["candidate_artifact_digest"]
+            == correction["corrected_candidate_digest"]
         ):
             raise PolicyAdminUsabilityEvidenceError("finding_correction_not_fresh")
         retest = sessions_by_id.get(correction["retest_session_id"])
@@ -1174,7 +1186,8 @@ def validate_evidence(value: object) -> dict[str, object]:
             retest is None
             or retest["session_id"] == origin["session_id"]
             or retest["track"] != finding["track"]
-            or retest["release_artifact_digest"] != correction["corrected_release_digest"]
+            or retest["candidate_artifact_digest"]
+            != correction["corrected_candidate_digest"]
             or _require_timestamp(retest["started_at"], "retest_started_at") <= corrected_at
             or not _session_qualifies(retest)
         ):
@@ -1183,7 +1196,7 @@ def validate_evidence(value: object) -> dict[str, object]:
     current_sessions = [
         session
         for session in sessions
-        if session["release_artifact_digest"] == release["artifact_digest"]
+        if session["candidate_artifact_digest"] == candidate["artifact_digest"]
     ]
     offline_sessions = [session for session in current_sessions if session["track"] == "offline"]
     postgresql_sessions = [
@@ -1219,7 +1232,7 @@ def validate_evidence(value: object) -> dict[str, object]:
     for finding in broad_changes:
         correction = finding["correction"]
         corrected_at = _require_timestamp(
-            correction["corrected_release_published_at"], "corrected_release_at"
+            correction["corrected_candidate_frozen_at"], "corrected_candidate_at"
         )
         for track in correction["affected_tracks"]:
             track_sessions = [session for session in current_sessions if session["track"] == track]
@@ -1233,7 +1246,30 @@ def validate_evidence(value: object) -> dict[str, object]:
                 broad_tracks_not_rerun.add(track)
 
     reasons: list[str] = []
-    if evidence_kind != "release_gate_evidence":
+    offline_gate_complete = (
+        len(offline_sessions) == 5
+        and len(successful_offline) == 5
+        and len(offline_within_15) >= 4
+        and not offline_over_25
+        and "offline" not in broad_tracks_not_rerun
+        and not any(
+            finding["track"] == "offline"
+            and finding["blocker_reason"] != "none"
+            and finding["status"] == "open"
+            for finding in findings
+        )
+    )
+    postgresql_after_offline = True
+    if postgresql_sessions:
+        postgresql_after_offline = offline_gate_complete and min(
+            session_intervals[session["session_id"]][0]
+            for session in postgresql_sessions
+        ) >= max(
+            session_intervals[session["session_id"]][1]
+            for session in offline_sessions
+        )
+
+    if evidence_kind != "candidate_gate_evidence":
         reasons.append("synthetic_fixture")
     if attestation["distinct_humans_verified_off_repository"] is not True:
         reasons.append("distinct_humans_not_attested")
@@ -1247,8 +1283,8 @@ def validate_evidence(value: object) -> dict[str, object]:
         reasons.append("identity_mapping_boundary_not_attested")
     if attestation["raw_intake_not_committed"] is not True:
         reasons.append("raw_intake_boundary_not_attested")
-    if attestation["release_artifact_digest_verified"] is not True:
-        reasons.append("release_artifact_digest_not_attested")
+    if attestation["candidate_artifact_digest_verified"] is not True:
+        reasons.append("candidate_artifact_digest_not_attested")
     if len(offline_sessions) != 5:
         reasons.append("offline_participant_count_not_five")
     if len(successful_offline) != 5:
@@ -1261,6 +1297,8 @@ def validate_evidence(value: object) -> dict[str, object]:
         reasons.append("postgresql_participant_count_not_three")
     if len(successful_postgresql) != 3:
         reasons.append("postgresql_completion_or_state_verification_incomplete")
+    if not postgresql_after_offline:
+        reasons.append("postgresql_started_before_offline_gate_completed")
     if unresolved_blockers:
         reasons.append("blocker_open")
     if broad_tracks_not_rerun:
@@ -1270,11 +1308,14 @@ def validate_evidence(value: object) -> dict[str, object]:
     return {
         "schema_id": SCHEMA_ID,
         "schema_version": SCHEMA_VERSION,
-        "status": "passed_release_gate" if ready else "not_ready",
+        "status": "eligible_for_unchanged_promotion" if ready else "not_ready",
         "evidence_kind": evidence_kind,
         "gate_issue": GATE_ISSUE,
-        "release_artifact_digest": release["artifact_digest"],
-        "ready_for_v1_policy_admin_claim": ready,
+        "target_version": candidate["target_version"],
+        "candidate_artifact_digest": candidate["artifact_digest"],
+        "eligible_for_v1_0_0_promotion": ready,
+        "promotion_requires_exact_candidate_digest": True,
+        "claim_scope": CLAIM_SCOPE,
         "offline_participant_count": len(offline_sessions),
         "offline_completed_unaided_count": len(successful_offline),
         "offline_within_15_minutes_count": len(offline_within_15),
@@ -1326,7 +1367,7 @@ def main(argv: list[str] | None = None) -> int:
     print(json.dumps(result, sort_keys=True, separators=(",", ":")))
     if result["evidence_kind"] == "synthetic_test_fixture":
         return 0
-    return 0 if result["ready_for_v1_policy_admin_claim"] else 1
+    return 0 if result["eligible_for_v1_0_0_promotion"] else 1
 
 
 if __name__ == "__main__":

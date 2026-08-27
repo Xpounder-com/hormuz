@@ -1,7 +1,7 @@
 # Independent policy-administrator usability gate
 
 This protocol measures whether the v1 policy-administration workflow is usable
-and state-correct without private guidance. It is the human release gate in
+and state-correct without private guidance. It is the human candidate gate in
 [issue #173](https://github.com/Xpounder-com/hormuz/issues/173). Current
 qualifying evidence is **0/5** offline participants and **0/3** PostgreSQL
 participants. Repository tests and the synthetic fixture do not change either
@@ -14,10 +14,10 @@ a different claim.
 ## Qualifying participants
 
 Pre-register exactly five people for the offline cohort and exactly three for
-the PostgreSQL cohort before testing a release artifact. A person may be in
+the PostgreSQL cohort before testing a candidate artifact. A person may be in
 both cohorts, but that person's measured session intervals must not overlap.
 Do not replace a failed participant with a later success or omit a run against
-the current artifact.
+the current candidate.
 
 The final aggregate explicitly attests that both cohorts were preregistered
 before testing, every started session is included, and no participant was
@@ -32,31 +32,42 @@ A participant is independent only when all of these are true:
   command implementation;
 - they received no private walkthrough before the run;
 - the facilitator provides zero interventions after timing starts; and
-- they use only documentation, examples, and `--help` shipped with the tested
-  release.
+- they use only documentation, examples, and `--help` shipped with the frozen
+  candidate.
 
-Public material outside the release, private notes, hints, screen sharing,
+Public material outside the candidate, private notes, hints, screen sharing,
 spoken command suggestions, and corrections from a facilitator disqualify the
 run. Record the assistance count even when it is nonzero; do not hide the run.
 
-## V1 artifact boundary
+## Frozen v1.0.0 candidate boundary
 
-The qualifying v1 evidence artifact is the published Hormuz Python source
-distribution (`hormuz-<version>.tar.gz`). That archive co-locates the protocol,
-`config.example.json`, both saved-task examples, and the evidence validator. CI
-inspects the built archive rather than only trusting `MANIFEST.in`.
+The qualifying artifact is one frozen Hormuz Python source distribution named
+for target version `v1.0.0`. Before any measured session, record its exact
+source commit, UTC freeze time, and SHA-256 digest. The archive co-locates the
+protocol, `config.example.json`, both saved-task examples, the command
+implementation that produces `--help`, and the evidence validator. CI inspects
+the built archive rather than only trusting `MANIFEST.in`.
+
+The candidate is not yet the final release. If and only if the gate passes,
+promote the exact tested archive and digest to `v1.0.0`. Do not rebuild,
+repackage, rename content inside the archive, regenerate metadata inside it, or
+substitute a byte-equivalent claim based only on the same source commit. A
+different byte stream is a new candidate with a new digest and must satisfy the
+affected gate again. External release-page metadata may be added during
+promotion only when the archived bytes remain unchanged.
 
 A wheel may be installed and the signed OCI image may be used during setup, but
-neither is accepted as the session's `artifact_kind` in contract v1: those
+neither is accepted as the session's `artifact_kind` in contract v2: those
 formats do not currently contain the complete participant kit. Expanding the
 accepted formats requires packaging the same immutable kit and revising the
 contract; it cannot be inferred from an otherwise successful run.
 
 ## Setup boundary
 
-Installation and environment setup finish before the measured task. Verify and
-record the immutable source-archive SHA-256 digest, then install from that
-archive. The participant starts with a clean working directory containing
+Installation and environment setup finish before the measured task. Verify
+that the supplied archive matches the frozen candidate SHA-256 digest, then
+install from that archive. The participant starts with a clean working
+directory containing
 copies of the shipped
 `config.example.json`,
 `examples/policy-admin-usability-baseline.json`, and
@@ -112,6 +123,19 @@ to the kit shipped with itself: one semantic change at
 `4000`. It also requires the canonical baseline, candidate, and suite
 identities, `usage_basis: current`, and an attestation that current SQLite usage
 was zero. Stage labels alone cannot qualify a session.
+
+Complete and evaluate the entire offline cohort before starting any measured
+PostgreSQL session. All five offline sessions must qualify, at least four must
+finish within 15 minutes, none may exceed 25 minutes, and no offline blocker may
+remain open. The earliest PostgreSQL `started_at` must be at or after the latest
+computed offline session end.
+
+If the offline cohort exposes a blocker, correct it, freeze a new candidate with
+a new digest, run the required automated regression, and repeat the affected
+offline cohort before provisioning measured PostgreSQL sessions. Prior runs
+remain in the aggregate as blocker history but cannot count toward the new
+candidate. This ordering avoids spending PostgreSQL setup time on a candidate
+whose basic documentation or command workflow has already failed.
 
 ## PostgreSQL task card
 
@@ -172,30 +196,30 @@ or evaluation failures use the published-guidance, misleading-success, or
 content-exposure reasons as applicable.
 
 An open blocker always prevents the gate from passing. A resolved blocker must
-name a correction commit, the exact corrected release source commit, immutable
-corrected-release digest, successful GitHub Actions regression run with an
+name a correction commit, the exact corrected candidate source commit,
+immutable corrected-candidate digest, successful GitHub Actions regression run with an
 explicit `success` conclusion, and a later qualifying retest session. The
 regression record names the Actions source commit and canonical
 `.github/workflows/ci.yml` path, and the release steward attests that the run is
 bound to that commit and workflow. Its source commit must equal the corrected
-release source commit. The corrected digest, source commit, and publication
-time must exactly equal the top-level release being gated; a correction,
+candidate source commit. The corrected digest, source commit, and freeze time
+must exactly equal the top-level candidate being gated; a correction,
 regression, and retest against a different artifact cannot clear a blocker on
-an older release. Before accepting the aggregate, the release steward verifies
-and attests that the correction commit is an ancestor of the corrected release
-source commit. The retest may be one of the pre-registered current cohort runs.
-If the correction broadly changes a track's workflow, every member of that
-track must rerun after the corrected release was published.
+an older candidate. Before accepting the aggregate, the release steward
+verifies and attests that the correction commit is an ancestor of the corrected
+candidate source commit. The retest may be one of the pre-registered current
+cohort runs. If the correction broadly changes a track's workflow, every member
+of that track must rerun after the corrected candidate was frozen.
 
 ## Content-free aggregate
 
-The strict `hormuz.policy-admin-usability-evidence` v1 aggregate records only:
+The strict `hormuz.policy-admin-usability-evidence` v2 aggregate records only:
 
-- the release version, artifact kind and digest, source commit, and publication
-  time;
+- target version `v1.0.0`, candidate artifact kind and digest, source commit,
+  and freeze time;
 - preregistration, complete-session inclusion, and no-replacement attestations;
 - pseudonymous participant/session IDs, track, stage outcomes, measured
-  seconds, and release digest;
+  seconds, and candidate digest;
 - author/reviewer, private-walkthrough, and assistance-count metadata;
 - bounded documentation/example/`--help` usage plus up to 20 finding IDs and
   their friction categories per session;
@@ -207,20 +231,20 @@ The strict `hormuz.policy-admin-usability-evidence` v1 aggregate records only:
 - guarded apply/rollback attestations and values, expected and observed policy
   version IDs, content digests, generations, and the predecessor, activation,
   and rollback lifecycle event types for PostgreSQL; and
-- correction commit, exact corrected release source commit/artifact digest,
+- correction commit, exact corrected candidate source commit/artifact digest,
   source-history verification attestation, automated regression source/workflow
   binding, and retest linkage.
 
 Exact field allowlists leave no place for names, email addresses, policy JSON,
 request content, prompts, responses, credentials, logs, screenshots, local
 paths, hostnames, or free-form notes. Keep the participant-to-person mapping and
-raw intake outside Git, Actions, release artifacts, and the aggregate.
+raw intake outside Git, Actions, candidate/release artifacts, and the aggregate.
 
 Use the checked-in fixture only to exercise the contract:
 
 ```bash
 python tools/verify_policy_admin_usability_evidence.py \
-  tests/fixtures/policy_admin_usability/complete-synthetic-v1.json \
+  tests/fixtures/policy_admin_usability/complete-synthetic-v2.json \
   --allow-synthetic-fixture
 ```
 
@@ -231,11 +255,21 @@ python tools/verify_policy_admin_usability_evidence.py \
   /private/path/policy-admin-usability-evidence.json
 ```
 
-Exit `0` means the real gate passed, exit `1` means a structurally valid real
-aggregate remains incomplete, and exit `2` means the evidence contract itself
-is invalid. Explicitly allowed synthetic evidence exits `0` only to show that
-the fixture is structurally valid; its JSON result always has
-`ready_for_v1_policy_admin_claim: false`.
+Exit `0` means the frozen candidate is eligible for unchanged promotion, exit
+`1` means a structurally valid real aggregate remains incomplete, and exit `2`
+means the evidence contract itself is invalid. A successful result reports
+`status: eligible_for_unchanged_promotion`, the exact candidate digest,
+`target_version: v1.0.0`, and
+`claim_scope: administrator_workflow_usability_and_state_correctness`.
+Promotion must use that reported digest; the validator never authorizes a
+rebuild. Explicitly allowed synthetic evidence exits `0` only to show that the
+fixture is structurally valid; its JSON result always has
+`eligible_for_v1_0_0_promotion: false`.
+
+Schema v2 replaces the pre-evidence schema v1 lifecycle, which incorrectly
+modeled the tested object as an already published release. The validator
+rejects schema v1 rather than silently assigning its fields the new candidate
+semantics. No real human evidence existed when v2 was introduced.
 
 The validator accepts only a regular file of at most 1 MiB, rejects symlinks
 and special files without blocking on them, and treats malformed or
@@ -245,8 +279,9 @@ skew without permitting future sessions to pass early.
 
 ## Nonclaims
 
-The validator can enforce structure, thresholds, exact release/correction
-identity, session-end chronology, required attestations, metadata
+The validator can enforce structure, thresholds, exact candidate/correction
+identity, candidate-freeze and session-end chronology, offline-before-PostgreSQL
+ordering, required attestations, metadata
 relationships, and the synthetic-evidence boundary. It cannot independently
 prove the off-repository cohort registration or identity mapping, that every
 started run was submitted, that a person was not privately coached, the
@@ -254,6 +289,9 @@ recorded offline outputs were personally observed, the attested PostgreSQL
 tenant isolation, that a participant actually supplied the recorded
 active-version guard, the attested Git ancestry, or the stated
 source/workflow binding and contents of a referenced Actions run without
-separately inspecting those systems. Passing this gate proves the bounded
-administrator tasks, not live-provider behavior, enterprise availability,
-disaster recovery, or the separate issue #110 claim.
+separately inspecting those systems. Passing this gate proves only the bounded
+administrator workflow's usability and apply/history/rollback state
+correctness for the tested candidate. It does not prove complete enterprise
+readiness, production security or availability, disaster recovery,
+live-provider behavior, customer demand, market validation, or the separate
+issue #110 claim.
