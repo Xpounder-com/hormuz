@@ -154,12 +154,16 @@ python tools/verify_policy_admin_usability_evidence.py \
   --allow-synthetic-fixture
 ```
 
-The validator requires exactly five current-artifact offline participants and
-three current-artifact PostgreSQL participants. It computes unaided completion,
-the 15- and 25-minute thresholds, allowed published-guidance use, and exact
+Contract v1 accepts only the source archive because it is the release format
+that ships the complete protocol, configuration, examples, and validator kit;
+the package gate inspects those members in the built archive. The validator
+requires exactly five current-artifact offline participants and three
+current-artifact PostgreSQL participants. It computes unaided completion, the
+15- and 25-minute thresholds, allowed published-guidance use, and exact
 apply/history/rollback version, digest, and generation relationships. Open
-blockers prevent readiness. Corrections require an automated regression and a
-later independent retest against the corrected artifact; a broad workflow
+blockers prevent readiness. Corrections require an automated regression, an
+exact digest/source/publication-time match to the release being gated, attested
+correction-commit ancestry, and a later independent retest. A broad workflow
 change requires every participant in the affected track to rerun.
 
 Synthetic and internal results never satisfy the human gate. The current count

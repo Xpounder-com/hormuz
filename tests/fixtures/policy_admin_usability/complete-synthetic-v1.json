@@ -6,7 +6,7 @@
   "generated_at": "2026-08-27T20:00:00Z",
   "release": {
     "version": "v1.0",
-    "artifact_kind": "signed_oci",
+    "artifact_kind": "source_archive",
     "artifact_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "source_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "published_at": "2026-08-27T10:00:00Z"

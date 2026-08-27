@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify that a built Hormuz wheel has no retired context implementation."""
+"""Verify the built Hormuz distribution and isolated wheel boundaries."""
 
 from __future__ import annotations
 
@@ -66,6 +66,13 @@ REQUIRED_HELM_SDIST_PATHS = (
     "tools/verify_postgres_ha_reference.py",
     "tools/verify_postgres_ha_reference.sh",
 )
+REQUIRED_POLICY_ADMIN_USABILITY_SDIST_PATHS = (
+    "config.example.json",
+    "docs/POLICY_ADMIN_USABILITY.md",
+    "examples/policy-admin-usability-baseline.json",
+    "examples/policy-admin-usability-scenarios.json",
+    "tools/verify_policy_admin_usability_evidence.py",
+)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -89,9 +96,10 @@ def main(argv: list[str] | None = None) -> int:
     _assert_archive_boundary(sdist, _sdist_members)
     _assert_compose_sdist_boundary(sdist)
     _assert_helm_sdist_boundary(sdist)
+    _assert_policy_admin_usability_sdist_boundary(sdist)
     _verify_isolated_install(wheel, config, python)
     print(
-        "verified core distribution boundary: no context/runtime data and complete deployment profiles"
+        "verified core distribution boundary: no context/runtime data and complete deployment/usability assets"
     )
     return 0
 
@@ -142,6 +150,20 @@ def _assert_helm_sdist_boundary(path: Path) -> None:
     if missing:
         raise RuntimeError(
             f"Helm profile incomplete in {path.name}: {', '.join(sorted(missing))}"
+        )
+
+
+def _assert_policy_admin_usability_sdist_boundary(path: Path) -> None:
+    members = tuple(name.lstrip("./") for name in _sdist_members(path))
+    missing = [
+        required
+        for required in REQUIRED_POLICY_ADMIN_USABILITY_SDIST_PATHS
+        if not any(f"/{member}".endswith(f"/{required}") for member in members)
+    ]
+    if missing:
+        raise RuntimeError(
+            "Policy-administrator usability kit incomplete in "
+            f"{path.name}: {', '.join(sorted(missing))}"
         )
 
 

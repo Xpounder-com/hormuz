@@ -31,11 +31,25 @@ Public material outside the release, private notes, hints, screen sharing,
 spoken command suggestions, and corrections from a facilitator disqualify the
 run. Record the assistance count even when it is nonzero; do not hide the run.
 
+## V1 artifact boundary
+
+The qualifying v1 evidence artifact is the published Hormuz Python source
+distribution (`hormuz-<version>.tar.gz`). That archive co-locates the protocol,
+`config.example.json`, both saved-task examples, and the evidence validator. CI
+inspects the built archive rather than only trusting `MANIFEST.in`.
+
+A wheel may be installed and the signed OCI image may be used during setup, but
+neither is accepted as the session's `artifact_kind` in contract v1: those
+formats do not currently contain the complete participant kit. Expanding the
+accepted formats requires packaging the same immutable kit and revising the
+contract; it cannot be inferred from an otherwise successful run.
+
 ## Setup boundary
 
 Installation and environment setup finish before the measured task. Verify and
-record the immutable release artifact SHA-256 digest. The participant starts
-with a clean working directory containing copies of the shipped
+record the immutable source-archive SHA-256 digest, then install from that
+archive. The participant starts with a clean working directory containing
+copies of the shipped
 `config.example.json`,
 `examples/policy-admin-usability-baseline.json`, and
 `examples/policy-admin-usability-scenarios.json`. Rename the configuration copy
@@ -126,12 +140,17 @@ feedback text. These findings block the affected gate:
 - policy, request, credential, token, or personal content is exposed.
 
 An open blocker always prevents the gate from passing. A resolved blocker must
-name a correction commit, immutable corrected-release digest, successful
-GitHub Actions regression run with an explicit `success` conclusion, and a
-later qualifying retest session against that corrected artifact. The retest
-may be one of the pre-registered current cohort runs. If the correction broadly
-changes a track's workflow, every member of that track must rerun after the
-corrected release was published.
+name a correction commit, the exact corrected release source commit, immutable
+corrected-release digest, successful GitHub Actions regression run with an
+explicit `success` conclusion, and a later qualifying retest session. The
+corrected digest, source commit, and publication time must exactly equal the
+top-level release being gated; a correction and retest against a different
+artifact cannot clear a blocker on an older release. Before accepting the
+aggregate, the release steward verifies and attests that the correction commit
+is an ancestor of the corrected release source commit. The retest may be one of
+the pre-registered current cohort runs. If the correction broadly changes a
+track's workflow, every member of that track must rerun after the corrected
+release was published.
 
 ## Content-free aggregate
 
@@ -147,8 +166,9 @@ The strict `hormuz.policy-admin-usability-evidence` v1 aggregate records only:
 - expected and observed policy version IDs, content digests, generations, and
   the predecessor, activation, and rollback lifecycle event types for
   PostgreSQL; and
-- correction commit, automated regression run, corrected artifact digest, and
-  retest linkage.
+- correction commit, exact corrected release source commit/artifact digest,
+  source-history verification attestation, automated regression run, and retest
+  linkage.
 
 Exact field allowlists leave no place for names, email addresses, policy JSON,
 request content, prompts, responses, credentials, logs, screenshots, local
@@ -178,9 +198,11 @@ the fixture is structurally valid; its JSON result always has
 
 ## Nonclaims
 
-The validator can enforce structure, thresholds, metadata relationships, and
-the synthetic-evidence boundary. It cannot prove the off-repository identity
-mapping, that a person was not privately coached, or that a referenced Actions
-run contains the stated regression without separately inspecting it. Passing
-this gate proves the bounded administrator tasks, not live-provider behavior,
-enterprise availability, disaster recovery, or the separate issue #110 claim.
+The validator can enforce structure, thresholds, exact release/correction
+identity, metadata relationships, and the synthetic-evidence boundary. It
+cannot prove the off-repository identity mapping, that a person was not
+privately coached, the attested Git ancestry, or that a referenced Actions run
+contains the stated regression without separately inspecting those sources.
+Passing this gate proves the bounded administrator tasks, not live-provider
+behavior, enterprise availability, disaster recovery, or the separate issue
+#110 claim.

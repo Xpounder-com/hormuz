@@ -57,7 +57,7 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
         category: str = "documentation",
         status: str = "open",
         broad: bool = False,
-        corrected_at: str = "2026-08-27T10:30:00Z",
+        corrected_at: str = "2026-08-27T10:00:00Z",
         retest_session_id: str = "paus:10000000-0000-4000-8000-000000000001",
     ) -> tuple[dict[str, object], dict[str, object]]:
         origin = copy.deepcopy(self._sessions(value, "offline")[0])
@@ -79,8 +79,12 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
         if status == "resolved":
             correction = {
                 "resolution_commit": "c" * 40,
+                "corrected_release_source_commit": value["release"][  # type: ignore[index]
+                    "source_commit"
+                ],
                 "corrected_release_digest": value["release"]["artifact_digest"],  # type: ignore[index]
                 "corrected_release_published_at": corrected_at,
+                "resolution_commit_ancestor_verified": True,
                 "automated_regression_url": (
                     "https://github.com/Xpounder-com/hormuz/actions/runs/123456789"
                 ),
@@ -162,6 +166,18 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
                 with self.assertRaisesRegex(
                     usability.PolicyAdminUsabilityEvidenceError,
                     "release_version_invalid",
+                ):
+                    usability.validate_evidence(value)
+
+    def test_v1_gate_accepts_only_the_complete_source_archive_kit(self) -> None:
+        self.assertEqual(usability.ARTIFACT_KINDS, {"source_archive"})
+        for artifact_kind in ("wheel", "signed_oci"):
+            with self.subTest(artifact_kind=artifact_kind):
+                value = self._release_evidence()
+                value["release"]["artifact_kind"] = artifact_kind
+                with self.assertRaisesRegex(
+                    usability.PolicyAdminUsabilityEvidenceError,
+                    "release_artifact_kind_invalid",
                 ):
                     usability.validate_evidence(value)
 
@@ -429,9 +445,9 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
 
         value = self._release_evidence()
         _, finding = self._add_blocked_origin(value, status="resolved")
-        finding["correction"]["corrected_release_published_at"] = (
-            self._sessions(value, "offline")[0]["started_at"]
-        )
+        retest_started_at = self._sessions(value, "offline")[0]["started_at"]
+        value["release"]["published_at"] = retest_started_at
+        finding["correction"]["corrected_release_published_at"] = retest_started_at
         with self.assertRaisesRegex(
             usability.PolicyAdminUsabilityEvidenceError,
             "finding_retest_invalid",
@@ -462,6 +478,40 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
         ):
             usability.validate_evidence(value)
 
+        value = self._release_evidence()
+        _, finding = self._add_blocked_origin(value, status="resolved")
+        finding["correction"]["resolution_commit_ancestor_verified"] = False
+        with self.assertRaisesRegex(
+            usability.PolicyAdminUsabilityEvidenceError,
+            "resolution_commit_ancestor_not_verified",
+        ):
+            usability.validate_evidence(value)
+
+    def test_resolved_blocker_is_bound_to_the_exact_gated_release(self) -> None:
+        mutations = (
+            (
+                "artifact digest",
+                "corrected_release_digest",
+                "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            ),
+            ("source commit", "corrected_release_source_commit", "d" * 40),
+            (
+                "publication time",
+                "corrected_release_published_at",
+                "2026-08-27T10:01:00Z",
+            ),
+        )
+        for label, field, replacement in mutations:
+            with self.subTest(label=label):
+                value = self._release_evidence()
+                _, finding = self._add_blocked_origin(value, status="resolved")
+                finding["correction"][field] = replacement
+                with self.assertRaisesRegex(
+                    usability.PolicyAdminUsabilityEvidenceError,
+                    "finding_correction_not_in_gated_release",
+                ):
+                    usability.validate_evidence(value)
+
     def test_broad_change_requires_every_current_session_in_affected_track_to_rerun(
         self,
     ) -> None:
@@ -473,26 +523,27 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
             corrected_at="2026-08-27T11:30:00Z",
             retest_session_id="paus:10000000-0000-4000-8000-000000000003",
         )
+        value["release"]["published_at"] = "2026-08-27T11:30:00Z"
+        offline_sessions = self._sessions(value, "offline")
+        offline_sessions[0]["release_artifact_digest"] = (
+            "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        )
+        offline_sessions[1]["release_artifact_digest"] = (
+            "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        )
+        offline_sessions[3]["started_at"] = "2026-08-27T11:30:00Z"
 
         result = usability.validate_evidence(value)
 
         self.assertIn("broad_workflow_gate_not_fully_rerun", result["reasons"])
 
-        for index, session in enumerate(self._sessions(value, "offline")[:5]):
+        for index, session in enumerate(offline_sessions[:5]):
+            session["release_artifact_digest"] = value["release"]["artifact_digest"]
             session["started_at"] = f"2026-08-27T1{3 + index}:00:00Z"
-        value["release"]["published_at"] = "2026-08-27T12:00:00Z"
         value["generated_at"] = "2026-08-27T23:00:00Z"
         result = usability.validate_evidence(value)
         self.assertNotIn("broad_workflow_gate_not_fully_rerun", result["reasons"])
         self.assertTrue(result["ready_for_v1_policy_admin_claim"])
-
-        corrected_digest = (
-            "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
-        )
-        finding["correction"]["corrected_release_digest"] = corrected_digest
-        self._sessions(value, "offline")[2]["release_artifact_digest"] = corrected_digest
-        result = usability.validate_evidence(value)
-        self.assertIn("broad_workflow_gate_not_fully_rerun", result["reasons"])
 
     def test_cli_exit_codes_distinguish_error_incomplete_and_passed(self) -> None:
         stderr = io.StringIO()
@@ -573,6 +624,8 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
             self.assertIn("evidence_invalid_json", stderr.getvalue())
 
     def test_source_distribution_and_docs_carry_the_gate_contract(self) -> None:
+        from tools import verify_core_wheel
+
         manifest = (ROOT / "MANIFEST.in").read_text(encoding="utf-8")
         guide = (ROOT / "docs" / "POLICY_ADMIN_USABILITY.md").read_text(
             encoding="utf-8"
@@ -589,6 +642,16 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
         self.assertIn("0/3", guide)
         self.assertIn("Issue #110", guide)
         self.assertIn("separate", guide)
+        self.assertEqual(
+            set(verify_core_wheel.REQUIRED_POLICY_ADMIN_USABILITY_SDIST_PATHS),
+            {
+                "config.example.json",
+                "docs/POLICY_ADMIN_USABILITY.md",
+                "examples/policy-admin-usability-baseline.json",
+                "examples/policy-admin-usability-scenarios.json",
+                "tools/verify_policy_admin_usability_evidence.py",
+            },
+        )
 
     def test_shipped_offline_task_assets_produce_the_expected_semantic_change(
         self,

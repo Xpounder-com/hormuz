@@ -24,7 +24,9 @@ SCHEMA_ID = "hormuz.policy-admin-usability-evidence"
 SCHEMA_VERSION = 1
 GATE_ISSUE = "https://github.com/Xpounder-com/hormuz/issues/173"
 EVIDENCE_KINDS = {"release_gate_evidence", "synthetic_test_fixture"}
-ARTIFACT_KINDS = {"source_archive", "wheel", "signed_oci"}
+# The v1 participant kit includes the protocol, configuration, examples, and
+# evidence validator. Only the source archive ships that complete kit.
+ARTIFACT_KINDS = {"source_archive"}
 TRACKS = {"offline", "postgresql"}
 OUTCOMES = {"completed", "blocked"}
 STAGE_STATUSES = {"completed", "failed", "not_attempted"}
@@ -188,8 +190,10 @@ _FINDING_FIELDS = {
 }
 _CORRECTION_FIELDS = {
     "resolution_commit",
+    "corrected_release_source_commit",
     "corrected_release_digest",
     "corrected_release_published_at",
+    "resolution_commit_ancestor_verified",
     "automated_regression_url",
     "automated_regression_conclusion",
     "retest_session_id",
@@ -585,6 +589,11 @@ def _validate_correction(value: object, label: str) -> dict[str, Any]:
         correction["resolution_commit"], _REVISION_RE, f"{label}_resolution_commit"
     )
     _require_pattern(
+        correction["corrected_release_source_commit"],
+        _REVISION_RE,
+        f"{label}_corrected_release_source_commit",
+    )
+    _require_pattern(
         correction["corrected_release_digest"],
         _SHA256_RE,
         f"{label}_corrected_release_digest",
@@ -592,6 +601,10 @@ def _validate_correction(value: object, label: str) -> dict[str, Any]:
     _require_timestamp(
         correction["corrected_release_published_at"], f"{label}_corrected_release_at"
     )
+    if correction["resolution_commit_ancestor_verified"] is not True:
+        raise PolicyAdminUsabilityEvidenceError(
+            f"{label}_resolution_commit_ancestor_not_verified"
+        )
     _require_pattern(
         correction["automated_regression_url"],
         _ACTIONS_RUN_RE,
@@ -753,6 +766,14 @@ def validate_evidence(value: object) -> dict[str, object]:
         if corrected_at > generated_at:
             raise PolicyAdminUsabilityEvidenceError("correction_after_generation")
         if (
+            correction["corrected_release_digest"] != release["artifact_digest"]
+            or correction["corrected_release_source_commit"] != release["source_commit"]
+            or corrected_at != release_published_at
+        ):
+            raise PolicyAdminUsabilityEvidenceError(
+                "finding_correction_not_in_gated_release"
+            )
+        if (
             _require_timestamp(origin["started_at"], "origin_started_at") >= corrected_at
             or origin["release_artifact_digest"] == correction["corrected_release_digest"]
         ):
@@ -812,9 +833,7 @@ def validate_evidence(value: object) -> dict[str, object]:
         for track in correction["affected_tracks"]:
             track_sessions = [session for session in current_sessions if session["track"] == track]
             if (
-                release["artifact_digest"] != correction["corrected_release_digest"]
-                or release_published_at < corrected_at
-                or any(
+                any(
                     _require_timestamp(session["started_at"], "session_started_at")
                     <= corrected_at
                     for session in track_sessions
