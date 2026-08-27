@@ -9,6 +9,7 @@ import os
 import sqlite3
 import shlex
 import signal
+import stat
 import sys
 import tempfile
 import threading
@@ -69,7 +70,12 @@ from .custody_repository import (
     CustodyOperationIntent,
 )
 from .policy_control import PolicyControlService, load_policy_document
-from .policy_document import PolicyDocumentError
+from .policy_document import PolicyDocument, PolicyDocumentError
+from .policy_templates import (
+    PolicyTemplateError,
+    create_policy_document,
+    policy_templates as available_policy_templates,
+)
 from .policy_repository import PolicyActivation, PolicyControlError, PolicyControlStatus, PolicyVersionRecord
 from .policy_runtime import PolicyRuntime
 from .postgres import PostgresConnectionPool, PostgresStorageError, migrate_postgres
@@ -125,6 +131,37 @@ def build_parser() -> argparse.ArgumentParser:
         help="Bootstrap and administer immutable tenant policy versions",
     )
     policy_control_subparsers = policy_control.add_subparsers(dest="policy_control_command", required=True)
+
+    policy_control_subparsers.add_parser(
+        "templates",
+        help="List built-in policy templates without loading configuration",
+    )
+
+    create = policy_control_subparsers.add_parser(
+        "create",
+        help="Create a complete policy document from a built-in template",
+    )
+    create.add_argument(
+        "--template",
+        default="standard",
+        help="Built-in template name (default: standard; list with `policy templates`)",
+    )
+    create.add_argument(
+        "--organization",
+        help="Tenant organization ID (optional when exactly one is configured)",
+    )
+    create.add_argument(
+        "--monthly-budget-usd",
+        type=float,
+        help="Optional organization monthly budget override in USD",
+    )
+    create.add_argument(
+        "--per-actor-monthly-budget-usd",
+        type=float,
+        help="Optional per-actor monthly budget override in USD",
+    )
+    create.add_argument("--output", required=True, help="New policy-document JSON path")
+    create.add_argument("--force", action="store_true", help="Replace an existing regular output file")
 
     validate = policy_control_subparsers.add_parser(
         "validate",
@@ -432,9 +469,13 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "demo":
         return _provider_free_demo()
+    if args.command == "policy" and args.policy_control_command == "templates":
+        return _policy_template_catalog()
     try:
-        if args.command == "policy" and args.policy_control_command == "validate":
+        if args.command == "policy" and args.policy_control_command in {"create", "validate"}:
             context = GatewayConfig.load_policy_validation_context(args.config)
+            if args.policy_control_command == "create":
+                return _policy_create(context, args)
             return _policy_validate(context, args.file)
         config = GatewayConfig.load(args.config)
         if args.command == "serve":
@@ -988,6 +1029,144 @@ def _policy_validate(config: GatewayConfig | PolicyValidationContext, policy_pat
         f"teams={len(document.team_policies)} actors={len(document.actor_policies)}"
     )
     return 0
+
+
+def _policy_template_catalog() -> int:
+    """Print the stable credential-free template catalog."""
+
+    print("Available policy templates:")
+    for template in available_policy_templates():
+        print(f"  {template.name:<9} {template.description}")
+    return 0
+
+
+def _policy_create(context: PolicyValidationContext, args: argparse.Namespace) -> int:
+    """Create one validated local policy document without runtime credentials."""
+
+    try:
+        document = create_policy_document(
+            template_name=args.template,
+            context=context,
+            organization_id=args.organization,
+            monthly_budget_usd=args.monthly_budget_usd,
+            per_actor_monthly_budget_usd=args.per_actor_monthly_budget_usd,
+        )
+        _write_generated_policy_document(
+            Path(args.output).expanduser().absolute(),
+            document,
+            force=args.force,
+        )
+    except (PolicyTemplateError, PolicyDocumentError) as error:
+        _print_policy_creation_failure(error.code, error.reason, hint=error.hint)
+        return 2
+    print(
+        f"policy created: template={args.template} organization={document.organization_id} "
+        f"version={document.version_id}"
+    )
+    return 0
+
+
+def _write_generated_policy_document(
+    path: Path,
+    document: PolicyDocument,
+    *,
+    force: bool,
+) -> None:
+    """Atomically publish an owner-only policy document without following links."""
+
+    _validate_policy_output_target(path, force=force)
+    serialized = (json.dumps(document.to_mapping(), indent=2, sort_keys=True) + "\n").encode("utf-8")
+    descriptor: int | None = None
+    temporary_path: str | None = None
+    try:
+        descriptor, temporary_path = tempfile.mkstemp(
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            dir=str(path.parent),
+        )
+        if hasattr(os, "fchmod"):
+            os.fchmod(descriptor, 0o600)
+        remaining = memoryview(serialized)
+        while remaining:
+            written = os.write(descriptor, remaining)
+            if written <= 0:
+                raise OSError("policy document write made no progress")
+            remaining = remaining[written:]
+        os.fsync(descriptor)
+        os.close(descriptor)
+        descriptor = None
+        if force:
+            # Recheck immediately before publication so --force remains
+            # limited to an absent target or an existing regular file.
+            _validate_policy_output_target(path, force=True)
+            os.replace(temporary_path, path)
+        else:
+            try:
+                os.link(temporary_path, path)
+            except FileExistsError:
+                raise PolicyTemplateError(
+                    "policy_output_exists",
+                    "the selected output path already exists",
+                    hint="Choose another path or pass --force to replace a regular file.",
+                ) from None
+        try:
+            os.unlink(temporary_path)
+        except OSError:
+            pass
+        temporary_path = None
+    except PolicyTemplateError:
+        raise
+    except OSError:
+        raise PolicyTemplateError(
+            "policy_output_unavailable",
+            "the policy document could not be written",
+            hint="Check that the output directory exists and is writable.",
+        ) from None
+    finally:
+        if descriptor is not None:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+        if temporary_path is not None:
+            try:
+                os.unlink(temporary_path)
+            except OSError:
+                pass
+
+
+def _validate_policy_output_target(path: Path, *, force: bool) -> None:
+    """Refuse links and limit forced replacement to regular files."""
+
+    try:
+        target = os.lstat(path)
+    except FileNotFoundError:
+        return
+    except OSError:
+        raise PolicyTemplateError(
+            "policy_output_unavailable",
+            "the policy output path could not be inspected",
+            hint="Check that the output directory exists and is accessible.",
+        ) from None
+    if stat.S_ISLNK(target.st_mode):
+        raise PolicyTemplateError(
+            "policy_output_symlink_refused",
+            "the selected output path is a symbolic link",
+            hint="Choose a regular file path; Hormuz never follows policy output links.",
+        )
+    if force and not stat.S_ISREG(target.st_mode):
+        raise PolicyTemplateError(
+            "policy_output_not_regular",
+            "the selected output path is not a regular file",
+            hint="Choose a regular file path; --force never replaces special files or directories.",
+        )
+
+
+def _print_policy_creation_failure(code: str, reason: str, *, hint: str | None = None) -> None:
+    print(f"policy creation failed: {code}", file=sys.stderr)
+    print(f"reason: {reason}", file=sys.stderr)
+    if hint is not None:
+        print(f"hint: {hint}", file=sys.stderr)
 
 
 def _print_policy_document_failure(code: str, reason: str, *, hint: str | None = None) -> None:
