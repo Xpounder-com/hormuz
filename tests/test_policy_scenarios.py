@@ -198,6 +198,38 @@ class PolicyScenarioSuiteTests(unittest.TestCase):
                 {"baseline", *(f"concurrent-{index}" for index in range(workers))},
             )
 
+    def test_add_fails_closed_when_platform_locking_is_unavailable(self) -> None:
+        suite = create_policy_scenario_suite(
+            organization_id="xpounder",
+            scenario_id="baseline",
+            actor_id="alice",
+            client="codex",
+            protocol="openai",
+            requested_model="gpt-5.4-mini",
+            requested_output_tokens=1_000,
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "scenarios.json"
+            write_policy_scenario_suite(path, suite, force=False)
+            original = path.read_bytes()
+
+            with (
+                mock.patch.object(policy_scenarios, "_fcntl", None),
+                self.assertRaises(PolicyScenarioError) as unavailable,
+            ):
+                add_policy_scenario_to_suite(
+                    path,
+                    scenario_id="unsafe-add",
+                    actor_id="alice",
+                    client="codex",
+                    protocol="openai",
+                    requested_model="gpt-5.4-mini",
+                    requested_output_tokens=2_000,
+                )
+
+            self.assertEqual(unavailable.exception.code, "policy_scenario_lock_unavailable")
+            self.assertEqual(path.read_bytes(), original)
+
     def test_replace_rejects_changed_source_and_writer_enforces_loader_limit(self) -> None:
         suite = create_policy_scenario_suite(
             organization_id="xpounder",

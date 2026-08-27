@@ -14,7 +14,7 @@ from typing import Any
 
 try:  # pragma: no cover - unavailable only on non-POSIX platforms
     import fcntl as _fcntl
-except ImportError:  # pragma: no cover - optimistic digest guard remains
+except ImportError:  # pragma: no cover - add fails closed without locking
     _fcntl = None
 
 from .contracts import (
@@ -220,6 +220,12 @@ def add_policy_scenario_to_suite(
     """Serialize a complete read-modify-write add and reject outside edits."""
 
     selected = Path(path).expanduser()
+    if _fcntl is None:
+        raise PolicyScenarioError(
+            "policy_scenario_lock_unavailable",
+            "this platform cannot safely serialize scenario-suite additions",
+            hint="Edit a copy explicitly and validate it before replacing the suite.",
+        )
     for _ in range(_MAX_POLICY_SCENARIO_UPDATE_RETRIES):
         descriptor: int | None = None
         try:
@@ -234,8 +240,7 @@ def add_policy_scenario_to_suite(
                     "the scenario suite path is not a regular file",
                     hint="Choose a regular JSON file.",
                 )
-            if _fcntl is not None:
-                _fcntl.flock(descriptor, _fcntl.LOCK_EX)
+            _fcntl.flock(descriptor, _fcntl.LOCK_EX)
             if not _descriptor_matches_path(descriptor, selected):
                 continue
             suite = PolicyScenarioSuite.from_json_bytes(_read_policy_scenario_bytes(descriptor))
@@ -265,11 +270,10 @@ def add_policy_scenario_to_suite(
             ) from None
         finally:
             if descriptor is not None:
-                if _fcntl is not None:
-                    try:
-                        _fcntl.flock(descriptor, _fcntl.LOCK_UN)
-                    except OSError:
-                        pass
+                try:
+                    _fcntl.flock(descriptor, _fcntl.LOCK_UN)
+                except OSError:
+                    pass
                 try:
                     os.close(descriptor)
                 except OSError:

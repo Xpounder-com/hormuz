@@ -369,7 +369,10 @@ replacement are atomic owner-only writes with mode `0600`; symbolic links,
 directories, and special files are refused. Suite files are bounded to 1 MiB
 on both read and write. Concurrent add commands are serialized; if another
 editor replaces the loaded suite, the add fails with
-`policy_scenario_concurrent_update` instead of discarding either change.
+`policy_scenario_concurrent_update` instead of discarding either change. On a
+platform without advisory file locking, add fails closed with
+`policy_scenario_lock_unavailable`; use an explicitly reviewed replacement
+rather than accepting a possible lost update.
 
 Evaluate the active baseline and one local or saved candidate across the whole
 suite:
