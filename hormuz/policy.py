@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .config import GatewayConfig, Identity, ModelRoute
+from .config import GatewayConfig, Identity, ModelRoute, PolicyAnalysisContext
 from .policy_document import PolicySnapshot
 from .policy_runtime import PolicyRuntime
 from .store import MonthlyTotals, RequestAttempt, ReservationScope, UsageRepository
@@ -24,7 +24,7 @@ class PolicyDecision:
 class PolicyEngine:
     def __init__(
         self,
-        config: GatewayConfig,
+        config: GatewayConfig | PolicyAnalysisContext,
         store: UsageRepository,
         *,
         policy_runtime: PolicyRuntime | None = None,

@@ -9,10 +9,38 @@ from pathlib import Path
 from unittest import mock
 
 from hormuz.cli import main
-from hormuz.demo import ProviderFreeDemoError, run_provider_free_demo
+from hormuz.demo import ProviderFreeDemoError, ProviderFreeDemoResult, run_provider_free_demo
 
 
 class ProviderFreeDemoTests(unittest.TestCase):
+    def test_existing_demo_stdout_contract_is_exactly_preserved(self) -> None:
+        output = io.StringIO()
+        with (
+            mock.patch(
+                "hormuz.demo.run_provider_free_demo",
+                return_value=ProviderFreeDemoResult(
+                    elapsed_seconds=1.25,
+                    provider_simulator_calls=3,
+                    usage_events=4,
+                    security_events=1,
+                ),
+            ),
+            redirect_stdout(output),
+        ):
+            self.assertEqual(main(["demo"]), 0)
+
+        self.assertEqual(
+            output.getvalue(),
+            "Hormuz provider-free governed-policy demo\n"
+            "PASS allowed request reached the loopback provider simulator\n"
+            "PASS unapproved model was rerouted and output-capped\n"
+            "PASS detected secret was redacted before provider egress\n"
+            "PASS denied request made no provider call\n"
+            "PASS content-free evidence validated: 4 usage events, 1 security event\n"
+            "PASS external provider calls: 0 (3 loopback simulator calls)\n"
+            "Completed in 1.25 seconds; temporary evidence removed\n",
+        )
+
     def test_documented_command_exercises_gateway_using_loopback_only(self) -> None:
         real_create_connection = socket.create_connection
         destinations: list[tuple[str, int]] = []

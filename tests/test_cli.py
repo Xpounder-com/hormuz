@@ -48,7 +48,14 @@ from hormuz.audit_chain import (
     serialize_audit_chain_checkpoint,
 )
 from hormuz.policy_document import PolicyDocument
-from hormuz.policy_repository import PolicyActivation, PolicyHistory, PolicyLifecycleEvent, PolicyVersionRecord
+from hormuz.policy_repository import (
+    PolicyActivation,
+    PolicyControlError,
+    PolicyHistory,
+    PolicyLifecycleEvent,
+    PolicyVersionRecord,
+)
+from hormuz.policy_templates import PolicyTemplateError
 from hormuz.store import MonthlyTotals, UsageStore
 
 
@@ -507,6 +514,282 @@ class ClientConfigTests(unittest.TestCase):
             "  lockdown  Emergency deny-all policy with empty client and model allowlists and "
             "secret denial.\n",
         )
+
+    def test_policy_demo_is_zero_network_cleans_by_default_and_retains_owner_only_artifacts(self) -> None:
+        demo_roots_before = set(Path(tempfile.gettempdir()).glob("hormuz-policy-demo-*"))
+        output = io.StringIO()
+        with (
+            mock.patch("socket.create_connection", side_effect=AssertionError("network forbidden")),
+            mock.patch("hormuz.cli.PolicyControlService") as service,
+            redirect_stdout(output),
+        ):
+            self.assertEqual(main(["policy", "demo"]), 0)
+
+        service.assert_not_called()
+        self.assertEqual(
+            set(Path(tempfile.gettempdir()).glob("hormuz-policy-demo-*")),
+            demo_roots_before,
+        )
+        self.assertIn("PASS disposable SQLite current usage: 0 requests, 0 tokens, USD 0", output.getvalue())
+        self.assertIn("policy mutations: 0", output.getvalue())
+        self.assertIn("Temporary artifacts removed", output.getvalue())
+        self.assertIn("hormuz policy demo --output policy-demo", output.getvalue())
+        self.assertIn("policy apply", output.getvalue())
+        self.assertIn("policy history", output.getvalue())
+        self.assertIn("policy rollback", output.getvalue())
+        self.assertTrue(output.getvalue().rstrip().splitlines()[-1].startswith("  hormuz --config hormuz.json policy rollback"))
+
+        with tempfile.TemporaryDirectory() as temporary:
+            retained = Path(temporary) / "inspect"
+            retained_output = io.StringIO()
+            with (
+                mock.patch("socket.create_connection", side_effect=AssertionError("network forbidden")),
+                mock.patch("hormuz.cli.PolicyControlService") as retained_service,
+                redirect_stdout(retained_output),
+            ):
+                self.assertEqual(main(["policy", "demo", "--output", str(retained)]), 0)
+
+            retained_service.assert_not_called()
+            self.assertEqual(stat.S_IMODE(retained.stat().st_mode), 0o700)
+            required = {
+                "hormuz.json",
+                "baseline.json",
+                "candidate.json",
+                "comparison.json",
+                "scenarios.json",
+                "evaluation.json",
+                "usage.sqlite3",
+            }
+            self.assertTrue(required.issubset({path.name for path in retained.iterdir()}))
+            for artifact in retained.iterdir():
+                with self.subTest(artifact=artifact.name):
+                    self.assertTrue(artifact.is_file())
+                    self.assertEqual(stat.S_IMODE(artifact.stat().st_mode), 0o600)
+            comparison = json.loads((retained / "comparison.json").read_text(encoding="utf-8"))
+            evaluation = json.loads((retained / "evaluation.json").read_text(encoding="utf-8"))
+            validate_contract(comparison)
+            validate_contract(evaluation)
+            self.assertEqual(comparison["schema_version"], 1)
+            self.assertEqual(evaluation["usage_basis"], "current")
+            self.assertEqual(evaluation["summary"]["changed_count"], 2)
+            self.assertIn("Owner-only artifacts retained in:", retained_output.getvalue())
+
+            original = (retained / "candidate.json").read_bytes()
+            error = io.StringIO()
+            with redirect_stderr(error):
+                self.assertEqual(main(["policy", "demo", "--output", str(retained)]), 2)
+            self.assertIn("policy_demo_output_exists", error.getvalue())
+            self.assertEqual((retained / "candidate.json").read_bytes(), original)
+
+    def test_policy_demo_normalizes_expected_failures_and_cleans_temporary_artifacts(self) -> None:
+        demo_roots_before = set(Path(tempfile.gettempdir()).glob("hormuz-policy-demo-*"))
+        error = io.StringIO()
+        with (
+            mock.patch(
+                "hormuz.cli._write_policy_document",
+                side_effect=PolicyTemplateError(
+                    "do-not-echo-code",
+                    "do-not-echo-reason",
+                ),
+            ),
+            redirect_stderr(error),
+        ):
+            self.assertEqual(main(["policy", "demo"]), 2)
+
+        self.assertEqual(
+            set(Path(tempfile.gettempdir()).glob("hormuz-policy-demo-*")),
+            demo_roots_before,
+        )
+        self.assertIn("policy demo failed: policy_demo_execution_failed", error.getvalue())
+        self.assertNotIn("do-not-echo", error.getvalue())
+
+    def test_local_baseline_candidate_and_sqlite_need_no_policy_administrator(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            retained = Path(temporary) / "local"
+            with redirect_stdout(io.StringIO()):
+                self.assertEqual(main(["policy", "demo", "--output", str(retained)]), 0)
+
+            with (
+                mock.patch.dict(os.environ, {}, clear=True),
+                mock.patch(
+                    "hormuz.cli.GatewayConfig.load",
+                    side_effect=AssertionError("runtime credentials must not be loaded"),
+                ) as runtime_load,
+                mock.patch("hormuz.cli.PolicyControlService") as service,
+            ):
+                comparison_output = io.StringIO()
+                with redirect_stdout(comparison_output):
+                    comparison_result = main(
+                        [
+                            "--config",
+                            str(retained / "hormuz.json"),
+                            "policy",
+                            "compare",
+                            str(retained / "candidate.json"),
+                            "--baseline",
+                            str(retained / "baseline.json"),
+                            "--organization",
+                            "demo-organization",
+                            "--json",
+                        ]
+                    )
+                preview_output = io.StringIO()
+                with redirect_stdout(preview_output):
+                    preview_result = main(
+                        [
+                            "--config",
+                            str(retained / "hormuz.json"),
+                            "policy",
+                            "preview",
+                            str(retained / "candidate.json"),
+                            "--baseline",
+                            str(retained / "baseline.json"),
+                            "--organization",
+                            "demo-organization",
+                            "--actor",
+                            "demo-administrator",
+                            "--client",
+                            "codex",
+                            "--protocol",
+                            "openai",
+                            "--model",
+                            "demo-fast",
+                            "--max-output-tokens",
+                            "8000",
+                            "--json",
+                        ]
+                    )
+                evaluation_output = io.StringIO()
+                with redirect_stdout(evaluation_output):
+                    evaluation_result = main(
+                        [
+                            "--config",
+                            str(retained / "hormuz.json"),
+                            "policy",
+                            "evaluate",
+                            str(retained / "candidate.json"),
+                            "--baseline",
+                            str(retained / "baseline.json"),
+                            "--organization",
+                            "demo-organization",
+                            "--scenarios",
+                            str(retained / "scenarios.json"),
+                            "--json",
+                        ]
+                    )
+
+            service.assert_not_called()
+            runtime_load.assert_not_called()
+            self.assertEqual(comparison_result, 1)
+            self.assertEqual(preview_result, 0)
+            self.assertEqual(evaluation_result, 1)
+            comparison = json.loads(comparison_output.getvalue())
+            preview = json.loads(preview_output.getvalue())
+            evaluation = json.loads(evaluation_output.getvalue())
+            for contract in (comparison, preview, evaluation):
+                validate_contract(contract)
+            self.assertEqual(preview["usage_basis"], "current")
+            self.assertEqual(evaluation["usage_basis"], "current")
+            self.assertEqual(evaluation["summary"]["changed_count"], 2)
+
+    def test_managed_or_mixed_policy_analysis_authenticates_before_data_access(self) -> None:
+        context = GatewayConfig.load_policy_validation_context(ROOT / "config.example.json")
+        fixture = json.loads(
+            (ROOT / "tests" / "fixtures" / "policies" / "policy-document-v1.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        baseline = PolicyDocument.from_mapping(fixture, config=context)
+        candidate_mapping = json.loads(json.dumps(fixture))
+        candidate_mapping["policies"]["organization"]["max_output_tokens"] = 4_000
+        candidate = PolicyDocument.from_mapping(candidate_mapping, config=context)
+        postgres_config = replace(
+            self.config,
+            usage_storage=replace(self.config.usage_storage, backend="postgresql"),
+        )
+        postgres_analysis_context = replace(
+            GatewayConfig.load_policy_analysis_context(ROOT / "config.example.json"),
+            usage_storage=replace(self.config.usage_storage, backend="postgresql"),
+        )
+        usage_store = mock.Mock()
+        usage_store.monthly_totals.return_value = MonthlyTotals()
+        order: list[str] = []
+
+        with (
+            tempfile.TemporaryDirectory() as temporary,
+            mock.patch(
+                "hormuz.cli.GatewayConfig.load_policy_analysis_context",
+                return_value=postgres_analysis_context,
+            ) as analysis_load,
+            mock.patch("hormuz.cli.GatewayConfig.load", return_value=postgres_config),
+            mock.patch("hormuz.cli.PolicyControlService") as service_type,
+            mock.patch("hormuz.cli.create_usage_store") as create_store,
+        ):
+            baseline_path = Path(temporary) / "baseline.json"
+            candidate_path = Path(temporary) / "candidate.json"
+            baseline_path.write_text(json.dumps(baseline.to_mapping()), encoding="utf-8")
+            candidate_path.write_text(json.dumps(candidate.to_mapping()), encoding="utf-8")
+            service = service_type.return_value
+            service.authorize.side_effect = lambda **_kwargs: order.append("authorize")
+
+            def usage(*_args: object, **_kwargs: object) -> object:
+                order.append("usage")
+                return usage_store
+
+            create_store.side_effect = usage
+            with redirect_stdout(io.StringIO()):
+                self.assertEqual(
+                    main(
+                        [
+                            "policy",
+                            "preview",
+                            str(candidate_path),
+                            "--baseline",
+                            str(baseline_path),
+                            "--organization",
+                            "xpounder",
+                            "--actor",
+                            "alice",
+                            "--client",
+                            "codex",
+                            "--protocol",
+                            "openai",
+                            "--model",
+                            "gpt-5.4-mini",
+                            "--json",
+                        ]
+                    ),
+                    0,
+                )
+            self.assertLess(order.index("authorize"), order.index("usage"))
+            analysis_load.assert_called_once()
+            service.authorize.assert_called_once_with(
+                organization_id="xpounder",
+                credential_env="HORMUZ_POLICY_ADMIN_TOKEN",
+            )
+            service.policy_version.assert_not_called()
+
+            service.reset_mock()
+            service.authorize.side_effect = PolicyControlError("policy_control_credential_unavailable")
+            create_store.reset_mock()
+            error = io.StringIO()
+            with redirect_stderr(error):
+                result = main(
+                    [
+                        "policy",
+                        "compare",
+                        "--version",
+                        candidate.version_id,
+                        "--baseline",
+                        str(baseline_path),
+                        "--organization",
+                        "xpounder",
+                    ]
+                )
+            self.assertEqual(result, 2)
+            self.assertEqual(error.getvalue(), "policy control error: policy_control_credential_unavailable\n")
+            service.policy_version.assert_not_called()
+            create_store.assert_not_called()
 
     def test_policy_show_history_and_export_use_stable_admin_surfaces(self) -> None:
         context = GatewayConfig.load_policy_validation_context(ROOT / "config.example.json")

@@ -78,6 +78,7 @@ jobs:
             experiments/context/dist/hormuz_context_experiment-*.whl
           "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" --help
           "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" demo
+          "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" policy demo
           "$RUNNER_TEMP/hormuz-wheel/bin/hormuz" auth token --help
           "$RUNNER_TEMP/hormuz-wheel/bin/hormuz-context-experiment" --help
           HORMUZ_TOKEN=test-identity-token "$RUNNER_TEMP/hormuz-wheel/bin/hormuz-context-experiment" \

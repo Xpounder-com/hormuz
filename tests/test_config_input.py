@@ -61,6 +61,16 @@ class ConfigurationInputTests(unittest.TestCase):
         self.assertEqual(tuple(context.identities_by_actor), ("alice",))
         self.assertIn("gpt-5.4-mini", context.model_routes)
 
+    def test_policy_analysis_context_never_resolves_credentials(self) -> None:
+        with mock.patch("hormuz._config_builder.os.environ", _EnvironmentMustNotBeRead()):
+            context = GatewayConfig.load_policy_analysis_context(ROOT / "config.example.json")
+
+        self.assertEqual(context.organization_ids, ("xpounder",))
+        self.assertEqual(tuple(context.identities_by_actor), ("alice",))
+        self.assertIn("gpt-5.4-mini", context.model_routes)
+        self.assertEqual(context.usage_storage.backend, "sqlite")
+        self.assertEqual(context.database_path, (ROOT / "hormuz.sqlite3").resolve())
+
     def test_unavailable_configuration_path_is_content_free(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "operator-secret-never-expose.json"

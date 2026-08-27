@@ -9,6 +9,31 @@ from hormuz.policy_repository import PolicyActivation, PolicyAdministrator, Poli
 
 
 class PolicyControlServiceTests(unittest.TestCase):
+    def test_authorize_confirms_persisted_administrator_authority(self) -> None:
+        service = object.__new__(PolicyControlService)
+        service._config = SimpleNamespace(organization_ids={"xpounder"})
+        service._repository = mock.Mock()
+        caller = PolicyAdministrator(
+            organization_id="xpounder",
+            authentication_kind="static",
+            actor_id="alice",
+        )
+
+        with mock.patch.object(service, "_authenticated_administrator", return_value=caller) as authenticate:
+            service.authorize(
+                organization_id="xpounder",
+                credential_env="HORMUZ_POLICY_ADMIN_TOKEN",
+            )
+
+        authenticate.assert_called_once_with(
+            organization_id="xpounder",
+            credential_env="HORMUZ_POLICY_ADMIN_TOKEN",
+        )
+        service._repository.authorize.assert_called_once_with(
+            organization_id="xpounder",
+            caller=caller,
+        )
+
     def test_apply_canonicalizes_the_file_before_entering_the_repository(self) -> None:
         service = object.__new__(PolicyControlService)
         service._config = SimpleNamespace(organization_ids={"xpounder"})

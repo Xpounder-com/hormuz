@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import cast
 
-from .config import GatewayConfig, Identity
+from .config import GatewayConfig, Identity, PolicyAnalysisContext
 from .policy import PolicyDecision, PolicyEngine
 from .policy_document import PolicyDocument
 from .policy_scenarios import PolicyScenario, PolicyScenarioSuite
@@ -150,7 +150,7 @@ def compare_policy_documents(
 
 def preview_policy_request(
     *,
-    config: GatewayConfig,
+    config: GatewayConfig | PolicyAnalysisContext,
     usage_store: UsageRepository,
     identity: Identity,
     baseline: PolicyDocument,
@@ -227,7 +227,7 @@ def preview_policy_request(
 
 def evaluate_policy_scenario_suite(
     *,
-    config: GatewayConfig,
+    config: GatewayConfig | PolicyAnalysisContext,
     usage_store: UsageRepository,
     suite: PolicyScenarioSuite,
     baseline: PolicyDocument,

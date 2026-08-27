@@ -136,6 +136,13 @@ class PostgresPolicyControlStore(PostgresPolicyRuntimeStore):
                 )
                 return cursor.fetchone() is not None
 
+    def authorize(self, *, organization_id: str, caller: PolicyAdministrator) -> None:
+        """Prove that an authenticated caller is a current tenant administrator."""
+
+        with self._transaction(organization_id) as connection:
+            with connection.cursor() as cursor:
+                self._require_administrator(cursor, organization_id=organization_id, caller=caller)
+
     def bootstrap(
         self,
         *,

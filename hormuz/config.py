@@ -297,6 +297,20 @@ class PolicyValidationContext:
 
 
 @dataclass(frozen=True)
+class PolicyAnalysisContext(PolicyValidationContext):
+    """Credential-free configuration facts for local policy analysis.
+
+    This projection deliberately contains only the validated identity and
+    routing metadata used by policy evaluation plus the local usage-store
+    location. It cannot authenticate a gateway request or open PostgreSQL.
+    """
+
+    database_path: Path
+    usage_storage: UsageStorageConfig
+    audit_chain: AuditChainConfig | None
+
+
+@dataclass(frozen=True)
 class Policy:
     allowed_clients: tuple[str, ...] | None = None
     allowed_models: tuple[str, ...] | None = None
@@ -369,6 +383,14 @@ class GatewayConfig:
         from ._config_builder import build_policy_validation_context
 
         return build_policy_validation_context(cls, path)
+
+    @classmethod
+    def load_policy_analysis_context(cls, path: str | Path) -> PolicyAnalysisContext:
+        """Load the credential-free facts required for local SQLite analysis."""
+
+        from ._config_builder import build_policy_analysis_context
+
+        return build_policy_analysis_context(cls, path)
 
     def validate_references(self) -> None:
         if self.custody_control.mode == "postgresql" and self.custody_retention is None:

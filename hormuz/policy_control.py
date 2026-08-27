@@ -94,6 +94,18 @@ class PolicyControlService:
             administrators=configured,
         )
 
+    def authorize(self, *, organization_id: str, credential_env: str) -> None:
+        """Require current policy-administrator authority without reading policy data."""
+
+        self._require_configured_organization(organization_id)
+        self._repository.authorize(
+            organization_id=organization_id,
+            caller=self._authenticated_administrator(
+                organization_id=organization_id,
+                credential_env=credential_env,
+            ),
+        )
+
     def stage(
         self,
         *,
