@@ -5,7 +5,7 @@ Hormuz freezes the gateway-control and metadata-only evidence surface before it 
 Print the machine-readable manifest from any installed core package:
 
 ```bash
-hormuz contract-manifest
+hormuz contract manifest
 ```
 
 The manifest is the canonical inventory of current schema IDs, versions, error codes, enforcement meanings, and compatibility rules. The fixtures in `tests/fixtures/contracts/` are the executable examples for those contracts.
@@ -30,9 +30,11 @@ The current Hormuz-owned JSON schemas are:
 | `GET /v1/gateway/whoami` | `hormuz.gateway-identity` v1 |
 | `GET /v1/gateway/usage` | `hormuz.gateway-usage-summary` v1 |
 | Hormuz-generated HTTP errors | `hormuz.gateway-error` v3 |
-| `hormuz policy-check` output | `hormuz.policy-decision` v1 |
+| `hormuz policy check` output | `hormuz.policy-decision` v1 |
 | `hormuz policy status --json` | `hormuz.policy-control-status` v1 |
 | `hormuz policy history --json` | `hormuz.policy-history` v1 |
+| `hormuz policy compare --json` | `hormuz.policy-comparison` v1 |
+| `hormuz policy preview --json` | `hormuz.policy-preview` v1 |
 | `hormuz custody status --json` | `hormuz.custody-control-status` v3 |
 | `hormuz status --json` | `hormuz.usage-report` v1 |
 | audit JSONL events | `hormuz.audit-event` v2 |
@@ -97,7 +99,38 @@ Every durable v2 event snapshots the authenticated identity at request time:
 
 In local mode, `policy_version` is a deterministic content-free fingerprint of the policy-relevant configuration, prefixed `local-config-`. In managed PostgreSQL mode it is the exact immutable staged-policy digest, prefixed `sha256:`. A gateway reads and pins the active managed version when a request begins; activation cannot rewrite an in-flight request or its durable evidence. Neither form contains a credential value or request content.
 
-Managed policy control has three additional strict contracts. `hormuz.policy-document` v1 accepts only allowlisted routing, cap, budget, and egress-control fields. `hormuz.policy-control-status` v1 returns administration metadata for a current policy administrator: the active digest/generation, immutable version metadata, structural redacted change summaries, and stable administrator keys. The additive `hormuz.policy-history` v1 CLI contract is a bounded, newest-first lifecycle timeline containing only stage, activation, and rollback events. Each event binds the immutable version ID to its digest, timestamp, opaque actor key, nullable activation generation, and structural change summary. Its requested limit is explicit, the fixed maximum is 100, and `has_more` reports truncation. PostgreSQL `hormuz.policy-control-event` v1 records bootstrap, administrator, stage, activation, rollback, and break-glass events. It stores both an explicit durable schema ID/version and opaque actor identity keys plus structural metadata only; Hormuz validates the exact event shape before it inserts the row, and the compatibility fixture exercises that durable schema. See [POLICY_CONTROL.md](POLICY_CONTROL.md) for authorization and lifecycle semantics.
+Managed policy control has five administrator-facing strict contracts in
+addition to its durable control events. `hormuz.policy-document` v1 accepts
+only allowlisted routing, cap, budget, and egress-control fields.
+`hormuz.policy-control-status` v1 returns administration metadata for a current
+policy administrator: the active digest/generation, immutable version
+metadata, structural redacted change summaries, and stable administrator
+keys. The additive `hormuz.policy-history` v1 CLI contract is a bounded,
+newest-first lifecycle timeline containing only stage, activation, and rollback
+events. Each event binds the immutable version ID to its digest, timestamp,
+opaque actor key, nullable activation generation, and structural change
+summary. Its requested limit is explicit, the fixed maximum is 100, and
+`has_more` reports truncation.
+
+`hormuz.policy-comparison` v1 is an administrator-only, value-bearing semantic
+diff. It identifies the baseline and candidate by immutable version ID and
+digest and reports sorted normalized policy paths with `before`, `after`, and
+an `added`, `removed`, or `changed` classification. Object order and allowlist
+order are not policy changes. `hormuz.policy-preview` v1 is also
+administrator-only and value-bearing. It records the evaluation timestamp,
+current UTC usage period and basis, explicit request dimensions, and complete
+versioned decisions for one pinned active baseline and one candidate. These
+two CLI outputs may contain model aliases, limits, budgets, policy paths, and
+decision reasons. They are not durable metadata-only audit evidence and must
+not be copied into policy-control event rows.
+
+PostgreSQL `hormuz.policy-control-event` v1 records bootstrap, administrator,
+stage, activation, rollback, and break-glass events. It stores both an
+explicit durable schema ID/version and opaque actor identity keys plus
+structural metadata only; Hormuz validates the exact event shape before it
+inserts the row, and the compatibility fixture exercises that durable schema.
+See [POLICY_CONTROL.md](POLICY_CONTROL.md) for authorization and lifecycle
+semantics.
 
 Managed custody control adds `hormuz.custody-control-status` v3 and
 `hormuz.custody-control-event` v1. Status contains tenant-qualified
@@ -153,7 +186,7 @@ No contract in this release permits prompts, responses, secret values, matched d
 
 ## Immutable audit-anchor artifact
 
-`hormuz audit-anchor` can package current v2 audit events for one tenant into
+`hormuz audit anchor` can package current v2 audit events for one tenant into
 `hormuz.audit-anchor` v1. The durable artifact has a random `artifact_id`, its
 creation time, the ordered events, and a SHA-256 predecessor chain ending in a
 `head_digest`. Strict contract validation rejects unknown fields, legacy audit
@@ -175,7 +208,7 @@ Hormuz-generated JSON errors use `hormuz.gateway-error` v3 and a stable
 `hormuz_custody_restricted` for a lifecycle restriction that blocks a new
 provider selection. Historical v1/v2 objects remain validator-compatible and
 do not silently accept later codes. The current public-code inventory is
-available in `hormuz contract-manifest`; it includes authentication,
+available in `hormuz contract manifest`; it includes authentication,
 request-shape, policy, secret, budget, configuration, upstream, custody, and
 durable-storage categories. A caller should switch on `error.code`, not an
 English error message.
@@ -187,7 +220,7 @@ Where an OpenAI- or Anthropic-compatible endpoint must preserve a provider-nativ
 The release line has these intentional pre-stability changes:
 
 1. Audit exports now emit `hormuz.audit-event` v2. The prior v1 audit shapes remain validator-compatible for historical export fixtures, but new events use v2. `upstream_model` is renamed to `routed_model`, and v2 adds identity source/type, organization, policy version, provider-reported model, cost basis, allocation basis, and coverage.
-2. `hormuz status --json` changes from an unversioned bare array to `hormuz.usage-report` v1 with report metadata and a `rows` array. `hormuz policy-check` uses `routed_model` in place of its former `upstream_model` field and includes `policy_version`.
+2. `hormuz status --json` changes from an unversioned bare array to `hormuz.usage-report` v1 with report metadata and a `rows` array. `hormuz policy check` uses `routed_model` in place of its former `upstream_model` field and includes `policy_version`.
 3. Gateway-owned errors now emit `hormuz.gateway-error` v2 so storage interruptions have a stable, content-free classification without widening the strict v1 error-code set. Historical v1 error objects remain validator-compatible.
 4. PostgreSQL schema v2 adds the governed policy-control tables. Every staged policy stores `hormuz.policy-document` v1 in immutable canonical form; every policy-control event stores `hormuz.policy-control-event` v1. There is no down-migration. An older binary fails closed on the newer schema rather than reinterpreting versioned policy state.
 5. Immutable audit anchors use `hormuz.audit-anchor` v1. The schema is added to the manifest with a compatibility fixture; its cryptographic chain verifier is separate from structural JSON validation so an operator can verify a retained artifact before trusting it.
@@ -252,7 +285,7 @@ After this contract is released, any new optional field needs a new documented s
 ## Verification
 
 ```bash
-hormuz contract-manifest
+hormuz contract manifest
 python3 -m unittest -v tests.test_contracts tests.test_cli tests.test_gateway tests.test_store
 HORMUZ_TEST_POSTGRES_DSN='postgresql://operator@host:5432/hormuz_test' \
   python3 -m unittest discover -s tests -p 'test_postgres_*.py' -v

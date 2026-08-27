@@ -184,7 +184,7 @@ def _verify_isolated_install(wheel: Path, config_template: Path, base_python: Pa
             raise RuntimeError("installed core wheel exposes the retired context command")
 
         manifest_result = subprocess.run(
-            [python, "-I", "-m", "hormuz", "contract-manifest"],
+            [python, "-I", "-m", "hormuz", "contract", "manifest"],
             capture_output=True,
             check=False,
             cwd=root,

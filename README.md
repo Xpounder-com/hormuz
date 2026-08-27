@@ -136,8 +136,8 @@ python3 -m hormuz --config hormuz.json serve
 In another terminal, print the configuration for an existing client:
 
 ```bash
-python3 -m hormuz --config hormuz.json client-config codex
-python3 -m hormuz --config hormuz.json client-config claude
+python3 -m hormuz --config hormuz.json client config codex
+python3 -m hormuz --config hormuz.json client config claude
 ```
 
 Employees authenticate to Hormuz with their unique `HORMUZ_TOKEN`. Hormuz removes that credential and authenticates upstream with the company's provider key.
@@ -213,10 +213,46 @@ reference, activation generation, and a structural change summary. Export is
 atomic with mode `0600`, refuses links and special files, and requires
 `--force` to replace a regular file.
 
-Evaluate a request without calling a model:
+Compare a local or saved candidate semantically before activation. The output
+uses normalized policy paths, ignores irrelevant object and allowlist order,
+and identifies both documents by immutable version and digest:
 
 ```bash
-python3 -m hormuz --config hormuz.json policy-check \
+python3 -m hormuz --config hormuz.json policy compare engineering-strict.json \
+  --organization xpounder \
+  --json
+```
+
+Exit status is `0` when the documents are semantically identical, `1` when
+they differ, and `2` on error. Use `--version sha256:...` for a saved candidate
+and `--against-version sha256:...` for a non-active baseline.
+
+Preview one explicit request against the pinned active policy and a candidate,
+without calling a model or reserving budget:
+
+```bash
+python3 -m hormuz --config hormuz.json policy preview engineering-strict.json \
+  --organization xpounder \
+  --actor alice \
+  --client codex \
+  --protocol openai \
+  --model gpt-5.4-mini \
+  --max-output-tokens 1000 \
+  --json
+```
+
+The `hormuz.policy-preview` v1 result includes `evaluated_at`, the current UTC
+usage period, `usage_basis: current`, and separate baseline/candidate
+decisions. Exit status is `0` when the candidate allows the request, `3` when
+it denies, and `2` on error. The active baseline is pinned before candidate
+loading, so a concurrent activation cannot mix policy versions. Preview is a
+point-in-time evaluation; later usage or reservations can change live
+admission.
+
+Evaluate the active policy only, using the long-standing automation contract:
+
+```bash
+python3 -m hormuz --config hormuz.json policy check \
   --actor alice \
   --client codex \
   --protocol openai \
@@ -236,13 +272,13 @@ python3 -m hormuz --config hormuz.json status --json
 Inspect the versioned policy/evidence schemas before integrating a report or audit export:
 
 ```bash
-python3 -m hormuz contract-manifest
+python3 -m hormuz contract manifest
 ```
 
 Export metadata-only audit evidence for the current month:
 
 ```bash
-python3 -m hormuz --config hormuz.json audit-export \
+python3 -m hormuz --config hormuz.json audit export \
   --kind all \
   --output hormuz-audit.jsonl
 ```
@@ -251,8 +287,14 @@ Inspect the current per-organization commit-time chain without contacting an
 external storage service:
 
 ```bash
-python3 -m hormuz --config hormuz.json audit-chain status
+python3 -m hormuz --config hormuz.json audit chain status
 ```
+
+Primary command names use separate words rather than hyphenated command
+tokens. The earlier hyphenated top-level spellings remain hidden compatibility
+aliases for existing automation in v1; in particular, the legacy check
+invocation retains the exact `hormuz.policy-decision` v1 JSON and exit-code
+behavior of `policy check`.
 
 The deprecated context-pack experiment is intentionally outside the core gateway. See [docs/CONTEXT_EXPERIMENT_MIGRATION.md](docs/CONTEXT_EXPERIMENT_MIGRATION.md) for the separate package and its temporary compatibility shim.
 

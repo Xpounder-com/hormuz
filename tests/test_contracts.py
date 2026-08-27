@@ -32,8 +32,12 @@ from hormuz.contracts import (
     CUSTODY_EVIDENCE_EXPORT_SCHEMA_VERSION,
     ERROR_SCHEMA_ID,
     ERROR_SCHEMA_VERSION,
+    POLICY_COMPARISON_SCHEMA_ID,
+    POLICY_COMPARISON_SCHEMA_VERSION,
     POLICY_HISTORY_SCHEMA_ID,
     POLICY_HISTORY_SCHEMA_VERSION,
+    POLICY_PREVIEW_SCHEMA_ID,
+    POLICY_PREVIEW_SCHEMA_VERSION,
     READINESS_SCHEMA_ID,
     READINESS_SCHEMA_VERSION,
     REQUEST_ATTEMPT_EVENT_SCHEMA_ID,
@@ -78,6 +82,8 @@ class PolicyEvidenceContractTests(unittest.TestCase):
             "error_v3",
             "policy_decision",
             "policy_control_status",
+            "policy_comparison",
+            "policy_preview",
             "policy_history",
             "custody_control_status",
             "custody_control_status_v2",
@@ -125,6 +131,41 @@ class PolicyEvidenceContractTests(unittest.TestCase):
         invalid_history_generation["events"][0]["generation"] = None
         with self.assertRaises(ContractValidationError):
             validate_contract(invalid_history_generation)
+        invalid_comparison = json.loads(json.dumps(valid["policy_comparison"]))
+        invalid_comparison["changes"][0]["path"] = "submitted_prompt"
+        with self.assertRaises(ContractValidationError):
+            validate_contract(invalid_comparison)
+        invalid_comparison_order = json.loads(json.dumps(valid["policy_comparison"]))
+        invalid_comparison_order["changes"].append(
+            {
+                "path": "egress_controls.secrets.mode",
+                "change_type": "changed",
+                "before": "redact",
+                "after": "deny",
+            }
+        )
+        with self.assertRaises(ContractValidationError):
+            validate_contract(invalid_comparison_order)
+        invalid_comparison_number = json.loads(json.dumps(valid["policy_comparison"]))
+        invalid_comparison_number["changes"][0]["before"] = 10**400
+        with self.assertRaises(ContractValidationError):
+            validate_contract(invalid_comparison_number)
+        invalid_preview = json.loads(json.dumps(valid["policy_preview"]))
+        invalid_preview["usage_basis"] = "saved"
+        with self.assertRaises(ContractValidationError):
+            validate_contract(invalid_preview)
+        invalid_preview_period = json.loads(json.dumps(valid["policy_preview"]))
+        invalid_preview_period["usage_period"]["starts_at"] = "2026-07-01T00:00:00+00:00"
+        with self.assertRaises(ContractValidationError):
+            validate_contract(invalid_preview_period)
+        invalid_preview_timezone = json.loads(json.dumps(valid["policy_preview"]))
+        invalid_preview_timezone["evaluated_at"] = "2026-08-27T06:30:00+01:00"
+        with self.assertRaises(ContractValidationError):
+            validate_contract(invalid_preview_timezone)
+        invalid_preview_version = json.loads(json.dumps(valid["policy_preview"]))
+        invalid_preview_version["candidate"]["decision"]["policy_version"] = invalid_preview_version["baseline"]["version_id"]
+        with self.assertRaises(ContractValidationError):
+            validate_contract(invalid_preview_version)
         invalid_custody_event = json.loads(json.dumps(valid["custody_control_event"]))
         invalid_custody_event["plaintext"] = "must-never-appear"
         with self.assertRaises(ContractValidationError):
@@ -196,6 +237,8 @@ class PolicyEvidenceContractTests(unittest.TestCase):
         self.assertIn((READINESS_SCHEMA_ID, READINESS_SCHEMA_VERSION), schemas)
         self.assertIn(("hormuz.policy-decision", 1), schemas)
         self.assertIn(("hormuz.policy-control-status", 1), schemas)
+        self.assertIn((POLICY_COMPARISON_SCHEMA_ID, POLICY_COMPARISON_SCHEMA_VERSION), schemas)
+        self.assertIn((POLICY_PREVIEW_SCHEMA_ID, POLICY_PREVIEW_SCHEMA_VERSION), schemas)
         self.assertIn((POLICY_HISTORY_SCHEMA_ID, POLICY_HISTORY_SCHEMA_VERSION), schemas)
         self.assertIn(("hormuz.policy-document", 1), schemas)
         self.assertIn(("hormuz.policy-control-event", 1), schemas)

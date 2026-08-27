@@ -65,12 +65,12 @@ Make a current JWT access token available through the environment selected by th
 ```bash
 export HORMUZ_OIDC_ACCESS_TOKEN="current-short-lived-jwt-access-token"
 
-hormuz --config /etc/hormuz/hormuz.json client-config codex \
+hormuz --config /etc/hormuz/hormuz.json client config codex \
   --url https://hormuz.example.com \
   --actor alice \
   --auth-mode oidc
 
-hormuz --config /etc/hormuz/hormuz.json client-config claude \
+hormuz --config /etc/hormuz/hormuz.json client config claude \
   --url https://hormuz.example.com \
   --actor alice \
   --auth-mode oidc

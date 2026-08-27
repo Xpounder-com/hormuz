@@ -7,7 +7,7 @@ Hormuz can export the local usage and secret-egress ledgers as deterministic, me
 The default lower bound is the start of the current UTC month:
 
 ```bash
-python3 -m hormuz --config hormuz.json audit-export \
+python3 -m hormuz --config hormuz.json audit export \
   --kind all \
   --output hormuz-audit.jsonl
 ```
@@ -15,7 +15,7 @@ python3 -m hormuz --config hormuz.json audit-export \
 Select one ledger or an explicit lower bound when needed:
 
 ```bash
-python3 -m hormuz --config hormuz.json audit-export \
+python3 -m hormuz --config hormuz.json audit export \
   --kind security \
   --since 2026-08-01T00:00:00Z \
   --output hormuz-security-audit.jsonl
@@ -45,7 +45,7 @@ Version 1 files remain readable by the contract validator for historical compati
 
 ## Commit-time audit chain and external checkpoints
 
-The `audit-export` and `audit-anchor` commands remain useful inspection and
+The `audit export` and `audit anchor` commands remain useful inspection and
 snapshot tools, but they are not the commit-time evidence contract. New
 metadata-only usage and secret-egress audit events are also appended in the
 same storage transaction to a versioned chain for their organization. Each
@@ -56,15 +56,15 @@ The core commands are intentionally operational rather than request-path work:
 
 ```bash
 # Local chain state only; this never contacts Object Lock.
-hormuz --config /etc/hormuz/hormuz.json audit-chain status
+hormuz --config /etc/hormuz/hormuz.json audit chain status
 
 # Write a canonical checkpoint file, anchor the tuple to Object Lock, then
 # record the successful receipt locally.
-hormuz --config /etc/hormuz/hormuz.json audit-chain anchor \
+hormuz --config /etc/hormuz/hormuz.json audit chain anchor \
   --output /var/lib/hormuz/audit-checkpoint.json
 
 # Verify current event correspondence, ordering, and a trusted checkpoint.
-hormuz --config /etc/hormuz/hormuz.json audit-chain verify \
+hormuz --config /etc/hormuz/hormuz.json audit chain verify \
   --checkpoint /var/lib/hormuz/audit-checkpoint.json
 ```
 
@@ -74,7 +74,7 @@ its own schema ID/version, and random checkpoint identifier. The retained Object
 external evidence; the local receipt supports freshness monitoring but is not a
 substitute for the protected object.
 
-Run `hormuz audit-chain anchor` from a customer-controlled scheduler (for
+Run `hormuz audit chain anchor` from a customer-controlled scheduler (for
 example a systemd timer or Kubernetes CronJob). The scheduled job anchors the
 tenant's organization, chain epoch, sequence, head digest, chain version, and
 checkpoint schema version. `audit_chain.maximum_anchor_age_seconds` turns an
@@ -95,7 +95,7 @@ from a trusted canonical checkpoint. Hormuz never silently resets sequence
 numbers. The command requires an explicit confirmation and has no HTTP route:
 
 ```bash
-hormuz --config /etc/hormuz/hormuz.json audit-chain epoch \
+hormuz --config /etc/hormuz/hormuz.json audit chain epoch \
   --reason restore \
   --checkpoint /secure/recovery/trusted-checkpoint.json \
   --confirm START_NEW_AUDIT_CHAIN_EPOCH
@@ -126,7 +126,7 @@ or host root account is physically unable to alter data.
 
 The checksum detects accidental or deliberate changes only when a trusted copy of the checksum is retained elsewhere. Hormuz does not yet sign exports, make the local SQLite database append-only, send the export to WORM storage, record who ran an export, or enforce audit-reader RBAC. Production deployments should ship events to an organization-controlled append-only destination and apply retention, legal-hold, access-review, and deletion policies there.
 
-The legacy `audit-anchor` command creates an export-time snapshot. It remains
+The legacy `audit anchor` command creates an export-time snapshot. It remains
 separate from the commit-time chain above and does not retroactively protect
 events removed before it runs. The configured Object Lock sink can also retain
 commit-time checkpoint artifacts; see [CUSTODY.md](CUSTODY.md). Neither mode

@@ -108,7 +108,7 @@ def _manifest_schema(
 
 
 def validate_contract_manifest(value: Mapping[str, Any]) -> None:
-    """Strictly validate the versioned manifest emitted by ``contract-manifest``."""
+    """Strictly validate the versioned manifest emitted by ``contract manifest``."""
 
     _exact_keys(
         value,

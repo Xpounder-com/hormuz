@@ -52,14 +52,24 @@ from .contracts import (
     COST_BASIS_CONFIGURED_RATE_CARD_ESTIMATE,
     COVERAGE_GATEWAY_CAPTURED_REQUESTS_ONLY,
     POLICY_CONTROL_STATUS_SCHEMA_ID,
+    POLICY_COMPARISON_SCHEMA_ID,
     POLICY_HISTORY_SCHEMA_ID,
+    POLICY_PREVIEW_SCHEMA_ID,
     CUSTODY_CONTROL_STATUS_SCHEMA_ID,
     POLICY_DECISION_SCHEMA_ID,
     USAGE_REPORT_SCHEMA_ID,
     contract_envelope,
     contract_manifest,
 )
-from .policy import PolicyEngine
+from .policy import PolicyDecision, PolicyEngine
+from .policy_analysis import (
+    PolicyAnalysisError,
+    PolicyComparison,
+    PolicyPreview,
+    PolicyVersionIdentity,
+    compare_policy_documents,
+    preview_policy_request,
+)
 from .custody_control import CustodyControlService
 from .custody_executor import CustodyExecutorService
 from .custody_execution_repository import CustodyExecutionError
@@ -116,7 +126,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="Run the provider-free governed-policy quickstart on loopback",
     )
     subparsers.add_parser("doctor", help="Validate configuration and required credentials")
-    subparsers.add_parser("contract-manifest", help="Print the stable policy and evidence schema manifest")
+    contract = subparsers.add_parser("contract", help="Inspect stable Hormuz-owned contracts")
+    contract_subparsers = contract.add_subparsers(dest="contract_command", required=True)
+    contract_subparsers.add_parser("manifest", help="Print the stable policy and evidence schema manifest")
     status = subparsers.add_parser("status", help="Print a current-month usage and cost report")
     status.add_argument("--json", action="store_true", help="Emit machine-readable JSON")
     status.add_argument(
@@ -128,18 +140,17 @@ def build_parser() -> argparse.ArgumentParser:
     status.add_argument("--team", help="Limit the report to a configured team ID")
     status.add_argument("--actor", help="Limit the report to a configured actor ID")
 
-    policy = subparsers.add_parser("policy-check", help="Evaluate a request without sending it upstream")
-    policy.add_argument("--actor", required=True, help="Configured actor ID")
-    policy.add_argument("--client", required=True, choices=["codex", "claude-code"])
-    policy.add_argument("--protocol", required=True, choices=["openai", "anthropic"])
-    policy.add_argument("--model", required=True, help="Company model alias")
-    policy.add_argument("--max-output-tokens", type=int)
-
     policy_control = subparsers.add_parser(
         "policy",
         help="Bootstrap and administer immutable tenant policy versions",
     )
     policy_control_subparsers = policy_control.add_subparsers(dest="policy_control_command", required=True)
+
+    policy_check = policy_control_subparsers.add_parser(
+        "check",
+        help="Evaluate the active policy without sending a provider request",
+    )
+    _policy_request_arguments(policy_check)
 
     policy_control_subparsers.add_parser(
         "templates",
@@ -210,6 +221,24 @@ def build_parser() -> argparse.ArgumentParser:
     export.add_argument("--output", required=True, help="New policy-document JSON path")
     export.add_argument("--force", action="store_true", help="Replace an existing regular output file")
 
+    compare = policy_control_subparsers.add_parser(
+        "compare",
+        help="Semantically compare a local or saved candidate with the active or selected baseline",
+    )
+    _policy_control_auth_arguments(compare)
+    _policy_candidate_arguments(compare)
+    compare.add_argument("--against-version", help="Immutable baseline version (default: active)")
+    compare.add_argument("--json", action="store_true", help="Emit the versioned comparison contract")
+
+    preview = policy_control_subparsers.add_parser(
+        "preview",
+        help="Preview one request against the pinned active policy and a candidate",
+    )
+    _policy_control_auth_arguments(preview)
+    _policy_candidate_arguments(preview)
+    _policy_request_arguments(preview)
+    preview.add_argument("--json", action="store_true", help="Emit the versioned preview contract")
+
     bootstrap = policy_control_subparsers.add_parser(
         "bootstrap",
         help="Persist one-time configuration-seeded policy administrators",
@@ -239,19 +268,19 @@ def build_parser() -> argparse.ArgumentParser:
         _policy_control_auth_arguments(command)
         command.add_argument("--issuer", required=True, help="Configured OIDC issuer URL")
         command.add_argument("--subject", required=True, help="Stable OIDC subject")
-    revoke_static = administrator_subparsers.add_parser(
-        "revoke-static",
+    retire = administrator_subparsers.add_parser("retire", help="Retire a persisted bootstrap authority")
+    retire_subparsers = retire.add_subparsers(dest="policy_administrator_retire_command", required=True)
+    retire_static = retire_subparsers.add_parser(
+        "static",
         help="Retire a persisted static bootstrap policy administrator",
     )
-    _policy_control_auth_arguments(revoke_static)
-    revoke_static.add_argument("--actor-id", required=True, help="Persisted static bootstrap actor ID")
+    _policy_control_auth_arguments(retire_static)
+    retire_static.add_argument("--actor-id", required=True, help="Persisted static bootstrap actor ID")
 
-    break_glass = policy_control_subparsers.add_parser(
-        "break-glass",
+    recover = policy_control_subparsers.add_parser(
+        "recover",
         help="Recover OIDC policy authority only after every administrator is lost",
     )
-    break_glass_subparsers = break_glass.add_subparsers(dest="policy_break_glass_command", required=True)
-    recover = break_glass_subparsers.add_parser("recover", help="Recover one OIDC administrator under break-glass controls")
     recover.add_argument("--organization", required=True, help="Tenant organization ID")
     recover.add_argument("--issuer", required=True, help="Configured OIDC issuer URL")
     recover.add_argument("--subject", required=True, help="Stable OIDC subject")
@@ -262,41 +291,32 @@ def build_parser() -> argparse.ArgumentParser:
         help="Controlled recovery reason",
     )
 
-    connect = subparsers.add_parser("client-config", help="Print client configuration for this gateway")
-    connect.add_argument("client", choices=["codex", "claude"])
-    connect.add_argument("--url", help="Externally reachable gateway URL; defaults to configured listener")
-    connect.add_argument("--actor", help="Configured actor ID; defaults to the first configured actor")
-    connect.add_argument(
-        "--auth-mode",
-        choices=["auto", "static", "oidc"],
-        default="auto",
-        help="Credential source to configure (default: static when available, otherwise OIDC)",
-    )
-    connect.add_argument(
-        "--credential-env",
-        help="Environment variable containing the credential (OIDC default: HORMUZ_OIDC_ACCESS_TOKEN)",
-    )
+    client = subparsers.add_parser("client", help="Configure supported AI clients")
+    client_subparsers = client.add_subparsers(dest="client_command", required=True)
+    connect = client_subparsers.add_parser("config", help="Print client configuration for this gateway")
+    _client_config_arguments(connect)
 
     auth = subparsers.add_parser("auth", help="Credential helpers for AI clients")
     auth_subparsers = auth.add_subparsers(dest="auth_command", required=True)
     auth_token = auth_subparsers.add_parser("token", help="Print a credential from an environment variable")
     auth_token.add_argument("--env", default="HORMUZ_OIDC_ACCESS_TOKEN", help="Credential environment variable")
 
-    audit = subparsers.add_parser("audit-export", help="Export metadata-only usage and security events as JSONL")
-    audit.add_argument("--kind", choices=["all", "usage", "security"], default="all")
-    audit.add_argument("--since", help="UTC ISO-8601 lower bound (default: start of current month)")
-    audit.add_argument("--output", default="-", help="Output path or - for stdout (default: -)")
-    audit.add_argument("--force", action="store_true", help="Allow replacing an existing output file")
+    audit = subparsers.add_parser("audit", help="Export and verify metadata-only audit evidence")
+    audit_subparsers = audit.add_subparsers(dest="audit_command", required=True)
+    audit_export = audit_subparsers.add_parser(
+        "export",
+        help="Export metadata-only usage and security events as JSONL",
+    )
+    _audit_export_arguments(audit_export)
 
-    audit_anchor = subparsers.add_parser(
-        "audit-anchor",
+    audit_anchor = audit_subparsers.add_parser(
+        "anchor",
         help="Export and immutably retain a metadata-only audit snapshot",
     )
-    audit_anchor.add_argument("--kind", choices=["all", "usage", "security"], default="all")
-    audit_anchor.add_argument("--since", help="UTC ISO-8601 lower bound (default: start of current month)")
+    _audit_anchor_arguments(audit_anchor)
 
-    audit_chain = subparsers.add_parser(
-        "audit-chain",
+    audit_chain = audit_subparsers.add_parser(
+        "chain",
         help="Operate the per-organization commit-time audit chain",
     )
     audit_chain_subparsers = audit_chain.add_subparsers(dest="audit_chain_command", required=True)
@@ -382,12 +402,20 @@ def build_parser() -> argparse.ArgumentParser:
         _custody_control_auth_arguments(command)
         command.add_argument("--issuer", required=True, help="Configured OIDC issuer URL")
         command.add_argument("--subject", required=True, help="Stable OIDC subject")
-    custody_revoke_static = custody_administrator_subparsers.add_parser(
-        "revoke-static",
+    custody_retire = custody_administrator_subparsers.add_parser(
+        "retire",
+        help="Retire a persisted bootstrap authority",
+    )
+    custody_retire_subparsers = custody_retire.add_subparsers(
+        dest="custody_administrator_retire_command",
+        required=True,
+    )
+    custody_retire_static = custody_retire_subparsers.add_parser(
+        "static",
         help="Retire a persisted static bootstrap custody administrator",
     )
-    _custody_control_auth_arguments(custody_revoke_static)
-    custody_revoke_static.add_argument("--actor-id", required=True, help="Persisted static bootstrap actor ID")
+    _custody_control_auth_arguments(custody_retire_static)
+    custody_retire_static.add_argument("--actor-id", required=True, help="Persisted static bootstrap actor ID")
 
     authorize = custody_subparsers.add_parser(
         "authorize",
@@ -422,10 +450,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="Write a strict tenant-scoped metadata-only custody evidence export to stdout",
     )
     _custody_control_auth_arguments(custody_evidence_export)
-    custody_evidence_delete_check = custody_evidence_subparsers.add_parser(
-        "deletion-check",
+    custody_evidence_deletion = custody_evidence_subparsers.add_parser(
+        "deletion",
+        help="Inspect deletion constraints without deleting evidence",
+    )
+    custody_evidence_deletion_subparsers = custody_evidence_deletion.add_subparsers(
+        dest="custody_evidence_deletion_command",
+        required=True,
+    )
+    custody_evidence_delete_check = custody_evidence_deletion_subparsers.add_parser(
+        "check",
         help="Record why a custody evidence record cannot be deleted; this never deletes data",
     )
+    custody_evidence_delete_check.set_defaults(custody_evidence_command="deletion-check")
     _custody_control_auth_arguments(custody_evidence_delete_check)
     custody_evidence_delete_check.add_argument(
         "--source-schema-id",
@@ -452,18 +489,24 @@ def build_parser() -> argparse.ArgumentParser:
         help="Immutable source event identifier",
     )
 
-    custody_executor = subparsers.add_parser(
-        "custody-executor",
-        help="Run machine-only custody-executor maintenance",
-    )
+    custody_executor = custody_subparsers.add_parser("executor", help="Run machine-only custody maintenance")
     custody_executor_subparsers = custody_executor.add_subparsers(
-        dest="custody_executor_command",
+        dest="custody_executor_action",
         required=True,
     )
-    custody_executor_subparsers.add_parser(
-        "register-assets",
+    custody_executor_register = custody_executor_subparsers.add_parser(
+        "register",
+        help="Register configured custody resources",
+    )
+    custody_executor_register_subparsers = custody_executor_register.add_subparsers(
+        dest="custody_executor_register_command",
+        required=True,
+    )
+    custody_executor_assets = custody_executor_register_subparsers.add_parser(
+        "assets",
         help="Persist configured custody asset generations through the restricted executor boundary",
     )
+    custody_executor_assets.set_defaults(custody_executor_command="register-assets")
 
     storage = subparsers.add_parser("storage", help="Verify or migrate the metadata-only usage store")
     storage_subparsers = storage.add_subparsers(dest="storage_command", required=True)
@@ -474,6 +517,48 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     return parser
+
+
+def _policy_request_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--actor", required=True, help="Configured actor ID")
+    parser.add_argument("--client", required=True, choices=["codex", "claude-code"])
+    parser.add_argument("--protocol", required=True, choices=["openai", "anthropic"])
+    parser.add_argument("--model", required=True, help="Company model alias")
+    parser.add_argument("--max-output-tokens", type=int)
+
+
+def _policy_candidate_arguments(parser: argparse.ArgumentParser) -> None:
+    candidate = parser.add_mutually_exclusive_group(required=True)
+    candidate.add_argument("file", nargs="?", help="Local policy-document JSON candidate")
+    candidate.add_argument("--version", dest="candidate_version", help="Saved immutable candidate version")
+
+
+def _client_config_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("client", choices=["codex", "claude"])
+    parser.add_argument("--url", help="Externally reachable gateway URL; defaults to configured listener")
+    parser.add_argument("--actor", help="Configured actor ID; defaults to the first configured actor")
+    parser.add_argument(
+        "--auth-mode",
+        choices=["auto", "static", "oidc"],
+        default="auto",
+        help="Credential source to configure (default: static when available, otherwise OIDC)",
+    )
+    parser.add_argument(
+        "--credential-env",
+        help="Environment variable containing the credential (OIDC default: HORMUZ_OIDC_ACCESS_TOKEN)",
+    )
+
+
+def _audit_export_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--kind", choices=["all", "usage", "security"], default="all")
+    parser.add_argument("--since", help="UTC ISO-8601 lower bound (default: start of current month)")
+    parser.add_argument("--output", default="-", help="Output path or - for stdout (default: -)")
+    parser.add_argument("--force", action="store_true", help="Allow replacing an existing output file")
+
+
+def _audit_anchor_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--kind", choices=["all", "usage", "security"], default="all")
+    parser.add_argument("--since", help="UTC ISO-8601 lower bound (default: start of current month)")
 
 
 def _policy_control_auth_arguments(parser: argparse.ArgumentParser) -> None:
@@ -498,14 +583,14 @@ def main(argv: list[str] | None = None) -> int:
     raw_argv = list(sys.argv[1:] if argv is None else argv)
     if _is_deprecated_context_command(raw_argv):
         return _context_experiment_moved()
-    args = build_parser().parse_args(raw_argv)
+    args = build_parser().parse_args(_normalize_command_argv(raw_argv))
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.WARNING if args.command == "demo" else logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
     if args.command == "auth" and args.auth_command == "token":
         return _auth_token(args.env)
-    if args.command == "contract-manifest":
+    if args.command == "contract" and args.contract_command == "manifest":
         print(json.dumps(contract_manifest(), indent=2, sort_keys=True))
         return 0
     if args.command == "demo":
@@ -525,11 +610,11 @@ def main(argv: list[str] | None = None) -> int:
             return _doctor(config)
         if args.command == "status":
             return _status(config, args)
-        if args.command == "policy-check":
+        if args.command == "policy" and args.policy_control_command == "check":
             return _policy_check(config, args)
         if args.command == "policy":
             return _policy_control(config, args)
-        if args.command == "client-config":
+        if args.command == "client" and args.client_command == "config":
             return _client_config(
                 config,
                 args.client,
@@ -538,16 +623,15 @@ def main(argv: list[str] | None = None) -> int:
                 auth_mode=args.auth_mode,
                 credential_env=args.credential_env,
             )
-        if args.command == "audit-export":
-            return _audit_export(config, args)
-        if args.command == "audit-anchor":
-            return _audit_anchor(config, args)
-        if args.command == "audit-chain":
-            return _audit_chain(config, args)
+        if args.command == "audit":
+            if args.audit_command == "export":
+                return _audit_export(config, args)
+            if args.audit_command == "anchor":
+                return _audit_anchor(config, args)
+            if args.audit_command == "chain":
+                return _audit_chain(config, args)
         if args.command == "custody":
             return _custody(config, args)
-        if args.command == "custody-executor":
-            return _custody_executor(config, args)
         if args.command == "storage":
             return _storage(config, args)
     except ConfigError as error:
@@ -574,12 +658,68 @@ def main(argv: list[str] | None = None) -> int:
     except PolicyControlError as error:
         print(f"policy control error: {error.code}", file=sys.stderr)
         return 2
+    except PolicyAnalysisError as error:
+        print(f"policy analysis error: {error.code}", file=sys.stderr)
+        return 2
     except (OSError, sqlite3.Error):
         print("storage error: storage_unavailable", file=sys.stderr)
         return 2
     except KeyboardInterrupt:
         return 130
     return 2
+
+
+def _normalize_command_argv(argv: list[str]) -> list[str]:
+    """Map legacy hyphenated command tokens onto the primary spaced tree."""
+
+    index = _top_level_command_index(argv)
+    if index is None:
+        return list(argv)
+    prefix = list(argv[:index])
+    command = list(argv[index:])
+    top_level_aliases = {
+        "contract-manifest": ["contract", "manifest"],
+        "policy-check": ["policy", "check"],
+        "client-config": ["client", "config"],
+        "audit-export": ["audit", "export"],
+        "audit-anchor": ["audit", "anchor"],
+        "audit-chain": ["audit", "chain"],
+        "custody-executor": ["custody", "executor"],
+    }
+    replacement = top_level_aliases.get(command[0])
+    if replacement is not None:
+        command = [*replacement, *command[1:]]
+    nested_aliases = (
+        (("policy", "break-glass", "recover"), ("policy", "recover")),
+        (("policy", "administrator", "revoke-static"), ("policy", "administrator", "retire", "static")),
+        (("custody", "administrator", "revoke-static"), ("custody", "administrator", "retire", "static")),
+        (("custody", "evidence", "deletion-check"), ("custody", "evidence", "deletion", "check")),
+        (("custody", "executor", "register-assets"), ("custody", "executor", "register", "assets")),
+    )
+    for legacy, primary in nested_aliases:
+        if tuple(command[: len(legacy)]) == legacy:
+            command = [*primary, *command[len(legacy) :]]
+            break
+    return [*prefix, *command]
+
+
+def _top_level_command_index(argv: list[str]) -> int | None:
+    index = 0
+    while index < len(argv):
+        value = argv[index]
+        if value == "--":
+            return None
+        if value == "--config":
+            index += 2
+            continue
+        if value.startswith("--config=") or value == "--verbose":
+            index += 1
+            continue
+        if value.startswith("-"):
+            index += 1
+            continue
+        return index
+    return None
 
 
 def _is_deprecated_context_command(argv: list[str]) -> bool:
@@ -925,25 +1065,24 @@ def _policy_check(config: GatewayConfig, args: argparse.Namespace) -> int:
         requested_model=args.model,
         requested_output_tokens=args.max_output_tokens,
     )
-    print(
-        json.dumps(
-            contract_envelope(
-                POLICY_DECISION_SCHEMA_ID,
-                {
-                    "allowed": decision.allowed,
-                    "action": decision.action,
-                    "reason": decision.reason,
-                    "requested_model": decision.requested_model,
-                    "resolved_alias": decision.resolved_alias,
-                    "routed_model": decision.route.upstream_model if decision.route else None,
-                    "max_output_tokens": decision.max_output_tokens,
-                    "policy_version": decision.policy_version,
-                },
-            ),
-            indent=2,
-        )
-    )
+    print(json.dumps(_policy_decision_contract(decision), indent=2))
     return 0 if decision.allowed else 3
+
+
+def _policy_decision_contract(decision: PolicyDecision) -> dict[str, object]:
+    return contract_envelope(
+        POLICY_DECISION_SCHEMA_ID,
+        {
+            "allowed": decision.allowed,
+            "action": decision.action,
+            "reason": decision.reason,
+            "requested_model": decision.requested_model,
+            "resolved_alias": decision.resolved_alias,
+            "routed_model": decision.route.upstream_model if decision.route else None,
+            "max_output_tokens": decision.max_output_tokens,
+            "policy_version": decision.policy_version,
+        },
+    )
 
 
 def _policy_control(config: GatewayConfig, args: argparse.Namespace) -> int:
@@ -1024,6 +1163,47 @@ def _policy_control(config: GatewayConfig, args: argparse.Namespace) -> int:
             return 2
         _print_policy_version("policy exported", version)
         return 0
+    if command == "compare":
+        # Resolve and retain the baseline before reading the candidate so an
+        # activation racing this command cannot change the comparison halfway.
+        baseline = service.policy_version(
+            organization_id=args.organization,
+            credential_env=args.credential_env,
+            version_id=args.against_version,
+        )
+        candidate = _policy_candidate_document(service, config, args)
+        comparison = compare_policy_documents(baseline.document, candidate)
+        _print_policy_comparison(comparison, as_json=args.json)
+        return 0 if comparison.identical else 1
+    if command == "preview":
+        # The active version is pinned before candidate loading and reused for
+        # the complete baseline evaluation.
+        baseline = service.policy_version(
+            organization_id=args.organization,
+            credential_env=args.credential_env,
+            version_id=None,
+        )
+        candidate = _policy_candidate_document(service, config, args)
+        identity = config.identities_by_actor.get(args.actor)
+        if identity is None:
+            raise PolicyAnalysisError("policy_preview_actor_not_found")
+        if identity.organization_id != args.organization:
+            raise PolicyAnalysisError("policy_preview_actor_organization_mismatch")
+        if args.max_output_tokens is not None and args.max_output_tokens < 1:
+            raise PolicyAnalysisError("policy_preview_output_tokens_invalid")
+        preview = preview_policy_request(
+            config=config,
+            usage_store=create_usage_store(config, read_only=True),
+            identity=identity,
+            baseline=baseline.document,
+            candidate=candidate,
+            client=args.client,
+            protocol=args.protocol,
+            requested_model=args.model,
+            requested_output_tokens=args.max_output_tokens,
+        )
+        _print_policy_preview(preview, as_json=args.json)
+        return 0 if preview.candidate_decision.allowed else 3
     if command == "administrator":
         if args.policy_administrator_command == "grant":
             administrator = service.grant_oidc_administrator(
@@ -1046,7 +1226,10 @@ def _policy_control(config: GatewayConfig, args: argparse.Namespace) -> int:
             )
             print(f"policy administrator revoked: organization={args.organization} issuer={args.issuer} subject={args.subject}")
             return 0
-        if args.policy_administrator_command == "revoke-static":
+        if (
+            args.policy_administrator_command == "retire"
+            and args.policy_administrator_retire_command == "static"
+        ):
             service.revoke_static_administrator(
                 organization_id=args.organization,
                 credential_env=args.credential_env,
@@ -1054,7 +1237,7 @@ def _policy_control(config: GatewayConfig, args: argparse.Namespace) -> int:
             )
             print(f"static policy administrator revoked: organization={args.organization} actor_id={args.actor_id}")
             return 0
-    if command == "break-glass" and args.policy_break_glass_command == "recover":
+    if command == "recover":
         try:
             recovery_secret = getpass.getpass("Hormuz break-glass recovery secret: ")
         except (EOFError, OSError):
@@ -1072,6 +1255,24 @@ def _policy_control(config: GatewayConfig, args: argparse.Namespace) -> int:
         )
         return 0
     raise ConfigError("unsupported policy control command")
+
+
+def _policy_candidate_document(
+    service: PolicyControlService,
+    config: GatewayConfig,
+    args: argparse.Namespace,
+) -> PolicyDocument:
+    if args.candidate_version is not None:
+        candidate = service.policy_version(
+            organization_id=args.organization,
+            credential_env=args.credential_env,
+            version_id=args.candidate_version,
+        ).document
+    else:
+        candidate = load_policy_document(config, args.file)
+    if candidate.organization_id != args.organization:
+        raise PolicyAnalysisError("policy_candidate_organization_mismatch")
+    return candidate
 
 
 def _policy_validate(config: GatewayConfig | PolicyValidationContext, policy_path: str) -> int:
@@ -1346,6 +1547,102 @@ def _print_policy_history(history: PolicyHistory, *, as_json: bool) -> None:
             "  change_summary="
             + json.dumps(event.change_summary, sort_keys=True, separators=(",", ":"))
         )
+
+
+def _print_policy_comparison(comparison: PolicyComparison, *, as_json: bool) -> None:
+    payload = {
+        "organization_id": comparison.organization_id,
+        "baseline": _policy_version_identity_payload(comparison.baseline),
+        "candidate": _policy_version_identity_payload(comparison.candidate),
+        "identical": comparison.identical,
+        "changes": [
+            {
+                "path": change.path,
+                "change_type": change.change_type,
+                "before": change.before,
+                "after": change.after,
+            }
+            for change in comparison.changes
+        ],
+    }
+    if as_json:
+        print(json.dumps(contract_envelope(POLICY_COMPARISON_SCHEMA_ID, payload), indent=2, sort_keys=True))
+        return
+    print(f"organization: {comparison.organization_id}")
+    _print_policy_version_identity("baseline", comparison.baseline)
+    _print_policy_version_identity("candidate", comparison.candidate)
+    print(f"semantic changes: {len(comparison.changes)}")
+    if comparison.identical:
+        print("result: identical")
+        return
+    for change in comparison.changes:
+        print(f"{change.change_type} {change.path}")
+        print(f"  before: {json.dumps(change.before, sort_keys=True, separators=(',', ':'))}")
+        print(f"  after:  {json.dumps(change.after, sort_keys=True, separators=(',', ':'))}")
+
+
+def _print_policy_preview(preview: PolicyPreview, *, as_json: bool) -> None:
+    payload = {
+        "organization_id": preview.organization_id,
+        "evaluated_at": preview.evaluated_at.isoformat(),
+        "usage_period": {
+            "starts_at": preview.usage_period.starts_at.isoformat(),
+            "ends_before": preview.usage_period.ends_before.isoformat(),
+        },
+        "usage_basis": preview.usage_basis,
+        "request": {
+            "actor_id": preview.identity.actor_id,
+            "client": preview.client,
+            "protocol": preview.protocol,
+            "requested_model": preview.requested_model,
+            "requested_output_tokens": preview.requested_output_tokens,
+        },
+        "baseline": {
+            **_policy_version_identity_payload(preview.baseline),
+            "decision": _policy_decision_contract(preview.baseline_decision),
+        },
+        "candidate": {
+            **_policy_version_identity_payload(preview.candidate),
+            "decision": _policy_decision_contract(preview.candidate_decision),
+        },
+    }
+    if as_json:
+        print(json.dumps(contract_envelope(POLICY_PREVIEW_SCHEMA_ID, payload), indent=2, sort_keys=True))
+        return
+    print(f"organization: {preview.organization_id}")
+    print(f"evaluated at: {preview.evaluated_at.isoformat()}")
+    print(
+        "usage: current "
+        f"[{preview.usage_period.starts_at.isoformat()}, {preview.usage_period.ends_before.isoformat()})"
+    )
+    print(
+        f"request: actor={preview.identity.actor_id} client={preview.client} protocol={preview.protocol} "
+        f"model={preview.requested_model} max_output_tokens={preview.requested_output_tokens or '-'}"
+    )
+    _print_policy_preview_decision("baseline", preview.baseline, preview.baseline_decision)
+    _print_policy_preview_decision("candidate", preview.candidate, preview.candidate_decision)
+
+
+def _policy_version_identity_payload(identity: PolicyVersionIdentity) -> dict[str, str]:
+    return {"version_id": identity.version_id, "content_sha256": identity.content_sha256}
+
+
+def _print_policy_version_identity(prefix: str, identity: PolicyVersionIdentity) -> None:
+    print(f"{prefix}: version={identity.version_id} digest={identity.content_sha256}")
+
+
+def _print_policy_preview_decision(
+    prefix: str,
+    identity: PolicyVersionIdentity,
+    decision: PolicyDecision,
+) -> None:
+    print(
+        f"{prefix}: version={identity.version_id} digest={identity.content_sha256} "
+        f"allowed={str(decision.allowed).lower()} action={decision.action}"
+    )
+    print(f"  reason: {decision.reason}")
+    print(f"  routed_model: {decision.route.upstream_model if decision.route else '-'}")
+    print(f"  max_output_tokens: {decision.max_output_tokens if decision.max_output_tokens is not None else '-'}")
 
 
 def _client_config(
@@ -1750,6 +2047,8 @@ def _is_sha256_digest(value: object) -> bool:
 
 
 def _custody(config: GatewayConfig, args: argparse.Namespace) -> int:
+    if args.custody_command == "executor":
+        return _custody_executor(config, args)
     if args.custody_command in {"bootstrap", "status", "administrator", "authorize", "approve", "evidence"}:
         return _custody_control(config, args)
     if config.custody_control.mode == "postgresql":
@@ -1832,7 +2131,10 @@ def _custody_control(config: GatewayConfig, args: argparse.Namespace) -> int:
                 f"organization={args.organization} issuer={args.issuer} subject={args.subject}"
             )
             return 0
-        if args.custody_administrator_command == "revoke-static":
+        if (
+            args.custody_administrator_command == "retire"
+            and args.custody_administrator_retire_command == "static"
+        ):
             service.revoke_static_administrator(
                 organization_id=args.organization,
                 credential_env=args.credential_env,

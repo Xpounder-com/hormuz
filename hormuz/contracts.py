@@ -57,9 +57,11 @@ from ._contract_schemas.manifest import (
     validate_contract_manifest as _validate_contract_manifest_contract,
 )
 from ._contract_schemas.policy import (
+    _validate_policy_comparison,
     _validate_policy_control_status,
     _validate_policy_decision,
     _validate_policy_history,
+    _validate_policy_preview,
     policy_schema_entries as _policy_schema_entries,
     validate_policy_action as _validate_policy_action_contract,
     validate_policy_control_event as _validate_policy_control_event_contract,
@@ -491,7 +493,7 @@ def contract_manifest() -> dict[str, object]:
 
 
 def validate_contract_manifest(value: Mapping[str, Any]) -> None:
-    """Strictly validate the versioned manifest emitted by ``contract-manifest``."""
+    """Strictly validate the versioned manifest emitted by ``contract manifest``."""
 
     _validate_contract_manifest_contract(value)
 
@@ -511,6 +513,8 @@ def validate_contract(value: Mapping[str, Any]) -> None:
         (ERROR_SCHEMA_ID, ERROR_SCHEMA_VERSION): lambda item: _validate_error(item, PUBLIC_ERROR_CODES),
         (POLICY_DECISION_SCHEMA_ID, 1): _validate_policy_decision,
         (POLICY_CONTROL_STATUS_SCHEMA_ID, 1): _validate_policy_control_status,
+        (POLICY_COMPARISON_SCHEMA_ID, POLICY_COMPARISON_SCHEMA_VERSION): _validate_policy_comparison,
+        (POLICY_PREVIEW_SCHEMA_ID, POLICY_PREVIEW_SCHEMA_VERSION): _validate_policy_preview,
         (POLICY_HISTORY_SCHEMA_ID, POLICY_HISTORY_SCHEMA_VERSION): _validate_policy_history,
         (CUSTODY_CONTROL_STATUS_SCHEMA_ID, 1): _validate_custody_control_status_v1,
         (CUSTODY_CONTROL_STATUS_SCHEMA_ID, 2): _validate_custody_control_status_v2,

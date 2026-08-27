@@ -51,6 +51,7 @@ from ._persistence import (
     normalize_audit_chain_head,
     normalize_request_attempt_result,
     normalize_request_attempt_state,
+    monthly_usage_bounds,
     require_pending_request_attempt_state,
     require_terminal_request_attempt_state,
     should_mark_request_attempt_unknown,
@@ -1137,11 +1138,16 @@ class PostgresUsageStore:
         actor_id: str | None = None,
         team_id: str | None = None,
         organization_id: str | None = None,
+        starts_at: datetime | None = None,
+        ends_before: datetime | None = None,
     ) -> MonthlyTotals:
         organization = self._organization(organization_id)
-        start = _month_start()
+        start, end = monthly_usage_bounds(starts_at=starts_at, ends_before=ends_before)
         clauses = ["organization_id = %s", "occurred_at >= %s"]
         parameters: list[object] = [organization, start]
+        if end is not None:
+            clauses.append("occurred_at < %s")
+            parameters.append(end)
         if actor_id is not None:
             clauses.append("actor_id = %s")
             parameters.append(actor_id)

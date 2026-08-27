@@ -16,6 +16,7 @@ def create_usage_store(
     *,
     environ: Mapping[str, str] | None = None,
     connection_pool: PostgresConnectionPool | None = None,
+    read_only: bool = False,
 ) -> UsageRepository:
     """Return the configured store, never placing a PostgreSQL DSN in config."""
 
@@ -28,6 +29,7 @@ def create_usage_store(
             config.database_path,
             audit_chain_maximum_anchor_age_seconds=audit_chain_maximum_anchor_age_seconds,
             audit_chain_organization_ids=config.organization_ids,
+            read_only=read_only,
         )
     if storage.backend != "postgresql":  # Configuration parsing prevents this path.
         raise PostgresStorageError("storage_backend_unsupported")
