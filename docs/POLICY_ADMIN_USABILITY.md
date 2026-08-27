@@ -18,6 +18,13 @@ the PostgreSQL cohort before testing a release artifact. A person may be in
 both cohorts. Do not replace a failed participant with a later success or omit a
 run against the current artifact.
 
+The final aggregate explicitly attests that both cohorts were preregistered
+before testing, every started session is included, and no participant was
+replaced. Exact session counts are necessary but not sufficient: any false or
+missing attestation leaves the gate incomplete. The aggregate generation time
+must be at or after each session's computed end time (`started_at` plus
+`duration_seconds`).
+
 A participant is independent only when all of these are true:
 
 - they did not author or review the workflow, this protocol, or the relevant
@@ -158,6 +165,7 @@ The strict `hormuz.policy-admin-usability-evidence` v1 aggregate records only:
 
 - the release version, artifact kind and digest, source commit, and publication
   time;
+- preregistration, complete-session inclusion, and no-replacement attestations;
 - pseudonymous participant/session IDs, track, stage outcomes, measured
   seconds, and release digest;
 - author/reviewer, private-walkthrough, and assistance-count metadata;
@@ -199,10 +207,11 @@ the fixture is structurally valid; its JSON result always has
 ## Nonclaims
 
 The validator can enforce structure, thresholds, exact release/correction
-identity, metadata relationships, and the synthetic-evidence boundary. It
-cannot prove the off-repository identity mapping, that a person was not
-privately coached, the attested Git ancestry, or that a referenced Actions run
-contains the stated regression without separately inspecting those sources.
-Passing this gate proves the bounded administrator tasks, not live-provider
-behavior, enterprise availability, disaster recovery, or the separate issue
-#110 claim.
+identity, session-end chronology, required attestations, metadata
+relationships, and the synthetic-evidence boundary. It cannot independently
+prove the off-repository cohort registration or identity mapping, that every
+started run was submitted, that a person was not privately coached, the
+attested Git ancestry, or that a referenced Actions run contains the stated
+regression without separately inspecting those sources. Passing this gate
+proves the bounded administrator tasks, not live-provider behavior, enterprise
+availability, disaster recovery, or the separate issue #110 claim.

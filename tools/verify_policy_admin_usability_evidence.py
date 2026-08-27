@@ -15,7 +15,7 @@ import os
 import re
 import stat
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -108,6 +108,9 @@ _RELEASE_FIELDS = {
 }
 _OPERATOR_FIELDS = {
     "distinct_humans_verified_off_repository",
+    "cohorts_preregistered_before_testing",
+    "all_started_sessions_included",
+    "participant_replacement_absent",
     "identity_mapping_not_committed",
     "raw_intake_not_committed",
     "release_artifact_digest_verified",
@@ -701,6 +704,14 @@ def validate_evidence(value: object) -> dict[str, object]:
         started_at = _require_timestamp(session["started_at"], "session_started_at")
         if started_at > generated_at:
             raise PolicyAdminUsabilityEvidenceError("session_after_generation")
+        try:
+            completed_at = started_at + timedelta(seconds=session["duration_seconds"])
+        except OverflowError as error:
+            raise PolicyAdminUsabilityEvidenceError(
+                "session_ends_after_generation"
+            ) from error
+        if completed_at > generated_at:
+            raise PolicyAdminUsabilityEvidenceError("session_ends_after_generation")
         if (
             session["release_artifact_digest"] == release["artifact_digest"]
             and started_at < release_published_at
@@ -846,6 +857,12 @@ def validate_evidence(value: object) -> dict[str, object]:
         reasons.append("synthetic_fixture")
     if attestation["distinct_humans_verified_off_repository"] is not True:
         reasons.append("distinct_humans_not_attested")
+    if attestation["cohorts_preregistered_before_testing"] is not True:
+        reasons.append("cohorts_not_preregistered_before_testing")
+    if attestation["all_started_sessions_included"] is not True:
+        reasons.append("started_sessions_not_fully_attested")
+    if attestation["participant_replacement_absent"] is not True:
+        reasons.append("participant_replacement_not_ruled_out")
     if attestation["identity_mapping_not_committed"] is not True:
         reasons.append("identity_mapping_boundary_not_attested")
     if attestation["raw_intake_not_committed"] is not True:

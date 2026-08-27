@@ -160,11 +160,14 @@ the package gate inspects those members in the built archive. The validator
 requires exactly five current-artifact offline participants and three
 current-artifact PostgreSQL participants. It computes unaided completion, the
 15- and 25-minute thresholds, allowed published-guidance use, and exact
-apply/history/rollback version, digest, and generation relationships. Open
-blockers prevent readiness. Corrections require an automated regression, an
-exact digest/source/publication-time match to the release being gated, attested
-correction-commit ancestry, and a later independent retest. A broad workflow
-change requires every participant in the affected track to rerun.
+apply/history/rollback version, digest, and generation relationships. It also
+requires preregistration, complete started-session inclusion, no-replacement
+attestations, and aggregate generation no earlier than any computed session
+end. Open blockers prevent readiness. Corrections require an automated
+regression, an exact digest/source/publication-time match to the release being
+gated, attested correction-commit ancestry, and a later independent retest. A
+broad workflow change requires every participant in the affected track to
+rerun.
 
 Synthetic and internal results never satisfy the human gate. The current count
 remains 0/5 offline and 0/3 PostgreSQL. This administrator-usability evidence is

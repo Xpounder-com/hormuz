@@ -13,6 +13,9 @@
   },
   "operator_attestation": {
     "distinct_humans_verified_off_repository": false,
+    "cohorts_preregistered_before_testing": true,
+    "all_started_sessions_included": true,
+    "participant_replacement_absent": true,
     "identity_mapping_not_committed": true,
     "raw_intake_not_committed": true,
     "release_artifact_digest_verified": true

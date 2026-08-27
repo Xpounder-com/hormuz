@@ -158,6 +158,33 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
         self.assertEqual(result["offline_over_25_minutes_count"], 0)
         self.assertEqual(value["release"]["version"], "v1.0")
 
+    def test_preregistered_cohort_completeness_and_no_replacement_are_attested(
+        self,
+    ) -> None:
+        requirements = (
+            (
+                "cohorts_preregistered_before_testing",
+                "cohorts_not_preregistered_before_testing",
+            ),
+            (
+                "all_started_sessions_included",
+                "started_sessions_not_fully_attested",
+            ),
+            (
+                "participant_replacement_absent",
+                "participant_replacement_not_ruled_out",
+            ),
+        )
+        for field, reason in requirements:
+            with self.subTest(field=field):
+                value = self._release_evidence()
+                value["operator_attestation"][field] = False
+
+                result = usability.validate_evidence(value)
+
+                self.assertFalse(result["ready_for_v1_policy_admin_claim"])
+                self.assertIn(reason, result["reasons"])
+
     def test_release_label_uses_stable_v1_naming(self) -> None:
         for version in ("v1.0-alpha", "v1.1", "1.0"):
             with self.subTest(version=version):
@@ -286,6 +313,20 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
         self._sessions(value, "offline")[4]["duration_seconds"] = 1501
         result = usability.validate_evidence(value)
         self.assertIn("offline_duration_over_25_minutes", result["reasons"])
+
+    def test_aggregate_generation_cannot_precede_session_completion(self) -> None:
+        value = self._release_evidence()
+        value["generated_at"] = "2026-08-27T14:45:00Z"
+        with self.assertRaisesRegex(
+            usability.PolicyAdminUsabilityEvidenceError,
+            "session_ends_after_generation",
+        ):
+            usability.validate_evidence(value)
+
+        value["generated_at"] = "2026-08-27T14:50:00Z"
+        self.assertTrue(
+            usability.validate_evidence(value)["ready_for_v1_policy_admin_claim"]
+        )
 
     def test_exact_participant_counts_prevent_cherry_picking_extra_runs(self) -> None:
         value = self._release_evidence()
