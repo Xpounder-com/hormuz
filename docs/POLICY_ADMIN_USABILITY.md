@@ -116,14 +116,15 @@ Start timing after PostgreSQL, configuration, the baseline, candidate, and
 credential are ready. The participant must:
 
 1. authenticate as a policy administrator and inspect the active baseline;
-2. apply the candidate with an `--if-active` guard;
+2. apply the candidate with an `--if-active` guard matching the inspected
+   baseline version;
 3. use the versioned JSON status to verify the active candidate version ID,
    content digest, and activation generation, including that generation
    advanced by one;
 4. inspect bounded JSON history and verify the predecessor plus candidate
    activation metadata;
 5. perform the default one-step generation rollback with an `--if-active`
-   guard; and
+   guard matching the active candidate version; and
 6. verify through status and history that the predecessor version ID and digest
    are active again, rollback created the next generation, and the history
    events match both observed state transitions.
@@ -132,14 +133,19 @@ Rollback is a new activation and does not erase history. Repeating rollback may
 toggle to the version just left; this task performs one rollback only. All
 three participants must complete and the validator must independently match
 expected and observed version IDs, content digests, generations, and history
-metadata.
+metadata. The aggregate records whether each guard was used and its version
+value; a PostgreSQL session cannot qualify unless both guards match the active
+version expected at that step.
 
 ## Findings and blockers
 
 Every recorded friction category other than `none` links to a public issue.
 Authentication-bypass and content/credential-exposure findings may instead use
-an opaque private security-advisory reference. The aggregate contains no
-feedback text. These findings block the affected gate:
+an opaque private security-advisory reference. A session carries a bounded,
+sorted collection of finding IDs and friction categories so multiple findings
+from one run are retained rather than collapsed or omitted. Each finding links
+back to that session. The aggregate contains no feedback text. These findings
+block the affected gate:
 
 - the workflow cannot be completed through published guidance;
 - output misleadingly reports success;
@@ -174,13 +180,14 @@ The strict `hormuz.policy-admin-usability-evidence` v1 aggregate records only:
 - pseudonymous participant/session IDs, track, stage outcomes, measured
   seconds, and release digest;
 - author/reviewer, private-walkthrough, and assistance-count metadata;
-- bounded documentation/example/`--help` usage and friction categories;
+- bounded documentation/example/`--help` usage plus up to 20 finding IDs and
+  their friction categories per session;
 - public issue or opaque private-advisory references;
 - a unique opaque run scope and tenant-isolation attestation for each
   PostgreSQL session;
-- expected and observed policy version IDs, content digests, generations, and
-  the predecessor, activation, and rollback lifecycle event types for
-  PostgreSQL; and
+- guarded apply/rollback attestations and values, expected and observed policy
+  version IDs, content digests, generations, and the predecessor, activation,
+  and rollback lifecycle event types for PostgreSQL; and
 - correction commit, exact corrected release source commit/artifact digest,
   source-history verification attestation, automated regression source/workflow
   binding, and retest linkage.
@@ -211,6 +218,12 @@ is invalid. Explicitly allowed synthetic evidence exits `0` only to show that
 the fixture is structurally valid; its JSON result always has
 `ready_for_v1_policy_admin_claim: false`.
 
+The validator accepts only a regular file of at most 1 MiB, rejects symlinks
+and special files without blocking on them, and treats malformed or
+unrepresentable JSON numbers as contract errors. `generated_at` may be no more
+than five minutes ahead of the validator's UTC clock, allowing bounded clock
+skew without permitting future sessions to pass early.
+
 ## Nonclaims
 
 The validator can enforce structure, thresholds, exact release/correction
@@ -218,7 +231,8 @@ identity, session-end chronology, required attestations, metadata
 relationships, and the synthetic-evidence boundary. It cannot independently
 prove the off-repository cohort registration or identity mapping, that every
 started run was submitted, that a person was not privately coached, the
-attested PostgreSQL tenant isolation, the attested Git ancestry, or the stated
+attested PostgreSQL tenant isolation, that a participant actually supplied the
+recorded active-version guard, the attested Git ancestry, or the stated
 source/workflow binding and contents of a referenced Actions run without
 separately inspecting those systems. Passing this gate proves the bounded
 administrator tasks, not live-provider behavior, enterprise availability,

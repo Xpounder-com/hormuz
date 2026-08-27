@@ -15,7 +15,7 @@ import os
 import re
 import stat
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -88,6 +88,7 @@ REFERENCE_TYPES = {"public_issue", "private_security_advisory"}
 FINDING_STATUSES = {"open", "resolved"}
 HISTORY_EVENT_TYPES = {"policy_staged", "policy_activated", "policy_rolled_back"}
 REGRESSION_WORKFLOW_PATH = ".github/workflows/ci.yml"
+_MAX_FUTURE_CLOCK_SKEW = timedelta(minutes=5)
 
 _ROOT_FIELDS = {
     "schema_id",
@@ -128,8 +129,8 @@ _SESSION_FIELDS = {
     "guidance_usage",
     "stages",
     "outcome",
-    "friction_category",
-    "finding_id",
+    "friction_categories",
+    "finding_ids",
     "postgresql_isolation",
     "postgresql_verification",
     "content_free_attestations",
@@ -158,6 +159,8 @@ _APPLY_FIELDS = {
     "previous_version_id",
     "previous_content_sha256",
     "previous_generation",
+    "if_active_guard_used",
+    "if_active_version_id",
     "expected_version_id",
     "expected_content_sha256",
     "observed_version_id",
@@ -165,6 +168,8 @@ _APPLY_FIELDS = {
     "observed_generation",
 }
 _ROLLBACK_FIELDS = {
+    "if_active_guard_used",
+    "if_active_version_id",
     "expected_version_id",
     "expected_content_sha256",
     "expected_predecessor_generation",
@@ -246,9 +251,13 @@ def _strict_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
 
 def _read_evidence(path: Path) -> object:
     before_open = path.lstat()
-    if stat.S_ISLNK(before_open.st_mode):
+    if not stat.S_ISREG(before_open.st_mode):
         raise PolicyAdminUsabilityEvidenceError("evidence_not_regular")
-    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_NONBLOCK", 0)
+    )
     descriptor = os.open(path, flags)
     try:
         metadata = os.fstat(descriptor)
@@ -323,6 +332,26 @@ def _require_sorted_enums(
     if not isinstance(value, list) or not minimum <= len(value) <= maximum:
         raise PolicyAdminUsabilityEvidenceError(f"{label}_invalid")
     if any(not isinstance(item, str) or item not in choices for item in value):
+        raise PolicyAdminUsabilityEvidenceError(f"{label}_invalid")
+    if value != sorted(set(value)):
+        raise PolicyAdminUsabilityEvidenceError(f"{label}_invalid")
+    return value
+
+
+def _require_sorted_patterns(
+    value: object,
+    pattern: re.Pattern[str],
+    *,
+    minimum: int,
+    maximum: int,
+    label: str,
+) -> list[str]:
+    if not isinstance(value, list) or not minimum <= len(value) <= maximum:
+        raise PolicyAdminUsabilityEvidenceError(f"{label}_invalid")
+    if any(
+        not isinstance(item, str) or pattern.fullmatch(item) is None
+        for item in value
+    ):
         raise PolicyAdminUsabilityEvidenceError(f"{label}_invalid")
     if value != sorted(set(value)):
         raise PolicyAdminUsabilityEvidenceError(f"{label}_invalid")
@@ -439,6 +468,19 @@ def _validate_postgresql(value: object, label: str) -> None:
         _MAX_GENERATION,
         f"{label}_apply_observed_generation",
     )
+    apply_guard_used = _require_bool(
+        apply["if_active_guard_used"], f"{label}_apply_if_active_guard_used"
+    )
+    if apply_guard_used:
+        _require_pattern(
+            apply["if_active_version_id"],
+            _SHA256_RE,
+            f"{label}_apply_if_active_version_id",
+        )
+    elif apply["if_active_version_id"] is not None:
+        raise PolicyAdminUsabilityEvidenceError(
+            f"{label}_apply_if_active_guard_inconsistent"
+        )
     if apply["previous_version_id"] == apply["expected_version_id"]:
         raise PolicyAdminUsabilityEvidenceError(f"{label}_candidate_not_distinct")
 
@@ -464,6 +506,20 @@ def _validate_postgresql(value: object, label: str) -> None:
         _MAX_GENERATION,
         f"{label}_rollback_observed_generation",
     )
+    rollback_guard_used = _require_bool(
+        rollback["if_active_guard_used"],
+        f"{label}_rollback_if_active_guard_used",
+    )
+    if rollback_guard_used:
+        _require_pattern(
+            rollback["if_active_version_id"],
+            _SHA256_RE,
+            f"{label}_rollback_if_active_version_id",
+        )
+    elif rollback["if_active_version_id"] is not None:
+        raise PolicyAdminUsabilityEvidenceError(
+            f"{label}_rollback_if_active_guard_inconsistent"
+        )
 
     for prefix in ("predecessor", "apply", "rollback"):
         _require_enum(
@@ -524,6 +580,20 @@ def _postgresql_state_errors(session: dict[str, Any]) -> set[str]:
     return errors
 
 
+def _postgresql_guards_valid(session: dict[str, Any]) -> bool:
+    verification = session["postgresql_verification"]
+    if not isinstance(verification, dict):
+        return False
+    apply = verification["apply"]
+    rollback = verification["rollback"]
+    return (
+        apply["if_active_guard_used"] is True
+        and apply["if_active_version_id"] == apply["previous_version_id"]
+        and rollback["if_active_guard_used"] is True
+        and rollback["if_active_version_id"] == apply["observed_version_id"]
+    )
+
+
 def _actions_complete(session: dict[str, Any]) -> bool:
     return all(stage["status"] == "completed" for stage in session["stages"])
 
@@ -545,7 +615,10 @@ def _session_qualifies(session: dict[str, Any]) -> bool:
         and _is_independent(session)
         and (
             session["track"] == "offline"
-            or not _postgresql_state_errors(session)
+            or (
+                not _postgresql_state_errors(session)
+                and _postgresql_guards_valid(session)
+            )
         )
     )
 
@@ -569,12 +642,23 @@ def _validate_session(value: object, index: int) -> dict[str, Any]:
     outcome = _require_enum(session["outcome"], OUTCOMES, f"{label}_outcome")
     if outcome == "completed" and not _actions_complete(session):
         raise PolicyAdminUsabilityEvidenceError(f"{label}_outcome_inconsistent")
-    _require_enum(
-        session["friction_category"], FRICTION_CATEGORIES, f"{label}_friction"
+    friction_categories = _require_sorted_enums(
+        session["friction_categories"],
+        FRICTION_CATEGORIES,
+        minimum=1,
+        maximum=len(FRICTION_CATEGORIES),
+        label=f"{label}_friction_categories",
     )
-    if session["finding_id"] is not None:
-        _require_pattern(session["finding_id"], _FINDING_ID_RE, f"{label}_finding")
-    if (session["friction_category"] == "none") != (session["finding_id"] is None):
+    finding_ids = _require_sorted_patterns(
+        session["finding_ids"],
+        _FINDING_ID_RE,
+        minimum=0,
+        maximum=20,
+        label=f"{label}_finding_ids",
+    )
+    if (friction_categories == ["none"]) != (not finding_ids):
+        raise PolicyAdminUsabilityEvidenceError(f"{label}_finding_inconsistent")
+    if "none" in friction_categories and friction_categories != ["none"]:
         raise PolicyAdminUsabilityEvidenceError(f"{label}_finding_inconsistent")
 
     verification = session["postgresql_verification"]
@@ -612,8 +696,9 @@ def _validate_session(value: object, index: int) -> dict[str, Any]:
     )
     if any(attestations[field] is not True for field in _CONTENT_FREE_FIELDS):
         raise PolicyAdminUsabilityEvidenceError(f"{label}_content_free_invalid")
-    if track == "postgresql" and outcome == "completed" and _postgresql_state_errors(session):
-        raise PolicyAdminUsabilityEvidenceError(f"{label}_outcome_inconsistent")
+    if track == "postgresql" and outcome == "completed":
+        if _postgresql_state_errors(session) or not _postgresql_guards_valid(session):
+            raise PolicyAdminUsabilityEvidenceError(f"{label}_outcome_inconsistent")
     return session
 
 
@@ -723,6 +808,9 @@ def validate_evidence(value: object) -> dict[str, object]:
     if root["gate_issue"] != GATE_ISSUE:
         raise PolicyAdminUsabilityEvidenceError("gate_issue_invalid")
     generated_at = _require_timestamp(root["generated_at"], "generated_at")
+    validation_time = datetime.now(timezone.utc).replace(tzinfo=None)
+    if generated_at > validation_time + _MAX_FUTURE_CLOCK_SKEW:
+        raise PolicyAdminUsabilityEvidenceError("generation_in_future")
     release, release_published_at = _validate_release(root["release"])
     if release_published_at > generated_at:
         raise PolicyAdminUsabilityEvidenceError("release_after_generation")
@@ -780,21 +868,29 @@ def validate_evidence(value: object) -> dict[str, object]:
     findings_by_id = {finding["finding_id"]: finding for finding in findings}
 
     for session in sessions:
-        finding_id = session["finding_id"]
-        if finding_id is None:
-            if session["outcome"] == "blocked":
-                raise PolicyAdminUsabilityEvidenceError("blocked_session_finding_missing")
-            continue
-        finding = findings_by_id.get(finding_id)
-        if (
-            finding is None
-            or finding["origin_session_id"] != session["session_id"]
-            or finding["track"] != session["track"]
-            or finding["category"] != session["friction_category"]
-        ):
+        linked_findings: list[dict[str, Any]] = []
+        for finding_id in session["finding_ids"]:
+            finding = findings_by_id.get(finding_id)
+            if (
+                finding is None
+                or finding["origin_session_id"] != session["session_id"]
+                or finding["track"] != session["track"]
+            ):
+                raise PolicyAdminUsabilityEvidenceError("session_finding_invalid")
+            linked_findings.append(finding)
+        expected_categories = (
+            sorted({finding["category"] for finding in linked_findings})
+            if linked_findings
+            else ["none"]
+        )
+        if session["friction_categories"] != expected_categories:
             raise PolicyAdminUsabilityEvidenceError("session_finding_invalid")
-        is_blocker = finding["blocker_reason"] != "none"
-        if (session["outcome"] == "blocked") != is_blocker:
+        blocker_reasons = {
+            finding["blocker_reason"]
+            for finding in linked_findings
+            if finding["blocker_reason"] != "none"
+        }
+        if (session["outcome"] == "blocked") != bool(blocker_reasons):
             raise PolicyAdminUsabilityEvidenceError("session_blocker_inconsistent")
         state_errors = (
             _postgresql_state_errors(session)
@@ -802,16 +898,12 @@ def validate_evidence(value: object) -> dict[str, object]:
             and session["postgresql_verification"] is not None
             else set()
         )
-        if (
-            state_errors
-            and finding["blocker_reason"] not in state_errors
-            and finding["blocker_reason"] != "misleading_success"
-        ):
+        if not state_errors <= blocker_reasons:
             raise PolicyAdminUsabilityEvidenceError("postgresql_blocker_inconsistent")
 
     for finding in findings:
         origin = sessions_by_id.get(finding["origin_session_id"])
-        if origin is None or origin["finding_id"] != finding["finding_id"]:
+        if origin is None or finding["finding_id"] not in origin["finding_ids"]:
             raise PolicyAdminUsabilityEvidenceError("finding_origin_invalid")
         correction = finding["correction"]
         if correction is None:
@@ -992,11 +1084,11 @@ def main(argv: list[str] | None = None) -> int:
     except OSError:
         print("policy-admin usability evidence failed: evidence_unavailable", file=sys.stderr)
         return 2
-    except (UnicodeError, json.JSONDecodeError, RecursionError):
-        print("policy-admin usability evidence failed: evidence_invalid_json", file=sys.stderr)
-        return 2
     except PolicyAdminUsabilityEvidenceError as error:
         print(f"policy-admin usability evidence failed: {error}", file=sys.stderr)
+        return 2
+    except (UnicodeError, ValueError, RecursionError):
+        print("policy-admin usability evidence failed: evidence_invalid_json", file=sys.stderr)
         return 2
     print(json.dumps(result, sort_keys=True, separators=(",", ":")))
     if result["evidence_kind"] == "synthetic_test_fixture":

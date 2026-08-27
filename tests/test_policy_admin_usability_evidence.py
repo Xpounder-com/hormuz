@@ -5,6 +5,7 @@ import copy
 import importlib.util
 import io
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -68,8 +69,10 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
         origin["started_at"] = "2026-08-27T09:00:00Z"
         origin["duration_seconds"] = 300
         origin["outcome"] = "blocked"
-        origin["friction_category"] = category
-        origin["finding_id"] = "pauf:40000000-0000-4000-8000-000000000001"
+        origin["friction_categories"] = [category]
+        origin["finding_ids"] = [
+            "pauf:40000000-0000-4000-8000-000000000001"
+        ]
         origin["stages"][3]["status"] = "failed"  # type: ignore[index]
         origin["stages"][4]["status"] = "not_attempted"  # type: ignore[index]
         origin["stages"][5]["status"] = "not_attempted"  # type: ignore[index]
@@ -99,7 +102,7 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
                 "affected_tracks": ["offline"],
             }
         finding = {
-            "finding_id": origin["finding_id"],
+            "finding_id": origin["finding_ids"][0],
             "origin_session_id": origin["session_id"],
             "track": "offline",
             "category": category,
@@ -122,8 +125,8 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
     ) -> None:
         finding_id = "pauf:50000000-0000-4000-8000-000000000001"
         session["outcome"] = "blocked"
-        session["friction_category"] = category
-        session["finding_id"] = finding_id
+        session["friction_categories"] = [category]
+        session["finding_ids"] = [finding_id]
         value["findings"].append(  # type: ignore[union-attr]
             {
                 "finding_id": finding_id,
@@ -333,6 +336,19 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
             usability.validate_evidence(value)["ready_for_v1_policy_admin_claim"]
         )
 
+    def test_future_dated_aggregate_cannot_pass_before_sessions_occur(self) -> None:
+        value = self._release_evidence()
+        value["generated_at"] = "2099-08-27T20:00:00Z"
+        value["release"]["published_at"] = "2099-08-27T10:00:00Z"  # type: ignore[index]
+        for session in value["sessions"]:  # type: ignore[union-attr]
+            session["started_at"] = session["started_at"].replace("2026", "2099")
+
+        with self.assertRaisesRegex(
+            usability.PolicyAdminUsabilityEvidenceError,
+            "generation_in_future",
+        ):
+            usability.validate_evidence(value)
+
     def test_exact_participant_counts_prevent_cherry_picking_extra_runs(self) -> None:
         value = self._release_evidence()
         extra = copy.deepcopy(self._sessions(value, "offline")[0])
@@ -431,6 +447,37 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
         ):
             usability.validate_evidence(value)
 
+    def test_postgresql_completion_requires_both_active_version_guards(self) -> None:
+        value = self._release_evidence()
+        session = self._sessions(value, "postgresql")[0]
+        verification = session["postgresql_verification"]
+        verification["apply"]["if_active_guard_used"] = False  # type: ignore[index]
+        verification["apply"]["if_active_version_id"] = None  # type: ignore[index]
+        self._add_postgresql_blocker(
+            value,
+            session,
+            category="activation",
+            blocker_reason="published_guidance_failure",
+        )
+
+        result = usability.validate_evidence(value)
+
+        self.assertEqual(result["postgresql_completed_verified_count"], 2)
+        self.assertIn("blocker_open", result["reasons"])
+
+        value = self._release_evidence()
+        verification = self._sessions(value, "postgresql")[0][
+            "postgresql_verification"
+        ]
+        verification["rollback"]["if_active_version_id"] = verification[  # type: ignore[index]
+            "apply"
+        ]["previous_version_id"]
+        with self.assertRaisesRegex(
+            usability.PolicyAdminUsabilityEvidenceError,
+            "outcome_inconsistent",
+        ):
+            usability.validate_evidence(value)
+
     def test_each_approved_blocker_reason_blocks_the_gate(self) -> None:
         for blocker_reason in usability.BLOCKER_REASONS - {"none"}:
             with self.subTest(blocker_reason=blocker_reason):
@@ -463,8 +510,8 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
         value = self._release_evidence()
         session = self._sessions(value, "offline")[0]
         finding_id = "pauf:60000000-0000-4000-8000-000000000001"
-        session["friction_category"] = "command_discovery"
-        session["finding_id"] = finding_id
+        session["friction_categories"] = ["command_discovery"]
+        session["finding_ids"] = [finding_id]
         value["findings"].append(  # type: ignore[union-attr]
             {
                 "finding_id": finding_id,
@@ -492,6 +539,42 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
         with self.assertRaisesRegex(
             usability.PolicyAdminUsabilityEvidenceError,
             "private_reference_invalid",
+        ):
+            usability.validate_evidence(value)
+
+    def test_one_session_can_record_every_observed_finding(self) -> None:
+        value = self._release_evidence()
+        origin, _ = self._add_blocked_origin(value)
+        second_id = "pauf:40000000-0000-4000-8000-000000000002"
+        origin["finding_ids"].append(second_id)  # type: ignore[union-attr]
+        origin["friction_categories"] = ["documentation", "verification"]
+        value["findings"].append(  # type: ignore[union-attr]
+            {
+                "finding_id": second_id,
+                "origin_session_id": origin["session_id"],
+                "track": "offline",
+                "category": "verification",
+                "blocker_reason": "content_or_credential_exposure",
+                "reference_type": "private_security_advisory",
+                "reference": (
+                    "private-advisory:70000000-0000-4000-8000-000000000002"
+                ),
+                "status": "open",
+                "correction": None,
+            }
+        )
+
+        result = usability.validate_evidence(value)
+
+        self.assertEqual(result["finding_count"], 2)
+        self.assertEqual(result["unresolved_blocker_count"], 2)
+        self.assertIn("blocker_open", result["reasons"])
+
+        origin["finding_ids"].remove(second_id)  # type: ignore[union-attr]
+        origin["friction_categories"] = ["documentation"]
+        with self.assertRaisesRegex(
+            usability.PolicyAdminUsabilityEvidenceError,
+            "finding_origin_invalid",
         ):
             usability.validate_evidence(value)
 
@@ -648,7 +731,7 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
         for index, session in enumerate(offline_sessions[:5]):
             session["release_artifact_digest"] = value["release"]["artifact_digest"]
             session["started_at"] = f"2026-08-27T1{3 + index}:00:00Z"
-        value["generated_at"] = "2026-08-27T23:00:00Z"
+        value["generated_at"] = "2026-08-27T20:00:00Z"
         result = usability.validate_evidence(value)
         self.assertNotIn("broad_workflow_gate_not_fully_rerun", result["reasons"])
         self.assertTrue(result["ready_for_v1_policy_admin_claim"])
@@ -713,6 +796,21 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
             ):
                 usability._read_evidence(root)
 
+            fifo = root / "evidence.pipe"
+            os.mkfifo(fifo)
+            with (
+                mock.patch.object(
+                    usability.os,
+                    "open",
+                    side_effect=AssertionError("FIFO must be rejected before open"),
+                ),
+                self.assertRaisesRegex(
+                    usability.PolicyAdminUsabilityEvidenceError,
+                    "evidence_not_regular",
+                ),
+            ):
+                usability._read_evidence(fifo)
+
             oversized = root / "oversized.json"
             oversized.write_bytes(b" " * (usability._MAX_EVIDENCE_BYTES + 1))
             with self.assertRaisesRegex(
@@ -729,6 +827,29 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
                 contextlib.redirect_stderr(stderr),
             ):
                 self.assertEqual(usability.main([str(nested)]), 2)
+            self.assertIn("evidence_invalid_json", stderr.getvalue())
+
+            stderr = io.StringIO()
+            with (
+                mock.patch.object(
+                    usability.json,
+                    "loads",
+                    side_effect=ValueError("oversized integer details"),
+                ),
+                contextlib.redirect_stderr(stderr),
+            ):
+                self.assertEqual(usability.main([str(nested)]), 2)
+            self.assertIn("evidence_invalid_json", stderr.getvalue())
+            self.assertNotIn("oversized integer details", stderr.getvalue())
+
+            huge_integer = root / "huge-integer.json"
+            huge_integer.write_text(
+                '{"value":' + ("9" * 5_000) + "}",
+                encoding="utf-8",
+            )
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                self.assertEqual(usability.main([str(huge_integer)]), 2)
             self.assertIn("evidence_invalid_json", stderr.getvalue())
 
     def test_source_distribution_and_docs_carry_the_gate_contract(self) -> None:
