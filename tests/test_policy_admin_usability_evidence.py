@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import copy
+import hashlib
 import importlib.util
 import io
 import json
@@ -76,6 +77,7 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
         origin["stages"][3]["status"] = "failed"  # type: ignore[index]
         origin["stages"][4]["status"] = "not_attempted"  # type: ignore[index]
         origin["stages"][5]["status"] = "not_attempted"  # type: ignore[index]
+        origin["offline_verification"] = None
         value["sessions"].append(origin)  # type: ignore[union-attr]
 
         correction = None
@@ -229,6 +231,79 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
         self.assertTrue(
             usability.validate_evidence(value)["ready_for_v1_policy_admin_claim"]
         )
+
+    def test_same_participant_sessions_must_not_overlap_in_time(self) -> None:
+        value = self._release_evidence()
+        postgresql = self._sessions(value, "postgresql")[0]
+        postgresql["started_at"] = "2026-08-27T11:05:00Z"
+        with self.assertRaisesRegex(
+            usability.PolicyAdminUsabilityEvidenceError,
+            "participant_sessions_overlap",
+        ):
+            usability.validate_evidence(value)
+
+        postgresql["started_at"] = "2026-08-27T11:10:00Z"
+        self.assertTrue(
+            usability.validate_evidence(value)["ready_for_v1_policy_admin_claim"]
+        )
+
+    def test_offline_completion_is_bound_to_shipped_assets_and_expected_results(
+        self,
+    ) -> None:
+        mutations = (
+            (
+                "baseline asset",
+                lambda verification: verification.update(
+                    baseline_asset_sha256="sha256:" + "0" * 64
+                ),
+                "offline_baseline_asset_unexpected",
+            ),
+            (
+                "scenario asset",
+                lambda verification: verification.update(
+                    scenario_suite_asset_sha256="sha256:" + "0" * 64
+                ),
+                "offline_scenario_asset_unexpected",
+            ),
+            (
+                "comparison result",
+                lambda verification: verification["comparison"].update(after=3999),
+                "offline_comparison_after_invalid",
+            ),
+            (
+                "candidate identity",
+                lambda verification: verification["comparison"].update(
+                    candidate_version_id="sha256:" + "3" * 64,
+                    candidate_content_sha256="3" * 64,
+                ),
+                "offline_comparison_identity_unexpected",
+            ),
+            (
+                "evaluation result",
+                lambda verification: verification["evaluation"].update(
+                    candidate_max_output_tokens=3999
+                ),
+                "offline_evaluation_candidate_max_output_tokens_invalid",
+            ),
+        )
+        for label, mutation, expected_error in mutations:
+            with self.subTest(label=label):
+                value = self._release_evidence()
+                session = self._sessions(value, "offline")[0]
+                mutation(session["offline_verification"])
+                with self.assertRaisesRegex(
+                    usability.PolicyAdminUsabilityEvidenceError,
+                    expected_error,
+                ):
+                    usability.validate_evidence(value)
+
+        value = self._release_evidence()
+        self._sessions(value, "offline")[0]["offline_verification"] = None
+        with self.assertRaisesRegex(
+            usability.PolicyAdminUsabilityEvidenceError,
+            "offline_verification_inconsistent",
+        ):
+            usability.validate_evidence(value)
 
     def test_unknown_content_fields_and_misordered_stages_fail_closed(self) -> None:
         value = self._release_evidence()
@@ -479,13 +554,48 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
             usability.validate_evidence(value)
 
     def test_each_approved_blocker_reason_blocks_the_gate(self) -> None:
-        for blocker_reason in usability.BLOCKER_REASONS - {"none"}:
+        offline_reasons = (
+            usability.BLOCKER_REASONS
+            - usability._POSTGRESQL_ONLY_BLOCKER_REASONS
+            - {"none"}
+        )
+        for blocker_reason in offline_reasons:
             with self.subTest(blocker_reason=blocker_reason):
                 value = self._release_evidence()
                 self._add_blocked_origin(value, blocker_reason=blocker_reason)
                 result = usability.validate_evidence(value)
                 self.assertIn("blocker_open", result["reasons"])
                 self.assertFalse(result["ready_for_v1_policy_admin_claim"])
+
+        categories = {
+            "authentication_bypass": "authentication",
+            "history_inconsistency": "history",
+            "wrong_policy_state": "verification",
+        }
+        for blocker_reason in usability._POSTGRESQL_ONLY_BLOCKER_REASONS:
+            with self.subTest(blocker_reason=blocker_reason):
+                value = self._release_evidence()
+                session = self._sessions(value, "postgresql")[0]
+                self._add_postgresql_blocker(
+                    value,
+                    session,
+                    category=categories[blocker_reason],
+                    blocker_reason=blocker_reason,
+                )
+                result = usability.validate_evidence(value)
+                self.assertIn("blocker_open", result["reasons"])
+                self.assertFalse(result["ready_for_v1_policy_admin_claim"])
+
+    def test_postgresql_only_blockers_are_rejected_for_offline_sessions(self) -> None:
+        for blocker_reason in usability._POSTGRESQL_ONLY_BLOCKER_REASONS:
+            with self.subTest(blocker_reason=blocker_reason):
+                value = self._release_evidence()
+                self._add_blocked_origin(value, blocker_reason=blocker_reason)
+                with self.assertRaisesRegex(
+                    usability.PolicyAdminUsabilityEvidenceError,
+                    "blocker_track_invalid",
+                ):
+                    usability.validate_evidence(value)
 
     def test_postgresql_blocker_before_state_verification_needs_no_fake_state(self) -> None:
         value = self._release_evidence()
@@ -894,22 +1004,40 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
         from hormuz.policy_scenarios import PolicyScenarioSuite
         from hormuz.store import MonthlyTotals, UsageStore
 
+        baseline_path = ROOT / "examples" / "policy-admin-usability-baseline.json"
+        suite_path = ROOT / "examples" / "policy-admin-usability-scenarios.json"
+        self.assertEqual(
+            "sha256:" + hashlib.sha256(baseline_path.read_bytes()).hexdigest(),
+            usability._OFFLINE_BASELINE_ASSET_SHA256,
+        )
+        self.assertEqual(
+            "sha256:" + hashlib.sha256(suite_path.read_bytes()).hexdigest(),
+            usability._OFFLINE_SCENARIO_SUITE_ASSET_SHA256,
+        )
         context = GatewayConfig.load_policy_analysis_context(ROOT / "config.example.json")
         baseline_mapping = json.loads(
-            (ROOT / "examples" / "policy-admin-usability-baseline.json").read_text(
-                encoding="utf-8"
-            )
+            baseline_path.read_text(encoding="utf-8")
         )
         suite_mapping = json.loads(
-            (ROOT / "examples" / "policy-admin-usability-scenarios.json").read_text(
-                encoding="utf-8"
-            )
+            suite_path.read_text(encoding="utf-8")
         )
         baseline = PolicyDocument.from_mapping(baseline_mapping, config=context)
         candidate_mapping = copy.deepcopy(baseline_mapping)
         candidate_mapping["policies"]["organization"]["max_output_tokens"] = 4000
         candidate = PolicyDocument.from_mapping(candidate_mapping, config=context)
         suite = PolicyScenarioSuite.from_mapping(suite_mapping)
+        self.assertEqual(
+            baseline.content_sha256,
+            usability._OFFLINE_BASELINE_CONTENT_SHA256,
+        )
+        self.assertEqual(
+            candidate.content_sha256,
+            usability._OFFLINE_CANDIDATE_CONTENT_SHA256,
+        )
+        self.assertEqual(
+            suite.content_sha256,
+            usability._OFFLINE_SCENARIO_SUITE_CONTENT_SHA256,
+        )
 
         comparison = compare_policy_documents(baseline, candidate)
         self.assertEqual(

@@ -159,14 +159,17 @@ that ships the complete protocol, configuration, examples, and validator kit;
 the package gate inspects those members in the built archive. The validator
 requires exactly five current-artifact offline participants and three
 current-artifact PostgreSQL participants. It computes unaided completion, the
-15- and 25-minute thresholds, allowed published-guidance use, and exact
-apply/history/rollback version, digest, and generation relationships. It also
-requires preregistration, complete started-session inclusion, no-replacement
-attestations, and aggregate generation no earlier than any computed session
-end or more than five minutes ahead of the validator clock. Sessions retain a
-bounded collection of every linked finding. PostgreSQL runs also require unique
-opaque run scopes, tenant-isolation attestations, and matching guarded apply and
-rollback values. Open blockers prevent readiness. Corrections require an
+15- and 25-minute thresholds, allowed published-guidance use, shipped offline
+asset and expected compare/evaluate bindings, and exact apply/history/rollback
+version, digest, and generation relationships. It also requires
+preregistration, complete started-session inclusion, no-replacement
+attestations, non-overlapping intervals for the same participant, and aggregate
+generation no earlier than any computed session end or more than five minutes
+ahead of the validator clock. Sessions retain a bounded collection of every
+linked finding, with managed-state blockers restricted to PostgreSQL runs.
+PostgreSQL runs also require unique opaque run scopes, tenant-isolation
+attestations, and matching guarded apply and rollback values. Open blockers
+prevent readiness. Corrections require an
 automated regression whose Actions source commit and canonical CI workflow are
 attested and bound to the exact corrected release, an exact
 digest/source/publication-time match to the release being gated, attested

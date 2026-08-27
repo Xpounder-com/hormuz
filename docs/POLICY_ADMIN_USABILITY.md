@@ -15,8 +15,9 @@ a different claim.
 
 Pre-register exactly five people for the offline cohort and exactly three for
 the PostgreSQL cohort before testing a release artifact. A person may be in
-both cohorts. Do not replace a failed participant with a later success or omit a
-run against the current artifact.
+both cohorts, but that person's measured session intervals must not overlap.
+Do not replace a failed participant with a later success or omit a run against
+the current artifact.
 
 The final aggregate explicitly attests that both cohorts were preregistered
 before testing, every started session is included, and no participant was
@@ -102,6 +103,16 @@ The offline cohort passes only when all five complete unaided, at least four
 finish in 900 seconds or less, and every participant finishes in 1,500 seconds
 or less.
 
+Each completed offline session records the SHA-256 digests of the exact shipped
+baseline and scenario-suite files plus a bounded, content-free summary of the
+observed comparison and evaluation contracts. The verifier binds those values
+to the kit shipped with itself: one semantic change at
+`policies.organization.max_output_tokens` from `16000` to `4000`, one changed
+`output-cap` scenario, both decisions allowed, and output caps of `16000` and
+`4000`. It also requires the canonical baseline, candidate, and suite
+identities, `usage_basis: current`, and an attestation that current SQLite usage
+was zero. Stage labels alone cannot qualify a session.
+
 ## PostgreSQL task card
 
 For each of three independent participants, provision a separate isolated
@@ -154,6 +165,12 @@ block the affected gate:
 - status and history disagree; or
 - policy, request, credential, token, or personal content is exposed.
 
+`wrong_policy_state`, `authentication_bypass`, and `history_inconsistency` are
+PostgreSQL-only blocker reasons because the offline task neither authenticates
+an administrator nor changes or inspects managed policy state. Offline compare
+or evaluation failures use the published-guidance, misleading-success, or
+content-exposure reasons as applicable.
+
 An open blocker always prevents the gate from passing. A resolved blocker must
 name a correction commit, the exact corrected release source commit, immutable
 corrected-release digest, successful GitHub Actions regression run with an
@@ -182,6 +199,8 @@ The strict `hormuz.policy-admin-usability-evidence` v1 aggregate records only:
 - author/reviewer, private-walkthrough, and assistance-count metadata;
 - bounded documentation/example/`--help` usage plus up to 20 finding IDs and
   their friction categories per session;
+- exact shipped offline-asset digests and bounded comparison/evaluation
+  identities, counts, booleans, semantic path, and public numeric outcomes;
 - public issue or opaque private-advisory references;
 - a unique opaque run scope and tenant-isolation attestation for each
   PostgreSQL session;
@@ -231,8 +250,9 @@ identity, session-end chronology, required attestations, metadata
 relationships, and the synthetic-evidence boundary. It cannot independently
 prove the off-repository cohort registration or identity mapping, that every
 started run was submitted, that a person was not privately coached, the
-attested PostgreSQL tenant isolation, that a participant actually supplied the
-recorded active-version guard, the attested Git ancestry, or the stated
+recorded offline outputs were personally observed, the attested PostgreSQL
+tenant isolation, that a participant actually supplied the recorded
+active-version guard, the attested Git ancestry, or the stated
 source/workflow binding and contents of a referenced Actions run without
 separately inspecting those systems. Passing this gate proves the bounded
 administrator tasks, not live-provider behavior, enterprise availability,

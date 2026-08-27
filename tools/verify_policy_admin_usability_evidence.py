@@ -131,6 +131,7 @@ _SESSION_FIELDS = {
     "outcome",
     "friction_categories",
     "finding_ids",
+    "offline_verification",
     "postgresql_isolation",
     "postgresql_verification",
     "content_free_attestations",
@@ -149,6 +150,43 @@ _CONTENT_FREE_FIELDS = {
     "identity_mapping_absent",
     "local_path_absent",
     "free_text_absent",
+}
+_OFFLINE_VERIFICATION_FIELDS = {
+    "baseline_asset_sha256",
+    "scenario_suite_asset_sha256",
+    "comparison",
+    "evaluation",
+}
+_OFFLINE_COMPARISON_FIELDS = {
+    "baseline_version_id",
+    "baseline_content_sha256",
+    "candidate_version_id",
+    "candidate_content_sha256",
+    "change_count",
+    "change_type",
+    "path",
+    "before",
+    "after",
+}
+_OFFLINE_EVALUATION_FIELDS = {
+    "suite_id",
+    "suite_content_sha256",
+    "usage_basis",
+    "current_usage_zero_attested",
+    "baseline_version_id",
+    "baseline_content_sha256",
+    "candidate_version_id",
+    "candidate_content_sha256",
+    "scenario_count",
+    "changed_count",
+    "baseline_allowed_count",
+    "candidate_allowed_count",
+    "scenario_id",
+    "scenario_changed",
+    "baseline_allowed",
+    "candidate_allowed",
+    "baseline_max_output_tokens",
+    "candidate_max_output_tokens",
 }
 _POSTGRESQL_ISOLATION_FIELDS = {
     "run_scope_id",
@@ -234,6 +272,29 @@ _V1_VERSION_RE = re.compile(
 )
 _MAX_EVIDENCE_BYTES = 1024 * 1024
 _MAX_GENERATION = 9_223_372_036_854_775_807
+# These identities bind a qualifying offline session to the exact public task
+# assets and normalized semantic outputs shipped beside this validator. The
+# regression suite recomputes them so an asset change cannot drift silently.
+_OFFLINE_BASELINE_ASSET_SHA256 = (
+    "sha256:fbd93fa23264617604d80732dfb8821089a58d0cfa2c0af939f08dbe471cc826"
+)
+_OFFLINE_SCENARIO_SUITE_ASSET_SHA256 = (
+    "sha256:e62e9c6bc1df830c2049f59e1ab0804f0bcd5a50d1debb8dc1d6ac2fc6476f91"
+)
+_OFFLINE_BASELINE_CONTENT_SHA256 = (
+    "9c0003887b437aa19de4274e8cb04a46ad402cbbfe06b02a16164c012500ea8a"
+)
+_OFFLINE_CANDIDATE_CONTENT_SHA256 = (
+    "a160954974f6d63e5863dc787cd2f9343d924bdbd261f0b1906ca882c3bbf212"
+)
+_OFFLINE_SCENARIO_SUITE_CONTENT_SHA256 = (
+    "792b02e08c5b3920898e85f9e828dc1cbc647cc8356e737546a35803f0e15ea9"
+)
+_POSTGRESQL_ONLY_BLOCKER_REASONS = {
+    "authentication_bypass",
+    "history_inconsistency",
+    "wrong_policy_state",
+}
 
 
 class PolicyAdminUsabilityEvidenceError(ValueError):
@@ -431,6 +492,150 @@ def _validate_observed_policy_identity(
 ) -> None:
     _require_pattern(version_id, _SHA256_RE, f"{label}_version_id")
     _require_pattern(content_sha256, _CONTENT_SHA256_RE, f"{label}_content_sha256")
+
+
+def _validate_offline(value: object, label: str) -> None:
+    verification = _require_fields(
+        value,
+        _OFFLINE_VERIFICATION_FIELDS,
+        f"{label}_offline_verification",
+    )
+    baseline_asset = _require_pattern(
+        verification["baseline_asset_sha256"],
+        _SHA256_RE,
+        f"{label}_offline_baseline_asset",
+    )
+    if baseline_asset != _OFFLINE_BASELINE_ASSET_SHA256:
+        raise PolicyAdminUsabilityEvidenceError(
+            f"{label}_offline_baseline_asset_unexpected"
+        )
+    scenario_asset = _require_pattern(
+        verification["scenario_suite_asset_sha256"],
+        _SHA256_RE,
+        f"{label}_offline_scenario_asset",
+    )
+    if scenario_asset != _OFFLINE_SCENARIO_SUITE_ASSET_SHA256:
+        raise PolicyAdminUsabilityEvidenceError(
+            f"{label}_offline_scenario_asset_unexpected"
+        )
+
+    comparison = _require_fields(
+        verification["comparison"],
+        _OFFLINE_COMPARISON_FIELDS,
+        f"{label}_offline_comparison",
+    )
+    _validate_policy_identity(
+        comparison["baseline_version_id"],
+        comparison["baseline_content_sha256"],
+        f"{label}_offline_comparison_baseline",
+    )
+    _validate_policy_identity(
+        comparison["candidate_version_id"],
+        comparison["candidate_content_sha256"],
+        f"{label}_offline_comparison_candidate",
+    )
+    if (
+        comparison["baseline_content_sha256"]
+        != _OFFLINE_BASELINE_CONTENT_SHA256
+        or comparison["candidate_content_sha256"]
+        != _OFFLINE_CANDIDATE_CONTENT_SHA256
+    ):
+        raise PolicyAdminUsabilityEvidenceError(
+            f"{label}_offline_comparison_identity_unexpected"
+        )
+    _require_int(
+        comparison["change_count"],
+        1,
+        1,
+        f"{label}_offline_comparison_change_count",
+    )
+    _require_enum(
+        comparison["change_type"],
+        {"changed"},
+        f"{label}_offline_comparison_change_type",
+    )
+    _require_enum(
+        comparison["path"],
+        {"policies.organization.max_output_tokens"},
+        f"{label}_offline_comparison_path",
+    )
+    _require_int(
+        comparison["before"],
+        16_000,
+        16_000,
+        f"{label}_offline_comparison_before",
+    )
+    _require_int(
+        comparison["after"],
+        4_000,
+        4_000,
+        f"{label}_offline_comparison_after",
+    )
+
+    evaluation = _require_fields(
+        verification["evaluation"],
+        _OFFLINE_EVALUATION_FIELDS,
+        f"{label}_offline_evaluation",
+    )
+    _validate_policy_identity(
+        evaluation["suite_id"],
+        evaluation["suite_content_sha256"],
+        f"{label}_offline_evaluation_suite",
+    )
+    _validate_policy_identity(
+        evaluation["baseline_version_id"],
+        evaluation["baseline_content_sha256"],
+        f"{label}_offline_evaluation_baseline",
+    )
+    _validate_policy_identity(
+        evaluation["candidate_version_id"],
+        evaluation["candidate_content_sha256"],
+        f"{label}_offline_evaluation_candidate",
+    )
+    if (
+        evaluation["suite_content_sha256"]
+        != _OFFLINE_SCENARIO_SUITE_CONTENT_SHA256
+        or evaluation["baseline_content_sha256"]
+        != _OFFLINE_BASELINE_CONTENT_SHA256
+        or evaluation["candidate_content_sha256"]
+        != _OFFLINE_CANDIDATE_CONTENT_SHA256
+    ):
+        raise PolicyAdminUsabilityEvidenceError(
+            f"{label}_offline_evaluation_identity_unexpected"
+        )
+    _require_enum(
+        evaluation["usage_basis"],
+        {"current"},
+        f"{label}_offline_evaluation_usage_basis",
+    )
+    if evaluation["current_usage_zero_attested"] is not True:
+        raise PolicyAdminUsabilityEvidenceError(
+            f"{label}_offline_evaluation_usage_invalid"
+        )
+    for field, expected in (
+        ("scenario_count", 1),
+        ("changed_count", 1),
+        ("baseline_allowed_count", 1),
+        ("candidate_allowed_count", 1),
+        ("baseline_max_output_tokens", 16_000),
+        ("candidate_max_output_tokens", 4_000),
+    ):
+        _require_int(
+            evaluation[field],
+            expected,
+            expected,
+            f"{label}_offline_evaluation_{field}",
+        )
+    _require_enum(
+        evaluation["scenario_id"],
+        {"output-cap"},
+        f"{label}_offline_evaluation_scenario_id",
+    )
+    for field in ("scenario_changed", "baseline_allowed", "candidate_allowed"):
+        if evaluation[field] is not True:
+            raise PolicyAdminUsabilityEvidenceError(
+                f"{label}_offline_evaluation_{field}_invalid"
+            )
 
 
 def _validate_postgresql(value: object, label: str) -> None:
@@ -661,6 +866,7 @@ def _validate_session(value: object, index: int) -> dict[str, Any]:
     if "none" in friction_categories and friction_categories != ["none"]:
         raise PolicyAdminUsabilityEvidenceError(f"{label}_finding_inconsistent")
 
+    offline_verification = session["offline_verification"]
     verification = session["postgresql_verification"]
     if track == "offline":
         if session["postgresql_isolation"] is not None:
@@ -669,7 +875,17 @@ def _validate_session(value: object, index: int) -> dict[str, Any]:
             )
         if verification is not None:
             raise PolicyAdminUsabilityEvidenceError(f"{label}_postgresql_unexpected")
+        if offline_verification is not None:
+            _validate_offline(offline_verification, label)
+        if _actions_complete(session) != (offline_verification is not None):
+            raise PolicyAdminUsabilityEvidenceError(
+                f"{label}_offline_verification_inconsistent"
+            )
     else:
+        if offline_verification is not None:
+            raise PolicyAdminUsabilityEvidenceError(
+                f"{label}_offline_verification_unexpected"
+            )
         isolation = _require_fields(
             session["postgresql_isolation"],
             _POSTGRESQL_ISOLATION_FIELDS,
@@ -769,11 +985,13 @@ def _validate_finding(value: object, index: int) -> dict[str, Any]:
     _require_pattern(
         finding["origin_session_id"], _SESSION_ID_RE, f"{label}_origin_session"
     )
-    _require_enum(finding["track"], TRACKS, f"{label}_track")
+    track = _require_enum(finding["track"], TRACKS, f"{label}_track")
     _require_enum(finding["category"], FRICTION_CATEGORIES - {"none"}, f"{label}_category")
     blocker_reason = _require_enum(
         finding["blocker_reason"], BLOCKER_REASONS, f"{label}_blocker"
     )
+    if track == "offline" and blocker_reason in _POSTGRESQL_ONLY_BLOCKER_REASONS:
+        raise PolicyAdminUsabilityEvidenceError(f"{label}_blocker_track_invalid")
     reference_type = _require_enum(
         finding["reference_type"], REFERENCE_TYPES, f"{label}_reference_type"
     )
@@ -839,6 +1057,7 @@ def validate_evidence(value: object) -> dict[str, object]:
     ]
     if len(postgresql_scope_ids) != len(set(postgresql_scope_ids)):
         raise PolicyAdminUsabilityEvidenceError("postgresql_run_scope_ids_duplicated")
+    participant_intervals: dict[str, list[tuple[datetime, datetime]]] = {}
     for session in sessions:
         started_at = _require_timestamp(session["started_at"], "session_started_at")
         if started_at > generated_at:
@@ -851,11 +1070,25 @@ def validate_evidence(value: object) -> dict[str, object]:
             ) from error
         if completed_at > generated_at:
             raise PolicyAdminUsabilityEvidenceError("session_ends_after_generation")
+        participant_intervals.setdefault(session["participant_id"], []).append(
+            (started_at, completed_at)
+        )
         if (
             session["release_artifact_digest"] == release["artifact_digest"]
             and started_at < release_published_at
         ):
             raise PolicyAdminUsabilityEvidenceError("session_before_release")
+    for intervals in participant_intervals.values():
+        ordered = sorted(intervals)
+        for (_, previous_end), (current_start, _) in zip(
+            ordered,
+            ordered[1:],
+            strict=False,
+        ):
+            if current_start < previous_end:
+                raise PolicyAdminUsabilityEvidenceError(
+                    "participant_sessions_overlap"
+                )
 
     raw_findings = root["findings"]
     if not isinstance(raw_findings, list) or len(raw_findings) > 100:

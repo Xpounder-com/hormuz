@@ -49,6 +49,41 @@
       "outcome": "completed",
       "friction_categories": ["none"],
       "finding_ids": [],
+      "offline_verification": {
+        "baseline_asset_sha256": "sha256:fbd93fa23264617604d80732dfb8821089a58d0cfa2c0af939f08dbe471cc826",
+        "scenario_suite_asset_sha256": "sha256:e62e9c6bc1df830c2049f59e1ab0804f0bcd5a50d1debb8dc1d6ac2fc6476f91",
+        "comparison": {
+          "baseline_version_id": "sha256:9c0003887b437aa19de4274e8cb04a46ad402cbbfe06b02a16164c012500ea8a",
+          "baseline_content_sha256": "9c0003887b437aa19de4274e8cb04a46ad402cbbfe06b02a16164c012500ea8a",
+          "candidate_version_id": "sha256:a160954974f6d63e5863dc787cd2f9343d924bdbd261f0b1906ca882c3bbf212",
+          "candidate_content_sha256": "a160954974f6d63e5863dc787cd2f9343d924bdbd261f0b1906ca882c3bbf212",
+          "change_count": 1,
+          "change_type": "changed",
+          "path": "policies.organization.max_output_tokens",
+          "before": 16000,
+          "after": 4000
+        },
+        "evaluation": {
+          "suite_id": "sha256:792b02e08c5b3920898e85f9e828dc1cbc647cc8356e737546a35803f0e15ea9",
+          "suite_content_sha256": "792b02e08c5b3920898e85f9e828dc1cbc647cc8356e737546a35803f0e15ea9",
+          "usage_basis": "current",
+          "current_usage_zero_attested": true,
+          "baseline_version_id": "sha256:9c0003887b437aa19de4274e8cb04a46ad402cbbfe06b02a16164c012500ea8a",
+          "baseline_content_sha256": "9c0003887b437aa19de4274e8cb04a46ad402cbbfe06b02a16164c012500ea8a",
+          "candidate_version_id": "sha256:a160954974f6d63e5863dc787cd2f9343d924bdbd261f0b1906ca882c3bbf212",
+          "candidate_content_sha256": "a160954974f6d63e5863dc787cd2f9343d924bdbd261f0b1906ca882c3bbf212",
+          "scenario_count": 1,
+          "changed_count": 1,
+          "baseline_allowed_count": 1,
+          "candidate_allowed_count": 1,
+          "scenario_id": "output-cap",
+          "scenario_changed": true,
+          "baseline_allowed": true,
+          "candidate_allowed": true,
+          "baseline_max_output_tokens": 16000,
+          "candidate_max_output_tokens": 4000
+        }
+      },
       "postgresql_isolation": null,
       "postgresql_verification": null,
       "content_free_attestations": {
@@ -88,6 +123,41 @@
       "outcome": "completed",
       "friction_categories": ["none"],
       "finding_ids": [],
+      "offline_verification": {
+        "baseline_asset_sha256": "sha256:fbd93fa23264617604d80732dfb8821089a58d0cfa2c0af939f08dbe471cc826",
+        "scenario_suite_asset_sha256": "sha256:e62e9c6bc1df830c2049f59e1ab0804f0bcd5a50d1debb8dc1d6ac2fc6476f91",
+        "comparison": {
+          "baseline_version_id": "sha256:9c0003887b437aa19de4274e8cb04a46ad402cbbfe06b02a16164c012500ea8a",
+          "baseline_content_sha256": "9c0003887b437aa19de4274e8cb04a46ad402cbbfe06b02a16164c012500ea8a",
+          "candidate_version_id": "sha256:a160954974f6d63e5863dc787cd2f9343d924bdbd261f0b1906ca882c3bbf212",
+          "candidate_content_sha256": "a160954974f6d63e5863dc787cd2f9343d924bdbd261f0b1906ca882c3bbf212",
+          "change_count": 1,
+          "change_type": "changed",
+          "path": "policies.organization.max_output_tokens",
+          "before": 16000,
+          "after": 4000
+        },
+        "evaluation": {
+          "suite_id": "sha256:792b02e08c5b3920898e85f9e828dc1cbc647cc8356e737546a35803f0e15ea9",
+          "suite_content_sha256": "792b02e08c5b3920898e85f9e828dc1cbc647cc8356e737546a35803f0e15ea9",
+          "usage_basis": "current",
+          "current_usage_zero_attested": true,
+          "baseline_version_id": "sha256:9c0003887b437aa19de4274e8cb04a46ad402cbbfe06b02a16164c012500ea8a",
+          "baseline_content_sha256": "9c0003887b437aa19de4274e8cb04a46ad402cbbfe06b02a16164c012500ea8a",
+          "candidate_version_id": "sha256:a160954974f6d63e5863dc787cd2f9343d924bdbd261f0b1906ca882c3bbf212",
+          "candidate_content_sha256": "a160954974f6d63e5863dc787cd2f9343d924bdbd261f0b1906ca882c3bbf212",
+          "scenario_count": 1,
+          "changed_count": 1,
+          "baseline_allowed_count": 1,
+          "candidate_allowed_count": 1,
+          "scenario_id": "output-cap",
+          "scenario_changed": true,
+          "baseline_allowed": true,
+          "candidate_allowed": true,
+          "baseline_max_output_tokens": 16000,
+          "candidate_max_output_tokens": 4000
+        }
+      },
       "postgresql_isolation": null,
       "postgresql_verification": null,
       "content_free_attestations": {
@@ -127,6 +197,41 @@
       "outcome": "completed",
       "friction_categories": ["none"],
       "finding_ids": [],
+      "offline_verification": {
+        "baseline_asset_sha256": "sha256:fbd93fa23264617604d80732dfb8821089a58d0cfa2c0af939f08dbe471cc826",
+        "scenario_suite_asset_sha256": "sha256:e62e9c6bc1df830c2049f59e1ab0804f0bcd5a50d1debb8dc1d6ac2fc6476f91",
+        "comparison": {
+          "baseline_version_id": "sha256:9c0003887b437aa19de4274e8cb04a46ad402cbbfe06b02a16164c012500ea8a",
+          "baseline_content_sha256": "9c0003887b437aa19de4274e8cb04a46ad402cbbfe06b02a16164c012500ea8a",
+          "candidate_version_id": "sha256:a160954974f6d63e5863dc787cd2f9343d924bdbd261f0b1906ca882c3bbf212",
+          "candidate_content_sha256": "a160954974f6d63e5863dc787cd2f9343d924bdbd261f0b1906ca882c3bbf212",
+          "change_count": 1,
+          "change_type": "changed",
+          "path": "policies.organization.max_output_tokens",
+          "before": 16000,
+          "after": 4000
+        },
+        "evaluation": {
+          "suite_id": "sha256:792b02e08c5b3920898e85f9e828dc1cbc647cc8356e737546a35803f0e15ea9",
+          "suite_content_sha256": "792b02e08c5b3920898e85f9e828dc1cbc647cc8356e737546a35803f0e15ea9",
+          "usage_basis": "current",
+          "current_usage_zero_attested": true,
+          "baseline_version_id": "sha256:9c0003887b437aa19de4274e8cb04a46ad402cbbfe06b02a16164c012500ea8a",
+          "baseline_content_sha256": "9c0003887b437aa19de4274e8cb04a46ad402cbbfe06b02a16164c012500ea8a",
+          "candidate_version_id": "sha256:a160954974f6d63e5863dc787cd2f9343d924bdbd261f0b1906ca882c3bbf212",
+          "candidate_content_sha256": "a160954974f6d63e5863dc787cd2f9343d924bdbd261f0b1906ca882c3bbf212",
+          "scenario_count": 1,
+          "changed_count": 1,
+          "baseline_allowed_count": 1,
+          "candidate_allowed_count": 1,
+          "scenario_id": "output-cap",
+          "scenario_changed": true,
+          "baseline_allowed": true,
+          "candidate_allowed": true,
+          "baseline_max_output_tokens": 16000,
+          "candidate_max_output_tokens": 4000
+        }
+      },
       "postgresql_isolation": null,
       "postgresql_verification": null,
       "content_free_attestations": {
@@ -166,6 +271,41 @@
       "outcome": "completed",
       "friction_categories": ["none"],
       "finding_ids": [],
+      "offline_verification": {
+        "baseline_asset_sha256": "sha256:fbd93fa23264617604d80732dfb8821089a58d0cfa2c0af939f08dbe471cc826",
+        "scenario_suite_asset_sha256": "sha256:e62e9c6bc1df830c2049f59e1ab0804f0bcd5a50d1debb8dc1d6ac2fc6476f91",
+        "comparison": {
+          "baseline_version_id": "sha256:9c0003887b437aa19de4274e8cb04a46ad402cbbfe06b02a16164c012500ea8a",
+          "baseline_content_sha256": "9c0003887b437aa19de4274e8cb04a46ad402cbbfe06b02a16164c012500ea8a",
+          "candidate_version_id": "sha256:a160954974f6d63e5863dc787cd2f9343d924bdbd261f0b1906ca882c3bbf212",
+          "candidate_content_sha256": "a160954974f6d63e5863dc787cd2f9343d924bdbd261f0b1906ca882c3bbf212",
+          "change_count": 1,
+          "change_type": "changed",
+          "path": "policies.organization.max_output_tokens",
+          "before": 16000,
+          "after": 4000
+        },
+        "evaluation": {
+          "suite_id": "sha256:792b02e08c5b3920898e85f9e828dc1cbc647cc8356e737546a35803f0e15ea9",
+          "suite_content_sha256": "792b02e08c5b3920898e85f9e828dc1cbc647cc8356e737546a35803f0e15ea9",
+          "usage_basis": "current",
+          "current_usage_zero_attested": true,
+          "baseline_version_id": "sha256:9c0003887b437aa19de4274e8cb04a46ad402cbbfe06b02a16164c012500ea8a",
+          "baseline_content_sha256": "9c0003887b437aa19de4274e8cb04a46ad402cbbfe06b02a16164c012500ea8a",
+          "candidate_version_id": "sha256:a160954974f6d63e5863dc787cd2f9343d924bdbd261f0b1906ca882c3bbf212",
+          "candidate_content_sha256": "a160954974f6d63e5863dc787cd2f9343d924bdbd261f0b1906ca882c3bbf212",
+          "scenario_count": 1,
+          "changed_count": 1,
+          "baseline_allowed_count": 1,
+          "candidate_allowed_count": 1,
+          "scenario_id": "output-cap",
+          "scenario_changed": true,
+          "baseline_allowed": true,
+          "candidate_allowed": true,
+          "baseline_max_output_tokens": 16000,
+          "candidate_max_output_tokens": 4000
+        }
+      },
       "postgresql_isolation": null,
       "postgresql_verification": null,
       "content_free_attestations": {
@@ -205,6 +345,41 @@
       "outcome": "completed",
       "friction_categories": ["none"],
       "finding_ids": [],
+      "offline_verification": {
+        "baseline_asset_sha256": "sha256:fbd93fa23264617604d80732dfb8821089a58d0cfa2c0af939f08dbe471cc826",
+        "scenario_suite_asset_sha256": "sha256:e62e9c6bc1df830c2049f59e1ab0804f0bcd5a50d1debb8dc1d6ac2fc6476f91",
+        "comparison": {
+          "baseline_version_id": "sha256:9c0003887b437aa19de4274e8cb04a46ad402cbbfe06b02a16164c012500ea8a",
+          "baseline_content_sha256": "9c0003887b437aa19de4274e8cb04a46ad402cbbfe06b02a16164c012500ea8a",
+          "candidate_version_id": "sha256:a160954974f6d63e5863dc787cd2f9343d924bdbd261f0b1906ca882c3bbf212",
+          "candidate_content_sha256": "a160954974f6d63e5863dc787cd2f9343d924bdbd261f0b1906ca882c3bbf212",
+          "change_count": 1,
+          "change_type": "changed",
+          "path": "policies.organization.max_output_tokens",
+          "before": 16000,
+          "after": 4000
+        },
+        "evaluation": {
+          "suite_id": "sha256:792b02e08c5b3920898e85f9e828dc1cbc647cc8356e737546a35803f0e15ea9",
+          "suite_content_sha256": "792b02e08c5b3920898e85f9e828dc1cbc647cc8356e737546a35803f0e15ea9",
+          "usage_basis": "current",
+          "current_usage_zero_attested": true,
+          "baseline_version_id": "sha256:9c0003887b437aa19de4274e8cb04a46ad402cbbfe06b02a16164c012500ea8a",
+          "baseline_content_sha256": "9c0003887b437aa19de4274e8cb04a46ad402cbbfe06b02a16164c012500ea8a",
+          "candidate_version_id": "sha256:a160954974f6d63e5863dc787cd2f9343d924bdbd261f0b1906ca882c3bbf212",
+          "candidate_content_sha256": "a160954974f6d63e5863dc787cd2f9343d924bdbd261f0b1906ca882c3bbf212",
+          "scenario_count": 1,
+          "changed_count": 1,
+          "baseline_allowed_count": 1,
+          "candidate_allowed_count": 1,
+          "scenario_id": "output-cap",
+          "scenario_changed": true,
+          "baseline_allowed": true,
+          "candidate_allowed": true,
+          "baseline_max_output_tokens": 16000,
+          "candidate_max_output_tokens": 4000
+        }
+      },
       "postgresql_isolation": null,
       "postgresql_verification": null,
       "content_free_attestations": {
@@ -244,6 +419,7 @@
       "outcome": "completed",
       "friction_categories": ["none"],
       "finding_ids": [],
+      "offline_verification": null,
       "postgresql_isolation": {
         "run_scope_id": "pauscope:60000000-0000-4000-8000-000000000001",
         "isolated_tenant_attested": true
@@ -323,6 +499,7 @@
       "outcome": "completed",
       "friction_categories": ["none"],
       "finding_ids": [],
+      "offline_verification": null,
       "postgresql_isolation": {
         "run_scope_id": "pauscope:60000000-0000-4000-8000-000000000002",
         "isolated_tenant_attested": true
@@ -402,6 +579,7 @@
       "outcome": "completed",
       "friction_categories": ["none"],
       "finding_ids": [],
+      "offline_verification": null,
       "postgresql_isolation": {
         "run_scope_id": "pauscope:60000000-0000-4000-8000-000000000003",
         "isolated_tenant_attested": true
