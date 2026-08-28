@@ -31,6 +31,7 @@ PROMOTION_SCHEMA_ID = "hormuz.v1-candidate-promotion-readiness"
 FINAL_RELEASE_PROOF_SCHEMA_ID = "hormuz.v1-final-release-proof"
 FINAL_TAG_PROOF_SCHEMA_ID = "hormuz.v1-final-tag-proof"
 EVIDENCE_SNAPSHOT_SCHEMA_ID = "hormuz.v1-candidate-evidence-snapshot"
+FREEZE_AUTHORIZATION_PROOF_SCHEMA_ID = "hormuz.v1-freeze-authorization-proof"
 EXPECTED_REPOSITORY = "Xpounder-com/hormuz"
 TARGET_VERSION = "v1.0.0"
 PACKAGE_NAME = "hormuz"
@@ -43,6 +44,7 @@ GATE_ISSUE = "https://github.com/Xpounder-com/hormuz/issues/173"
 EVIDENCE_SCHEMA_ID = "hormuz.policy-admin-usability-evidence"
 EVIDENCE_SCHEMA_VERSION = 2
 WORKFLOW_PATH = ".github/workflows/freeze-v1-candidate.yml"
+FREEZE_AUTHORIZATION_JOB_NAME = "Authorize the designated v1 release steward"
 MAX_ARCHIVE_BYTES = 64 * 1024 * 1024
 MAX_JSON_BYTES = 2 * 1024 * 1024
 MAX_ARCHIVE_MEMBERS = 20_000
@@ -149,6 +151,99 @@ def _read_json(path: Path, *, label: str) -> object:
         _safe_read(path, maximum=MAX_JSON_BYTES, label=label),
         label=label,
     )
+
+
+def validate_freeze_run_authorization(
+    runs_api_path: Path,
+    jobs_directory: Path,
+    *,
+    source_commit: str,
+    current_run_id: int,
+) -> dict[str, object]:
+    if _REVISION_RE.fullmatch(source_commit) is None:
+        raise V1CandidateError("freeze_authorization_source_commit_invalid")
+    if (
+        isinstance(current_run_id, bool)
+        or not isinstance(current_run_id, int)
+        or current_run_id < 1
+    ):
+        raise V1CandidateError("freeze_authorization_current_run_invalid")
+    try:
+        jobs_directory_mode = jobs_directory.lstat().st_mode
+    except OSError as error:
+        raise V1CandidateError("freeze_authorization_jobs_unavailable") from error
+    if not stat.S_ISDIR(jobs_directory_mode):
+        raise V1CandidateError("freeze_authorization_jobs_not_directory")
+
+    pages = _read_json(runs_api_path, label="freeze_runs_api")
+    if not isinstance(pages, list) or not pages:
+        raise V1CandidateError("freeze_runs_api_invalid")
+    run_ids: list[int] = []
+    for page in pages:
+        if not isinstance(page, dict) or not isinstance(
+            page.get("workflow_runs"), list
+        ):
+            raise V1CandidateError("freeze_runs_api_invalid")
+        for run in page["workflow_runs"]:
+            if not isinstance(run, dict):
+                raise V1CandidateError("freeze_runs_api_invalid")
+            run_id = run.get("id")
+            workflow_path = run.get("path")
+            if (
+                isinstance(run_id, bool)
+                or not isinstance(run_id, int)
+                or run_id < 1
+                or run.get("event") != "workflow_dispatch"
+                or run.get("head_sha") != source_commit
+                or not isinstance(workflow_path, str)
+                or workflow_path.split("@", 1)[0] != WORKFLOW_PATH
+                or run_id in run_ids
+            ):
+                raise V1CandidateError("freeze_runs_api_invalid")
+            run_ids.append(run_id)
+    if current_run_id not in run_ids:
+        raise V1CandidateError("freeze_authorization_current_run_missing")
+
+    authorized_run_ids: list[int] = []
+    for run_id in run_ids:
+        job_pages = _read_json(
+            jobs_directory / f"{run_id}.json",
+            label=f"freeze_run_{run_id}_jobs_api",
+        )
+        if not isinstance(job_pages, list) or not job_pages:
+            raise V1CandidateError("freeze_jobs_api_invalid")
+        authorization_succeeded = False
+        for page in job_pages:
+            if not isinstance(page, dict) or not isinstance(page.get("jobs"), list):
+                raise V1CandidateError("freeze_jobs_api_invalid")
+            for job in page["jobs"]:
+                if (
+                    not isinstance(job, dict)
+                    or job.get("run_id") != run_id
+                    or job.get("head_sha") != source_commit
+                ):
+                    raise V1CandidateError("freeze_jobs_api_invalid")
+                if (
+                    job.get("name") == FREEZE_AUTHORIZATION_JOB_NAME
+                    and job.get("status") == "completed"
+                    and job.get("conclusion") == "success"
+                ):
+                    authorization_succeeded = True
+        if authorization_succeeded:
+            authorized_run_ids.append(run_id)
+
+    if authorized_run_ids != [current_run_id]:
+        raise V1CandidateError("freeze_run_authorization_invalid")
+    return {
+        "schema_id": FREEZE_AUTHORIZATION_PROOF_SCHEMA_ID,
+        "schema_version": 1,
+        "status": "only_current_run_authorized",
+        "source_commit": source_commit,
+        "current_run_id": current_run_id,
+        "observed_run_count": len(run_ids),
+        "authorized_run_ids": authorized_run_ids,
+        "authorization_job_name": FREEZE_AUTHORIZATION_JOB_NAME,
+    }
 
 
 def _sha256(payload: bytes) -> str:
@@ -1007,12 +1102,50 @@ def validate_final_tag_annotation(
     gate_evidence_digest: str,
     candidate_tag: str,
 ) -> dict[str, object]:
+    payload = _safe_read(
+        message_path,
+        maximum=16 * 1024,
+        label="final_tag_annotation",
+    )
+    return _validate_final_tag_annotation_payload(
+        payload,
+        candidate_digest=candidate_digest,
+        gate_evidence_digest=gate_evidence_digest,
+        candidate_tag=candidate_tag,
+    )
+
+
+def validate_final_tag_annotation_record(
+    message_path: Path,
+    *,
+    candidate_digest: str,
+    gate_evidence_digest: str,
+    candidate_tag: str,
+) -> dict[str, object]:
+    payload = _safe_read(
+        message_path,
+        maximum=16 * 1024,
+        label="final_tag_annotation_record",
+    )
+    if not payload.endswith(b"\n"):
+        raise V1CandidateError("final_tag_annotation_record_invalid")
+    return _validate_final_tag_annotation_payload(
+        payload[:-1],
+        candidate_digest=candidate_digest,
+        gate_evidence_digest=gate_evidence_digest,
+        candidate_tag=candidate_tag,
+    )
+
+
+def _validate_final_tag_annotation_payload(
+    payload: bytes,
+    *,
+    candidate_digest: str,
+    gate_evidence_digest: str,
+    candidate_tag: str,
+) -> dict[str, object]:
     try:
-        message = _safe_read(
-            message_path,
-            maximum=16 * 1024,
-            label="final_tag_annotation",
-        ).decode("utf-8")
+        message = payload.decode("utf-8")
     except UnicodeError as error:
         raise V1CandidateError("final_tag_annotation_invalid") from error
     _validate_final_tag_annotation_text(
@@ -1131,6 +1264,26 @@ def _parser() -> argparse.ArgumentParser:
     tag_annotation.add_argument("--candidate-tag", required=True)
     tag_annotation.add_argument("--output", required=True, type=Path)
 
+    tag_annotation_record = commands.add_parser(
+        "tag-annotation-record",
+        help="verify a Git for-each-ref annotation record without losing trailing bytes",
+    )
+    tag_annotation_record.add_argument("--message", required=True, type=Path)
+    tag_annotation_record.add_argument("--candidate-digest", required=True)
+    tag_annotation_record.add_argument("--gate-evidence-digest", required=True)
+    tag_annotation_record.add_argument("--candidate-tag", required=True)
+    tag_annotation_record.add_argument("--output", required=True, type=Path)
+
+    freeze_authorization = commands.add_parser(
+        "freeze-authorization",
+        help="prove only the current exact-commit freeze run was authorized",
+    )
+    freeze_authorization.add_argument("--runs-api", required=True, type=Path)
+    freeze_authorization.add_argument("--jobs-directory", required=True, type=Path)
+    freeze_authorization.add_argument("--source-commit", required=True)
+    freeze_authorization.add_argument("--current-run-id", required=True, type=int)
+    freeze_authorization.add_argument("--output", required=True, type=Path)
+
     final_tag = commands.add_parser(
         "final-tag", help="verify the exact protected final-tag object"
     )
@@ -1209,6 +1362,20 @@ def main(argv: list[str] | None = None) -> int:
                 candidate_digest=args.candidate_digest,
                 gate_evidence_digest=args.gate_evidence_digest,
                 candidate_tag=args.candidate_tag,
+            )
+        elif args.command == "tag-annotation-record":
+            result = validate_final_tag_annotation_record(
+                args.message,
+                candidate_digest=args.candidate_digest,
+                gate_evidence_digest=args.gate_evidence_digest,
+                candidate_tag=args.candidate_tag,
+            )
+        elif args.command == "freeze-authorization":
+            result = validate_freeze_run_authorization(
+                args.runs_api,
+                args.jobs_directory,
+                source_commit=args.source_commit,
+                current_run_id=args.current_run_id,
             )
         elif args.command == "final-tag":
             result = validate_final_tag_object(

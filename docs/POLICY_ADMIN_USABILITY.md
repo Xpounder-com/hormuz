@@ -78,7 +78,11 @@ before the write-capable freeze job can start. The freeze job also targets the
 protected `v1-release-custody` GitHub environment. That environment must allow
 only protected branches and require exactly that steward as its reviewer; an
 unauthorized failed dispatch is excluded from the one-run count and cannot
-poison a later legitimate freeze.
+poison a later legitimate freeze. The one-run decision is based on the recorded
+successful authorization job, not the steward's current login. Rotating the
+steward therefore never makes a previously authorized attempt disappear: that
+source commit is consumed and recovery requires a new commit even if no archive
+was ultimately published.
 Before that one build, the workflow uses the owner-supplied
 `V1_RELEASE_ADMIN_TOKEN` secret, scoped to read-only repository Administration
 and Environments, to verify the live settings. Immutable Releases must already
@@ -166,7 +170,10 @@ commit, was created no earlier than the validated aggregate, and its annotation
 has exactly the title and three standalone fields for the candidate custody
 tag, archive digest, and gate-evidence digest, with no extra or conflicting
 claims. That protected annotation is the authoritative promotion binding even
-if editable release-page text later changes. Only after this second
+if editable release-page text later changes. Before pushing a local tag, the
+command validates the complete Git-rendered annotation record without shell
+newline normalization, so trailing blank paragraphs or claims cannot be hidden.
+Only after this second
 verification does the command create a directly published, metadata-only
 immutable `v1.0.0` GitHub Release. Its deterministic notes link to the canonical
 archive and manifest under the digest-addressed candidate tag and repeat the

@@ -890,15 +890,121 @@ class V1CandidateTests(unittest.TestCase):
                     "--format=%(contents)",
                     "refs/tags/v1.0.0",
                 ]
-            ).decode("utf-8").rstrip("\n")
-            message_path.write_text(serialized, encoding="utf-8")
-            proof = v1_candidate.validate_final_tag_annotation(
+            )
+            message_path.write_bytes(serialized)
+            proof = v1_candidate.validate_final_tag_annotation_record(
                 message_path,
                 candidate_digest=candidate_digest,
                 gate_evidence_digest=gate_digest,
                 candidate_tag=candidate_tag,
             )
             self.assertEqual(proof["status"], "exact_annotation_valid")
+
+            # Git appends one record terminator after %(contents). Preserve and
+            # remove only that byte; an extra newline in the tag itself must
+            # remain visible to the exact annotation validator.
+            self.assertTrue(serialized.endswith(b"\n\n"))
+            message_path.write_bytes(serialized[:-1] + b"\n" + serialized[-1:])
+            with self.assertRaisesRegex(
+                v1_candidate.V1CandidateError, "final_tag_annotation_invalid"
+            ):
+                v1_candidate.validate_final_tag_annotation_record(
+                    message_path,
+                    candidate_digest=candidate_digest,
+                    gate_evidence_digest=gate_digest,
+                    candidate_tag=candidate_tag,
+                )
+
+    def test_freeze_authorization_survives_steward_rotation(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source_commit = "a" * 40
+            current_run_id = 202
+            runs_path = root / "freeze-runs.json"
+            jobs_directory = root / "jobs"
+            jobs_directory.mkdir()
+            runs_path.write_text(
+                json.dumps(
+                    [
+                        {
+                            "workflow_runs": [
+                                {
+                                    "id": 101,
+                                    "event": "workflow_dispatch",
+                                    "head_sha": source_commit,
+                                    "path": (
+                                        ".github/workflows/"
+                                        "freeze-v1-candidate.yml@main"
+                                    ),
+                                    "actor": {"login": "former-steward"},
+                                    "triggering_actor": {
+                                        "login": "former-steward"
+                                    },
+                                },
+                                {
+                                    "id": current_run_id,
+                                    "event": "workflow_dispatch",
+                                    "head_sha": source_commit,
+                                    "path": (
+                                        ".github/workflows/"
+                                        "freeze-v1-candidate.yml@main"
+                                    ),
+                                    "actor": {"login": "current-steward"},
+                                    "triggering_actor": {
+                                        "login": "current-steward"
+                                    },
+                                },
+                            ]
+                        }
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            def write_jobs(run_id: int, conclusion: str) -> None:
+                (jobs_directory / f"{run_id}.json").write_text(
+                    json.dumps(
+                        [
+                            {
+                                "jobs": [
+                                    {
+                                        "run_id": run_id,
+                                        "head_sha": source_commit,
+                                        "name": (
+                                            v1_candidate.FREEZE_AUTHORIZATION_JOB_NAME
+                                        ),
+                                        "status": "completed",
+                                        "conclusion": conclusion,
+                                    }
+                                ]
+                            }
+                        ]
+                    ),
+                    encoding="utf-8",
+                )
+
+            write_jobs(101, "success")
+            write_jobs(current_run_id, "success")
+            with self.assertRaisesRegex(
+                v1_candidate.V1CandidateError, "freeze_run_authorization_invalid"
+            ):
+                v1_candidate.validate_freeze_run_authorization(
+                    runs_path,
+                    jobs_directory,
+                    source_commit=source_commit,
+                    current_run_id=current_run_id,
+                )
+
+            # An unauthorized failed dispatch remains harmless; the actor names
+            # are historical context and never get reinterpreted after rotation.
+            write_jobs(101, "failure")
+            proof = v1_candidate.validate_freeze_run_authorization(
+                runs_path,
+                jobs_directory,
+                source_commit=source_commit,
+                current_run_id=current_run_id,
+            )
+            self.assertEqual(proof["authorized_run_ids"], [current_run_id])
 
     def test_freeze_workflow_has_one_build_and_no_final_tag_creation(self) -> None:
         workflow = (ROOT / ".github/workflows/freeze-v1-candidate.yml").read_text()
@@ -923,11 +1029,15 @@ class V1CandidateTests(unittest.TestCase):
         self.assertIn("--no-isolation", workflow)
         self.assertIn('[[ "$GITHUB_RUN_ATTEMPT" == "1" ]]', workflow)
         self.assertIn("head_sha=$GITHUB_SHA", workflow)
-        self.assertIn('actor.get("login") == steward', workflow)
-        self.assertIn('triggering_actor.get("login") == steward', workflow)
+        self.assertIn('[[ "$ORIGINAL_ACTOR" == "$AUTHORIZED_STEWARD" ]]', workflow)
         self.assertIn(
-            '[[ "$freeze_run_identity" == "1:$GITHUB_RUN_ID" ]]', workflow
+            '[[ "$TRIGGERING_ACTOR" == "$AUTHORIZED_STEWARD" ]]', workflow
         )
+        self.assertNotIn('actor.get("login") == steward', workflow)
+        self.assertNotIn('triggering_actor.get("login") == steward', workflow)
+        self.assertIn("/jobs?filter=all&per_page=100", workflow)
+        self.assertIn("tools/v1_candidate.py freeze-authorization", workflow)
+        self.assertNotIn("freeze_run_identity", workflow)
         self.assertIn("create a new commit instead of rebuilding", workflow)
         self.assertIn("immutable-releases", workflow)
         self.assertIn("V1_RELEASE_ADMIN_TOKEN", workflow)
@@ -1009,6 +1119,8 @@ class V1CandidateTests(unittest.TestCase):
         self.assertIn("final_tag_target_chronology_or_annotation_invalid", script)
         self.assertIn('Gate evidence: $gate_evidence_digest', script)
         self.assertIn('Candidate custody tag: $candidate_tag', script)
+        self.assertIn("run_candidate_tool tag-annotation-record", script)
+        self.assertNotIn('local_tag_message="$(', script)
 
     def test_promotion_requires_the_clean_exact_candidate_checkout(self) -> None:
         script = (ROOT / "tools/promote_v1_candidate.sh").read_text()

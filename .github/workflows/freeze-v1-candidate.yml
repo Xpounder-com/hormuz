@@ -69,6 +69,7 @@ jobs:
           GH_ADMIN_TOKEN: ${{ secrets.V1_RELEASE_ADMIN_TOKEN }}
           AUTHORIZED_STEWARD: ${{ vars.V1_RELEASE_STEWARD }}
         run: |
+          umask 077
           assert_api_absent() {
             local endpoint="$1"
             local label="$2"
@@ -107,23 +108,46 @@ jobs:
           gh api --paginate --slurp \
             "/repos/$GITHUB_REPOSITORY/actions/workflows/freeze-v1-candidate.yml/runs?event=workflow_dispatch&head_sha=$GITHUB_SHA&per_page=100" \
             > "$freeze_runs_path"
-          freeze_run_identity="$(python -c '
+          freeze_run_ids_path="$RUNNER_TEMP/freeze-run-ids.txt"
+          python -I -B -c '
 import json, pathlib, sys
 pages = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
-steward = sys.argv[2]
+if not isinstance(pages, list) or not pages:
+    raise SystemExit("freeze run listing is invalid")
 run_ids = []
 for page in pages:
-    for run in page.get("workflow_runs", []):
-        actor = run.get("actor") or {}
-        triggering_actor = run.get("triggering_actor") or {}
-        if actor.get("login") == steward and triggering_actor.get("login") == steward:
-            run_ids.append(str(run.get("id")))
-print(f"{len(run_ids)}:{','.join(sorted(run_ids, key=int))}")
-' "$freeze_runs_path" "$AUTHORIZED_STEWARD")"
-          [[ "$freeze_run_identity" == "1:$GITHUB_RUN_ID" ]] || {
-            echo "the exact source commit already has another steward-authorized freeze run; create a new commit instead of rebuilding" >&2
-            exit 1
-          }
+    if not isinstance(page, dict) or not isinstance(page.get("workflow_runs"), list):
+        raise SystemExit("freeze run listing is invalid")
+    for run in page["workflow_runs"]:
+        run_id = run.get("id") if isinstance(run, dict) else None
+        if isinstance(run_id, bool) or not isinstance(run_id, int) or run_id < 1 or run_id in run_ids:
+            raise SystemExit("freeze run listing is invalid")
+        run_ids.append(run_id)
+if not run_ids:
+    raise SystemExit("freeze run listing is empty")
+print("\n".join(str(run_id) for run_id in run_ids))
+' "$freeze_runs_path" > "$freeze_run_ids_path"
+          freeze_jobs_dir="$RUNNER_TEMP/freeze-run-jobs"
+          mkdir -m 700 "$freeze_jobs_dir"
+          mapfile -t freeze_run_ids < "$freeze_run_ids_path"
+          for freeze_run_id in "${freeze_run_ids[@]}"; do
+            [[ "$freeze_run_id" =~ ^[1-9][0-9]*$ ]] || {
+              echo "freeze run id is invalid" >&2
+              exit 1
+            }
+            gh api --paginate --slurp \
+              "/repos/$GITHUB_REPOSITORY/actions/runs/$freeze_run_id/jobs?filter=all&per_page=100" \
+              > "$freeze_jobs_dir/$freeze_run_id.json"
+          done
+          python -I -B tools/v1_candidate.py freeze-authorization \
+            --runs-api "$freeze_runs_path" \
+            --jobs-directory "$freeze_jobs_dir" \
+            --source-commit "$GITHUB_SHA" \
+            --current-run-id "$GITHUB_RUN_ID" \
+            --output "$RUNNER_TEMP/freeze-authorization-proof.json" || {
+              echo "the exact source commit already has another successfully authorized freeze run; create a new commit instead of rebuilding" >&2
+              exit 1
+            }
           package_version="$(python -c 'import pathlib, tomllib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"])')"
           [[ "$package_version" == "1.0.0" ]] || {
             echo "candidate package version must be exactly 1.0.0" >&2

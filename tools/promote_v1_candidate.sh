@@ -361,13 +361,12 @@ tagged = datetime.fromisoformat(sys.argv[1].replace("Z", "+00:00"))
 gate = datetime.fromisoformat(sys.argv[2].replace("Z", "+00:00"))
 raise SystemExit(0 if tagged >= gate else 2)
   ' "$local_tagged_at" "$gate_generated_at" || fail "local_final_tag_chronology_invalid"
-  local_tag_message_path="$work_dir/local-final-tag-message.txt"
-  local_tag_message="$(git -C "$repository_root" for-each-ref \
+  local_tag_message_path="$work_dir/local-final-tag-message-record.txt"
+  git -C "$repository_root" for-each-ref \
     --format='%(contents)' \
-    "refs/tags/$FINAL_TAG")"
-  printf '%s' "$local_tag_message" >"$local_tag_message_path"
+    "refs/tags/$FINAL_TAG" >"$local_tag_message_path"
   chmod 600 "$local_tag_message_path"
-  run_candidate_tool tag-annotation \
+  run_candidate_tool tag-annotation-record \
     --message "$local_tag_message_path" \
     --candidate-digest "$candidate_digest" \
     --gate-evidence-digest "$gate_evidence_digest" \
