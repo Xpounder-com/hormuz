@@ -13,6 +13,7 @@ from pathlib import Path
 SCHEMA_VERSION = 1
 MANIFEST_PATH = Path(".github/repository-governance-v1.json")
 RULESET_PATHS = (
+    ".github/rulesets/candidate-tag-creation.json",
     ".github/rulesets/main.json",
     ".github/rulesets/version-tag-creation.json",
     ".github/rulesets/version-tag-immutability.json",
@@ -220,6 +221,25 @@ def _expected_rulesets(checks: list[dict[str, object]]) -> dict[str, object]:
         }
     }
     return {
+        ".github/rulesets/candidate-tag-creation.json": {
+            "name": "Steward workflow candidate tags",
+            "target": "tag",
+            "enforcement": "active",
+            "bypass_actors": [
+                {
+                    "actor_id": 15368,
+                    "actor_type": "Integration",
+                    "bypass_mode": "always",
+                }
+            ],
+            "conditions": {
+                "ref_name": {
+                    "include": ["refs/tags/candidate-v1.0.0-*"],
+                    "exclude": [],
+                }
+            },
+            "rules": [{"type": "creation"}],
+        },
         ".github/rulesets/main.json": {
             "name": "Protect main",
             "target": "branch",
@@ -298,6 +318,7 @@ def _validate_workflows(
     if not workflow_paths:
         raise RepositoryGovernanceError("no GitHub Actions workflows found")
     action_use_count = 0
+    write_capable_workflows: list[str] = []
     for path in workflow_paths:
         try:
             text = path.read_text(encoding="utf-8")
@@ -309,6 +330,10 @@ def _validate_workflows(
             )
         if re.search(r"^permissions:\s*$", text, flags=re.MULTILINE) is None:
             raise RepositoryGovernanceError(f"workflow lacks explicit permissions: {path.name}")
+        if re.search(
+            r"^[ \t]+contents:[ \t]+write\s*$", text, flags=re.MULTILINE
+        ):
+            write_capable_workflows.append(path.name)
         uses = ANY_ACTION_USE.findall(text)
         pinned = FULL_ACTION_USE.findall(text)
         if len(uses) != len(pinned):
@@ -334,6 +359,11 @@ def _validate_workflows(
                     f"pull-request workflow token is not read-only: {path.name}"
                 )
         action_use_count += len(pinned)
+
+    if write_capable_workflows != ["freeze-v1-candidate.yml"]:
+        raise RepositoryGovernanceError(
+            "only the steward-gated candidate freeze workflow may write contents"
+        )
 
     ci = (root / ".github/workflows/ci.yml").read_text(encoding="utf-8")
     if not re.search(

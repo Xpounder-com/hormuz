@@ -343,8 +343,6 @@ else
   if git -C "$repository_root" show-ref --verify --quiet "refs/tags/$FINAL_TAG"; then
     [[ "$(git -C "$repository_root" cat-file -t "refs/tags/$FINAL_TAG")" == "tag" ]] \
       || fail "local_final_tag_not_annotated"
-    [[ "$(git -C "$repository_root" rev-list -n 1 "$FINAL_TAG")" == "$source_commit" ]] \
-      || fail "local_final_tag_target_invalid"
   else
     require_gate_time_current
     git -C "$repository_root" -c tag.gpgSign=false tag -a "$FINAL_TAG" "$source_commit" \
@@ -353,26 +351,19 @@ else
       -m "Gate evidence: $gate_evidence_digest" \
       -m "Candidate custody tag: $candidate_tag"
   fi
-  local_tagged_at="$(git -C "$repository_root" for-each-ref --format='%(taggerdate:iso-strict)' "refs/tags/$FINAL_TAG")"
-  "${SAFE_PYTHON[@]}" -c '
-from datetime import datetime
-import sys
-tagged = datetime.fromisoformat(sys.argv[1].replace("Z", "+00:00"))
-gate = datetime.fromisoformat(sys.argv[2].replace("Z", "+00:00"))
-raise SystemExit(0 if tagged >= gate else 2)
-  ' "$local_tagged_at" "$gate_generated_at" || fail "local_final_tag_chronology_invalid"
-  local_tag_message_path="$work_dir/local-final-tag-message-record.txt"
-  git -C "$repository_root" for-each-ref \
-    --format='%(contents)' \
-    "refs/tags/$FINAL_TAG" >"$local_tag_message_path"
-  chmod 600 "$local_tag_message_path"
-  run_candidate_tool tag-annotation-record \
-    --message "$local_tag_message_path" \
+  local_tag_object_path="$work_dir/local-final-tag-object.txt"
+  git -C "$repository_root" cat-file tag "refs/tags/$FINAL_TAG" \
+    >"$local_tag_object_path" || fail "local_final_tag_object_unavailable"
+  chmod 600 "$local_tag_object_path"
+  run_candidate_tool local-tag \
+    --tag-object "$local_tag_object_path" \
+    --source-commit "$source_commit" \
+    --gate-generated-at "$gate_generated_at" \
     --candidate-digest "$candidate_digest" \
     --gate-evidence-digest "$gate_evidence_digest" \
     --candidate-tag "$candidate_tag" \
     --output "$work_dir/local-final-tag-proof.json" >/dev/null \
-    || fail "local_final_tag_annotation_invalid"
+    || fail "local_final_tag_target_chronology_or_annotation_invalid"
   git -C "$repository_root" push origin "refs/tags/$FINAL_TAG"
   gh api "/repos/$REPOSITORY/git/ref/tags/$FINAL_TAG" >"$work_dir/final-tag-ref-after-push.json"
   validate_remote_final_tag \

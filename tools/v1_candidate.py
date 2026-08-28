@@ -66,6 +66,9 @@ REQUIRED_ARCHIVE_PATHS = (
 _REVISION_RE = re.compile(r"[0-9a-f]{40}\Z")
 _DIGEST_RE = re.compile(r"sha256:[0-9a-f]{64}\Z")
 _CUSTODY_TAG_RE = re.compile(r"candidate-v1\.0\.0-([0-9a-f]{64})\Z")
+_TAGGER_HEADER_RE = re.compile(
+    r"tagger .+ <[^<>\r\n]*> ([0-9]+) ([+-])([0-9]{2})([0-9]{2})\Z"
+)
 _RUN_URL_RE = re.compile(
     r"https://github\.com/Xpounder-com/hormuz/actions/runs/([1-9][0-9]*)/attempts/([1-9][0-9]*)\Z"
 )
@@ -1115,28 +1118,6 @@ def validate_final_tag_annotation(
     )
 
 
-def validate_final_tag_annotation_record(
-    message_path: Path,
-    *,
-    candidate_digest: str,
-    gate_evidence_digest: str,
-    candidate_tag: str,
-) -> dict[str, object]:
-    payload = _safe_read(
-        message_path,
-        maximum=16 * 1024,
-        label="final_tag_annotation_record",
-    )
-    if not payload.endswith(b"\n"):
-        raise V1CandidateError("final_tag_annotation_record_invalid")
-    return _validate_final_tag_annotation_payload(
-        payload[:-1],
-        candidate_digest=candidate_digest,
-        gate_evidence_digest=gate_evidence_digest,
-        candidate_tag=candidate_tag,
-    )
-
-
 def _validate_final_tag_annotation_payload(
     payload: bytes,
     *,
@@ -1162,6 +1143,65 @@ def _validate_final_tag_annotation_payload(
         "custody_release_tag": candidate_tag,
         "candidate_artifact_digest": candidate_digest,
         "gate_evidence_digest": gate_evidence_digest,
+    }
+
+
+def validate_local_final_tag_object(
+    tag_object_path: Path,
+    *,
+    source_commit: str,
+    gate_generated_at: str,
+    candidate_digest: str,
+    gate_evidence_digest: str,
+    candidate_tag: str,
+) -> dict[str, object]:
+    if _REVISION_RE.fullmatch(source_commit) is None:
+        raise V1CandidateError("local_final_tag_source_commit_invalid")
+    payload = _safe_read(
+        tag_object_path,
+        maximum=16 * 1024,
+        label="local_final_tag_object",
+    )
+    header_payload, separator, message_payload = payload.partition(b"\n\n")
+    if not separator or not message_payload:
+        raise V1CandidateError("local_final_tag_object_invalid")
+    try:
+        header_lines = header_payload.decode("utf-8").splitlines()
+    except UnicodeError as error:
+        raise V1CandidateError("local_final_tag_object_invalid") from error
+    if (
+        len(header_lines) != 4
+        or header_lines[0] != f"object {source_commit}"
+        or header_lines[1] != "type commit"
+        or header_lines[2] != f"tag {FINAL_TAG}"
+    ):
+        raise V1CandidateError("local_final_tag_object_invalid")
+    tagger_match = _TAGGER_HEADER_RE.fullmatch(header_lines[3])
+    if tagger_match is None:
+        raise V1CandidateError("local_final_tag_object_invalid")
+    timezone_hour = int(tagger_match.group(3))
+    timezone_minute = int(tagger_match.group(4))
+    if timezone_hour > 23 or timezone_minute > 59:
+        raise V1CandidateError("local_final_tag_object_invalid")
+    try:
+        tagged_at = datetime.fromtimestamp(int(tagger_match.group(1)), tz=UTC)
+    except (OverflowError, OSError, ValueError) as error:
+        raise V1CandidateError("local_final_tag_object_invalid") from error
+    gate_time = _timestamp_value(gate_generated_at, "gate_generated_at")
+    if tagged_at < gate_time:
+        raise V1CandidateError("local_final_tag_chronology_invalid")
+    annotation = _validate_final_tag_annotation_payload(
+        message_payload,
+        candidate_digest=candidate_digest,
+        gate_evidence_digest=gate_evidence_digest,
+        candidate_tag=candidate_tag,
+    )
+    return {
+        **annotation,
+        "status": "exact_local_tag_object_valid",
+        "source_commit": source_commit,
+        "tagged_at": tagged_at.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "direct_target_type": "commit",
     }
 
 
@@ -1264,15 +1304,17 @@ def _parser() -> argparse.ArgumentParser:
     tag_annotation.add_argument("--candidate-tag", required=True)
     tag_annotation.add_argument("--output", required=True, type=Path)
 
-    tag_annotation_record = commands.add_parser(
-        "tag-annotation-record",
-        help="verify a Git for-each-ref annotation record without losing trailing bytes",
+    local_tag = commands.add_parser(
+        "local-tag",
+        help="verify an exact raw local final-tag object before push",
     )
-    tag_annotation_record.add_argument("--message", required=True, type=Path)
-    tag_annotation_record.add_argument("--candidate-digest", required=True)
-    tag_annotation_record.add_argument("--gate-evidence-digest", required=True)
-    tag_annotation_record.add_argument("--candidate-tag", required=True)
-    tag_annotation_record.add_argument("--output", required=True, type=Path)
+    local_tag.add_argument("--tag-object", required=True, type=Path)
+    local_tag.add_argument("--source-commit", required=True)
+    local_tag.add_argument("--gate-generated-at", required=True)
+    local_tag.add_argument("--candidate-digest", required=True)
+    local_tag.add_argument("--gate-evidence-digest", required=True)
+    local_tag.add_argument("--candidate-tag", required=True)
+    local_tag.add_argument("--output", required=True, type=Path)
 
     freeze_authorization = commands.add_parser(
         "freeze-authorization",
@@ -1363,9 +1405,11 @@ def main(argv: list[str] | None = None) -> int:
                 gate_evidence_digest=args.gate_evidence_digest,
                 candidate_tag=args.candidate_tag,
             )
-        elif args.command == "tag-annotation-record":
-            result = validate_final_tag_annotation_record(
-                args.message,
+        elif args.command == "local-tag":
+            result = validate_local_final_tag_object(
+                args.tag_object,
+                source_commit=args.source_commit,
+                gate_generated_at=args.gate_generated_at,
                 candidate_digest=args.candidate_digest,
                 gate_evidence_digest=args.gate_evidence_digest,
                 candidate_tag=args.candidate_tag,

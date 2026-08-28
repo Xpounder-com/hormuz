@@ -24,7 +24,7 @@ class RepositoryGovernanceTests(unittest.TestCase):
         self.assertEqual(result["schema_version"], 1)
         self.assertEqual(result["status"], "passed")
         self.assertEqual(result["repository"], "Xpounder-com/hormuz")
-        self.assertEqual(result["ruleset_count"], 3)
+        self.assertEqual(result["ruleset_count"], 4)
         self.assertEqual(result["required_check_count"], 11)
         self.assertGreaterEqual(result["workflow_count"], 4)
         self.assertGreater(result["pinned_action_use_count"], 0)
@@ -49,6 +49,27 @@ class RepositoryGovernanceTests(unittest.TestCase):
         self.assertEqual(
             creation_ruleset["conditions"]["ref_name"]["include"],
             ["refs/tags/v*"],
+        )
+
+        candidate_creation_ruleset = json.loads(
+            (
+                REPOSITORY_ROOT
+                / ".github/rulesets/candidate-tag-creation.json"
+            ).read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            candidate_creation_ruleset["conditions"]["ref_name"]["include"],
+            ["refs/tags/candidate-v1.0.0-*"],
+        )
+        self.assertEqual(
+            candidate_creation_ruleset["bypass_actors"],
+            [
+                {
+                    "actor_id": 15368,
+                    "actor_type": "Integration",
+                    "bypass_mode": "always",
+                }
+            ],
         )
 
     def test_unpinned_action_fails_closed(self) -> None:
@@ -135,6 +156,41 @@ class RepositoryGovernanceTests(unittest.TestCase):
             ruleset_path.write_text(json.dumps(ruleset), encoding="utf-8")
             with self.assertRaisesRegex(
                 RepositoryGovernanceError, "ruleset contract changed"
+            ):
+                validate_repository_governance(root)
+
+    def test_candidate_tag_creation_cannot_gain_a_human_bypass(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._copy_contract(root)
+            ruleset_path = root / ".github/rulesets/candidate-tag-creation.json"
+            ruleset = json.loads(ruleset_path.read_text(encoding="utf-8"))
+            ruleset["bypass_actors"] = [
+                {
+                    "actor_id": None,
+                    "actor_type": "OrganizationAdmin",
+                    "bypass_mode": "always",
+                }
+            ]
+            ruleset_path.write_text(json.dumps(ruleset), encoding="utf-8")
+            with self.assertRaisesRegex(
+                RepositoryGovernanceError, "ruleset contract changed"
+            ):
+                validate_repository_governance(root)
+
+    def test_only_candidate_freeze_workflow_can_write_contents(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._copy_contract(root)
+            workflow = root / ".github/workflows/release-oci.yml"
+            value = workflow.read_text(encoding="utf-8")
+            workflow.write_text(
+                value.replace("  contents: read\n", "  contents: write\n", 1),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                RepositoryGovernanceError,
+                "only the steward-gated candidate freeze workflow",
             ):
                 validate_repository_governance(root)
 

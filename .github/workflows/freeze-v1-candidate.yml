@@ -163,6 +163,16 @@ print("\n".join(str(run_id) for run_id in run_ids))
             echo "immutable GitHub Releases must be enabled before freezing" >&2
             exit 1
           }
+          candidate_creation_ruleset_id="$(GH_TOKEN="$GH_ADMIN_TOKEN" gh api "/repos/$GITHUB_REPOSITORY/rulesets?includes_parents=true&per_page=100" --jq '[.[] | select(.name == "Steward workflow candidate tags" and .source_type == "Repository" and .target == "tag" and .enforcement == "active")] | if length == 1 then .[0].id else "" end')"
+          [[ "$candidate_creation_ruleset_id" =~ ^[1-9][0-9]*$ ]] || {
+            echo "one active Steward workflow candidate tags ruleset is required before freezing" >&2
+            exit 1
+          }
+          candidate_creation_rule_contract="$(GH_TOKEN="$GH_ADMIN_TOKEN" gh api "/repos/$GITHUB_REPOSITORY/rulesets/$candidate_creation_ruleset_id" --jq '(.bypass_actors == [{"actor_id":15368,"actor_type":"Integration","bypass_mode":"always"}]) and (.conditions.ref_name.exclude == []) and (.conditions.ref_name.include == ["refs/tags/candidate-v1.0.0-*"]) and ([.rules[].type] == ["creation"])')"
+          [[ "$candidate_creation_rule_contract" == "true" ]] || {
+            echo "candidate tag creation must be restricted to the steward-gated GitHub Actions workflow" >&2
+            exit 1
+          }
           immutability_ruleset_id="$(GH_TOKEN="$GH_ADMIN_TOKEN" gh api "/repos/$GITHUB_REPOSITORY/rulesets?includes_parents=true&per_page=100" --jq '[.[] | select(.name == "Immutable version tags" and .source_type == "Repository" and .target == "tag" and .enforcement == "active")] | if length == 1 then .[0].id else "" end')"
           [[ "$immutability_ruleset_id" =~ ^[1-9][0-9]*$ ]] || {
             echo "one active Immutable version tags ruleset is required before freezing" >&2

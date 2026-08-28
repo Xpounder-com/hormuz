@@ -880,36 +880,43 @@ class V1CandidateTests(unittest.TestCase):
                 ],
                 check=True,
             )
-            message_path = root / "serialized-tag-message.txt"
-            serialized = subprocess.check_output(
-                [
-                    "git",
-                    "-C",
-                    str(repository),
-                    "for-each-ref",
-                    "--format=%(contents)",
-                    "refs/tags/v1.0.0",
-                ]
+            source_commit = subprocess.check_output(
+                ["git", "-C", str(repository), "rev-parse", "HEAD"], text=True
+            ).strip()
+            tag_object_path = root / "serialized-tag-object.txt"
+            tag_object_path.write_bytes(
+                subprocess.check_output(
+                    [
+                        "git",
+                        "-C",
+                        str(repository),
+                        "cat-file",
+                        "tag",
+                        "refs/tags/v1.0.0",
+                    ]
+                )
             )
-            message_path.write_bytes(serialized)
-            proof = v1_candidate.validate_final_tag_annotation_record(
-                message_path,
+            proof = v1_candidate.validate_local_final_tag_object(
+                tag_object_path,
+                source_commit=source_commit,
+                gate_generated_at="2020-01-01T00:00:00Z",
                 candidate_digest=candidate_digest,
                 gate_evidence_digest=gate_digest,
                 candidate_tag=candidate_tag,
             )
-            self.assertEqual(proof["status"], "exact_annotation_valid")
+            self.assertEqual(proof["status"], "exact_local_tag_object_valid")
+            self.assertEqual(proof["direct_target_type"], "commit")
 
-            # Git appends one record terminator after %(contents). Preserve and
-            # remove only that byte; an extra newline in the tag itself must
-            # remain visible to the exact annotation validator.
-            self.assertTrue(serialized.endswith(b"\n\n"))
-            message_path.write_bytes(serialized[:-1] + b"\n" + serialized[-1:])
+            # Raw object bytes reach the validator unchanged; an extra trailing
+            # paragraph cannot be erased by shell command substitution.
+            tag_object_path.write_bytes(tag_object_path.read_bytes() + b"\n")
             with self.assertRaisesRegex(
                 v1_candidate.V1CandidateError, "final_tag_annotation_invalid"
             ):
-                v1_candidate.validate_final_tag_annotation_record(
-                    message_path,
+                v1_candidate.validate_local_final_tag_object(
+                    tag_object_path,
+                    source_commit=source_commit,
+                    gate_generated_at="2020-01-01T00:00:00Z",
                     candidate_digest=candidate_digest,
                     gate_evidence_digest=gate_digest,
                     candidate_tag=candidate_tag,
@@ -1006,6 +1013,97 @@ class V1CandidateTests(unittest.TestCase):
             )
             self.assertEqual(proof["authorized_run_ids"], [current_run_id])
 
+    def test_git_direct_tag_target_distinguishes_a_nested_tag(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary) / "repository"
+            repository.mkdir()
+            subprocess.run(["git", "init", "--quiet", str(repository)], check=True)
+            identity = [
+                "-c",
+                "user.name=Hormuz release test",
+                "-c",
+                "user.email=release-test@example.invalid",
+            ]
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(repository),
+                    *identity,
+                    "commit",
+                    "--quiet",
+                    "--allow-empty",
+                    "-m",
+                    "initial",
+                ],
+                check=True,
+            )
+            commit = subprocess.check_output(
+                ["git", "-C", str(repository), "rev-parse", "HEAD"], text=True
+            ).strip()
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(repository),
+                    *identity,
+                    "tag",
+                    "-a",
+                    "inner",
+                    "-m",
+                    "inner",
+                ],
+                check=True,
+            )
+            inner_tag_object = subprocess.check_output(
+                ["git", "-C", str(repository), "rev-parse", "refs/tags/inner"],
+                text=True,
+            ).strip()
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(repository),
+                    *identity,
+                    "tag",
+                    "-a",
+                    "v1.0.0",
+                    "inner",
+                    "-m",
+                    "outer",
+                ],
+                check=True,
+                stderr=subprocess.DEVNULL,
+            )
+            tag_object_path = Path(temporary) / "nested-tag-object.txt"
+            tag_object = subprocess.check_output(
+                [
+                    "git",
+                    "-C",
+                    str(repository),
+                    "cat-file",
+                    "tag",
+                    "refs/tags/v1.0.0",
+                ]
+            )
+            tag_object_path.write_bytes(tag_object)
+            self.assertTrue(
+                tag_object.startswith(
+                    f"object {inner_tag_object}\ntype tag\n".encode("ascii")
+                )
+            )
+            with self.assertRaisesRegex(
+                v1_candidate.V1CandidateError, "local_final_tag_object_invalid"
+            ):
+                v1_candidate.validate_local_final_tag_object(
+                    tag_object_path,
+                    source_commit=commit,
+                    gate_generated_at="2020-01-01T00:00:00Z",
+                    candidate_digest="sha256:" + "a" * 64,
+                    gate_evidence_digest="sha256:" + "b" * 64,
+                    candidate_tag="candidate-v1.0.0-" + "a" * 64,
+                )
+
     def test_freeze_workflow_has_one_build_and_no_final_tag_creation(self) -> None:
         workflow = (ROOT / ".github/workflows/freeze-v1-candidate.yml").read_text()
         self.assertIn("permissions:\n  contents: read", workflow)
@@ -1042,6 +1140,9 @@ class V1CandidateTests(unittest.TestCase):
         self.assertIn("immutable-releases", workflow)
         self.assertIn("V1_RELEASE_ADMIN_TOKEN", workflow)
         self.assertIn("Administration and Environments permissions", workflow)
+        self.assertIn("Steward workflow candidate tags", workflow)
+        self.assertIn("candidate_creation_rule_contract", workflow)
+        self.assertIn('"actor_id":15368', workflow)
         self.assertIn("environments/v1-release-custody", workflow)
         self.assertIn('item.get("type") == "required_reviewers"', workflow)
         self.assertIn('deployment.get("protected_branches") is True', workflow)
@@ -1119,8 +1220,10 @@ class V1CandidateTests(unittest.TestCase):
         self.assertIn("final_tag_target_chronology_or_annotation_invalid", script)
         self.assertIn('Gate evidence: $gate_evidence_digest', script)
         self.assertIn('Candidate custody tag: $candidate_tag', script)
-        self.assertIn("run_candidate_tool tag-annotation-record", script)
+        self.assertIn("run_candidate_tool local-tag", script)
         self.assertNotIn('local_tag_message="$(', script)
+        self.assertIn('cat-file tag "refs/tags/$FINAL_TAG"', script)
+        self.assertNotIn('rev-list -n 1 "$FINAL_TAG"', script)
 
     def test_promotion_requires_the_clean_exact_candidate_checkout(self) -> None:
         script = (ROOT / "tools/promote_v1_candidate.sh").read_text()

@@ -88,8 +88,13 @@ Before that one build, the workflow uses the owner-supplied
 and Environments, to verify the live settings. Immutable Releases must already
 be enabled, the protected environment must match the steward contract, and one
 active, no-bypass tag ruleset must protect both `refs/tags/v*` and
-`refs/tags/candidate-v1.0.0-*`. The ordinary per-run `GITHUB_TOKEN` performs the
-candidate release operation; the administration token cannot publish.
+`refs/tags/candidate-v1.0.0-*`. A separate creation ruleset permits the GitHub
+Actions integration to create only `candidate-v1.0.0-*` tags, while repository
+governance requires the steward-gated freeze workflow to be the sole workflow
+with `contents: write`. Human creation of candidate tags is denied; final `v*`
+tag creation remains organization-administrator-only. The ordinary per-run
+`GITHUB_TOKEN` performs the candidate release operation; the administration
+token cannot publish.
 
 The freeze workflow installs the exact pure-Python frontend and backend wheels
 from `requirements/v1-source-build.lock` with SHA-256 enforcement, forced
@@ -171,8 +176,10 @@ has exactly the title and three standalone fields for the candidate custody
 tag, archive digest, and gate-evidence digest, with no extra or conflicting
 claims. That protected annotation is the authoritative promotion binding even
 if editable release-page text later changes. Before pushing a local tag, the
-command validates the complete Git-rendered annotation record without shell
-newline normalization, so trailing blank paragraphs or claims cannot be hidden.
+command validates the complete raw Git tag object without shell newline
+normalization: its direct target and type, tag name, tagger chronology, and
+annotation bytes must all match. A recursively peeled nested tag or trailing
+blank paragraph is therefore rejected before the protected ref is created.
 Only after this second
 verification does the command create a directly published, metadata-only
 immutable `v1.0.0` GitHub Release. Its deterministic notes link to the canonical
