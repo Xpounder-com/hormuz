@@ -7,6 +7,7 @@ import unittest
 from datetime import datetime, timezone
 from pathlib import Path
 
+import hormuz._audit_verifier as audit_verifier
 import hormuz._persistence as persistence
 import hormuz.audit_chain as audit_chain
 from hormuz.audit_chain import build_audit_chain_entry, build_custody_audit_chain_entry
@@ -271,7 +272,7 @@ class PersistenceContractTests(unittest.TestCase):
 
     def test_backend_neutral_module_cannot_import_database_adapters(self) -> None:
         forbidden = {"sqlite3", "psycopg", "psycopg_pool", "store", "postgres_usage_store", "postgres"}
-        for module in (persistence, audit_chain):
+        for module in (persistence, audit_chain, audit_verifier):
             with self.subTest(module=module.__name__):
                 source = Path(module.__file__).read_text(encoding="utf-8")
                 tree = ast.parse(source)
@@ -296,6 +297,26 @@ class PersistenceContractTests(unittest.TestCase):
             if isinstance(node, ast.ImportFrom)
         }
         self.assertNotIn("store", postgres_imports)
+
+    def test_shared_verifier_and_storage_adapters_keep_distinct_ownership(self) -> None:
+        verifier_source = Path(audit_verifier.__file__).read_text(encoding="utf-8")
+        self.assertNotIn(".execute(", verifier_source)
+        self.assertNotIn("_transaction(", verifier_source)
+
+        sqlite_source = Path(persistence.__file__).with_name("store.py").read_text(encoding="utf-8")
+        self.assertIn('connection.execute("BEGIN")', sqlite_source)
+        self.assertIn("_audit_chain_source_events_in_connection", sqlite_source)
+        self.assertIn("return verify_audit_chain_inputs(inputs)", sqlite_source)
+        self.assertIn("raise StorageSchemaError(error.code) from None", sqlite_source)
+
+        postgres_source = Path(persistence.__file__).with_name("postgres_usage_store.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("with self._transaction(organization) as connection", postgres_source)
+        self.assertIn("for_share=True", postgres_source)
+        self.assertIn("_custody_audit_chain_source_events_in_cursor", postgres_source)
+        self.assertIn("return verify_audit_chain_inputs(inputs)", postgres_source)
+        self.assertIn("raise PostgresStorageError(error.code) from None", postgres_source)
 
 
 if __name__ == "__main__":
