@@ -110,23 +110,23 @@ jobs:
             > "$freeze_runs_path"
           freeze_run_ids_path="$RUNNER_TEMP/freeze-run-ids.txt"
           python -I -B -c '
-import json, pathlib, sys
-pages = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
-if not isinstance(pages, list) or not pages:
-    raise SystemExit("freeze run listing is invalid")
-run_ids = []
-for page in pages:
-    if not isinstance(page, dict) or not isinstance(page.get("workflow_runs"), list):
-        raise SystemExit("freeze run listing is invalid")
-    for run in page["workflow_runs"]:
-        run_id = run.get("id") if isinstance(run, dict) else None
-        if isinstance(run_id, bool) or not isinstance(run_id, int) or run_id < 1 or run_id in run_ids:
-            raise SystemExit("freeze run listing is invalid")
-        run_ids.append(run_id)
-if not run_ids:
-    raise SystemExit("freeze run listing is empty")
-print("\n".join(str(run_id) for run_id in run_ids))
-' "$freeze_runs_path" > "$freeze_run_ids_path"
+          import json, pathlib, sys
+          pages = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+          if not isinstance(pages, list) or not pages:
+              raise SystemExit("freeze run listing is invalid")
+          run_ids = []
+          for page in pages:
+              if not isinstance(page, dict) or not isinstance(page.get("workflow_runs"), list):
+                  raise SystemExit("freeze run listing is invalid")
+              for run in page["workflow_runs"]:
+                  run_id = run.get("id") if isinstance(run, dict) else None
+                  if isinstance(run_id, bool) or not isinstance(run_id, int) or run_id < 1 or run_id in run_ids:
+                      raise SystemExit("freeze run listing is invalid")
+                  run_ids.append(run_id)
+          if not run_ids:
+              raise SystemExit("freeze run listing is empty")
+          print("\n".join(str(run_id) for run_id in run_ids))
+          ' "$freeze_runs_path" > "$freeze_run_ids_path"
           freeze_jobs_dir="$RUNNER_TEMP/freeze-run-jobs"
           mkdir -m 700 "$freeze_jobs_dir"
           mapfile -t freeze_run_ids < "$freeze_run_ids_path"
@@ -188,24 +188,24 @@ print("\n".join(str(run_id) for run_id in run_ids))
             "/repos/$GITHUB_REPOSITORY/environments/v1-release-custody" \
             > "$release_environment_path"
           release_environment_contract="$(python -c '
-import json, pathlib, sys
-value = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
-steward = sys.argv[2]
-rules = [item for item in value.get("protection_rules", []) if item.get("type") == "required_reviewers"]
-reviewers = rules[0].get("reviewers", []) if len(rules) == 1 else []
-deployment = value.get("deployment_branch_policy") or {}
-valid = (
-    value.get("name") == "v1-release-custody"
-    and deployment.get("protected_branches") is True
-    and deployment.get("custom_branch_policies") is False
-    and len(rules) == 1
-    and rules[0].get("prevent_self_review") is False
-    and len(reviewers) == 1
-    and reviewers[0].get("type") == "User"
-    and (reviewers[0].get("reviewer") or {}).get("login") == steward
-)
-print("true" if valid else "false")
-' "$release_environment_path" "$AUTHORIZED_STEWARD")"
+          import json, pathlib, sys
+          value = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+          steward = sys.argv[2]
+          rules = [item for item in value.get("protection_rules", []) if item.get("type") == "required_reviewers"]
+          reviewers = rules[0].get("reviewers", []) if len(rules) == 1 else []
+          deployment = value.get("deployment_branch_policy") or {}
+          valid = (
+              value.get("name") == "v1-release-custody"
+              and deployment.get("protected_branches") is True
+              and deployment.get("custom_branch_policies") is False
+              and len(rules) == 1
+              and rules[0].get("prevent_self_review") is False
+              and len(reviewers) == 1
+              and reviewers[0].get("type") == "User"
+              and (reviewers[0].get("reviewer") or {}).get("login") == steward
+          )
+          print("true" if valid else "false")
+          ' "$release_environment_path" "$AUTHORIZED_STEWARD")"
           [[ "$release_environment_contract" == "true" ]] || {
             echo "the protected v1-release-custody environment must require the designated steward reviewer" >&2
             exit 1

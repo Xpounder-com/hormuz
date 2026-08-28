@@ -446,12 +446,12 @@ def _workflow_permissions(
             continue
         indent = _yaml_indent(line, label=workflow_name)
         entry = _permission_key_and_value(line, indent=indent)
+        if indent == 0 and entry is None:
+            raise RepositoryGovernanceError(
+                f"workflow uses unsupported top-level mapping syntax: {workflow_name}"
+            )
         if indent == 0 and entry is not None and entry[0] == "permissions":
             top_level_permissions.append(index)
-        if indent == 0 and line.startswith("<<:"):
-            raise RepositoryGovernanceError(
-                f"workflow uses unsupported top-level YAML merge: {workflow_name}"
-            )
         if indent == 0 and entry is not None and entry[0] == "jobs":
             if _plain_yaml_value(entry[1], label=workflow_name):
                 raise RepositoryGovernanceError(

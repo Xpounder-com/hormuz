@@ -274,6 +274,26 @@ class RepositoryGovernanceTests(unittest.TestCase):
             ):
                 validate_repository_governance(root)
 
+    def test_escaped_top_level_permission_override_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._copy_contract(root)
+            workflow = root / ".github/workflows/upstream-canary.yml"
+            value = workflow.read_text(encoding="utf-8")
+            workflow.write_text(
+                value.replace(
+                    "permissions:\n  contents: read\n",
+                    'permissions:\n  contents: read\n"permis\\u0073ions": write-all\n',
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                RepositoryGovernanceError,
+                "unsupported top-level mapping syntax",
+            ):
+                validate_repository_governance(root)
+
     def test_nonstandard_job_indentation_cannot_hide_write_all(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
