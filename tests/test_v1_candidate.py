@@ -148,7 +148,9 @@ class V1CandidateTests(unittest.TestCase):
         evidence_digest = "sha256:" + hashlib.sha256(evidence.read_bytes()).hexdigest()
         release = {
             "tag_name": v1_candidate.FINAL_TAG,
-            "target_commitish": candidate["source_commit"],
+            # GitHub documents target_commitish as unused when this protected
+            # annotated tag already exists; the tag and exact body are binding.
+            "target_commitish": "main",
             "name": v1_candidate.FINAL_RELEASE_TITLE,
             "body": v1_candidate._final_release_notes(manifest, evidence_digest),
             "draft": False,

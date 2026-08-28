@@ -430,7 +430,6 @@ final_release_error="$work_dir/final-release-api.err"
 if ! release_exists "$FINAL_TAG" "$final_release_api" "$final_release_error"; then
   gh release create "$FINAL_TAG" \
     --repo "$REPOSITORY" \
-    --target "$source_commit" \
     --verify-tag \
     --title "Hormuz v1.0.0" \
     --notes-file "$final_notes_path" \

@@ -924,7 +924,6 @@ def validate_final_release(
     assert isinstance(candidate, dict) and isinstance(custody, dict)
     if (
         release.get("tag_name") != FINAL_TAG
-        or release.get("target_commitish") != candidate["source_commit"]
         or release.get("name") != FINAL_RELEASE_TITLE
         or release.get("draft") is not False
         or release.get("prerelease") is not False
