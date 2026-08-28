@@ -56,11 +56,15 @@ Custody authorization (managed PostgreSQL mode)
 - `hormuz/custody.py` owns provider-neutral encrypted-envelope and audit-anchor contracts; `hormuz/aws_custody.py` provides the optional AWS reference adapters, while `hormuz/openbao_custody.py` and `hormuz/self_hosted_custody.py` provide the optional OpenBao and S3-compatible Object Lock adapters. `hormuz/custody_runtime.py` resolves owner-only encrypted provider credentials at gateway startup; `hormuz/custody_runtime_projection.py` owns the locally enforced lifecycle view, prepared admission barriers, replica acknowledgements, and five-second partition fence without adding a PostgreSQL read to each request.
 - `hormuz/usage.py` parses provider usage metadata without storing response content.
 - `hormuz/redaction.py` transforms provider-bound JSON values using configured secret controls.
+
+The CLI ownership manifest is:
+
 - `hormuz/cli.py` owns the public `main` and `build_parser` entry points, legacy argv normalization, top-level dispatch, and shared CLI error conventions.
 - `hormuz/commands/policy.py` owns policy command registration, execution, formatting, and safe local policy-artifact handling behind a narrow dispatch-time dependency seam. It does not import the CLI façade or introduce a command framework.
 - `hormuz/commands/custody.py` owns custody command registration, human-control and machine-executor dispatch, content-free formatting, verification, and encrypted-envelope file operations behind a narrow dispatch-time dependency seam. The façade retains only shared error translation and one private compatibility wrapper.
 - `hormuz/commands/audit.py` owns audit command registration, export and anchoring orchestration, formatting, and owner-only checkpoint file handling behind a narrow backend-neutral dependency seam. SQLite and PostgreSQL retain snapshot, transaction, tenant-scope, source-loading, and audit-chain verification ownership.
 - `hormuz/commands/client.py` owns Codex and Claude Code configuration rendering, credential-helper behavior, and client/auth parser registration. The façade retains legacy argv normalization and thin private compatibility wrappers only.
+- `hormuz/commands/runtime.py` owns serving, provider-free demo, diagnostics, usage status, contract inspection, storage operations, and their parser registration behind a dispatch-time runtime dependency seam. The façade remains the stable entry point, parser assembler, legacy normalization layer, and shared exception/exit-code boundary.
 
 ## Trust boundary
 
