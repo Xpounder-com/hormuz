@@ -39,11 +39,22 @@ and [repository Actions settings](https://docs.github.com/en/repositories/managi
 The importable ruleset payloads under `.github/rulesets/` define four separate
 controls:
 
-1. Only the GitHub Actions integration may create a
-   `candidate-v1.0.0-*` tag. The governance verifier requires the steward-gated
-   candidate-freeze job to be the repository's only job with an effective
-   contents-write grant. It resolves workflow and job overrides, treats
-   `write-all` as contents-write, and rejects unsupported permission syntax.
+1. Only an organization administrator may create a `candidate-v1.0.0-*` tag.
+   The steward-gated candidate-freeze job uses a short-lived, environment-only
+   fine-grained token from such an administrator for the publication step.
+   Every workflow-issued `GITHUB_TOKEN` remains contents-read-only. The
+   governance verifier resolves workflow and job overrides, treats `write-all`
+   as contents-write, rejects every such grant, and fails closed on unsupported
+   permission syntax. It binds all credential-bearing steps to the protected
+   `freeze` job, permits only the declared literal workflow environments and
+   secret expressions, and pins the complete byte content of the release
+   workflow, both release jobs, every credential-bearing step, and the
+   repository custody tool invoked by those steps. Repository code runs with
+   GitHub credentials and GitHub persistence-file paths removed from its
+   environment. Inserted setup steps therefore cannot poison later
+   credential-bearing commands, and workflow, job, or step controls cannot
+   turn a failed authorization into success. The custody environment must
+   contain exactly the two release-token names before checkout or build.
 2. `main` cannot be deleted or force-pushed. Every change uses a pull request,
    resolves review threads, is tested against current `main`, and passes all 11
    release-blocking checks from the GitHub Actions app.

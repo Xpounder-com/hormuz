@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import sys
@@ -75,7 +76,85 @@ PERMISSION_KEYS = {
     "statuses",
 }
 PERMISSION_LEVELS = {"none", "read", "write"}
-AUTHORIZED_CONTENTS_WRITER = ("freeze-v1-candidate.yml", "freeze")
+CUSTODY_SECRET_NAMES = (
+    "V1_RELEASE_ADMIN_TOKEN",
+    "V1_RELEASE_PUBLISH_TOKEN",
+)
+CUSTODY_ENVIRONMENT_NAME = "v1-release-custody"
+EXPECTED_WORKFLOW_SECRET_EXPRESSIONS = {
+    "freeze-v1-candidate.yml": (
+        "${{ secrets.V1_RELEASE_ADMIN_TOKEN }}",
+        "${{ secrets.V1_RELEASE_PUBLISH_TOKEN != '' }}",
+        (
+            "${{ secrets.V1_RELEASE_ADMIN_TOKEN != "
+            "secrets.V1_RELEASE_PUBLISH_TOKEN }}"
+        ),
+        "${{ secrets.V1_RELEASE_ADMIN_TOKEN }}",
+        "${{ secrets.V1_RELEASE_PUBLISH_TOKEN }}",
+        (
+            "${{ secrets.V1_RELEASE_ADMIN_TOKEN != "
+            "secrets.V1_RELEASE_PUBLISH_TOKEN }}"
+        ),
+        "${{ secrets.V1_RELEASE_ADMIN_TOKEN }}",
+    ),
+    "live-client-conformance.yml": (
+        "${{ secrets.HORMUZ_LIVE_ANTHROPIC_PROVIDER_KEY }}",
+        "${{ secrets.HORMUZ_LIVE_OPENAI_PROVIDER_KEY }}",
+    ),
+    "release-oci.yml": (
+        "${{ secrets.GITHUB_TOKEN }}",
+        "${{ secrets.GITHUB_TOKEN }}",
+        "${{ secrets.GITHUB_TOKEN }}",
+        "${{ secrets.GITHUB_TOKEN }}",
+    ),
+}
+EXPECTED_WORKFLOW_JOB_ENVIRONMENTS = {
+    "freeze-v1-candidate.yml": {
+        "preflight": CUSTODY_ENVIRONMENT_NAME,
+        "publish": CUSTODY_ENVIRONMENT_NAME,
+    },
+    "live-client-conformance.yml": {
+        "live-clients": "live-provider-conformance"
+    },
+}
+WORKFLOW_TOP_LEVEL_FIELDS = frozenset(
+    {"name", "on", "permissions", "concurrency", "jobs"}
+)
+REQUIRED_WORKFLOW_TOP_LEVEL_FIELDS = frozenset(
+    {"name", "on", "permissions", "jobs"}
+)
+CANONICAL_WORKFLOW_NAMES = frozenset(
+    {
+        "ci.yml",
+        "freeze-v1-candidate.yml",
+        "live-client-conformance.yml",
+        "release-oci.yml",
+        "upstream-canary.yml",
+    }
+)
+CANDIDATE_CREDENTIAL_STEP_SHA256 = {
+    "Verify credentials and live controls before the one permitted build": (
+        "45da1f4a8eca5a51ca9af737c16c93a90624c9cad2136d14a5176fe3c0cf9d57"
+    ),
+    "Revalidate controls, publish the verified draft, and seal custody": (
+        "6c28ea758335ba292e301949c4e13283b880e4d91ddb6af7d79d65a9d82f2ab3"
+    ),
+    "Verify the published immutable candidate and attestations": (
+        "2580ad938db646bfbec7fe4585d2f75e286ba36f310179d68577bd1f6f05391d"
+    ),
+}
+CANDIDATE_FREEZE_JOB_SHA256 = {
+    "authorize": "17dcbe2c36d7cbd38e2c63df0924b54201aa7ef9fed255d21fd995c1856c8451",
+    "preflight": "1c7966ebc828b5a40295c793aff5ec2b6d0ce6af8a4efe87f27893fa42487c91",
+    "build": "bbdb6cc17297f7a013067f435f9323703f0093ef9013a4b53abfd4dc8d9dc834",
+    "publish": "45e9f5d8ee73e9959c1325d7942723b834077117d756d2b95ad4912aed2bc325",
+}
+CANDIDATE_FREEZE_WORKFLOW_SHA256 = (
+    "550d9cd192c435568812363eec7dd6f7fb6724611c1ec89921f1daabb5063771"
+)
+CANDIDATE_TOOL_SHA256 = (
+    "befc54446f6a2b912b1ba5d0ff982abb32d9700beea0dad55f9fa04fc8c26ab8"
+)
 PermissionSpec = str | dict[str, str]
 
 
@@ -241,13 +320,13 @@ def _expected_rulesets(checks: list[dict[str, object]]) -> dict[str, object]:
     }
     return {
         ".github/rulesets/candidate-tag-creation.json": {
-            "name": "Steward workflow candidate tags",
+            "name": "Owner-created candidate tags",
             "target": "tag",
             "enforcement": "active",
             "bypass_actors": [
                 {
-                    "actor_id": 15368,
-                    "actor_type": "Integration",
+                    "actor_id": None,
+                    "actor_type": "OrganizationAdmin",
                     "bypass_mode": "always",
                 }
             ],
@@ -435,12 +514,382 @@ def _contents_permission(permissions: PermissionSpec) -> str:
     return permissions.get("contents", "none")
 
 
+def _workflow_named_step(text: str, *, name: str) -> str:
+    marker = f"      - name: {name}\n"
+    if text.count(marker) != 1:
+        raise RepositoryGovernanceError(
+            f"candidate freeze step identity changed: {name}"
+        )
+    start = text.index(marker)
+    remainder_start = start + len(marker)
+    next_step = re.search(
+        r"^(?:      - |  [a-z][a-z0-9-]*:\s*$)",
+        text[remainder_start:],
+        flags=re.MULTILINE,
+    )
+    end = (
+        remainder_start + next_step.start()
+        if next_step is not None
+        else -1
+    )
+    return text[start:] if end < 0 else text[start:end]
+
+
+def _has_exact_line(text: str, expected: str) -> bool:
+    return any(line.strip() == expected for line in text.splitlines())
+
+
+def _workflow_step_fields(step: str, *, name: str) -> tuple[str, ...]:
+    fields: list[str] = []
+    for line in step.splitlines()[1:]:
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        if _yaml_indent(line, label=name) != 8:
+            continue
+        field = _permission_key_and_value(line, indent=8)
+        if field is None:
+            raise RepositoryGovernanceError(
+                "candidate freeze credential boundary changed"
+            )
+        fields.append(field[0])
+    return tuple(fields)
+
+
+def _workflow_step_environment(step: str, *, name: str) -> dict[str, str]:
+    lines = step.splitlines()
+    environment_declarations: list[int] = []
+    for index, line in enumerate(lines[1:], start=1):
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        indent = _yaml_indent(line, label=name)
+        if indent < 8:
+            raise RepositoryGovernanceError(
+                "candidate freeze credential boundary changed"
+            )
+        if indent != 8:
+            continue
+        field = _permission_key_and_value(line, indent=8)
+        if field is None:
+            raise RepositoryGovernanceError(
+                "candidate freeze credential boundary changed"
+            )
+        if field[0] == "env":
+            if _plain_yaml_value(field[1], label=name):
+                raise RepositoryGovernanceError(
+                    "candidate freeze credential boundary changed"
+                )
+            environment_declarations.append(index)
+    if len(environment_declarations) != 1:
+        raise RepositoryGovernanceError(
+            "candidate freeze credential boundary changed"
+        )
+
+    environment: dict[str, str] = {}
+    for line in lines[environment_declarations[0] + 1 :]:
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        indent = _yaml_indent(line, label=name)
+        if indent <= 8:
+            break
+        if indent != 10:
+            raise RepositoryGovernanceError(
+                "candidate freeze credential boundary changed"
+            )
+        entry = re.fullmatch(r" {10}([A-Z][A-Z0-9_]*):\s*(.*)", line)
+        if entry is None:
+            raise RepositoryGovernanceError(
+                "candidate freeze credential boundary changed"
+            )
+        key, value = entry.groups()
+        value = value.strip()
+        if not value or "#" in value or key in environment:
+            raise RepositoryGovernanceError(
+                "candidate freeze credential boundary changed"
+            )
+        environment[key] = value
+    if not environment:
+        raise RepositoryGovernanceError(
+            "candidate freeze credential boundary changed"
+        )
+    return environment
+
+
+def _workflow_step_run_lines(step: str, *, name: str) -> tuple[str, ...]:
+    lines = step.splitlines()
+    run_declarations: list[int] = []
+    for index, line in enumerate(lines[1:], start=1):
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        if _yaml_indent(line, label=name) != 8:
+            continue
+        field = _permission_key_and_value(line, indent=8)
+        if field is None:
+            raise RepositoryGovernanceError(
+                "candidate freeze credential boundary changed"
+            )
+        if field[0] == "run":
+            if _plain_yaml_value(field[1], label=name) != "|":
+                raise RepositoryGovernanceError(
+                    "candidate freeze credential boundary changed"
+                )
+            run_declarations.append(index)
+    if len(run_declarations) != 1:
+        raise RepositoryGovernanceError(
+            "candidate freeze credential boundary changed"
+        )
+
+    run_lines: list[str] = []
+    for line in lines[run_declarations[0] + 1 :]:
+        if not line.strip():
+            continue
+        indent = _yaml_indent(line, label=name)
+        if indent <= 8:
+            break
+        if indent < 10:
+            raise RepositoryGovernanceError(
+                "candidate freeze credential boundary changed"
+            )
+        run_lines.append(line.strip())
+    if not run_lines:
+        raise RepositoryGovernanceError(
+            "candidate freeze credential boundary changed"
+        )
+    return tuple(run_lines)
+
+
+def _validate_candidate_freeze_authorization(text: str) -> None:
+    step_name = "Fail closed unless the trusted workflow and steward initiated this run"
+    step = _workflow_named_step(text, name=step_name)
+    expected_environment = {
+        "AUTHORIZED_STEWARD": "${{ vars.V1_RELEASE_STEWARD }}",
+        "ORIGINAL_ACTOR": "${{ github.actor }}",
+        "TRIGGERING_ACTOR": "${{ github.triggering_actor }}",
+        "WORKFLOW_REF": "${{ github.workflow_ref }}",
+    }
+    required_run_lines = (
+        "set -euo pipefail",
+        '[[ "$GITHUB_REPOSITORY" == "Xpounder-com/hormuz" ]] || {',
+        '[[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]] || {',
+        '[[ "$WORKFLOW_REF" == "Xpounder-com/hormuz/.github/workflows/freeze-v1-candidate.yml@refs/heads/main" ]] || {',
+        '[[ "$GITHUB_REF" == "refs/heads/main" && "$GITHUB_REF_TYPE" == "branch" ]] || {',
+        '[[ "$GITHUB_REF_PROTECTED" == "true" ]] || {',
+        '[[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]] || {',
+        '[[ "$GITHUB_RUN_ID" =~ ^[1-9][0-9]*$ && "$GITHUB_RUN_ATTEMPT" == "1" ]] || {',
+        '[[ -n "$AUTHORIZED_STEWARD" ]] || {',
+        '[[ "$ORIGINAL_ACTOR" == "$AUTHORIZED_STEWARD" ]] || {',
+        '[[ "$TRIGGERING_ACTOR" == "$AUTHORIZED_STEWARD" ]] || {',
+    )
+    run_lines = _workflow_step_run_lines(step, name=step_name)
+    if (
+        _workflow_step_fields(step, name=step_name) != ("env", "run")
+        or _workflow_step_environment(step, name=step_name)
+        != expected_environment
+        or any(line not in run_lines for line in required_run_lines)
+    ):
+        raise RepositoryGovernanceError(
+            "candidate freeze authorization changed"
+        )
+
+
+def _validate_candidate_freeze_credentials(text: str) -> None:
+    preflight_name = "Verify credentials and live controls before the one permitted build"
+    publish_name = "Revalidate controls, publish the verified draft, and seal custody"
+    verify_name = "Verify the published immutable candidate and attestations"
+    publish = _workflow_named_step(text, name=publish_name)
+    verify = _workflow_named_step(text, name=verify_name)
+    preflight = _workflow_named_step(text, name=preflight_name)
+    preflight_environment = _workflow_step_environment(
+        preflight, name=preflight_name
+    )
+    publish_environment = _workflow_step_environment(
+        publish, name=publish_name
+    )
+    verify_environment = _workflow_step_environment(
+        verify, name=verify_name
+    )
+    credential_steps = (
+        (preflight, preflight_name),
+        (publish, publish_name),
+        (verify, verify_name),
+    )
+    actual_step_digests = {
+        name: hashlib.sha256(step.encode("utf-8")).hexdigest()
+        for step, name in credential_steps
+    }
+    if any(
+        _workflow_step_fields(step, name=name) != ("env", "run")
+        for step, name in credential_steps
+    ) or actual_step_digests != CANDIDATE_CREDENTIAL_STEP_SHA256:
+        raise RepositoryGovernanceError(
+            "candidate freeze credential boundary changed"
+        )
+    expected_preflight_environment = {
+        "GH_READ_TOKEN": "${{ github.token }}",
+        "GH_ADMIN_TOKEN": "${{ secrets.V1_RELEASE_ADMIN_TOKEN }}",
+        "PUBLISH_TOKEN_CONFIGURED": (
+            "${{ secrets.V1_RELEASE_PUBLISH_TOKEN != '' }}"
+        ),
+        "RELEASE_TOKENS_SEPARATED": (
+            "${{ secrets.V1_RELEASE_ADMIN_TOKEN != "
+            "secrets.V1_RELEASE_PUBLISH_TOKEN }}"
+        ),
+        "AUTHORIZED_STEWARD": "${{ vars.V1_RELEASE_STEWARD }}",
+        "WORKFLOW_REF": "${{ github.workflow_ref }}",
+    }
+    expected_publish_environment = {
+        "GH_READ_TOKEN": "${{ github.token }}",
+        "GH_ADMIN_TOKEN": "${{ secrets.V1_RELEASE_ADMIN_TOKEN }}",
+        "GH_PUBLISH_TOKEN": "${{ secrets.V1_RELEASE_PUBLISH_TOKEN }}",
+        "RELEASE_TOKENS_SEPARATED": (
+            "${{ secrets.V1_RELEASE_ADMIN_TOKEN != "
+            "secrets.V1_RELEASE_PUBLISH_TOKEN }}"
+        ),
+        "AUTHORIZED_STEWARD": "${{ vars.V1_RELEASE_STEWARD }}",
+        "WORKFLOW_REF": "${{ github.workflow_ref }}",
+    }
+    expected_verify_environment = {
+        "GH_TOKEN": "${{ github.token }}",
+        "GH_ADMIN_TOKEN": "${{ secrets.V1_RELEASE_ADMIN_TOKEN }}",
+    }
+    if (
+        preflight_environment != expected_preflight_environment
+        or publish_environment != expected_publish_environment
+        or verify_environment != expected_verify_environment
+    ):
+        raise RepositoryGovernanceError(
+            "candidate freeze credential boundary changed"
+        )
+    if (
+        "V1_RELEASE_PUBLISH_TOKEN" in preflight
+        and "PUBLISH_TOKEN_CONFIGURED" not in preflight
+    ) or "V1_RELEASE_PUBLISH_TOKEN" in verify or "GH_PUBLISH_TOKEN" in verify:
+        raise RepositoryGovernanceError(
+            "candidate freeze credential boundary changed"
+        )
+    if (
+        publish.count("${{ secrets.V1_RELEASE_PUBLISH_TOKEN }}") != 1
+        or "tools/v1_candidate.py" in publish
+        or "actions/checkout" in publish
+    ):
+        raise RepositoryGovernanceError(
+            "candidate freeze credential boundary changed"
+        )
+
+
+def _workflow_control_lines(text: str, *, workflow_name: str) -> tuple[str, ...]:
+    control_lines: list[str] = []
+    block_scalar_indent: int | None = None
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        indent = _yaml_indent(line, label=workflow_name)
+        if block_scalar_indent is not None:
+            if indent > block_scalar_indent:
+                continue
+            block_scalar_indent = None
+        if line.lstrip().startswith("#"):
+            continue
+        control_lines.append(line)
+        if re.fullmatch(
+            r"[ ]*(?:-[ ]+)?[a-z][a-z0-9-]*:[ ]*[|>][+-]?[ ]*(?:#.*)?",
+            line,
+        ):
+            block_scalar_indent = indent
+    return tuple(control_lines)
+
+
+def _workflow_secret_expressions(text: str, *, workflow_name: str) -> tuple[str, ...]:
+    for line in _workflow_control_lines(text, workflow_name=workflow_name):
+        if re.search(
+            r"\\(?:x[0-9a-fA-F]{2}|u[0-9a-fA-F]{4}|U[0-9a-fA-F]{8})",
+            line,
+        ) or re.search(r"\\[ \t]*$", line):
+            raise RepositoryGovernanceError(
+                f"workflow YAML character escapes are unsupported: {workflow_name}"
+            )
+    expressions: list[str] = []
+    cursor = 0
+    while True:
+        start = text.find("${{", cursor)
+        if start < 0:
+            break
+        end = text.find("}}", start + 3)
+        if end < 0 or 0 <= text.find("${{", start + 3) < end:
+            raise RepositoryGovernanceError(
+                f"workflow expression syntax is unsupported: {workflow_name}"
+            )
+        expression = text[start : end + 2]
+        if "\\" in expression:
+            raise RepositoryGovernanceError(
+                f"workflow expression syntax is unsupported: {workflow_name}"
+            )
+        if re.search(r"\bsecrets\b", expression, flags=re.IGNORECASE):
+            expressions.append(expression)
+        cursor = end + 2
+    return tuple(expressions)
+
+
+def _validate_workflow_secret_expressions(
+    text: str, *, workflow_name: str
+) -> None:
+    expected = EXPECTED_WORKFLOW_SECRET_EXPRESSIONS.get(workflow_name, ())
+    actual = _workflow_secret_expressions(text, workflow_name=workflow_name)
+    if sorted(actual) != sorted(expected):
+        raise RepositoryGovernanceError(
+            f"workflow secret expression contract changed: {workflow_name}"
+        )
+
+
+def _workflow_job_fields(
+    job: str, *, workflow_name: str, job_name: str
+) -> dict[str, str]:
+    lines = job.splitlines()
+    if not lines:
+        raise RepositoryGovernanceError(
+            f"workflow job mapping is empty: {workflow_name}:{job_name}"
+        )
+    job_indent = _yaml_indent(
+        lines[0], label=f"{workflow_name}:{job_name}"
+    )
+    field_indent: int | None = None
+    fields: dict[str, str] = {}
+    for line in lines[1:]:
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        indent = _yaml_indent(line, label=f"{workflow_name}:{job_name}")
+        if indent <= job_indent:
+            break
+        if field_indent is None:
+            field_indent = indent
+        if indent != field_indent:
+            continue
+        field = _permission_key_and_value(line, indent=field_indent)
+        if field is None:
+            raise RepositoryGovernanceError(
+                f"workflow job uses unsupported mapping syntax: {workflow_name}:{job_name}"
+            )
+        key, raw_value = field
+        if key in fields:
+            raise RepositoryGovernanceError(
+                f"workflow job repeats field: {workflow_name}:{job_name}:{key}"
+            )
+        fields[key] = _plain_yaml_value(
+            raw_value, label=f"{workflow_name}:{job_name}:{key}"
+        )
+    return fields
+
+
 def _workflow_permissions(
     text: str, *, workflow_name: str
-) -> tuple[PermissionSpec, dict[str, PermissionSpec | None]]:
+) -> tuple[
+    PermissionSpec,
+    dict[str, PermissionSpec | None],
+    dict[str, str],
+]:
     lines = text.splitlines()
     top_level_permissions: list[int] = []
     jobs_declarations: list[int] = []
+    top_level_fields: set[str] = set()
     for index, line in enumerate(lines):
         if not line.strip() or line.lstrip().startswith("#"):
             continue
@@ -450,6 +899,13 @@ def _workflow_permissions(
             raise RepositoryGovernanceError(
                 f"workflow uses unsupported top-level mapping syntax: {workflow_name}"
             )
+        if indent == 0 and entry is not None:
+            key = entry[0]
+            if key in top_level_fields:
+                raise RepositoryGovernanceError(
+                    f"workflow repeats top-level field: {workflow_name}:{key}"
+                )
+            top_level_fields.add(key)
         if indent == 0 and entry is not None and entry[0] == "permissions":
             top_level_permissions.append(index)
         if indent == 0 and entry is not None and entry[0] == "jobs":
@@ -458,6 +914,18 @@ def _workflow_permissions(
                     f"workflow jobs must use a block mapping: {workflow_name}"
                 )
             jobs_declarations.append(index)
+
+    if (
+        not REQUIRED_WORKFLOW_TOP_LEVEL_FIELDS.issubset(top_level_fields)
+        or not top_level_fields.issubset(WORKFLOW_TOP_LEVEL_FIELDS)
+        or (
+            workflow_name in CANONICAL_WORKFLOW_NAMES
+            and top_level_fields != WORKFLOW_TOP_LEVEL_FIELDS
+        )
+    ):
+        raise RepositoryGovernanceError(
+            f"workflow top-level contract changed: {workflow_name}"
+        )
 
     if len(top_level_permissions) != 1:
         raise RepositoryGovernanceError(
@@ -505,6 +973,7 @@ def _workflow_permissions(
         )
 
     jobs: dict[str, PermissionSpec | None] = {}
+    job_blocks: dict[str, str] = {}
     for position, (job_name, start_index) in enumerate(job_starts):
         end_index = (
             job_starts[position + 1][1]
@@ -564,7 +1033,8 @@ def _workflow_permissions(
             if permission_declarations
             else None
         )
-    return workflow_permissions, jobs
+        job_blocks[job_name] = "\n".join(lines[start_index:end_index]) + "\n"
+    return workflow_permissions, jobs, job_blocks
 
 
 def _validate_workflows(
@@ -575,6 +1045,9 @@ def _validate_workflows(
         raise RepositoryGovernanceError("no GitHub Actions workflows found")
     action_use_count = 0
     contents_writers: list[tuple[str, str]] = []
+    candidate_freeze_seen = False
+    candidate_job_bytes_valid = False
+    candidate_workflow_bytes_valid = False
     for path in workflow_paths:
         try:
             text = path.read_text(encoding="utf-8")
@@ -584,9 +1057,145 @@ def _validate_workflows(
             raise RepositoryGovernanceError(
                 f"public-fork-unsafe pull_request_target trigger: {path.name}"
             )
-        workflow_permissions, jobs = _workflow_permissions(
+        if path.name != "freeze-v1-candidate.yml" and any(
+            secret_name in text for secret_name in CUSTODY_SECRET_NAMES
+        ):
+            raise RepositoryGovernanceError(
+                "custody secret used outside candidate freeze workflow"
+            )
+        if (
+            path.name != "freeze-v1-candidate.yml"
+            and CUSTODY_ENVIRONMENT_NAME in text
+        ):
+            raise RepositoryGovernanceError(
+                "custody environment used outside candidate freeze workflow"
+            )
+        workflow_permissions, jobs, job_blocks = _workflow_permissions(
             text, workflow_name=path.name
         )
+        _validate_workflow_secret_expressions(text, workflow_name=path.name)
+        job_fields = {
+            job_name: _workflow_job_fields(
+                job,
+                workflow_name=path.name,
+                job_name=job_name,
+            )
+            for job_name, job in job_blocks.items()
+        }
+        actual_environments = {
+            job_name: fields["environment"]
+            for job_name, fields in job_fields.items()
+            if "environment" in fields
+        }
+        expected_environments = EXPECTED_WORKFLOW_JOB_ENVIRONMENTS.get(
+            path.name, {}
+        )
+        if actual_environments != expected_environments:
+            raise RepositoryGovernanceError(
+                f"workflow environment contract changed: {path.name}"
+            )
+        if path.name == "freeze-v1-candidate.yml":
+            candidate_freeze_seen = True
+            candidate_workflow_bytes_valid = (
+                hashlib.sha256(text.encode("utf-8")).hexdigest()
+                == CANDIDATE_FREEZE_WORKFLOW_SHA256
+            )
+            authorize_job = job_blocks.get("authorize")
+            preflight_job = job_blocks.get("preflight")
+            build_job = job_blocks.get("build")
+            publish_job = job_blocks.get("publish")
+            expected_authorize_job_fields = {
+                "name": "Authorize the designated v1 release steward",
+                "permissions": "{}",
+                "runs-on": "ubuntu-24.04",
+                "timeout-minutes": "2",
+                "steps": "",
+            }
+            expected_preflight_job_fields = {
+                "name": "Approve and verify candidate custody before build",
+                "needs": "authorize",
+                "if": "${{ github.repository == 'Xpounder-com/hormuz' }}",
+                "environment": CUSTODY_ENVIRONMENT_NAME,
+                "permissions": "",
+                "runs-on": "ubuntu-24.04",
+                "timeout-minutes": "8",
+                "steps": "",
+            }
+            expected_build_job_fields = {
+                "name": "Build the candidate once without publisher authority",
+                "needs": "preflight",
+                "if": "${{ github.repository == 'Xpounder-com/hormuz' }}",
+                "permissions": "",
+                "runs-on": "ubuntu-24.04",
+                "timeout-minutes": "15",
+                "steps": "",
+            }
+            expected_publish_job_fields = {
+                "name": "Approve, independently verify, and publish candidate custody",
+                "needs": "build",
+                "if": "${{ github.repository == 'Xpounder-com/hormuz' }}",
+                "environment": CUSTODY_ENVIRONMENT_NAME,
+                "permissions": "",
+                "runs-on": "ubuntu-24.04",
+                "timeout-minutes": "15",
+                "steps": "",
+            }
+            if (
+                set(job_blocks) != {"authorize", "preflight", "build", "publish"}
+                or authorize_job is None
+                or preflight_job is None
+                or build_job is None
+                or publish_job is None
+                or job_fields.get("authorize")
+                != expected_authorize_job_fields
+                or job_fields.get("preflight") != expected_preflight_job_fields
+                or job_fields.get("build") != expected_build_job_fields
+                or job_fields.get("publish") != expected_publish_job_fields
+            ):
+                raise RepositoryGovernanceError(
+                    "candidate freeze job contract changed"
+                )
+            _validate_candidate_freeze_authorization(authorize_job)
+            _validate_candidate_freeze_credentials(preflight_job + publish_job)
+            if (
+                workflow_permissions != "{}"
+                or jobs.get("authorize") != "{}"
+                or jobs.get("preflight")
+                != {"actions": "read", "contents": "read"}
+                or jobs.get("build")
+                != {"actions": "read", "contents": "read"}
+                or jobs.get("publish")
+                != {
+                    "actions": "read",
+                    "attestations": "read",
+                    "contents": "read",
+                }
+                or "${{ secrets." in build_job
+                or CUSTODY_ENVIRONMENT_NAME in build_job
+                or "id-token" in build_job
+                or "contents: write" in build_job
+                or "self-hosted" in build_job
+                or "persist-credentials: false" not in build_job
+                or "ref: ${{ github.sha }}" not in build_job
+                or "actions/upload-artifact@" not in build_job
+                or "retention-days: 1" not in build_job
+                or "overwrite: false" not in build_job
+                or "actions/checkout@" in preflight_job
+                or "actions/checkout@" in publish_job
+                or "tools/v1_candidate.py" in publish_job
+                or "python -m build" in publish_job
+                or re.search(r"(?:^|\s)(?:tar|unzip)\s", publish_job)
+            ):
+                raise RepositoryGovernanceError(
+                    "candidate freeze isolation boundary changed"
+                )
+            actual_job_digests = {
+                job_name: hashlib.sha256(job.encode("utf-8")).hexdigest()
+                for job_name, job in job_blocks.items()
+            }
+            candidate_job_bytes_valid = (
+                actual_job_digests == CANDIDATE_FREEZE_JOB_SHA256
+            )
         for job_name, job_permissions in jobs.items():
             effective_permissions = (
                 workflow_permissions if job_permissions is None else job_permissions
@@ -618,9 +1227,19 @@ def _validate_workflows(
                 )
         action_use_count += len(pinned)
 
-    if contents_writers != [AUTHORIZED_CONTENTS_WRITER]:
+    if not candidate_freeze_seen:
+        raise RepositoryGovernanceError("candidate freeze workflow is required")
+    if contents_writers:
         raise RepositoryGovernanceError(
-            "only the steward-gated candidate freeze job may write contents"
+            "workflow-issued contents write is forbidden"
+        )
+    if not candidate_job_bytes_valid:
+        raise RepositoryGovernanceError(
+            "candidate freeze job bytes changed"
+        )
+    if not candidate_workflow_bytes_valid:
+        raise RepositoryGovernanceError(
+            "candidate freeze workflow bytes changed"
         )
 
     ci = (root / ".github/workflows/ci.yml").read_text(encoding="utf-8")
@@ -651,6 +1270,14 @@ def _validate_workflows(
 
 def validate_repository_governance(root: Path) -> dict[str, object]:
     root = root.resolve()
+    try:
+        candidate_tool = (root / "tools/v1_candidate.py").read_bytes()
+    except OSError as exc:
+        raise RepositoryGovernanceError(
+            "candidate custody tool is unavailable"
+        ) from exc
+    if hashlib.sha256(candidate_tool).hexdigest() != CANDIDATE_TOOL_SHA256:
+        raise RepositoryGovernanceError("candidate custody tool bytes changed")
     manifest = _read_json(root / MANIFEST_PATH)
     checks = _validate_manifest(manifest)
     _validate_rulesets(root, checks)

@@ -1,11 +1,11 @@
 {
-  "name": "Steward workflow candidate tags",
+  "name": "Owner-created candidate tags",
   "target": "tag",
   "enforcement": "active",
   "bypass_actors": [
     {
-      "actor_id": 15368,
-      "actor_type": "Integration",
+      "actor_id": null,
+      "actor_type": "OrganizationAdmin",
       "bypass_mode": "always"
     }
   ],

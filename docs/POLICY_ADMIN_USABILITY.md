@@ -74,31 +74,65 @@ requires a new source commit and a newly computed candidate digest.
 The repository variable `V1_RELEASE_STEWARD` must contain the one GitHub login
 authorized to perform this destructive dispatch. A read-only authorization job
 requires both the original actor and triggering actor to equal that login
-before the write-capable freeze job can start. The freeze job also targets the
-protected `v1-release-custody` GitHub environment. That environment must allow
-only protected branches and require exactly that steward as its reviewer; an
-unauthorized failed dispatch is excluded from the one-run count and cannot
+and rejects any workflow definition not running from protected `main`, any
+non-full candidate SHA, and every rerun attempt. The workflow has four fresh
+GitHub-hosted jobs in a fixed dependency chain: `authorize`, `preflight`,
+`build`, and `publish`. Both `preflight` and `publish` separately target the
+protected `v1-release-custody` environment, which allows only protected branches
+and requires exactly the steward as reviewer. Consequently publication requires
+a second protected-environment approval after the build has completed.
+
+An unauthorized failed dispatch is excluded from the one-run count and cannot
 poison a later legitimate freeze. The one-run decision is based on the recorded
 successful authorization job, not the steward's current login. Rotating the
 steward therefore never makes a previously authorized attempt disappear: that
 source commit is consumed and recovery requires a new commit even if no archive
 was ultimately published.
-Before that one build, the workflow uses the owner-supplied
-`V1_RELEASE_ADMIN_TOKEN` secret, scoped to read-only repository Administration
-and Environments, to verify the live settings. Immutable Releases must already
-be enabled, the protected environment must match the steward contract, and one
-active, no-bypass tag ruleset must protect both `refs/tags/v*` and
-`refs/tags/candidate-v1.0.0-*`. A separate creation ruleset permits the GitHub
-Actions integration to create only `candidate-v1.0.0-*` tags, while repository
-governance requires the steward-gated freeze job to be the sole job with an
-effective contents-write grant. The verifier resolves workflow- and job-level
-permission maps, including `write-all`, and fails closed on unsupported YAML
-forms. Human creation of candidate tags is denied; final `v*`
-tag creation remains organization-administrator-only. The ordinary per-run
-`GITHUB_TOKEN` performs the candidate release operation; the administration
-token cannot publish.
 
-The freeze workflow installs the exact pure-Python frontend and backend wheels
+Before that one build, `preflight` requires two distinct owner-supplied
+environment secrets without checking out or executing repository code.
+`V1_RELEASE_ADMIN_TOKEN` is scoped to read-only repository Administration and
+Environments and verifies the live settings.
+`V1_RELEASE_PUBLISH_TOKEN` is a short-lived, fine-grained personal access token
+for this repository with Contents read/write and no Administration or
+Environments permission. Its owner must be an organization administrator so it
+can pass the candidate-tag creation ruleset. `preflight` sees only the
+administration token and boolean presence/equality results for the publisher
+token. The publisher credential itself is injected into one workflow-embedded
+publication step only. That step executes no checked-out code and independently
+repeats the credential and live-control checks immediately before mutation.
+Revoke or rotate the publisher token after a successful freeze.
+
+Before checkout or build, `preflight` lists the protected environment's secret
+metadata and requires exactly `V1_RELEASE_ADMIN_TOKEN` and
+`V1_RELEASE_PUBLISH_TOKEN`. A repository- or organization-level secret with the
+same name cannot satisfy that check; both custody credentials must be stored in
+the reviewed environment. The administration token's owner must also be an
+organization administrator; GitHub otherwise withholds ruleset bypass actors
+from the read response and the workflow fails closed before the archive build.
+
+Immutable Releases must already be enabled, the protected environment must
+match the steward contract, and one active, no-bypass tag ruleset must protect
+both `refs/tags/v*` and `refs/tags/candidate-v1.0.0-*`. A separate creation
+ruleset permits only organization administrators to create
+`candidate-v1.0.0-*` tags. This is the repository's actual GitHub trust boundary:
+the built-in Actions integration cannot be installed as a repository-ruleset
+bypass actor. The steward-gated workflow is the prescribed candidate path, but
+organization administrators remain trusted repository governors.
+
+Every workflow-issued `GITHUB_TOKEN` remains read-only. An ephemeral read-only
+token is permitted for exact-SHA checkout and API inspection; this is not a
+publisher credential. The `build` job is deliberately secretless: it has no
+protected environment, custom or publisher secret, write permission, OIDC token
+capability, persisted checkout credential, or reusable self-hosted runner. No
+publisher or repository-write credential exists anywhere repository-controlled
+code can execute. The governance verifier resolves workflow- and job-level
+permission maps, including `write-all`, pins the full workflow and all four job
+bodies, and fails closed if these boundaries drift. Final `v*` tag creation
+remains organization-administrator-only.
+
+On its fresh GitHub-hosted runner, `build` installs the exact pure-Python frontend
+and backend wheels
 from `requirements/v1-source-build.lock` with SHA-256 enforcement, forced
 reinstallation, and no dependency resolution. Forced reinstallation ensures a
 preinstalled runner package cannot bypass download and hash verification. The
@@ -109,7 +143,17 @@ the strict `hormuz.v1-candidate-manifest` contract. The manifest records the
 source commit, UTC freeze time, archive name and size, workflow run, digest,
 and the facts that overwriting and promotion-time rebuilding are forbidden.
 The manifest is written atomically with mode `0600` and refuses an existing,
-symlink, or special-file destination.
+symlink, or special-file destination. The archive and manifest are transferred
+as one run-scoped Actions artifact with one-day retention. No job output or
+manifest field is interpolated into a publisher shell command.
+
+The fresh `publish` runner has no checkout and treats both transferred files as
+untrusted input. Its workflow-embedded validator accepts exactly the two fixed
+filenames as bounded regular files, rejects symlinks, special files, extra
+entries, duplicate JSON members, and non-finite JSON values, and validates the
+complete manifest schema, repository, full candidate SHA, run ID and attempt,
+version, size, and independently computed SHA-256. It never executes or extracts
+the source archive.
 
 Candidate custody uses a published immutable GitHub prerelease and a non-semver,
 digest-addressed tag such as
@@ -117,13 +161,20 @@ digest-addressed tag such as
 avoids creating the final tag before the human gate passes and cannot trigger
 the semantic-version OCI workflow. Copy the exact value from
 `custody.release_tag` in the manifest rather than typing it.
-The workflow attaches exactly two assets without `--clobber`: the source
-archive and its manifest. It then downloads both assets into a new directory
-and verifies their local and GitHub-reported digests, immutable state, and
-GitHub release attestations. Existing candidate releases or assets are never
-replaced. The prerelease is intentionally visible before the gate: it labels
-itself as a candidate, makes no v1 success claim, and closes the draft-asset
-mutation window before any participant session starts.
+
+Publication first creates an unpublished draft, attaches exactly the source
+archive and manifest without overwrite semantics, downloads both remote assets
+through the release-asset API, and compares their sizes, SHA-256 digests, and
+exact bytes. The workflow repeats the live immutable-release, ruleset,
+environment, current-main, no-overwrite, final-tag-absence, and remote-byte
+checks immediately before changing the draft to a prerelease. Any validation,
+upload, or remote-byte mismatch before that change leaves the release
+unpublished; the workflow never creates `v1.0.0`. After publication it verifies
+immutable state, the digest-addressed candidate tag's source binding, asset
+digests, and GitHub release attestations. Existing candidate releases or assets
+are never replaced. The prerelease is intentionally visible before the gate: it
+labels itself as a candidate, makes no v1 success claim, and closes the
+draft-asset mutation window before any participant session starts.
 
 Give every participant the exact archived source distribution and manifest.
 Before installation, verify the archive locally and compare the result with

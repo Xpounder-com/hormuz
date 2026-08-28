@@ -3,8 +3,7 @@ name: Freeze v1.0.0 candidate
 on:
   workflow_dispatch:
 
-permissions:
-  contents: read
+permissions: {}
 
 concurrency:
   group: freeze-v1-candidate
@@ -17,14 +16,40 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 2
     steps:
-      - name: Fail closed unless the configured steward initiated this run
+      - name: Fail closed unless the trusted workflow and steward initiated this run
         env:
           AUTHORIZED_STEWARD: ${{ vars.V1_RELEASE_STEWARD }}
           ORIGINAL_ACTOR: ${{ github.actor }}
           TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+          WORKFLOW_REF: ${{ github.workflow_ref }}
         run: |
+          set -euo pipefail
           [[ "$GITHUB_REPOSITORY" == "Xpounder-com/hormuz" ]] || {
             echo "candidate freeze is restricted to the canonical repository" >&2
+            exit 1
+          }
+          [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]] || {
+            echo "candidate freeze requires an explicit workflow dispatch" >&2
+            exit 1
+          }
+          [[ "$WORKFLOW_REF" == "Xpounder-com/hormuz/.github/workflows/freeze-v1-candidate.yml@refs/heads/main" ]] || {
+            echo "candidate freeze must execute the workflow definition from main" >&2
+            exit 1
+          }
+          [[ "$GITHUB_REF" == "refs/heads/main" && "$GITHUB_REF_TYPE" == "branch" ]] || {
+            echo "candidate freeze must be dispatched from main" >&2
+            exit 1
+          }
+          [[ "$GITHUB_REF_PROTECTED" == "true" ]] || {
+            echo "candidate freeze requires protected main" >&2
+            exit 1
+          }
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "candidate freeze requires one full lowercase source SHA" >&2
+            exit 1
+          }
+          [[ "$GITHUB_RUN_ID" =~ ^[1-9][0-9]*$ && "$GITHUB_RUN_ATTEMPT" == "1" ]] || {
+            echo "candidate freeze reruns are forbidden" >&2
             exit 1
           }
           [[ -n "$AUTHORIZED_STEWARD" ]] || {
@@ -40,78 +65,92 @@ jobs:
             exit 1
           }
 
-  freeze:
-    name: Build once and seal immutable candidate custody
+  preflight:
+    name: Approve and verify candidate custody before build
     needs: authorize
     if: ${{ github.repository == 'Xpounder-com/hormuz' }}
     environment: v1-release-custody
     permissions:
-      contents: write
       actions: read
-      attestations: read
+      contents: read
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 8
     steps:
-      - name: Check out the exact protected main candidate
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-
-      - name: Set up pinned Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.12"
-
-      - name: Fail closed before the one permitted archive build
+      - name: Verify credentials and live controls before the one permitted build
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_READ_TOKEN: ${{ github.token }}
           GH_ADMIN_TOKEN: ${{ secrets.V1_RELEASE_ADMIN_TOKEN }}
+          PUBLISH_TOKEN_CONFIGURED: ${{ secrets.V1_RELEASE_PUBLISH_TOKEN != '' }}
+          RELEASE_TOKENS_SEPARATED: ${{ secrets.V1_RELEASE_ADMIN_TOKEN != secrets.V1_RELEASE_PUBLISH_TOKEN }}
           AUTHORIZED_STEWARD: ${{ vars.V1_RELEASE_STEWARD }}
+          WORKFLOW_REF: ${{ github.workflow_ref }}
         run: |
+          set -euo pipefail
           umask 077
           assert_api_absent() {
-            local endpoint="$1"
-            local label="$2"
+            local token="$1"
+            local endpoint="$2"
+            local label="$3"
             local error_file="$RUNNER_TEMP/${label}.err"
-            if gh api "$endpoint" >/dev/null 2>"$error_file"; then
+            if GH_TOKEN="$token" gh api "$endpoint" >/dev/null 2>"$error_file"; then
               echo "$label already exists" >&2
               exit 1
             fi
             if ! grep -Fq 'HTTP 404' "$error_file"; then
-              cat "$error_file" >&2
               echo "could not prove $label is absent" >&2
               exit 1
             fi
           }
-          [[ "$GITHUB_REF" == "refs/heads/main" ]] || {
-            echo "candidate freeze must be dispatched from main" >&2
-            exit 1
-          }
-          [[ "$GITHUB_REF_PROTECTED" == "true" ]] || {
-            echo "candidate freeze requires protected main" >&2
-            exit 1
-          }
-          [[ "$GITHUB_RUN_ATTEMPT" == "1" ]] || {
-            echo "a freeze run cannot be rerun because the archive may already have been built" >&2
-            exit 1
-          }
+          [[ "$GITHUB_REPOSITORY" == "Xpounder-com/hormuz" ]] || exit 1
+          [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]] || exit 1
+          [[ "$WORKFLOW_REF" == "Xpounder-com/hormuz/.github/workflows/freeze-v1-candidate.yml@refs/heads/main" ]] || exit 1
+          [[ "$GITHUB_REF" == "refs/heads/main" && "$GITHUB_REF_PROTECTED" == "true" ]] || exit 1
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 1
+          [[ "$GITHUB_RUN_ID" =~ ^[1-9][0-9]*$ && "$GITHUB_RUN_ATTEMPT" == "1" ]] || exit 1
+          [[ -n "$AUTHORIZED_STEWARD" ]] || exit 1
+          [[ "$GITHUB_ACTOR" == "$AUTHORIZED_STEWARD" ]] || exit 1
+          [[ "$GITHUB_TRIGGERING_ACTOR" == "$AUTHORIZED_STEWARD" ]] || exit 1
           [[ -n "${GH_ADMIN_TOKEN:-}" ]] || {
             echo "V1_RELEASE_ADMIN_TOKEN with read-only Administration and Environments permissions is required" >&2
             exit 1
           }
-          gh release verify-asset --help >/dev/null 2>&1 || {
-            echo "the runner GitHub CLI cannot verify immutable release attestations" >&2
+          [[ "$PUBLISH_TOKEN_CONFIGURED" == "true" ]] || {
+            echo "V1_RELEASE_PUBLISH_TOKEN with Contents write permission is required" >&2
             exit 1
           }
+          [[ "$RELEASE_TOKENS_SEPARATED" == "true" ]] || {
+            echo "the release administration and publication tokens must be distinct" >&2
+            exit 1
+          }
+
+          current_run_path="$RUNNER_TEMP/current-freeze-run.json"
+          GH_TOKEN="$GH_READ_TOKEN" gh api "/repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" > "$current_run_path"
           freeze_runs_path="$RUNNER_TEMP/freeze-runs.json"
-          gh api --paginate --slurp \
+          GH_TOKEN="$GH_READ_TOKEN" gh api --paginate --slurp \
             "/repos/$GITHUB_REPOSITORY/actions/workflows/freeze-v1-candidate.yml/runs?event=workflow_dispatch&head_sha=$GITHUB_SHA&per_page=100" \
             > "$freeze_runs_path"
           freeze_run_ids_path="$RUNNER_TEMP/freeze-run-ids.txt"
-          python -I -B -c '
-          import json, pathlib, sys
-          pages = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+          /usr/bin/python3 -I -B - "$freeze_runs_path" "$freeze_run_ids_path" <<'PYTHON'
+          import json
+          import pathlib
+          import sys
+
+          def strict_object(pairs):
+              value = {}
+              for key, item in pairs:
+                  if key in value:
+                      raise SystemExit("freeze run listing contains duplicate JSON members")
+                  value[key] = item
+              return value
+
+          def reject_constant(_value):
+              raise SystemExit("freeze run listing contains a non-finite number")
+
+          pages = json.loads(
+              pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"),
+              object_pairs_hook=strict_object,
+              parse_constant=reject_constant,
+          )
           if not isinstance(pages, list) or not pages:
               raise SystemExit("freeze run listing is invalid")
           run_ids = []
@@ -120,82 +159,281 @@ jobs:
                   raise SystemExit("freeze run listing is invalid")
               for run in page["workflow_runs"]:
                   run_id = run.get("id") if isinstance(run, dict) else None
-                  if isinstance(run_id, bool) or not isinstance(run_id, int) or run_id < 1 or run_id in run_ids:
+                  if type(run_id) is not int or run_id < 1 or run_id in run_ids:
                       raise SystemExit("freeze run listing is invalid")
                   run_ids.append(run_id)
           if not run_ids:
               raise SystemExit("freeze run listing is empty")
-          print("\n".join(str(run_id) for run_id in run_ids))
-          ' "$freeze_runs_path" > "$freeze_run_ids_path"
+          pathlib.Path(sys.argv[2]).write_text(
+              "".join(f"{run_id}\n" for run_id in run_ids), encoding="ascii"
+          )
+          PYTHON
           freeze_jobs_dir="$RUNNER_TEMP/freeze-run-jobs"
           mkdir -m 700 "$freeze_jobs_dir"
           mapfile -t freeze_run_ids < "$freeze_run_ids_path"
           for freeze_run_id in "${freeze_run_ids[@]}"; do
-            [[ "$freeze_run_id" =~ ^[1-9][0-9]*$ ]] || {
-              echo "freeze run id is invalid" >&2
-              exit 1
-            }
-            gh api --paginate --slurp \
+            [[ "$freeze_run_id" =~ ^[1-9][0-9]*$ ]] || exit 1
+            GH_TOKEN="$GH_READ_TOKEN" gh api --paginate --slurp \
               "/repos/$GITHUB_REPOSITORY/actions/runs/$freeze_run_id/jobs?filter=all&per_page=100" \
               > "$freeze_jobs_dir/$freeze_run_id.json"
           done
-          python -I -B tools/v1_candidate.py freeze-authorization \
-            --runs-api "$freeze_runs_path" \
-            --jobs-directory "$freeze_jobs_dir" \
-            --source-commit "$GITHUB_SHA" \
-            --current-run-id "$GITHUB_RUN_ID" \
-            --output "$RUNNER_TEMP/freeze-authorization-proof.json" || {
-              echo "the exact source commit already has another successfully authorized freeze run; create a new commit instead of rebuilding" >&2
-              exit 1
-            }
-          package_version="$(python -c 'import pathlib, tomllib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"])')"
-          [[ "$package_version" == "1.0.0" ]] || {
-            echo "candidate package version must be exactly 1.0.0" >&2
-            exit 1
-          }
-          main_sha="$(gh api "/repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)"
-          [[ "$main_sha" == "$GITHUB_SHA" ]] || {
-            echo "candidate source is no longer current main" >&2
-            exit 1
-          }
-          immutable_enabled="$(GH_TOKEN="$GH_ADMIN_TOKEN" gh api "/repos/$GITHUB_REPOSITORY/immutable-releases" --jq .enabled)"
-          [[ "$immutable_enabled" == "true" ]] || {
-            echo "immutable GitHub Releases must be enabled before freezing" >&2
-            exit 1
-          }
-          candidate_creation_ruleset_id="$(GH_TOKEN="$GH_ADMIN_TOKEN" gh api "/repos/$GITHUB_REPOSITORY/rulesets?includes_parents=true&per_page=100" --jq '[.[] | select(.name == "Steward workflow candidate tags" and .source_type == "Repository" and .target == "tag" and .enforcement == "active")] | if length == 1 then .[0].id else "" end')"
-          [[ "$candidate_creation_ruleset_id" =~ ^[1-9][0-9]*$ ]] || {
-            echo "one active Steward workflow candidate tags ruleset is required before freezing" >&2
-            exit 1
-          }
-          candidate_creation_rule_contract="$(GH_TOKEN="$GH_ADMIN_TOKEN" gh api "/repos/$GITHUB_REPOSITORY/rulesets/$candidate_creation_ruleset_id" --jq '(.bypass_actors == [{"actor_id":15368,"actor_type":"Integration","bypass_mode":"always"}]) and (.conditions.ref_name.exclude == []) and (.conditions.ref_name.include == ["refs/tags/candidate-v1.0.0-*"]) and ([.rules[].type] == ["creation"])')"
-          [[ "$candidate_creation_rule_contract" == "true" ]] || {
-            echo "candidate tag creation must be restricted to the steward-gated GitHub Actions workflow" >&2
-            exit 1
-          }
-          immutability_ruleset_id="$(GH_TOKEN="$GH_ADMIN_TOKEN" gh api "/repos/$GITHUB_REPOSITORY/rulesets?includes_parents=true&per_page=100" --jq '[.[] | select(.name == "Immutable version tags" and .source_type == "Repository" and .target == "tag" and .enforcement == "active")] | if length == 1 then .[0].id else "" end')"
-          [[ "$immutability_ruleset_id" =~ ^[1-9][0-9]*$ ]] || {
-            echo "one active Immutable version tags ruleset is required before freezing" >&2
-            exit 1
-          }
-          immutability_rule_contract="$(GH_TOKEN="$GH_ADMIN_TOKEN" gh api "/repos/$GITHUB_REPOSITORY/rulesets/$immutability_ruleset_id" --jq '(.bypass_actors == []) and (.conditions.ref_name.exclude == []) and ((.conditions.ref_name.include | sort) == (["refs/tags/candidate-v1.0.0-*", "refs/tags/v*"] | sort)) and (([.rules[].type] | sort) == (["deletion", "non_fast_forward", "update"] | sort))')"
-          [[ "$immutability_rule_contract" == "true" ]] || {
-            echo "live no-bypass immutability must cover both candidate and final v1 tags" >&2
-            exit 1
-          }
-          release_environment_path="$RUNNER_TEMP/v1-release-custody-environment.json"
-          GH_TOKEN="$GH_ADMIN_TOKEN" gh api \
-            "/repos/$GITHUB_REPOSITORY/environments/v1-release-custody" \
-            > "$release_environment_path"
-          release_environment_contract="$(python -c '
-          import json, pathlib, sys
-          value = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
-          steward = sys.argv[2]
-          rules = [item for item in value.get("protection_rules", []) if item.get("type") == "required_reviewers"]
+
+          main_path="$RUNNER_TEMP/main-commit.json"
+          GH_TOKEN="$GH_READ_TOKEN" gh api "/repos/$GITHUB_REPOSITORY/commits/main" > "$main_path"
+          ci_runs_path="$RUNNER_TEMP/main-ci-runs.json"
+          GH_TOKEN="$GH_READ_TOKEN" gh api --paginate --slurp \
+            "/repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?branch=main&event=push&status=completed&per_page=100" \
+            > "$ci_runs_path"
+          releases_path="$RUNNER_TEMP/releases.json"
+          GH_TOKEN="$GH_READ_TOKEN" gh api --paginate --slurp \
+            "/repos/$GITHUB_REPOSITORY/releases?per_page=100" > "$releases_path"
+          immutable_path="$RUNNER_TEMP/immutable-releases.json"
+          GH_TOKEN="$GH_ADMIN_TOKEN" gh api "/repos/$GITHUB_REPOSITORY/immutable-releases" > "$immutable_path"
+          rulesets_path="$RUNNER_TEMP/rulesets.json"
+          GH_TOKEN="$GH_ADMIN_TOKEN" gh api --paginate --slurp \
+            "/repos/$GITHUB_REPOSITORY/rulesets?includes_parents=true&per_page=100" > "$rulesets_path"
+          candidate_ruleset_path="$RUNNER_TEMP/candidate-ruleset.json"
+          immutable_ruleset_path="$RUNNER_TEMP/immutable-ruleset.json"
+          candidate_ruleset_id="$(GH_TOKEN="$GH_ADMIN_TOKEN" gh api "/repos/$GITHUB_REPOSITORY/rulesets?includes_parents=true&per_page=100" --jq '[.[] | select(.name == "Owner-created candidate tags" and .source_type == "Repository" and .target == "tag" and .enforcement == "active")] | if length == 1 then .[0].id else "" end')"
+          immutable_ruleset_id="$(GH_TOKEN="$GH_ADMIN_TOKEN" gh api "/repos/$GITHUB_REPOSITORY/rulesets?includes_parents=true&per_page=100" --jq '[.[] | select(.name == "Immutable version tags" and .source_type == "Repository" and .target == "tag" and .enforcement == "active")] | if length == 1 then .[0].id else "" end')"
+          [[ "$candidate_ruleset_id" =~ ^[1-9][0-9]*$ ]] || exit 1
+          [[ "$immutable_ruleset_id" =~ ^[1-9][0-9]*$ ]] || exit 1
+          GH_TOKEN="$GH_ADMIN_TOKEN" gh api "/repos/$GITHUB_REPOSITORY/rulesets/$candidate_ruleset_id" > "$candidate_ruleset_path"
+          GH_TOKEN="$GH_ADMIN_TOKEN" gh api "/repos/$GITHUB_REPOSITORY/rulesets/$immutable_ruleset_id" > "$immutable_ruleset_path"
+          environment_path="$RUNNER_TEMP/v1-release-custody-environment.json"
+          GH_TOKEN="$GH_ADMIN_TOKEN" gh api "/repos/$GITHUB_REPOSITORY/environments/v1-release-custody" > "$environment_path"
+          environment_secrets_path="$RUNNER_TEMP/v1-release-custody-secrets.json"
+          GH_TOKEN="$GH_ADMIN_TOKEN" gh api --paginate --slurp \
+            "/repos/$GITHUB_REPOSITORY/environments/v1-release-custody/secrets?per_page=100" \
+            > "$environment_secrets_path"
+
+          /usr/bin/python3 -I -B - \
+            "$current_run_path" "$freeze_runs_path" "$freeze_jobs_dir" \
+            "$main_path" "$ci_runs_path" "$releases_path" "$immutable_path" \
+            "$rulesets_path" "$candidate_ruleset_path" "$immutable_ruleset_path" \
+            "$environment_path" "$environment_secrets_path" \
+            "$GITHUB_SHA" "$GITHUB_RUN_ID" "$AUTHORIZED_STEWARD" <<'PYTHON'
+          import json
+          import pathlib
+          import sys
+
+          WORKFLOW = ".github/workflows/freeze-v1-candidate.yml"
+          AUTHORIZATION_JOB = "Authorize the designated v1 release steward"
+          REPOSITORY = "Xpounder-com/hormuz"
+
+          def strict_object(pairs):
+              value = {}
+              for key, item in pairs:
+                  if key in value:
+                      raise SystemExit("GitHub API response contains duplicate JSON members")
+                  value[key] = item
+              return value
+
+          def reject_constant(_value):
+              raise SystemExit("GitHub API response contains a non-finite number")
+
+          def load(path):
+              return json.loads(
+                  pathlib.Path(path).read_text(encoding="utf-8"),
+                  object_pairs_hook=strict_object,
+                  parse_constant=reject_constant,
+              )
+
+          (
+              current_run_file,
+              runs_file,
+              jobs_directory,
+              main_file,
+              ci_file,
+              releases_file,
+              immutable_file,
+              rulesets_file,
+              candidate_ruleset_file,
+              immutable_ruleset_file,
+              environment_file,
+              secrets_file,
+              source_sha,
+              run_id_text,
+              steward,
+          ) = sys.argv[1:]
+          run_id = int(run_id_text)
+          current = load(current_run_file)
+          repository = current.get("repository") if isinstance(current, dict) else None
+          head_repository = current.get("head_repository") if isinstance(current, dict) else None
+          actor = current.get("actor") if isinstance(current, dict) else None
+          triggering_actor = current.get("triggering_actor") if isinstance(current, dict) else None
+          if (
+              not isinstance(current, dict)
+              or current.get("id") != run_id
+              or current.get("run_attempt") != 1
+              or current.get("event") != "workflow_dispatch"
+              or current.get("head_branch") != "main"
+              or current.get("head_sha") != source_sha
+              or not isinstance(current.get("path"), str)
+              or current["path"].split("@", 1)[0] != WORKFLOW
+              or not isinstance(repository, dict)
+              or repository.get("full_name") != REPOSITORY
+              or not isinstance(head_repository, dict)
+              or head_repository.get("full_name") != REPOSITORY
+              or not isinstance(actor, dict)
+              or actor.get("login") != steward
+              or not isinstance(triggering_actor, dict)
+              or triggering_actor.get("login") != steward
+          ):
+              raise SystemExit("current freeze run identity is invalid")
+
+          pages = load(runs_file)
+          if not isinstance(pages, list) or not pages:
+              raise SystemExit("freeze run listing is invalid")
+          run_ids = []
+          for page in pages:
+              if not isinstance(page, dict) or not isinstance(page.get("workflow_runs"), list):
+                  raise SystemExit("freeze run listing is invalid")
+              for run in page["workflow_runs"]:
+                  path = run.get("path") if isinstance(run, dict) else None
+                  observed_id = run.get("id") if isinstance(run, dict) else None
+                  if (
+                      type(observed_id) is not int
+                      or observed_id < 1
+                      or observed_id in run_ids
+                      or run.get("event") != "workflow_dispatch"
+                      or run.get("head_sha") != source_sha
+                      or not isinstance(path, str)
+                      or path.split("@", 1)[0] != WORKFLOW
+                  ):
+                      raise SystemExit("freeze run listing is invalid")
+                  run_ids.append(observed_id)
+          if run_id not in run_ids:
+              raise SystemExit("current freeze run is missing")
+          authorized = []
+          for observed_id in run_ids:
+              job_pages = load(pathlib.Path(jobs_directory) / f"{observed_id}.json")
+              if not isinstance(job_pages, list) or not job_pages:
+                  raise SystemExit("freeze jobs listing is invalid")
+              succeeded = False
+              for page in job_pages:
+                  if not isinstance(page, dict) or not isinstance(page.get("jobs"), list):
+                      raise SystemExit("freeze jobs listing is invalid")
+                  for job in page["jobs"]:
+                      if (
+                          not isinstance(job, dict)
+                          or job.get("run_id") != observed_id
+                          or job.get("head_sha") != source_sha
+                      ):
+                          raise SystemExit("freeze jobs listing is invalid")
+                      if (
+                          job.get("name") == AUTHORIZATION_JOB
+                          and job.get("status") == "completed"
+                          and job.get("conclusion") == "success"
+                      ):
+                          succeeded = True
+              if succeeded:
+                  authorized.append(observed_id)
+          if authorized != [run_id]:
+              raise SystemExit("this source SHA already has another authorized freeze run")
+
+          main = load(main_file)
+          if not isinstance(main, dict) or main.get("sha") != source_sha:
+              raise SystemExit("candidate source is no longer current main")
+          ci_pages = load(ci_file)
+          ci_runs = []
+          if not isinstance(ci_pages, list):
+              raise SystemExit("main CI listing is invalid")
+          for page in ci_pages:
+              if not isinstance(page, dict) or not isinstance(page.get("workflow_runs"), list):
+                  raise SystemExit("main CI listing is invalid")
+              ci_runs.extend(page["workflow_runs"])
+          if not any(
+              isinstance(run, dict)
+              and run.get("head_sha") == source_sha
+              and run.get("event") == "push"
+              and run.get("status") == "completed"
+              and run.get("conclusion") == "success"
+              for run in ci_runs
+          ):
+              raise SystemExit("the exact main commit lacks successful post-merge CI")
+
+          release_pages = load(releases_file)
+          releases = []
+          if not isinstance(release_pages, list):
+              raise SystemExit("release listing is invalid")
+          for page in release_pages:
+              if not isinstance(page, list):
+                  raise SystemExit("release listing is invalid")
+              releases.extend(page)
+          if any(
+              not isinstance(release, dict)
+              or release.get("tag_name") == "v1.0.0"
+              or (
+                  release.get("target_commitish") == source_sha
+                  and isinstance(release.get("tag_name"), str)
+                  and release["tag_name"].startswith("candidate-v1.0.0-")
+              )
+              for release in releases
+          ):
+              raise SystemExit("a final or same-source candidate release already exists")
+
+          immutable = load(immutable_file)
+          if not isinstance(immutable, dict) or immutable.get("enabled") is not True:
+              raise SystemExit("immutable GitHub Releases must be enabled")
+          ruleset_pages = load(rulesets_file)
+          rulesets = []
+          if not isinstance(ruleset_pages, list):
+              raise SystemExit("ruleset listing is invalid")
+          for page in ruleset_pages:
+              if not isinstance(page, list):
+                  raise SystemExit("ruleset listing is invalid")
+              rulesets.extend(page)
+          expected_names = {"Owner-created candidate tags", "Immutable version tags"}
+          observed = [
+              item
+              for item in rulesets
+              if isinstance(item, dict)
+              and item.get("name") in expected_names
+              and item.get("source_type") == "Repository"
+              and item.get("target") == "tag"
+              and item.get("enforcement") == "active"
+          ]
+          if len(observed) != 2 or {item["name"] for item in observed} != expected_names:
+              raise SystemExit("required active repository tag rulesets are missing")
+          candidate_ruleset = load(candidate_ruleset_file)
+          if (
+              not isinstance(candidate_ruleset, dict)
+              or candidate_ruleset.get("bypass_actors")
+              != [{"actor_id": None, "actor_type": "OrganizationAdmin", "bypass_mode": "always"}]
+              or (candidate_ruleset.get("conditions") or {}).get("ref_name")
+              != {"exclude": [], "include": ["refs/tags/candidate-v1.0.0-*"]}
+              or [rule.get("type") for rule in candidate_ruleset.get("rules", [])] != ["creation"]
+          ):
+              raise SystemExit("candidate tag creation ruleset contract changed")
+          immutable_ruleset = load(immutable_ruleset_file)
+          immutable_rules = immutable_ruleset.get("rules", []) if isinstance(immutable_ruleset, dict) else []
+          if (
+              not isinstance(immutable_ruleset, dict)
+              or immutable_ruleset.get("bypass_actors") != []
+              or (immutable_ruleset.get("conditions") or {}).get("ref_name", {}).get("exclude") != []
+              or sorted((immutable_ruleset.get("conditions") or {}).get("ref_name", {}).get("include", []))
+              != ["refs/tags/candidate-v1.0.0-*", "refs/tags/v*"]
+              or sorted(rule.get("type") for rule in immutable_rules) != ["deletion", "non_fast_forward", "update"]
+              or [
+                  (rule.get("parameters") or {}).get("update_allows_fetch_and_merge", False)
+                  for rule in immutable_rules
+                  if rule.get("type") == "update"
+              ] != [False]
+          ):
+              raise SystemExit("version tag immutability ruleset contract changed")
+
+          environment = load(environment_file)
+          rules = [
+              item
+              for item in environment.get("protection_rules", [])
+              if isinstance(item, dict) and item.get("type") == "required_reviewers"
+          ] if isinstance(environment, dict) else []
           reviewers = rules[0].get("reviewers", []) if len(rules) == 1 else []
-          deployment = value.get("deployment_branch_policy") or {}
-          valid = (
-              value.get("name") == "v1-release-custody"
+          deployment = environment.get("deployment_branch_policy") or {} if isinstance(environment, dict) else {}
+          if not (
+              isinstance(environment, dict)
+              and environment.get("name") == "v1-release-custody"
               and deployment.get("protected_branches") is True
               and deployment.get("custom_branch_policies") is False
               and len(rules) == 1
@@ -203,28 +441,91 @@ jobs:
               and len(reviewers) == 1
               and reviewers[0].get("type") == "User"
               and (reviewers[0].get("reviewer") or {}).get("login") == steward
-          )
-          print("true" if valid else "false")
-          ' "$release_environment_path" "$AUTHORIZED_STEWARD")"
-          [[ "$release_environment_contract" == "true" ]] || {
-            echo "the protected v1-release-custody environment must require the designated steward reviewer" >&2
+          ):
+              raise SystemExit("protected release environment contract changed")
+          secret_pages = load(secrets_file)
+          names = []
+          if not isinstance(secret_pages, list):
+              raise SystemExit("environment secret inventory is invalid")
+          for page in secret_pages:
+              if not isinstance(page, dict) or not isinstance(page.get("secrets"), list):
+                  raise SystemExit("environment secret inventory is invalid")
+              for item in page["secrets"]:
+                  if not isinstance(item, dict) or not isinstance(item.get("name"), str):
+                      raise SystemExit("environment secret inventory is invalid")
+                  names.append(item["name"])
+          if sorted(names) != ["V1_RELEASE_ADMIN_TOKEN", "V1_RELEASE_PUBLISH_TOKEN"]:
+              raise SystemExit("protected environment must contain only the two custody secrets")
+          PYTHON
+
+          assert_api_absent "$GH_READ_TOKEN" "/repos/$GITHUB_REPOSITORY/git/ref/tags/v1.0.0" "final-v1.0.0-tag"
+          assert_api_absent "$GH_READ_TOKEN" "/repos/$GITHUB_REPOSITORY/releases/tags/v1.0.0" "final-v1.0.0-release"
+
+  build:
+    name: Build the candidate once without publisher authority
+    needs: preflight
+    if: ${{ github.repository == 'Xpounder-com/hormuz' }}
+    permissions:
+      actions: read
+      contents: read
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out the exact protected main candidate without persisted credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.sha }}
+
+      - name: Set up pinned Python for the secretless build
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Verify the fresh runner and exact trusted source
+        env:
+          GH_READ_TOKEN: ${{ github.token }}
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REPOSITORY" == "Xpounder-com/hormuz" ]] || exit 1
+          [[ "$WORKFLOW_REF" == "Xpounder-com/hormuz/.github/workflows/freeze-v1-candidate.yml@refs/heads/main" ]] || exit 1
+          [[ "$GITHUB_REF" == "refs/heads/main" && "$GITHUB_REF_PROTECTED" == "true" ]] || exit 1
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ && "$GITHUB_RUN_ATTEMPT" == "1" ]] || exit 1
+          [[ -z "${V1_RELEASE_ADMIN_TOKEN+x}" && -z "${V1_RELEASE_PUBLISH_TOKEN+x}" ]] || {
+            echo "the build runner must not receive release environment secrets" >&2
             exit 1
           }
-          assert_api_absent "/repos/$GITHUB_REPOSITORY/git/ref/tags/v1.0.0" "final-v1.0.0-tag"
-          assert_api_absent "/repos/$GITHUB_REPOSITORY/releases/tags/v1.0.0" "final-v1.0.0-release"
-          existing_candidate_count="$(gh api --paginate --slurp "/repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq "[.[][] | select(.target_commitish == \"$GITHUB_SHA\" and (.tag_name | startswith(\"candidate-v1.0.0-\")))] | length")"
-          [[ "$existing_candidate_count" == "0" ]] || {
-            echo "this source commit already has a frozen candidate" >&2
+          [[ -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN+x}" && -z "${ACTIONS_ID_TOKEN_REQUEST_URL+x}" ]] || {
+            echo "the build runner must not receive an OIDC token capability" >&2
             exit 1
           }
-          successful_main_ci="$(gh api "/repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?branch=main&event=push&status=completed&per_page=100" --jq "[.workflow_runs[] | select(.head_sha == \"$GITHUB_SHA\" and .conclusion == \"success\")] | length")"
-          [[ "$successful_main_ci" -ge 1 ]] || {
-            echo "the exact main commit lacks a successful post-merge CI run" >&2
+          [[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]] || {
+            echo "checkout does not match the full candidate SHA" >&2
+            exit 1
+          }
+          [[ -z "$(git status --porcelain=v1 --untracked-files=all)" ]] || {
+            echo "candidate checkout is not clean" >&2
+            exit 1
+          }
+          main_sha="$(GH_TOKEN="$GH_READ_TOKEN" gh api "/repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)"
+          [[ "$main_sha" == "$GITHUB_SHA" ]] || {
+            echo "candidate source is no longer current main" >&2
+            exit 1
+          }
+          package_version="$(/usr/bin/python3 -I -B -c 'import pathlib, tomllib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text(encoding="utf-8"))["project"]["version"])')"
+          [[ "$package_version" == "1.0.0" ]] || {
+            echo "candidate package version must be exactly 1.0.0" >&2
             exit 1
           }
 
       - name: Install the hash-locked source-build frontend and backend
         run: |
+          set -euo pipefail
+          [[ -z "${GH_TOKEN+x}" && -z "${GITHUB_TOKEN+x}" ]] || exit 1
+          [[ -z "${V1_RELEASE_ADMIN_TOKEN+x}" && -z "${V1_RELEASE_PUBLISH_TOKEN+x}" ]] || exit 1
+          [[ -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN+x}" && -z "${ACTIONS_ID_TOKEN_REQUEST_URL+x}" ]] || exit 1
           python -m pip install \
             --disable-pip-version-check \
             --force-reinstall \
@@ -235,6 +536,11 @@ jobs:
 
       - name: Build the source archive exactly once and seal its manifest
         run: |
+          set -euo pipefail
+          umask 077
+          [[ -z "${GH_TOKEN+x}" && -z "${GITHUB_TOKEN+x}" ]] || exit 1
+          [[ -z "${V1_RELEASE_ADMIN_TOKEN+x}" && -z "${V1_RELEASE_PUBLISH_TOKEN+x}" ]] || exit 1
+          [[ -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN+x}" && -z "${ACTIONS_ID_TOKEN_REQUEST_URL+x}" ]] || exit 1
           candidate_dir="$RUNNER_TEMP/hormuz-v1-candidate"
           mkdir -m 700 "$candidate_dir"
           source_date_epoch="$(git show -s --format=%ct "$GITHUB_SHA")"
@@ -249,6 +555,7 @@ jobs:
             echo "the source archive name is not the v1.0.0 contract" >&2
             exit 1
           }
+          chmod 600 "$archive_path"
           manifest_path="$candidate_dir/hormuz-v1.0.0-candidate-manifest.json"
           frozen_at="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
           python tools/v1_candidate.py manifest \
@@ -259,103 +566,932 @@ jobs:
             --run-id "$GITHUB_RUN_ID" \
             --run-attempt "$GITHUB_RUN_ATTEMPT" \
             --output "$manifest_path"
-          [[ "$(stat -c '%a' "$manifest_path")" == "600" ]] || {
-            echo "candidate manifest is not owner-only" >&2
+          [[ "$(stat -c '%a' "$archive_path")" == "600" ]] || exit 1
+          [[ "$(stat -c '%a' "$manifest_path")" == "600" ]] || exit 1
+          mapfile -t candidate_entries < <(find "$candidate_dir" -mindepth 1 -maxdepth 1 -printf '%f\n' | LC_ALL=C sort)
+          [[ "${candidate_entries[*]}" == "hormuz-1.0.0.tar.gz hormuz-v1.0.0-candidate-manifest.json" ]] || {
+            echo "candidate transfer must contain exactly the archive and manifest" >&2
             exit 1
           }
-          custody_tag="$(python -c 'import json, pathlib, sys; print(json.loads(pathlib.Path(sys.argv[1]).read_text())["custody"]["release_tag"])' "$manifest_path")"
-          artifact_digest="$(python -c 'import json, pathlib, sys; print(json.loads(pathlib.Path(sys.argv[1]).read_text())["candidate"]["artifact_digest"])' "$manifest_path")"
-          {
-            echo "CANDIDATE_DIR=$candidate_dir"
-            echo "ARCHIVE_PATH=$archive_path"
-            echo "MANIFEST_PATH=$manifest_path"
-            echo "CUSTODY_TAG=$custody_tag"
-            echo "ARTIFACT_DIGEST=$artifact_digest"
-          } >> "$GITHUB_ENV"
 
-      - name: Create one digest-addressed immutable candidate prerelease
+      - name: Transfer only the fixed candidate files to the publisher runner
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hormuz-v1.0.0-candidate-transfer
+          path: |
+            ${{ runner.temp }}/hormuz-v1-candidate/hormuz-1.0.0.tar.gz
+            ${{ runner.temp }}/hormuz-v1-candidate/hormuz-v1.0.0-candidate-manifest.json
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+          overwrite: false
+          include-hidden-files: false
+
+  publish:
+    name: Approve, independently verify, and publish candidate custody
+    needs: build
+    if: ${{ github.repository == 'Xpounder-com/hormuz' }}
+    environment: v1-release-custody
+    permissions:
+      actions: read
+      attestations: read
+      contents: read
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Download the run-scoped untrusted candidate transfer
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: hormuz-v1.0.0-candidate-transfer
+          path: ${{ runner.temp }}/hormuz-v1-candidate-transfer
+
+      - name: Revalidate controls, publish the verified draft, and seal custody
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_READ_TOKEN: ${{ github.token }}
+          GH_ADMIN_TOKEN: ${{ secrets.V1_RELEASE_ADMIN_TOKEN }}
+          GH_PUBLISH_TOKEN: ${{ secrets.V1_RELEASE_PUBLISH_TOKEN }}
+          RELEASE_TOKENS_SEPARATED: ${{ secrets.V1_RELEASE_ADMIN_TOKEN != secrets.V1_RELEASE_PUBLISH_TOKEN }}
+          AUTHORIZED_STEWARD: ${{ vars.V1_RELEASE_STEWARD }}
+          WORKFLOW_REF: ${{ github.workflow_ref }}
         run: |
-          assert_api_absent() {
-            local endpoint="$1"
-            local label="$2"
-            local error_file="$RUNNER_TEMP/${label}.err"
-            if gh api "$endpoint" >/dev/null 2>"$error_file"; then
-              echo "$label already exists" >&2
-              exit 1
-            fi
-            if ! grep -Fq 'HTTP 404' "$error_file"; then
-              cat "$error_file" >&2
-              echo "could not prove $label is absent" >&2
-              exit 1
-            fi
-          }
-          assert_api_absent "/repos/$GITHUB_REPOSITORY/releases/tags/$CUSTODY_TAG" "candidate-release"
-          assert_api_absent "/repos/$GITHUB_REPOSITORY/git/ref/tags/$CUSTODY_TAG" "candidate-tag"
-          gh release create "$CUSTODY_TAG" \
-            "$ARCHIVE_PATH#Frozen Hormuz v1.0.0 source archive" \
-            "$MANIFEST_PATH#Digest-bound candidate manifest" \
-            --repo "$GITHUB_REPOSITORY" \
-            --target "$GITHUB_SHA" \
-            --title "Hormuz v1.0.0 frozen candidate" \
-            --notes "Immutable candidate custody only; this is not the final v1.0.0 release. Candidate: $ARTIFACT_DIGEST. Gate: #173. Use tools/promote_v1_candidate.sh only after the real gate passes." \
-            --prerelease \
-            --latest=false
-          candidate_ref="$(gh api "/repos/$GITHUB_REPOSITORY/git/ref/tags/$CUSTODY_TAG" --jq '.object.type + ":" + .object.sha')"
-          [[ "$candidate_ref" == "commit:$GITHUB_SHA" ]] || {
-            echo "candidate custody tag does not identify the frozen source commit" >&2
-            exit 1
-          }
-          assert_api_absent "/repos/$GITHUB_REPOSITORY/git/ref/tags/v1.0.0" "final-v1.0.0-tag"
+          set -euo pipefail
+          umask 077
+          /usr/bin/python3 -I -B - <<'PYTHON'
+          # BEGIN V1 CANDIDATE PUBLISHER
+          import datetime
+          import hashlib
+          import hmac
+          import json
+          import os
+          import pathlib
+          import re
+          import stat
+          import urllib.error
+          import urllib.parse
+          import urllib.request
 
-      - name: Re-download and prove exact immutable candidate custody
+          REPOSITORY = "Xpounder-com/hormuz"
+          WORKFLOW = ".github/workflows/freeze-v1-candidate.yml"
+          WORKFLOW_REF = f"{REPOSITORY}/{WORKFLOW}@refs/heads/main"
+          ENVIRONMENT = "v1-release-custody"
+          ARCHIVE_NAME = "hormuz-1.0.0.tar.gz"
+          MANIFEST_NAME = "hormuz-v1.0.0-candidate-manifest.json"
+          FINAL_TAG = "v1.0.0"
+          API_VERSION = "2022-11-28"
+          MAX_ARCHIVE_BYTES = 64 * 1024 * 1024
+          MAX_JSON_BYTES = 2 * 1024 * 1024
+          MAX_API_BYTES = 8 * 1024 * 1024
+          REVISION_RE = re.compile(r"[0-9a-f]{40}\Z")
+          DIGEST_RE = re.compile(r"sha256:[0-9a-f]{64}\Z")
+          TAG_RE = re.compile(r"candidate-v1\.0\.0-[0-9a-f]{64}\Z")
+
+          class ContractError(RuntimeError):
+              pass
+
+          def require(condition, label):
+              if not condition:
+                  raise ContractError(label)
+
+          def strict_object(pairs):
+              value = {}
+              for key, item in pairs:
+                  if key in value:
+                      raise ContractError("duplicate_json_member")
+                  value[key] = item
+              return value
+
+          def reject_constant(_value):
+              raise ContractError("json_number_not_finite")
+
+          def decode_json(payload, label):
+              try:
+                  return json.loads(
+                      payload.decode("utf-8"),
+                      object_pairs_hook=strict_object,
+                      parse_constant=reject_constant,
+                  )
+              except ContractError:
+                  raise
+              except (UnicodeError, json.JSONDecodeError, RecursionError) as error:
+                  raise ContractError(f"{label}_invalid_json") from error
+
+          def safe_read(path, maximum, label):
+              try:
+                  before = path.lstat()
+              except OSError as error:
+                  raise ContractError(f"{label}_unavailable") from error
+              require(stat.S_ISREG(before.st_mode), f"{label}_not_regular")
+              require(0 < before.st_size <= maximum, f"{label}_size_invalid")
+              flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+              try:
+                  descriptor = os.open(path, flags)
+              except OSError as error:
+                  raise ContractError(f"{label}_unavailable") from error
+              try:
+                  opened = os.fstat(descriptor)
+                  require(
+                      stat.S_ISREG(opened.st_mode)
+                      and (opened.st_dev, opened.st_ino, opened.st_size)
+                      == (before.st_dev, before.st_ino, before.st_size),
+                      f"{label}_changed_during_open",
+                  )
+                  chunks = []
+                  total = 0
+                  while True:
+                      chunk = os.read(descriptor, min(1024 * 1024, maximum + 1 - total))
+                      if not chunk:
+                          break
+                      chunks.append(chunk)
+                      total += len(chunk)
+                      require(total <= maximum, f"{label}_size_invalid")
+                  after = os.fstat(descriptor)
+                  require(
+                      (after.st_dev, after.st_ino, after.st_size)
+                      == (opened.st_dev, opened.st_ino, opened.st_size)
+                      and total == opened.st_size,
+                      f"{label}_changed_during_read",
+                  )
+                  return b"".join(chunks)
+              finally:
+                  os.close(descriptor)
+
+          def require_fields(value, expected, label):
+              require(isinstance(value, dict) and set(value) == expected, f"{label}_fields_invalid")
+              return value
+
+          def validate_timestamp(value):
+              require(isinstance(value, str), "candidate_frozen_at_invalid")
+              try:
+                  parsed = datetime.datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(
+                      tzinfo=datetime.timezone.utc
+                  )
+              except ValueError as error:
+                  raise ContractError("candidate_frozen_at_invalid") from error
+              require(parsed.strftime("%Y-%m-%dT%H:%M:%SZ") == value, "candidate_frozen_at_invalid")
+              require(
+                  parsed <= datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=5),
+                  "candidate_frozen_at_future",
+              )
+
+          def validate_transfer(directory, repository, source_sha, run_id, run_attempt):
+              require(repository == REPOSITORY, "repository_invalid")
+              require(REVISION_RE.fullmatch(source_sha) is not None, "source_sha_invalid")
+              require(type(run_id) is int and run_id > 0, "run_id_invalid")
+              require(run_attempt == 1 and type(run_attempt) is int, "run_attempt_invalid")
+              try:
+                  directory_stat = directory.lstat()
+              except OSError as error:
+                  raise ContractError("transfer_directory_unavailable") from error
+              require(stat.S_ISDIR(directory_stat.st_mode), "transfer_not_directory")
+              entries = list(os.scandir(directory))
+              require(
+                  sorted(entry.name for entry in entries) == [ARCHIVE_NAME, MANIFEST_NAME],
+                  "transfer_file_set_invalid",
+              )
+              for entry in entries:
+                  require(entry.is_file(follow_symlinks=False), "transfer_entry_not_regular")
+              os.chmod(directory, 0o700, follow_symlinks=False)
+              archive_path = directory / ARCHIVE_NAME
+              manifest_path = directory / MANIFEST_NAME
+              os.chmod(archive_path, 0o600, follow_symlinks=False)
+              os.chmod(manifest_path, 0o600, follow_symlinks=False)
+              archive_payload = safe_read(archive_path, MAX_ARCHIVE_BYTES, "archive")
+              manifest_payload = safe_read(manifest_path, MAX_JSON_BYTES, "manifest")
+              manifest = require_fields(
+                  decode_json(manifest_payload, "manifest"),
+                  {"schema_id", "schema_version", "candidate", "custody", "gate", "build"},
+                  "manifest",
+              )
+              require(
+                  manifest["schema_id"] == "hormuz.v1-candidate-manifest"
+                  and manifest["schema_version"] == 1
+                  and type(manifest["schema_version"]) is int,
+                  "manifest_schema_invalid",
+              )
+              candidate = require_fields(
+                  manifest["candidate"],
+                  {
+                      "target_version",
+                      "artifact_kind",
+                      "artifact_name",
+                      "artifact_size_bytes",
+                      "artifact_digest",
+                      "source_commit",
+                      "frozen_at",
+                      "package_name",
+                      "package_version",
+                  },
+                  "candidate",
+              )
+              digest = f"sha256:{hashlib.sha256(archive_payload).hexdigest()}"
+              require(DIGEST_RE.fullmatch(digest) is not None, "artifact_digest_invalid")
+              require(
+                  candidate["target_version"] == "v1.0.0"
+                  and candidate["artifact_kind"] == "source_archive"
+                  and candidate["artifact_name"] == ARCHIVE_NAME
+                  and candidate["artifact_size_bytes"] == len(archive_payload)
+                  and type(candidate["artifact_size_bytes"]) is int
+                  and candidate["artifact_digest"] == digest
+                  and candidate["source_commit"] == source_sha
+                  and candidate["package_name"] == "hormuz"
+                  and candidate["package_version"] == "1.0.0",
+                  "candidate_identity_invalid",
+              )
+              validate_timestamp(candidate["frozen_at"])
+              tag = f"candidate-v1.0.0-{digest.removeprefix('sha256:')}"
+              require(TAG_RE.fullmatch(tag) is not None, "custody_tag_invalid")
+              custody = require_fields(
+                  manifest["custody"],
+                  {
+                      "repository",
+                      "release_tag",
+                      "release_state",
+                      "immutable_releases_required",
+                      "asset_overwrite_permitted",
+                  },
+                  "custody",
+              )
+              require(
+                  custody
+                  == {
+                      "repository": REPOSITORY,
+                      "release_tag": tag,
+                      "release_state": "published_immutable_candidate",
+                      "immutable_releases_required": True,
+                      "asset_overwrite_permitted": False,
+                  },
+                  "custody_contract_invalid",
+              )
+              gate = require_fields(
+                  manifest["gate"],
+                  {
+                      "issue",
+                      "evidence_schema_id",
+                      "evidence_schema_version",
+                      "session_digest_binding_required",
+                      "changed_artifact_invalidates_evidence",
+                  },
+                  "gate",
+              )
+              require(
+                  gate
+                  == {
+                      "issue": "https://github.com/Xpounder-com/hormuz/issues/173",
+                      "evidence_schema_id": "hormuz.policy-admin-usability-evidence",
+                      "evidence_schema_version": 2,
+                      "session_digest_binding_required": True,
+                      "changed_artifact_invalidates_evidence": True,
+                  },
+                  "gate_contract_invalid",
+              )
+              build = require_fields(
+                  manifest["build"],
+                  {
+                      "workflow_path",
+                      "invocation_url",
+                      "run_id",
+                      "run_attempt",
+                      "archive_build_count",
+                      "promotion_rebuild_permitted",
+                  },
+                  "build",
+              )
+              require(
+                  build
+                  == {
+                      "workflow_path": WORKFLOW,
+                      "invocation_url": (
+                          f"https://github.com/{REPOSITORY}/actions/runs/{run_id}/attempts/1"
+                      ),
+                      "run_id": run_id,
+                      "run_attempt": 1,
+                      "archive_build_count": 1,
+                      "promotion_rebuild_permitted": False,
+                  },
+                  "build_contract_invalid",
+              )
+              return {
+                  "archive_path": archive_path,
+                  "archive_payload": archive_payload,
+                  "manifest_path": manifest_path,
+                  "manifest_payload": manifest_payload,
+                  "manifest": manifest,
+                  "digest": digest,
+                  "tag": tag,
+                  "source_sha": source_sha,
+              }
+
+          class SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, request, fp, code, message, headers, new_url):
+                  redirected = super().redirect_request(request, fp, code, message, headers, new_url)
+                  if redirected is not None:
+                      old_host = urllib.parse.urlsplit(request.full_url).netloc
+                      new_host = urllib.parse.urlsplit(new_url).netloc
+                      if old_host != new_host:
+                          redirected.remove_header("Authorization")
+                          redirected.remove_header("X-GitHub-Api-Version")
+                  return redirected
+
+          OPENER = urllib.request.build_opener(SafeRedirectHandler())
+
+          def request_bytes(token, method, url, *, body=None, content_type=None, accept=None, expected=(200,), maximum=MAX_API_BYTES):
+              headers = {
+                  "Accept": accept or "application/vnd.github+json",
+                  "Authorization": f"Bearer {token}",
+                  "User-Agent": "hormuz-v1-candidate-publisher",
+                  "X-GitHub-Api-Version": API_VERSION,
+              }
+              if content_type is not None:
+                  headers["Content-Type"] = content_type
+              request = urllib.request.Request(url, data=body, headers=headers, method=method)
+              try:
+                  response = OPENER.open(request, timeout=30)
+              except urllib.error.HTTPError as error:
+                  if error.code not in expected:
+                      raise ContractError(f"github_api_unexpected_status:{error.code}") from error
+                  response = error
+              with response:
+                  status_code = response.getcode()
+                  require(status_code in expected, f"github_api_unexpected_status:{status_code}")
+                  payload = response.read(maximum + 1)
+              require(len(payload) <= maximum, "github_api_response_too_large")
+              return status_code, payload
+
+          def api_json(token, method, path, *, value=None, expected=(200,)):
+              body = None
+              if value is not None:
+                  body = json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
+              status_code, payload = request_bytes(
+                  token,
+                  method,
+                  f"https://api.github.com{path}",
+                  body=body,
+                  content_type="application/json" if body is not None else None,
+                  expected=expected,
+              )
+              return status_code, decode_json(payload, "github_api")
+
+          def list_pages(token, path):
+              values = []
+              for page in range(1, 101):
+                  separator = "&" if "?" in path else "?"
+                  _status, payload = api_json(token, "GET", f"{path}{separator}per_page=100&page={page}")
+                  require(isinstance(payload, list), "github_api_page_invalid")
+                  values.extend(payload)
+                  if len(payload) < 100:
+                      return values
+              raise ContractError("github_api_pagination_unbounded")
+
+          def assert_absent(token, path, label):
+              status_code, _payload = api_json(token, "GET", path, expected=(404,))
+              require(status_code == 404, f"{label}_already_exists")
+
+          def validate_run_context(read_token, source_sha, run_id, steward):
+              require(os.environ.get("GITHUB_REPOSITORY") == REPOSITORY, "repository_context_invalid")
+              require(os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch", "event_context_invalid")
+              require(os.environ.get("WORKFLOW_REF") == WORKFLOW_REF, "workflow_ref_invalid")
+              require(os.environ.get("GITHUB_REF") == "refs/heads/main", "source_ref_invalid")
+              require(os.environ.get("GITHUB_REF_PROTECTED") == "true", "source_ref_unprotected")
+              require(os.environ.get("GITHUB_RUN_ATTEMPT") == "1", "rerun_forbidden")
+              require(os.environ.get("GITHUB_ACTOR") == steward, "actor_invalid")
+              require(os.environ.get("GITHUB_TRIGGERING_ACTOR") == steward, "triggering_actor_invalid")
+              _status, main = api_json(read_token, "GET", f"/repos/{REPOSITORY}/commits/main")
+              require(isinstance(main, dict) and main.get("sha") == source_sha, "source_not_current_main")
+              _status, run = api_json(read_token, "GET", f"/repos/{REPOSITORY}/actions/runs/{run_id}")
+              repository = run.get("repository") if isinstance(run, dict) else None
+              head_repository = run.get("head_repository") if isinstance(run, dict) else None
+              actor = run.get("actor") if isinstance(run, dict) else None
+              triggering_actor = run.get("triggering_actor") if isinstance(run, dict) else None
+              require(
+                  isinstance(run, dict)
+                  and run.get("id") == run_id
+                  and run.get("run_attempt") == 1
+                  and run.get("event") == "workflow_dispatch"
+                  and run.get("head_branch") == "main"
+                  and run.get("head_sha") == source_sha
+                  and isinstance(run.get("path"), str)
+                  and run["path"].split("@", 1)[0] == WORKFLOW
+                  and isinstance(repository, dict)
+                  and repository.get("full_name") == REPOSITORY
+                  and isinstance(head_repository, dict)
+                  and head_repository.get("full_name") == REPOSITORY
+                  and isinstance(actor, dict)
+                  and actor.get("login") == steward
+                  and isinstance(triggering_actor, dict)
+                  and triggering_actor.get("login") == steward,
+                  "workflow_run_identity_invalid",
+              )
+
+          def validate_rulesets(admin_token):
+              rulesets = list_pages(admin_token, f"/repos/{REPOSITORY}/rulesets?includes_parents=true")
+              observed = [
+                  item
+                  for item in rulesets
+                  if isinstance(item, dict)
+                  and item.get("name") in {"Owner-created candidate tags", "Immutable version tags"}
+                  and item.get("source_type") == "Repository"
+                  and item.get("target") == "tag"
+                  and item.get("enforcement") == "active"
+              ]
+              require(len(observed) == 2, "rulesets_duplicated_or_missing")
+              matches = {
+                  item.get("name"): item
+                  for item in observed
+              }
+              require(set(matches) == {"Owner-created candidate tags", "Immutable version tags"}, "rulesets_missing")
+              require(all(type(item.get("id")) is int and item["id"] > 0 for item in matches.values()), "ruleset_id_invalid")
+              _status, candidate = api_json(
+                  admin_token,
+                  "GET",
+                  f"/repos/{REPOSITORY}/rulesets/{matches['Owner-created candidate tags']['id']}",
+              )
+              require(
+                  isinstance(candidate, dict)
+                  and candidate.get("bypass_actors")
+                  == [{"actor_id": None, "actor_type": "OrganizationAdmin", "bypass_mode": "always"}]
+                  and (candidate.get("conditions") or {}).get("ref_name")
+                  == {"exclude": [], "include": ["refs/tags/candidate-v1.0.0-*"]}
+                  and [rule.get("type") for rule in candidate.get("rules", [])] == ["creation"],
+                  "candidate_creation_ruleset_invalid",
+              )
+              _status, immutable = api_json(
+                  admin_token,
+                  "GET",
+                  f"/repos/{REPOSITORY}/rulesets/{matches['Immutable version tags']['id']}",
+              )
+              rules = immutable.get("rules", []) if isinstance(immutable, dict) else []
+              require(
+                  isinstance(immutable, dict)
+                  and immutable.get("bypass_actors") == []
+                  and (immutable.get("conditions") or {}).get("ref_name", {}).get("exclude") == []
+                  and sorted((immutable.get("conditions") or {}).get("ref_name", {}).get("include", []))
+                  == ["refs/tags/candidate-v1.0.0-*", "refs/tags/v*"]
+                  and sorted(rule.get("type") for rule in rules) == ["deletion", "non_fast_forward", "update"]
+                  and [
+                      (rule.get("parameters") or {}).get("update_allows_fetch_and_merge", False)
+                      for rule in rules
+                      if rule.get("type") == "update"
+                  ] == [False],
+                  "tag_immutability_ruleset_invalid",
+              )
+
+          def validate_environment(admin_token, steward):
+              _status, environment = api_json(
+                  admin_token, "GET", f"/repos/{REPOSITORY}/environments/{ENVIRONMENT}"
+              )
+              rules = [
+                  item
+                  for item in environment.get("protection_rules", [])
+                  if isinstance(item, dict) and item.get("type") == "required_reviewers"
+              ] if isinstance(environment, dict) else []
+              reviewers = rules[0].get("reviewers", []) if len(rules) == 1 else []
+              deployment = environment.get("deployment_branch_policy") or {} if isinstance(environment, dict) else {}
+              require(
+                  isinstance(environment, dict)
+                  and environment.get("name") == ENVIRONMENT
+                  and deployment.get("protected_branches") is True
+                  and deployment.get("custom_branch_policies") is False
+                  and len(rules) == 1
+                  and rules[0].get("prevent_self_review") is False
+                  and len(reviewers) == 1
+                  and reviewers[0].get("type") == "User"
+                  and (reviewers[0].get("reviewer") or {}).get("login") == steward,
+                  "release_environment_invalid",
+              )
+              names = []
+              for page in range(1, 101):
+                  _status, value = api_json(
+                      admin_token,
+                      "GET",
+                      f"/repos/{REPOSITORY}/environments/{ENVIRONMENT}/secrets?per_page=100&page={page}",
+                  )
+                  require(isinstance(value, dict) and isinstance(value.get("secrets"), list), "secret_inventory_invalid")
+                  page_names = []
+                  for item in value["secrets"]:
+                      require(isinstance(item, dict) and isinstance(item.get("name"), str), "secret_inventory_invalid")
+                      page_names.append(item["name"])
+                  names.extend(page_names)
+                  if len(page_names) < 100:
+                      break
+              else:
+                  raise ContractError("secret_inventory_unbounded")
+              require(sorted(names) == ["V1_RELEASE_ADMIN_TOKEN", "V1_RELEASE_PUBLISH_TOKEN"], "secret_inventory_invalid")
+
+          def release_list(publish_token):
+              return list_pages(publish_token, f"/repos/{REPOSITORY}/releases")
+
+          def validate_live_controls(admin_token, read_token, publish_token, transfer, steward, *, release_id=None, draft=None):
+              validate_run_context(read_token, transfer["source_sha"], int(os.environ["GITHUB_RUN_ID"]), steward)
+              _status, immutable = api_json(admin_token, "GET", f"/repos/{REPOSITORY}/immutable-releases")
+              require(isinstance(immutable, dict) and immutable.get("enabled") is True, "immutable_releases_disabled")
+              validate_rulesets(admin_token)
+              validate_environment(admin_token, steward)
+              releases = release_list(publish_token)
+              require(all(isinstance(item, dict) for item in releases), "release_list_invalid")
+              require(not any(item.get("tag_name") == FINAL_TAG for item in releases), "final_release_exists")
+              same_source = [
+                  item
+                  for item in releases
+                  if item.get("target_commitish") == transfer["source_sha"]
+                  and isinstance(item.get("tag_name"), str)
+                  and item["tag_name"].startswith("candidate-v1.0.0-")
+              ]
+              if release_id is None:
+                  require(not same_source, "same_source_candidate_exists")
+                  require(not any(item.get("tag_name") == transfer["tag"] for item in releases), "candidate_release_exists")
+                  assert_absent(publish_token, f"/repos/{REPOSITORY}/releases/tags/{transfer['tag']}", "candidate_release")
+                  assert_absent(publish_token, f"/repos/{REPOSITORY}/git/ref/tags/{transfer['tag']}", "candidate_tag")
+              else:
+                  require(
+                      len(same_source) == 1
+                      and same_source[0].get("id") == release_id
+                      and same_source[0].get("tag_name") == transfer["tag"]
+                      and same_source[0].get("draft") is draft,
+                      "candidate_release_race_detected",
+                  )
+              assert_absent(publish_token, f"/repos/{REPOSITORY}/releases/tags/{FINAL_TAG}", "final_release")
+              assert_absent(publish_token, f"/repos/{REPOSITORY}/git/ref/tags/{FINAL_TAG}", "final_tag")
+
+          def expected_notes(transfer):
+              return (
+                  "Immutable candidate custody only; this is not the final v1.0.0 release. "
+                  f"Candidate: {transfer['digest']}. Gate: #173. "
+                  "Use tools/promote_v1_candidate.sh only after the real gate passes."
+              )
+
+          def validate_asset(asset, *, name, label, payload, tag):
+              digest = f"sha256:{hashlib.sha256(payload).hexdigest()}"
+              asset_id = asset.get("id") if isinstance(asset, dict) else None
+              require(
+                  isinstance(asset, dict)
+                  and type(asset_id) is int
+                  and asset_id > 0
+                  and asset.get("name") == name
+                  and asset.get("label") == label
+                  and asset.get("state") == "uploaded"
+                  and asset.get("size") == len(payload)
+                  and type(asset.get("size")) is int
+                  and asset.get("digest") == digest
+                  and asset.get("url") == f"https://api.github.com/repos/{REPOSITORY}/releases/assets/{asset_id}"
+                  and asset.get("browser_download_url")
+                  == f"https://github.com/{REPOSITORY}/releases/download/{tag}/{name}",
+                  f"release_asset_invalid:{name}",
+              )
+              return asset_id
+
+          def expected_assets(transfer):
+              return {
+                  ARCHIVE_NAME: ("Frozen Hormuz v1.0.0 source archive", transfer["archive_payload"]),
+                  MANIFEST_NAME: ("Digest-bound candidate manifest", transfer["manifest_payload"]),
+              }
+
+          def validate_release(release, transfer, *, release_id, draft):
+              require(
+                  isinstance(release, dict)
+                  and release.get("id") == release_id
+                  and type(release.get("id")) is int
+                  and release.get("tag_name") == transfer["tag"]
+                  and release.get("target_commitish") == transfer["source_sha"]
+                  and release.get("name") == "Hormuz v1.0.0 frozen candidate"
+                  and release.get("body") == expected_notes(transfer)
+                  and release.get("draft") is draft
+                  and release.get("prerelease") is True
+                  and release.get("immutable") is (not draft),
+                  "candidate_release_state_invalid",
+              )
+              if draft:
+                  require(release.get("published_at") is None, "draft_release_already_published")
+              else:
+                  require(isinstance(release.get("published_at"), str), "published_release_time_invalid")
+              assets = release.get("assets")
+              require(isinstance(assets, list) and len(assets) == 2, "release_asset_set_invalid")
+              by_name = {}
+              for asset in assets:
+                  name = asset.get("name") if isinstance(asset, dict) else None
+                  require(isinstance(name, str) and name not in by_name, "release_asset_set_invalid")
+                  by_name[name] = asset
+              require(set(by_name) == {ARCHIVE_NAME, MANIFEST_NAME}, "release_asset_set_invalid")
+              asset_ids = {}
+              for name, (label, payload) in expected_assets(transfer).items():
+                  asset_ids[name] = validate_asset(by_name[name], name=name, label=label, payload=payload, tag=transfer["tag"])
+              require(len(set(asset_ids.values())) == 2, "release_asset_id_duplicate")
+              return asset_ids
+
+          def download_and_compare(publish_token, asset_ids, transfer):
+              for name, (_label, expected_payload) in expected_assets(transfer).items():
+                  _status, remote_payload = request_bytes(
+                      publish_token,
+                      "GET",
+                      f"https://api.github.com/repos/{REPOSITORY}/releases/assets/{asset_ids[name]}",
+                      accept="application/octet-stream",
+                      expected=(200,),
+                      maximum=(MAX_ARCHIVE_BYTES if name == ARCHIVE_NAME else MAX_JSON_BYTES),
+                  )
+                  require(
+                      len(remote_payload) == len(expected_payload)
+                      and hmac.compare_digest(hashlib.sha256(remote_payload).digest(), hashlib.sha256(expected_payload).digest())
+                      and hmac.compare_digest(remote_payload, expected_payload),
+                      f"remote_asset_bytes_mismatch:{name}",
+                  )
+
+          def upload_asset(publish_token, release_id, *, name, label, payload, tag):
+              query = urllib.parse.urlencode({"name": name, "label": label})
+              _status, response_payload = request_bytes(
+                  publish_token,
+                  "POST",
+                  f"https://uploads.github.com/repos/{REPOSITORY}/releases/{release_id}/assets?{query}",
+                  body=payload,
+                  content_type="application/octet-stream",
+                  expected=(201,),
+              )
+              asset = decode_json(response_payload, "release_asset")
+              validate_asset(asset, name=name, label=label, payload=payload, tag=tag)
+
+          def publish_candidate():
+              read_token = os.environ.get("GH_READ_TOKEN", "")
+              admin_token = os.environ.get("GH_ADMIN_TOKEN", "")
+              publish_token = os.environ.get("GH_PUBLISH_TOKEN", "")
+              steward = os.environ.get("AUTHORIZED_STEWARD", "")
+              require(read_token != "", "read_token_missing")
+              require(admin_token != "", "admin_token_missing")
+              require(publish_token != "", "publish_token_missing")
+              require(steward != "", "steward_missing")
+              require(os.environ.get("RELEASE_TOKENS_SEPARATED") == "true", "release_tokens_not_separated")
+              require(not hmac.compare_digest(admin_token, publish_token), "release_tokens_not_separated")
+              source_sha = os.environ.get("GITHUB_SHA", "")
+              run_id_text = os.environ.get("GITHUB_RUN_ID", "")
+              run_attempt_text = os.environ.get("GITHUB_RUN_ATTEMPT", "")
+              require(run_id_text.isascii() and run_id_text.isdigit(), "run_id_invalid")
+              require(run_attempt_text == "1", "run_attempt_invalid")
+              transfer_directory = pathlib.Path(os.environ["RUNNER_TEMP"]) / "hormuz-v1-candidate-transfer"
+              transfer = validate_transfer(
+                  transfer_directory,
+                  os.environ.get("GITHUB_REPOSITORY", ""),
+                  source_sha,
+                  int(run_id_text),
+                  int(run_attempt_text),
+              )
+
+              validate_live_controls(admin_token, read_token, publish_token, transfer, steward)
+              create_payload = {
+                  "tag_name": transfer["tag"],
+                  "target_commitish": transfer["source_sha"],
+                  "name": "Hormuz v1.0.0 frozen candidate",
+                  "body": expected_notes(transfer),
+                  "draft": True,
+                  "prerelease": True,
+                  "generate_release_notes": False,
+                  "make_latest": "false",
+              }
+              _status, draft_release = api_json(
+                  publish_token,
+                  "POST",
+                  f"/repos/{REPOSITORY}/releases",
+                  value=create_payload,
+                  expected=(201,),
+              )
+              release_id = draft_release.get("id") if isinstance(draft_release, dict) else None
+              require(type(release_id) is int and release_id > 0, "draft_release_id_invalid")
+              require(isinstance(draft_release.get("assets"), list) and draft_release["assets"] == [], "draft_release_not_empty")
+              require(
+                  draft_release.get("tag_name") == transfer["tag"]
+                  and draft_release.get("target_commitish") == transfer["source_sha"]
+                  and draft_release.get("name") == "Hormuz v1.0.0 frozen candidate"
+                  and draft_release.get("body") == expected_notes(transfer)
+                  and draft_release.get("draft") is True
+                  and draft_release.get("prerelease") is True
+                  and draft_release.get("immutable") is False
+                  and draft_release.get("published_at") is None,
+                  "draft_release_state_invalid",
+              )
+
+              for name, (label, payload) in expected_assets(transfer).items():
+                  upload_asset(
+                      publish_token,
+                      release_id,
+                      name=name,
+                      label=label,
+                      payload=payload,
+                      tag=transfer["tag"],
+                  )
+              _status, draft_release = api_json(
+                  publish_token, "GET", f"/repos/{REPOSITORY}/releases/{release_id}"
+              )
+              asset_ids = validate_release(draft_release, transfer, release_id=release_id, draft=True)
+              download_and_compare(publish_token, asset_ids, transfer)
+
+              # Recheck every mutable control and the remote bytes immediately before publication.
+              validate_live_controls(
+                  admin_token,
+                  read_token,
+                  publish_token,
+                  transfer,
+                  steward,
+                  release_id=release_id,
+                  draft=True,
+              )
+              _status, draft_release = api_json(
+                  publish_token, "GET", f"/repos/{REPOSITORY}/releases/{release_id}"
+              )
+              asset_ids = validate_release(draft_release, transfer, release_id=release_id, draft=True)
+              download_and_compare(publish_token, asset_ids, transfer)
+
+              _status, published = api_json(
+                  publish_token,
+                  "PATCH",
+                  f"/repos/{REPOSITORY}/releases/{release_id}",
+                  value={"draft": False, "prerelease": True, "make_latest": "false"},
+              )
+              validate_release(published, transfer, release_id=release_id, draft=False)
+              validate_live_controls(
+                  admin_token,
+                  read_token,
+                  publish_token,
+                  transfer,
+                  steward,
+                  release_id=release_id,
+                  draft=False,
+              )
+              _status, candidate_ref = api_json(
+                  read_token, "GET", f"/repos/{REPOSITORY}/git/ref/tags/{transfer['tag']}"
+              )
+              target = candidate_ref.get("object") if isinstance(candidate_ref, dict) else None
+              require(
+                  candidate_ref.get("ref") == f"refs/tags/{transfer['tag']}"
+                  and isinstance(target, dict)
+                  and target.get("type") == "commit"
+                  and target.get("sha") == transfer["source_sha"],
+                  "candidate_tag_binding_invalid",
+              )
+              print(
+                  json.dumps(
+                      {
+                          "status": "published_immutable_candidate",
+                          "release_tag": transfer["tag"],
+                          "source_commit": transfer["source_sha"],
+                          "artifact_digest": transfer["digest"],
+                          "final_tag_created": False,
+                      },
+                      sort_keys=True,
+                      separators=(",", ":"),
+                  )
+              )
+
+          if __name__ == "__main__":
+              try:
+                  publish_candidate()
+              except ContractError as error:
+                  raise SystemExit(f"candidate publication contract failed: {error}") from error
+          # END V1 CANDIDATE PUBLISHER
+          PYTHON
+
+      - name: Verify the published immutable candidate and attestations
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
           GH_ADMIN_TOKEN: ${{ secrets.V1_RELEASE_ADMIN_TOKEN }}
         run: |
-          verification_dir="$RUNNER_TEMP/hormuz-v1-candidate-verification"
-          mkdir -m 700 "$verification_dir"
-          gh release download "$CUSTODY_TAG" \
-            --repo "$GITHUB_REPOSITORY" \
-            --pattern 'hormuz-1.0.0.tar.gz' \
-            --pattern 'hormuz-v1.0.0-candidate-manifest.json' \
-            --dir "$verification_dir"
-          cmp --silent "$ARCHIVE_PATH" "$verification_dir/hormuz-1.0.0.tar.gz"
-          cmp --silent "$MANIFEST_PATH" "$verification_dir/hormuz-v1.0.0-candidate-manifest.json"
-          gh api "/repos/$GITHUB_REPOSITORY/releases/tags/$CUSTODY_TAG" \
-            > "$verification_dir/release-api.json"
-          GH_TOKEN="$GH_ADMIN_TOKEN" gh api "/repos/$GITHUB_REPOSITORY/immutable-releases" \
-            > "$verification_dir/immutable-api.json"
-          python tools/v1_candidate.py custody \
-            --manifest "$verification_dir/hormuz-v1.0.0-candidate-manifest.json" \
-            --archive "$verification_dir/hormuz-1.0.0.tar.gz" \
-            --release-api "$verification_dir/release-api.json" \
-            --immutable-api "$verification_dir/immutable-api.json" \
-            --output "$verification_dir/custody-proof.json"
-          for asset in 'hormuz-1.0.0.tar.gz' 'hormuz-v1.0.0-candidate-manifest.json'; do
-            verified="false"
-            for attempt in $(seq 1 12); do
-              if gh release verify-asset "$CUSTODY_TAG" "$verification_dir/$asset" \
-                --repo "$GITHUB_REPOSITORY" \
-                --format json >"$verification_dir/${asset}.attestation-${attempt}.json" 2>"$verification_dir/${asset}.attestation-${attempt}.err"; then
-                verified="true"
-                break
-              fi
-              sleep 5
-            done
-            [[ "$verified" == "true" ]] || {
-              cat "$verification_dir/${asset}.attestation-${attempt}.err" >&2
-              echo "candidate release attestation was not verifiable: $asset" >&2
-              exit 1
-            }
-          done
-          {
-            echo "### Frozen v1.0.0 candidate"
-            echo
-            echo "- Immutable prerelease custody tag: \`$CUSTODY_TAG\`"
-            echo "- Source commit: \`$GITHUB_SHA\`"
-            echo "- Source archive: \`$ARTIFACT_DIGEST\`"
-            echo "- Final \`v1.0.0\` tag created: no"
-            echo "- Human gate advanced: no"
-          } >> "$GITHUB_STEP_SUMMARY"
+          set -euo pipefail
+          umask 077
+          /usr/bin/python3 -I -B - <<'PYTHON'
+          import hashlib
+          import json
+          import os
+          import pathlib
+          import re
+          import stat
+          import subprocess
+          import time
+          import urllib.request
+
+          repository = "Xpounder-com/hormuz"
+          archive_name = "hormuz-1.0.0.tar.gz"
+          manifest_name = "hormuz-v1.0.0-candidate-manifest.json"
+          transfer = pathlib.Path(os.environ["RUNNER_TEMP"]) / "hormuz-v1-candidate-transfer"
+
+          def safe_payload(path, maximum):
+              before = path.lstat()
+              if not stat.S_ISREG(before.st_mode) or not 0 < before.st_size <= maximum:
+                  raise SystemExit("final verification input is not one bounded regular file")
+              descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+              try:
+                  opened = os.fstat(descriptor)
+                  if (opened.st_dev, opened.st_ino, opened.st_size) != (before.st_dev, before.st_ino, before.st_size):
+                      raise SystemExit("final verification input changed during open")
+                  chunks = []
+                  total = 0
+                  while True:
+                      chunk = os.read(descriptor, min(1024 * 1024, maximum + 1 - total))
+                      if not chunk:
+                          break
+                      chunks.append(chunk)
+                      total += len(chunk)
+                      if total > maximum:
+                          raise SystemExit("final verification input is too large")
+                  if total != opened.st_size:
+                      raise SystemExit("final verification input size changed")
+                  return b"".join(chunks)
+              finally:
+                  os.close(descriptor)
+
+          archive = safe_payload(transfer / archive_name, 64 * 1024 * 1024)
+          manifest = safe_payload(transfer / manifest_name, 2 * 1024 * 1024)
+          digest = hashlib.sha256(archive).hexdigest()
+          if re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+              raise SystemExit("candidate digest is invalid")
+          tag = f"candidate-v1.0.0-{digest}"
+          release_url = f"https://api.github.com/repos/{repository}/releases/tags/{tag}"
+          request = urllib.request.Request(
+              release_url,
+              headers={
+                  "Accept": "application/vnd.github+json",
+                  "Authorization": f"Bearer {os.environ['GH_TOKEN']}",
+                  "User-Agent": "hormuz-v1-candidate-final-verifier",
+                  "X-GitHub-Api-Version": "2022-11-28",
+              },
+          )
+          with urllib.request.urlopen(request, timeout=30) as response:
+              release_payload = response.read(8 * 1024 * 1024 + 1)
+          if len(release_payload) > 8 * 1024 * 1024:
+              raise SystemExit("published release response is too large")
+          release = json.loads(release_payload.decode("utf-8"))
+          assets = release.get("assets", []) if isinstance(release, dict) else []
+          by_name = {asset.get("name"): asset for asset in assets if isinstance(asset, dict)}
+          expected = {
+              archive_name: (len(archive), f"sha256:{digest}"),
+              manifest_name: (len(manifest), f"sha256:{hashlib.sha256(manifest).hexdigest()}"),
+          }
+          if not (
+              isinstance(release, dict)
+              and release.get("tag_name") == tag
+              and release.get("target_commitish") == os.environ["GITHUB_SHA"]
+              and release.get("draft") is False
+              and release.get("prerelease") is True
+              and release.get("immutable") is True
+              and set(by_name) == set(expected)
+              and all(
+                  by_name[name].get("state") == "uploaded"
+                  and by_name[name].get("size") == size
+                  and by_name[name].get("digest") == asset_digest
+                  for name, (size, asset_digest) in expected.items()
+              )
+          ):
+              raise SystemExit("published immutable candidate state is invalid")
+
+          immutable_request = urllib.request.Request(
+              f"https://api.github.com/repos/{repository}/immutable-releases",
+              headers={
+                  "Accept": "application/vnd.github+json",
+                  "Authorization": f"Bearer {os.environ['GH_ADMIN_TOKEN']}",
+                  "User-Agent": "hormuz-v1-candidate-final-verifier",
+                  "X-GitHub-Api-Version": "2022-11-28",
+              },
+          )
+          with urllib.request.urlopen(immutable_request, timeout=30) as response:
+              immutable_payload = response.read(1024 * 1024 + 1)
+          if len(immutable_payload) > 1024 * 1024:
+              raise SystemExit("immutable release response is too large")
+          immutable = json.loads(immutable_payload.decode("utf-8"))
+          if not isinstance(immutable, dict) or immutable.get("enabled") is not True:
+              raise SystemExit("immutable release control changed after publication")
+
+          command_environment = {
+              "GH_TOKEN": os.environ["GH_TOKEN"],
+              "HOME": os.environ["HOME"],
+              "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+          }
+          for asset_name in (archive_name, manifest_name):
+              verified = False
+              for _attempt in range(12):
+                  result = subprocess.run(
+                      [
+                          "/usr/bin/gh",
+                          "release",
+                          "verify-asset",
+                          tag,
+                          str(transfer / asset_name),
+                          "--repo",
+                          repository,
+                          "--format",
+                          "json",
+                      ],
+                      check=False,
+                      capture_output=True,
+                      env=command_environment,
+                      text=True,
+                  )
+                  if result.returncode == 0:
+                      verified = True
+                      break
+                  time.sleep(5)
+              if not verified:
+                  raise SystemExit(f"candidate release attestation was not verifiable: {asset_name}")
+
+          summary = pathlib.Path(os.environ["GITHUB_STEP_SUMMARY"])
+          with summary.open("a", encoding="utf-8") as destination:
+              destination.write("### Frozen v1.0.0 candidate\n\n")
+              destination.write(f"- Immutable prerelease custody tag: `{tag}`\n")
+              destination.write(f"- Source commit: `{os.environ['GITHUB_SHA']}`\n")
+              destination.write(f"- Source archive: `sha256:{digest}`\n")
+              destination.write("- Final `v1.0.0` tag created: no\n")
+              destination.write("- Human gate advanced: no\n")
+          PYTHON

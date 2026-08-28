@@ -190,7 +190,7 @@ verify_live_tag_immutability() {
   local contract
   ruleset_id="$(gh api "/repos/$REPOSITORY/rulesets?includes_parents=true&per_page=100" --jq '[.[] | select(.name == "Immutable version tags" and .source_type == "Repository" and .target == "tag" and .enforcement == "active")] | if length == 1 then .[0].id else "" end')"
   [[ "$ruleset_id" =~ ^[1-9][0-9]*$ ]] || fail "live_tag_immutability_ruleset_missing"
-  contract="$(gh api "/repos/$REPOSITORY/rulesets/$ruleset_id" --jq '(.bypass_actors == []) and (.conditions.ref_name.exclude == []) and ((.conditions.ref_name.include | sort) == (["refs/tags/candidate-v1.0.0-*", "refs/tags/v*"] | sort)) and (([.rules[].type] | sort) == (["deletion", "non_fast_forward", "update"] | sort))')"
+  contract="$(gh api "/repos/$REPOSITORY/rulesets/$ruleset_id" --jq '(.bypass_actors == []) and (.conditions.ref_name.exclude == []) and ((.conditions.ref_name.include | sort) == (["refs/tags/candidate-v1.0.0-*", "refs/tags/v*"] | sort)) and (([.rules[].type] | sort) == (["deletion", "non_fast_forward", "update"] | sort)) and ([.rules[] | select(.type == "update") | (.parameters.update_allows_fetch_and_merge // false)] == [false])')"
   [[ "$contract" == "true" ]] || fail "live_tag_immutability_contract_invalid"
 }
 

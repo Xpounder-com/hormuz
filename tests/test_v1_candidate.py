@@ -3,10 +3,12 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import os
 import stat
 import subprocess
 import tarfile
 import tempfile
+import textwrap
 import tomllib
 import unittest
 from pathlib import Path
@@ -26,6 +28,19 @@ EVIDENCE_FIXTURE = (
 
 
 class V1CandidateTests(unittest.TestCase):
+    def _publisher_namespace(self) -> dict[str, object]:
+        workflow = (ROOT / ".github/workflows/freeze-v1-candidate.yml").read_text(
+            encoding="utf-8"
+        )
+        start = "# BEGIN V1 CANDIDATE PUBLISHER"
+        end = "# END V1 CANDIDATE PUBLISHER"
+        self.assertEqual(workflow.count(start), 1)
+        self.assertEqual(workflow.count(end), 1)
+        source = workflow.split(start, 1)[1].split(end, 1)[0]
+        namespace: dict[str, object] = {"__name__": "workflow_contract_test"}
+        exec(compile(textwrap.dedent(source), "embedded-publisher.py", "exec"), namespace)
+        return namespace
+
     def _archive(self, directory: Path, *, marker: str = "first") -> Path:
         path = directory / v1_candidate.ARCHIVE_NAME
         members = {
@@ -1104,20 +1119,26 @@ class V1CandidateTests(unittest.TestCase):
                     candidate_tag="candidate-v1.0.0-" + "a" * 64,
                 )
 
-    def test_freeze_workflow_has_one_build_and_no_final_tag_creation(self) -> None:
+    def test_freeze_workflow_separates_authority_and_builds_once(self) -> None:
         workflow = (ROOT / ".github/workflows/freeze-v1-candidate.yml").read_text()
-        self.assertIn("permissions:\n  contents: read", workflow)
-        self.assertIn(
-            "name: Authorize the designated v1 release steward\n    permissions: {}",
-            workflow,
-        )
-        self.assertIn("V1_RELEASE_STEWARD", workflow)
-        self.assertIn("ORIGINAL_ACTOR: ${{ github.actor }}", workflow)
-        self.assertIn("TRIGGERING_ACTOR: ${{ github.triggering_actor }}", workflow)
+        self.assertIn("permissions: {}", workflow)
+        self.assertNotIn("contents: write", workflow)
+        self.assertNotIn("id-token: write", workflow)
+        self.assertNotIn("self-hosted", workflow)
+        self.assertEqual(workflow.count("  authorize:\n"), 1)
+        self.assertEqual(workflow.count("  preflight:\n"), 1)
+        self.assertEqual(workflow.count("  build:\n"), 1)
+        self.assertEqual(workflow.count("  publish:\n"), 1)
+        self.assertEqual(workflow.count("environment: v1-release-custody"), 2)
         self.assertIn("needs: authorize", workflow)
-        self.assertIn("environment: v1-release-custody", workflow)
-        self.assertLess(workflow.index("authorize:"), workflow.index("contents: write"))
-        self.assertIn("attestations: read", workflow)
+        self.assertIn("needs: preflight", workflow)
+        self.assertIn("needs: build", workflow)
+        self.assertIn("${{ github.workflow_ref }}", workflow)
+        self.assertIn("@refs/heads/main", workflow)
+        self.assertIn('[[ "$GITHUB_REF_PROTECTED" == "true" ]]', workflow)
+        self.assertIn('[[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]', workflow)
+        self.assertIn("GITHUB_TRIGGERING_ACTOR", workflow)
+        self.assertIn("/jobs?filter=all&per_page=100", workflow)
         self.assertEqual(workflow.count("python -m build --sdist"), 1)
         self.assertIn("requirements/v1-source-build.lock", workflow)
         self.assertIn("--require-hashes", workflow)
@@ -1125,40 +1146,230 @@ class V1CandidateTests(unittest.TestCase):
         self.assertIn("--only-binary=:all:", workflow)
         self.assertIn("--no-deps", workflow)
         self.assertIn("--no-isolation", workflow)
-        self.assertIn('[[ "$GITHUB_RUN_ATTEMPT" == "1" ]]', workflow)
-        self.assertIn("head_sha=$GITHUB_SHA", workflow)
-        self.assertIn('[[ "$ORIGINAL_ACTOR" == "$AUTHORIZED_STEWARD" ]]', workflow)
-        self.assertIn(
-            '[[ "$TRIGGERING_ACTOR" == "$AUTHORIZED_STEWARD" ]]', workflow
+        self.assertIn("persist-credentials: false", workflow)
+        self.assertIn("ref: ${{ github.sha }}", workflow)
+        self.assertIn("ACTIONS_ID_TOKEN_REQUEST_TOKEN", workflow)
+        self.assertIn("actions/upload-artifact@", workflow)
+        self.assertIn("actions/download-artifact@", workflow)
+        self.assertIn("retention-days: 1", workflow)
+        self.assertIn("overwrite: false", workflow)
+        self.assertIn("include-hidden-files: false", workflow)
+
+        build = workflow.split("  build:\n", 1)[1].split("  publish:\n", 1)[0]
+        publish = workflow.split("  publish:\n", 1)[1]
+        self.assertNotIn("${{ secrets.", build)
+        self.assertNotIn("environment: v1-release-custody", build)
+        self.assertNotIn("actions/checkout@", publish)
+        self.assertNotIn("python tools/", publish)
+        self.assertNotIn("python -m build", publish)
+        self.assertNotIn("tarfile", publish)
+        self.assertNotIn("extract", publish)
+        self.assertEqual(
+            workflow.count("GH_PUBLISH_TOKEN: ${{ secrets.V1_RELEASE_PUBLISH_TOKEN }}"),
+            1,
         )
-        self.assertNotIn('actor.get("login") == steward', workflow)
-        self.assertNotIn('triggering_actor.get("login") == steward', workflow)
-        self.assertIn("/jobs?filter=all&per_page=100", workflow)
-        self.assertIn("tools/v1_candidate.py freeze-authorization", workflow)
-        self.assertNotIn("freeze_run_identity", workflow)
-        self.assertIn("create a new commit instead of rebuilding", workflow)
-        self.assertIn("immutable-releases", workflow)
-        self.assertIn("V1_RELEASE_ADMIN_TOKEN", workflow)
-        self.assertIn("Administration and Environments permissions", workflow)
-        self.assertIn("Steward workflow candidate tags", workflow)
-        self.assertIn("candidate_creation_rule_contract", workflow)
-        self.assertIn('"actor_id":15368', workflow)
-        self.assertIn("environments/v1-release-custody", workflow)
-        self.assertIn('item.get("type") == "required_reviewers"', workflow)
-        self.assertIn('deployment.get("protected_branches") is True', workflow)
-        self.assertIn('reviewer") or {}).get("login") == steward', workflow)
-        self.assertIn('.source_type == "Repository"', workflow)
-        self.assertIn("refs/tags/candidate-v1.0.0-*", workflow)
-        self.assertIn("live no-bypass immutability", workflow)
-        self.assertIn('gh release create "$CUSTODY_TAG"', workflow)
-        self.assertIn("--prerelease", workflow)
-        self.assertIn("--latest=false", workflow)
-        self.assertNotIn("--draft", workflow)
-        self.assertIn("candidate-v1.0.0-", workflow)
-        self.assertNotIn("--clobber", workflow)
+        self.assertEqual(
+            workflow.count("GH_ADMIN_TOKEN: ${{ secrets.V1_RELEASE_ADMIN_TOKEN }}"),
+            3,
+        )
+
+    def test_publisher_validates_the_fixed_transfer_contract(self) -> None:
+        namespace = self._publisher_namespace()
+        validate_transfer = namespace["validate_transfer"]
+        self.assertTrue(callable(validate_transfer))
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            archive = self._archive(directory)
+            manifest = self._manifest_value(archive)
+            self._write_manifest(directory, manifest)
+            result = validate_transfer(
+                directory,
+                "Xpounder-com/hormuz",
+                "a" * 40,
+                123,
+                1,
+            )
+            self.assertEqual(result["source_sha"], "a" * 40)
+            self.assertEqual(
+                result["digest"],
+                "sha256:" + hashlib.sha256(archive.read_bytes()).hexdigest(),
+            )
+            self.assertEqual(stat.S_IMODE(archive.stat().st_mode), 0o600)
+            self.assertEqual(
+                stat.S_IMODE((directory / v1_candidate.MANIFEST_NAME).stat().st_mode),
+                0o600,
+            )
+
+    def test_publisher_rejects_untrusted_transfer_drift(self) -> None:
+        namespace = self._publisher_namespace()
+        validate_transfer = namespace["validate_transfer"]
+        contract_error = namespace["ContractError"]
+        mutations = (
+            "extra_file",
+            "repository",
+            "source_sha",
+            "run_id",
+            "run_attempt",
+            "version",
+            "digest",
+        )
+        for mutation in mutations:
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as temporary:
+                directory = Path(temporary)
+                archive = self._archive(directory)
+                manifest = self._manifest_value(archive)
+                repository = "Xpounder-com/hormuz"
+                source_sha = "a" * 40
+                run_id = 123
+                run_attempt = 1
+                if mutation == "extra_file":
+                    (directory / "unexpected.txt").write_text("unexpected", encoding="utf-8")
+                elif mutation == "repository":
+                    repository = "attacker/example"
+                elif mutation == "source_sha":
+                    source_sha = "a" * 39
+                elif mutation == "run_id":
+                    manifest["build"]["run_id"] = 124
+                elif mutation == "run_attempt":
+                    run_attempt = 2
+                elif mutation == "version":
+                    manifest["candidate"]["package_version"] = "1.0.1"
+                elif mutation == "digest":
+                    manifest["candidate"]["artifact_digest"] = "sha256:" + "b" * 64
+                self._write_manifest(directory, manifest)
+                with self.assertRaises(contract_error):
+                    validate_transfer(
+                        directory,
+                        repository,
+                        source_sha,
+                        run_id,
+                        run_attempt,
+                    )
+
+    def test_publisher_rejects_symlink_and_duplicate_json_inputs(self) -> None:
+        namespace = self._publisher_namespace()
+        validate_transfer = namespace["validate_transfer"]
+        contract_error = namespace["ContractError"]
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            archive = self._archive(directory)
+            manifest = self._manifest_value(archive)
+            manifest_path = self._write_manifest(directory, manifest)
+            manifest_path.unlink()
+            manifest_path.symlink_to(archive)
+            with self.assertRaises(contract_error):
+                validate_transfer(directory, "Xpounder-com/hormuz", "a" * 40, 123, 1)
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            self._archive(directory)
+            (directory / v1_candidate.MANIFEST_NAME).mkdir()
+            with self.assertRaises(contract_error):
+                validate_transfer(directory, "Xpounder-com/hormuz", "a" * 40, 123, 1)
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            self._archive(directory)
+            (directory / v1_candidate.MANIFEST_NAME).write_text(
+                '{"schema_id":"one","schema_id":"two"}', encoding="utf-8"
+            )
+            with self.assertRaises(contract_error):
+                validate_transfer(directory, "Xpounder-com/hormuz", "a" * 40, 123, 1)
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            self._archive(directory)
+            (directory / v1_candidate.MANIFEST_NAME).write_bytes(
+                b"{" + b" " * (2 * 1024 * 1024)
+            )
+            with self.assertRaises(contract_error):
+                validate_transfer(directory, "Xpounder-com/hormuz", "a" * 40, 123, 1)
+
+    def test_publisher_hashes_remote_draft_bytes_before_publication(self) -> None:
+        workflow = (ROOT / ".github/workflows/freeze-v1-candidate.yml").read_text()
+        publisher = workflow.split("          def publish_candidate():", 1)[1].split(
+            "          if __name__ == \"__main__\":", 1
+        )[0]
+        create_draft = publisher.index('"draft": True')
+        first_download = publisher.index("download_and_compare(", create_draft)
+        immediate_recheck = publisher.index(
+            "# Recheck every mutable control and the remote bytes immediately before publication."
+        )
+        second_download = publisher.index("download_and_compare(", immediate_recheck)
+        publish_draft = publisher.index('value={"draft": False', second_download)
+        self.assertLess(create_draft, first_download)
+        self.assertLess(first_download, immediate_recheck)
+        self.assertLess(immediate_recheck, second_download)
+        self.assertLess(second_download, publish_draft)
+        self.assertIn("remote_asset_bytes_mismatch", workflow)
+        self.assertNotIn("gh release delete", workflow)
         self.assertNotIn("gh release upload", workflow)
-        self.assertIn("could not prove $label is absent", workflow)
-        self.assertIn("'HTTP 404'", workflow)
+        self.assertNotIn("git tag v1.0.0", workflow)
+
+    def test_remote_byte_mismatch_cannot_publish_the_draft(self) -> None:
+        namespace = self._publisher_namespace()
+        contract_error = namespace["ContractError"]
+        calls: list[tuple[str, str]] = []
+        transfer = {
+            "archive_payload": b"archive",
+            "manifest_payload": b"manifest",
+            "digest": "sha256:" + hashlib.sha256(b"archive").hexdigest(),
+            "source_sha": "a" * 40,
+            "tag": "candidate-v1.0.0-" + hashlib.sha256(b"archive").hexdigest(),
+        }
+
+        def fake_api_json(
+            _token: str,
+            method: str,
+            path: str,
+            *,
+            value: object = None,
+            expected: tuple[int, ...] = (200,),
+        ) -> tuple[int, dict[str, object]]:
+            del value, expected
+            calls.append((method, path))
+            if method == "POST":
+                return 201, {
+                    "id": 7,
+                    "tag_name": transfer["tag"],
+                    "target_commitish": transfer["source_sha"],
+                    "name": "Hormuz v1.0.0 frozen candidate",
+                    "body": namespace["expected_notes"](transfer),
+                    "draft": True,
+                    "prerelease": True,
+                    "immutable": False,
+                    "published_at": None,
+                    "assets": [],
+                }
+            return 200, {}
+
+        namespace["validate_transfer"] = lambda *_args: transfer
+        namespace["validate_live_controls"] = lambda *_args, **_kwargs: None
+        namespace["api_json"] = fake_api_json
+        namespace["upload_asset"] = lambda *_args, **_kwargs: None
+        namespace["validate_release"] = lambda *_args, **_kwargs: {
+            v1_candidate.ARCHIVE_NAME: 1,
+            v1_candidate.MANIFEST_NAME: 2,
+        }
+
+        def mismatch(*_args: object, **_kwargs: object) -> None:
+            raise contract_error("remote_asset_bytes_mismatch")
+
+        namespace["download_and_compare"] = mismatch
+        environment = {
+            "GH_READ_TOKEN": "read",
+            "GH_ADMIN_TOKEN": "admin",
+            "GH_PUBLISH_TOKEN": "publish",
+            "AUTHORIZED_STEWARD": "steward",
+            "RELEASE_TOKENS_SEPARATED": "true",
+            "GITHUB_SHA": "a" * 40,
+            "GITHUB_RUN_ID": "123",
+            "GITHUB_RUN_ATTEMPT": "1",
+            "GITHUB_REPOSITORY": "Xpounder-com/hormuz",
+            "RUNNER_TEMP": "/private/tmp",
+        }
+        with mock.patch.dict(os.environ, environment, clear=False):
+            with self.assertRaises(contract_error):
+                namespace["publish_candidate"]()
+        self.assertTrue(any(method == "POST" for method, _path in calls))
+        self.assertFalse(any(method == "PATCH" for method, _path in calls))
 
     def test_source_build_frontend_and_backend_are_exactly_hash_locked(self) -> None:
         lock = (ROOT / "requirements/v1-source-build.lock").read_text()
@@ -1347,6 +1558,7 @@ class V1CandidateTests(unittest.TestCase):
         self.assertIn("gate_evidence_not_yet_current", script)
         self.assertIn("live_tag_immutability_contract_invalid", script)
         self.assertIn('.source_type == "Repository"', script)
+        self.assertIn("update_allows_fetch_and_merge // false", script)
 
     def test_source_distribution_contract_includes_custody_tools(self) -> None:
         manifest = (ROOT / "MANIFEST.in").read_text()
