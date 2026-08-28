@@ -718,6 +718,7 @@ class V1CandidateTests(unittest.TestCase):
 
     def test_freeze_workflow_has_one_build_and_no_final_tag_creation(self) -> None:
         workflow = (ROOT / ".github/workflows/freeze-v1-candidate.yml").read_text()
+        self.assertIn("attestations: read", workflow)
         self.assertEqual(workflow.count("python -m build --sdist"), 1)
         self.assertIn("requirements/v1-source-build.lock", workflow)
         self.assertIn("--require-hashes", workflow)
