@@ -71,12 +71,21 @@ exact commit has a successful post-merge CI run and its package version is
 exactly `1.0.0`. A rerun attempt is rejected, and only one freeze workflow run
 is permitted for a source commit. Recovering from a failed freeze therefore
 requires a new source commit and a newly computed candidate digest.
+The repository variable `V1_RELEASE_STEWARD` must contain the one GitHub login
+authorized to perform this destructive dispatch. A read-only authorization job
+requires both the original actor and triggering actor to equal that login
+before the write-capable freeze job can start. The freeze job also targets the
+protected `v1-release-custody` GitHub environment. That environment must allow
+only protected branches and require exactly that steward as its reviewer; an
+unauthorized failed dispatch is excluded from the one-run count and cannot
+poison a later legitimate freeze.
 Before that one build, the workflow uses the owner-supplied
-`V1_RELEASE_ADMIN_TOKEN` secret, scoped to read-only repository Administration,
-to verify the live settings. Immutable Releases must already be enabled and
-one active, no-bypass tag ruleset must protect both `refs/tags/v*` and
-`refs/tags/candidate-v1.0.0-*`. The ordinary per-run `GITHUB_TOKEN` performs
-the candidate release operation; the administration token cannot publish.
+`V1_RELEASE_ADMIN_TOKEN` secret, scoped to read-only repository Administration
+and Environments, to verify the live settings. Immutable Releases must already
+be enabled, the protected environment must match the steward contract, and one
+active, no-bypass tag ruleset must protect both `refs/tags/v*` and
+`refs/tags/candidate-v1.0.0-*`. The ordinary per-run `GITHUB_TOKEN` performs the
+candidate release operation; the administration token cannot publish.
 
 The freeze workflow installs the exact pure-Python frontend and backend wheels
 from `requirements/v1-source-build.lock` with SHA-256 enforcement, forced
@@ -122,8 +131,12 @@ candidate.
 After a real aggregate passes the validator, the repository owner checks out
 the manifest's exact frozen source commit and runs its checked-in promotion
 command from a clean Hormuz worktree. The command rejects a different commit,
-a commit outside fetched protected `main`, any tracked or untracked worktree
-change, and an output directory inside that checkout:
+a commit outside fetched protected `main`, any tracked, untracked, or ignored
+worktree content, and an output directory inside that checkout. It materializes
+the two validation programs from the exact checked-out commit into its private
+working directory and runs them with isolated Python, bytecode disabled, and
+site initialization disabled. Ignored bytecode or ambient Python modules can
+therefore neither satisfy nor replace the gate validator:
 
 ```bash
 tools/promote_v1_candidate.sh \
@@ -150,9 +163,10 @@ OCI release workflow to succeed for the exact tag and commit, and downloads the
 immutable candidate assets again.
 An existing final tag is accepted only when it is annotated, targets that
 commit, was created no earlier than the validated aggregate, and its annotation
-binds the candidate custody tag, archive digest, and gate-evidence digest. That
-protected annotation is the authoritative promotion binding even if editable
-release-page text later changes. Only after this second
+has exactly the title and three standalone fields for the candidate custody
+tag, archive digest, and gate-evidence digest, with no extra or conflicting
+claims. That protected annotation is the authoritative promotion binding even
+if editable release-page text later changes. Only after this second
 verification does the command create a directly published, metadata-only
 immutable `v1.0.0` GitHub Release. Its deterministic notes link to the canonical
 archive and manifest under the digest-addressed candidate tag and repeat the

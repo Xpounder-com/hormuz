@@ -29,6 +29,7 @@ SCHEMA_VERSION = 1
 PROOF_SCHEMA_ID = "hormuz.v1-candidate-custody-proof"
 PROMOTION_SCHEMA_ID = "hormuz.v1-candidate-promotion-readiness"
 FINAL_RELEASE_PROOF_SCHEMA_ID = "hormuz.v1-final-release-proof"
+FINAL_TAG_PROOF_SCHEMA_ID = "hormuz.v1-final-tag-proof"
 EVIDENCE_SNAPSHOT_SCHEMA_ID = "hormuz.v1-candidate-evidence-snapshot"
 EXPECTED_REPOSITORY = "Xpounder-com/hormuz"
 TARGET_VERSION = "v1.0.0"
@@ -957,6 +958,127 @@ def validate_final_release(
     }
 
 
+def _expected_final_tag_annotation_lines(
+    candidate_digest: str,
+    gate_evidence_digest: str,
+    candidate_tag: str,
+) -> list[str]:
+    candidate_match = _DIGEST_RE.fullmatch(candidate_digest)
+    gate_match = _DIGEST_RE.fullmatch(gate_evidence_digest)
+    custody_match = _CUSTODY_TAG_RE.fullmatch(candidate_tag)
+    if (
+        candidate_match is None
+        or gate_match is None
+        or custody_match is None
+        or custody_match.group(1) != candidate_digest.removeprefix("sha256:")
+    ):
+        raise V1CandidateError("final_tag_annotation_input_invalid")
+    return [
+        "Hormuz v1.0.0",
+        "",
+        f"Frozen source archive: {candidate_digest}",
+        "",
+        f"Gate evidence: {gate_evidence_digest}",
+        "",
+        f"Candidate custody tag: {candidate_tag}",
+    ]
+
+
+def _validate_final_tag_annotation_text(
+    message: str,
+    *,
+    candidate_digest: str,
+    gate_evidence_digest: str,
+    candidate_tag: str,
+) -> None:
+    expected = _expected_final_tag_annotation_lines(
+        candidate_digest,
+        gate_evidence_digest,
+        candidate_tag,
+    )
+    if "\r" in message or message.splitlines() != expected:
+        raise V1CandidateError("final_tag_annotation_invalid")
+
+
+def validate_final_tag_annotation(
+    message_path: Path,
+    *,
+    candidate_digest: str,
+    gate_evidence_digest: str,
+    candidate_tag: str,
+) -> dict[str, object]:
+    try:
+        message = _safe_read(
+            message_path,
+            maximum=16 * 1024,
+            label="final_tag_annotation",
+        ).decode("utf-8")
+    except UnicodeError as error:
+        raise V1CandidateError("final_tag_annotation_invalid") from error
+    _validate_final_tag_annotation_text(
+        message,
+        candidate_digest=candidate_digest,
+        gate_evidence_digest=gate_evidence_digest,
+        candidate_tag=candidate_tag,
+    )
+    return {
+        "schema_id": FINAL_TAG_PROOF_SCHEMA_ID,
+        "schema_version": 1,
+        "status": "exact_annotation_valid",
+        "release_tag": FINAL_TAG,
+        "custody_release_tag": candidate_tag,
+        "candidate_artifact_digest": candidate_digest,
+        "gate_evidence_digest": gate_evidence_digest,
+    }
+
+
+def validate_final_tag_object(
+    tag_object_path: Path,
+    *,
+    source_commit: str,
+    gate_generated_at: str,
+    candidate_digest: str,
+    gate_evidence_digest: str,
+    candidate_tag: str,
+) -> dict[str, object]:
+    if _REVISION_RE.fullmatch(source_commit) is None:
+        raise V1CandidateError("final_tag_source_commit_invalid")
+    value = _read_json(tag_object_path, label="final_tag_object")
+    target = value.get("object")
+    tagger = value.get("tagger")
+    message = value.get("message")
+    if (
+        value.get("tag") != FINAL_TAG
+        or not isinstance(target, dict)
+        or target.get("type") != "commit"
+        or target.get("sha") != source_commit
+        or not isinstance(tagger, dict)
+        or not isinstance(message, str)
+    ):
+        raise V1CandidateError("final_tag_object_invalid")
+    tagged_at = _timestamp_value(tagger.get("date"), "final_tag_created_at")
+    gate_time = _timestamp_value(gate_generated_at, "gate_generated_at")
+    if tagged_at < gate_time:
+        raise V1CandidateError("final_tag_chronology_invalid")
+    _validate_final_tag_annotation_text(
+        message,
+        candidate_digest=candidate_digest,
+        gate_evidence_digest=gate_evidence_digest,
+        candidate_tag=candidate_tag,
+    )
+    return {
+        "schema_id": FINAL_TAG_PROOF_SCHEMA_ID,
+        "schema_version": 1,
+        "status": "exact_protected_tag_valid",
+        "release_tag": FINAL_TAG,
+        "custody_release_tag": candidate_tag,
+        "source_commit": source_commit,
+        "candidate_artifact_digest": candidate_digest,
+        "gate_evidence_digest": gate_evidence_digest,
+        "tagged_at": tagger["date"],
+    }
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -999,6 +1121,26 @@ def _parser() -> argparse.ArgumentParser:
     final_release.add_argument("--release-api", required=True, type=Path)
     final_release.add_argument("--immutable-api", required=True, type=Path)
     final_release.add_argument("--output", required=True, type=Path)
+
+    tag_annotation = commands.add_parser(
+        "tag-annotation", help="verify the exact protected final-tag annotation"
+    )
+    tag_annotation.add_argument("--message", required=True, type=Path)
+    tag_annotation.add_argument("--candidate-digest", required=True)
+    tag_annotation.add_argument("--gate-evidence-digest", required=True)
+    tag_annotation.add_argument("--candidate-tag", required=True)
+    tag_annotation.add_argument("--output", required=True, type=Path)
+
+    final_tag = commands.add_parser(
+        "final-tag", help="verify the exact protected final-tag object"
+    )
+    final_tag.add_argument("--tag-object", required=True, type=Path)
+    final_tag.add_argument("--source-commit", required=True)
+    final_tag.add_argument("--gate-generated-at", required=True)
+    final_tag.add_argument("--candidate-digest", required=True)
+    final_tag.add_argument("--gate-evidence-digest", required=True)
+    final_tag.add_argument("--candidate-tag", required=True)
+    final_tag.add_argument("--output", required=True, type=Path)
 
     promotion = commands.add_parser("promotion", help="bind real gate evidence to exact bytes")
     promotion.add_argument("--manifest", required=True, type=Path)
@@ -1060,6 +1202,22 @@ def main(argv: list[str] | None = None) -> int:
                 args.evidence,
                 args.release_api,
                 args.immutable_api,
+            )
+        elif args.command == "tag-annotation":
+            result = validate_final_tag_annotation(
+                args.message,
+                candidate_digest=args.candidate_digest,
+                gate_evidence_digest=args.gate_evidence_digest,
+                candidate_tag=args.candidate_tag,
+            )
+        elif args.command == "final-tag":
+            result = validate_final_tag_object(
+                args.tag_object,
+                source_commit=args.source_commit,
+                gate_generated_at=args.gate_generated_at,
+                candidate_digest=args.candidate_digest,
+                gate_evidence_digest=args.gate_evidence_digest,
+                candidate_tag=args.candidate_tag,
             )
         else:
             result = validate_promotion(

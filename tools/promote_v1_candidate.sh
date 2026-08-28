@@ -8,6 +8,7 @@ readonly REPOSITORY="Xpounder-com/hormuz"
 readonly FINAL_TAG="v1.0.0"
 readonly ARCHIVE_NAME="hormuz-1.0.0.tar.gz"
 readonly MANIFEST_NAME="hormuz-v1.0.0-candidate-manifest.json"
+readonly -a SAFE_PYTHON=(python3 -I -B -S)
 
 fail() {
   printf 'v1 promotion failed: %s\n' "$1" >&2
@@ -70,13 +71,14 @@ done
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 repository_root="$(cd "$script_dir/.." && pwd -P)"
-tool="$script_dir/v1_candidate.py"
-[[ -f "$tool" ]] || fail "candidate_tool_missing"
+[[ -f "$script_dir/v1_candidate.py" ]] || fail "candidate_tool_missing"
+[[ -f "$script_dir/verify_policy_admin_usability_evidence.py" ]] \
+  || fail "gate_validator_missing"
 [[ "$(git -C "$repository_root" rev-parse --show-toplevel)" == "$repository_root" ]] \
   || fail "repository_checkout_required"
 checkout_commit="$(git -C "$repository_root" rev-parse HEAD)"
 [[ "$checkout_commit" =~ ^[0-9a-f]{40}$ ]] || fail "checkout_commit_invalid"
-[[ -z "$(git -C "$repository_root" status --porcelain=v1 --untracked-files=all --ignore-submodules=none)" ]] \
+[[ -z "$(git -C "$repository_root" status --porcelain=v1 --untracked-files=all --ignored=matching --ignore-submodules=none)" ]] \
   || fail "promotion_checkout_not_clean"
 
 origin_url="$(git -C "$repository_root" remote get-url origin)"
@@ -108,6 +110,29 @@ cleanup_work_dir() {
 }
 trap cleanup_work_dir EXIT
 
+trusted_tools_dir="$work_dir/trusted-tools"
+mkdir -m 700 "$trusted_tools_dir"
+git -C "$repository_root" show \
+  "$checkout_commit:tools/v1_candidate.py" \
+  >"$trusted_tools_dir/v1_candidate.py"
+git -C "$repository_root" show \
+  "$checkout_commit:tools/verify_policy_admin_usability_evidence.py" \
+  >"$trusted_tools_dir/verify_policy_admin_usability_evidence.py"
+chmod 600 \
+  "$trusted_tools_dir/v1_candidate.py" \
+  "$trusted_tools_dir/verify_policy_admin_usability_evidence.py"
+
+run_candidate_tool() {
+  "${SAFE_PYTHON[@]}" -c '
+import runpy
+import sys
+tool_directory = sys.argv[1]
+sys.path.insert(0, tool_directory)
+sys.argv = ["v1_candidate.py", *sys.argv[2:]]
+runpy.run_path(tool_directory + "/v1_candidate.py", run_name="__main__")
+' "$trusted_tools_dir" "$@"
+}
+
 report_proof_location() {
   if [[ "$cleanup" == "true" ]]; then
     printf 'temporary promotion material will be removed\n'
@@ -126,11 +151,11 @@ git -C "$repository_root" merge-base --is-ancestor "$checkout_commit" origin/mai
 
 pinned_evidence_path="$work_dir/gate-evidence.json"
 evidence_snapshot_report="$work_dir/gate-evidence-snapshot.json"
-python3 "$tool" evidence-snapshot \
+run_candidate_tool evidence-snapshot \
   --evidence "$evidence_path" \
   --output "$pinned_evidence_path" \
   >"$evidence_snapshot_report"
-pinned_evidence_digest="$(python3 -c 'import json, pathlib, sys; print(json.loads(pathlib.Path(sys.argv[1]).read_text())["digest"])' "$evidence_snapshot_report")"
+pinned_evidence_digest="$("${SAFE_PYTHON[@]}" -c 'import json, pathlib, sys; print(json.loads(pathlib.Path(sys.argv[1]).read_text())["digest"])' "$evidence_snapshot_report")"
 [[ "$pinned_evidence_digest" =~ ^sha256:[0-9a-f]{64}$ ]] \
   || fail "gate_evidence_snapshot_invalid"
 
@@ -177,11 +202,11 @@ release_exists \
   "$work_dir/initial-release-lookup.err" \
   || fail "candidate_release_not_found"
 snapshot_candidate "$initial_dir"
-manifest_source_commit="$(python3 -c 'import json, pathlib, sys; print(json.loads(pathlib.Path(sys.argv[1]).read_text())["candidate"]["source_commit"])' "$initial_dir/$MANIFEST_NAME")"
+manifest_source_commit="$("${SAFE_PYTHON[@]}" -c 'import json, pathlib, sys; print(json.loads(pathlib.Path(sys.argv[1]).read_text())["candidate"]["source_commit"])' "$initial_dir/$MANIFEST_NAME")"
 [[ "$manifest_source_commit" =~ ^[0-9a-f]{40}$ ]] || fail "manifest_source_commit_invalid"
 [[ "$manifest_source_commit" == "$checkout_commit" ]] \
   || fail "promotion_checkout_candidate_mismatch"
-freeze_run_id="$(python3 -c 'import json, pathlib, sys; print(json.loads(pathlib.Path(sys.argv[1]).read_text())["build"]["run_id"])' "$initial_dir/$MANIFEST_NAME")"
+freeze_run_id="$("${SAFE_PYTHON[@]}" -c 'import json, pathlib, sys; print(json.loads(pathlib.Path(sys.argv[1]).read_text())["build"]["run_id"])' "$initial_dir/$MANIFEST_NAME")"
 [[ "$freeze_run_id" =~ ^[1-9][0-9]*$ ]] || fail "freeze_run_id_invalid"
 
 snapshot_provenance() {
@@ -193,7 +218,7 @@ snapshot_provenance() {
 }
 
 snapshot_provenance "$initial_dir"
-python3 "$tool" promotion \
+run_candidate_tool promotion \
   --manifest "$initial_dir/$MANIFEST_NAME" \
   --archive "$initial_dir/$ARCHIVE_NAME" \
   --evidence "$pinned_evidence_path" \
@@ -203,18 +228,18 @@ python3 "$tool" promotion \
   --custody-tag-api "$initial_dir/custody-tag-api.json" \
   --output "$initial_dir/promotion-readiness.json" >/dev/null
 
-source_commit="$(python3 -c 'import json, pathlib, sys; print(json.loads(pathlib.Path(sys.argv[1]).read_text())["source_commit"])' "$initial_dir/promotion-readiness.json")"
-candidate_digest="$(python3 -c 'import json, pathlib, sys; print(json.loads(pathlib.Path(sys.argv[1]).read_text())["candidate_artifact_digest"])' "$initial_dir/promotion-readiness.json")"
-manifest_custody_tag="$(python3 -c 'import json, pathlib, sys; print(json.loads(pathlib.Path(sys.argv[1]).read_text())["custody_release_tag"])' "$initial_dir/promotion-readiness.json")"
-gate_generated_at="$(python3 -c 'import json, pathlib, sys; print(json.loads(pathlib.Path(sys.argv[1]).read_text())["gate_generated_at"])' "$initial_dir/promotion-readiness.json")"
-gate_evidence_digest="$(python3 -c 'import json, pathlib, sys; print(json.loads(pathlib.Path(sys.argv[1]).read_text())["gate_evidence_digest"])' "$initial_dir/promotion-readiness.json")"
+source_commit="$("${SAFE_PYTHON[@]}" -c 'import json, pathlib, sys; print(json.loads(pathlib.Path(sys.argv[1]).read_text())["source_commit"])' "$initial_dir/promotion-readiness.json")"
+candidate_digest="$("${SAFE_PYTHON[@]}" -c 'import json, pathlib, sys; print(json.loads(pathlib.Path(sys.argv[1]).read_text())["candidate_artifact_digest"])' "$initial_dir/promotion-readiness.json")"
+manifest_custody_tag="$("${SAFE_PYTHON[@]}" -c 'import json, pathlib, sys; print(json.loads(pathlib.Path(sys.argv[1]).read_text())["custody_release_tag"])' "$initial_dir/promotion-readiness.json")"
+gate_generated_at="$("${SAFE_PYTHON[@]}" -c 'import json, pathlib, sys; print(json.loads(pathlib.Path(sys.argv[1]).read_text())["gate_generated_at"])' "$initial_dir/promotion-readiness.json")"
+gate_evidence_digest="$("${SAFE_PYTHON[@]}" -c 'import json, pathlib, sys; print(json.loads(pathlib.Path(sys.argv[1]).read_text())["gate_evidence_digest"])' "$initial_dir/promotion-readiness.json")"
 [[ "$manifest_custody_tag" == "$candidate_tag" ]] || fail "candidate_tag_manifest_mismatch"
 [[ "$gate_evidence_digest" == "$pinned_evidence_digest" ]] \
   || fail "gate_evidence_snapshot_digest_mismatch"
 
 assert_readiness_binding() {
   local readiness_path="$1"
-  python3 -c '
+  "${SAFE_PYTHON[@]}" -c '
 import json, pathlib, sys
 value = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
 expected = {
@@ -258,8 +283,9 @@ verify_release_attestations "$candidate_tag" "$initial_dir"
 validate_remote_final_tag() {
   local ref_path="$1"
   local object_path="$2"
+  local proof_path="$3"
   local tag_object_sha
-  tag_object_sha="$(python3 -c '
+  tag_object_sha="$("${SAFE_PYTHON[@]}" -c '
 import json, pathlib, sys
 value = json.loads(pathlib.Path(sys.argv[1]).read_text())
 obj = value.get("object", {})
@@ -268,48 +294,32 @@ if obj.get("type") != "tag" or not isinstance(obj.get("sha"), str):
 print(obj["sha"])
 ' "$ref_path")" || fail "final_tag_not_annotated"
   gh api "/repos/$REPOSITORY/git/tags/$tag_object_sha" >"$object_path"
-  python3 -c '
-import json, pathlib, sys
-value = json.loads(pathlib.Path(sys.argv[1]).read_text())
-if value.get("tag") != sys.argv[2]:
-    raise SystemExit(2)
-obj = value.get("object", {})
-if obj.get("type") != "commit" or obj.get("sha") != sys.argv[3]:
-    raise SystemExit(2)
-tagger = value.get("tagger", {})
-tagged_at = tagger.get("date") if isinstance(tagger, dict) else None
-if not isinstance(tagged_at, str):
-    raise SystemExit(2)
-message = value.get("message")
-if not isinstance(message, str):
-    raise SystemExit(2)
-if (
-    f"Frozen source archive: {sys.argv[5]}" not in message
-    or f"Gate evidence: {sys.argv[6]}" not in message
-    or f"Candidate custody tag: {sys.argv[7]}" not in message
-):
-    raise SystemExit(2)
-from datetime import datetime
-if datetime.fromisoformat(tagged_at.replace("Z", "+00:00")) < datetime.fromisoformat(sys.argv[4].replace("Z", "+00:00")):
-    raise SystemExit(2)
-' "$object_path" "$FINAL_TAG" "$source_commit" "$gate_generated_at" "$candidate_digest" "$gate_evidence_digest" "$candidate_tag" \
-    || fail "final_tag_target_or_chronology_invalid"
+  run_candidate_tool final-tag \
+    --tag-object "$object_path" \
+    --source-commit "$source_commit" \
+    --gate-generated-at "$gate_generated_at" \
+    --candidate-digest "$candidate_digest" \
+    --gate-evidence-digest "$gate_evidence_digest" \
+    --candidate-tag "$candidate_tag" \
+    --output "$proof_path" >/dev/null \
+    || fail "final_tag_target_chronology_or_annotation_invalid"
 }
 
 refresh_and_validate_final_tag() {
   local label="$1"
   local ref_path="$work_dir/final-tag-${label}-ref.json"
   local object_path="$work_dir/final-tag-${label}-object.json"
+  local proof_path="$work_dir/final-tag-${label}-proof.json"
   local error_path="$work_dir/final-tag-${label}.err"
   if ! gh api "/repos/$REPOSITORY/git/ref/tags/$FINAL_TAG" >"$ref_path" 2>"$error_path"; then
     cat "$error_path" >&2
     fail "final_tag_lookup_failed"
   fi
-  validate_remote_final_tag "$ref_path" "$object_path"
+  validate_remote_final_tag "$ref_path" "$object_path" "$proof_path"
 }
 
 require_gate_time_current() {
-  python3 -c '
+  "${SAFE_PYTHON[@]}" -c '
 from datetime import datetime, timezone
 import sys
 gate = datetime.fromisoformat(sys.argv[1].replace("Z", "+00:00"))
@@ -321,7 +331,10 @@ final_ref="$work_dir/final-tag-ref.json"
 final_ref_error="$work_dir/final-tag-ref.err"
 verify_live_tag_immutability
 if gh api "/repos/$REPOSITORY/git/ref/tags/$FINAL_TAG" >"$final_ref" 2>"$final_ref_error"; then
-  validate_remote_final_tag "$final_ref" "$work_dir/final-tag-object.json"
+  validate_remote_final_tag \
+    "$final_ref" \
+    "$work_dir/final-tag-object.json" \
+    "$work_dir/final-tag-proof.json"
 else
   if ! grep -Fq "HTTP 404" "$final_ref_error"; then
     cat "$final_ref_error" >&2
@@ -332,21 +345,6 @@ else
       || fail "local_final_tag_not_annotated"
     [[ "$(git -C "$repository_root" rev-list -n 1 "$FINAL_TAG")" == "$source_commit" ]] \
       || fail "local_final_tag_target_invalid"
-    local_tagged_at="$(git -C "$repository_root" for-each-ref --format='%(taggerdate:iso-strict)' "refs/tags/$FINAL_TAG")"
-    python3 -c '
-from datetime import datetime
-import sys
-tagged = datetime.fromisoformat(sys.argv[1].replace("Z", "+00:00"))
-gate = datetime.fromisoformat(sys.argv[2].replace("Z", "+00:00"))
-raise SystemExit(0 if tagged >= gate else 2)
-' "$local_tagged_at" "$gate_generated_at" || fail "local_final_tag_chronology_invalid"
-    local_tag_message="$(git -C "$repository_root" for-each-ref --format='%(contents)' "refs/tags/$FINAL_TAG")"
-    [[ "$local_tag_message" == *"Frozen source archive: $candidate_digest"* ]] \
-      || fail "local_final_tag_candidate_digest_invalid"
-    [[ "$local_tag_message" == *"Gate evidence: $gate_evidence_digest"* ]] \
-      || fail "local_final_tag_gate_digest_invalid"
-    [[ "$local_tag_message" == *"Candidate custody tag: $candidate_tag"* ]] \
-      || fail "local_final_tag_candidate_tag_invalid"
   else
     require_gate_time_current
     git -C "$repository_root" -c tag.gpgSign=false tag -a "$FINAL_TAG" "$source_commit" \
@@ -355,11 +353,33 @@ raise SystemExit(0 if tagged >= gate else 2)
       -m "Gate evidence: $gate_evidence_digest" \
       -m "Candidate custody tag: $candidate_tag"
   fi
+  local_tagged_at="$(git -C "$repository_root" for-each-ref --format='%(taggerdate:iso-strict)' "refs/tags/$FINAL_TAG")"
+  "${SAFE_PYTHON[@]}" -c '
+from datetime import datetime
+import sys
+tagged = datetime.fromisoformat(sys.argv[1].replace("Z", "+00:00"))
+gate = datetime.fromisoformat(sys.argv[2].replace("Z", "+00:00"))
+raise SystemExit(0 if tagged >= gate else 2)
+  ' "$local_tagged_at" "$gate_generated_at" || fail "local_final_tag_chronology_invalid"
+  local_tag_message_path="$work_dir/local-final-tag-message.txt"
+  local_tag_message="$(git -C "$repository_root" for-each-ref \
+    --format='%(contents)' \
+    "refs/tags/$FINAL_TAG")"
+  printf '%s' "$local_tag_message" >"$local_tag_message_path"
+  chmod 600 "$local_tag_message_path"
+  run_candidate_tool tag-annotation \
+    --message "$local_tag_message_path" \
+    --candidate-digest "$candidate_digest" \
+    --gate-evidence-digest "$gate_evidence_digest" \
+    --candidate-tag "$candidate_tag" \
+    --output "$work_dir/local-final-tag-proof.json" >/dev/null \
+    || fail "local_final_tag_annotation_invalid"
   git -C "$repository_root" push origin "refs/tags/$FINAL_TAG"
   gh api "/repos/$REPOSITORY/git/ref/tags/$FINAL_TAG" >"$work_dir/final-tag-ref-after-push.json"
   validate_remote_final_tag \
     "$work_dir/final-tag-ref-after-push.json" \
-    "$work_dir/final-tag-object-after-push.json"
+    "$work_dir/final-tag-object-after-push.json" \
+    "$work_dir/final-tag-proof-after-push.json"
 fi
 
 wait_for_signed_oci() {
@@ -380,7 +400,7 @@ wait_for_signed_oci() {
       --limit 20 \
       --json databaseId,headBranch,headSha,status,conclusion,url \
       >"$work_dir/oci-runs-${attempt}.json"
-    record="$(python3 -c '
+    record="$("${SAFE_PYTHON[@]}" -c '
 import json, pathlib, sys
 runs = json.loads(pathlib.Path(sys.argv[1]).read_text())
 matches = [
@@ -412,7 +432,7 @@ prepublish_dir="$work_dir/prepublish-reverification"
 verify_live_tag_immutability
 snapshot_candidate "$prepublish_dir"
 snapshot_provenance "$prepublish_dir"
-python3 "$tool" promotion \
+run_candidate_tool promotion \
   --manifest "$prepublish_dir/$MANIFEST_NAME" \
   --archive "$prepublish_dir/$ARCHIVE_NAME" \
   --evidence "$pinned_evidence_path" \
@@ -426,7 +446,7 @@ refresh_and_validate_final_tag "prepublish"
 verify_release_attestations "$candidate_tag" "$prepublish_dir"
 
 final_notes_path="$work_dir/final-release-notes.md"
-python3 "$tool" final-notes \
+run_candidate_tool final-notes \
   --manifest "$prepublish_dir/$MANIFEST_NAME" \
   --evidence "$pinned_evidence_path" \
   --output "$final_notes_path" \
@@ -448,7 +468,7 @@ publication_ready="false"
 for attempt in $(seq 1 30); do
   gh api "/repos/$REPOSITORY/releases/tags/$FINAL_TAG" \
     >"$work_dir/published-release-${attempt}.json"
-  if python3 -c '
+  if "${SAFE_PYTHON[@]}" -c '
 import json, pathlib, sys
 value = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
 raise SystemExit(0 if value.get("draft") is False and value.get("immutable") is True else 2)
@@ -465,7 +485,7 @@ published_dir="$work_dir/published-reverification"
 verify_live_tag_immutability
 snapshot_candidate "$published_dir"
 snapshot_provenance "$published_dir"
-python3 "$tool" promotion \
+run_candidate_tool promotion \
   --manifest "$published_dir/$MANIFEST_NAME" \
   --archive "$published_dir/$ARCHIVE_NAME" \
   --evidence "$pinned_evidence_path" \
@@ -476,7 +496,7 @@ python3 "$tool" promotion \
   --output "$published_dir/promotion-readiness.json" >/dev/null
 assert_readiness_binding "$published_dir/promotion-readiness.json"
 refresh_and_validate_final_tag "published"
-python3 "$tool" final-release \
+run_candidate_tool final-release \
   --manifest "$published_dir/$MANIFEST_NAME" \
   --evidence "$pinned_evidence_path" \
   --release-api "$final_release_api" \

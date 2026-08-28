@@ -4,6 +4,7 @@ import hashlib
 import io
 import json
 import stat
+import subprocess
 import tarfile
 import tempfile
 import tomllib
@@ -719,8 +720,199 @@ class V1CandidateTests(unittest.TestCase):
             self.assertIn("without rebuilding or copying", notes)
             self.assertEqual(proof["digest"], "sha256:" + hashlib.sha256(payload).hexdigest())
 
+    def test_final_tag_annotation_requires_exact_standalone_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            archive = self._archive(root)
+            manifest = self._manifest_value(archive)
+            candidate = manifest["candidate"]
+            custody = manifest["custody"]
+            assert isinstance(candidate, dict) and isinstance(custody, dict)
+            candidate_digest = str(candidate["artifact_digest"])
+            candidate_tag = str(custody["release_tag"])
+            gate_digest = "sha256:" + "b" * 64
+            message = "\n".join(
+                v1_candidate._expected_final_tag_annotation_lines(
+                    candidate_digest,
+                    gate_digest,
+                    candidate_tag,
+                )
+            ) + "\n"
+            message_path = root / "tag-message.txt"
+            message_path.write_text(message, encoding="utf-8")
+
+            proof = v1_candidate.validate_final_tag_annotation(
+                message_path,
+                candidate_digest=candidate_digest,
+                gate_evidence_digest=gate_digest,
+                candidate_tag=candidate_tag,
+            )
+            self.assertEqual(proof["status"], "exact_annotation_valid")
+
+            invalid_messages = (
+                message.replace(candidate_tag, candidate_tag + "-stale"),
+                message + "\nGate evidence: sha256:" + "c" * 64 + "\n",
+                message.replace(
+                    f"Gate evidence: {gate_digest}",
+                    f"Gate evidence: sha256:{'d' * 64}",
+                ),
+            )
+            for invalid in invalid_messages:
+                with self.subTest(invalid=invalid[-80:]):
+                    message_path.write_text(invalid, encoding="utf-8")
+                    with self.assertRaisesRegex(
+                        v1_candidate.V1CandidateError,
+                        "final_tag_annotation_invalid",
+                    ):
+                        v1_candidate.validate_final_tag_annotation(
+                            message_path,
+                            candidate_digest=candidate_digest,
+                            gate_evidence_digest=gate_digest,
+                            candidate_tag=candidate_tag,
+                        )
+
+    def test_final_tag_object_uses_the_exact_annotation_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            archive = self._archive(root)
+            manifest = self._manifest_value(archive)
+            candidate = manifest["candidate"]
+            custody = manifest["custody"]
+            assert isinstance(candidate, dict) and isinstance(custody, dict)
+            source_commit = str(candidate["source_commit"])
+            candidate_digest = str(candidate["artifact_digest"])
+            candidate_tag = str(custody["release_tag"])
+            gate_digest = "sha256:" + "b" * 64
+            message = "\n".join(
+                v1_candidate._expected_final_tag_annotation_lines(
+                    candidate_digest,
+                    gate_digest,
+                    candidate_tag,
+                )
+            )
+            tag_object = root / "tag-object.json"
+            tag_object.write_text(
+                json.dumps(
+                    {
+                        "tag": "v1.0.0",
+                        "object": {"type": "commit", "sha": source_commit},
+                        "tagger": {"date": "2025-08-27T11:00:00Z"},
+                        "message": message,
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            proof = v1_candidate.validate_final_tag_object(
+                tag_object,
+                source_commit=source_commit,
+                gate_generated_at="2025-08-27T10:00:00Z",
+                candidate_digest=candidate_digest,
+                gate_evidence_digest=gate_digest,
+                candidate_tag=candidate_tag,
+            )
+            self.assertEqual(proof["status"], "exact_protected_tag_valid")
+
+            value = json.loads(tag_object.read_text())
+            value["message"] += f"\n\nGate evidence: sha256:{'c' * 64}"
+            tag_object.write_text(json.dumps(value), encoding="utf-8")
+            with self.assertRaisesRegex(
+                v1_candidate.V1CandidateError, "final_tag_annotation_invalid"
+            ):
+                v1_candidate.validate_final_tag_object(
+                    tag_object,
+                    source_commit=source_commit,
+                    gate_generated_at="2025-08-27T10:00:00Z",
+                    candidate_digest=candidate_digest,
+                    gate_evidence_digest=gate_digest,
+                    candidate_tag=candidate_tag,
+                )
+
+    def test_git_serialized_tag_annotation_matches_the_exact_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            repository = root / "repository"
+            repository.mkdir()
+            subprocess.run(
+                ["git", "init", "--quiet", str(repository)],
+                check=True,
+            )
+            identity = [
+                "-c",
+                "user.name=Hormuz release test",
+                "-c",
+                "user.email=release-test@example.invalid",
+            ]
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(repository),
+                    *identity,
+                    "commit",
+                    "--quiet",
+                    "--allow-empty",
+                    "-m",
+                    "initial",
+                ],
+                check=True,
+            )
+            candidate_digest = "sha256:" + "a" * 64
+            gate_digest = "sha256:" + "b" * 64
+            candidate_tag = "candidate-v1.0.0-" + "a" * 64
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(repository),
+                    *identity,
+                    "tag",
+                    "-a",
+                    "v1.0.0",
+                    "-m",
+                    "Hormuz v1.0.0",
+                    "-m",
+                    f"Frozen source archive: {candidate_digest}",
+                    "-m",
+                    f"Gate evidence: {gate_digest}",
+                    "-m",
+                    f"Candidate custody tag: {candidate_tag}",
+                ],
+                check=True,
+            )
+            message_path = root / "serialized-tag-message.txt"
+            serialized = subprocess.check_output(
+                [
+                    "git",
+                    "-C",
+                    str(repository),
+                    "for-each-ref",
+                    "--format=%(contents)",
+                    "refs/tags/v1.0.0",
+                ]
+            ).decode("utf-8").rstrip("\n")
+            message_path.write_text(serialized, encoding="utf-8")
+            proof = v1_candidate.validate_final_tag_annotation(
+                message_path,
+                candidate_digest=candidate_digest,
+                gate_evidence_digest=gate_digest,
+                candidate_tag=candidate_tag,
+            )
+            self.assertEqual(proof["status"], "exact_annotation_valid")
+
     def test_freeze_workflow_has_one_build_and_no_final_tag_creation(self) -> None:
         workflow = (ROOT / ".github/workflows/freeze-v1-candidate.yml").read_text()
+        self.assertIn("permissions:\n  contents: read", workflow)
+        self.assertIn(
+            "name: Authorize the designated v1 release steward\n    permissions: {}",
+            workflow,
+        )
+        self.assertIn("V1_RELEASE_STEWARD", workflow)
+        self.assertIn("ORIGINAL_ACTOR: ${{ github.actor }}", workflow)
+        self.assertIn("TRIGGERING_ACTOR: ${{ github.triggering_actor }}", workflow)
+        self.assertIn("needs: authorize", workflow)
+        self.assertIn("environment: v1-release-custody", workflow)
+        self.assertLess(workflow.index("authorize:"), workflow.index("contents: write"))
         self.assertIn("attestations: read", workflow)
         self.assertEqual(workflow.count("python -m build --sdist"), 1)
         self.assertIn("requirements/v1-source-build.lock", workflow)
@@ -731,12 +923,19 @@ class V1CandidateTests(unittest.TestCase):
         self.assertIn("--no-isolation", workflow)
         self.assertIn('[[ "$GITHUB_RUN_ATTEMPT" == "1" ]]', workflow)
         self.assertIn("head_sha=$GITHUB_SHA", workflow)
+        self.assertIn('actor.get("login") == steward', workflow)
+        self.assertIn('triggering_actor.get("login") == steward', workflow)
         self.assertIn(
             '[[ "$freeze_run_identity" == "1:$GITHUB_RUN_ID" ]]', workflow
         )
         self.assertIn("create a new commit instead of rebuilding", workflow)
         self.assertIn("immutable-releases", workflow)
         self.assertIn("V1_RELEASE_ADMIN_TOKEN", workflow)
+        self.assertIn("Administration and Environments permissions", workflow)
+        self.assertIn("environments/v1-release-custody", workflow)
+        self.assertIn('item.get("type") == "required_reviewers"', workflow)
+        self.assertIn('deployment.get("protected_branches") is True', workflow)
+        self.assertIn('reviewer") or {}).get("login") == steward', workflow)
         self.assertIn('.source_type == "Repository"', workflow)
         self.assertIn("refs/tags/candidate-v1.0.0-*", workflow)
         self.assertIn("live no-bypass immutability", workflow)
@@ -789,13 +988,13 @@ class V1CandidateTests(unittest.TestCase):
         self.assertNotIn("gh release upload", script)
         self.assertNotIn("gh release edit", script)
         self.assertNotIn("--clobber", script)
-        first_gate = script.index('python3 "$tool" promotion')
+        first_gate = script.index("run_candidate_tool promotion")
         tag_push = script.index('git -C "$repository_root" push')
         signed_oci = script.index("wait_for_signed_oci\n", tag_push)
         reverify = script.index('prepublish_dir="$work_dir/prepublish-reverification"')
-        final_notes = script.index('python3 "$tool" final-notes', reverify)
+        final_notes = script.index("run_candidate_tool final-notes", reverify)
         publish = script.index('gh release create "$FINAL_TAG"', reverify)
-        final_validation = script.index('python3 "$tool" final-release', publish)
+        final_validation = script.index("run_candidate_tool final-release", publish)
         self.assertLess(first_gate, tag_push)
         self.assertLess(tag_push, signed_oci)
         self.assertLess(signed_oci, reverify)
@@ -807,14 +1006,14 @@ class V1CandidateTests(unittest.TestCase):
         self.assertNotIn('gh release download "$FINAL_TAG"', script)
         self.assertIn("freeze_run_id", script)
         self.assertIn("candidate_tag_manifest_mismatch", script)
-        self.assertIn("final_tag_target_or_chronology_invalid", script)
+        self.assertIn("final_tag_target_chronology_or_annotation_invalid", script)
         self.assertIn('Gate evidence: $gate_evidence_digest', script)
         self.assertIn('Candidate custody tag: $candidate_tag', script)
 
     def test_promotion_requires_the_clean_exact_candidate_checkout(self) -> None:
         script = (ROOT / "tools/promote_v1_candidate.sh").read_text()
         clean_check = script.index(
-            "status --porcelain=v1 --untracked-files=all --ignore-submodules=none"
+            "status --porcelain=v1 --untracked-files=all --ignored=matching --ignore-submodules=none"
         )
         fetch_main = script.index('fetch --no-tags origin \\\n')
         explicit_main_ref = script.index(
@@ -826,7 +1025,7 @@ class V1CandidateTests(unittest.TestCase):
         manifest_match = script.index(
             '[[ "$manifest_source_commit" == "$checkout_commit" ]]'
         )
-        first_validation = script.index('python3 "$tool" promotion')
+        first_validation = script.index("run_candidate_tool promotion")
         first_release_mutation = script.index(
             'git -C "$repository_root" -c tag.gpgSign=false tag'
         )
@@ -841,12 +1040,22 @@ class V1CandidateTests(unittest.TestCase):
         self.assertIn("promotion_checkout_not_on_main", script)
         self.assertIn("promotion_checkout_candidate_mismatch", script)
         self.assertIn("promotion_output_inside_checkout", script)
+        self.assertIn("python3 -I -B -S", script)
+        self.assertIn(
+            '"$checkout_commit:tools/v1_candidate.py"',
+            script,
+        )
+        self.assertIn(
+            '"$checkout_commit:tools/verify_policy_admin_usability_evidence.py"',
+            script,
+        )
+        self.assertNotIn('python3 "$tool"', script)
 
     def test_promotion_pins_evidence_and_revalidates_every_phase(self) -> None:
         script = (ROOT / "tools/promote_v1_candidate.sh").read_text()
-        snapshot = script.index('python3 "$tool" evidence-snapshot')
-        first_validation = script.index('python3 "$tool" promotion')
-        promotion_count = script.count('python3 "$tool" promotion')
+        snapshot = script.index("run_candidate_tool evidence-snapshot")
+        first_validation = script.index("run_candidate_tool promotion")
+        promotion_count = script.count("run_candidate_tool promotion")
         self.assertLess(snapshot, first_validation)
         self.assertEqual(script.count('--evidence "$evidence_path"'), 1)
         self.assertEqual(
@@ -884,7 +1093,7 @@ class V1CandidateTests(unittest.TestCase):
         prepublish_snapshot = script.index(
             'snapshot_candidate "$prepublish_dir"', prepublish
         )
-        prepublish_validation = script.index('python3 "$tool" promotion', prepublish)
+        prepublish_validation = script.index("run_candidate_tool promotion", prepublish)
         prepublish_attestation = script.index(
             'verify_release_attestations "$candidate_tag" "$prepublish_dir"',
             prepublish,
@@ -900,9 +1109,9 @@ class V1CandidateTests(unittest.TestCase):
             final_release_create,
         )
         published_snapshot = script.index('snapshot_candidate "$published_dir"', published)
-        published_validation = script.index('python3 "$tool" promotion', published)
+        published_validation = script.index("run_candidate_tool promotion", published)
         final_release_validation = script.index(
-            'python3 "$tool" final-release', published
+            "run_candidate_tool final-release", published
         )
         published_attestation = script.index(
             'verify_release_attestations "$candidate_tag" "$published_dir"', published
