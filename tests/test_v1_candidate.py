@@ -8,6 +8,7 @@ import tarfile
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from tools import v1_candidate
 
@@ -250,6 +251,161 @@ class V1CandidateTests(unittest.TestCase):
             with self.assertRaisesRegex(v1_candidate.V1CandidateError, "output_exists"):
                 v1_candidate._write_new_private_json(link, {"status": "replaced"})
             self.assertEqual(json.loads(source.read_text()), {"status": "untouched"})
+
+    def test_evidence_snapshot_pins_exact_owner_only_bytes(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            evidence = root / "evidence.json"
+            payload = b'{\n  "sessions": ["exact bytes"]\n}\n'
+            evidence.write_bytes(payload)
+            snapshot = root / "snapshot.json"
+
+            stdout = io.StringIO()
+            with mock.patch("sys.stdout", new=stdout):
+                result = v1_candidate.main(
+                    [
+                        "evidence-snapshot",
+                        "--evidence",
+                        str(evidence),
+                        "--output",
+                        str(snapshot),
+                    ]
+                )
+
+            self.assertEqual(result, 0)
+            self.assertEqual(snapshot.read_bytes(), payload)
+            self.assertEqual(stat.S_IMODE(snapshot.stat().st_mode), 0o600)
+            report = json.loads(stdout.getvalue())
+            self.assertEqual(
+                report,
+                {
+                    "schema_id": v1_candidate.EVIDENCE_SNAPSHOT_SCHEMA_ID,
+                    "schema_version": 1,
+                    "digest": "sha256:" + hashlib.sha256(payload).hexdigest(),
+                    "size_bytes": len(payload),
+                },
+            )
+
+            evidence.write_bytes(b'{"sessions":["changed"]}\n')
+            with mock.patch("sys.stderr", new=io.StringIO()):
+                self.assertEqual(
+                    v1_candidate.main(
+                        [
+                            "evidence-snapshot",
+                            "--evidence",
+                            str(evidence),
+                            "--output",
+                            str(snapshot),
+                        ]
+                    ),
+                    2,
+                )
+            self.assertEqual(snapshot.read_bytes(), payload)
+
+            linked_evidence = root / "linked-evidence.json"
+            linked_evidence.symlink_to(evidence)
+            with mock.patch("sys.stderr", new=io.StringIO()):
+                self.assertEqual(
+                    v1_candidate.main(
+                        [
+                            "evidence-snapshot",
+                            "--evidence",
+                            str(linked_evidence),
+                            "--output",
+                            str(root / "linked-snapshot.json"),
+                        ]
+                    ),
+                    2,
+                )
+
+    def test_custody_cli_dispatch_does_not_require_promotion_provenance(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            output = root / "custody-proof.json"
+            expected = {"status": "verified"}
+            with (
+                mock.patch.object(
+                    v1_candidate, "validate_custody", return_value=expected
+                ) as validate,
+                mock.patch.object(v1_candidate, "_write_new_private_json") as write,
+                mock.patch("sys.stdout", new=io.StringIO()),
+            ):
+                result = v1_candidate.main(
+                    [
+                        "custody",
+                        "--manifest",
+                        str(root / "manifest.json"),
+                        "--archive",
+                        str(root / "archive.tar.gz"),
+                        "--release-api",
+                        str(root / "release.json"),
+                        "--immutable-api",
+                        str(root / "immutable.json"),
+                        "--state",
+                        "draft",
+                        "--output",
+                        str(output),
+                    ]
+                )
+
+            self.assertEqual(result, 0)
+            validate.assert_called_once_with(
+                root / "manifest.json",
+                root / "archive.tar.gz",
+                root / "release.json",
+                root / "immutable.json",
+                state="draft",
+            )
+            write.assert_called_once_with(output, expected)
+
+    def test_promotion_cli_dispatch_forwards_all_provenance_inputs(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            output = root / "promotion-proof.json"
+            expected = {"status": "eligible_for_exact_promotion"}
+            with (
+                mock.patch.object(
+                    v1_candidate, "validate_promotion", return_value=expected
+                ) as validate,
+                mock.patch.object(v1_candidate, "_write_new_private_json") as write,
+                mock.patch("sys.stdout", new=io.StringIO()),
+            ):
+                result = v1_candidate.main(
+                    [
+                        "promotion",
+                        "--manifest",
+                        str(root / "manifest.json"),
+                        "--archive",
+                        str(root / "archive.tar.gz"),
+                        "--evidence",
+                        str(root / "evidence.json"),
+                        "--release-api",
+                        str(root / "release.json"),
+                        "--immutable-api",
+                        str(root / "immutable.json"),
+                        "--freeze-run-api",
+                        str(root / "freeze-run.json"),
+                        "--custody-tag-api",
+                        str(root / "custody-tag.json"),
+                        "--state",
+                        "draft",
+                        "--output",
+                        str(output),
+                    ]
+                )
+
+            self.assertEqual(result, 0)
+            validate.assert_called_once_with(
+                root / "manifest.json",
+                root / "archive.tar.gz",
+                root / "evidence.json",
+                root / "release.json",
+                root / "immutable.json",
+                root / "freeze-run.json",
+                root / "custody-tag.json",
+                state="draft",
+            )
+            write.assert_called_once_with(output, expected)
 
     def test_archive_rejects_symlink_members(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -523,6 +679,51 @@ class V1CandidateTests(unittest.TestCase):
         self.assertIn("candidate_tag_manifest_mismatch", script)
         self.assertIn("final_tag_target_or_chronology_invalid", script)
         self.assertIn('Gate evidence: $gate_evidence_digest', script)
+
+    def test_promotion_pins_evidence_and_revalidates_every_phase(self) -> None:
+        script = (ROOT / "tools/promote_v1_candidate.sh").read_text()
+        snapshot = script.index('python3 "$tool" evidence-snapshot')
+        first_validation = script.index('python3 "$tool" promotion')
+        self.assertLess(snapshot, first_validation)
+        self.assertEqual(script.count('--evidence "$evidence_path"'), 1)
+        self.assertEqual(script.count('--evidence "$pinned_evidence_path"'), 4)
+        self.assertNotIn(
+            '"$evidence_path"',
+            script[script.index('>"$evidence_snapshot_report"') :],
+        )
+        self.assertEqual(
+            script.count('assert_readiness_binding "$'),
+            script.count('python3 "$tool" promotion'),
+        )
+        self.assertIn("gate_evidence_snapshot_digest_mismatch", script)
+        self.assertIn("promotion_readiness_binding_changed", script)
+
+    def test_promotion_resume_rechecks_tag_oci_and_attestations(self) -> None:
+        script = (ROOT / "tools/promote_v1_candidate.sh").read_text()
+        tag_create = script.index(
+            '    git -C "$repository_root" -c tag.gpgSign=false tag'
+        )
+        current_time_guard = script.index("    require_gate_time_current\n")
+        signed_oci = script.index("wait_for_signed_oci\n", tag_create)
+        published_resume = script.index(
+            'if [[ "$initial_state" == "published" ]]', signed_oci
+        )
+        resume_tag_check = script.index(
+            'refresh_and_validate_final_tag "published-resume"', published_resume
+        )
+        resume_attestation_check = script.index(
+            'verify_release_attestations "$FINAL_TAG" "$initial_dir"',
+            published_resume,
+        )
+        resume_exit = script.index("  exit 0", published_resume)
+
+        self.assertLess(current_time_guard, tag_create)
+        self.assertLess(signed_oci, published_resume)
+        self.assertLess(published_resume, resume_tag_check)
+        self.assertLess(resume_tag_check, resume_exit)
+        self.assertLess(resume_attestation_check, resume_exit)
+        self.assertIn("gate_evidence_not_yet_current", script)
+        self.assertIn("published_final_tag_missing", script)
 
     def test_source_distribution_contract_includes_custody_tools(self) -> None:
         manifest = (ROOT / "MANIFEST.in").read_text()

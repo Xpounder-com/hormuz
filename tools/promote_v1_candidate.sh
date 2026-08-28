@@ -112,6 +112,16 @@ gh auth status --hostname github.com >/dev/null 2>&1 || fail "github_authenticat
 gh release verify-asset --help >/dev/null 2>&1 \
   || fail "github_cli_release_verification_unavailable"
 
+pinned_evidence_path="$work_dir/gate-evidence.json"
+evidence_snapshot_report="$work_dir/gate-evidence-snapshot.json"
+python3 "$tool" evidence-snapshot \
+  --evidence "$evidence_path" \
+  --output "$pinned_evidence_path" \
+  >"$evidence_snapshot_report"
+pinned_evidence_digest="$(python3 -c 'import json, pathlib, sys; print(json.loads(pathlib.Path(sys.argv[1]).read_text())["digest"])' "$evidence_snapshot_report")"
+[[ "$pinned_evidence_digest" =~ ^sha256:[0-9a-f]{64}$ ]] \
+  || fail "gate_evidence_snapshot_invalid"
+
 release_exists() {
   local tag="$1"
   local response="$2"
@@ -177,7 +187,7 @@ gh api "/repos/$REPOSITORY/git/ref/tags/$candidate_tag" \
 python3 "$tool" promotion \
   --manifest "$initial_dir/$MANIFEST_NAME" \
   --archive "$initial_dir/$ARCHIVE_NAME" \
-  --evidence "$evidence_path" \
+  --evidence "$pinned_evidence_path" \
   --release-api "$initial_dir/release-api.json" \
   --immutable-api "$initial_dir/immutable-api.json" \
   --freeze-run-api "$initial_dir/freeze-run-api.json" \
@@ -191,6 +201,31 @@ manifest_custody_tag="$(python3 -c 'import json, pathlib, sys; print(json.loads(
 gate_generated_at="$(python3 -c 'import json, pathlib, sys; print(json.loads(pathlib.Path(sys.argv[1]).read_text())["gate_generated_at"])' "$initial_dir/promotion-readiness.json")"
 gate_evidence_digest="$(python3 -c 'import json, pathlib, sys; print(json.loads(pathlib.Path(sys.argv[1]).read_text())["gate_evidence_digest"])' "$initial_dir/promotion-readiness.json")"
 [[ "$manifest_custody_tag" == "$candidate_tag" ]] || fail "candidate_tag_manifest_mismatch"
+[[ "$gate_evidence_digest" == "$pinned_evidence_digest" ]] \
+  || fail "gate_evidence_snapshot_digest_mismatch"
+
+assert_readiness_binding() {
+  local readiness_path="$1"
+  python3 -c '
+import json, pathlib, sys
+value = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+expected = {
+    "source_commit": sys.argv[2],
+    "candidate_artifact_digest": sys.argv[3],
+    "custody_release_tag": sys.argv[4],
+    "gate_evidence_digest": sys.argv[5],
+    "gate_generated_at": sys.argv[6],
+}
+if any(value.get(key) != expected_value for key, expected_value in expected.items()):
+    raise SystemExit(2)
+' "$readiness_path" "$source_commit" "$candidate_digest" "$candidate_tag" "$gate_evidence_digest" "$gate_generated_at" \
+    || fail "promotion_readiness_binding_changed"
+}
+
+assert_readiness_binding "$initial_dir/promotion-readiness.json"
+if [[ "$initial_state" == "published" ]]; then
+  [[ "$release_tag" == "$FINAL_TAG" ]] || fail "published_release_tag_invalid"
+fi
 
 verify_release_attestations() {
   local tag="$1"
@@ -212,14 +247,6 @@ verify_release_attestations() {
     done
   done
 }
-
-if [[ "$initial_state" == "published" ]]; then
-  [[ "$release_tag" == "$FINAL_TAG" ]] || fail "published_release_tag_invalid"
-  verify_release_attestations "$FINAL_TAG" "$initial_dir"
-  printf 'v1.0.0 already published from exact candidate %s\n' "$candidate_digest"
-  report_proof_location
-  exit 0
-fi
 
 git -C "$repository_root" fetch origin main
 git -C "$repository_root" merge-base --is-ancestor "$source_commit" origin/main \
@@ -262,6 +289,27 @@ if datetime.fromisoformat(tagged_at.replace("Z", "+00:00")) < datetime.fromisofo
     || fail "final_tag_target_or_chronology_invalid"
 }
 
+refresh_and_validate_final_tag() {
+  local label="$1"
+  local ref_path="$work_dir/final-tag-${label}-ref.json"
+  local object_path="$work_dir/final-tag-${label}-object.json"
+  local error_path="$work_dir/final-tag-${label}.err"
+  if ! gh api "/repos/$REPOSITORY/git/ref/tags/$FINAL_TAG" >"$ref_path" 2>"$error_path"; then
+    cat "$error_path" >&2
+    fail "final_tag_lookup_failed"
+  fi
+  validate_remote_final_tag "$ref_path" "$object_path"
+}
+
+require_gate_time_current() {
+  python3 -c '
+from datetime import datetime, timezone
+import sys
+gate = datetime.fromisoformat(sys.argv[1].replace("Z", "+00:00"))
+raise SystemExit(0 if datetime.now(timezone.utc) >= gate else 2)
+' "$gate_generated_at" || fail "gate_evidence_not_yet_current"
+}
+
 final_ref="$work_dir/final-tag-ref.json"
 final_ref_error="$work_dir/final-tag-ref.err"
 if gh api "/repos/$REPOSITORY/git/ref/tags/$FINAL_TAG" >"$final_ref" 2>"$final_ref_error"; then
@@ -271,6 +319,7 @@ else
     cat "$final_ref_error" >&2
     fail "final_tag_lookup_failed"
   fi
+  [[ "$initial_state" != "published" ]] || fail "published_final_tag_missing"
   if git -C "$repository_root" show-ref --verify --quiet "refs/tags/$FINAL_TAG"; then
     [[ "$(git -C "$repository_root" cat-file -t "refs/tags/$FINAL_TAG")" == "tag" ]] \
       || fail "local_final_tag_not_annotated"
@@ -290,6 +339,7 @@ raise SystemExit(0 if tagged >= gate else 2)
     [[ "$local_tag_message" == *"Gate evidence: $gate_evidence_digest"* ]] \
       || fail "local_final_tag_gate_digest_invalid"
   else
+    require_gate_time_current
     git -C "$repository_root" -c tag.gpgSign=false tag -a "$FINAL_TAG" "$source_commit" \
       -m "Hormuz v1.0.0" \
       -m "Frozen source archive: $candidate_digest" \
@@ -346,6 +396,14 @@ if matches:
 
 wait_for_signed_oci
 
+if [[ "$initial_state" == "published" ]]; then
+  refresh_and_validate_final_tag "published-resume"
+  verify_release_attestations "$FINAL_TAG" "$initial_dir"
+  printf 'v1.0.0 already published from exact candidate %s\n' "$candidate_digest"
+  report_proof_location
+  exit 0
+fi
+
 # Re-download and revalidate after the signed OCI workflow. These are the bytes
 # that will be published; no build or upload command exists in this path.
 prepublish_dir="$work_dir/prepublish-reverification"
@@ -355,13 +413,15 @@ snapshot_release "$release_tag" "$prepublish_dir"
 python3 "$tool" promotion \
   --manifest "$prepublish_dir/$MANIFEST_NAME" \
   --archive "$prepublish_dir/$ARCHIVE_NAME" \
-  --evidence "$evidence_path" \
+  --evidence "$pinned_evidence_path" \
   --release-api "$prepublish_dir/release-api.json" \
   --immutable-api "$prepublish_dir/immutable-api.json" \
   --freeze-run-api "$initial_dir/freeze-run-api.json" \
   --custody-tag-api "$initial_dir/custody-tag-api.json" \
   --state draft \
   --output "$prepublish_dir/promotion-readiness.json" >/dev/null
+assert_readiness_binding "$prepublish_dir/promotion-readiness.json"
+refresh_and_validate_final_tag "prepublish"
 
 if [[ "$release_tag" == "$candidate_tag" ]]; then
   gh release edit "$candidate_tag" \
@@ -380,13 +440,15 @@ snapshot_release "$FINAL_TAG" "$final_draft_dir"
 python3 "$tool" promotion \
   --manifest "$final_draft_dir/$MANIFEST_NAME" \
   --archive "$final_draft_dir/$ARCHIVE_NAME" \
-  --evidence "$evidence_path" \
+  --evidence "$pinned_evidence_path" \
   --release-api "$final_draft_dir/release-api.json" \
   --immutable-api "$final_draft_dir/immutable-api.json" \
   --freeze-run-api "$initial_dir/freeze-run-api.json" \
   --custody-tag-api "$initial_dir/custody-tag-api.json" \
   --state draft \
   --output "$final_draft_dir/promotion-readiness.json" >/dev/null
+assert_readiness_binding "$final_draft_dir/promotion-readiness.json"
+refresh_and_validate_final_tag "final-draft"
 
 gh release edit "$FINAL_TAG" \
   --repo "$REPOSITORY" \
@@ -411,13 +473,15 @@ snapshot_release "$FINAL_TAG" "$published_dir"
 python3 "$tool" promotion \
   --manifest "$published_dir/$MANIFEST_NAME" \
   --archive "$published_dir/$ARCHIVE_NAME" \
-  --evidence "$evidence_path" \
+  --evidence "$pinned_evidence_path" \
   --release-api "$published_dir/release-api.json" \
   --immutable-api "$published_dir/immutable-api.json" \
   --freeze-run-api "$initial_dir/freeze-run-api.json" \
   --custody-tag-api "$initial_dir/custody-tag-api.json" \
   --state published \
   --output "$published_dir/promotion-readiness.json" >/dev/null
+assert_readiness_binding "$published_dir/promotion-readiness.json"
+refresh_and_validate_final_tag "published"
 verify_release_attestations "$FINAL_TAG" "$published_dir"
 
 printf 'published immutable v1.0.0 from exact candidate %s\n' "$candidate_digest"

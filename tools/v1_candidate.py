@@ -28,6 +28,7 @@ SCHEMA_ID = "hormuz.v1-candidate-manifest"
 SCHEMA_VERSION = 1
 PROOF_SCHEMA_ID = "hormuz.v1-candidate-custody-proof"
 PROMOTION_SCHEMA_ID = "hormuz.v1-candidate-promotion-readiness"
+EVIDENCE_SNAPSHOT_SCHEMA_ID = "hormuz.v1-candidate-evidence-snapshot"
 EXPECTED_REPOSITORY = "Xpounder-com/hormuz"
 TARGET_VERSION = "v1.0.0"
 PACKAGE_NAME = "hormuz"
@@ -470,7 +471,7 @@ def validate_manifest(value: object) -> dict[str, object]:
     return root
 
 
-def _write_new_private_json(path: Path, value: dict[str, object]) -> None:
+def _write_new_private_bytes(path: Path, encoded: bytes) -> None:
     if path.name == "":
         raise V1CandidateError("output_path_invalid")
     try:
@@ -489,9 +490,6 @@ def _write_new_private_json(path: Path, value: dict[str, object]) -> None:
     else:
         raise V1CandidateError("output_exists")
 
-    encoded = (
-        json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False) + "\n"
-    ).encode("utf-8")
     descriptor = -1
     temporary_path: Path | None = None
     try:
@@ -523,6 +521,13 @@ def _write_new_private_json(path: Path, value: dict[str, object]) -> None:
                 temporary_path.unlink()
             except OSError:
                 pass
+
+
+def _write_new_private_json(path: Path, value: dict[str, object]) -> None:
+    encoded = (
+        json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False) + "\n"
+    ).encode("utf-8")
+    _write_new_private_bytes(path, encoded)
 
 
 def _validate_archive_binding(manifest: dict[str, object], archive: Path) -> dict[str, object]:
@@ -885,6 +890,13 @@ def _parser() -> argparse.ArgumentParser:
     custody.add_argument("--state", choices=("draft", "published"), required=True)
     custody.add_argument("--output", required=True, type=Path)
 
+    evidence_snapshot = commands.add_parser(
+        "evidence-snapshot",
+        help="pin one owner-only gate-evidence snapshot before promotion",
+    )
+    evidence_snapshot.add_argument("--evidence", required=True, type=Path)
+    evidence_snapshot.add_argument("--output", required=True, type=Path)
+
     promotion = commands.add_parser("promotion", help="bind real gate evidence to exact bytes")
     promotion.add_argument("--manifest", required=True, type=Path)
     promotion.add_argument("--archive", required=True, type=Path)
@@ -900,6 +912,7 @@ def _parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
+    output_is_json = True
     try:
         if args.command == "manifest":
             if args.output.name != MANIFEST_NAME:
@@ -918,10 +931,22 @@ def main(argv: list[str] | None = None) -> int:
                 args.archive,
                 args.release_api,
                 args.immutable_api,
-                args.freeze_run_api,
-                args.custody_tag_api,
                 state=args.state,
             )
+        elif args.command == "evidence-snapshot":
+            evidence_payload = _safe_read(
+                args.evidence,
+                maximum=1024 * 1024,
+                label="gate_evidence",
+            )
+            _write_new_private_bytes(args.output, evidence_payload)
+            result = {
+                "schema_id": EVIDENCE_SNAPSHOT_SCHEMA_ID,
+                "schema_version": 1,
+                "digest": _sha256(evidence_payload),
+                "size_bytes": len(evidence_payload),
+            }
+            output_is_json = False
         else:
             result = validate_promotion(
                 args.manifest,
@@ -929,9 +954,12 @@ def main(argv: list[str] | None = None) -> int:
                 args.evidence,
                 args.release_api,
                 args.immutable_api,
+                args.freeze_run_api,
+                args.custody_tag_api,
                 state=args.state,
             )
-        _write_new_private_json(args.output, result)
+        if output_is_json:
+            _write_new_private_json(args.output, result)
     except V1CandidateError as error:
         print(f"v1 candidate failed: {error}", file=sys.stderr)
         return 2
