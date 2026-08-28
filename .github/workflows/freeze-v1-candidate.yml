@@ -1119,7 +1119,24 @@ jobs:
                   "Use tools/promote_v1_candidate.sh only after the real gate passes."
               )
 
-          def validate_asset(asset, *, name, label, payload, tag):
+          def release_download_namespace(release, *, tag, draft):
+              html_url = release.get("html_url") if isinstance(release, dict) else None
+              prefix = f"https://github.com/{REPOSITORY}/releases/tag/"
+              require(
+                  isinstance(html_url, str) and html_url.startswith(prefix),
+                  "candidate_release_url_invalid",
+              )
+              namespace = html_url.removeprefix(prefix)
+              if draft:
+                  require(
+                      re.fullmatch(r"untagged-[0-9a-f]{8,64}", namespace) is not None,
+                      "draft_release_url_invalid",
+                  )
+              else:
+                  require(namespace == tag, "published_release_url_invalid")
+              return namespace
+
+          def validate_asset(asset, *, name, label, payload, download_namespace):
               digest = f"sha256:{hashlib.sha256(payload).hexdigest()}"
               asset_id = asset.get("id") if isinstance(asset, dict) else None
               require(
@@ -1134,7 +1151,7 @@ jobs:
                   and asset.get("digest") == digest
                   and asset.get("url") == f"https://api.github.com/repos/{REPOSITORY}/releases/assets/{asset_id}"
                   and asset.get("browser_download_url")
-                  == f"https://github.com/{REPOSITORY}/releases/download/{tag}/{name}",
+                  == f"https://github.com/{REPOSITORY}/releases/download/{download_namespace}/{name}",
                   f"release_asset_invalid:{name}",
               )
               return asset_id
@@ -1163,6 +1180,11 @@ jobs:
                   require(release.get("published_at") is None, "draft_release_already_published")
               else:
                   require(isinstance(release.get("published_at"), str), "published_release_time_invalid")
+              download_namespace = release_download_namespace(
+                  release,
+                  tag=transfer["tag"],
+                  draft=draft,
+              )
               assets = release.get("assets")
               require(isinstance(assets, list) and len(assets) == 2, "release_asset_set_invalid")
               by_name = {}
@@ -1173,7 +1195,13 @@ jobs:
               require(set(by_name) == {ARCHIVE_NAME, MANIFEST_NAME}, "release_asset_set_invalid")
               asset_ids = {}
               for name, (label, payload) in expected_assets(transfer).items():
-                  asset_ids[name] = validate_asset(by_name[name], name=name, label=label, payload=payload, tag=transfer["tag"])
+                  asset_ids[name] = validate_asset(
+                      by_name[name],
+                      name=name,
+                      label=label,
+                      payload=payload,
+                      download_namespace=download_namespace,
+                  )
               require(len(set(asset_ids.values())) == 2, "release_asset_id_duplicate")
               return asset_ids
 
@@ -1194,7 +1222,15 @@ jobs:
                       f"remote_asset_bytes_mismatch:{name}",
                   )
 
-          def upload_asset(publish_token, release_id, *, name, label, payload, tag):
+          def upload_asset(
+              publish_token,
+              release_id,
+              *,
+              name,
+              label,
+              payload,
+              download_namespace,
+          ):
               query = urllib.parse.urlencode({"name": name, "label": label})
               _status, response_payload = request_bytes(
                   publish_token,
@@ -1205,7 +1241,13 @@ jobs:
                   expected=(201,),
               )
               asset = decode_json(response_payload, "release_asset")
-              validate_asset(asset, name=name, label=label, payload=payload, tag=tag)
+              validate_asset(
+                  asset,
+                  name=name,
+                  label=label,
+                  payload=payload,
+                  download_namespace=download_namespace,
+              )
 
           def publish_candidate():
               read_token = os.environ.get("GH_READ_TOKEN", "")
@@ -1264,6 +1306,11 @@ jobs:
                   and draft_release.get("published_at") is None,
                   "draft_release_state_invalid",
               )
+              draft_download_namespace = release_download_namespace(
+                  draft_release,
+                  tag=transfer["tag"],
+                  draft=True,
+              )
 
               for name, (label, payload) in expected_assets(transfer).items():
                   upload_asset(
@@ -1272,7 +1319,7 @@ jobs:
                       name=name,
                       label=label,
                       payload=payload,
-                      tag=transfer["tag"],
+                      download_namespace=draft_download_namespace,
                   )
               _status, draft_release = api_json(
                   publish_token, "GET", f"/repos/{REPOSITORY}/releases/{release_id}"
