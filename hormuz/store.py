@@ -14,7 +14,6 @@ from .audit_chain import (
     AuditChainAnchorStatus,
     AuditChainError,
     AuditChainHead,
-    audit_chain_checkpoint_position,
     audit_chain_checkpoint_summary,
     build_audit_chain_entry,
     canonical_json_text,
@@ -41,10 +40,18 @@ from ._persistence import (
     ReservationScope,
     SecretTotals,
     UsageRepository,
+    AuditChainEntryInput,
+    AuditChainSourceEventInput,
+    AuditChainVerificationInputs,
+    audit_chain_source_event_map,
     build_request_attempt_event,
     build_request_attempt_root,
     is_sha256_digest,
+    normalize_audit_chain_checkpoint_input,
+    normalize_audit_chain_entry_input,
+    normalize_audit_chain_epoch_input,
     normalize_audit_chain_head,
+    normalize_audit_chain_source_event_input,
     normalize_request_attempt_result,
     normalize_request_attempt_state,
     monthly_usage_bounds,
@@ -1608,8 +1615,9 @@ class UsageStore:
         connection: sqlite3.Connection,
         *,
         organization_id: str,
-    ) -> dict[str, dict[str, object]]:
-        sources: dict[str, dict[str, object]] = {}
+    ) -> tuple[AuditChainSourceEventInput, ...]:
+        sources: list[AuditChainSourceEventInput] = []
+        source_identities = set()
         usage_rows = connection.execute(
             """
             SELECT
@@ -1643,20 +1651,28 @@ class UsageStore:
                 event = usage_audit_event(dict(row))
             except EvidenceStorageError as error:
                 raise StorageSchemaError(error.code) from None
-            event_id = event.get("id")
-            if not isinstance(event_id, str) or event_id in sources:
+            source = normalize_audit_chain_source_event_input(
+                event,
+                error_factory=StorageSchemaError,
+            )
+            if source.source in source_identities:
                 raise StorageSchemaError("audit_chain_source_event_malformed")
-            sources[event_id] = event
+            source_identities.add(source.source)
+            sources.append(source)
         for row in secret_rows:
             try:
                 event = security_audit_event(dict(row))
             except EvidenceStorageError as error:
                 raise StorageSchemaError(error.code) from None
-            event_id = event.get("id")
-            if not isinstance(event_id, str) or event_id in sources:
+            source = normalize_audit_chain_source_event_input(
+                event,
+                error_factory=StorageSchemaError,
+            )
+            if source.source in source_identities:
                 raise StorageSchemaError("audit_chain_source_event_malformed")
-            sources[event_id] = event
-        return sources
+            source_identities.add(source.source)
+            sources.append(source)
+        return tuple(sources)
 
     def verify_audit_chain(
         self,
@@ -1666,22 +1682,11 @@ class UsageStore:
     ) -> AuditChainHead:
         """Verify ordered entries, source-event correspondence, and an optional external checkpoint."""
 
-        checkpoint_tuple: tuple[int, int, int, str] | None = None
-        if checkpoint is not None:
-            try:
-                _, checkpoint_organization, checkpoint_version, checkpoint_epoch, checkpoint_sequence, checkpoint_digest = (
-                    audit_chain_checkpoint_position(checkpoint)
-                )
-            except AuditChainError as error:
-                raise StorageSchemaError(error.code) from None
-            if checkpoint_organization != organization_id:
-                raise StorageSchemaError("audit_chain_tenant_mismatch")
-            checkpoint_tuple = (
-                checkpoint_version,
-                checkpoint_epoch,
-                checkpoint_sequence,
-                checkpoint_digest,
-            )
+        checkpoint_input = normalize_audit_chain_checkpoint_input(
+            checkpoint,
+            organization_id=organization_id,
+            error_factory=StorageSchemaError,
+        )
 
         with self._lock, self._connection() as connection:
             # Take one SQLite read snapshot. Without an explicit transaction,
@@ -1696,10 +1701,10 @@ class UsageStore:
                 create=False,
             )
             if head is None:
-                if checkpoint_tuple is not None:
+                if checkpoint_input is not None:
                     raise StorageSchemaError("audit_chain_checkpoint_mismatch")
                 return AuditChainHead(organization_id, 1, 1, 0, None)
-            epochs = connection.execute(
+            epoch_rows = connection.execute(
                 """
                 SELECT chain_version, chain_epoch, reason_code, predecessor_chain_epoch,
                        predecessor_sequence, predecessor_head_digest
@@ -1709,7 +1714,7 @@ class UsageStore:
                 """,
                 (organization_id,),
             ).fetchall()
-            entries = connection.execute(
+            entry_rows = connection.execute(
                 """
                 SELECT chain_version, chain_epoch, sequence, entry_schema_id,
                        entry_schema_version, event_id, previous_digest, event_digest, event_json
@@ -1719,39 +1724,61 @@ class UsageStore:
                 """,
                 (organization_id,),
             ).fetchall()
-            sources = self._audit_chain_source_events_in_connection(connection, organization_id=organization_id)
-        if head.chain_version != AUDIT_CHAIN_VERSION or head.chain_epoch < 1 or head.sequence < 0:
+            source_events = self._audit_chain_source_events_in_connection(
+                connection,
+                organization_id=organization_id,
+            )
+        inputs = AuditChainVerificationInputs(
+            organization_id=organization_id,
+            head=head,
+            epochs=tuple(
+                normalize_audit_chain_epoch_input(row, error_factory=StorageSchemaError)
+                for row in epoch_rows
+            ),
+            entries=tuple(
+                normalize_audit_chain_entry_input(
+                    row,
+                    organization_id=organization_id,
+                    error_factory=StorageSchemaError,
+                )
+                for row in entry_rows
+            ),
+            source_events=source_events,
+            checkpoint=checkpoint_input,
+        )
+        if inputs.head.chain_version != AUDIT_CHAIN_VERSION or inputs.head.chain_epoch < 1 or inputs.head.sequence < 0:
             raise StorageSchemaError("audit_chain_head_malformed")
-        if head.head_digest is not None and not is_sha256_digest(head.head_digest):
+        if inputs.head.head_digest is not None and not is_sha256_digest(inputs.head.head_digest):
             raise StorageSchemaError("audit_chain_head_malformed")
-        if checkpoint_tuple is not None and checkpoint_tuple[0] != head.chain_version:
+        if inputs.checkpoint is not None and inputs.checkpoint.chain_version != inputs.head.chain_version:
             raise StorageSchemaError("audit_chain_checkpoint_mismatch")
 
-        entries_by_epoch: dict[int, list[sqlite3.Row]] = {}
-        for row in entries:
-            entries_by_epoch.setdefault(int(row["chain_epoch"]), []).append(row)
+        sources = audit_chain_source_event_map(
+            inputs.source_events,
+            error_factory=StorageSchemaError,
+        )
+        entries_by_epoch: dict[int, list[AuditChainEntryInput]] = {}
+        for entry_input in inputs.entries:
+            entries_by_epoch.setdefault(entry_input.chain_epoch, []).append(entry_input)
         verified: dict[tuple[int, int], str] = {}
         active_epoch_seen = False
         checkpoint_matched = False
         previous_epoch_number = 0
-        for epoch in epochs:
-            try:
-                chain_version = int(epoch["chain_version"])
-                epoch_number = int(epoch["chain_epoch"])
-            except (TypeError, ValueError):
-                raise StorageSchemaError("audit_chain_epoch_malformed") from None
+        for epoch in inputs.epochs:
+            chain_version = epoch.chain_version
+            epoch_number = epoch.chain_epoch
             if (
-                chain_version != head.chain_version
+                chain_version != inputs.head.chain_version
                 or epoch_number < 1
                 or epoch_number <= previous_epoch_number
-                or epoch_number > head.chain_epoch
+                or epoch_number > inputs.head.chain_epoch
             ):
                 raise StorageSchemaError("audit_chain_epoch_malformed")
             previous_epoch_number = epoch_number
-            reason_code = epoch["reason_code"]
-            predecessor_digest = epoch["predecessor_head_digest"]
-            predecessor_epoch = epoch["predecessor_chain_epoch"]
-            predecessor_sequence = epoch["predecessor_sequence"]
+            reason_code = epoch.reason_code
+            predecessor_digest = epoch.predecessor_head_digest
+            predecessor_epoch = epoch.predecessor_chain_epoch
+            predecessor_sequence = epoch.predecessor_sequence
             if epoch_number == 1:
                 if (
                     reason_code != "initial_adoption"
@@ -1778,61 +1805,44 @@ class UsageStore:
                 if predecessor is not None:
                     if not hmac.compare_digest(predecessor, predecessor_digest):
                         raise StorageSchemaError("audit_chain_predecessor_invalid")
-                elif checkpoint_tuple is None or checkpoint_tuple != (
-                    chain_version,
-                    predecessor_epoch,
-                    predecessor_sequence,
-                    predecessor_digest,
+                elif (
+                    inputs.checkpoint is None
+                    or inputs.checkpoint.chain_version != chain_version
+                    or inputs.checkpoint.chain_epoch != predecessor_epoch
+                    or inputs.checkpoint.sequence != predecessor_sequence
+                    or inputs.checkpoint.head_digest != predecessor_digest
                 ):
                     raise StorageSchemaError("audit_chain_checkpoint_required")
                 else:
                     checkpoint_matched = True
                 previous_digest = predecessor_digest
             expected_sequence = 1
-            for row in entries_by_epoch.get(epoch_number, []):
+            for entry_input in entries_by_epoch.get(epoch_number, []):
                 try:
-                    parsed_event = json.loads(str(row["event_json"]))
-                    if not isinstance(parsed_event, dict):
-                        raise ValueError
-                    entry = {
-                        "schema_id": row["entry_schema_id"],
-                        "schema_version": row["entry_schema_version"],
-                        "organization_id": organization_id,
-                        "chain_version": row["chain_version"],
-                        "chain_epoch": row["chain_epoch"],
-                        "sequence": row["sequence"],
-                        "previous_digest": row["previous_digest"],
-                        "event_digest": row["event_digest"],
-                        "event": parsed_event,
-                    }
-                    event_id = parsed_event.get("id")
-                    if not isinstance(event_id, str) or row["event_id"] != event_id:
-                        raise AuditChainError("audit_chain_entry_malformed")
                     digest = verify_audit_chain_entry(
-                        entry,
-                        expected_organization_id=organization_id,
+                        entry_input.entry,
+                        expected_organization_id=inputs.organization_id,
                         expected_chain_version=chain_version,
                         expected_chain_epoch=epoch_number,
                         expected_sequence=expected_sequence,
                         expected_previous_digest=previous_digest,
-                        source_event=sources.get(event_id) if isinstance(event_id, str) else None,
+                        source_event=sources.get(entry_input.source),
                     )
-                except (AuditChainError, ValueError, TypeError, json.JSONDecodeError) as error:
-                    code = error.code if isinstance(error, AuditChainError) else "audit_chain_entry_malformed"
-                    raise StorageSchemaError(code) from None
+                except AuditChainError as error:
+                    raise StorageSchemaError(error.code) from None
                 verified[(epoch_number, expected_sequence)] = digest
                 previous_digest = digest
                 expected_sequence += 1
-            if epoch_number == head.chain_epoch:
+            if epoch_number == inputs.head.chain_epoch:
                 active_epoch_seen = True
-                if head.sequence != expected_sequence - 1 or head.head_digest != previous_digest:
+                if inputs.head.sequence != expected_sequence - 1 or inputs.head.head_digest != previous_digest:
                     raise StorageSchemaError("audit_chain_head_mismatch")
-        if not active_epoch_seen or previous_epoch_number != head.chain_epoch:
+        if not active_epoch_seen or previous_epoch_number != inputs.head.chain_epoch:
             raise StorageSchemaError("audit_chain_head_mismatch")
         if set(entries_by_epoch).difference(verified_epoch for verified_epoch, _ in verified):
             raise StorageSchemaError("audit_chain_epoch_malformed")
-        if checkpoint_tuple is not None and not checkpoint_matched:
-            digest = verified.get((checkpoint_tuple[1], checkpoint_tuple[2]))
-            if digest is None or not hmac.compare_digest(digest, checkpoint_tuple[3]):
+        if inputs.checkpoint is not None and not checkpoint_matched:
+            digest = verified.get((inputs.checkpoint.chain_epoch, inputs.checkpoint.sequence))
+            if digest is None or not hmac.compare_digest(digest, inputs.checkpoint.head_digest):
                 raise StorageSchemaError("audit_chain_checkpoint_mismatch")
-        return head
+        return inputs.head
