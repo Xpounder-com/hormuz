@@ -412,6 +412,57 @@ class RepositoryGovernanceTests(unittest.TestCase):
             ):
                 validate_repository_governance(root)
 
+    def test_candidate_authorization_step_cannot_continue_on_error(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._copy_contract(root)
+            workflow = root / ".github/workflows/freeze-v1-candidate.yml"
+            value = workflow.read_text(encoding="utf-8")
+            workflow.write_text(
+                value.replace(
+                    (
+                        "      - name: Fail closed unless the configured "
+                        "steward initiated this run\n"
+                    ),
+                    (
+                        "      - name: Fail closed unless the configured "
+                        "steward initiated this run\n"
+                        "        continue-on-error: true\n"
+                    ),
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                RepositoryGovernanceError,
+                "candidate freeze authorization changed",
+            ):
+                validate_repository_governance(root)
+
+    def test_candidate_authorization_job_cannot_continue_on_error(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._copy_contract(root)
+            workflow = root / ".github/workflows/freeze-v1-candidate.yml"
+            value = workflow.read_text(encoding="utf-8")
+            workflow.write_text(
+                value.replace(
+                    "    timeout-minutes: 2\n    steps:\n",
+                    (
+                        "    timeout-minutes: 2\n"
+                        "    continue-on-error: true\n"
+                        "    steps:\n"
+                    ),
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                RepositoryGovernanceError,
+                "candidate freeze job contract changed",
+            ):
+                validate_repository_governance(root)
+
     def test_candidate_freeze_job_cannot_override_the_shell(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -435,6 +486,33 @@ class RepositoryGovernanceTests(unittest.TestCase):
             with self.assertRaisesRegex(
                 RepositoryGovernanceError,
                 "candidate freeze job contract changed",
+            ):
+                validate_repository_governance(root)
+
+    def test_candidate_freeze_workflow_cannot_override_the_shell(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._copy_contract(root)
+            workflow = root / ".github/workflows/freeze-v1-candidate.yml"
+            value = workflow.read_text(encoding="utf-8")
+            workflow.write_text(
+                value.replace(
+                    "permissions:\n  contents: read\n\nconcurrency:\n",
+                    (
+                        "permissions:\n"
+                        "  contents: read\n\n"
+                        "defaults:\n"
+                        "  run:\n"
+                        "    shell: 'bash {0} || true'\n\n"
+                        "concurrency:\n"
+                    ),
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                RepositoryGovernanceError,
+                "workflow top-level contract changed",
             ):
                 validate_repository_governance(root)
 
@@ -462,6 +540,41 @@ class RepositoryGovernanceTests(unittest.TestCase):
                 "workflow secret expression contract changed",
             ):
                 validate_repository_governance(root)
+
+    def test_yaml_escaped_secret_cannot_bypass_custody_boundary(self) -> None:
+        escaped_expressions = (
+            '"${{ sec\\u0072ets.V1_RELEASE_PUBLISH_TOK\\u0045N }}"',
+            (
+                '"\\u0024\\u007b\\u007b \\u0073ecrets.'
+                'V1_RELEASE_PUBLISH_TOKEN \\u007d\\u007d"'
+            ),
+        )
+        for expression in escaped_expressions:
+            with self.subTest(expression=expression):
+                with tempfile.TemporaryDirectory() as temporary:
+                    root = Path(temporary)
+                    self._copy_contract(root)
+                    workflow = root / ".github/workflows/freeze-v1-candidate.yml"
+                    value = workflow.read_text(encoding="utf-8")
+                    workflow.write_text(
+                        value.replace(
+                            "      - name: Check out the exact protected main candidate\n",
+                            (
+                                "      - name: Consume a YAML-escaped secret\n"
+                                "        env:\n"
+                                f"          EXTRA_TOKEN: {expression}\n"
+                                "        run: 'true'\n"
+                                "      - name: Check out the exact protected main candidate\n"
+                            ),
+                            1,
+                        ),
+                        encoding="utf-8",
+                    )
+                    with self.assertRaisesRegex(
+                        RepositoryGovernanceError,
+                        "workflow YAML character escapes are unsupported",
+                    ):
+                        validate_repository_governance(root)
 
     def test_case_varied_computed_secret_cannot_bypass_custody_boundary(
         self,

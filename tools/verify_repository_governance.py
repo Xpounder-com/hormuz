@@ -111,6 +111,21 @@ EXPECTED_WORKFLOW_JOB_ENVIRONMENTS = {
         "live-clients": "live-provider-conformance"
     },
 }
+WORKFLOW_TOP_LEVEL_FIELDS = frozenset(
+    {"name", "on", "permissions", "concurrency", "jobs"}
+)
+REQUIRED_WORKFLOW_TOP_LEVEL_FIELDS = frozenset(
+    {"name", "on", "permissions", "jobs"}
+)
+CANONICAL_WORKFLOW_NAMES = frozenset(
+    {
+        "ci.yml",
+        "freeze-v1-candidate.yml",
+        "live-client-conformance.yml",
+        "release-oci.yml",
+        "upstream-canary.yml",
+    }
+)
 PermissionSpec = str | dict[str, str]
 
 
@@ -611,6 +626,44 @@ def _workflow_step_run_lines(step: str, *, name: str) -> tuple[str, ...]:
     return tuple(run_lines)
 
 
+def _validate_candidate_freeze_authorization(text: str) -> None:
+    step_name = "Fail closed unless the configured steward initiated this run"
+    step = _workflow_named_step(text, name=step_name)
+    expected_environment = {
+        "AUTHORIZED_STEWARD": "${{ vars.V1_RELEASE_STEWARD }}",
+        "ORIGINAL_ACTOR": "${{ github.actor }}",
+        "TRIGGERING_ACTOR": "${{ github.triggering_actor }}",
+    }
+    expected_run_lines = (
+        '[[ "$GITHUB_REPOSITORY" == "Xpounder-com/hormuz" ]] || {',
+        'echo "candidate freeze is restricted to the canonical repository" >&2',
+        "exit 1",
+        "}",
+        '[[ -n "$AUTHORIZED_STEWARD" ]] || {',
+        'echo "the V1_RELEASE_STEWARD repository variable is required" >&2',
+        "exit 1",
+        "}",
+        '[[ "$ORIGINAL_ACTOR" == "$AUTHORIZED_STEWARD" ]] || {',
+        'echo "candidate freeze must be initiated by the designated release steward" >&2',
+        "exit 1",
+        "}",
+        '[[ "$TRIGGERING_ACTOR" == "$AUTHORIZED_STEWARD" ]] || {',
+        'echo "candidate freeze must be triggered by the designated release steward" >&2',
+        "exit 1",
+        "}",
+    )
+    if (
+        _workflow_step_fields(step, name=step_name) != ("env", "run")
+        or _workflow_step_environment(step, name=step_name)
+        != expected_environment
+        or _workflow_step_run_lines(step, name=step_name)
+        != expected_run_lines
+    ):
+        raise RepositoryGovernanceError(
+            "candidate freeze authorization changed"
+        )
+
+
 def _validate_candidate_freeze_credentials(text: str) -> None:
     credential_name = "Verify distinct environment-scoped release credentials"
     preflight_name = "Fail closed before the one permitted archive build"
@@ -715,6 +768,13 @@ def _validate_candidate_freeze_credentials(text: str) -> None:
 
 
 def _workflow_secret_expressions(text: str, *, workflow_name: str) -> tuple[str, ...]:
+    if re.search(
+        r"\\(?:x[0-9a-fA-F]{2}|u[0-9a-fA-F]{4}|U[0-9a-fA-F]{8})",
+        text,
+    ):
+        raise RepositoryGovernanceError(
+            f"workflow YAML character escapes are unsupported: {workflow_name}"
+        )
     expressions: list[str] = []
     cursor = 0
     while True:
@@ -793,6 +853,7 @@ def _workflow_permissions(
     lines = text.splitlines()
     top_level_permissions: list[int] = []
     jobs_declarations: list[int] = []
+    top_level_fields: set[str] = set()
     for index, line in enumerate(lines):
         if not line.strip() or line.lstrip().startswith("#"):
             continue
@@ -802,6 +863,13 @@ def _workflow_permissions(
             raise RepositoryGovernanceError(
                 f"workflow uses unsupported top-level mapping syntax: {workflow_name}"
             )
+        if indent == 0 and entry is not None:
+            key = entry[0]
+            if key in top_level_fields:
+                raise RepositoryGovernanceError(
+                    f"workflow repeats top-level field: {workflow_name}:{key}"
+                )
+            top_level_fields.add(key)
         if indent == 0 and entry is not None and entry[0] == "permissions":
             top_level_permissions.append(index)
         if indent == 0 and entry is not None and entry[0] == "jobs":
@@ -810,6 +878,18 @@ def _workflow_permissions(
                     f"workflow jobs must use a block mapping: {workflow_name}"
                 )
             jobs_declarations.append(index)
+
+    if (
+        not REQUIRED_WORKFLOW_TOP_LEVEL_FIELDS.issubset(top_level_fields)
+        or not top_level_fields.issubset(WORKFLOW_TOP_LEVEL_FIELDS)
+        or (
+            workflow_name in CANONICAL_WORKFLOW_NAMES
+            and top_level_fields != WORKFLOW_TOP_LEVEL_FIELDS
+        )
+    ):
+        raise RepositoryGovernanceError(
+            f"workflow top-level contract changed: {workflow_name}"
+        )
 
     if len(top_level_permissions) != 1:
         raise RepositoryGovernanceError(
@@ -952,10 +1032,10 @@ def _validate_workflows(
             raise RepositoryGovernanceError(
                 "custody environment used outside candidate freeze workflow"
             )
-        _validate_workflow_secret_expressions(text, workflow_name=path.name)
         workflow_permissions, jobs, job_blocks = _workflow_permissions(
             text, workflow_name=path.name
         )
+        _validate_workflow_secret_expressions(text, workflow_name=path.name)
         job_fields = {
             job_name: _workflow_job_fields(
                 job,
@@ -978,7 +1058,15 @@ def _validate_workflows(
             )
         if path.name == "freeze-v1-candidate.yml":
             candidate_freeze_seen = True
+            authorize_job = job_blocks.get("authorize")
             freeze_job = job_blocks.get("freeze")
+            expected_authorize_job_fields = {
+                "name": "Authorize the designated v1 release steward",
+                "permissions": "{}",
+                "runs-on": "ubuntu-24.04",
+                "timeout-minutes": "2",
+                "steps": "",
+            }
             expected_freeze_job_fields = {
                 "name": "Build once and seal immutable candidate custody",
                 "needs": "authorize",
@@ -990,12 +1078,17 @@ def _validate_workflows(
                 "steps": "",
             }
             if (
-                freeze_job is None
+                set(job_blocks) != {"authorize", "freeze"}
+                or authorize_job is None
+                or freeze_job is None
+                or job_fields.get("authorize")
+                != expected_authorize_job_fields
                 or job_fields.get("freeze") != expected_freeze_job_fields
             ):
                 raise RepositoryGovernanceError(
                     "candidate freeze job contract changed"
                 )
+            _validate_candidate_freeze_authorization(authorize_job)
             _validate_candidate_freeze_credentials(freeze_job)
         for job_name, job_permissions in jobs.items():
             effective_permissions = (
