@@ -190,7 +190,87 @@ class RepositoryGovernanceTests(unittest.TestCase):
             )
             with self.assertRaisesRegex(
                 RepositoryGovernanceError,
-                "only the steward-gated candidate freeze workflow",
+                "only the steward-gated candidate freeze job",
+            ):
+                validate_repository_governance(root)
+
+    def test_non_freeze_job_cannot_gain_contents_write_via_write_all(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._copy_contract(root)
+            workflow = root / ".github/workflows/release-oci.yml"
+            value = workflow.read_text(encoding="utf-8")
+            workflow.write_text(
+                value.replace(
+                    "  release:\n",
+                    "  release:\n    permissions: write-all\n",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                RepositoryGovernanceError,
+                "only the steward-gated candidate freeze job",
+            ):
+                validate_repository_governance(root)
+
+    def test_non_freeze_workflow_cannot_inherit_top_level_write_all(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._copy_contract(root)
+            workflow = root / ".github/workflows/upstream-canary.yml"
+            value = workflow.read_text(encoding="utf-8")
+            workflow.write_text(
+                value.replace(
+                    "permissions:\n  contents: read\n",
+                    "permissions: write-all\n",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                RepositoryGovernanceError,
+                "only the steward-gated candidate freeze job",
+            ):
+                validate_repository_governance(root)
+
+    def test_flow_style_permission_grant_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._copy_contract(root)
+            workflow = root / ".github/workflows/upstream-canary.yml"
+            value = workflow.read_text(encoding="utf-8")
+            workflow.write_text(
+                value.replace(
+                    "permissions:\n  contents: read\n",
+                    "permissions: {contents: write}\n",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                RepositoryGovernanceError,
+                "unsupported YAML syntax",
+            ):
+                validate_repository_governance(root)
+
+    def test_escaped_job_permission_key_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._copy_contract(root)
+            workflow = root / ".github/workflows/release-oci.yml"
+            value = workflow.read_text(encoding="utf-8")
+            workflow.write_text(
+                value.replace(
+                    "  release:\n",
+                    '  release:\n    "permis\\u0073ions": write-all\n',
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                RepositoryGovernanceError,
+                "unsupported mapping syntax",
             ):
                 validate_repository_governance(root)
 

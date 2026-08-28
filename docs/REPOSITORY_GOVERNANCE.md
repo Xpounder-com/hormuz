@@ -41,8 +41,9 @@ controls:
 
 1. Only the GitHub Actions integration may create a
    `candidate-v1.0.0-*` tag. The governance verifier requires the steward-gated
-   candidate-freeze workflow to be the repository's only workflow with
-   `contents: write`.
+   candidate-freeze job to be the repository's only job with an effective
+   contents-write grant. It resolves workflow and job overrides, treats
+   `write-all` as contents-write, and rejects unsupported permission syntax.
 2. `main` cannot be deleted or force-pushed. Every change uses a pull request,
    resolves review threads, is tested against current `main`, and passes all 11
    release-blocking checks from the GitHub Actions app.

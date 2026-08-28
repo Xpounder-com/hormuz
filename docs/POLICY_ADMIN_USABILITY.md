@@ -90,8 +90,10 @@ be enabled, the protected environment must match the steward contract, and one
 active, no-bypass tag ruleset must protect both `refs/tags/v*` and
 `refs/tags/candidate-v1.0.0-*`. A separate creation ruleset permits the GitHub
 Actions integration to create only `candidate-v1.0.0-*` tags, while repository
-governance requires the steward-gated freeze workflow to be the sole workflow
-with `contents: write`. Human creation of candidate tags is denied; final `v*`
+governance requires the steward-gated freeze job to be the sole job with an
+effective contents-write grant. The verifier resolves workflow- and job-level
+permission maps, including `write-all`, and fails closed on unsupported YAML
+forms. Human creation of candidate tags is denied; final `v*`
 tag creation remains organization-administrator-only. The ordinary per-run
 `GITHUB_TOKEN` performs the candidate release operation; the administration
 token cannot publish.
