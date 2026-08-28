@@ -58,6 +58,7 @@ Custody authorization (managed PostgreSQL mode)
 - `hormuz/redaction.py` transforms provider-bound JSON values using configured secret controls.
 - `hormuz/cli.py` owns the public `main` and `build_parser` entry points, legacy argv normalization, top-level dispatch, and shared CLI error conventions.
 - `hormuz/commands/policy.py` owns policy command registration, execution, formatting, and safe local policy-artifact handling behind a narrow dispatch-time dependency seam. It does not import the CLI façade or introduce a command framework.
+- `hormuz/commands/custody.py` owns custody command registration, human-control and machine-executor dispatch, content-free formatting, verification, and encrypted-envelope file operations behind a narrow dispatch-time dependency seam. The façade retains only shared error translation and one private compatibility wrapper.
 
 ## Trust boundary
 
