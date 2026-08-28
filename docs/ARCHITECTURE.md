@@ -60,6 +60,7 @@ Custody authorization (managed PostgreSQL mode)
 - `hormuz/commands/policy.py` owns policy command registration, execution, formatting, and safe local policy-artifact handling behind a narrow dispatch-time dependency seam. It does not import the CLI façade or introduce a command framework.
 - `hormuz/commands/custody.py` owns custody command registration, human-control and machine-executor dispatch, content-free formatting, verification, and encrypted-envelope file operations behind a narrow dispatch-time dependency seam. The façade retains only shared error translation and one private compatibility wrapper.
 - `hormuz/commands/audit.py` owns audit command registration, export and anchoring orchestration, formatting, and owner-only checkpoint file handling behind a narrow backend-neutral dependency seam. SQLite and PostgreSQL retain snapshot, transaction, tenant-scope, source-loading, and audit-chain verification ownership.
+- `hormuz/commands/client.py` owns Codex and Claude Code configuration rendering, credential-helper behavior, and client/auth parser registration. The façade retains legacy argv normalization and thin private compatibility wrappers only.
 
 ## Trust boundary
 
