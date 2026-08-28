@@ -283,12 +283,16 @@ if not isinstance(tagged_at, str):
 message = value.get("message")
 if not isinstance(message, str):
     raise SystemExit(2)
-if f"Frozen source archive: {sys.argv[5]}" not in message or f"Gate evidence: {sys.argv[6]}" not in message:
+if (
+    f"Frozen source archive: {sys.argv[5]}" not in message
+    or f"Gate evidence: {sys.argv[6]}" not in message
+    or f"Candidate custody tag: {sys.argv[7]}" not in message
+):
     raise SystemExit(2)
 from datetime import datetime
 if datetime.fromisoformat(tagged_at.replace("Z", "+00:00")) < datetime.fromisoformat(sys.argv[4].replace("Z", "+00:00")):
     raise SystemExit(2)
-' "$object_path" "$FINAL_TAG" "$source_commit" "$gate_generated_at" "$candidate_digest" "$gate_evidence_digest" \
+' "$object_path" "$FINAL_TAG" "$source_commit" "$gate_generated_at" "$candidate_digest" "$gate_evidence_digest" "$candidate_tag" \
     || fail "final_tag_target_or_chronology_invalid"
 }
 
@@ -341,12 +345,15 @@ raise SystemExit(0 if tagged >= gate else 2)
       || fail "local_final_tag_candidate_digest_invalid"
     [[ "$local_tag_message" == *"Gate evidence: $gate_evidence_digest"* ]] \
       || fail "local_final_tag_gate_digest_invalid"
+    [[ "$local_tag_message" == *"Candidate custody tag: $candidate_tag"* ]] \
+      || fail "local_final_tag_candidate_tag_invalid"
   else
     require_gate_time_current
     git -C "$repository_root" -c tag.gpgSign=false tag -a "$FINAL_TAG" "$source_commit" \
       -m "Hormuz v1.0.0" \
       -m "Frozen source archive: $candidate_digest" \
-      -m "Gate evidence: $gate_evidence_digest"
+      -m "Gate evidence: $gate_evidence_digest" \
+      -m "Candidate custody tag: $candidate_tag"
   fi
   git -C "$repository_root" push origin "refs/tags/$FINAL_TAG"
   gh api "/repos/$REPOSITORY/git/ref/tags/$FINAL_TAG" >"$work_dir/final-tag-ref-after-push.json"

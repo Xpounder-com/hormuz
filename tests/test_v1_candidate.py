@@ -682,6 +682,9 @@ class V1CandidateTests(unittest.TestCase):
             )
             self.assertFalse(result["release_assets_copied"])
             self.assertFalse(result["promotion_rebuild_permitted"])
+            self.assertEqual(
+                result["authoritative_binding"], "protected_annotated_tag"
+            )
 
             release_value = json.loads(release.read_text())
             release_value["assets"] = [{"name": v1_candidate.ARCHIVE_NAME}]
@@ -806,6 +809,7 @@ class V1CandidateTests(unittest.TestCase):
         self.assertIn("candidate_tag_manifest_mismatch", script)
         self.assertIn("final_tag_target_or_chronology_invalid", script)
         self.assertIn('Gate evidence: $gate_evidence_digest', script)
+        self.assertIn('Candidate custody tag: $candidate_tag', script)
 
     def test_promotion_requires_the_clean_exact_candidate_checkout(self) -> None:
         script = (ROOT / "tools/promote_v1_candidate.sh").read_text()

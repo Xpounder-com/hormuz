@@ -150,7 +150,9 @@ OCI release workflow to succeed for the exact tag and commit, and downloads the
 immutable candidate assets again.
 An existing final tag is accepted only when it is annotated, targets that
 commit, was created no earlier than the validated aggregate, and its annotation
-binds both the archive digest and gate-evidence digest. Only after this second
+binds the candidate custody tag, archive digest, and gate-evidence digest. That
+protected annotation is the authoritative promotion binding even if editable
+release-page text later changes. Only after this second
 verification does the command create a directly published, metadata-only
 immutable `v1.0.0` GitHub Release. Its deterministic notes link to the canonical
 archive and manifest under the digest-addressed candidate tag and repeat the

@@ -951,6 +951,7 @@ def validate_final_release(
         "gate_evidence_digest": evidence_digest,
         "gate_status": gate_result["status"],
         "release_immutable": True,
+        "authoritative_binding": "protected_annotated_tag",
         "release_assets_copied": False,
         "promotion_rebuild_permitted": False,
     }
