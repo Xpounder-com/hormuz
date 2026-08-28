@@ -203,7 +203,11 @@ the semantic-version OCI workflow. Copy the exact value from
 Publication first creates an unpublished draft, attaches exactly the source
 archive and manifest without overwrite semantics, downloads both remote assets
 through the release-asset API, and compares their sizes, SHA-256 digests, and
-exact bytes. The workflow repeats the live immutable-release, ruleset,
+exact bytes. While the release is a draft, GitHub serves those assets from the
+release-specific `untagged-...` namespace exposed by its `html_url`; the
+publisher binds each asset to that exact namespace and, after publication,
+requires the digest-addressed candidate tag namespace instead. The workflow
+repeats the live immutable-release, ruleset,
 environment, current-main, no-overwrite, final-tag-absence, and remote-byte
 checks immediately before changing the draft to a prerelease. Any validation,
 upload, or remote-byte mismatch before that change leaves the release
