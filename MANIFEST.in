@@ -15,6 +15,8 @@ include tools/verify_public_community_paths.py
 include tools/verify_launch_assets.py
 include tools/verify_quiet_alpha_evidence.py
 include tools/verify_policy_admin_usability_evidence.py
+include tools/verify_v1_internal_repeatability_evidence.py
+include tools/run_v1_internal_repeatability.py
 include tools/v1_candidate.py
 include tools/promote_v1_candidate.sh
 include tools/verify_deployment_contract.py

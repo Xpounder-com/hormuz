@@ -1,17 +1,53 @@
-# Independent policy-administrator usability gate
+# v1.0.0 release custody and internal repeatability
 
-This protocol measures whether the v1 policy-administration workflow is usable
-and state-correct without private guidance. It is the human candidate gate in
-[issue #173](https://github.com/Xpounder-com/hormuz/issues/173). Current
-qualifying evidence is **0/5** offline participants and **0/3** PostgreSQL
-participants. Repository tests and the synthetic fixture do not change either
-count.
+The owner-approved current-stage checkpoint in
+[issue #173](https://github.com/Xpounder-com/hormuz/issues/173) is deterministic
+internal repeatability, not a human-usability study. The exact frozen
+`v1.0.0` source archive must complete the documented offline workflow five
+times in fresh virtual environments, fresh workspaces, and fresh SQLite
+databases whose current usage is zero. Every run uses a Python socket-denial
+guard and an environment allowlist containing no provider or policy-admin
+credential.
 
-Issue #110 remains a separate public-alpha onboarding gate. The same person may
-participate in both studies, but each study retains its own aggregate and proves
-a different claim.
+Passing proves only that the exact archived implementation mechanically repeats
+create, modify, validate, semantic compare, saved-scenario validation, and
+evaluation with the expected output-cap change. It does not prove five people
+used Hormuz, external onboarding, PostgreSQL apply/history/rollback behavior,
+production or enterprise readiness, security certification, or market demand.
 
-## Qualifying participants
+After the immutable candidate is published, run:
+
+```bash
+python tools/run_v1_internal_repeatability.py \
+  --manifest hormuz-v1.0.0-candidate-manifest.json \
+  --archive hormuz-1.0.0.tar.gz \
+  --output /private/path/v1-internal-repeatability-evidence.json \
+  --python /path/to/preprovisioned/hormuz-python
+
+python tools/verify_v1_internal_repeatability_evidence.py \
+  /private/path/v1-internal-repeatability-evidence.json
+```
+
+The selected Python must already have Hormuz's runtime dependencies. The runner
+creates child virtual environments without `pip`, uses the preprovisioned
+dependency layer offline, and loads Hormuz itself only from the validated
+archive. It writes one owner-only evidence file, never raw output or local
+paths. A failed stage remains in the invocation as bounded stage and exit-code
+metadata and prevents promotion.
+
+Any changed archive gets a new SHA-256 digest and invalidates the evidence. The
+final tag is created only after five exact-candidate runs pass, and promotion
+never rebuilds or uploads replacement source bytes.
+
+## Deferred external administrator study
+
+The original five-person offline and three-person PostgreSQL protocol below is
+retained as a versioned, auditable design for possible future work under
+[issue #110](https://github.com/Xpounder-com/hormuz/issues/110). Current counts
+remain **0/5** and **0/3**. They are not v1.0.0 release dependencies and must
+not be inferred from the internal sandbox result.
+
+### Qualifying participants
 
 Pre-register exactly five people for the offline cohort and exactly three for
 the PostgreSQL cohort before testing a candidate artifact. A person may be in
@@ -158,7 +194,7 @@ the source archive.
 Candidate custody uses a published immutable GitHub prerelease and a non-semver,
 digest-addressed tag such as
 `candidate-v1.0.0-` followed by the 64 lowercase SHA-256 hex characters. This
-avoids creating the final tag before the human gate passes and cannot trigger
+avoids creating the final tag before the internal repeatability gate passes and cannot trigger
 the semantic-version OCI workflow. Copy the exact value from
 `custody.release_tag` in the manifest rather than typing it.
 
@@ -174,17 +210,17 @@ immutable state, the digest-addressed candidate tag's source binding, asset
 digests, and GitHub release attestations. Existing candidate releases or assets
 are never replaced. The prerelease is intentionally visible before the gate: it
 labels itself as a candidate, makes no v1 success claim, and closes the
-draft-asset mutation window before any participant session starts.
+draft-asset mutation window before any measured repeatability run starts.
 
-Give every participant the exact archived source distribution and manifest.
-Before installation, verify the archive locally and compare the result with
+Use the exact archived source distribution and manifest for every run. Before
+execution, verify the archive locally and compare the result with
 `candidate.artifact_digest` in the manifest:
 
 ```bash
 shasum -a 256 hormuz-1.0.0.tar.gz
 ```
 
-Every session and the aggregate must carry that same `sha256:` value. Changing
+Every run and the aggregate must carry that same `sha256:` value. Changing
 even one archived byte creates a different candidate digest. Evidence bound to
 the prior digest remains blocker history but cannot count for the changed
 candidate; run the affected cohort again against a newly frozen immutable
@@ -203,7 +239,7 @@ therefore neither satisfy nor replace the gate validator:
 ```bash
 tools/promote_v1_candidate.sh \
   --candidate-tag CANDIDATE_TAG_FROM_MANIFEST \
-  --evidence /private/path/policy-admin-usability-evidence.json
+  --evidence /private/path/v1-internal-repeatability-evidence.json
 ```
 
 Use `--output /private/path/promotion-proof` only when the owner needs to keep
@@ -251,7 +287,7 @@ Any mismatch fails closed. The digest-addressed custody tag remains a pointer
 to the tested source commit and its canonical source archive; the final release
 is a protected, immutable version alias rather than a second copy of the bytes.
 
-## Setup boundary
+## Deferred external-study setup boundary
 
 Installation and environment setup finish before the measured task. Verify
 that the supplied archive matches the frozen candidate SHA-256 digest, then
@@ -272,7 +308,7 @@ specific help page, or explain the workflow. Installation may be measured in a
 separate study, but its time is never included in this gate's
 `duration_seconds`.
 
-## Offline task card
+## Deferred human offline task card
 
 Start the timer when the participant receives this ordered task. Stop after the
 evaluation result has been checked.
@@ -326,7 +362,7 @@ remain in the aggregate as blocker history but cannot count toward the new
 candidate. This ordering avoids spending PostgreSQL setup time on a candidate
 whose basic documentation or command workflow has already failed.
 
-## PostgreSQL task card
+## Deferred human PostgreSQL task card
 
 For each of three independent participants, provision a separate isolated
 tenant with one active baseline policy and a distinct reviewed candidate. Give
@@ -361,7 +397,7 @@ metadata. The aggregate records whether each guard was used and its version
 value; a PostgreSQL session cannot qualify unless both guards match the active
 version expected at that step.
 
-## Findings and blockers
+## Deferred human findings and blockers
 
 Every recorded friction category other than `none` links to a public issue.
 Authentication-bypass and content/credential-exposure findings may instead use
@@ -400,7 +436,7 @@ candidate source commit. The retest may be one of the pre-registered current
 cohort runs. If the correction broadly changes a track's workflow, every member
 of that track must rerun after the corrected candidate was frozen.
 
-## Content-free aggregate
+## Deferred human evidence aggregate
 
 The strict `hormuz.policy-admin-usability-evidence` v2 aggregate records only:
 
@@ -444,16 +480,13 @@ python tools/verify_policy_admin_usability_evidence.py \
   /private/path/policy-admin-usability-evidence.json
 ```
 
-Exit `0` means the frozen candidate is eligible for unchanged promotion, exit
-`1` means a structurally valid real aggregate remains incomplete, and exit `2`
-means the evidence contract itself is invalid. A successful result reports
-`status: eligible_for_unchanged_promotion`, the exact candidate digest,
-`target_version: v1.0.0`, and
-`claim_scope: administrator_workflow_usability_and_state_correctness`.
-Promotion must use that reported digest; the validator never authorizes a
-rebuild. Explicitly allowed synthetic evidence exits `0` only to show that the
-fixture is structurally valid; its JSON result always has
-`eligible_for_v1_0_0_promotion: false`.
+This legacy validator preserves the proposed human-study contract. The current
+v1 candidate manifest and promotion command accept only
+`hormuz.v1-internal-repeatability-evidence` v1. A legacy
+`eligible_for_v1_0_0_promotion` result is therefore not current release
+authorization. Explicitly allowed synthetic evidence exits `0` only to show
+that the fixture is structurally valid; it never proves a human or release
+claim.
 
 Schema v2 replaces the pre-evidence schema v1 lifecycle, which incorrectly
 modeled the tested object as an already published release. The validator

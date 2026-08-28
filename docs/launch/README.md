@@ -1,5 +1,9 @@
 # Hormuz launch package
 
+> Archived v0.1.3 recruitment material. Do not use these drafts as the v1.0.0
+> release claim set; the current boundary is documented in the root README and
+> `docs/POLICY_ADMIN_USABILITY.md`.
+
 This directory contains the evidence-grounded tester-recruitment launch package
 for the Hormuz v0.1.3 public open-source alpha. Every public asset is currently
 marked **DRAFT — DO NOT PUBLISH** until the owner completes the final

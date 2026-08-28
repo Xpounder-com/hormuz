@@ -57,16 +57,16 @@ validated-onboarding evidence additionally requires the operator to attest
 distinct humans off-repository, five independent installation/demo completions
 across all four reviewer personas, a later returning-user session, and
 resolution plus independent retest of every security or installation blocker.
-Hormuz may publish a bounded public-alpha tester-recruitment announcement while
-the honest count remains 0/5. Internal and synthetic runs do not count. Closing
-#110 remains mandatory before any validated-onboarding, beyond-alpha, or
-stronger commercial-readiness claim. The validator does not prove the
+The external study is deferred and the honest count remains 0/5. Internal and
+synthetic runs do not count. Closing #110 remains mandatory before any
+validated-human-onboarding or stronger commercial-readiness claim, but it is
+not a v1.0.0 release dependency. The validator does not prove the
 off-repository identity attestation or replace #115's separately completed
 live-provider evidence.
 
 ## Durable-data inventory boundary
 
-The self-hosted public-alpha data boundary is documented in
+The self-hosted v1 data boundary is documented in
 [DURABLE_DATA.md](DURABLE_DATA.md) and its strict versioned inventory. Verify
 that every SQLite and PostgreSQL table is registered, operator-created
 artifacts are named, prompt and response bodies remain outside the claimed
@@ -141,7 +141,33 @@ path is never overwritten. The managed `policy apply`, `policy history`, and
 executed. This is evidence for the policy-administration UX milestone, not for
 completion of the enterprise v1 release gate.
 
-## Independent policy-administrator v1 gate
+## v1 internal-repeatability gate
+
+The exact-digest protocol is defined in
+[POLICY_ADMIN_USABILITY.md](POLICY_ADMIN_USABILITY.md). Verify its versioned
+contract and deliberately non-promotable fixture with:
+
+```bash
+python -m unittest -v tests.test_v1_internal_repeatability_evidence
+python tools/verify_v1_internal_repeatability_evidence.py \
+  tests/fixtures/v1_internal_repeatability/complete-synthetic-v1.json \
+  --allow-synthetic-fixture
+```
+
+After candidate freeze, `tools/run_v1_internal_repeatability.py` validates the
+manifest/archive binding and runs the fixed six-stage workflow five times. Each
+run gets a fresh child virtual environment, workspace, and zero-usage SQLite
+database; the candidate process receives no provider or policy-admin
+credential and runs with Python socket creation denied. The aggregate retains
+only candidate/task digests, timestamps, stage and exit status, isolation
+attestations, and the bounded expected comparison/evaluation facts.
+
+All five exact-candidate runs must pass. Promotion rejects a different digest,
+the deferred human-evidence schema, synthetic evidence, incomplete runs, and
+any widened claim boundary. Passing proves deterministic internal offline
+workflow repeatability only.
+
+## Deferred independent administrator study
 
 The external protocol and strict content-free aggregate are defined in
 [POLICY_ADMIN_USABILITY.md](POLICY_ADMIN_USABILITY.md). Verify the contract and
@@ -179,12 +205,11 @@ correction-commit ancestry, and a later independent retest. A broad workflow
 change requires every participant in the affected track to rerun against the
 new digest.
 
-Synthetic and internal results never satisfy the human gate. The current count
-remains 0/5 offline and 0/3 PostgreSQL. This administrator-usability evidence is
-separate from issue #110's public-alpha onboarding evidence, even when a person
-participates in both studies. Success means the exact tested bytes are eligible
-for unchanged promotion to `v1.0.0`; it is not complete enterprise-readiness or
-market-validation evidence.
+Synthetic and internal results never satisfy this deferred human study. The
+current count remains 0/5 offline and 0/3 PostgreSQL under issue #110. The
+legacy human-evidence schema is not accepted by the current v1 candidate
+manifest or promotion command and must not be reported as completed from the
+internal sandbox result.
 
 ## Launch-claim boundary
 
@@ -619,7 +644,7 @@ The final `hormuz.oci-release-evidence` summary hashes every retained evidence
 file and records the registry-portable digest contract, AMD64 boundary,
 mirroring requirements, exact signer, and explicit Rekor/attestation
 boundaries. GHCR is the first publication registry, not the product contract.
-The workflow requires the public-alpha package to remain public and records
+The workflow requires the published package to remain public and records
 that visibility in release-evidence schema v2. The workflow artifact contains
 only allowlisted summaries, not raw SBOM,
 provenance, vulnerability, or Cosign verification payloads. This workflow does not

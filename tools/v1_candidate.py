@@ -41,8 +41,8 @@ FINAL_RELEASE_TITLE = "Hormuz v1.0.0"
 ARCHIVE_NAME = "hormuz-1.0.0.tar.gz"
 MANIFEST_NAME = "hormuz-v1.0.0-candidate-manifest.json"
 GATE_ISSUE = "https://github.com/Xpounder-com/hormuz/issues/173"
-EVIDENCE_SCHEMA_ID = "hormuz.policy-admin-usability-evidence"
-EVIDENCE_SCHEMA_VERSION = 2
+EVIDENCE_SCHEMA_ID = "hormuz.v1-internal-repeatability-evidence"
+EVIDENCE_SCHEMA_VERSION = 1
 WORKFLOW_PATH = ".github/workflows/freeze-v1-candidate.yml"
 FREEZE_AUTHORIZATION_JOB_NAME = "Authorize the designated v1 release steward"
 MAX_ARCHIVE_BYTES = 64 * 1024 * 1024
@@ -59,8 +59,10 @@ REQUIRED_ARCHIVE_PATHS = (
     "pyproject.toml",
     "requirements/v1-source-build.lock",
     "tools/promote_v1_candidate.sh",
+    "tools/run_v1_internal_repeatability.py",
     "tools/v1_candidate.py",
     "tools/verify_policy_admin_usability_evidence.py",
+    "tools/verify_v1_internal_repeatability_evidence.py",
 )
 
 _REVISION_RE = re.compile(r"[0-9a-f]{40}\Z")
@@ -848,9 +850,9 @@ def _validate_gate_evidence(
 ) -> tuple[dict[str, object], str, str]:
     try:
         try:
-            from tools import verify_policy_admin_usability_evidence as usability
+            from tools import verify_v1_internal_repeatability_evidence as repeatability
         except ImportError:
-            import verify_policy_admin_usability_evidence as usability  # type: ignore[no-redef]
+            import verify_v1_internal_repeatability_evidence as repeatability  # type: ignore[no-redef]
 
         evidence_payload = _safe_read(
             evidence_path,
@@ -859,10 +861,10 @@ def _validate_gate_evidence(
         )
         evidence = json.loads(
             evidence_payload.decode("utf-8"),
-            object_pairs_hook=usability._strict_object,
+            object_pairs_hook=repeatability._strict_object,
             parse_constant=_reject_json_constant,
         )
-        result = usability.validate_evidence(evidence)
+        result = repeatability.validate_evidence(evidence)
     except (OSError, UnicodeError, json.JSONDecodeError, ValueError, RecursionError) as error:
         raise V1CandidateError("gate_evidence_invalid") from error
     if not isinstance(evidence, dict):

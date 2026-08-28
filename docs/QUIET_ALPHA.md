@@ -1,17 +1,16 @@
-# Public-alpha onboarding validation
+# Deferred external onboarding validation
 
-Hormuz may publish a bounded public-alpha announcement to recruit testers while
-this validation is incomplete. Hormuz is not production-ready. External
-onboarding validation pending: **0/5** independent completions. Issue #110
+This document preserves the v0.1.3 external-onboarding protocol for a possible
+future study. It is not a v1.0.0 release dependency. External onboarding
+validation remains **0/5** independent completions. Issue #110
 tracks whether independent developers, security reviewers, platform engineers,
 and engineering administrators can install the public checkout and finish the
 provider-free demonstration using only public repository material.
 
-This is a post-publication validation milestone. It does not block the initial
-tester-recruitment announcement, but it must close before Hormuz claims
-validated onboarding, advances beyond alpha, or makes stronger
-commercial-readiness claims. Internal, maintainer-assisted, and synthetic runs
-do not count toward the five independent completions.
+This deferred study must close before Hormuz claims validated human onboarding
+or uses its results for stronger commercial-readiness claims. Internal,
+maintainer-assisted, agent, sandbox, and synthetic runs do not count toward the
+five independent completions.
 
 Anyone may run the public test and file a sanitized installation report. To
 keep opaque participant IDs from becoming a durable GitHub-identity mapping,
@@ -193,9 +192,9 @@ conditions hold:
    another independent session;
 5. every security or installation blocker has a resolution commit and a
    successful independent retest; and
-6. stronger promotion claiming validated onboarding, beyond-alpha readiness, or
-   commercial readiness has not started. The bounded public-alpha
-   tester-recruitment announcement is allowed and does not set this flag.
+6. stronger promotion claiming validated onboarding or commercial readiness
+   has not started. Publishing v1.0.0 without that human claim does not set
+   this flag.
 
 The repository's fixture is deliberately synthetic:
 

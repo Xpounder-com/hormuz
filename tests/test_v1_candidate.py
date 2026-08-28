@@ -22,8 +22,8 @@ EVIDENCE_FIXTURE = (
     ROOT
     / "tests"
     / "fixtures"
-    / "policy_admin_usability"
-    / "complete-synthetic-v2.json"
+    / "v1_internal_repeatability"
+    / "complete-synthetic-v1.json"
 )
 
 
@@ -87,9 +87,6 @@ class V1CandidateTests(unittest.TestCase):
             )
         )
         value["evidence_kind"] = "candidate_gate_evidence"
-        value["operator_attestation"][
-            "distinct_humans_verified_off_repository"
-        ] = True
         candidate = manifest["candidate"]
         assert isinstance(candidate, dict)
         value["candidate"] = {
@@ -99,8 +96,8 @@ class V1CandidateTests(unittest.TestCase):
             "source_commit": candidate["source_commit"],
             "frozen_at": candidate["frozen_at"],
         }
-        for session in value["sessions"]:
-            session["candidate_artifact_digest"] = candidate["artifact_digest"]
+        for run in value["runs"]:
+            run["candidate_artifact_digest"] = candidate["artifact_digest"]
         path = directory / "real-evidence.json"
         path.write_text(json.dumps(value), encoding="utf-8")
         return path
@@ -1472,7 +1469,7 @@ class V1CandidateTests(unittest.TestCase):
             script,
         )
         self.assertIn(
-            '"$checkout_commit:tools/verify_policy_admin_usability_evidence.py"',
+            '"$checkout_commit:tools/verify_v1_internal_repeatability_evidence.py"',
             script,
         )
         self.assertNotIn('python3 "$tool"', script)

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hormuz"
-version = "0.1.3"
+version = "1.0.0"
 description = "Enterprise AI gateway policy, usage, and control plane."
 readme = "README.md"
 license = "Apache-2.0"
@@ -14,7 +14,6 @@ authors = [
   { name = "NeuralInt" }
 ]
 classifiers = [
-  "Development Status :: 3 - Alpha",
   "Environment :: Console",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3 :: Only",

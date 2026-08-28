@@ -109,7 +109,7 @@ tag and fails unless all of these are true:
   validated before attachment;
 - certificate extensions match the release workflow name, repository, source
   tag ref, source commit, and `push` trigger in addition to the exact subject;
-- GHCR remains public for anonymous public-alpha pull and the semantic-version
+- GHCR remains public for anonymous release pull and the semantic-version
   registry tag is either absent or already resolves to the exact verified
   digest; it is never reassigned.
 
@@ -151,7 +151,7 @@ signed supported digest, attestations, or semantic-version GHCR tag. The
 corrected public-registry gate uses the next immutable version, `v0.1.3`,
 rather than moving or reusing `v0.1.2`.
 
-Verify the current public-alpha digest anonymously:
+Verify the previously published signed digest anonymously:
 
 ```bash
 image="ghcr.io/xpounder-com/hormuz@sha256:8ac24f5c7afb8ce09ec133616de06702f568a2e70594d8034146a131d86e5b67"
@@ -221,7 +221,9 @@ entries remain historical evidence and must not be deleted or represented as
 revoked certificates. A verifier configured with a different expected
 identity must fail closed before the artifact is admitted.
 
-`v0.1.3` is the current supported signed Hormuz release. `v0.1.1` remains the
+`v0.1.3` is the previously verified signed Hormuz reference. The v1.0.0 OCI
+artifact is produced only after exact-byte candidate promotion; verify the
+immutable release metadata before treating it as current. `v0.1.1` remains the
 prior supported digest and its original signature/attestation identity remains
 part of that rollback boundary; the failed `v0.1.2` attempt is not a supported
 release. The existence of two supported signed releases does not itself prove
