@@ -1053,6 +1053,8 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
         self.assertIn(
             "include tools/verify_policy_admin_usability_evidence.py\n", manifest
         )
+        self.assertIn("include tools/v1_candidate.py\n", manifest)
+        self.assertIn("include tools/promote_v1_candidate.sh\n", manifest)
         self.assertIn("recursive-include docs *.md\n", manifest)
         self.assertIn("recursive-include tests *.py *.json\n", manifest)
         self.assertIn("include examples/policy-admin-usability-baseline.json\n", manifest)
@@ -1072,6 +1074,8 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
                 "docs/POLICY_ADMIN_USABILITY.md",
                 "examples/policy-admin-usability-baseline.json",
                 "examples/policy-admin-usability-scenarios.json",
+                "tools/promote_v1_candidate.sh",
+                "tools/v1_candidate.py",
                 "tools/verify_policy_admin_usability_evidence.py",
             },
         )

@@ -1,0 +1,200 @@
+name: Freeze v1.0.0 candidate
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: freeze-v1-candidate
+  cancel-in-progress: false
+
+jobs:
+  freeze:
+    name: Build once and seal draft custody
+    if: ${{ github.repository == 'Xpounder-com/hormuz' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out the exact protected main candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up pinned Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Fail closed before the one permitted archive build
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          assert_api_absent() {
+            local endpoint="$1"
+            local label="$2"
+            local error_file="$RUNNER_TEMP/${label}.err"
+            if gh api "$endpoint" >/dev/null 2>"$error_file"; then
+              echo "$label already exists" >&2
+              exit 1
+            fi
+            if ! grep -Fq 'HTTP 404' "$error_file"; then
+              cat "$error_file" >&2
+              echo "could not prove $label is absent" >&2
+              exit 1
+            fi
+          }
+          [[ "$GITHUB_REF" == "refs/heads/main" ]] || {
+            echo "candidate freeze must be dispatched from main" >&2
+            exit 1
+          }
+          [[ "$GITHUB_REF_PROTECTED" == "true" ]] || {
+            echo "candidate freeze requires protected main" >&2
+            exit 1
+          }
+          [[ "$GITHUB_RUN_ATTEMPT" == "1" ]] || {
+            echo "a freeze run cannot be rerun because the archive may already have been built" >&2
+            exit 1
+          }
+          package_version="$(python -c 'import pathlib, tomllib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"])')"
+          [[ "$package_version" == "1.0.0" ]] || {
+            echo "candidate package version must be exactly 1.0.0" >&2
+            exit 1
+          }
+          main_sha="$(gh api "/repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)"
+          [[ "$main_sha" == "$GITHUB_SHA" ]] || {
+            echo "candidate source is no longer current main" >&2
+            exit 1
+          }
+          immutable_enabled="$(gh api "/repos/$GITHUB_REPOSITORY/immutable-releases" --jq .enabled)"
+          [[ "$immutable_enabled" == "true" ]] || {
+            echo "immutable GitHub Releases must be enabled before freezing" >&2
+            exit 1
+          }
+          assert_api_absent "/repos/$GITHUB_REPOSITORY/git/ref/tags/v1.0.0" "final-v1.0.0-tag"
+          assert_api_absent "/repos/$GITHUB_REPOSITORY/releases/tags/v1.0.0" "final-v1.0.0-release"
+          existing_candidate_count="$(gh api --paginate --slurp "/repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq "[.[][] | select(.draft == true and .target_commitish == \"$GITHUB_SHA\" and (.tag_name | startswith(\"candidate-v1.0.0-\")))] | length")"
+          [[ "$existing_candidate_count" == "0" ]] || {
+            echo "this source commit already has a frozen candidate" >&2
+            exit 1
+          }
+          successful_main_ci="$(gh api "/repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?branch=main&event=push&status=completed&per_page=100" --jq "[.workflow_runs[] | select(.head_sha == \"$GITHUB_SHA\" and .conclusion == \"success\")] | length")"
+          [[ "$successful_main_ci" -ge 1 ]] || {
+            echo "the exact main commit lacks a successful post-merge CI run" >&2
+            exit 1
+          }
+
+      - name: Install the pinned source-build frontend
+        run: python -m pip install build==1.3.0
+
+      - name: Build the source archive exactly once and seal its manifest
+        run: |
+          candidate_dir="$RUNNER_TEMP/hormuz-v1-candidate"
+          mkdir -m 700 "$candidate_dir"
+          source_date_epoch="$(git show -s --format=%ct "$GITHUB_SHA")"
+          SOURCE_DATE_EPOCH="$source_date_epoch" python -m build --sdist --outdir "$candidate_dir"
+          mapfile -t archives < <(find "$candidate_dir" -maxdepth 1 -type f -name '*.tar.gz' -print)
+          [[ "${#archives[@]}" == "1" ]] || {
+            echo "the one source build did not produce exactly one archive" >&2
+            exit 1
+          }
+          archive_path="${archives[0]}"
+          [[ "$(basename "$archive_path")" == "hormuz-1.0.0.tar.gz" ]] || {
+            echo "the source archive name is not the v1.0.0 contract" >&2
+            exit 1
+          }
+          manifest_path="$candidate_dir/hormuz-v1.0.0-candidate-manifest.json"
+          frozen_at="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+          python tools/v1_candidate.py manifest \
+            --archive "$archive_path" \
+            --source-commit "$GITHUB_SHA" \
+            --frozen-at "$frozen_at" \
+            --invocation-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT" \
+            --run-id "$GITHUB_RUN_ID" \
+            --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --output "$manifest_path"
+          [[ "$(stat -c '%a' "$manifest_path")" == "600" ]] || {
+            echo "candidate manifest is not owner-only" >&2
+            exit 1
+          }
+          custody_tag="$(python -c 'import json, pathlib, sys; print(json.loads(pathlib.Path(sys.argv[1]).read_text())["custody"]["release_tag"])' "$manifest_path")"
+          artifact_digest="$(python -c 'import json, pathlib, sys; print(json.loads(pathlib.Path(sys.argv[1]).read_text())["candidate"]["artifact_digest"])' "$manifest_path")"
+          {
+            echo "CANDIDATE_DIR=$candidate_dir"
+            echo "ARCHIVE_PATH=$archive_path"
+            echo "MANIFEST_PATH=$manifest_path"
+            echo "CUSTODY_TAG=$custody_tag"
+            echo "ARTIFACT_DIGEST=$artifact_digest"
+          } >> "$GITHUB_ENV"
+
+      - name: Create one digest-addressed draft release without overwrite
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          assert_api_absent() {
+            local endpoint="$1"
+            local label="$2"
+            local error_file="$RUNNER_TEMP/${label}.err"
+            if gh api "$endpoint" >/dev/null 2>"$error_file"; then
+              echo "$label already exists" >&2
+              exit 1
+            fi
+            if ! grep -Fq 'HTTP 404' "$error_file"; then
+              cat "$error_file" >&2
+              echo "could not prove $label is absent" >&2
+              exit 1
+            fi
+          }
+          assert_api_absent "/repos/$GITHUB_REPOSITORY/releases/tags/$CUSTODY_TAG" "candidate-release"
+          assert_api_absent "/repos/$GITHUB_REPOSITORY/git/ref/tags/$CUSTODY_TAG" "candidate-tag"
+          gh release create "$CUSTODY_TAG" \
+            "$ARCHIVE_PATH#Frozen Hormuz v1.0.0 source archive" \
+            "$MANIFEST_PATH#Digest-bound candidate manifest" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "Hormuz v1.0.0 frozen candidate" \
+            --notes "Draft custody only. Candidate: $ARTIFACT_DIGEST. Gate: #173. Do not publish or replace either asset; use tools/promote_v1_candidate.sh after the real gate passes." \
+            --draft
+          candidate_ref="$(gh api "/repos/$GITHUB_REPOSITORY/git/ref/tags/$CUSTODY_TAG" --jq '.object.type + ":" + .object.sha')"
+          [[ "$candidate_ref" == "commit:$GITHUB_SHA" ]] || {
+            echo "candidate custody tag does not identify the frozen source commit" >&2
+            exit 1
+          }
+          assert_api_absent "/repos/$GITHUB_REPOSITORY/git/ref/tags/v1.0.0" "final-v1.0.0-tag"
+
+      - name: Re-download and prove exact draft custody
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          verification_dir="$RUNNER_TEMP/hormuz-v1-candidate-verification"
+          mkdir -m 700 "$verification_dir"
+          gh release download "$CUSTODY_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern 'hormuz-1.0.0.tar.gz' \
+            --pattern 'hormuz-v1.0.0-candidate-manifest.json' \
+            --dir "$verification_dir"
+          cmp --silent "$ARCHIVE_PATH" "$verification_dir/hormuz-1.0.0.tar.gz"
+          cmp --silent "$MANIFEST_PATH" "$verification_dir/hormuz-v1.0.0-candidate-manifest.json"
+          gh api "/repos/$GITHUB_REPOSITORY/releases/tags/$CUSTODY_TAG" \
+            > "$verification_dir/release-api.json"
+          gh api "/repos/$GITHUB_REPOSITORY/immutable-releases" \
+            > "$verification_dir/immutable-api.json"
+          python tools/v1_candidate.py custody \
+            --manifest "$verification_dir/hormuz-v1.0.0-candidate-manifest.json" \
+            --archive "$verification_dir/hormuz-1.0.0.tar.gz" \
+            --release-api "$verification_dir/release-api.json" \
+            --immutable-api "$verification_dir/immutable-api.json" \
+            --state draft \
+            --output "$verification_dir/custody-proof.json"
+          {
+            echo "### Frozen v1.0.0 candidate"
+            echo
+            echo "- Draft custody tag: \`$CUSTODY_TAG\`"
+            echo "- Source commit: \`$GITHUB_SHA\`"
+            echo "- Source archive: \`$ARTIFACT_DIGEST\`"
+            echo "- Final \`v1.0.0\` tag created: no"
+            echo "- Human gate advanced: no"
+          } >> "$GITHUB_STEP_SUMMARY"
