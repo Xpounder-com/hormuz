@@ -141,6 +141,17 @@ CANDIDATE_CREDENTIAL_STEP_SHA256 = {
         "394a6a100e43e4a240a62dbe3930031459f92a9bbe6b18d46237da12236705a2"
     ),
 }
+CANDIDATE_FREEZE_JOB_SHA256 = {
+    "authorize": (
+        "d997a87355493a01d811044f7ff2f291b470122e411d6dd6e45226ebd21c85a1"
+    ),
+    "freeze": (
+        "95a5baf2fbbf8f62c2c09b320773a75d1ef13ce12a5189ba739161d12216147b"
+    ),
+}
+CANDIDATE_FREEZE_WORKFLOW_SHA256 = (
+    "c252c43dc284deee55b7e4a14075239fec155639ec8475e52c5a2fdc9a15bafa"
+)
 PermissionSpec = str | dict[str, str]
 
 
@@ -786,14 +797,37 @@ def _validate_candidate_freeze_credentials(text: str) -> None:
         )
 
 
+def _workflow_control_lines(text: str, *, workflow_name: str) -> tuple[str, ...]:
+    control_lines: list[str] = []
+    block_scalar_indent: int | None = None
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        indent = _yaml_indent(line, label=workflow_name)
+        if block_scalar_indent is not None:
+            if indent > block_scalar_indent:
+                continue
+            block_scalar_indent = None
+        if line.lstrip().startswith("#"):
+            continue
+        control_lines.append(line)
+        if re.fullmatch(
+            r"[ ]*(?:-[ ]+)?[a-z][a-z0-9-]*:[ ]*[|>][+-]?[ ]*(?:#.*)?",
+            line,
+        ):
+            block_scalar_indent = indent
+    return tuple(control_lines)
+
+
 def _workflow_secret_expressions(text: str, *, workflow_name: str) -> tuple[str, ...]:
-    if re.search(
-        r"\\(?:x[0-9a-fA-F]{2}|u[0-9a-fA-F]{4}|U[0-9a-fA-F]{8})",
-        text,
-    ):
-        raise RepositoryGovernanceError(
-            f"workflow YAML character escapes are unsupported: {workflow_name}"
-        )
+    for line in _workflow_control_lines(text, workflow_name=workflow_name):
+        if re.search(
+            r"\\(?:x[0-9a-fA-F]{2}|u[0-9a-fA-F]{4}|U[0-9a-fA-F]{8})",
+            line,
+        ) or re.search(r"\\[ \t]*$", line):
+            raise RepositoryGovernanceError(
+                f"workflow YAML character escapes are unsupported: {workflow_name}"
+            )
     expressions: list[str] = []
     cursor = 0
     while True:
@@ -806,6 +840,10 @@ def _workflow_secret_expressions(text: str, *, workflow_name: str) -> tuple[str,
                 f"workflow expression syntax is unsupported: {workflow_name}"
             )
         expression = text[start : end + 2]
+        if "\\" in expression:
+            raise RepositoryGovernanceError(
+                f"workflow expression syntax is unsupported: {workflow_name}"
+            )
         if re.search(r"\bsecrets\b", expression, flags=re.IGNORECASE):
             expressions.append(expression)
         cursor = end + 2
@@ -1029,6 +1067,8 @@ def _validate_workflows(
     action_use_count = 0
     contents_writers: list[tuple[str, str]] = []
     candidate_freeze_seen = False
+    candidate_job_bytes_valid = False
+    candidate_workflow_bytes_valid = False
     for path in workflow_paths:
         try:
             text = path.read_text(encoding="utf-8")
@@ -1077,6 +1117,10 @@ def _validate_workflows(
             )
         if path.name == "freeze-v1-candidate.yml":
             candidate_freeze_seen = True
+            candidate_workflow_bytes_valid = (
+                hashlib.sha256(text.encode("utf-8")).hexdigest()
+                == CANDIDATE_FREEZE_WORKFLOW_SHA256
+            )
             authorize_job = job_blocks.get("authorize")
             freeze_job = job_blocks.get("freeze")
             expected_authorize_job_fields = {
@@ -1109,6 +1153,13 @@ def _validate_workflows(
                 )
             _validate_candidate_freeze_authorization(authorize_job)
             _validate_candidate_freeze_credentials(freeze_job)
+            actual_job_digests = {
+                job_name: hashlib.sha256(job.encode("utf-8")).hexdigest()
+                for job_name, job in job_blocks.items()
+            }
+            candidate_job_bytes_valid = (
+                actual_job_digests == CANDIDATE_FREEZE_JOB_SHA256
+            )
         for job_name, job_permissions in jobs.items():
             effective_permissions = (
                 workflow_permissions if job_permissions is None else job_permissions
@@ -1145,6 +1196,14 @@ def _validate_workflows(
     if contents_writers:
         raise RepositoryGovernanceError(
             "workflow-issued contents write is forbidden"
+        )
+    if not candidate_job_bytes_valid:
+        raise RepositoryGovernanceError(
+            "candidate freeze job bytes changed"
+        )
+    if not candidate_workflow_bytes_valid:
+        raise RepositoryGovernanceError(
+            "candidate freeze workflow bytes changed"
         )
 
     ci = (root / ".github/workflows/ci.yml").read_text(encoding="utf-8")

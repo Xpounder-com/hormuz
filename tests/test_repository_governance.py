@@ -472,6 +472,59 @@ class RepositoryGovernanceTests(unittest.TestCase):
                     ):
                         validate_repository_governance(root)
 
+    def test_candidate_jobs_cannot_add_path_poisoning_steps(self) -> None:
+        insertions = (
+            (
+                (
+                    "    steps:\n"
+                    "      - name: Fail closed unless the configured "
+                    "steward initiated this run\n"
+                ),
+                (
+                    "    steps:\n"
+                    "      - name: Poison the authorization shell path\n"
+                    "        run: |\n"
+                    '          echo /tmp/poison >> "$GITHUB_PATH"\n'
+                    "      - name: Fail closed unless the configured "
+                    "steward initiated this run\n"
+                ),
+            ),
+            (
+                (
+                    "    timeout-minutes: 15\n"
+                    "    steps:\n"
+                    "      - name: Verify distinct environment-scoped "
+                    "release credentials\n"
+                ),
+                (
+                    "    timeout-minutes: 15\n"
+                    "    steps:\n"
+                    "      - name: Poison later credential shells\n"
+                    "        run: |\n"
+                    '          echo /tmp/poison >> "$GITHUB_PATH"\n'
+                    "      - name: Verify distinct environment-scoped "
+                    "release credentials\n"
+                ),
+            ),
+        )
+        for needle, replacement in insertions:
+            with self.subTest(needle=needle):
+                with tempfile.TemporaryDirectory() as temporary:
+                    root = Path(temporary)
+                    self._copy_contract(root)
+                    workflow = root / ".github/workflows/freeze-v1-candidate.yml"
+                    value = workflow.read_text(encoding="utf-8")
+                    self.assertEqual(value.count(needle), 1)
+                    workflow.write_text(
+                        value.replace(needle, replacement, 1),
+                        encoding="utf-8",
+                    )
+                    with self.assertRaisesRegex(
+                        RepositoryGovernanceError,
+                        "candidate freeze job bytes changed",
+                    ):
+                        validate_repository_governance(root)
+
     def test_candidate_authorization_step_cannot_continue_on_error(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -576,6 +629,26 @@ class RepositoryGovernanceTests(unittest.TestCase):
             ):
                 validate_repository_governance(root)
 
+    def test_candidate_freeze_workflow_bytes_are_pinned(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._copy_contract(root)
+            workflow = root / ".github/workflows/freeze-v1-candidate.yml"
+            value = workflow.read_text(encoding="utf-8")
+            workflow.write_text(
+                value.replace(
+                    "  cancel-in-progress: false\n",
+                    "  cancel-in-progress: true\n",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                RepositoryGovernanceError,
+                "candidate freeze workflow bytes changed",
+            ):
+                validate_repository_governance(root)
+
     def test_candidate_secret_access_rejects_unvalidated_expression_syntax(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -628,6 +701,44 @@ class RepositoryGovernanceTests(unittest.TestCase):
                             ),
                             1,
                         ),
+                        encoding="utf-8",
+                    )
+                    with self.assertRaisesRegex(
+                        RepositoryGovernanceError,
+                        "workflow YAML character escapes are unsupported",
+                    ):
+                        validate_repository_governance(root)
+
+    def test_yaml_line_continuation_cannot_conceal_secret_context(self) -> None:
+        escaped_values = (
+            '"${{ sec\\\n          rets.EXTRA_TOKEN }}"',
+            '"$\\\n          {{ secrets.EXTRA_TOKEN }}"',
+        )
+        for escaped_value in escaped_values:
+            with self.subTest(escaped_value=escaped_value):
+                with tempfile.TemporaryDirectory() as temporary:
+                    root = Path(temporary)
+                    self._copy_contract(root)
+                    (root / ".github/workflows/rogue-secret.yml").write_text(
+                        f"""name: YAML continuation secret
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  consume:
+    permissions:
+      contents: read
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Consume concealed secret
+        env:
+          EXTRA_TOKEN: {escaped_value}
+        run: 'true'
+""",
                         encoding="utf-8",
                     )
                     with self.assertRaisesRegex(
