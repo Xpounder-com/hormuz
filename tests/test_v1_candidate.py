@@ -95,8 +95,6 @@ class V1CandidateTests(unittest.TestCase):
         manifest_path: Path,
         manifest: dict[str, object],
         archive: Path,
-        *,
-        state: str = "draft",
     ) -> tuple[Path, Path]:
         candidate = manifest["candidate"]
         custody = manifest["custody"]
@@ -104,14 +102,13 @@ class V1CandidateTests(unittest.TestCase):
         manifest_payload = manifest_path.read_bytes()
         archive_payload = archive.read_bytes()
         release = {
-            "tag_name": (
-                custody["release_tag"] if state == "draft" else v1_candidate.FINAL_TAG
-            ),
+            "tag_name": custody["release_tag"],
             "target_commitish": candidate["source_commit"],
-            "draft": state == "draft",
-            "prerelease": False,
-            "immutable": state == "published",
+            "draft": False,
+            "prerelease": True,
+            "immutable": True,
             "created_at": "2025-08-27T10:01:00Z",
+            "published_at": "2025-08-27T10:04:00Z",
             "assets": [
                 {
                     "name": v1_candidate.ARCHIVE_NAME,
@@ -131,13 +128,40 @@ class V1CandidateTests(unittest.TestCase):
                 },
             ],
         }
-        release_path = directory / f"release-{state}.json"
-        immutable_path = directory / f"immutable-{state}.json"
+        release_path = directory / "candidate-release.json"
+        immutable_path = directory / "immutable-settings.json"
         release_path.write_text(json.dumps(release), encoding="utf-8")
         immutable_path.write_text(
             json.dumps({"enabled": True, "enforced_by_owner": False}),
             encoding="utf-8",
         )
+        return release_path, immutable_path
+
+    def _final_release(
+        self,
+        directory: Path,
+        manifest: dict[str, object],
+        evidence: Path,
+    ) -> tuple[Path, Path]:
+        candidate = manifest["candidate"]
+        assert isinstance(candidate, dict)
+        evidence_digest = "sha256:" + hashlib.sha256(evidence.read_bytes()).hexdigest()
+        release = {
+            "tag_name": v1_candidate.FINAL_TAG,
+            "target_commitish": candidate["source_commit"],
+            "name": v1_candidate.FINAL_RELEASE_TITLE,
+            "body": v1_candidate._final_release_notes(manifest, evidence_digest),
+            "draft": False,
+            "prerelease": False,
+            "immutable": True,
+            "created_at": "2025-08-27T23:00:00Z",
+            "published_at": "2025-08-27T23:00:01Z",
+            "assets": [],
+        }
+        release_path = directory / "final-release.json"
+        immutable_path = directory / "final-immutable-settings.json"
+        release_path.write_text(json.dumps(release), encoding="utf-8")
+        immutable_path.write_text(json.dumps({"enabled": True}), encoding="utf-8")
         return release_path, immutable_path
 
     def _freeze_run(self, directory: Path, manifest: dict[str, object]) -> Path:
@@ -207,6 +231,9 @@ class V1CandidateTests(unittest.TestCase):
             )
             self.assertRegex(
                 custody["release_tag"], r"^candidate-v1\.0\.0-[0-9a-f]{64}$"
+            )
+            self.assertEqual(
+                custody["release_state"], "published_immutable_candidate"
             )
             self.assertEqual(build["archive_build_count"], 1)
             self.assertFalse(build["promotion_rebuild_permitted"])
@@ -342,8 +369,6 @@ class V1CandidateTests(unittest.TestCase):
                         str(root / "release.json"),
                         "--immutable-api",
                         str(root / "immutable.json"),
-                        "--state",
-                        "draft",
                         "--output",
                         str(output),
                     ]
@@ -355,7 +380,6 @@ class V1CandidateTests(unittest.TestCase):
                 root / "archive.tar.gz",
                 root / "release.json",
                 root / "immutable.json",
-                state="draft",
             )
             write.assert_called_once_with(output, expected)
 
@@ -363,7 +387,7 @@ class V1CandidateTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             output = root / "promotion-proof.json"
-            expected = {"status": "eligible_for_exact_promotion"}
+            expected = {"status": "eligible_for_metadata_promotion"}
             with (
                 mock.patch.object(
                     v1_candidate, "validate_promotion", return_value=expected
@@ -388,8 +412,6 @@ class V1CandidateTests(unittest.TestCase):
                         str(root / "freeze-run.json"),
                         "--custody-tag-api",
                         str(root / "custody-tag.json"),
-                        "--state",
-                        "draft",
                         "--output",
                         str(output),
                     ]
@@ -404,7 +426,6 @@ class V1CandidateTests(unittest.TestCase):
                 root / "immutable.json",
                 root / "freeze-run.json",
                 root / "custody-tag.json",
-                state="draft",
             )
             write.assert_called_once_with(output, expected)
 
@@ -422,27 +443,24 @@ class V1CandidateTests(unittest.TestCase):
             ):
                 v1_candidate.inspect_archive(archive_path)
 
-    def test_draft_and_published_custody_verify_exact_release_assets(self) -> None:
+    def test_immutable_candidate_custody_verifies_exact_release_assets(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             archive = self._archive(root)
             manifest = self._manifest_value(archive)
             manifest_path = self._write_manifest(root, manifest)
-            for state in ("draft", "published"):
-                with self.subTest(state=state):
-                    release, immutable = self._api_files(
-                        root, manifest_path, manifest, archive, state=state
-                    )
-                    result = v1_candidate.validate_custody(
-                        manifest_path,
-                        archive,
-                        release,
-                        immutable,
-                        state=state,
-                    )
-                    self.assertTrue(result["archive_reverified"])
-                    self.assertEqual(result["release_immutable"], state == "published")
-                    self.assertFalse(result["promotion_rebuild_permitted"])
+            release, immutable = self._api_files(
+                root, manifest_path, manifest, archive
+            )
+            result = v1_candidate.validate_custody(
+                manifest_path,
+                archive,
+                release,
+                immutable,
+            )
+            self.assertTrue(result["archive_reverified"])
+            self.assertTrue(result["release_immutable"])
+            self.assertFalse(result["promotion_rebuild_permitted"])
 
     def test_custody_rejects_disabled_immutability_and_extra_assets(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -456,7 +474,7 @@ class V1CandidateTests(unittest.TestCase):
                 v1_candidate.V1CandidateError, "immutable_releases_not_enabled"
             ):
                 v1_candidate.validate_custody(
-                    manifest_path, archive, release, immutable, state="draft"
+                    manifest_path, archive, release, immutable
                 )
 
             release, immutable = self._api_files(root, manifest_path, manifest, archive)
@@ -474,7 +492,7 @@ class V1CandidateTests(unittest.TestCase):
                 v1_candidate.V1CandidateError, "release_assets_invalid"
             ):
                 v1_candidate.validate_custody(
-                    manifest_path, archive, release, immutable, state="draft"
+                    manifest_path, archive, release, immutable
                 )
 
     def test_real_gate_can_promote_only_the_exact_candidate_digest(self) -> None:
@@ -502,9 +520,8 @@ class V1CandidateTests(unittest.TestCase):
                 first_immutable,
                 first_run,
                 first_tag,
-                state="draft",
             )
-            self.assertEqual(result["status"], "eligible_for_exact_promotion")
+            self.assertEqual(result["status"], "eligible_for_metadata_promotion")
             self.assertTrue(result["final_tag_creation_permitted"])
 
             second_archive = self._archive(second, marker="changed")
@@ -530,7 +547,6 @@ class V1CandidateTests(unittest.TestCase):
                     second_immutable,
                     second_run,
                     second_tag,
-                    state="draft",
                 )
 
     def test_synthetic_gate_evidence_cannot_authorize_promotion(self) -> None:
@@ -560,7 +576,6 @@ class V1CandidateTests(unittest.TestCase):
                     immutable,
                     freeze_run,
                     custody_tag,
-                    state="draft",
                 )
 
     def test_promotion_rejects_a_run_not_bound_to_the_freeze_workflow(self) -> None:
@@ -588,7 +603,6 @@ class V1CandidateTests(unittest.TestCase):
                     immutable,
                     freeze_run,
                     custody_tag,
-                    state="draft",
                 )
 
     def test_promotion_rejects_an_asset_replaced_after_the_freeze_run(self) -> None:
@@ -617,7 +631,6 @@ class V1CandidateTests(unittest.TestCase):
                     immutable,
                     freeze_run,
                     custody_tag,
-                    state="draft",
                 )
 
     def test_promotion_rejects_a_moved_custody_tag(self) -> None:
@@ -645,14 +658,68 @@ class V1CandidateTests(unittest.TestCase):
                     immutable,
                     freeze_run,
                     custody_tag,
-                    state="draft",
                 )
+
+    def test_final_release_is_metadata_only_and_bound_to_exact_candidate(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            archive = self._archive(root)
+            manifest = self._manifest_value(archive)
+            manifest_path = self._write_manifest(root, manifest)
+            evidence = self._evidence(root, manifest)
+            release, immutable = self._final_release(root, manifest, evidence)
+
+            result = v1_candidate.validate_final_release(
+                manifest_path,
+                evidence,
+                release,
+                immutable,
+            )
+            self.assertEqual(
+                result["status"], "published_metadata_for_exact_candidate"
+            )
+            self.assertFalse(result["release_assets_copied"])
+            self.assertFalse(result["promotion_rebuild_permitted"])
+
+            release_value = json.loads(release.read_text())
+            release_value["assets"] = [{"name": v1_candidate.ARCHIVE_NAME}]
+            release.write_text(json.dumps(release_value), encoding="utf-8")
+            with self.assertRaisesRegex(
+                v1_candidate.V1CandidateError, "final_release_contract_invalid"
+            ):
+                v1_candidate.validate_final_release(
+                    manifest_path,
+                    evidence,
+                    release,
+                    immutable,
+                )
+
+    def test_final_release_notes_name_canonical_candidate_bytes(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            archive = self._archive(root)
+            manifest = self._manifest_value(archive)
+            manifest_path = self._write_manifest(root, manifest)
+            evidence = self._evidence(root, manifest)
+
+            payload, proof = v1_candidate.create_final_release_notes(
+                manifest_path, evidence
+            )
+            candidate = manifest["candidate"]
+            custody = manifest["custody"]
+            assert isinstance(candidate, dict) and isinstance(custody, dict)
+            notes = payload.decode("utf-8")
+            self.assertIn(str(custody["release_tag"]), notes)
+            self.assertIn(str(candidate["artifact_digest"]), notes)
+            self.assertIn("without rebuilding or copying", notes)
+            self.assertEqual(proof["digest"], "sha256:" + hashlib.sha256(payload).hexdigest())
 
     def test_freeze_workflow_has_one_build_and_no_final_tag_creation(self) -> None:
         workflow = (ROOT / ".github/workflows/freeze-v1-candidate.yml").read_text()
         self.assertEqual(workflow.count("python -m build --sdist"), 1)
         self.assertIn("requirements/v1-source-build.lock", workflow)
         self.assertIn("--require-hashes", workflow)
+        self.assertIn("--force-reinstall", workflow)
         self.assertIn("--only-binary=:all:", workflow)
         self.assertIn("--no-deps", workflow)
         self.assertIn("--no-isolation", workflow)
@@ -663,7 +730,14 @@ class V1CandidateTests(unittest.TestCase):
         )
         self.assertIn("create a new commit instead of rebuilding", workflow)
         self.assertIn("immutable-releases", workflow)
+        self.assertIn("V1_RELEASE_ADMIN_TOKEN", workflow)
+        self.assertIn('.source_type == "Repository"', workflow)
+        self.assertIn("refs/tags/candidate-v1.0.0-*", workflow)
+        self.assertIn("live no-bypass immutability", workflow)
         self.assertIn('gh release create "$CUSTODY_TAG"', workflow)
+        self.assertIn("--prerelease", workflow)
+        self.assertIn("--latest=false", workflow)
+        self.assertNotIn("--draft", workflow)
         self.assertIn("candidate-v1.0.0-", workflow)
         self.assertNotIn("--clobber", workflow)
         self.assertNotIn("gh release upload", workflow)
@@ -707,17 +781,24 @@ class V1CandidateTests(unittest.TestCase):
         self.assertNotIn("python -m build", script)
         self.assertNotIn("pip install build", script)
         self.assertNotIn("gh release upload", script)
+        self.assertNotIn("gh release edit", script)
         self.assertNotIn("--clobber", script)
         first_gate = script.index('python3 "$tool" promotion')
         tag_push = script.index('git -C "$repository_root" push')
         signed_oci = script.index("wait_for_signed_oci\n", tag_push)
         reverify = script.index('prepublish_dir="$work_dir/prepublish-reverification"')
-        publish = script.index('gh release edit "$FINAL_TAG"', reverify)
+        final_notes = script.index('python3 "$tool" final-notes', reverify)
+        publish = script.index('gh release create "$FINAL_TAG"', reverify)
+        final_validation = script.index('python3 "$tool" final-release', publish)
         self.assertLess(first_gate, tag_push)
         self.assertLess(tag_push, signed_oci)
         self.assertLess(signed_oci, reverify)
-        self.assertLess(reverify, publish)
+        self.assertLess(reverify, final_notes)
+        self.assertLess(final_notes, publish)
+        self.assertLess(publish, final_validation)
         self.assertIn('gh release verify-asset "$tag"', script)
+        self.assertIn('verify_release_attestations "$candidate_tag"', script)
+        self.assertNotIn('gh release download "$FINAL_TAG"', script)
         self.assertIn("freeze_run_id", script)
         self.assertIn("candidate_tag_manifest_mismatch", script)
         self.assertIn("final_tag_target_or_chronology_invalid", script)
@@ -762,7 +843,7 @@ class V1CandidateTests(unittest.TestCase):
         self.assertLess(snapshot, first_validation)
         self.assertEqual(script.count('--evidence "$evidence_path"'), 1)
         self.assertEqual(
-            script.count('--evidence "$pinned_evidence_path"'), promotion_count
+            script.count('--evidence "$pinned_evidence_path"'), promotion_count + 2
         )
         self.assertNotIn(
             '"$evidence_path"',
@@ -783,49 +864,58 @@ class V1CandidateTests(unittest.TestCase):
         self.assertIn("gate_evidence_snapshot_digest_mismatch", script)
         self.assertIn("promotion_readiness_binding_changed", script)
 
-    def test_promotion_resume_rechecks_tag_oci_and_attestations(self) -> None:
+    def test_promotion_rechecks_candidate_tag_oci_and_final_metadata(self) -> None:
         script = (ROOT / "tools/promote_v1_candidate.sh").read_text()
         tag_create = script.index(
             '    git -C "$repository_root" -c tag.gpgSign=false tag'
         )
         current_time_guard = script.index("    require_gate_time_current\n")
         signed_oci = script.index("wait_for_signed_oci\n", tag_create)
-        published_resume = script.index(
-            'if [[ "$initial_state" == "published" ]]', signed_oci
+        prepublish = script.index(
+            'prepublish_dir="$work_dir/prepublish-reverification"', signed_oci
         )
-        resume_release_snapshot = script.index(
-            'snapshot_release "$FINAL_TAG" "$published_resume_dir"', published_resume
+        prepublish_snapshot = script.index(
+            'snapshot_candidate "$prepublish_dir"', prepublish
         )
-        resume_provenance_snapshot = script.index(
-            'snapshot_provenance "$published_resume_dir"', published_resume
+        prepublish_validation = script.index('python3 "$tool" promotion', prepublish)
+        prepublish_attestation = script.index(
+            'verify_release_attestations "$candidate_tag" "$prepublish_dir"',
+            prepublish,
         )
-        resume_validation = script.index(
-            'python3 "$tool" promotion', published_resume
+        final_release_lookup = script.index(
+            'if ! release_exists "$FINAL_TAG"', prepublish
         )
-        resume_binding = script.index(
-            'assert_readiness_binding "$published_resume_dir/promotion-readiness.json"',
-            published_resume,
+        final_release_create = script.index(
+            'gh release create "$FINAL_TAG"', final_release_lookup
         )
-        resume_tag_check = script.index(
-            'refresh_and_validate_final_tag "published-resume"', published_resume
+        published = script.index(
+            'published_dir="$work_dir/published-reverification"',
+            final_release_create,
         )
-        resume_attestation_check = script.index(
-            'verify_release_attestations "$FINAL_TAG" "$published_resume_dir"',
-            published_resume,
+        published_snapshot = script.index('snapshot_candidate "$published_dir"', published)
+        published_validation = script.index('python3 "$tool" promotion', published)
+        final_release_validation = script.index(
+            'python3 "$tool" final-release', published
         )
-        resume_exit = script.index("  exit 0", published_resume)
+        published_attestation = script.index(
+            'verify_release_attestations "$candidate_tag" "$published_dir"', published
+        )
 
         self.assertLess(current_time_guard, tag_create)
-        self.assertLess(signed_oci, published_resume)
-        self.assertLess(published_resume, resume_release_snapshot)
-        self.assertLess(resume_release_snapshot, resume_provenance_snapshot)
-        self.assertLess(resume_provenance_snapshot, resume_validation)
-        self.assertLess(resume_validation, resume_binding)
-        self.assertLess(resume_binding, resume_tag_check)
-        self.assertLess(resume_tag_check, resume_exit)
-        self.assertLess(resume_attestation_check, resume_exit)
+        self.assertLess(signed_oci, prepublish)
+        self.assertLess(prepublish, prepublish_snapshot)
+        self.assertLess(prepublish_snapshot, prepublish_validation)
+        self.assertLess(prepublish_validation, prepublish_attestation)
+        self.assertLess(prepublish_attestation, final_release_lookup)
+        self.assertLess(final_release_lookup, final_release_create)
+        self.assertLess(final_release_create, published)
+        self.assertLess(published, published_snapshot)
+        self.assertLess(published_snapshot, published_validation)
+        self.assertLess(published_validation, final_release_validation)
+        self.assertLess(final_release_validation, published_attestation)
         self.assertIn("gate_evidence_not_yet_current", script)
-        self.assertIn("published_final_tag_missing", script)
+        self.assertIn("live_tag_immutability_contract_invalid", script)
+        self.assertIn('.source_type == "Repository"', script)
 
     def test_source_distribution_contract_includes_custody_tools(self) -> None:
         manifest = (ROOT / "MANIFEST.in").read_text()

@@ -13,7 +13,7 @@ concurrency:
 
 jobs:
   freeze:
-    name: Build once and seal draft custody
+    name: Build once and seal immutable candidate custody
     if: ${{ github.repository == 'Xpounder-com/hormuz' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -32,6 +32,7 @@ jobs:
       - name: Fail closed before the one permitted archive build
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_ADMIN_TOKEN: ${{ secrets.V1_RELEASE_ADMIN_TOKEN }}
         run: |
           assert_api_absent() {
             local endpoint="$1"
@@ -59,6 +60,14 @@ jobs:
             echo "a freeze run cannot be rerun because the archive may already have been built" >&2
             exit 1
           }
+          [[ -n "${GH_ADMIN_TOKEN:-}" ]] || {
+            echo "V1_RELEASE_ADMIN_TOKEN with read-only repository Administration permission is required" >&2
+            exit 1
+          }
+          gh release verify-asset --help >/dev/null 2>&1 || {
+            echo "the runner GitHub CLI cannot verify immutable release attestations" >&2
+            exit 1
+          }
           freeze_run_identity="$(gh api "/repos/$GITHUB_REPOSITORY/actions/workflows/freeze-v1-candidate.yml/runs?event=workflow_dispatch&head_sha=$GITHUB_SHA&per_page=100" --jq '(.total_count | tostring) + ":" + (.workflow_runs | map(.id | tostring) | sort | join(","))')"
           [[ "$freeze_run_identity" == "1:$GITHUB_RUN_ID" ]] || {
             echo "the exact source commit already has another freeze run; create a new commit instead of rebuilding" >&2
@@ -74,14 +83,24 @@ jobs:
             echo "candidate source is no longer current main" >&2
             exit 1
           }
-          immutable_enabled="$(gh api "/repos/$GITHUB_REPOSITORY/immutable-releases" --jq .enabled)"
+          immutable_enabled="$(GH_TOKEN="$GH_ADMIN_TOKEN" gh api "/repos/$GITHUB_REPOSITORY/immutable-releases" --jq .enabled)"
           [[ "$immutable_enabled" == "true" ]] || {
             echo "immutable GitHub Releases must be enabled before freezing" >&2
             exit 1
           }
+          immutability_ruleset_id="$(GH_TOKEN="$GH_ADMIN_TOKEN" gh api "/repos/$GITHUB_REPOSITORY/rulesets?includes_parents=true&per_page=100" --jq '[.[] | select(.name == "Immutable version tags" and .source_type == "Repository" and .target == "tag" and .enforcement == "active")] | if length == 1 then .[0].id else "" end')"
+          [[ "$immutability_ruleset_id" =~ ^[1-9][0-9]*$ ]] || {
+            echo "one active Immutable version tags ruleset is required before freezing" >&2
+            exit 1
+          }
+          immutability_rule_contract="$(GH_TOKEN="$GH_ADMIN_TOKEN" gh api "/repos/$GITHUB_REPOSITORY/rulesets/$immutability_ruleset_id" --jq '(.bypass_actors == []) and (.conditions.ref_name.exclude == []) and ((.conditions.ref_name.include | sort) == (["refs/tags/candidate-v1.0.0-*", "refs/tags/v*"] | sort)) and (([.rules[].type] | sort) == (["deletion", "non_fast_forward", "update"] | sort))')"
+          [[ "$immutability_rule_contract" == "true" ]] || {
+            echo "live no-bypass immutability must cover both candidate and final v1 tags" >&2
+            exit 1
+          }
           assert_api_absent "/repos/$GITHUB_REPOSITORY/git/ref/tags/v1.0.0" "final-v1.0.0-tag"
           assert_api_absent "/repos/$GITHUB_REPOSITORY/releases/tags/v1.0.0" "final-v1.0.0-release"
-          existing_candidate_count="$(gh api --paginate --slurp "/repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq "[.[][] | select(.draft == true and .target_commitish == \"$GITHUB_SHA\" and (.tag_name | startswith(\"candidate-v1.0.0-\")))] | length")"
+          existing_candidate_count="$(gh api --paginate --slurp "/repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq "[.[][] | select(.target_commitish == \"$GITHUB_SHA\" and (.tag_name | startswith(\"candidate-v1.0.0-\")))] | length")"
           [[ "$existing_candidate_count" == "0" ]] || {
             echo "this source commit already has a frozen candidate" >&2
             exit 1
@@ -96,6 +115,7 @@ jobs:
         run: |
           python -m pip install \
             --disable-pip-version-check \
+            --force-reinstall \
             --require-hashes \
             --only-binary=:all: \
             --no-deps \
@@ -141,7 +161,7 @@ jobs:
             echo "ARTIFACT_DIGEST=$artifact_digest"
           } >> "$GITHUB_ENV"
 
-      - name: Create one digest-addressed draft release without overwrite
+      - name: Create one digest-addressed immutable candidate prerelease
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -167,8 +187,9 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
             --title "Hormuz v1.0.0 frozen candidate" \
-            --notes "Draft custody only. Candidate: $ARTIFACT_DIGEST. Gate: #173. Do not publish or replace either asset; use tools/promote_v1_candidate.sh after the real gate passes." \
-            --draft
+            --notes "Immutable candidate custody only; this is not the final v1.0.0 release. Candidate: $ARTIFACT_DIGEST. Gate: #173. Use tools/promote_v1_candidate.sh only after the real gate passes." \
+            --prerelease \
+            --latest=false
           candidate_ref="$(gh api "/repos/$GITHUB_REPOSITORY/git/ref/tags/$CUSTODY_TAG" --jq '.object.type + ":" + .object.sha')"
           [[ "$candidate_ref" == "commit:$GITHUB_SHA" ]] || {
             echo "candidate custody tag does not identify the frozen source commit" >&2
@@ -176,9 +197,10 @@ jobs:
           }
           assert_api_absent "/repos/$GITHUB_REPOSITORY/git/ref/tags/v1.0.0" "final-v1.0.0-tag"
 
-      - name: Re-download and prove exact draft custody
+      - name: Re-download and prove exact immutable candidate custody
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_ADMIN_TOKEN: ${{ secrets.V1_RELEASE_ADMIN_TOKEN }}
         run: |
           verification_dir="$RUNNER_TEMP/hormuz-v1-candidate-verification"
           mkdir -m 700 "$verification_dir"
@@ -191,19 +213,35 @@ jobs:
           cmp --silent "$MANIFEST_PATH" "$verification_dir/hormuz-v1.0.0-candidate-manifest.json"
           gh api "/repos/$GITHUB_REPOSITORY/releases/tags/$CUSTODY_TAG" \
             > "$verification_dir/release-api.json"
-          gh api "/repos/$GITHUB_REPOSITORY/immutable-releases" \
+          GH_TOKEN="$GH_ADMIN_TOKEN" gh api "/repos/$GITHUB_REPOSITORY/immutable-releases" \
             > "$verification_dir/immutable-api.json"
           python tools/v1_candidate.py custody \
             --manifest "$verification_dir/hormuz-v1.0.0-candidate-manifest.json" \
             --archive "$verification_dir/hormuz-1.0.0.tar.gz" \
             --release-api "$verification_dir/release-api.json" \
             --immutable-api "$verification_dir/immutable-api.json" \
-            --state draft \
             --output "$verification_dir/custody-proof.json"
+          for asset in 'hormuz-1.0.0.tar.gz' 'hormuz-v1.0.0-candidate-manifest.json'; do
+            verified="false"
+            for attempt in $(seq 1 12); do
+              if gh release verify-asset "$CUSTODY_TAG" "$verification_dir/$asset" \
+                --repo "$GITHUB_REPOSITORY" \
+                --format json >"$verification_dir/${asset}.attestation-${attempt}.json" 2>"$verification_dir/${asset}.attestation-${attempt}.err"; then
+                verified="true"
+                break
+              fi
+              sleep 5
+            done
+            [[ "$verified" == "true" ]] || {
+              cat "$verification_dir/${asset}.attestation-${attempt}.err" >&2
+              echo "candidate release attestation was not verifiable: $asset" >&2
+              exit 1
+            }
+          done
           {
             echo "### Frozen v1.0.0 candidate"
             echo
-            echo "- Draft custody tag: \`$CUSTODY_TAG\`"
+            echo "- Immutable prerelease custody tag: \`$CUSTODY_TAG\`"
             echo "- Source commit: \`$GITHUB_SHA\`"
             echo "- Source archive: \`$ARTIFACT_DIGEST\`"
             echo "- Final \`v1.0.0\` tag created: no"

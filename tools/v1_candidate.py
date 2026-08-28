@@ -28,12 +28,14 @@ SCHEMA_ID = "hormuz.v1-candidate-manifest"
 SCHEMA_VERSION = 1
 PROOF_SCHEMA_ID = "hormuz.v1-candidate-custody-proof"
 PROMOTION_SCHEMA_ID = "hormuz.v1-candidate-promotion-readiness"
+FINAL_RELEASE_PROOF_SCHEMA_ID = "hormuz.v1-final-release-proof"
 EVIDENCE_SNAPSHOT_SCHEMA_ID = "hormuz.v1-candidate-evidence-snapshot"
 EXPECTED_REPOSITORY = "Xpounder-com/hormuz"
 TARGET_VERSION = "v1.0.0"
 PACKAGE_NAME = "hormuz"
 PACKAGE_VERSION = "1.0.0"
 FINAL_TAG = TARGET_VERSION
+FINAL_RELEASE_TITLE = "Hormuz v1.0.0"
 ARCHIVE_NAME = "hormuz-1.0.0.tar.gz"
 MANIFEST_NAME = "hormuz-v1.0.0-candidate-manifest.json"
 GATE_ISSUE = "https://github.com/Xpounder-com/hormuz/issues/173"
@@ -331,7 +333,7 @@ def create_manifest(
         "custody": {
             "repository": EXPECTED_REPOSITORY,
             "release_tag": _custody_tag(digest),
-            "release_state": "draft_candidate",
+            "release_state": "published_immutable_candidate",
             "immutable_releases_required": True,
             "asset_overwrite_permitted": False,
         },
@@ -413,7 +415,7 @@ def validate_manifest(value: object) -> dict[str, object]:
         custody["repository"] != EXPECTED_REPOSITORY
         or custody["release_tag"] != _custody_tag(digest)
         or _CUSTODY_TAG_RE.fullmatch(str(custody["release_tag"])) is None
-        or custody["release_state"] != "draft_candidate"
+        or custody["release_state"] != "published_immutable_candidate"
         or custody["immutable_releases_required"] is not True
         or custody["asset_overwrite_permitted"] is not False
     ):
@@ -546,14 +548,13 @@ def _validate_archive_binding(manifest: dict[str, object], archive: Path) -> dic
     return inspected
 
 
-def _validate_release(
+def _validate_candidate_release(
     release: object,
     immutable_settings: object,
     *,
     manifest: dict[str, object],
     manifest_payload: bytes,
     archive: dict[str, object],
-    state: str,
 ) -> str:
     if not isinstance(immutable_settings, dict) or immutable_settings.get("enabled") is not True:
         raise V1CandidateError("immutable_releases_not_enabled")
@@ -563,18 +564,14 @@ def _validate_release(
     custody = manifest["custody"]
     assert isinstance(candidate, dict) and isinstance(custody, dict)
     release_tag = release.get("tag_name")
-    expected_draft = state == "draft"
-    expected_immutable = state == "published"
-    allowed_tags = {custody["release_tag"], FINAL_TAG} if expected_draft else {FINAL_TAG}
     if (
-        state not in {"draft", "published"}
-        or release_tag not in allowed_tags
+        release_tag != custody["release_tag"]
         or release.get("target_commitish") != candidate["source_commit"]
-        or release.get("draft") is not expected_draft
-        or release.get("prerelease") is not False
-        or release.get("immutable") is not expected_immutable
+        or release.get("draft") is not False
+        or release.get("prerelease") is not True
+        or release.get("immutable") is not True
     ):
-        raise V1CandidateError("release_state_invalid")
+        raise V1CandidateError("candidate_release_state_invalid")
 
     assets = release.get("assets")
     if not isinstance(assets, list) or len(assets) != 2:
@@ -610,19 +607,16 @@ def _validate_custody_snapshot(
     archive_path: Path,
     release_path: Path,
     immutable_settings_path: Path,
-    *,
-    state: str,
 ) -> tuple[dict[str, object], dict[str, object], dict[str, object]]:
     manifest = validate_manifest(_decode_json(manifest_payload, label="manifest"))
     archive = _validate_archive_binding(manifest, archive_path)
     release = _read_json(release_path, label="release_api")
-    release_tag = _validate_release(
+    release_tag = _validate_candidate_release(
         release,
         _read_json(immutable_settings_path, label="immutable_api"),
         manifest=manifest,
         manifest_payload=manifest_payload,
         archive=archive,
-        state=state,
     )
     candidate = manifest["candidate"]
     custody = manifest["custody"]
@@ -630,7 +624,7 @@ def _validate_custody_snapshot(
     proof = {
         "schema_id": PROOF_SCHEMA_ID,
         "schema_version": 1,
-        "status": "frozen_in_draft_custody" if state == "draft" else "published_immutable",
+        "status": "frozen_in_immutable_candidate_custody",
         "repository": EXPECTED_REPOSITORY,
         "release_tag": release_tag,
         "custody_release_tag": custody["release_tag"],
@@ -641,7 +635,7 @@ def _validate_custody_snapshot(
         "archive_reverified": True,
         "release_asset_digests_verified": True,
         "immutable_releases_enabled": True,
-        "release_immutable": state == "published",
+        "release_immutable": True,
         "asset_overwrite_permitted": False,
         "promotion_rebuild_permitted": False,
     }
@@ -654,8 +648,6 @@ def validate_custody(
     archive_path: Path,
     release_path: Path,
     immutable_settings_path: Path,
-    *,
-    state: str,
 ) -> dict[str, object]:
     manifest_payload = _safe_read(manifest_path, maximum=MAX_JSON_BYTES, label="manifest")
     proof, _manifest, _release = _validate_custody_snapshot(
@@ -663,7 +655,6 @@ def validate_custody(
         archive_path,
         release_path,
         immutable_settings_path,
-        state=state,
     )
     return proof
 
@@ -721,7 +712,10 @@ def _validate_asset_chronology(
     release_created_at = _timestamp_value(
         release.get("created_at"), "candidate_release_created_at"
     )
-    if not frozen_at <= release_created_at <= run_updated_at:
+    release_published_at = _timestamp_value(
+        release.get("published_at"), "candidate_release_published_at"
+    )
+    if not frozen_at <= release_created_at <= release_published_at <= run_updated_at:
         raise V1CandidateError("candidate_release_chronology_invalid")
     assets = release.get("assets")
     assert isinstance(assets, list)
@@ -729,7 +723,7 @@ def _validate_asset_chronology(
         assert isinstance(asset, dict)
         created_at = _timestamp_value(asset.get("created_at"), "release_asset_created_at")
         updated_at = _timestamp_value(asset.get("updated_at"), "release_asset_updated_at")
-        if not release_created_at <= created_at <= updated_at <= run_updated_at:
+        if not release_created_at <= created_at <= updated_at <= release_published_at:
             raise V1CandidateError("release_asset_chronology_invalid")
 
 
@@ -812,8 +806,6 @@ def validate_promotion(
     immutable_settings_path: Path,
     freeze_run_path: Path,
     custody_tag_path: Path,
-    *,
-    state: str,
 ) -> dict[str, object]:
     manifest_payload = _safe_read(manifest_path, maximum=MAX_JSON_BYTES, label="manifest")
     custody_proof, manifest, release = _validate_custody_snapshot(
@@ -821,7 +813,6 @@ def validate_promotion(
         archive_path,
         release_path,
         immutable_settings_path,
-        state=state,
     )
     freeze_run = _read_json(freeze_run_path, label="freeze_run_api")
     freeze_run_url = _validate_freeze_run(freeze_run, manifest)
@@ -841,11 +832,7 @@ def validate_promotion(
     return {
         "schema_id": PROMOTION_SCHEMA_ID,
         "schema_version": 1,
-        "status": (
-            "eligible_for_exact_promotion"
-            if state == "draft"
-            else "published_exact_candidate_verified"
-        ),
+        "status": "eligible_for_metadata_promotion",
         "repository": EXPECTED_REPOSITORY,
         "release_tag": custody_proof["release_tag"],
         "custody_release_tag": custody["release_tag"],
@@ -863,9 +850,109 @@ def validate_promotion(
         "archive_reverified": True,
         "release_asset_digests_verified": True,
         "immutable_releases_enabled": True,
-        "release_immutable": state == "published",
-        "final_tag_creation_permitted": state == "draft",
+        "release_immutable": True,
+        "final_tag_creation_permitted": True,
         "asset_overwrite_permitted": False,
+        "promotion_rebuild_permitted": False,
+    }
+
+
+def _final_release_notes(
+    manifest: dict[str, object], gate_evidence_digest: str
+) -> str:
+    if _DIGEST_RE.fullmatch(gate_evidence_digest) is None:
+        raise V1CandidateError("gate_evidence_digest_invalid")
+    candidate = manifest["candidate"]
+    custody = manifest["custody"]
+    assert isinstance(candidate, dict) and isinstance(custody, dict)
+    candidate_tag = str(custody["release_tag"])
+    archive_url = (
+        f"https://github.com/{EXPECTED_REPOSITORY}/releases/download/"
+        f"{candidate_tag}/{ARCHIVE_NAME}"
+    )
+    manifest_url = (
+        f"https://github.com/{EXPECTED_REPOSITORY}/releases/download/"
+        f"{candidate_tag}/{MANIFEST_NAME}"
+    )
+    return (
+        "Hormuz v1.0.0 promotes the immutable, gate-tested source archive "
+        "without rebuilding or copying it.\n\n"
+        f"Canonical source archive: [{ARCHIVE_NAME}]({archive_url})\n\n"
+        f"Candidate manifest: [{MANIFEST_NAME}]({manifest_url})\n\n"
+        f"- Candidate tag: `{candidate_tag}`\n"
+        f"- Source archive: `{candidate['artifact_digest']}`\n"
+        f"- Gate evidence: `{gate_evidence_digest}`\n"
+        f"- Source commit: `{candidate['source_commit']}`\n\n"
+        "The final GitHub Release intentionally carries no copied assets; the "
+        "digest-addressed candidate release remains the canonical immutable custody object."
+    )
+
+
+def create_final_release_notes(
+    manifest_path: Path, evidence_path: Path
+) -> tuple[bytes, dict[str, object]]:
+    manifest = validate_manifest(_read_json(manifest_path, label="manifest"))
+    _gate_result, evidence_digest, _generated_at = _validate_gate_evidence(
+        evidence_path, manifest
+    )
+    payload = _final_release_notes(manifest, evidence_digest).encode("utf-8")
+    return payload, {
+        "schema_id": "hormuz.v1-final-release-notes",
+        "schema_version": 1,
+        "digest": _sha256(payload),
+        "size_bytes": len(payload),
+        "gate_evidence_digest": evidence_digest,
+    }
+
+
+def validate_final_release(
+    manifest_path: Path,
+    evidence_path: Path,
+    release_path: Path,
+    immutable_settings_path: Path,
+) -> dict[str, object]:
+    manifest = validate_manifest(_read_json(manifest_path, label="manifest"))
+    gate_result, evidence_digest, gate_generated_at = _validate_gate_evidence(
+        evidence_path, manifest
+    )
+    immutable_settings = _read_json(immutable_settings_path, label="immutable_api")
+    if immutable_settings.get("enabled") is not True:
+        raise V1CandidateError("immutable_releases_not_enabled")
+    release = _read_json(release_path, label="final_release_api")
+    candidate = manifest["candidate"]
+    custody = manifest["custody"]
+    assert isinstance(candidate, dict) and isinstance(custody, dict)
+    if (
+        release.get("tag_name") != FINAL_TAG
+        or release.get("target_commitish") != candidate["source_commit"]
+        or release.get("name") != FINAL_RELEASE_TITLE
+        or release.get("draft") is not False
+        or release.get("prerelease") is not False
+        or release.get("immutable") is not True
+        or release.get("assets") != []
+        or release.get("body") != _final_release_notes(manifest, evidence_digest)
+    ):
+        raise V1CandidateError("final_release_contract_invalid")
+    created_at = _timestamp_value(release.get("created_at"), "final_release_created_at")
+    published_at = _timestamp_value(
+        release.get("published_at"), "final_release_published_at"
+    )
+    gate_time = _timestamp_value(gate_generated_at, "gate_generated_at")
+    if not gate_time <= created_at <= published_at:
+        raise V1CandidateError("final_release_chronology_invalid")
+    return {
+        "schema_id": FINAL_RELEASE_PROOF_SCHEMA_ID,
+        "schema_version": 1,
+        "status": "published_metadata_for_exact_candidate",
+        "repository": EXPECTED_REPOSITORY,
+        "release_tag": FINAL_TAG,
+        "custody_release_tag": custody["release_tag"],
+        "source_commit": candidate["source_commit"],
+        "candidate_artifact_digest": candidate["artifact_digest"],
+        "gate_evidence_digest": evidence_digest,
+        "gate_status": gate_result["status"],
+        "release_immutable": True,
+        "release_assets_copied": False,
         "promotion_rebuild_permitted": False,
     }
 
@@ -883,12 +970,11 @@ def _parser() -> argparse.ArgumentParser:
     manifest.add_argument("--run-attempt", required=True, type=int)
     manifest.add_argument("--output", required=True, type=Path)
 
-    custody = commands.add_parser("custody", help="verify draft or published release custody")
+    custody = commands.add_parser("custody", help="verify immutable candidate custody")
     custody.add_argument("--manifest", required=True, type=Path)
     custody.add_argument("--archive", required=True, type=Path)
     custody.add_argument("--release-api", required=True, type=Path)
     custody.add_argument("--immutable-api", required=True, type=Path)
-    custody.add_argument("--state", choices=("draft", "published"), required=True)
     custody.add_argument("--output", required=True, type=Path)
 
     evidence_snapshot = commands.add_parser(
@@ -898,6 +984,22 @@ def _parser() -> argparse.ArgumentParser:
     evidence_snapshot.add_argument("--evidence", required=True, type=Path)
     evidence_snapshot.add_argument("--output", required=True, type=Path)
 
+    final_notes = commands.add_parser(
+        "final-notes", help="create deterministic metadata-only v1 release notes"
+    )
+    final_notes.add_argument("--manifest", required=True, type=Path)
+    final_notes.add_argument("--evidence", required=True, type=Path)
+    final_notes.add_argument("--output", required=True, type=Path)
+
+    final_release = commands.add_parser(
+        "final-release", help="verify the immutable metadata-only v1 release"
+    )
+    final_release.add_argument("--manifest", required=True, type=Path)
+    final_release.add_argument("--evidence", required=True, type=Path)
+    final_release.add_argument("--release-api", required=True, type=Path)
+    final_release.add_argument("--immutable-api", required=True, type=Path)
+    final_release.add_argument("--output", required=True, type=Path)
+
     promotion = commands.add_parser("promotion", help="bind real gate evidence to exact bytes")
     promotion.add_argument("--manifest", required=True, type=Path)
     promotion.add_argument("--archive", required=True, type=Path)
@@ -906,7 +1008,6 @@ def _parser() -> argparse.ArgumentParser:
     promotion.add_argument("--immutable-api", required=True, type=Path)
     promotion.add_argument("--freeze-run-api", required=True, type=Path)
     promotion.add_argument("--custody-tag-api", required=True, type=Path)
-    promotion.add_argument("--state", choices=("draft", "published"), required=True)
     promotion.add_argument("--output", required=True, type=Path)
     return parser
 
@@ -932,7 +1033,6 @@ def main(argv: list[str] | None = None) -> int:
                 args.archive,
                 args.release_api,
                 args.immutable_api,
-                state=args.state,
             )
         elif args.command == "evidence-snapshot":
             evidence_payload = _safe_read(
@@ -948,6 +1048,19 @@ def main(argv: list[str] | None = None) -> int:
                 "size_bytes": len(evidence_payload),
             }
             output_is_json = False
+        elif args.command == "final-notes":
+            notes_payload, result = create_final_release_notes(
+                args.manifest, args.evidence
+            )
+            _write_new_private_bytes(args.output, notes_payload)
+            output_is_json = False
+        elif args.command == "final-release":
+            result = validate_final_release(
+                args.manifest,
+                args.evidence,
+                args.release_api,
+                args.immutable_api,
+            )
         else:
             result = validate_promotion(
                 args.manifest,
@@ -957,7 +1070,6 @@ def main(argv: list[str] | None = None) -> int:
                 args.immutable_api,
                 args.freeze_run_api,
                 args.custody_tag_api,
-                state=args.state,
             )
         if output_is_json:
             _write_new_private_json(args.output, result)

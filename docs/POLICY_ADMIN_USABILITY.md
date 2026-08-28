@@ -71,19 +71,27 @@ exact commit has a successful post-merge CI run and its package version is
 exactly `1.0.0`. A rerun attempt is rejected, and only one freeze workflow run
 is permitted for a source commit. Recovering from a failed freeze therefore
 requires a new source commit and a newly computed candidate digest.
+Before that one build, the workflow uses the owner-supplied
+`V1_RELEASE_ADMIN_TOKEN` secret, scoped to read-only repository Administration,
+to verify the live settings. Immutable Releases must already be enabled and
+one active, no-bypass tag ruleset must protect both `refs/tags/v*` and
+`refs/tags/candidate-v1.0.0-*`. The ordinary per-run `GITHUB_TOKEN` performs
+the candidate release operation; the administration token cannot publish.
 
 The freeze workflow installs the exact pure-Python frontend and backend wheels
-from `requirements/v1-source-build.lock` with SHA-256 enforcement and without
-dependency resolution. It then invokes the source-distribution build exactly
-once with build isolation disabled. It validates the archive contents, computes
-its SHA-256 digest, and writes
+from `requirements/v1-source-build.lock` with SHA-256 enforcement, forced
+reinstallation, and no dependency resolution. Forced reinstallation ensures a
+preinstalled runner package cannot bypass download and hash verification. The
+workflow then invokes the source-distribution build exactly once with build
+isolation disabled. It validates the archive contents, computes its SHA-256
+digest, and writes
 the strict `hormuz.v1-candidate-manifest` contract. The manifest records the
 source commit, UTC freeze time, archive name and size, workflow run, digest,
 and the facts that overwriting and promotion-time rebuilding are forbidden.
 The manifest is written atomically with mode `0600` and refuses an existing,
 symlink, or special-file destination.
 
-Candidate custody uses a draft GitHub Release and a non-semver,
+Candidate custody uses a published immutable GitHub prerelease and a non-semver,
 digest-addressed tag such as
 `candidate-v1.0.0-` followed by the 64 lowercase SHA-256 hex characters. This
 avoids creating the final tag before the human gate passes and cannot trigger
@@ -91,8 +99,11 @@ the semantic-version OCI workflow. Copy the exact value from
 `custody.release_tag` in the manifest rather than typing it.
 The workflow attaches exactly two assets without `--clobber`: the source
 archive and its manifest. It then downloads both assets into a new directory
-and verifies their local and GitHub-reported digests. Existing candidate
-releases or assets are never replaced.
+and verifies their local and GitHub-reported digests, immutable state, and
+GitHub release attestations. Existing candidate releases or assets are never
+replaced. The prerelease is intentionally visible before the gate: it labels
+itself as a candidate, makes no v1 success claim, and closes the draft-asset
+mutation window before any participant session starts.
 
 Give every participant the exact archived source distribution and manifest.
 Before installation, verify the archive locally and compare the result with
@@ -105,7 +116,8 @@ shasum -a 256 hormuz-1.0.0.tar.gz
 Every session and the aggregate must carry that same `sha256:` value. Changing
 even one archived byte creates a different candidate digest. Evidence bound to
 the prior digest remains blocker history but cannot count for the changed
-candidate; run the affected cohort again against a newly frozen draft.
+candidate; run the affected cohort again against a newly frozen immutable
+candidate.
 
 After a real aggregate passes the validator, the repository owner checks out
 the manifest's exact frozen source commit and runs its checked-in promotion
@@ -123,7 +135,7 @@ Use `--output /private/path/promotion-proof` only when the owner needs to keep
 the owner-only downloaded artifacts and mechanical proof. The directory must
 not already exist. Without `--output`, temporary material is removed.
 
-The command downloads the draft assets and validates the real evidence against
+The command downloads the immutable candidate assets and validates the real evidence against
 their exact digest before it creates anything. It also queries the recorded
 Actions run and requires a successful first attempt of the canonical freeze
 workflow on protected `main`, at the manifest's source commit, with the freeze
@@ -135,21 +147,26 @@ promotion phase; the no-bypass tag-immutability ruleset also covers these
 digest-addressed candidate tags. The command then creates and pushes the
 protected annotated `v1.0.0` tag at that commit, waits for the existing signed
 OCI release workflow to succeed for the exact tag and commit, and downloads the
-draft assets again.
+immutable candidate assets again.
 An existing final tag is accepted only when it is annotated, targets that
 commit, was created no earlier than the validated aggregate, and its annotation
 binds both the archive digest and gate-evidence digest. Only after this second
-verification does the command associate the existing draft with `v1.0.0` and
-publish it. It downloads the published assets once more, requires GitHub to
-report the release immutable, and verifies GitHub's release attestations for
-both assets.
+verification does the command create a directly published, metadata-only
+immutable `v1.0.0` GitHub Release. Its deterministic notes link to the canonical
+archive and manifest under the digest-addressed candidate tag and repeat the
+source, candidate, and gate-evidence digests. The final release intentionally
+has no copied assets: this avoids GitHub's unprotected draft-asset interval and
+keeps the tested immutable candidate bytes as the single custody object. The
+command downloads that candidate once more, requires both releases to be
+immutable, and verifies GitHub's attestations for both candidate assets.
 
 There is no build or asset-upload operation in the promotion command. A
 partially completed promotion may be resumed only when the existing annotated
-tag, source commit, release assets, evidence digest, and OCI run still match.
+tag, source commit, immutable candidate assets, final metadata, evidence digest,
+and OCI run still match.
 Any mismatch fails closed. The digest-addressed custody tag remains a pointer
-to the tested source commit; the final release is associated only with the
-protected `v1.0.0` tag.
+to the tested source commit and its canonical source archive; the final release
+is a protected, immutable version alias rather than a second copy of the bytes.
 
 ## Setup boundary
 

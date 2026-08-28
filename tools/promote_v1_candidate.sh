@@ -24,8 +24,9 @@ Usage:
 
 The command verifies the real #173 gate, creates the protected annotated
 v1.0.0 tag, waits for the existing signed OCI release workflow, reverifies the
-same draft-release assets, and publishes that draft as an immutable release.
-It never builds, uploads, replaces, or overwrites a release asset.
+same immutable candidate assets, and publishes a metadata-only immutable final
+release that links to those exact bytes. It never builds, copies, uploads,
+replaces, or overwrites a release asset.
 EOF
 }
 
@@ -147,48 +148,35 @@ release_exists() {
   fail "release_lookup_failed"
 }
 
-snapshot_release() {
-  local tag="$1"
-  local directory="$2"
+snapshot_candidate() {
+  local directory="$1"
   mkdir -m 700 "$directory"
-  gh release download "$tag" \
+  gh release download "$candidate_tag" \
     --repo "$REPOSITORY" \
     --pattern "$ARCHIVE_NAME" \
     --pattern "$MANIFEST_NAME" \
     --dir "$directory"
-  gh api "/repos/$REPOSITORY/releases/tags/$tag" >"$directory/release-api.json"
+  gh api "/repos/$REPOSITORY/releases/tags/$candidate_tag" >"$directory/release-api.json"
   gh api "/repos/$REPOSITORY/immutable-releases" >"$directory/immutable-api.json"
 }
 
-read_release_state() {
-  python3 -c '
-import json, pathlib, sys
-value = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
-if value.get("draft") is True and value.get("immutable") is False:
-    print("draft")
-elif value.get("draft") is False and value.get("immutable") is True:
-    print("published")
-else:
-    print("invalid")
-' "$1"
+verify_live_tag_immutability() {
+  local ruleset_id
+  local contract
+  ruleset_id="$(gh api "/repos/$REPOSITORY/rulesets?includes_parents=true&per_page=100" --jq '[.[] | select(.name == "Immutable version tags" and .source_type == "Repository" and .target == "tag" and .enforcement == "active")] | if length == 1 then .[0].id else "" end')"
+  [[ "$ruleset_id" =~ ^[1-9][0-9]*$ ]] || fail "live_tag_immutability_ruleset_missing"
+  contract="$(gh api "/repos/$REPOSITORY/rulesets/$ruleset_id" --jq '(.bypass_actors == []) and (.conditions.ref_name.exclude == []) and ((.conditions.ref_name.include | sort) == (["refs/tags/candidate-v1.0.0-*", "refs/tags/v*"] | sort)) and (([.rules[].type] | sort) == (["deletion", "non_fast_forward", "update"] | sort))')"
+  [[ "$contract" == "true" ]] || fail "live_tag_immutability_contract_invalid"
 }
 
-initial_lookup="$work_dir/initial-release-lookup.json"
-initial_error="$work_dir/initial-release-lookup.err"
-release_tag="$candidate_tag"
-if ! release_exists "$candidate_tag" "$initial_lookup" "$initial_error"; then
-  release_tag="$FINAL_TAG"
-  release_exists \
-    "$FINAL_TAG" \
-    "$work_dir/final-release-lookup.json" \
-    "$work_dir/final-release-lookup.err" \
-    || fail "candidate_release_not_found"
-fi
-
 initial_dir="$work_dir/initial-verification"
-snapshot_release "$release_tag" "$initial_dir"
-initial_state="$(read_release_state "$initial_dir/release-api.json")"
-[[ "$initial_state" != "invalid" ]] || fail "release_state_invalid"
+verify_live_tag_immutability
+release_exists \
+  "$candidate_tag" \
+  "$work_dir/initial-release-lookup.json" \
+  "$work_dir/initial-release-lookup.err" \
+  || fail "candidate_release_not_found"
+snapshot_candidate "$initial_dir"
 manifest_source_commit="$(python3 -c 'import json, pathlib, sys; print(json.loads(pathlib.Path(sys.argv[1]).read_text())["candidate"]["source_commit"])' "$initial_dir/$MANIFEST_NAME")"
 [[ "$manifest_source_commit" =~ ^[0-9a-f]{40}$ ]] || fail "manifest_source_commit_invalid"
 [[ "$manifest_source_commit" == "$checkout_commit" ]] \
@@ -213,7 +201,6 @@ python3 "$tool" promotion \
   --immutable-api "$initial_dir/immutable-api.json" \
   --freeze-run-api "$initial_dir/freeze-run-api.json" \
   --custody-tag-api "$initial_dir/custody-tag-api.json" \
-  --state "$initial_state" \
   --output "$initial_dir/promotion-readiness.json" >/dev/null
 
 source_commit="$(python3 -c 'import json, pathlib, sys; print(json.loads(pathlib.Path(sys.argv[1]).read_text())["source_commit"])' "$initial_dir/promotion-readiness.json")"
@@ -244,9 +231,6 @@ if any(value.get(key) != expected_value for key, expected_value in expected.item
 }
 
 assert_readiness_binding "$initial_dir/promotion-readiness.json"
-if [[ "$initial_state" == "published" ]]; then
-  [[ "$release_tag" == "$FINAL_TAG" ]] || fail "published_release_tag_invalid"
-fi
 
 verify_release_attestations() {
   local tag="$1"
@@ -268,6 +252,8 @@ verify_release_attestations() {
     done
   done
 }
+
+verify_release_attestations "$candidate_tag" "$initial_dir"
 
 validate_remote_final_tag() {
   local ref_path="$1"
@@ -329,6 +315,7 @@ raise SystemExit(0 if datetime.now(timezone.utc) >= gate else 2)
 
 final_ref="$work_dir/final-tag-ref.json"
 final_ref_error="$work_dir/final-tag-ref.err"
+verify_live_tag_immutability
 if gh api "/repos/$REPOSITORY/git/ref/tags/$FINAL_TAG" >"$final_ref" 2>"$final_ref_error"; then
   validate_remote_final_tag "$final_ref" "$work_dir/final-tag-object.json"
 else
@@ -336,7 +323,6 @@ else
     cat "$final_ref_error" >&2
     fail "final_tag_lookup_failed"
   fi
-  [[ "$initial_state" != "published" ]] || fail "published_final_tag_missing"
   if git -C "$repository_root" show-ref --verify --quiet "refs/tags/$FINAL_TAG"; then
     [[ "$(git -C "$repository_root" cat-file -t "refs/tags/$FINAL_TAG")" == "tag" ]] \
       || fail "local_final_tag_not_annotated"
@@ -413,36 +399,11 @@ if matches:
 
 wait_for_signed_oci
 
-if [[ "$initial_state" == "published" ]]; then
-  published_resume_dir="$work_dir/published-resume-reverification"
-  snapshot_release "$FINAL_TAG" "$published_resume_dir"
-  [[ "$(read_release_state "$published_resume_dir/release-api.json")" == "published" ]] \
-    || fail "published_resume_release_invalid"
-  snapshot_provenance "$published_resume_dir"
-  python3 "$tool" promotion \
-    --manifest "$published_resume_dir/$MANIFEST_NAME" \
-    --archive "$published_resume_dir/$ARCHIVE_NAME" \
-    --evidence "$pinned_evidence_path" \
-    --release-api "$published_resume_dir/release-api.json" \
-    --immutable-api "$published_resume_dir/immutable-api.json" \
-    --freeze-run-api "$published_resume_dir/freeze-run-api.json" \
-    --custody-tag-api "$published_resume_dir/custody-tag-api.json" \
-    --state published \
-    --output "$published_resume_dir/promotion-readiness.json" >/dev/null
-  assert_readiness_binding "$published_resume_dir/promotion-readiness.json"
-  refresh_and_validate_final_tag "published-resume"
-  verify_release_attestations "$FINAL_TAG" "$published_resume_dir"
-  printf 'v1.0.0 already published from exact candidate %s\n' "$candidate_digest"
-  report_proof_location
-  exit 0
-fi
-
-# Re-download and revalidate after the signed OCI workflow. These are the bytes
-# that will be published; no build or upload command exists in this path.
+# Re-download and revalidate the immutable candidate after signed OCI succeeds.
+# The final release links to these bytes; it never stages or copies an asset.
 prepublish_dir="$work_dir/prepublish-reverification"
-snapshot_release "$release_tag" "$prepublish_dir"
-[[ "$(read_release_state "$prepublish_dir/release-api.json")" == "draft" ]] \
-  || fail "candidate_release_not_draft"
+verify_live_tag_immutability
+snapshot_candidate "$prepublish_dir"
 snapshot_provenance "$prepublish_dir"
 python3 "$tool" promotion \
   --manifest "$prepublish_dir/$MANIFEST_NAME" \
@@ -452,51 +413,42 @@ python3 "$tool" promotion \
   --immutable-api "$prepublish_dir/immutable-api.json" \
   --freeze-run-api "$prepublish_dir/freeze-run-api.json" \
   --custody-tag-api "$prepublish_dir/custody-tag-api.json" \
-  --state draft \
   --output "$prepublish_dir/promotion-readiness.json" >/dev/null
 assert_readiness_binding "$prepublish_dir/promotion-readiness.json"
 refresh_and_validate_final_tag "prepublish"
+verify_release_attestations "$candidate_tag" "$prepublish_dir"
 
-if [[ "$release_tag" == "$candidate_tag" ]]; then
-  gh release edit "$candidate_tag" \
+final_notes_path="$work_dir/final-release-notes.md"
+python3 "$tool" final-notes \
+  --manifest "$prepublish_dir/$MANIFEST_NAME" \
+  --evidence "$pinned_evidence_path" \
+  --output "$final_notes_path" \
+  >"$work_dir/final-release-notes-proof.json"
+
+final_release_api="$work_dir/final-release-api.json"
+final_release_error="$work_dir/final-release-api.err"
+if ! release_exists "$FINAL_TAG" "$final_release_api" "$final_release_error"; then
+  gh release create "$FINAL_TAG" \
     --repo "$REPOSITORY" \
-    --tag "$FINAL_TAG" \
     --target "$source_commit" \
     --verify-tag \
-    --title "Hormuz v1.0.0"
-  release_tag="$FINAL_TAG"
+    --title "Hormuz v1.0.0" \
+    --notes-file "$final_notes_path" \
+    --latest \
+    >"$work_dir/final-release-url.txt"
 fi
-
-final_draft_dir="$work_dir/final-draft-reverification"
-snapshot_release "$FINAL_TAG" "$final_draft_dir"
-[[ "$(read_release_state "$final_draft_dir/release-api.json")" == "draft" ]] \
-  || fail "final_release_not_draft"
-snapshot_provenance "$final_draft_dir"
-python3 "$tool" promotion \
-  --manifest "$final_draft_dir/$MANIFEST_NAME" \
-  --archive "$final_draft_dir/$ARCHIVE_NAME" \
-  --evidence "$pinned_evidence_path" \
-  --release-api "$final_draft_dir/release-api.json" \
-  --immutable-api "$final_draft_dir/immutable-api.json" \
-  --freeze-run-api "$final_draft_dir/freeze-run-api.json" \
-  --custody-tag-api "$final_draft_dir/custody-tag-api.json" \
-  --state draft \
-  --output "$final_draft_dir/promotion-readiness.json" >/dev/null
-assert_readiness_binding "$final_draft_dir/promotion-readiness.json"
-refresh_and_validate_final_tag "final-draft"
-
-gh release edit "$FINAL_TAG" \
-  --repo "$REPOSITORY" \
-  --draft=false \
-  --latest \
-  --verify-tag
 
 publication_ready="false"
 for attempt in $(seq 1 30); do
   gh api "/repos/$REPOSITORY/releases/tags/$FINAL_TAG" \
     >"$work_dir/published-release-${attempt}.json"
-  if [[ "$(read_release_state "$work_dir/published-release-${attempt}.json")" == "published" ]]; then
+  if python3 -c '
+import json, pathlib, sys
+value = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+raise SystemExit(0 if value.get("draft") is False and value.get("immutable") is True else 2)
+' "$work_dir/published-release-${attempt}.json"; then
     publication_ready="true"
+    final_release_api="$work_dir/published-release-${attempt}.json"
     break
   fi
   sleep 2
@@ -504,7 +456,8 @@ done
 [[ "$publication_ready" == "true" ]] || fail "immutable_publication_not_observed"
 
 published_dir="$work_dir/published-reverification"
-snapshot_release "$FINAL_TAG" "$published_dir"
+verify_live_tag_immutability
+snapshot_candidate "$published_dir"
 snapshot_provenance "$published_dir"
 python3 "$tool" promotion \
   --manifest "$published_dir/$MANIFEST_NAME" \
@@ -514,11 +467,16 @@ python3 "$tool" promotion \
   --immutable-api "$published_dir/immutable-api.json" \
   --freeze-run-api "$published_dir/freeze-run-api.json" \
   --custody-tag-api "$published_dir/custody-tag-api.json" \
-  --state published \
   --output "$published_dir/promotion-readiness.json" >/dev/null
 assert_readiness_binding "$published_dir/promotion-readiness.json"
 refresh_and_validate_final_tag "published"
-verify_release_attestations "$FINAL_TAG" "$published_dir"
+python3 "$tool" final-release \
+  --manifest "$published_dir/$MANIFEST_NAME" \
+  --evidence "$pinned_evidence_path" \
+  --release-api "$final_release_api" \
+  --immutable-api "$published_dir/immutable-api.json" \
+  --output "$published_dir/final-release-proof.json" >/dev/null
+verify_release_attestations "$candidate_tag" "$published_dir"
 
-printf 'published immutable v1.0.0 from exact candidate %s\n' "$candidate_digest"
+printf 'published immutable v1.0.0 metadata for exact candidate %s\n' "$candidate_digest"
 report_proof_location
