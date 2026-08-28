@@ -74,8 +74,8 @@ requires a new source commit and a newly computed candidate digest.
 The repository variable `V1_RELEASE_STEWARD` must contain the one GitHub login
 authorized to perform this destructive dispatch. A read-only authorization job
 requires both the original actor and triggering actor to equal that login
-before the write-capable freeze job can start. The freeze job also targets the
-protected `v1-release-custody` GitHub environment. That environment must allow
+before the publication-capable freeze job can start. The freeze job also
+targets the protected `v1-release-custody` GitHub environment, which must allow
 only protected branches and require exactly that steward as its reviewer; an
 unauthorized failed dispatch is excluded from the one-run count and cannot
 poison a later legitimate freeze. The one-run decision is based on the recorded
@@ -83,20 +83,41 @@ successful authorization job, not the steward's current login. Rotating the
 steward therefore never makes a previously authorized attempt disappear: that
 source commit is consumed and recovery requires a new commit even if no archive
 was ultimately published.
-Before that one build, the workflow uses the owner-supplied
-`V1_RELEASE_ADMIN_TOKEN` secret, scoped to read-only repository Administration
-and Environments, to verify the live settings. Immutable Releases must already
-be enabled, the protected environment must match the steward contract, and one
-active, no-bypass tag ruleset must protect both `refs/tags/v*` and
-`refs/tags/candidate-v1.0.0-*`. A separate creation ruleset permits the GitHub
-Actions integration to create only `candidate-v1.0.0-*` tags, while repository
-governance requires the steward-gated freeze job to be the sole job with an
-effective contents-write grant. The verifier resolves workflow- and job-level
-permission maps, including `write-all`, and fails closed on unsupported YAML
-forms. Human creation of candidate tags is denied; final `v*`
-tag creation remains organization-administrator-only. The ordinary per-run
-`GITHUB_TOKEN` performs the candidate release operation; the administration
-token cannot publish.
+Before that one build, the workflow requires two distinct owner-supplied
+environment secrets. `V1_RELEASE_ADMIN_TOKEN` is scoped to read-only repository
+Administration and Environments and verifies the live settings.
+`V1_RELEASE_PUBLISH_TOKEN` is a short-lived, fine-grained personal access token
+for this repository with Contents read/write and no Administration or
+Environments permission. Its owner must be an organization administrator so it
+can pass the candidate-tag creation ruleset. The workflow injects the publisher
+credential only into the candidate-publication step; it fails before building
+if either token is absent or both secret names contain the same
+credential. Revoke or rotate the publisher token after a successful freeze.
+Before checkout or build, the workflow also lists the protected environment's
+secret metadata and requires exactly `V1_RELEASE_ADMIN_TOKEN` and
+`V1_RELEASE_PUBLISH_TOKEN`. A repository- or organization-level secret with the
+same name cannot satisfy that check; both custody credentials must be stored in
+the reviewed environment.
+The administration token's owner must also be an organization administrator;
+GitHub otherwise withholds ruleset bypass actors from the read response and the
+workflow fails closed before the archive build.
+
+Immutable Releases must already be enabled, the protected environment must
+match the steward contract, and one active, no-bypass tag ruleset must protect
+both `refs/tags/v*` and `refs/tags/candidate-v1.0.0-*`. A separate creation
+ruleset permits only organization administrators to create
+`candidate-v1.0.0-*` tags. This is the repository's actual GitHub trust boundary:
+the built-in Actions integration cannot be installed as a repository-ruleset
+bypass actor. The steward-gated workflow is the prescribed candidate path, but
+organization administrators remain trusted repository governors.
+
+Every workflow-issued `GITHUB_TOKEN`, including the freeze job's token, remains
+contents-read-only. The governance verifier resolves workflow- and job-level
+permission maps, including `write-all`, and fails closed on any effective
+contents-write grant or unsupported YAML form. The read-only administration
+token cannot publish, and the publisher token is not used for ruleset or
+environment inspection. Final `v*` tag creation remains
+organization-administrator-only.
 
 The freeze workflow installs the exact pure-Python frontend and backend wheels
 from `requirements/v1-source-build.lock` with SHA-256 enforcement, forced

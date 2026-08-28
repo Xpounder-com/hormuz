@@ -1116,7 +1116,7 @@ class V1CandidateTests(unittest.TestCase):
         self.assertIn("TRIGGERING_ACTOR: ${{ github.triggering_actor }}", workflow)
         self.assertIn("needs: authorize", workflow)
         self.assertIn("environment: v1-release-custody", workflow)
-        self.assertLess(workflow.index("authorize:"), workflow.index("contents: write"))
+        self.assertNotIn("contents: write", workflow)
         self.assertIn("attestations: read", workflow)
         self.assertEqual(workflow.count("python -m build --sdist"), 1)
         self.assertIn("requirements/v1-source-build.lock", workflow)
@@ -1139,17 +1139,62 @@ class V1CandidateTests(unittest.TestCase):
         self.assertIn("create a new commit instead of rebuilding", workflow)
         self.assertIn("immutable-releases", workflow)
         self.assertIn("V1_RELEASE_ADMIN_TOKEN", workflow)
+        self.assertIn("V1_RELEASE_PUBLISH_TOKEN", workflow)
         self.assertIn("Administration and Environments permissions", workflow)
-        self.assertIn("Steward workflow candidate tags", workflow)
+        self.assertIn("Owner-created candidate tags", workflow)
         self.assertIn("candidate_creation_rule_contract", workflow)
-        self.assertIn('"actor_id":15368', workflow)
+        self.assertIn('"actor_id":null', workflow)
+        self.assertIn('"actor_type":"OrganizationAdmin"', workflow)
         self.assertIn("environments/v1-release-custody", workflow)
+        self.assertIn(
+            "environments/v1-release-custody/secrets?per_page=100", workflow
+        )
+        self.assertIn("environment_secret_names", workflow)
+        self.assertIn("only the two release custody secrets", workflow)
         self.assertIn('item.get("type") == "required_reviewers"', workflow)
         self.assertIn('deployment.get("protected_branches") is True', workflow)
         self.assertIn('reviewer") or {}).get("login") == steward', workflow)
         self.assertIn('.source_type == "Repository"', workflow)
         self.assertIn("refs/tags/candidate-v1.0.0-*", workflow)
         self.assertIn("live no-bypass immutability", workflow)
+        self.assertIn("update_allows_fetch_and_merge // false", workflow)
+        self.assertEqual(
+            workflow.count(
+                "GH_ADMIN_TOKEN: ${{ secrets.V1_RELEASE_ADMIN_TOKEN }}"
+            ),
+            3,
+        )
+        self.assertEqual(workflow.count("secrets.V1_RELEASE_PUBLISH_TOKEN"), 3)
+        self.assertEqual(
+            workflow.count(
+                "GH_TOKEN: ${{ secrets.V1_RELEASE_PUBLISH_TOKEN }}"
+            ),
+            1,
+        )
+        self.assertIn(
+            "PUBLISH_TOKEN_CONFIGURED: ${{ secrets.V1_RELEASE_PUBLISH_TOKEN != '' }}",
+            workflow,
+        )
+        self.assertIn(
+            (
+                "RELEASE_TOKENS_SEPARATED: "
+                "${{ secrets.V1_RELEASE_ADMIN_TOKEN != "
+                "secrets.V1_RELEASE_PUBLISH_TOKEN }}"
+            ),
+            workflow,
+        )
+        publish_start = workflow.index(
+            "- name: Create one digest-addressed immutable candidate prerelease"
+        )
+        publish_end = workflow.index(
+            "- name: Re-download and prove exact immutable candidate custody"
+        )
+        publish_step = workflow[publish_start:publish_end]
+        self.assertIn(
+            "GH_TOKEN: ${{ secrets.V1_RELEASE_PUBLISH_TOKEN }}", publish_step
+        )
+        self.assertNotIn("secrets.GITHUB_TOKEN", publish_step)
+        self.assertNotIn("V1_RELEASE_ADMIN_TOKEN", publish_step)
         self.assertIn('gh release create "$CUSTODY_TAG"', workflow)
         self.assertIn("--prerelease", workflow)
         self.assertIn("--latest=false", workflow)
@@ -1347,6 +1392,7 @@ class V1CandidateTests(unittest.TestCase):
         self.assertIn("gate_evidence_not_yet_current", script)
         self.assertIn("live_tag_immutability_contract_invalid", script)
         self.assertIn('.source_type == "Repository"', script)
+        self.assertIn("update_allows_fetch_and_merge // false", script)
 
     def test_source_distribution_contract_includes_custody_tools(self) -> None:
         manifest = (ROOT / "MANIFEST.in").read_text()
