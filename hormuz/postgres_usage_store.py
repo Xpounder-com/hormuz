@@ -12,7 +12,7 @@ from .audit_chain import (
     AuditChainAnchorStatus,
     AuditChainError,
     AuditChainHead,
-    audit_chain_checkpoint_position,
+    AuditChainSource,
     audit_chain_checkpoint_summary,
     build_audit_chain_entry,
     canonical_json_text,
@@ -45,10 +45,18 @@ from ._persistence import (
     ReservationDenied,
     ReservationScope,
     SecretTotals,
+    AuditChainEntryInput,
+    AuditChainSourceEventInput,
+    AuditChainVerificationInputs,
+    audit_chain_source_event_map,
     build_request_attempt_event,
     build_request_attempt_root,
     is_sha256_digest,
+    normalize_audit_chain_checkpoint_input,
+    normalize_audit_chain_entry_input,
+    normalize_audit_chain_epoch_input,
     normalize_audit_chain_head,
+    normalize_audit_chain_source_event_input,
     normalize_request_attempt_result,
     normalize_request_attempt_state,
     monthly_usage_bounds,
@@ -1640,8 +1648,9 @@ class PostgresUsageStore:
         cursor: Any,
         *,
         organization_id: str,
-    ) -> dict[str, dict[str, object]]:
-        sources: dict[str, dict[str, object]] = {}
+    ) -> tuple[AuditChainSourceEventInput, ...]:
+        sources: list[AuditChainSourceEventInput] = []
+        source_identities: set[AuditChainSource] = set()
         cursor.execute(
             f"""
             SELECT
@@ -1677,20 +1686,28 @@ class PostgresUsageStore:
                 event = usage_audit_event(dict(row))
             except EvidenceStorageError as error:
                 raise PostgresStorageError(error.code) from None
-            event_id = event.get("id")
-            if not isinstance(event_id, str) or event_id in sources:
+            source = normalize_audit_chain_source_event_input(
+                event,
+                error_factory=PostgresStorageError,
+            )
+            if source.source in source_identities:
                 raise PostgresStorageError("audit_chain_source_event_malformed")
-            sources[event_id] = event
+            source_identities.add(source.source)
+            sources.append(source)
         for row in secret_rows:
             try:
                 event = security_audit_event(dict(row))
             except EvidenceStorageError as error:
                 raise PostgresStorageError(error.code) from None
-            event_id = event.get("id")
-            if not isinstance(event_id, str) or event_id in sources:
+            source = normalize_audit_chain_source_event_input(
+                event,
+                error_factory=PostgresStorageError,
+            )
+            if source.source in source_identities:
                 raise PostgresStorageError("audit_chain_source_event_malformed")
-            sources[event_id] = event
-        return sources
+            source_identities.add(source.source)
+            sources.append(source)
+        return tuple(sources)
 
     @staticmethod
     def _custody_audit_chain_source_events_in_cursor(
@@ -1698,7 +1715,7 @@ class PostgresUsageStore:
         *,
         organization_id: str,
         entries: list[Mapping[str, object]],
-    ) -> dict[tuple[str, int, str], dict[str, object]]:
+    ) -> tuple[AuditChainSourceEventInput, ...]:
         """Load v2 custody sources through the bounded verifier function.
 
         The ordinary gateway runtime intentionally has no direct read privilege
@@ -1707,7 +1724,8 @@ class PostgresUsageStore:
         verification content-free and tenant scoped.
         """
 
-        sources: dict[tuple[str, int, str], dict[str, object]] = {}
+        sources: list[AuditChainSourceEventInput] = []
+        source_identities: set[AuditChainSource] = set()
         for entry in entries:
             if entry.get("entry_schema_version") != 2:
                 continue
@@ -1721,8 +1739,12 @@ class PostgresUsageStore:
                 or not isinstance(source_event_id, str)
             ):
                 raise PostgresStorageError("audit_chain_entry_malformed")
-            key = (source_schema_id, source_schema_version, source_event_id)
-            if key in sources:
+            source = AuditChainSource(
+                schema_id=source_schema_id,
+                schema_version=source_schema_version,
+                event_id=source_event_id,
+            )
+            if source in source_identities:
                 raise PostgresStorageError("audit_chain_entry_malformed")
             cursor.execute(
                 """
@@ -1740,8 +1762,15 @@ class PostgresUsageStore:
                 raise PostgresStorageError("audit_chain_source_event_malformed") from None
             if not isinstance(parsed, dict):
                 raise PostgresStorageError("audit_chain_source_event_malformed")
-            sources[key] = parsed
-        return sources
+            sources.append(
+                normalize_audit_chain_source_event_input(
+                    parsed,
+                    source=source,
+                    error_factory=PostgresStorageError,
+                )
+            )
+            source_identities.add(source)
+        return tuple(sources)
 
     def verify_audit_chain(
         self,
@@ -1750,22 +1779,11 @@ class PostgresUsageStore:
         checkpoint: Mapping[str, object] | None = None,
     ) -> AuditChainHead:
         organization = self._organization(organization_id)
-        checkpoint_tuple: tuple[int, int, int, str] | None = None
-        if checkpoint is not None:
-            try:
-                _, checkpoint_organization, checkpoint_version, checkpoint_epoch, checkpoint_sequence, checkpoint_digest = (
-                    audit_chain_checkpoint_position(checkpoint)
-                )
-            except AuditChainError as error:
-                raise PostgresStorageError(error.code) from None
-            if checkpoint_organization != organization:
-                raise PostgresStorageError("audit_chain_tenant_mismatch")
-            checkpoint_tuple = (
-                checkpoint_version,
-                checkpoint_epoch,
-                checkpoint_sequence,
-                checkpoint_digest,
-            )
+        checkpoint_input = normalize_audit_chain_checkpoint_input(
+            checkpoint,
+            organization_id=organization,
+            error_factory=PostgresStorageError,
+        )
         with self._transaction(organization) as connection:
             with connection.cursor() as cursor:
                 # Hold a shared lock on the tenant head for this full
@@ -1780,7 +1798,7 @@ class PostgresUsageStore:
                     for_share=True,
                 )
                 if head is None:
-                    if checkpoint_tuple is not None:
+                    if checkpoint_input is not None:
                         raise PostgresStorageError("audit_chain_checkpoint_mismatch")
                     return AuditChainHead(organization, 1, 1, 0, None)
                 cursor.execute(
@@ -1793,7 +1811,7 @@ class PostgresUsageStore:
                     """,
                     (organization,),
                 )
-                epochs = cursor.fetchall()
+                epoch_rows = cursor.fetchall()
                 cursor.execute(
                     f"""
                     SELECT chain_version, chain_epoch, sequence, entry_schema_id,
@@ -1805,45 +1823,67 @@ class PostgresUsageStore:
                     """,
                     (organization,),
                 )
-                entries = cursor.fetchall()
-                sources = self._audit_chain_source_events_in_cursor(cursor, organization_id=organization)
-                custody_sources = self._custody_audit_chain_source_events_in_cursor(
+                entry_rows = cursor.fetchall()
+                source_events = self._audit_chain_source_events_in_cursor(
                     cursor,
                     organization_id=organization,
-                    entries=entries,
                 )
-        if head.chain_version != AUDIT_CHAIN_VERSION or head.chain_epoch < 1 or head.sequence < 0:
+                custody_source_events = self._custody_audit_chain_source_events_in_cursor(
+                    cursor,
+                    organization_id=organization,
+                    entries=entry_rows,
+                )
+        inputs = AuditChainVerificationInputs(
+            organization_id=organization,
+            head=head,
+            epochs=tuple(
+                normalize_audit_chain_epoch_input(row, error_factory=PostgresStorageError)
+                for row in epoch_rows
+            ),
+            entries=tuple(
+                normalize_audit_chain_entry_input(
+                    row,
+                    organization_id=organization,
+                    error_factory=PostgresStorageError,
+                )
+                for row in entry_rows
+            ),
+            source_events=source_events + custody_source_events,
+            checkpoint=checkpoint_input,
+        )
+        if inputs.head.chain_version != AUDIT_CHAIN_VERSION or inputs.head.chain_epoch < 1 or inputs.head.sequence < 0:
             raise PostgresStorageError("audit_chain_head_malformed")
-        if head.head_digest is not None and not is_sha256_digest(head.head_digest):
+        if inputs.head.head_digest is not None and not is_sha256_digest(inputs.head.head_digest):
             raise PostgresStorageError("audit_chain_head_malformed")
-        if checkpoint_tuple is not None and checkpoint_tuple[0] != head.chain_version:
+        if inputs.checkpoint is not None and inputs.checkpoint.chain_version != inputs.head.chain_version:
             raise PostgresStorageError("audit_chain_checkpoint_mismatch")
 
-        entries_by_epoch: dict[int, list[Mapping[str, object]]] = {}
-        for row in entries:
-            entries_by_epoch.setdefault(int(row["chain_epoch"]), []).append(row)
+        sources = audit_chain_source_event_map(
+            inputs.source_events,
+            error_factory=PostgresStorageError,
+        )
+        entries_by_epoch: dict[int, list[AuditChainEntryInput]] = {}
+        for entry_input in inputs.entries:
+            entries_by_epoch.setdefault(entry_input.chain_epoch, []).append(entry_input)
         verified: dict[tuple[int, int], str] = {}
         active_epoch_seen = False
         checkpoint_matched = False
         previous_epoch_number = 0
-        for epoch in epochs:
-            try:
-                chain_version = int(epoch["chain_version"])
-                epoch_number = int(epoch["chain_epoch"])
-            except (TypeError, ValueError):
-                raise PostgresStorageError("audit_chain_epoch_malformed") from None
+        for epoch in inputs.epochs:
+            chain_version = epoch.chain_version
+            epoch_number = epoch.chain_epoch
             if (
-                chain_version != head.chain_version
+                chain_version != inputs.head.chain_version
                 or epoch_number < 1
                 or epoch_number <= previous_epoch_number
-                or epoch_number > head.chain_epoch
+                or epoch_number > inputs.head.chain_epoch
             ):
                 raise PostgresStorageError("audit_chain_epoch_malformed")
             previous_epoch_number = epoch_number
-            reason_code = epoch["reason_code"]
-            predecessor_digest = epoch["predecessor_head_digest"]
-            predecessor_epoch = epoch["predecessor_chain_epoch"]
-            predecessor_sequence = epoch["predecessor_sequence"]
+            reason_code = epoch.reason_code
+            predecessor_digest = epoch.predecessor_head_digest
+            predecessor_epoch = epoch.predecessor_chain_epoch
+            predecessor_sequence = epoch.predecessor_sequence
             if epoch_number == 1:
                 if (
                     reason_code != "initial_adoption"
@@ -1870,91 +1910,47 @@ class PostgresUsageStore:
                 if predecessor is not None:
                     if not hmac.compare_digest(predecessor, predecessor_digest):
                         raise PostgresStorageError("audit_chain_predecessor_invalid")
-                elif checkpoint_tuple is None or checkpoint_tuple != (
-                    chain_version,
-                    predecessor_epoch,
-                    predecessor_sequence,
-                    predecessor_digest,
+                elif (
+                    inputs.checkpoint is None
+                    or inputs.checkpoint.chain_version != chain_version
+                    or inputs.checkpoint.chain_epoch != predecessor_epoch
+                    or inputs.checkpoint.sequence != predecessor_sequence
+                    or inputs.checkpoint.head_digest != predecessor_digest
                 ):
                     raise PostgresStorageError("audit_chain_checkpoint_required")
                 else:
                     checkpoint_matched = True
                 previous_digest = predecessor_digest
             expected_sequence = 1
-            for row in entries_by_epoch.get(epoch_number, []):
+            for entry_input in entries_by_epoch.get(epoch_number, []):
                 try:
-                    parsed_event = json.loads(str(row["event_json"]))
-                    if not isinstance(parsed_event, dict):
-                        raise ValueError
-                    entry: dict[str, object] = {
-                        "schema_id": row["entry_schema_id"],
-                        "schema_version": row["entry_schema_version"],
-                        "organization_id": organization,
-                        "chain_version": row["chain_version"],
-                        "chain_epoch": row["chain_epoch"],
-                        "sequence": row["sequence"],
-                        "previous_digest": row["previous_digest"],
-                        "event_digest": row["event_digest"],
-                        "event": parsed_event,
-                    }
-                    entry_schema_version = row["entry_schema_version"]
-                    if entry_schema_version == 1:
-                        event_id = parsed_event.get("id")
-                        if not isinstance(event_id, str) or row["event_id"] != event_id:
-                            raise AuditChainError("audit_chain_entry_malformed")
-                        source_event = sources.get(event_id)
-                    elif entry_schema_version == 2:
-                        source_schema_id = row["source_schema_id"]
-                        source_schema_version = row["source_schema_version"]
-                        source_event_id = row["source_event_id"]
-                        if (
-                            not isinstance(source_schema_id, str)
-                            or isinstance(source_schema_version, bool)
-                            or not isinstance(source_schema_version, int)
-                            or not isinstance(source_event_id, str)
-                            or row["event_id"] != source_event_id
-                        ):
-                            raise AuditChainError("audit_chain_entry_malformed")
-                        entry.update(
-                            {
-                                "source_schema_id": source_schema_id,
-                                "source_schema_version": source_schema_version,
-                                "source_event_id": source_event_id,
-                            }
-                        )
-                        source_event = custody_sources.get(
-                            (source_schema_id, source_schema_version, source_event_id)
-                        )
-                    else:
-                        raise AuditChainError("audit_chain_entry_schema_unsupported")
                     digest = verify_audit_chain_entry(
-                        entry,
-                        expected_organization_id=organization,
+                        entry_input.entry,
+                        expected_organization_id=inputs.organization_id,
                         expected_chain_version=chain_version,
                         expected_chain_epoch=epoch_number,
                         expected_sequence=expected_sequence,
                         expected_previous_digest=previous_digest,
-                        source_event=source_event,
+                        source_event=sources.get(entry_input.source),
                     )
-                except (AuditChainError, ValueError, TypeError, json.JSONDecodeError) as error:
-                    code = error.code if isinstance(error, AuditChainError) else "audit_chain_entry_malformed"
-                    raise PostgresStorageError(code) from None
+                except AuditChainError as error:
+                    raise PostgresStorageError(error.code) from None
                 verified[(epoch_number, expected_sequence)] = digest
                 previous_digest = digest
                 expected_sequence += 1
-            if epoch_number == head.chain_epoch:
+            if epoch_number == inputs.head.chain_epoch:
                 active_epoch_seen = True
-                if head.sequence != expected_sequence - 1 or head.head_digest != previous_digest:
+                if inputs.head.sequence != expected_sequence - 1 or inputs.head.head_digest != previous_digest:
                     raise PostgresStorageError("audit_chain_head_mismatch")
-        if not active_epoch_seen or previous_epoch_number != head.chain_epoch:
+        if not active_epoch_seen or previous_epoch_number != inputs.head.chain_epoch:
             raise PostgresStorageError("audit_chain_head_mismatch")
         if set(entries_by_epoch).difference(verified_epoch for verified_epoch, _ in verified):
             raise PostgresStorageError("audit_chain_epoch_malformed")
-        if checkpoint_tuple is not None and not checkpoint_matched:
-            digest = verified.get((checkpoint_tuple[1], checkpoint_tuple[2]))
-            if digest is None or not hmac.compare_digest(digest, checkpoint_tuple[3]):
+        if inputs.checkpoint is not None and not checkpoint_matched:
+            digest = verified.get((inputs.checkpoint.chain_epoch, inputs.checkpoint.sequence))
+            if digest is None or not hmac.compare_digest(digest, inputs.checkpoint.head_digest):
                 raise PostgresStorageError("audit_chain_checkpoint_mismatch")
-        return head
+        return inputs.head
 
 
 def _month_start() -> datetime:

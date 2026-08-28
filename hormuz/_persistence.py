@@ -11,11 +11,22 @@ import json
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Protocol
+from types import MappingProxyType
+from typing import Any, Mapping, Protocol
 
-from .audit_chain import AuditChainAnchorStatus, AuditChainHead
+from .audit_chain import (
+    AuditChainAnchorStatus,
+    AuditChainError,
+    AuditChainHead,
+    AuditChainSource,
+    audit_chain_checkpoint_position,
+)
 from .config import Identity
 from .contracts import (
+    AUDIT_CHAIN_ENTRY_LEGACY_SCHEMA_VERSION,
+    AUDIT_CHAIN_ENTRY_SCHEMA_VERSION,
+    AUDIT_EVENT_SCHEMA_ID,
+    AUDIT_EVENT_SCHEMA_VERSION,
     REQUEST_ATTEMPT_EVENT_SCHEMA_ID,
     REQUEST_ATTEMPT_EVENT_SCHEMA_VERSION,
     REQUEST_ATTEMPT_SCHEMA_ID,
@@ -104,6 +115,63 @@ class RequestAttemptResult:
     policy_action: str
     redaction_count: int
     redaction_rules: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class AuditChainCheckpointInput:
+    """One strictly parsed external checkpoint position."""
+
+    chain_version: int
+    chain_epoch: int
+    sequence: int
+    head_digest: str
+
+
+@dataclass(frozen=True)
+class AuditChainEpochInput:
+    """Backend-neutral epoch row loaded inside a backend-owned snapshot."""
+
+    chain_version: int
+    chain_epoch: int
+    reason_code: object
+    predecessor_chain_epoch: object
+    predecessor_sequence: object
+    predecessor_head_digest: object
+
+
+@dataclass(frozen=True)
+class AuditChainEntryInput:
+    """Canonical entry mapping plus its finite source identity."""
+
+    chain_epoch: int
+    event_id: str
+    source: AuditChainSource
+    entry: Mapping[str, object]
+
+
+@dataclass(frozen=True)
+class AuditChainSourceEventInput:
+    """One loaded metadata-only event bound to a finite source identity."""
+
+    source: AuditChainSource
+    event: Mapping[str, Any]
+
+
+@dataclass(frozen=True)
+class AuditChainVerificationInputs:
+    """Immutable values consumed by either backend's current verifier.
+
+    Backends still own snapshot acquisition, SQL, source retrieval, tenant
+    context, and error translation.  This value only removes their row-shape
+    differences so parity can be proven before verifier extraction.
+    """
+
+    organization_id: str
+    head: AuditChainHead
+    epochs: tuple[AuditChainEpochInput, ...]
+    entries: tuple[AuditChainEntryInput, ...]
+    source_events: tuple[AuditChainSourceEventInput, ...]
+    checkpoint: AuditChainCheckpointInput | None
 
 
 class ReservationDenied(RuntimeError):
@@ -328,6 +396,163 @@ def normalize_audit_chain_head(
         sequence=int(row["sequence"]),
         head_digest=head_digest,
     )
+
+
+def normalize_audit_chain_checkpoint_input(
+    checkpoint: Mapping[str, object] | None,
+    *,
+    organization_id: str,
+    error_factory: StorageErrorFactory,
+) -> AuditChainCheckpointInput | None:
+    """Strictly parse one optional checkpoint at the storage boundary."""
+
+    if checkpoint is None:
+        return None
+    try:
+        _, checkpoint_organization, chain_version, chain_epoch, sequence, head_digest = (
+            audit_chain_checkpoint_position(checkpoint)
+        )
+    except AuditChainError as error:
+        raise error_factory(error.code) from None
+    if checkpoint_organization != organization_id:
+        raise error_factory("audit_chain_tenant_mismatch")
+    return AuditChainCheckpointInput(
+        chain_version=chain_version,
+        chain_epoch=chain_epoch,
+        sequence=sequence,
+        head_digest=head_digest,
+    )
+
+
+def normalize_audit_chain_epoch_input(
+    row: PersistenceRow,
+    *,
+    error_factory: StorageErrorFactory,
+) -> AuditChainEpochInput:
+    """Normalize SQLite and PostgreSQL epoch rows without validating linkage."""
+
+    try:
+        chain_version = int(row["chain_version"])
+        chain_epoch = int(row["chain_epoch"])
+    except (KeyError, TypeError, ValueError):
+        raise error_factory("audit_chain_epoch_malformed") from None
+    return AuditChainEpochInput(
+        chain_version=chain_version,
+        chain_epoch=chain_epoch,
+        reason_code=row["reason_code"],
+        predecessor_chain_epoch=row["predecessor_chain_epoch"],
+        predecessor_sequence=row["predecessor_sequence"],
+        predecessor_head_digest=row["predecessor_head_digest"],
+    )
+
+
+def normalize_audit_chain_entry_input(
+    row: PersistenceRow,
+    *,
+    organization_id: str,
+    error_factory: StorageErrorFactory,
+) -> AuditChainEntryInput:
+    """Normalize one stored entry and its v1 or v2 source identity."""
+
+    try:
+        parsed_event = json.loads(str(row["event_json"]))
+        if not isinstance(parsed_event, dict):
+            raise ValueError
+        schema_version = row["entry_schema_version"]
+        entry: dict[str, object] = {
+            "schema_id": row["entry_schema_id"],
+            "schema_version": schema_version,
+            "organization_id": organization_id,
+            "chain_version": row["chain_version"],
+            "chain_epoch": row["chain_epoch"],
+            "sequence": row["sequence"],
+            "previous_digest": row["previous_digest"],
+            "event_digest": row["event_digest"],
+            "event": parsed_event,
+        }
+        if schema_version == AUDIT_CHAIN_ENTRY_LEGACY_SCHEMA_VERSION:
+            event_id = parsed_event.get("id")
+            if not isinstance(event_id, str) or row["event_id"] != event_id:
+                raise AuditChainError("audit_chain_entry_malformed")
+            source = AuditChainSource(
+                schema_id=AUDIT_EVENT_SCHEMA_ID,
+                schema_version=AUDIT_EVENT_SCHEMA_VERSION,
+                event_id=event_id,
+            )
+        elif schema_version == AUDIT_CHAIN_ENTRY_SCHEMA_VERSION:
+            source_schema_id = row["source_schema_id"]
+            source_schema_version = row["source_schema_version"]
+            source_event_id = row["source_event_id"]
+            if (
+                not isinstance(source_schema_id, str)
+                or isinstance(source_schema_version, bool)
+                or not isinstance(source_schema_version, int)
+                or not isinstance(source_event_id, str)
+                or row["event_id"] != source_event_id
+            ):
+                raise AuditChainError("audit_chain_entry_malformed")
+            event_id = source_event_id
+            source = AuditChainSource(
+                schema_id=source_schema_id,
+                schema_version=source_schema_version,
+                event_id=source_event_id,
+            )
+            entry.update(
+                {
+                    "source_schema_id": source.schema_id,
+                    "source_schema_version": source.schema_version,
+                    "source_event_id": source.event_id,
+                }
+            )
+        else:
+            raise AuditChainError("audit_chain_entry_schema_unsupported")
+        chain_epoch = int(row["chain_epoch"])
+    except (AuditChainError, IndexError, KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
+        code = error.code if isinstance(error, AuditChainError) else "audit_chain_entry_malformed"
+        raise error_factory(code) from None
+    return AuditChainEntryInput(
+        chain_epoch=chain_epoch,
+        event_id=event_id,
+        source=source,
+        entry=MappingProxyType(entry),
+    )
+
+
+def normalize_audit_chain_source_event_input(
+    event: Mapping[str, Any],
+    *,
+    source: AuditChainSource | None = None,
+    error_factory: StorageErrorFactory,
+) -> AuditChainSourceEventInput:
+    """Bind one loaded source event to the identity used by its entry."""
+
+    if not isinstance(event, Mapping):
+        raise error_factory("audit_chain_source_event_malformed")
+    if source is None:
+        event_id = event.get("id")
+        if not isinstance(event_id, str):
+            raise error_factory("audit_chain_source_event_malformed")
+        source = AuditChainSource(
+            schema_id=AUDIT_EVENT_SCHEMA_ID,
+            schema_version=AUDIT_EVENT_SCHEMA_VERSION,
+            event_id=event_id,
+        )
+    return AuditChainSourceEventInput(source=source, event=MappingProxyType(dict(event)))
+
+
+def audit_chain_source_event_map(
+    source_events: tuple[AuditChainSourceEventInput, ...],
+    *,
+    error_factory: StorageErrorFactory,
+) -> dict[AuditChainSource, Mapping[str, Any]]:
+    """Index an already loaded finite source set and reject ambiguity."""
+
+    indexed: dict[AuditChainSource, Mapping[str, Any]] = {}
+    for source_event in source_events:
+        if source_event.source in indexed:
+            raise error_factory("audit_chain_source_event_malformed")
+        indexed[source_event.source] = source_event.event
+    return indexed
 
 
 def optional_string(

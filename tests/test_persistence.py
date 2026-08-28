@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import ast
+import json
+import sqlite3
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
 
 import hormuz._persistence as persistence
 import hormuz.audit_chain as audit_chain
+from hormuz.audit_chain import build_audit_chain_entry, build_custody_audit_chain_entry
 from hormuz.config import Identity
 from hormuz.store import (
     MonthlyTotals,
@@ -146,6 +149,125 @@ class PersistenceContractTests(unittest.TestCase):
                 },
                 error_factory=_StorageError,
             )
+
+    def test_audit_verification_inputs_normalize_v1_v2_and_source_identity(self) -> None:
+        fixtures = json.loads(
+            (Path(__file__).parent / "fixtures" / "contracts" / "valid-v1.json").read_text()
+        )
+        v1_event = fixtures["audit_usage_v2"]
+        v1_entry = build_audit_chain_entry(
+            v1_event,
+            chain_version=1,
+            chain_epoch=1,
+            sequence=1,
+            previous_digest=None,
+        )
+        v1_input = persistence.normalize_audit_chain_entry_input(
+            {
+                "entry_schema_id": v1_entry["schema_id"],
+                "entry_schema_version": v1_entry["schema_version"],
+                "chain_version": v1_entry["chain_version"],
+                "chain_epoch": v1_entry["chain_epoch"],
+                "sequence": v1_entry["sequence"],
+                "event_id": v1_event["id"],
+                "previous_digest": v1_entry["previous_digest"],
+                "event_digest": v1_entry["event_digest"],
+                "event_json": json.dumps(v1_entry["event"]),
+                "source_schema_id": None,
+                "source_schema_version": None,
+                "source_event_id": None,
+            },
+            organization_id="xpounder",
+            error_factory=_StorageError,
+        )
+        self.assertEqual(v1_input.source.schema_id, "hormuz.audit-event")
+        self.assertEqual(v1_input.source.event_id, v1_event["id"])
+
+        epoch = persistence.normalize_audit_chain_epoch_input(
+            {
+                "chain_version": 1,
+                "chain_epoch": 1,
+                "reason_code": "initial_adoption",
+                "predecessor_chain_epoch": None,
+                "predecessor_sequence": None,
+                "predecessor_head_digest": None,
+            },
+            error_factory=_StorageError,
+        )
+        checkpoint = persistence.normalize_audit_chain_checkpoint_input(
+            fixtures["audit_chain_checkpoint_v1"],
+            organization_id="xpounder",
+            error_factory=_StorageError,
+        )
+        self.assertEqual((epoch.chain_version, epoch.chain_epoch), (1, 1))
+        self.assertIsNotNone(checkpoint)
+        self.assertEqual((checkpoint.chain_epoch, checkpoint.sequence), (1, 1))
+
+        source_event_id = "01234567-89ab-4def-8123-456789abcdef"
+        v2_event = fixtures["custody_control_event"]
+        v2_entry = build_custody_audit_chain_entry(
+            v2_event,
+            source_schema_id="hormuz.custody-control-event",
+            source_schema_version=1,
+            source_event_id=source_event_id,
+            chain_version=1,
+            chain_epoch=1,
+            sequence=2,
+            previous_digest=str(v1_entry["event_digest"]),
+        )
+        v2_input = persistence.normalize_audit_chain_entry_input(
+            {
+                "entry_schema_id": v2_entry["schema_id"],
+                "entry_schema_version": v2_entry["schema_version"],
+                "chain_version": v2_entry["chain_version"],
+                "chain_epoch": v2_entry["chain_epoch"],
+                "sequence": v2_entry["sequence"],
+                "event_id": source_event_id,
+                "previous_digest": v2_entry["previous_digest"],
+                "event_digest": v2_entry["event_digest"],
+                "event_json": json.dumps(v2_entry["event"]),
+                "source_schema_id": v2_entry["source_schema_id"],
+                "source_schema_version": v2_entry["source_schema_version"],
+                "source_event_id": v2_entry["source_event_id"],
+            },
+            organization_id="xpounder",
+            error_factory=_StorageError,
+        )
+        v2_source = persistence.normalize_audit_chain_source_event_input(
+            v2_event,
+            source=v2_input.source,
+            error_factory=_StorageError,
+        )
+        self.assertEqual(v2_input.source.schema_id, "hormuz.custody-control-event")
+        self.assertEqual(
+            persistence.audit_chain_source_event_map(
+                (v2_source,),
+                error_factory=_StorageError,
+            )[v2_input.source],
+            v2_event,
+        )
+
+    def test_sqlite_v2_claim_without_source_columns_fails_with_stable_storage_error(self) -> None:
+        connection = sqlite3.connect(":memory:")
+        connection.row_factory = sqlite3.Row
+        row = connection.execute(
+            """
+            SELECT 1 AS chain_version, 1 AS chain_epoch, 1 AS sequence,
+                   'hormuz.audit-chain-entry' AS entry_schema_id,
+                   2 AS entry_schema_version, 'event-id' AS event_id,
+                   NULL AS previous_digest, ? AS event_digest, ? AS event_json
+            """,
+            ("a" * 64, json.dumps({"id": "event-id"})),
+        ).fetchone()
+        connection.close()
+
+        with self.assertRaises(_StorageError) as raised:
+            persistence.normalize_audit_chain_entry_input(
+                row,
+                organization_id="acme",
+                error_factory=_StorageError,
+            )
+        self.assertEqual(raised.exception.code, "audit_chain_entry_malformed")
 
     def test_backend_neutral_module_cannot_import_database_adapters(self) -> None:
         forbidden = {"sqlite3", "psycopg", "psycopg_pool", "store", "postgres_usage_store", "postgres"}

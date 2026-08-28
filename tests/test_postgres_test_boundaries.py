@@ -96,6 +96,8 @@ EXPECTED_OWNERS = {
         {
             "test_commit_time_audit_chain_serializes_multi_instance_writes_and_is_tenant_isolated",
             "test_commit_time_audit_chain_rolls_back_and_runtime_cannot_rewrite_history",
+            "test_normalized_cross_backend_corruption_fixtures_have_exact_error_parity",
+            "test_cross_backend_recovery_epoch_has_checkpoint_parity",
         },
     ),
     "test_postgres_request_attempts": (
@@ -149,7 +151,7 @@ class PostgresTestBoundaryTests(unittest.TestCase):
             suite = unittest.defaultTestLoader.loadTestsFromName(f"{module_name}.{class_name}")
             self.assertEqual(suite.countTestCases(), len(expected_methods), module_name)
 
-        self.assertEqual(len(owned), 60)
+        self.assertEqual(len(owned), 62)
         self.assertFalse((ROOT / "tests" / "test_postgres.py").exists())
         self.assertFalse(
             any(name.startswith("test_") for name in PostgresTestCase.__dict__),
