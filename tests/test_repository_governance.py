@@ -199,7 +199,7 @@ class RepositoryGovernanceTests(unittest.TestCase):
             ):
                 validate_repository_governance(root)
 
-    def test_candidate_freeze_job_cannot_grant_contents_write(self) -> None:
+    def test_candidate_build_job_cannot_grant_contents_write(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             self._copy_contract(root)
@@ -207,15 +207,31 @@ class RepositoryGovernanceTests(unittest.TestCase):
             value = workflow.read_text(encoding="utf-8")
             workflow.write_text(
                 value.replace(
-                    "    permissions:\n      contents: read\n",
-                    "    permissions:\n      contents: write\n",
+                    (
+                        "  build:\n"
+                        "    name: Build the candidate once without publisher authority\n"
+                        "    needs: preflight\n"
+                        "    if: ${{ github.repository == 'Xpounder-com/hormuz' }}\n"
+                        "    permissions:\n"
+                        "      actions: read\n"
+                        "      contents: read\n"
+                    ),
+                    (
+                        "  build:\n"
+                        "    name: Build the candidate once without publisher authority\n"
+                        "    needs: preflight\n"
+                        "    if: ${{ github.repository == 'Xpounder-com/hormuz' }}\n"
+                        "    permissions:\n"
+                        "      actions: read\n"
+                        "      contents: write\n"
+                    ),
                     1,
                 ),
                 encoding="utf-8",
             )
             with self.assertRaisesRegex(
                 RepositoryGovernanceError,
-                "workflow-issued contents write is forbidden",
+                "candidate freeze isolation boundary changed",
             ):
                 validate_repository_governance(root)
 
@@ -227,8 +243,8 @@ class RepositoryGovernanceTests(unittest.TestCase):
             value = workflow.read_text(encoding="utf-8")
             workflow.write_text(
                 value.replace(
-                    "GH_TOKEN: ${{ secrets.V1_RELEASE_PUBLISH_TOKEN }}",
-                    "GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}",
+                    "GH_PUBLISH_TOKEN: ${{ secrets.V1_RELEASE_PUBLISH_TOKEN }}",
+                    "GH_PUBLISH_TOKEN: ${{ github.token }}",
                     1,
                 ),
                 encoding="utf-8",
@@ -329,33 +345,29 @@ class RepositoryGovernanceTests(unittest.TestCase):
             )
             with self.assertRaisesRegex(
                 RepositoryGovernanceError,
-                "candidate freeze credential boundary changed",
+                "workflow secret expression contract changed",
             ):
                 validate_repository_governance(root)
 
-    def test_candidate_credentials_must_remain_in_the_freeze_job(self) -> None:
+    def test_candidate_credentials_must_remain_in_protected_jobs(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             self._copy_contract(root)
             workflow = root / ".github/workflows/freeze-v1-candidate.yml"
-            value = workflow.read_text(encoding="utf-8").replace(
-                "    environment: v1-release-custody\n", "", 1
+            value = workflow.read_text(encoding="utf-8")
+            publish_marker = (
+                "  publish:\n"
+                "    name: Approve, independently verify, and publish candidate custody\n"
+                "    needs: build\n"
+                "    if: ${{ github.repository == 'Xpounder-com/hormuz' }}\n"
+                "    environment: v1-release-custody\n"
             )
+            self.assertEqual(value.count(publish_marker), 1)
             workflow.write_text(
                 value.replace(
-                    "  freeze:\n",
-                    (
-                        "  freeze:\n"
-                        "    name: Hold the protected custody environment\n"
-                        "    needs: authorize\n"
-                        "    environment: v1-release-custody\n"
-                        "    permissions:\n"
-                        "      contents: read\n"
-                        "    runs-on: ubuntu-24.04\n"
-                        "    steps:\n"
-                        "      - name: Preserve the environment boundary\n"
-                        "        run: 'true'\n\n"
-                        "  publish:\n"
+                    publish_marker,
+                    publish_marker.replace(
+                        "    environment: v1-release-custody\n", ""
                     ),
                     1,
                 ),
@@ -363,7 +375,7 @@ class RepositoryGovernanceTests(unittest.TestCase):
             )
             with self.assertRaisesRegex(
                 RepositoryGovernanceError,
-                "candidate freeze job contract changed",
+                "workflow environment contract changed",
             ):
                 validate_repository_governance(root)
 
@@ -399,12 +411,12 @@ class RepositoryGovernanceTests(unittest.TestCase):
             workflow.write_text(
                 value.replace(
                     (
-                        "      - name: Verify distinct environment-scoped "
-                        "release credentials\n"
+                        "      - name: Verify credentials and live controls "
+                        "before the one permitted build\n"
                     ),
                     (
-                        "      - name: Verify distinct environment-scoped "
-                        "release credentials\n"
+                        "      - name: Verify credentials and live controls "
+                        "before the one permitted build\n"
                         "        continue-on-error: true\n"
                     ),
                     1,
@@ -420,42 +432,42 @@ class RepositoryGovernanceTests(unittest.TestCase):
     def test_credential_step_bodies_cannot_persist_tokens(self) -> None:
         mutations = (
             (
-                "          umask 077\n",
                 (
-                    "          umask 077\n"
-                    '          echo "$GH_ADMIN_TOKEN" >> "$GITHUB_ENV"\n'
+                    "      - name: Verify credentials and live controls before "
+                    "the one permitted build\n"
+                    "        env:\n"
+                ),
+                (
+                    "      - name: Verify credentials and live controls before "
+                    "the one permitted build\n"
+                    "        env:\n"
+                    "          # token persistence probe\n"
                 ),
             ),
             (
                 (
-                    "      - name: Create one digest-addressed immutable "
-                    "candidate prerelease\n"
+                    "      - name: Revalidate controls, publish the verified "
+                    "draft, and seal custody\n"
                     "        env:\n"
-                    "          GH_TOKEN: "
-                    "${{ secrets.V1_RELEASE_PUBLISH_TOKEN }}\n"
-                    "        run: |\n"
-                    "          assert_api_absent() {\n"
                 ),
                 (
-                    "      - name: Create one digest-addressed immutable "
-                    "candidate prerelease\n"
+                    "      - name: Revalidate controls, publish the verified "
+                    "draft, and seal custody\n"
                     "        env:\n"
-                    "          GH_TOKEN: "
-                    "${{ secrets.V1_RELEASE_PUBLISH_TOKEN }}\n"
-                    "        run: |\n"
-                    '          echo "$GH_TOKEN" >> "$GITHUB_ENV"\n'
-                    "          assert_api_absent() {\n"
+                    "          # publisher persistence probe\n"
                 ),
             ),
             (
                 (
-                    '          verification_dir="$RUNNER_TEMP/'
-                    'hormuz-v1-candidate-verification"\n'
+                    "      - name: Verify the published immutable candidate "
+                    "and attestations\n"
+                    "        env:\n"
                 ),
                 (
-                    '          verification_dir="$RUNNER_TEMP/'
-                    'hormuz-v1-candidate-verification"\n'
-                    '          echo "$GH_ADMIN_TOKEN" >> "$GITHUB_ENV"\n'
+                    "      - name: Verify the published immutable candidate "
+                    "and attestations\n"
+                    "        env:\n"
+                    "          # verifier persistence probe\n"
                 ),
             ),
         )
@@ -477,97 +489,97 @@ class RepositoryGovernanceTests(unittest.TestCase):
                     ):
                         validate_repository_governance(root)
 
-    def test_repository_tool_invocations_scrub_credentials_and_persistence(
+    def test_repository_code_never_runs_with_custody_credentials(self) -> None:
+        workflow = (
+            REPOSITORY_ROOT / ".github/workflows/freeze-v1-candidate.yml"
+        ).read_text(encoding="utf-8")
+        build_start = workflow.index("  build:\n")
+        publish_start = workflow.index("  publish:\n")
+        build = workflow[build_start:publish_start]
+        publish = workflow[publish_start:]
+        self.assertNotIn("${{ secrets.", build)
+        self.assertNotIn("GH_ADMIN_TOKEN", build)
+        self.assertNotIn("GH_PUBLISH_TOKEN", build)
+        self.assertNotIn("environment: v1-release-custody", build)
+        self.assertIn("python tools/v1_candidate.py manifest", build)
+        self.assertNotIn("actions/checkout@", publish)
+        self.assertNotIn("python tools/", publish)
+        self.assertNotIn("python -m build", publish)
+
+    def test_credential_bearing_python_remains_isolated_and_workflow_embedded(
         self,
     ) -> None:
-        scrubbed_names = (
-            "GH_ADMIN_TOKEN",
-            "GH_TOKEN",
-            "GITHUB_ENV",
-            "GITHUB_OUTPUT",
-            "GITHUB_PATH",
-            "GITHUB_STATE",
-            "GITHUB_STEP_SUMMARY",
-        )
-        for name in scrubbed_names:
-            with self.subTest(name=name):
-                with tempfile.TemporaryDirectory() as temporary:
-                    root = Path(temporary)
-                    self._copy_contract(root)
-                    workflow = root / ".github/workflows/freeze-v1-candidate.yml"
-                    value = workflow.read_text(encoding="utf-8")
-                    scrub_line = f"            -u {name} \\\n"
-                    self.assertEqual(value.count(scrub_line), 2)
-                    workflow.write_text(
-                        value.replace(scrub_line, ""),
-                        encoding="utf-8",
-                    )
-                    with self.assertRaisesRegex(
-                        RepositoryGovernanceError,
-                        "candidate freeze credential boundary changed",
-                    ):
-                        validate_repository_governance(root)
-
-    def test_admin_scope_python_cannot_import_repository_modules(self) -> None:
-        isolated_invocations = (
-            "          python -I -B -c '\n",
-            '          package_version="$(python -I -B -c \'',
-            '          release_environment_contract="$(python -I -B -c \'',
-        )
-        for invocation in isolated_invocations:
-            with self.subTest(invocation=invocation):
-                with tempfile.TemporaryDirectory() as temporary:
-                    root = Path(temporary)
-                    self._copy_contract(root)
-                    workflow = root / ".github/workflows/freeze-v1-candidate.yml"
-                    value = workflow.read_text(encoding="utf-8")
-                    self.assertEqual(value.count(invocation), 1)
-                    workflow.write_text(
-                        value.replace(
-                            invocation,
-                            invocation.replace("python -I -B", "python"),
-                            1,
-                        ),
-                        encoding="utf-8",
-                    )
-                    with self.assertRaisesRegex(
-                        RepositoryGovernanceError,
-                        "candidate freeze credential boundary changed",
-                    ):
-                        validate_repository_governance(root)
+        workflow = (
+            REPOSITORY_ROOT / ".github/workflows/freeze-v1-candidate.yml"
+        ).read_text(encoding="utf-8")
+        self.assertGreaterEqual(workflow.count("/usr/bin/python3 -I -B -"), 4)
+        self.assertEqual(workflow.count("# BEGIN V1 CANDIDATE PUBLISHER"), 1)
+        self.assertEqual(workflow.count("# END V1 CANDIDATE PUBLISHER"), 1)
+        publisher = workflow.split("# BEGIN V1 CANDIDATE PUBLISHER", 1)[1].split(
+            "# END V1 CANDIDATE PUBLISHER", 1
+        )[0]
+        self.assertNotIn("import tools", publisher)
+        self.assertNotIn("tarfile", publisher)
+        self.assertNotIn("extract", publisher)
 
     def test_candidate_jobs_cannot_add_path_poisoning_steps(self) -> None:
         insertions = (
             (
                 (
                     "    steps:\n"
-                    "      - name: Fail closed unless the configured "
-                    "steward initiated this run\n"
+                    "      - name: Fail closed unless the trusted workflow "
+                    "and steward initiated this run\n"
                 ),
                 (
                     "    steps:\n"
                     "      - name: Poison the authorization shell path\n"
                     "        run: |\n"
                     '          echo /tmp/poison >> "$GITHUB_PATH"\n'
-                    "      - name: Fail closed unless the configured "
-                    "steward initiated this run\n"
+                    "      - name: Fail closed unless the trusted workflow "
+                    "and steward initiated this run\n"
                 ),
             ),
             (
                 (
-                    "    timeout-minutes: 15\n"
+                    "    timeout-minutes: 8\n"
                     "    steps:\n"
-                    "      - name: Verify distinct environment-scoped "
-                    "release credentials\n"
+                    "      - name: Verify credentials and live controls before "
+                    "the one permitted build\n"
                 ),
                 (
-                    "    timeout-minutes: 15\n"
+                    "    timeout-minutes: 8\n"
                     "    steps:\n"
-                    "      - name: Poison later credential shells\n"
+                    "      - name: Poison the preflight shell path\n"
                     "        run: |\n"
                     '          echo /tmp/poison >> "$GITHUB_PATH"\n'
-                    "      - name: Verify distinct environment-scoped "
-                    "release credentials\n"
+                    "      - name: Verify credentials and live controls before "
+                    "the one permitted build\n"
+                ),
+            ),
+            (
+                (
+                    "      - name: Check out the exact protected main candidate "
+                    "without persisted credentials\n"
+                ),
+                (
+                    "      - name: Poison the build shell path\n"
+                    "        run: |\n"
+                    '          echo /tmp/poison >> "$GITHUB_PATH"\n'
+                    "      - name: Check out the exact protected main candidate "
+                    "without persisted credentials\n"
+                ),
+            ),
+            (
+                (
+                    "      - name: Download the run-scoped untrusted candidate "
+                    "transfer\n"
+                ),
+                (
+                    "      - name: Poison the publisher shell path\n"
+                    "        run: |\n"
+                    '          echo /tmp/poison >> "$GITHUB_PATH"\n'
+                    "      - name: Download the run-scoped untrusted candidate "
+                    "transfer\n"
                 ),
             ),
         )
@@ -598,12 +610,12 @@ class RepositoryGovernanceTests(unittest.TestCase):
             workflow.write_text(
                 value.replace(
                     (
-                        "      - name: Fail closed unless the configured "
-                        "steward initiated this run\n"
+                        "      - name: Fail closed unless the trusted workflow "
+                        "and steward initiated this run\n"
                     ),
                     (
-                        "      - name: Fail closed unless the configured "
-                        "steward initiated this run\n"
+                        "      - name: Fail closed unless the trusted workflow "
+                        "and steward initiated this run\n"
                         "        continue-on-error: true\n"
                     ),
                     1,
@@ -640,7 +652,7 @@ class RepositoryGovernanceTests(unittest.TestCase):
             ):
                 validate_repository_governance(root)
 
-    def test_candidate_freeze_job_cannot_override_the_shell(self) -> None:
+    def test_candidate_build_job_cannot_override_the_shell(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             self._copy_contract(root)
@@ -648,8 +660,27 @@ class RepositoryGovernanceTests(unittest.TestCase):
             value = workflow.read_text(encoding="utf-8")
             workflow.write_text(
                 value.replace(
-                    "    timeout-minutes: 15\n    steps:\n",
                     (
+                        "  build:\n"
+                        "    name: Build the candidate once without publisher authority\n"
+                        "    needs: preflight\n"
+                        "    if: ${{ github.repository == 'Xpounder-com/hormuz' }}\n"
+                        "    permissions:\n"
+                        "      actions: read\n"
+                        "      contents: read\n"
+                        "    runs-on: ubuntu-24.04\n"
+                        "    timeout-minutes: 15\n"
+                        "    steps:\n"
+                    ),
+                    (
+                        "  build:\n"
+                        "    name: Build the candidate once without publisher authority\n"
+                        "    needs: preflight\n"
+                        "    if: ${{ github.repository == 'Xpounder-com/hormuz' }}\n"
+                        "    permissions:\n"
+                        "      actions: read\n"
+                        "      contents: read\n"
+                        "    runs-on: ubuntu-24.04\n"
                         "    timeout-minutes: 15\n"
                         "    defaults:\n"
                         "      run:\n"
@@ -662,7 +693,7 @@ class RepositoryGovernanceTests(unittest.TestCase):
             )
             with self.assertRaisesRegex(
                 RepositoryGovernanceError,
-                "candidate freeze job contract changed",
+                    "candidate freeze job contract changed",
             ):
                 validate_repository_governance(root)
 
@@ -674,10 +705,9 @@ class RepositoryGovernanceTests(unittest.TestCase):
             value = workflow.read_text(encoding="utf-8")
             workflow.write_text(
                 value.replace(
-                    "permissions:\n  contents: read\n\nconcurrency:\n",
+                    "permissions: {}\n\nconcurrency:\n",
                     (
-                        "permissions:\n"
-                        "  contents: read\n\n"
+                        "permissions: {}\n\n"
                         "defaults:\n"
                         "  run:\n"
                         "    shell: 'bash {0} || true'\n\n"
@@ -771,13 +801,17 @@ class RepositoryGovernanceTests(unittest.TestCase):
                     value = workflow.read_text(encoding="utf-8")
                     workflow.write_text(
                         value.replace(
-                            "      - name: Check out the exact protected main candidate\n",
+                            (
+                                "      - name: Check out the exact protected main "
+                                "candidate without persisted credentials\n"
+                            ),
                             (
                                 "      - name: Consume a YAML-escaped secret\n"
                                 "        env:\n"
                                 f"          EXTRA_TOKEN: {expression}\n"
                                 "        run: 'true'\n"
-                                "      - name: Check out the exact protected main candidate\n"
+                                "      - name: Check out the exact protected main "
+                                "candidate without persisted credentials\n"
                             ),
                             1,
                         ),
@@ -837,7 +871,10 @@ jobs:
             value = workflow.read_text(encoding="utf-8")
             workflow.write_text(
                 value.replace(
-                    "      - name: Check out the exact protected main candidate\n",
+                    (
+                        "      - name: Check out the exact protected main candidate "
+                        "without persisted credentials\n"
+                    ),
                     (
                         "      - name: Consume a case-varied computed secret\n"
                         "        env:\n"
@@ -845,7 +882,8 @@ jobs:
                         "${{ SeCrEtS[format('V1_RELEASE_{0}_TOKEN', "
                         "'PUBLISH')] }}\n"
                         "        run: 'true'\n"
-                        "      - name: Check out the exact protected main candidate\n"
+                        "      - name: Check out the exact protected main candidate "
+                        "without persisted credentials\n"
                     ),
                     1,
                 ),
