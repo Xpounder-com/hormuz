@@ -4,6 +4,7 @@ include SUPPORT.md
 include CONTRIBUTING.md
 include CODE_OF_CONDUCT.md
 include config.example.json
+include requirements/v1-source-build.lock
 include docs/launch/claims-v2.json
 include docs/deployment-contract-v1.json
 include docs/durable-data-v1.json
@@ -14,6 +15,8 @@ include tools/verify_public_community_paths.py
 include tools/verify_launch_assets.py
 include tools/verify_quiet_alpha_evidence.py
 include tools/verify_policy_admin_usability_evidence.py
+include tools/v1_candidate.py
+include tools/promote_v1_candidate.sh
 include tools/verify_deployment_contract.py
 include tools/verify_durable_data_inventory.py
 include tools/oidc_reference_conformance.py

@@ -24,11 +24,53 @@ class RepositoryGovernanceTests(unittest.TestCase):
         self.assertEqual(result["schema_version"], 1)
         self.assertEqual(result["status"], "passed")
         self.assertEqual(result["repository"], "Xpounder-com/hormuz")
-        self.assertEqual(result["ruleset_count"], 3)
+        self.assertEqual(result["ruleset_count"], 4)
         self.assertEqual(result["required_check_count"], 11)
         self.assertGreaterEqual(result["workflow_count"], 4)
         self.assertGreater(result["pinned_action_use_count"], 0)
         self.assertEqual(result["public_transition_check_count"], 10)
+
+        immutable_ruleset = json.loads(
+            (
+                REPOSITORY_ROOT
+                / ".github/rulesets/version-tag-immutability.json"
+            ).read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            immutable_ruleset["conditions"]["ref_name"]["include"],
+            ["refs/tags/v*", "refs/tags/candidate-v1.0.0-*"],
+        )
+
+        creation_ruleset = json.loads(
+            (
+                REPOSITORY_ROOT / ".github/rulesets/version-tag-creation.json"
+            ).read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            creation_ruleset["conditions"]["ref_name"]["include"],
+            ["refs/tags/v*"],
+        )
+
+        candidate_creation_ruleset = json.loads(
+            (
+                REPOSITORY_ROOT
+                / ".github/rulesets/candidate-tag-creation.json"
+            ).read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            candidate_creation_ruleset["conditions"]["ref_name"]["include"],
+            ["refs/tags/candidate-v1.0.0-*"],
+        )
+        self.assertEqual(
+            candidate_creation_ruleset["bypass_actors"],
+            [
+                {
+                    "actor_id": 15368,
+                    "actor_type": "Integration",
+                    "bypass_mode": "always",
+                }
+            ],
+        )
 
     def test_unpinned_action_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -114,6 +156,170 @@ class RepositoryGovernanceTests(unittest.TestCase):
             ruleset_path.write_text(json.dumps(ruleset), encoding="utf-8")
             with self.assertRaisesRegex(
                 RepositoryGovernanceError, "ruleset contract changed"
+            ):
+                validate_repository_governance(root)
+
+    def test_candidate_tag_creation_cannot_gain_a_human_bypass(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._copy_contract(root)
+            ruleset_path = root / ".github/rulesets/candidate-tag-creation.json"
+            ruleset = json.loads(ruleset_path.read_text(encoding="utf-8"))
+            ruleset["bypass_actors"] = [
+                {
+                    "actor_id": None,
+                    "actor_type": "OrganizationAdmin",
+                    "bypass_mode": "always",
+                }
+            ]
+            ruleset_path.write_text(json.dumps(ruleset), encoding="utf-8")
+            with self.assertRaisesRegex(
+                RepositoryGovernanceError, "ruleset contract changed"
+            ):
+                validate_repository_governance(root)
+
+    def test_only_candidate_freeze_workflow_can_write_contents(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._copy_contract(root)
+            workflow = root / ".github/workflows/release-oci.yml"
+            value = workflow.read_text(encoding="utf-8")
+            workflow.write_text(
+                value.replace("  contents: read\n", "  contents: write\n", 1),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                RepositoryGovernanceError,
+                "only the steward-gated candidate freeze job",
+            ):
+                validate_repository_governance(root)
+
+    def test_non_freeze_job_cannot_gain_contents_write_via_write_all(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._copy_contract(root)
+            workflow = root / ".github/workflows/release-oci.yml"
+            value = workflow.read_text(encoding="utf-8")
+            workflow.write_text(
+                value.replace(
+                    "  release:\n",
+                    "  release:\n    permissions: write-all\n",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                RepositoryGovernanceError,
+                "only the steward-gated candidate freeze job",
+            ):
+                validate_repository_governance(root)
+
+    def test_non_freeze_workflow_cannot_inherit_top_level_write_all(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._copy_contract(root)
+            workflow = root / ".github/workflows/upstream-canary.yml"
+            value = workflow.read_text(encoding="utf-8")
+            workflow.write_text(
+                value.replace(
+                    "permissions:\n  contents: read\n",
+                    "permissions: write-all\n",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                RepositoryGovernanceError,
+                "only the steward-gated candidate freeze job",
+            ):
+                validate_repository_governance(root)
+
+    def test_flow_style_permission_grant_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._copy_contract(root)
+            workflow = root / ".github/workflows/upstream-canary.yml"
+            value = workflow.read_text(encoding="utf-8")
+            workflow.write_text(
+                value.replace(
+                    "permissions:\n  contents: read\n",
+                    "permissions: {contents: write}\n",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                RepositoryGovernanceError,
+                "unsupported YAML syntax",
+            ):
+                validate_repository_governance(root)
+
+    def test_escaped_job_permission_key_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._copy_contract(root)
+            workflow = root / ".github/workflows/release-oci.yml"
+            value = workflow.read_text(encoding="utf-8")
+            workflow.write_text(
+                value.replace(
+                    "  release:\n",
+                    '  release:\n    "permis\\u0073ions": write-all\n',
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                RepositoryGovernanceError,
+                "unsupported mapping syntax",
+            ):
+                validate_repository_governance(root)
+
+    def test_escaped_top_level_permission_override_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._copy_contract(root)
+            workflow = root / ".github/workflows/upstream-canary.yml"
+            value = workflow.read_text(encoding="utf-8")
+            workflow.write_text(
+                value.replace(
+                    "permissions:\n  contents: read\n",
+                    'permissions:\n  contents: read\n"permis\\u0073ions": write-all\n',
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                RepositoryGovernanceError,
+                "unsupported top-level mapping syntax",
+            ):
+                validate_repository_governance(root)
+
+    def test_nonstandard_job_indentation_cannot_hide_write_all(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._copy_contract(root)
+            workflow = root / ".github/workflows/rogue.yml"
+            workflow.write_text(
+                """name: Rogue candidate writer
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  poison:
+     permissions: write-all
+     runs-on: ubuntu-24.04
+     steps:
+       - run: 'true'
+""",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                RepositoryGovernanceError,
+                "only the steward-gated candidate freeze job",
             ):
                 validate_repository_governance(root)
 

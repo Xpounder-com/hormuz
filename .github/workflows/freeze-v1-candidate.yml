@@ -1,0 +1,361 @@
+name: Freeze v1.0.0 candidate
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: freeze-v1-candidate
+  cancel-in-progress: false
+
+jobs:
+  authorize:
+    name: Authorize the designated v1 release steward
+    permissions: {}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Fail closed unless the configured steward initiated this run
+        env:
+          AUTHORIZED_STEWARD: ${{ vars.V1_RELEASE_STEWARD }}
+          ORIGINAL_ACTOR: ${{ github.actor }}
+          TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+        run: |
+          [[ "$GITHUB_REPOSITORY" == "Xpounder-com/hormuz" ]] || {
+            echo "candidate freeze is restricted to the canonical repository" >&2
+            exit 1
+          }
+          [[ -n "$AUTHORIZED_STEWARD" ]] || {
+            echo "the V1_RELEASE_STEWARD repository variable is required" >&2
+            exit 1
+          }
+          [[ "$ORIGINAL_ACTOR" == "$AUTHORIZED_STEWARD" ]] || {
+            echo "candidate freeze must be initiated by the designated release steward" >&2
+            exit 1
+          }
+          [[ "$TRIGGERING_ACTOR" == "$AUTHORIZED_STEWARD" ]] || {
+            echo "candidate freeze must be triggered by the designated release steward" >&2
+            exit 1
+          }
+
+  freeze:
+    name: Build once and seal immutable candidate custody
+    needs: authorize
+    if: ${{ github.repository == 'Xpounder-com/hormuz' }}
+    environment: v1-release-custody
+    permissions:
+      contents: write
+      actions: read
+      attestations: read
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out the exact protected main candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up pinned Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Fail closed before the one permitted archive build
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_ADMIN_TOKEN: ${{ secrets.V1_RELEASE_ADMIN_TOKEN }}
+          AUTHORIZED_STEWARD: ${{ vars.V1_RELEASE_STEWARD }}
+        run: |
+          umask 077
+          assert_api_absent() {
+            local endpoint="$1"
+            local label="$2"
+            local error_file="$RUNNER_TEMP/${label}.err"
+            if gh api "$endpoint" >/dev/null 2>"$error_file"; then
+              echo "$label already exists" >&2
+              exit 1
+            fi
+            if ! grep -Fq 'HTTP 404' "$error_file"; then
+              cat "$error_file" >&2
+              echo "could not prove $label is absent" >&2
+              exit 1
+            fi
+          }
+          [[ "$GITHUB_REF" == "refs/heads/main" ]] || {
+            echo "candidate freeze must be dispatched from main" >&2
+            exit 1
+          }
+          [[ "$GITHUB_REF_PROTECTED" == "true" ]] || {
+            echo "candidate freeze requires protected main" >&2
+            exit 1
+          }
+          [[ "$GITHUB_RUN_ATTEMPT" == "1" ]] || {
+            echo "a freeze run cannot be rerun because the archive may already have been built" >&2
+            exit 1
+          }
+          [[ -n "${GH_ADMIN_TOKEN:-}" ]] || {
+            echo "V1_RELEASE_ADMIN_TOKEN with read-only Administration and Environments permissions is required" >&2
+            exit 1
+          }
+          gh release verify-asset --help >/dev/null 2>&1 || {
+            echo "the runner GitHub CLI cannot verify immutable release attestations" >&2
+            exit 1
+          }
+          freeze_runs_path="$RUNNER_TEMP/freeze-runs.json"
+          gh api --paginate --slurp \
+            "/repos/$GITHUB_REPOSITORY/actions/workflows/freeze-v1-candidate.yml/runs?event=workflow_dispatch&head_sha=$GITHUB_SHA&per_page=100" \
+            > "$freeze_runs_path"
+          freeze_run_ids_path="$RUNNER_TEMP/freeze-run-ids.txt"
+          python -I -B -c '
+          import json, pathlib, sys
+          pages = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+          if not isinstance(pages, list) or not pages:
+              raise SystemExit("freeze run listing is invalid")
+          run_ids = []
+          for page in pages:
+              if not isinstance(page, dict) or not isinstance(page.get("workflow_runs"), list):
+                  raise SystemExit("freeze run listing is invalid")
+              for run in page["workflow_runs"]:
+                  run_id = run.get("id") if isinstance(run, dict) else None
+                  if isinstance(run_id, bool) or not isinstance(run_id, int) or run_id < 1 or run_id in run_ids:
+                      raise SystemExit("freeze run listing is invalid")
+                  run_ids.append(run_id)
+          if not run_ids:
+              raise SystemExit("freeze run listing is empty")
+          print("\n".join(str(run_id) for run_id in run_ids))
+          ' "$freeze_runs_path" > "$freeze_run_ids_path"
+          freeze_jobs_dir="$RUNNER_TEMP/freeze-run-jobs"
+          mkdir -m 700 "$freeze_jobs_dir"
+          mapfile -t freeze_run_ids < "$freeze_run_ids_path"
+          for freeze_run_id in "${freeze_run_ids[@]}"; do
+            [[ "$freeze_run_id" =~ ^[1-9][0-9]*$ ]] || {
+              echo "freeze run id is invalid" >&2
+              exit 1
+            }
+            gh api --paginate --slurp \
+              "/repos/$GITHUB_REPOSITORY/actions/runs/$freeze_run_id/jobs?filter=all&per_page=100" \
+              > "$freeze_jobs_dir/$freeze_run_id.json"
+          done
+          python -I -B tools/v1_candidate.py freeze-authorization \
+            --runs-api "$freeze_runs_path" \
+            --jobs-directory "$freeze_jobs_dir" \
+            --source-commit "$GITHUB_SHA" \
+            --current-run-id "$GITHUB_RUN_ID" \
+            --output "$RUNNER_TEMP/freeze-authorization-proof.json" || {
+              echo "the exact source commit already has another successfully authorized freeze run; create a new commit instead of rebuilding" >&2
+              exit 1
+            }
+          package_version="$(python -c 'import pathlib, tomllib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"])')"
+          [[ "$package_version" == "1.0.0" ]] || {
+            echo "candidate package version must be exactly 1.0.0" >&2
+            exit 1
+          }
+          main_sha="$(gh api "/repos/$GITHUB_REPOSITORY/commits/main" --jq .sha)"
+          [[ "$main_sha" == "$GITHUB_SHA" ]] || {
+            echo "candidate source is no longer current main" >&2
+            exit 1
+          }
+          immutable_enabled="$(GH_TOKEN="$GH_ADMIN_TOKEN" gh api "/repos/$GITHUB_REPOSITORY/immutable-releases" --jq .enabled)"
+          [[ "$immutable_enabled" == "true" ]] || {
+            echo "immutable GitHub Releases must be enabled before freezing" >&2
+            exit 1
+          }
+          candidate_creation_ruleset_id="$(GH_TOKEN="$GH_ADMIN_TOKEN" gh api "/repos/$GITHUB_REPOSITORY/rulesets?includes_parents=true&per_page=100" --jq '[.[] | select(.name == "Steward workflow candidate tags" and .source_type == "Repository" and .target == "tag" and .enforcement == "active")] | if length == 1 then .[0].id else "" end')"
+          [[ "$candidate_creation_ruleset_id" =~ ^[1-9][0-9]*$ ]] || {
+            echo "one active Steward workflow candidate tags ruleset is required before freezing" >&2
+            exit 1
+          }
+          candidate_creation_rule_contract="$(GH_TOKEN="$GH_ADMIN_TOKEN" gh api "/repos/$GITHUB_REPOSITORY/rulesets/$candidate_creation_ruleset_id" --jq '(.bypass_actors == [{"actor_id":15368,"actor_type":"Integration","bypass_mode":"always"}]) and (.conditions.ref_name.exclude == []) and (.conditions.ref_name.include == ["refs/tags/candidate-v1.0.0-*"]) and ([.rules[].type] == ["creation"])')"
+          [[ "$candidate_creation_rule_contract" == "true" ]] || {
+            echo "candidate tag creation must be restricted to the steward-gated GitHub Actions workflow" >&2
+            exit 1
+          }
+          immutability_ruleset_id="$(GH_TOKEN="$GH_ADMIN_TOKEN" gh api "/repos/$GITHUB_REPOSITORY/rulesets?includes_parents=true&per_page=100" --jq '[.[] | select(.name == "Immutable version tags" and .source_type == "Repository" and .target == "tag" and .enforcement == "active")] | if length == 1 then .[0].id else "" end')"
+          [[ "$immutability_ruleset_id" =~ ^[1-9][0-9]*$ ]] || {
+            echo "one active Immutable version tags ruleset is required before freezing" >&2
+            exit 1
+          }
+          immutability_rule_contract="$(GH_TOKEN="$GH_ADMIN_TOKEN" gh api "/repos/$GITHUB_REPOSITORY/rulesets/$immutability_ruleset_id" --jq '(.bypass_actors == []) and (.conditions.ref_name.exclude == []) and ((.conditions.ref_name.include | sort) == (["refs/tags/candidate-v1.0.0-*", "refs/tags/v*"] | sort)) and (([.rules[].type] | sort) == (["deletion", "non_fast_forward", "update"] | sort))')"
+          [[ "$immutability_rule_contract" == "true" ]] || {
+            echo "live no-bypass immutability must cover both candidate and final v1 tags" >&2
+            exit 1
+          }
+          release_environment_path="$RUNNER_TEMP/v1-release-custody-environment.json"
+          GH_TOKEN="$GH_ADMIN_TOKEN" gh api \
+            "/repos/$GITHUB_REPOSITORY/environments/v1-release-custody" \
+            > "$release_environment_path"
+          release_environment_contract="$(python -c '
+          import json, pathlib, sys
+          value = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+          steward = sys.argv[2]
+          rules = [item for item in value.get("protection_rules", []) if item.get("type") == "required_reviewers"]
+          reviewers = rules[0].get("reviewers", []) if len(rules) == 1 else []
+          deployment = value.get("deployment_branch_policy") or {}
+          valid = (
+              value.get("name") == "v1-release-custody"
+              and deployment.get("protected_branches") is True
+              and deployment.get("custom_branch_policies") is False
+              and len(rules) == 1
+              and rules[0].get("prevent_self_review") is False
+              and len(reviewers) == 1
+              and reviewers[0].get("type") == "User"
+              and (reviewers[0].get("reviewer") or {}).get("login") == steward
+          )
+          print("true" if valid else "false")
+          ' "$release_environment_path" "$AUTHORIZED_STEWARD")"
+          [[ "$release_environment_contract" == "true" ]] || {
+            echo "the protected v1-release-custody environment must require the designated steward reviewer" >&2
+            exit 1
+          }
+          assert_api_absent "/repos/$GITHUB_REPOSITORY/git/ref/tags/v1.0.0" "final-v1.0.0-tag"
+          assert_api_absent "/repos/$GITHUB_REPOSITORY/releases/tags/v1.0.0" "final-v1.0.0-release"
+          existing_candidate_count="$(gh api --paginate --slurp "/repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq "[.[][] | select(.target_commitish == \"$GITHUB_SHA\" and (.tag_name | startswith(\"candidate-v1.0.0-\")))] | length")"
+          [[ "$existing_candidate_count" == "0" ]] || {
+            echo "this source commit already has a frozen candidate" >&2
+            exit 1
+          }
+          successful_main_ci="$(gh api "/repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?branch=main&event=push&status=completed&per_page=100" --jq "[.workflow_runs[] | select(.head_sha == \"$GITHUB_SHA\" and .conclusion == \"success\")] | length")"
+          [[ "$successful_main_ci" -ge 1 ]] || {
+            echo "the exact main commit lacks a successful post-merge CI run" >&2
+            exit 1
+          }
+
+      - name: Install the hash-locked source-build frontend and backend
+        run: |
+          python -m pip install \
+            --disable-pip-version-check \
+            --force-reinstall \
+            --require-hashes \
+            --only-binary=:all: \
+            --no-deps \
+            -r requirements/v1-source-build.lock
+
+      - name: Build the source archive exactly once and seal its manifest
+        run: |
+          candidate_dir="$RUNNER_TEMP/hormuz-v1-candidate"
+          mkdir -m 700 "$candidate_dir"
+          source_date_epoch="$(git show -s --format=%ct "$GITHUB_SHA")"
+          SOURCE_DATE_EPOCH="$source_date_epoch" python -m build --sdist --no-isolation --outdir "$candidate_dir"
+          mapfile -t archives < <(find "$candidate_dir" -maxdepth 1 -type f -name '*.tar.gz' -print)
+          [[ "${#archives[@]}" == "1" ]] || {
+            echo "the one source build did not produce exactly one archive" >&2
+            exit 1
+          }
+          archive_path="${archives[0]}"
+          [[ "$(basename "$archive_path")" == "hormuz-1.0.0.tar.gz" ]] || {
+            echo "the source archive name is not the v1.0.0 contract" >&2
+            exit 1
+          }
+          manifest_path="$candidate_dir/hormuz-v1.0.0-candidate-manifest.json"
+          frozen_at="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+          python tools/v1_candidate.py manifest \
+            --archive "$archive_path" \
+            --source-commit "$GITHUB_SHA" \
+            --frozen-at "$frozen_at" \
+            --invocation-url "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT" \
+            --run-id "$GITHUB_RUN_ID" \
+            --run-attempt "$GITHUB_RUN_ATTEMPT" \
+            --output "$manifest_path"
+          [[ "$(stat -c '%a' "$manifest_path")" == "600" ]] || {
+            echo "candidate manifest is not owner-only" >&2
+            exit 1
+          }
+          custody_tag="$(python -c 'import json, pathlib, sys; print(json.loads(pathlib.Path(sys.argv[1]).read_text())["custody"]["release_tag"])' "$manifest_path")"
+          artifact_digest="$(python -c 'import json, pathlib, sys; print(json.loads(pathlib.Path(sys.argv[1]).read_text())["candidate"]["artifact_digest"])' "$manifest_path")"
+          {
+            echo "CANDIDATE_DIR=$candidate_dir"
+            echo "ARCHIVE_PATH=$archive_path"
+            echo "MANIFEST_PATH=$manifest_path"
+            echo "CUSTODY_TAG=$custody_tag"
+            echo "ARTIFACT_DIGEST=$artifact_digest"
+          } >> "$GITHUB_ENV"
+
+      - name: Create one digest-addressed immutable candidate prerelease
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          assert_api_absent() {
+            local endpoint="$1"
+            local label="$2"
+            local error_file="$RUNNER_TEMP/${label}.err"
+            if gh api "$endpoint" >/dev/null 2>"$error_file"; then
+              echo "$label already exists" >&2
+              exit 1
+            fi
+            if ! grep -Fq 'HTTP 404' "$error_file"; then
+              cat "$error_file" >&2
+              echo "could not prove $label is absent" >&2
+              exit 1
+            fi
+          }
+          assert_api_absent "/repos/$GITHUB_REPOSITORY/releases/tags/$CUSTODY_TAG" "candidate-release"
+          assert_api_absent "/repos/$GITHUB_REPOSITORY/git/ref/tags/$CUSTODY_TAG" "candidate-tag"
+          gh release create "$CUSTODY_TAG" \
+            "$ARCHIVE_PATH#Frozen Hormuz v1.0.0 source archive" \
+            "$MANIFEST_PATH#Digest-bound candidate manifest" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "Hormuz v1.0.0 frozen candidate" \
+            --notes "Immutable candidate custody only; this is not the final v1.0.0 release. Candidate: $ARTIFACT_DIGEST. Gate: #173. Use tools/promote_v1_candidate.sh only after the real gate passes." \
+            --prerelease \
+            --latest=false
+          candidate_ref="$(gh api "/repos/$GITHUB_REPOSITORY/git/ref/tags/$CUSTODY_TAG" --jq '.object.type + ":" + .object.sha')"
+          [[ "$candidate_ref" == "commit:$GITHUB_SHA" ]] || {
+            echo "candidate custody tag does not identify the frozen source commit" >&2
+            exit 1
+          }
+          assert_api_absent "/repos/$GITHUB_REPOSITORY/git/ref/tags/v1.0.0" "final-v1.0.0-tag"
+
+      - name: Re-download and prove exact immutable candidate custody
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_ADMIN_TOKEN: ${{ secrets.V1_RELEASE_ADMIN_TOKEN }}
+        run: |
+          verification_dir="$RUNNER_TEMP/hormuz-v1-candidate-verification"
+          mkdir -m 700 "$verification_dir"
+          gh release download "$CUSTODY_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern 'hormuz-1.0.0.tar.gz' \
+            --pattern 'hormuz-v1.0.0-candidate-manifest.json' \
+            --dir "$verification_dir"
+          cmp --silent "$ARCHIVE_PATH" "$verification_dir/hormuz-1.0.0.tar.gz"
+          cmp --silent "$MANIFEST_PATH" "$verification_dir/hormuz-v1.0.0-candidate-manifest.json"
+          gh api "/repos/$GITHUB_REPOSITORY/releases/tags/$CUSTODY_TAG" \
+            > "$verification_dir/release-api.json"
+          GH_TOKEN="$GH_ADMIN_TOKEN" gh api "/repos/$GITHUB_REPOSITORY/immutable-releases" \
+            > "$verification_dir/immutable-api.json"
+          python tools/v1_candidate.py custody \
+            --manifest "$verification_dir/hormuz-v1.0.0-candidate-manifest.json" \
+            --archive "$verification_dir/hormuz-1.0.0.tar.gz" \
+            --release-api "$verification_dir/release-api.json" \
+            --immutable-api "$verification_dir/immutable-api.json" \
+            --output "$verification_dir/custody-proof.json"
+          for asset in 'hormuz-1.0.0.tar.gz' 'hormuz-v1.0.0-candidate-manifest.json'; do
+            verified="false"
+            for attempt in $(seq 1 12); do
+              if gh release verify-asset "$CUSTODY_TAG" "$verification_dir/$asset" \
+                --repo "$GITHUB_REPOSITORY" \
+                --format json >"$verification_dir/${asset}.attestation-${attempt}.json" 2>"$verification_dir/${asset}.attestation-${attempt}.err"; then
+                verified="true"
+                break
+              fi
+              sleep 5
+            done
+            [[ "$verified" == "true" ]] || {
+              cat "$verification_dir/${asset}.attestation-${attempt}.err" >&2
+              echo "candidate release attestation was not verifiable: $asset" >&2
+              exit 1
+            }
+          done
+          {
+            echo "### Frozen v1.0.0 candidate"
+            echo
+            echo "- Immutable prerelease custody tag: \`$CUSTODY_TAG\`"
+            echo "- Source commit: \`$GITHUB_SHA\`"
+            echo "- Source archive: \`$ARTIFACT_DIGEST\`"
+            echo "- Final \`v1.0.0\` tag created: no"
+            echo "- Human gate advanced: no"
+          } >> "$GITHUB_STEP_SUMMARY"

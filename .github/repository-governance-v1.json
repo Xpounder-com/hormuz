@@ -91,6 +91,7 @@
     }
   ],
   "ruleset_files": [
+    ".github/rulesets/candidate-tag-creation.json",
     ".github/rulesets/main.json",
     ".github/rulesets/version-tag-creation.json",
     ".github/rulesets/version-tag-immutability.json"

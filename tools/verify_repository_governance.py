@@ -13,6 +13,7 @@ from pathlib import Path
 SCHEMA_VERSION = 1
 MANIFEST_PATH = Path(".github/repository-governance-v1.json")
 RULESET_PATHS = (
+    ".github/rulesets/candidate-tag-creation.json",
     ".github/rulesets/main.json",
     ".github/rulesets/version-tag-creation.json",
     ".github/rulesets/version-tag-immutability.json",
@@ -57,6 +58,25 @@ FULL_ACTION_USE = re.compile(
 ANY_ACTION_USE = re.compile(
     r"^[ \t]*uses:[ \t]*([^\s#]+)(?:[ \t]+#.*)?$", flags=re.MULTILINE
 )
+PERMISSION_KEYS = {
+    "actions",
+    "attestations",
+    "checks",
+    "contents",
+    "deployments",
+    "discussions",
+    "id-token",
+    "issues",
+    "models",
+    "packages",
+    "pages",
+    "pull-requests",
+    "security-events",
+    "statuses",
+}
+PERMISSION_LEVELS = {"none", "read", "write"}
+AUTHORIZED_CONTENTS_WRITER = ("freeze-v1-candidate.yml", "freeze")
+PermissionSpec = str | dict[str, str]
 
 
 class RepositoryGovernanceError(ValueError):
@@ -210,10 +230,35 @@ def _validate_manifest(manifest: dict[str, object]) -> list[dict[str, object]]:
 
 
 def _expected_rulesets(checks: list[dict[str, object]]) -> dict[str, object]:
-    tag_condition = {
+    version_tag_condition = {
         "ref_name": {"include": ["refs/tags/v*"], "exclude": []}
     }
+    immutable_tag_condition = {
+        "ref_name": {
+            "include": ["refs/tags/v*", "refs/tags/candidate-v1.0.0-*"],
+            "exclude": [],
+        }
+    }
     return {
+        ".github/rulesets/candidate-tag-creation.json": {
+            "name": "Steward workflow candidate tags",
+            "target": "tag",
+            "enforcement": "active",
+            "bypass_actors": [
+                {
+                    "actor_id": 15368,
+                    "actor_type": "Integration",
+                    "bypass_mode": "always",
+                }
+            ],
+            "conditions": {
+                "ref_name": {
+                    "include": ["refs/tags/candidate-v1.0.0-*"],
+                    "exclude": [],
+                }
+            },
+            "rules": [{"type": "creation"}],
+        },
         ".github/rulesets/main.json": {
             "name": "Protect main",
             "target": "branch",
@@ -257,7 +302,7 @@ def _expected_rulesets(checks: list[dict[str, object]]) -> dict[str, object]:
                     "bypass_mode": "always",
                 }
             ],
-            "conditions": tag_condition,
+            "conditions": version_tag_condition,
             "rules": [{"type": "creation"}],
         },
         ".github/rulesets/version-tag-immutability.json": {
@@ -265,7 +310,7 @@ def _expected_rulesets(checks: list[dict[str, object]]) -> dict[str, object]:
             "target": "tag",
             "enforcement": "active",
             "bypass_actors": [],
-            "conditions": tag_condition,
+            "conditions": immutable_tag_condition,
             "rules": [
                 {
                     "type": "update",
@@ -285,6 +330,243 @@ def _validate_rulesets(root: Path, checks: list[dict[str, object]]) -> None:
             raise RepositoryGovernanceError(f"ruleset contract changed: {relative}")
 
 
+def _yaml_indent(line: str, *, label: str) -> int:
+    prefix = line[: len(line) - len(line.lstrip(" \t"))]
+    if "\t" in prefix:
+        raise RepositoryGovernanceError(
+            f"workflow permissions use unsupported tab indentation: {label}"
+        )
+    return len(prefix)
+
+
+def _plain_yaml_value(value: str, *, label: str) -> str:
+    value = value.strip()
+    if value.startswith("#"):
+        return ""
+    if " #" in value:
+        value = value.split(" #", 1)[0].rstrip()
+    if "#" in value:
+        raise RepositoryGovernanceError(
+            f"workflow permissions use unsupported YAML syntax: {label}"
+        )
+    return value
+
+
+def _permission_key_and_value(line: str, *, indent: int) -> tuple[str, str] | None:
+    match = re.fullmatch(
+        rf" {{{indent}}}(?:([a-z][a-z0-9-]*)|'([a-z][a-z0-9-]*)'|\"([a-z][a-z0-9-]*)\"):\s*(.*)",
+        line,
+    )
+    if match is None:
+        return None
+    key = next(value for value in match.groups()[:3] if value is not None)
+    return key, match.group(4)
+
+
+def _parse_permissions(
+    lines: list[str],
+    declaration_index: int,
+    *,
+    indent: int,
+    end_index: int,
+    label: str,
+) -> PermissionSpec:
+    declaration = _permission_key_and_value(
+        lines[declaration_index], indent=indent
+    )
+    if declaration is None or declaration[0] != "permissions":
+        raise RepositoryGovernanceError(
+            f"workflow permissions declaration is invalid: {label}"
+        )
+    inline = _plain_yaml_value(declaration[1], label=label)
+    if inline:
+        if inline in {"{}", "read-all", "write-all"}:
+            return inline
+        raise RepositoryGovernanceError(
+            f"workflow permissions use unsupported YAML syntax: {label}"
+        )
+
+    permissions: dict[str, str] = {}
+    entry_indent: int | None = None
+    for index in range(declaration_index + 1, end_index):
+        line = lines[index]
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        current_indent = _yaml_indent(line, label=label)
+        if current_indent <= indent:
+            break
+        if entry_indent is None:
+            entry_indent = current_indent
+        if current_indent != entry_indent:
+            raise RepositoryGovernanceError(
+                f"workflow permissions use unsupported YAML structure: {label}"
+            )
+        entry = _permission_key_and_value(line, indent=entry_indent)
+        if entry is None:
+            raise RepositoryGovernanceError(
+                f"workflow permissions use unsupported YAML syntax: {label}"
+            )
+        key, raw_value = entry
+        value = _plain_yaml_value(raw_value, label=label)
+        if (
+            key not in PERMISSION_KEYS
+            or key in permissions
+            or value not in PERMISSION_LEVELS
+        ):
+            raise RepositoryGovernanceError(
+                f"workflow permissions entry is invalid: {label}"
+            )
+        permissions[key] = value
+    if not permissions:
+        raise RepositoryGovernanceError(
+            f"workflow permissions mapping is empty or invalid: {label}"
+        )
+    return permissions
+
+
+def _contents_permission(permissions: PermissionSpec) -> str:
+    if permissions == "write-all":
+        return "write"
+    if permissions == "read-all":
+        return "read"
+    if permissions == "{}":
+        return "none"
+    assert isinstance(permissions, dict)
+    return permissions.get("contents", "none")
+
+
+def _workflow_permissions(
+    text: str, *, workflow_name: str
+) -> tuple[PermissionSpec, dict[str, PermissionSpec | None]]:
+    lines = text.splitlines()
+    top_level_permissions: list[int] = []
+    jobs_declarations: list[int] = []
+    for index, line in enumerate(lines):
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        indent = _yaml_indent(line, label=workflow_name)
+        entry = _permission_key_and_value(line, indent=indent)
+        if indent == 0 and entry is None:
+            raise RepositoryGovernanceError(
+                f"workflow uses unsupported top-level mapping syntax: {workflow_name}"
+            )
+        if indent == 0 and entry is not None and entry[0] == "permissions":
+            top_level_permissions.append(index)
+        if indent == 0 and entry is not None and entry[0] == "jobs":
+            if _plain_yaml_value(entry[1], label=workflow_name):
+                raise RepositoryGovernanceError(
+                    f"workflow jobs must use a block mapping: {workflow_name}"
+                )
+            jobs_declarations.append(index)
+
+    if len(top_level_permissions) != 1:
+        raise RepositoryGovernanceError(
+            f"workflow lacks one explicit permissions mapping: {workflow_name}"
+        )
+    if len(jobs_declarations) != 1:
+        raise RepositoryGovernanceError(
+            f"workflow lacks one explicit jobs mapping: {workflow_name}"
+        )
+
+    jobs_index = jobs_declarations[0]
+    workflow_permissions = _parse_permissions(
+        lines,
+        top_level_permissions[0],
+        indent=0,
+        end_index=len(lines),
+        label=f"{workflow_name}:workflow",
+    )
+    job_starts: list[tuple[str, int]] = []
+    job_indent: int | None = None
+    for index in range(jobs_index + 1, len(lines)):
+        line = lines[index]
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        indent = _yaml_indent(line, label=workflow_name)
+        if indent == 0:
+            break
+        if job_indent is None:
+            job_indent = indent
+        if indent < job_indent:
+            raise RepositoryGovernanceError(
+                f"workflow jobs use inconsistent indentation: {workflow_name}"
+            )
+        if indent != job_indent:
+            continue
+        job = _permission_key_and_value(line, indent=job_indent)
+        if job is None or _plain_yaml_value(job[1], label=workflow_name):
+            raise RepositoryGovernanceError(
+                f"workflow job must use a plain block mapping: {workflow_name}"
+            )
+        job_starts.append((job[0], index))
+    if not job_starts or len({name for name, _index in job_starts}) != len(job_starts):
+        raise RepositoryGovernanceError(
+            f"workflow job mapping is empty or duplicated: {workflow_name}"
+        )
+
+    jobs: dict[str, PermissionSpec | None] = {}
+    for position, (job_name, start_index) in enumerate(job_starts):
+        end_index = (
+            job_starts[position + 1][1]
+            if position + 1 < len(job_starts)
+            else len(lines)
+        )
+        permission_declarations: list[int] = []
+        field_indent: int | None = None
+        for index in range(start_index + 1, end_index):
+            line = lines[index]
+            if not line.strip() or line.lstrip().startswith("#"):
+                continue
+            indent = _yaml_indent(line, label=f"{workflow_name}:{job_name}")
+            if indent == 0:
+                end_index = index
+                break
+            assert job_indent is not None
+            if indent <= job_indent:
+                raise RepositoryGovernanceError(
+                    f"workflow job uses inconsistent indentation: {workflow_name}:{job_name}"
+                )
+            if field_indent is None:
+                field_indent = indent
+            if indent < field_indent:
+                raise RepositoryGovernanceError(
+                    f"workflow job uses inconsistent indentation: {workflow_name}:{job_name}"
+                )
+            if indent != field_indent:
+                continue
+            if line[field_indent:].startswith("<<:"):
+                raise RepositoryGovernanceError(
+                    f"workflow job uses unsupported YAML merge: {workflow_name}:{job_name}"
+                )
+            entry = _permission_key_and_value(line, indent=indent)
+            if entry is None:
+                raise RepositoryGovernanceError(
+                    f"workflow job uses unsupported mapping syntax: {workflow_name}:{job_name}"
+                )
+            if entry[0] == "permissions":
+                permission_declarations.append(index)
+        if field_indent is None:
+            raise RepositoryGovernanceError(
+                f"workflow job mapping is empty: {workflow_name}:{job_name}"
+            )
+        if len(permission_declarations) > 1:
+            raise RepositoryGovernanceError(
+                f"workflow job repeats permissions: {workflow_name}:{job_name}"
+            )
+        jobs[job_name] = (
+            _parse_permissions(
+                lines,
+                permission_declarations[0],
+                indent=field_indent,
+                end_index=end_index,
+                label=f"{workflow_name}:{job_name}",
+            )
+            if permission_declarations
+            else None
+        )
+    return workflow_permissions, jobs
+
+
 def _validate_workflows(
     root: Path, allowed_owners: set[str]
 ) -> tuple[int, int]:
@@ -292,6 +574,7 @@ def _validate_workflows(
     if not workflow_paths:
         raise RepositoryGovernanceError("no GitHub Actions workflows found")
     action_use_count = 0
+    contents_writers: list[tuple[str, str]] = []
     for path in workflow_paths:
         try:
             text = path.read_text(encoding="utf-8")
@@ -301,8 +584,15 @@ def _validate_workflows(
             raise RepositoryGovernanceError(
                 f"public-fork-unsafe pull_request_target trigger: {path.name}"
             )
-        if re.search(r"^permissions:\s*$", text, flags=re.MULTILINE) is None:
-            raise RepositoryGovernanceError(f"workflow lacks explicit permissions: {path.name}")
+        workflow_permissions, jobs = _workflow_permissions(
+            text, workflow_name=path.name
+        )
+        for job_name, job_permissions in jobs.items():
+            effective_permissions = (
+                workflow_permissions if job_permissions is None else job_permissions
+            )
+            if _contents_permission(effective_permissions) == "write":
+                contents_writers.append((path.name, job_name))
         uses = ANY_ACTION_USE.findall(text)
         pinned = FULL_ACTION_USE.findall(text)
         if len(uses) != len(pinned):
@@ -319,15 +609,19 @@ def _validate_workflows(
                 raise RepositoryGovernanceError(
                     f"pull-request workflow consumes repository secrets: {path.name}"
                 )
-            if not re.search(
-                r"^permissions:\s*\n[ \t]+contents:[ \t]+read\s*$",
-                text,
-                flags=re.MULTILINE,
+            if (
+                not isinstance(workflow_permissions, dict)
+                or workflow_permissions.get("contents") != "read"
             ):
                 raise RepositoryGovernanceError(
                     f"pull-request workflow token is not read-only: {path.name}"
                 )
         action_use_count += len(pinned)
+
+    if contents_writers != [AUTHORIZED_CONTENTS_WRITER]:
+        raise RepositoryGovernanceError(
+            "only the steward-gated candidate freeze job may write contents"
+        )
 
     ci = (root / ".github/workflows/ci.yml").read_text(encoding="utf-8")
     if not re.search(

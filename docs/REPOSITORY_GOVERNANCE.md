@@ -36,15 +36,20 @@ and [repository Actions settings](https://docs.github.com/en/repositories/managi
 
 ## Protected source and releases
 
-The importable ruleset payloads under `.github/rulesets/` define three separate
+The importable ruleset payloads under `.github/rulesets/` define four separate
 controls:
 
-1. `main` cannot be deleted or force-pushed. Every change uses a pull request,
+1. Only the GitHub Actions integration may create a
+   `candidate-v1.0.0-*` tag. The governance verifier requires the steward-gated
+   candidate-freeze job to be the repository's only job with an effective
+   contents-write grant. It resolves workflow and job overrides, treats
+   `write-all` as contents-write, and rejects unsupported permission syntax.
+2. `main` cannot be deleted or force-pushed. Every change uses a pull request,
    resolves review threads, is tested against current `main`, and passes all 11
    release-blocking checks from the GitHub Actions app.
-2. Only an organization administrator may create a `v*` tag.
-3. After creation, a `v*` tag cannot be updated, force-moved, or deleted. The
-   immutability ruleset has no bypass actor.
+3. Only an organization administrator may create a `v*` tag.
+4. After creation, neither a `v*` nor a `candidate-v1.0.0-*` tag can be updated,
+   force-moved, or deleted. The immutability ruleset has no bypass actor.
 
 Separating tag creation from tag immutability is intentional: the organization
 owner can create the protected annotated release tag without receiving an
@@ -78,7 +83,7 @@ only after the disclosure decision and visibility authorization are recorded.
 A remote review must use allowlisted output and confirm at least:
 
 - repository visibility, description, topics, enabled surfaces, and homepage;
-- the three active rulesets and their full rule parameters;
+- the four active rulesets and their full rule parameters;
 - all 11 required checks bound to GitHub Actions application ID `15368`;
 - Actions enabled, full-SHA pinning required, default token permission `read`,
   and workflow approval disabled;
