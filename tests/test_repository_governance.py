@@ -412,6 +412,66 @@ class RepositoryGovernanceTests(unittest.TestCase):
             ):
                 validate_repository_governance(root)
 
+    def test_credential_step_bodies_cannot_persist_tokens(self) -> None:
+        mutations = (
+            (
+                "          umask 077\n",
+                (
+                    "          umask 077\n"
+                    '          echo "$GH_ADMIN_TOKEN" >> "$GITHUB_ENV"\n'
+                ),
+            ),
+            (
+                (
+                    "      - name: Create one digest-addressed immutable "
+                    "candidate prerelease\n"
+                    "        env:\n"
+                    "          GH_TOKEN: "
+                    "${{ secrets.V1_RELEASE_PUBLISH_TOKEN }}\n"
+                    "        run: |\n"
+                    "          assert_api_absent() {\n"
+                ),
+                (
+                    "      - name: Create one digest-addressed immutable "
+                    "candidate prerelease\n"
+                    "        env:\n"
+                    "          GH_TOKEN: "
+                    "${{ secrets.V1_RELEASE_PUBLISH_TOKEN }}\n"
+                    "        run: |\n"
+                    '          echo "$GH_TOKEN" >> "$GITHUB_ENV"\n'
+                    "          assert_api_absent() {\n"
+                ),
+            ),
+            (
+                (
+                    '          verification_dir="$RUNNER_TEMP/'
+                    'hormuz-v1-candidate-verification"\n'
+                ),
+                (
+                    '          verification_dir="$RUNNER_TEMP/'
+                    'hormuz-v1-candidate-verification"\n'
+                    '          echo "$GH_ADMIN_TOKEN" >> "$GITHUB_ENV"\n'
+                ),
+            ),
+        )
+        for needle, replacement in mutations:
+            with self.subTest(needle=needle):
+                with tempfile.TemporaryDirectory() as temporary:
+                    root = Path(temporary)
+                    self._copy_contract(root)
+                    workflow = root / ".github/workflows/freeze-v1-candidate.yml"
+                    value = workflow.read_text(encoding="utf-8")
+                    self.assertEqual(value.count(needle), 1)
+                    workflow.write_text(
+                        value.replace(needle, replacement, 1),
+                        encoding="utf-8",
+                    )
+                    with self.assertRaisesRegex(
+                        RepositoryGovernanceError,
+                        "candidate freeze credential boundary changed",
+                    ):
+                        validate_repository_governance(root)
+
     def test_candidate_authorization_step_cannot_continue_on_error(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

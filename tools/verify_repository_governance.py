@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import sys
@@ -126,6 +127,20 @@ CANONICAL_WORKFLOW_NAMES = frozenset(
         "upstream-canary.yml",
     }
 )
+CANDIDATE_CREDENTIAL_STEP_SHA256 = {
+    "Verify distinct environment-scoped release credentials": (
+        "1ce7b6af2e80d3e28713d9f1323849f400b65fc9ec26632139909c535738074b"
+    ),
+    "Fail closed before the one permitted archive build": (
+        "1c281cdff63dc6a05d3a6210a38eda943e0fd3d08bb48d6ad16d5c2ac959231b"
+    ),
+    "Create one digest-addressed immutable candidate prerelease": (
+        "7673292094a48ca04d3a6efa612f1fe12dbefba173ca7ce74f1f46b6314b3481"
+    ),
+    "Re-download and prove exact immutable candidate custody": (
+        "394a6a100e43e4a240a62dbe3930031459f92a9bbe6b18d46237da12236705a2"
+    ),
+}
 PermissionSpec = str | dict[str, str]
 
 
@@ -695,10 +710,14 @@ def _validate_candidate_freeze_credentials(text: str) -> None:
         (publish, publish_name),
         (verify, verify_name),
     )
+    actual_step_digests = {
+        name: hashlib.sha256(step.encode("utf-8")).hexdigest()
+        for step, name in credential_steps
+    }
     if any(
         _workflow_step_fields(step, name=name) != ("env", "run")
         for step, name in credential_steps
-    ):
+    ) or actual_step_digests != CANDIDATE_CREDENTIAL_STEP_SHA256:
         raise RepositoryGovernanceError(
             "candidate freeze credential boundary changed"
         )

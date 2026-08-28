@@ -47,8 +47,10 @@ controls:
    as contents-write, rejects every such grant, and fails closed on unsupported
    permission syntax. It binds all credential-bearing steps to the protected
    `freeze` job, permits only the declared literal workflow environments and
-   secret expressions, and requires the custody environment to contain exactly
-   the two release-token names before checkout or build.
+   secret expressions, pins the complete byte content of every
+   credential-bearing step, and rejects workflow, job, or step controls that
+   could turn a failed authorization into success. The custody environment must
+   contain exactly the two release-token names before checkout or build.
 2. `main` cannot be deleted or force-pushed. Every change uses a pull request,
    resolves review threads, is tested against current `main`, and passes all 11
    release-blocking checks from the GitHub Actions app.
