@@ -1380,8 +1380,8 @@ class V1CandidateTests(unittest.TestCase):
             "pyproject-hooks==1.2.0": (
                 "9e5c6bfa8dcc30091c74b0cf803c81fdd29d94f01992a7707bc97babb1141913"
             ),
-            "setuptools==80.9.0": (
-                "062d34222ad13e0cc312a4c02d73f059e86a4acbfbdea8f8f76b28c99f306922"
+            "setuptools==83.0.0": (
+                "29b23c360f22f414dc7336bb39178cc7bcbf6021ed2733cde173f09dba19abb3"
             ),
         }
         self.assertEqual(lock.count("--hash=sha256:"), len(expected))
@@ -1395,7 +1395,7 @@ class V1CandidateTests(unittest.TestCase):
         self.assertEqual(
             pyproject["build-system"],
             {
-                "requires": ["setuptools==80.9.0"],
+                "requires": ["setuptools==83.0.0"],
                 "build-backend": "setuptools.build_meta",
             },
         )

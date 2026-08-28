@@ -1,5 +1,5 @@
 # Generated for the signed Hormuz OCI linux/amd64 contract.
 # Update only through a reviewed dependency-refresh change and re-run the
 # reproducibility, SBOM, and vulnerability gates before release.
-setuptools==80.9.0 \
-    --hash=sha256:062d34222ad13e0cc312a4c02d73f059e86a4acbfbdea8f8f76b28c99f306922
+setuptools==83.0.0 \
+    --hash=sha256:29b23c360f22f414dc7336bb39178cc7bcbf6021ed2733cde173f09dba19abb3
