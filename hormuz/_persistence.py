@@ -507,7 +507,7 @@ def normalize_audit_chain_entry_input(
         else:
             raise AuditChainError("audit_chain_entry_schema_unsupported")
         chain_epoch = int(row["chain_epoch"])
-    except (AuditChainError, KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
+    except (AuditChainError, IndexError, KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
         code = error.code if isinstance(error, AuditChainError) else "audit_chain_entry_malformed"
         raise error_factory(code) from None
     return AuditChainEntryInput(

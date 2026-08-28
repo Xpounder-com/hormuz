@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import json
+import sqlite3
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
@@ -245,6 +246,28 @@ class PersistenceContractTests(unittest.TestCase):
             )[v2_input.source],
             v2_event,
         )
+
+    def test_sqlite_v2_claim_without_source_columns_fails_with_stable_storage_error(self) -> None:
+        connection = sqlite3.connect(":memory:")
+        connection.row_factory = sqlite3.Row
+        row = connection.execute(
+            """
+            SELECT 1 AS chain_version, 1 AS chain_epoch, 1 AS sequence,
+                   'hormuz.audit-chain-entry' AS entry_schema_id,
+                   2 AS entry_schema_version, 'event-id' AS event_id,
+                   NULL AS previous_digest, ? AS event_digest, ? AS event_json
+            """,
+            ("a" * 64, json.dumps({"id": "event-id"})),
+        ).fetchone()
+        connection.close()
+
+        with self.assertRaises(_StorageError) as raised:
+            persistence.normalize_audit_chain_entry_input(
+                row,
+                organization_id="acme",
+                error_factory=_StorageError,
+            )
+        self.assertEqual(raised.exception.code, "audit_chain_entry_malformed")
 
     def test_backend_neutral_module_cannot_import_database_adapters(self) -> None:
         forbidden = {"sqlite3", "psycopg", "psycopg_pool", "store", "postgres_usage_store", "postgres"}
