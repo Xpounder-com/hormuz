@@ -6,6 +6,7 @@ import json
 import stat
 import tarfile
 import tempfile
+import tomllib
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -650,7 +651,17 @@ class V1CandidateTests(unittest.TestCase):
     def test_freeze_workflow_has_one_build_and_no_final_tag_creation(self) -> None:
         workflow = (ROOT / ".github/workflows/freeze-v1-candidate.yml").read_text()
         self.assertEqual(workflow.count("python -m build --sdist"), 1)
+        self.assertIn("requirements/v1-source-build.lock", workflow)
+        self.assertIn("--require-hashes", workflow)
+        self.assertIn("--only-binary=:all:", workflow)
+        self.assertIn("--no-deps", workflow)
+        self.assertIn("--no-isolation", workflow)
         self.assertIn('[[ "$GITHUB_RUN_ATTEMPT" == "1" ]]', workflow)
+        self.assertIn("head_sha=$GITHUB_SHA", workflow)
+        self.assertIn(
+            '[[ "$freeze_run_identity" == "1:$GITHUB_RUN_ID" ]]', workflow
+        )
+        self.assertIn("create a new commit instead of rebuilding", workflow)
         self.assertIn("immutable-releases", workflow)
         self.assertIn('gh release create "$CUSTODY_TAG"', workflow)
         self.assertIn("candidate-v1.0.0-", workflow)
@@ -658,6 +669,38 @@ class V1CandidateTests(unittest.TestCase):
         self.assertNotIn("gh release upload", workflow)
         self.assertIn("could not prove $label is absent", workflow)
         self.assertIn("'HTTP 404'", workflow)
+
+    def test_source_build_frontend_and_backend_are_exactly_hash_locked(self) -> None:
+        lock = (ROOT / "requirements/v1-source-build.lock").read_text()
+        expected = {
+            "build==1.3.0": (
+                "7145f0b5061ba90a1500d60bd1b13ca0a8a4cebdd0cc16ed8adf1c0e739f43b4"
+            ),
+            "packaging==25.0": (
+                "29572ef2b1f17581046b3a2227d5c611fb25ec70ca1ba8554b24b0e69331a484"
+            ),
+            "pyproject-hooks==1.2.0": (
+                "9e5c6bfa8dcc30091c74b0cf803c81fdd29d94f01992a7707bc97babb1141913"
+            ),
+            "setuptools==80.9.0": (
+                "062d34222ad13e0cc312a4c02d73f059e86a4acbfbdea8f8f76b28c99f306922"
+            ),
+        }
+        self.assertEqual(lock.count("--hash=sha256:"), len(expected))
+        for requirement, digest in expected.items():
+            self.assertIn(
+                f"{requirement} \\\n    --hash=sha256:{digest}",
+                lock,
+            )
+
+        pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text())
+        self.assertEqual(
+            pyproject["build-system"],
+            {
+                "requires": ["setuptools==80.9.0"],
+                "build-backend": "setuptools.build_meta",
+            },
+        )
 
     def test_promotion_path_cannot_build_or_replace_assets(self) -> None:
         script = (ROOT / "tools/promote_v1_candidate.sh").read_text()
@@ -680,20 +723,62 @@ class V1CandidateTests(unittest.TestCase):
         self.assertIn("final_tag_target_or_chronology_invalid", script)
         self.assertIn('Gate evidence: $gate_evidence_digest', script)
 
+    def test_promotion_requires_the_clean_exact_candidate_checkout(self) -> None:
+        script = (ROOT / "tools/promote_v1_candidate.sh").read_text()
+        clean_check = script.index(
+            "status --porcelain=v1 --untracked-files=all --ignore-submodules=none"
+        )
+        fetch_main = script.index('fetch --no-tags origin \\\n')
+        explicit_main_ref = script.index(
+            '"refs/heads/main:refs/remotes/origin/main"', fetch_main
+        )
+        ancestry_check = script.index(
+            'merge-base --is-ancestor "$checkout_commit" origin/main'
+        )
+        manifest_match = script.index(
+            '[[ "$manifest_source_commit" == "$checkout_commit" ]]'
+        )
+        first_validation = script.index('python3 "$tool" promotion')
+        first_release_mutation = script.index(
+            'git -C "$repository_root" -c tag.gpgSign=false tag'
+        )
+
+        self.assertLess(clean_check, fetch_main)
+        self.assertLess(fetch_main, explicit_main_ref)
+        self.assertLess(explicit_main_ref, ancestry_check)
+        self.assertLess(ancestry_check, manifest_match)
+        self.assertLess(manifest_match, first_validation)
+        self.assertLess(first_validation, first_release_mutation)
+        self.assertIn("promotion_checkout_not_clean", script)
+        self.assertIn("promotion_checkout_not_on_main", script)
+        self.assertIn("promotion_checkout_candidate_mismatch", script)
+        self.assertIn("promotion_output_inside_checkout", script)
+
     def test_promotion_pins_evidence_and_revalidates_every_phase(self) -> None:
         script = (ROOT / "tools/promote_v1_candidate.sh").read_text()
         snapshot = script.index('python3 "$tool" evidence-snapshot')
         first_validation = script.index('python3 "$tool" promotion')
+        promotion_count = script.count('python3 "$tool" promotion')
         self.assertLess(snapshot, first_validation)
         self.assertEqual(script.count('--evidence "$evidence_path"'), 1)
-        self.assertEqual(script.count('--evidence "$pinned_evidence_path"'), 4)
+        self.assertEqual(
+            script.count('--evidence "$pinned_evidence_path"'), promotion_count
+        )
         self.assertNotIn(
             '"$evidence_path"',
             script[script.index('>"$evidence_snapshot_report"') :],
         )
         self.assertEqual(
             script.count('assert_readiness_binding "$'),
-            script.count('python3 "$tool" promotion'),
+            promotion_count,
+        )
+        self.assertEqual(script.count('snapshot_provenance "$'), promotion_count)
+        self.assertEqual(
+            script.count('--freeze-run-api "$initial_dir/freeze-run-api.json"'), 1
+        )
+        self.assertEqual(
+            script.count('--custody-tag-api "$initial_dir/custody-tag-api.json"'),
+            1,
         )
         self.assertIn("gate_evidence_snapshot_digest_mismatch", script)
         self.assertIn("promotion_readiness_binding_changed", script)
@@ -708,18 +793,35 @@ class V1CandidateTests(unittest.TestCase):
         published_resume = script.index(
             'if [[ "$initial_state" == "published" ]]', signed_oci
         )
+        resume_release_snapshot = script.index(
+            'snapshot_release "$FINAL_TAG" "$published_resume_dir"', published_resume
+        )
+        resume_provenance_snapshot = script.index(
+            'snapshot_provenance "$published_resume_dir"', published_resume
+        )
+        resume_validation = script.index(
+            'python3 "$tool" promotion', published_resume
+        )
+        resume_binding = script.index(
+            'assert_readiness_binding "$published_resume_dir/promotion-readiness.json"',
+            published_resume,
+        )
         resume_tag_check = script.index(
             'refresh_and_validate_final_tag "published-resume"', published_resume
         )
         resume_attestation_check = script.index(
-            'verify_release_attestations "$FINAL_TAG" "$initial_dir"',
+            'verify_release_attestations "$FINAL_TAG" "$published_resume_dir"',
             published_resume,
         )
         resume_exit = script.index("  exit 0", published_resume)
 
         self.assertLess(current_time_guard, tag_create)
         self.assertLess(signed_oci, published_resume)
-        self.assertLess(published_resume, resume_tag_check)
+        self.assertLess(published_resume, resume_release_snapshot)
+        self.assertLess(resume_release_snapshot, resume_provenance_snapshot)
+        self.assertLess(resume_provenance_snapshot, resume_validation)
+        self.assertLess(resume_validation, resume_binding)
+        self.assertLess(resume_binding, resume_tag_check)
         self.assertLess(resume_tag_check, resume_exit)
         self.assertLess(resume_attestation_check, resume_exit)
         self.assertIn("gate_evidence_not_yet_current", script)
@@ -729,6 +831,7 @@ class V1CandidateTests(unittest.TestCase):
         manifest = (ROOT / "MANIFEST.in").read_text()
         verifier = (ROOT / "tools/verify_core_wheel.py").read_text()
         for relative in (
+            "requirements/v1-source-build.lock",
             "tools/v1_candidate.py",
             "tools/promote_v1_candidate.sh",
         ):

@@ -210,8 +210,14 @@ def _validate_manifest(manifest: dict[str, object]) -> list[dict[str, object]]:
 
 
 def _expected_rulesets(checks: list[dict[str, object]]) -> dict[str, object]:
-    tag_condition = {
+    version_tag_condition = {
         "ref_name": {"include": ["refs/tags/v*"], "exclude": []}
+    }
+    immutable_tag_condition = {
+        "ref_name": {
+            "include": ["refs/tags/v*", "refs/tags/candidate-v1.0.0-*"],
+            "exclude": [],
+        }
     }
     return {
         ".github/rulesets/main.json": {
@@ -257,7 +263,7 @@ def _expected_rulesets(checks: list[dict[str, object]]) -> dict[str, object]:
                     "bypass_mode": "always",
                 }
             ],
-            "conditions": tag_condition,
+            "conditions": version_tag_condition,
             "rules": [{"type": "creation"}],
         },
         ".github/rulesets/version-tag-immutability.json": {
@@ -265,7 +271,7 @@ def _expected_rulesets(checks: list[dict[str, object]]) -> dict[str, object]:
             "target": "tag",
             "enforcement": "active",
             "bypass_actors": [],
-            "conditions": tag_condition,
+            "conditions": immutable_tag_condition,
             "rules": [
                 {
                     "type": "update",

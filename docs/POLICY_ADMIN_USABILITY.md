@@ -68,10 +68,15 @@ Repository release immutability must be enabled before a candidate is frozen
 and must remain enabled through publication. The release steward dispatches
 the `Freeze v1.0.0 candidate` workflow from protected `main` only after the
 exact commit has a successful post-merge CI run and its package version is
-exactly `1.0.0`. A rerun attempt is rejected.
+exactly `1.0.0`. A rerun attempt is rejected, and only one freeze workflow run
+is permitted for a source commit. Recovering from a failed freeze therefore
+requires a new source commit and a newly computed candidate digest.
 
-The freeze workflow invokes the source-distribution build exactly once. It
-then validates the archive contents, computes its SHA-256 digest, and writes
+The freeze workflow installs the exact pure-Python frontend and backend wheels
+from `requirements/v1-source-build.lock` with SHA-256 enforcement and without
+dependency resolution. It then invokes the source-distribution build exactly
+once with build isolation disabled. It validates the archive contents, computes
+its SHA-256 digest, and writes
 the strict `hormuz.v1-candidate-manifest` contract. The manifest records the
 source commit, UTC freeze time, archive name and size, workflow run, digest,
 and the facts that overwriting and promotion-time rebuilding are forbidden.
@@ -102,8 +107,11 @@ even one archived byte creates a different candidate digest. Evidence bound to
 the prior digest remains blocker history but cannot count for the changed
 candidate; run the affected cohort again against a newly frozen draft.
 
-After a real aggregate passes the validator, the repository owner runs the
-checked-in promotion command from a clean Hormuz checkout:
+After a real aggregate passes the validator, the repository owner checks out
+the manifest's exact frozen source commit and runs its checked-in promotion
+command from a clean Hormuz worktree. The command rejects a different commit,
+a commit outside fetched protected `main`, any tracked or untracked worktree
+change, and an output directory inside that checkout:
 
 ```bash
 tools/promote_v1_candidate.sh \
@@ -122,9 +130,12 @@ workflow on protected `main`, at the manifest's source commit, with the freeze
 time and both release-asset creation times inside that run. An asset replaced
 after the freeze run therefore fails even if it has the expected name. The
 digest-addressed custody tag must also remain a lightweight pointer to that
-source commit. The command then creates and pushes the protected annotated
-`v1.0.0` tag at that commit, waits for the existing signed OCI release workflow
-to succeed for the exact tag and commit, and downloads the draft assets again.
+source commit. The tag is re-fetched and revalidated during every later
+promotion phase; the no-bypass tag-immutability ruleset also covers these
+digest-addressed candidate tags. The command then creates and pushes the
+protected annotated `v1.0.0` tag at that commit, waits for the existing signed
+OCI release workflow to succeed for the exact tag and commit, and downloads the
+draft assets again.
 An existing final tag is accepted only when it is annotated, targets that
 commit, was created no earlier than the validated aggregate, and its annotation
 binds both the archive digest and gate-evidence digest. Only after this second

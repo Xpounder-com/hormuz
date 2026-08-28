@@ -73,6 +73,10 @@ tool="$script_dir/v1_candidate.py"
 [[ -f "$tool" ]] || fail "candidate_tool_missing"
 [[ "$(git -C "$repository_root" rev-parse --show-toplevel)" == "$repository_root" ]] \
   || fail "repository_checkout_required"
+checkout_commit="$(git -C "$repository_root" rev-parse HEAD)"
+[[ "$checkout_commit" =~ ^[0-9a-f]{40}$ ]] || fail "checkout_commit_invalid"
+[[ -z "$(git -C "$repository_root" status --porcelain=v1 --untracked-files=all --ignore-submodules=none)" ]] \
+  || fail "promotion_checkout_not_clean"
 
 origin_url="$(git -C "$repository_root" remote get-url origin)"
 case "$origin_url" in
@@ -92,6 +96,9 @@ if [[ -n "$output_path" ]]; then
 else
   work_dir="$(mktemp -d "${TMPDIR:-/tmp}/hormuz-v1-promotion.XXXXXX")"
 fi
+case "$work_dir/" in
+  "$repository_root/"*) fail "promotion_output_inside_checkout" ;;
+esac
 
 cleanup_work_dir() {
   if [[ "$cleanup" == "true" && -n "${work_dir:-}" && -d "$work_dir" ]]; then
@@ -111,6 +118,10 @@ report_proof_location() {
 gh auth status --hostname github.com >/dev/null 2>&1 || fail "github_authentication_required"
 gh release verify-asset --help >/dev/null 2>&1 \
   || fail "github_cli_release_verification_unavailable"
+git -C "$repository_root" fetch --no-tags origin \
+  "refs/heads/main:refs/remotes/origin/main"
+git -C "$repository_root" merge-base --is-ancestor "$checkout_commit" origin/main \
+  || fail "promotion_checkout_not_on_main"
 
 pinned_evidence_path="$work_dir/gate-evidence.json"
 evidence_snapshot_report="$work_dir/gate-evidence-snapshot.json"
@@ -178,12 +189,22 @@ initial_dir="$work_dir/initial-verification"
 snapshot_release "$release_tag" "$initial_dir"
 initial_state="$(read_release_state "$initial_dir/release-api.json")"
 [[ "$initial_state" != "invalid" ]] || fail "release_state_invalid"
+manifest_source_commit="$(python3 -c 'import json, pathlib, sys; print(json.loads(pathlib.Path(sys.argv[1]).read_text())["candidate"]["source_commit"])' "$initial_dir/$MANIFEST_NAME")"
+[[ "$manifest_source_commit" =~ ^[0-9a-f]{40}$ ]] || fail "manifest_source_commit_invalid"
+[[ "$manifest_source_commit" == "$checkout_commit" ]] \
+  || fail "promotion_checkout_candidate_mismatch"
 freeze_run_id="$(python3 -c 'import json, pathlib, sys; print(json.loads(pathlib.Path(sys.argv[1]).read_text())["build"]["run_id"])' "$initial_dir/$MANIFEST_NAME")"
 [[ "$freeze_run_id" =~ ^[1-9][0-9]*$ ]] || fail "freeze_run_id_invalid"
-gh api "/repos/$REPOSITORY/actions/runs/$freeze_run_id" \
-  >"$initial_dir/freeze-run-api.json"
-gh api "/repos/$REPOSITORY/git/ref/tags/$candidate_tag" \
-  >"$initial_dir/custody-tag-api.json"
+
+snapshot_provenance() {
+  local directory="$1"
+  gh api "/repos/$REPOSITORY/actions/runs/$freeze_run_id" \
+    >"$directory/freeze-run-api.json"
+  gh api "/repos/$REPOSITORY/git/ref/tags/$candidate_tag" \
+    >"$directory/custody-tag-api.json"
+}
+
+snapshot_provenance "$initial_dir"
 python3 "$tool" promotion \
   --manifest "$initial_dir/$MANIFEST_NAME" \
   --archive "$initial_dir/$ARCHIVE_NAME" \
@@ -247,10 +268,6 @@ verify_release_attestations() {
     done
   done
 }
-
-git -C "$repository_root" fetch origin main
-git -C "$repository_root" merge-base --is-ancestor "$source_commit" origin/main \
-  || fail "candidate_commit_not_on_main"
 
 validate_remote_final_tag() {
   local ref_path="$1"
@@ -397,8 +414,24 @@ if matches:
 wait_for_signed_oci
 
 if [[ "$initial_state" == "published" ]]; then
+  published_resume_dir="$work_dir/published-resume-reverification"
+  snapshot_release "$FINAL_TAG" "$published_resume_dir"
+  [[ "$(read_release_state "$published_resume_dir/release-api.json")" == "published" ]] \
+    || fail "published_resume_release_invalid"
+  snapshot_provenance "$published_resume_dir"
+  python3 "$tool" promotion \
+    --manifest "$published_resume_dir/$MANIFEST_NAME" \
+    --archive "$published_resume_dir/$ARCHIVE_NAME" \
+    --evidence "$pinned_evidence_path" \
+    --release-api "$published_resume_dir/release-api.json" \
+    --immutable-api "$published_resume_dir/immutable-api.json" \
+    --freeze-run-api "$published_resume_dir/freeze-run-api.json" \
+    --custody-tag-api "$published_resume_dir/custody-tag-api.json" \
+    --state published \
+    --output "$published_resume_dir/promotion-readiness.json" >/dev/null
+  assert_readiness_binding "$published_resume_dir/promotion-readiness.json"
   refresh_and_validate_final_tag "published-resume"
-  verify_release_attestations "$FINAL_TAG" "$initial_dir"
+  verify_release_attestations "$FINAL_TAG" "$published_resume_dir"
   printf 'v1.0.0 already published from exact candidate %s\n' "$candidate_digest"
   report_proof_location
   exit 0
@@ -410,14 +443,15 @@ prepublish_dir="$work_dir/prepublish-reverification"
 snapshot_release "$release_tag" "$prepublish_dir"
 [[ "$(read_release_state "$prepublish_dir/release-api.json")" == "draft" ]] \
   || fail "candidate_release_not_draft"
+snapshot_provenance "$prepublish_dir"
 python3 "$tool" promotion \
   --manifest "$prepublish_dir/$MANIFEST_NAME" \
   --archive "$prepublish_dir/$ARCHIVE_NAME" \
   --evidence "$pinned_evidence_path" \
   --release-api "$prepublish_dir/release-api.json" \
   --immutable-api "$prepublish_dir/immutable-api.json" \
-  --freeze-run-api "$initial_dir/freeze-run-api.json" \
-  --custody-tag-api "$initial_dir/custody-tag-api.json" \
+  --freeze-run-api "$prepublish_dir/freeze-run-api.json" \
+  --custody-tag-api "$prepublish_dir/custody-tag-api.json" \
   --state draft \
   --output "$prepublish_dir/promotion-readiness.json" >/dev/null
 assert_readiness_binding "$prepublish_dir/promotion-readiness.json"
@@ -437,14 +471,15 @@ final_draft_dir="$work_dir/final-draft-reverification"
 snapshot_release "$FINAL_TAG" "$final_draft_dir"
 [[ "$(read_release_state "$final_draft_dir/release-api.json")" == "draft" ]] \
   || fail "final_release_not_draft"
+snapshot_provenance "$final_draft_dir"
 python3 "$tool" promotion \
   --manifest "$final_draft_dir/$MANIFEST_NAME" \
   --archive "$final_draft_dir/$ARCHIVE_NAME" \
   --evidence "$pinned_evidence_path" \
   --release-api "$final_draft_dir/release-api.json" \
   --immutable-api "$final_draft_dir/immutable-api.json" \
-  --freeze-run-api "$initial_dir/freeze-run-api.json" \
-  --custody-tag-api "$initial_dir/custody-tag-api.json" \
+  --freeze-run-api "$final_draft_dir/freeze-run-api.json" \
+  --custody-tag-api "$final_draft_dir/custody-tag-api.json" \
   --state draft \
   --output "$final_draft_dir/promotion-readiness.json" >/dev/null
 assert_readiness_binding "$final_draft_dir/promotion-readiness.json"
@@ -470,14 +505,15 @@ done
 
 published_dir="$work_dir/published-reverification"
 snapshot_release "$FINAL_TAG" "$published_dir"
+snapshot_provenance "$published_dir"
 python3 "$tool" promotion \
   --manifest "$published_dir/$MANIFEST_NAME" \
   --archive "$published_dir/$ARCHIVE_NAME" \
   --evidence "$pinned_evidence_path" \
   --release-api "$published_dir/release-api.json" \
   --immutable-api "$published_dir/immutable-api.json" \
-  --freeze-run-api "$initial_dir/freeze-run-api.json" \
-  --custody-tag-api "$initial_dir/custody-tag-api.json" \
+  --freeze-run-api "$published_dir/freeze-run-api.json" \
+  --custody-tag-api "$published_dir/custody-tag-api.json" \
   --state published \
   --output "$published_dir/promotion-readiness.json" >/dev/null
 assert_readiness_binding "$published_dir/promotion-readiness.json"

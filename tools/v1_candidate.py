@@ -52,6 +52,7 @@ REQUIRED_ARCHIVE_PATHS = (
     "hormuz/cli.py",
     "hormuz/commands/policy.py",
     "pyproject.toml",
+    "requirements/v1-source-build.lock",
     "tools/promote_v1_candidate.sh",
     "tools/v1_candidate.py",
     "tools/verify_policy_admin_usability_evidence.py",

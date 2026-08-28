@@ -4,6 +4,7 @@ include SUPPORT.md
 include CONTRIBUTING.md
 include CODE_OF_CONDUCT.md
 include config.example.json
+include requirements/v1-source-build.lock
 include docs/launch/claims-v2.json
 include docs/deployment-contract-v1.json
 include docs/durable-data-v1.json

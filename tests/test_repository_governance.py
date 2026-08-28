@@ -30,6 +30,27 @@ class RepositoryGovernanceTests(unittest.TestCase):
         self.assertGreater(result["pinned_action_use_count"], 0)
         self.assertEqual(result["public_transition_check_count"], 10)
 
+        immutable_ruleset = json.loads(
+            (
+                REPOSITORY_ROOT
+                / ".github/rulesets/version-tag-immutability.json"
+            ).read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            immutable_ruleset["conditions"]["ref_name"]["include"],
+            ["refs/tags/v*", "refs/tags/candidate-v1.0.0-*"],
+        )
+
+        creation_ruleset = json.loads(
+            (
+                REPOSITORY_ROOT / ".github/rulesets/version-tag-creation.json"
+            ).read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            creation_ruleset["conditions"]["ref_name"]["include"],
+            ["refs/tags/v*"],
+        )
+
     def test_unpinned_action_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

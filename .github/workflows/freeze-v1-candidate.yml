@@ -59,6 +59,11 @@ jobs:
             echo "a freeze run cannot be rerun because the archive may already have been built" >&2
             exit 1
           }
+          freeze_run_identity="$(gh api "/repos/$GITHUB_REPOSITORY/actions/workflows/freeze-v1-candidate.yml/runs?event=workflow_dispatch&head_sha=$GITHUB_SHA&per_page=100" --jq '(.total_count | tostring) + ":" + (.workflow_runs | map(.id | tostring) | sort | join(","))')"
+          [[ "$freeze_run_identity" == "1:$GITHUB_RUN_ID" ]] || {
+            echo "the exact source commit already has another freeze run; create a new commit instead of rebuilding" >&2
+            exit 1
+          }
           package_version="$(python -c 'import pathlib, tomllib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"])')"
           [[ "$package_version" == "1.0.0" ]] || {
             echo "candidate package version must be exactly 1.0.0" >&2
@@ -87,15 +92,21 @@ jobs:
             exit 1
           }
 
-      - name: Install the pinned source-build frontend
-        run: python -m pip install build==1.3.0
+      - name: Install the hash-locked source-build frontend and backend
+        run: |
+          python -m pip install \
+            --disable-pip-version-check \
+            --require-hashes \
+            --only-binary=:all: \
+            --no-deps \
+            -r requirements/v1-source-build.lock
 
       - name: Build the source archive exactly once and seal its manifest
         run: |
           candidate_dir="$RUNNER_TEMP/hormuz-v1-candidate"
           mkdir -m 700 "$candidate_dir"
           source_date_epoch="$(git show -s --format=%ct "$GITHUB_SHA")"
-          SOURCE_DATE_EPOCH="$source_date_epoch" python -m build --sdist --outdir "$candidate_dir"
+          SOURCE_DATE_EPOCH="$source_date_epoch" python -m build --sdist --no-isolation --outdir "$candidate_dir"
           mapfile -t archives < <(find "$candidate_dir" -maxdepth 1 -type f -name '*.tar.gz' -print)
           [[ "${#archives[@]}" == "1" ]] || {
             echo "the one source build did not produce exactly one archive" >&2
