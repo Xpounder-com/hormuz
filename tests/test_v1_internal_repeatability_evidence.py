@@ -5,11 +5,13 @@ import hashlib
 import io
 import json
 import os
+import subprocess
 import tempfile
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from datetime import UTC, datetime
 from pathlib import Path
+from unittest import mock
 
 from tools import run_v1_internal_repeatability as runner
 from tools import verify_v1_internal_repeatability_evidence as repeatability
@@ -71,6 +73,57 @@ class V1InternalRepeatabilityEvidenceTests(unittest.TestCase):
                 repeatability.V1InternalRepeatabilityEvidenceError, f"^{code}$"
             ):
                 repeatability.validate_evidence(value)
+
+    def test_strict_scalar_types_fail_with_bounded_contract_errors(self) -> None:
+        mutations = (
+            (
+                lambda value: value.update(evidence_kind=[]),
+                "evidence_kind_invalid",
+            ),
+            (
+                lambda value: value.update(evidence_kind={}),
+                "evidence_kind_invalid",
+            ),
+            (
+                lambda value: value.update(schema_version=True),
+                "evidence_schema_invalid",
+            ),
+            (
+                lambda value: value["runs"][0].update(run_index=True),
+                "run_1_index_invalid",
+            ),
+            (
+                lambda value: value["runs"][0]["stages"][0].update(status=[]),
+                "run_1_stage_1_invalid",
+            ),
+            (
+                lambda value: value["execution_attestation"].update(
+                    human_participant_count=False
+                ),
+                "execution_attestation_invalid",
+            ),
+            (
+                lambda value: value["runs"][0]["isolation"].update(
+                    network_guard_enabled=1
+                ),
+                "run_1_isolation_invalid",
+            ),
+            (
+                lambda value: value["runs"][0]["observed"].update(
+                    baseline_allowed=1
+                ),
+                "run_1_observation_invalid",
+            ),
+        )
+        for mutation, code in mutations:
+            with self.subTest(code=code):
+                value = self._value()
+                mutation(value)
+                with self.assertRaisesRegex(
+                    repeatability.V1InternalRepeatabilityEvidenceError,
+                    f"^{code}$",
+                ):
+                    repeatability.validate_evidence(value)
 
     def test_one_failed_run_is_valid_not_ready_evidence(self) -> None:
         value = self._value()
@@ -237,6 +290,87 @@ class V1InternalRepeatabilityEvidenceTests(unittest.TestCase):
 
         self.assertEqual(absolute, selected)
         self.assertNotEqual(absolute, interpreter.resolve())
+
+    def test_runner_rejects_dependency_versions_outside_archived_requirements(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            dependency_root = Path(temporary)
+            valid = {
+                "paths": [str(dependency_root)],
+                "versions": {"PyJWT": "2.13.0", "cryptography": "42.0.0"},
+            }
+            self.assertEqual(
+                runner._validate_dependency_probe(valid, ROOT),
+                [str(dependency_root)],
+            )
+            for distribution, unsupported in (
+                ("PyJWT", "2.7.0"),
+                ("cryptography", "41.0.7"),
+            ):
+                with self.subTest(distribution=distribution):
+                    value = copy.deepcopy(valid)
+                    value["versions"][distribution] = unsupported
+                    with self.assertRaisesRegex(
+                        runner.V1InternalRepeatabilityRunError,
+                        "^preprovisioned_dependency_versions_unsupported$",
+                    ):
+                        runner._validate_dependency_probe(value, ROOT)
+
+    def test_runner_records_timed_out_or_unavailable_measured_stage(self) -> None:
+        failures = (
+            OSError("spawn_failed"),
+            subprocess.TimeoutExpired(cmd=["hormuz"], timeout=120),
+        )
+        for failure in failures:
+            with self.subTest(failure=type(failure).__name__):
+                with tempfile.TemporaryDirectory() as temporary:
+                    root = Path(temporary)
+                    workspace = root / "workspace"
+                    prepared = (
+                        workspace / "hormuz.toml",
+                        workspace / "baseline.json",
+                        workspace / "candidate.json",
+                        workspace / "scenarios.json",
+                    )
+                    with (
+                        mock.patch.object(
+                            runner,
+                            "_create_virtual_environment",
+                            return_value=root / "venv" / "bin" / "python",
+                        ),
+                        mock.patch.object(
+                            runner, "_prepare_workspace", return_value=prepared
+                        ),
+                        mock.patch.object(runner, "_probe_source"),
+                        mock.patch.object(runner, "_initialize_zero_usage"),
+                        mock.patch.object(
+                            runner.subprocess, "run", side_effect=failure
+                        ),
+                    ):
+                        result = runner._execute_one_run(
+                            run_index=1,
+                            invocation_root=root,
+                            host_python=root / "host-python",
+                            source_root=ROOT,
+                            dependency_paths=[str(root)],
+                            candidate_digest="sha256:" + "a" * 64,
+                        )
+
+                self.assertEqual(result["outcome"], "failed")
+                self.assertIsNone(result["observed"])
+                self.assertEqual(
+                    result["stages"][0],
+                    {
+                        "name": "create_from_template",
+                        "status": "failed",
+                        "exit_code": 255,
+                    },
+                )
+                self.assertTrue(
+                    all(
+                        stage["status"] == "not_attempted"
+                        for stage in result["stages"][1:]
+                    )
+                )
 
     def test_runner_rounds_evidence_time_up_for_whole_second_custody(self) -> None:
         moment = datetime(2026, 8, 28, 12, 0, 0, 123_456, tzinfo=UTC)

@@ -223,6 +223,19 @@ def _require_fields(value: object, fields: set[str], label: str) -> dict[str, An
     return value
 
 
+def _require_literal_mapping(
+    value: object, expected: dict[str, object], label: str
+) -> dict[str, Any]:
+    actual = _require_fields(value, set(expected), label)
+    if any(
+        type(actual[field]) is not type(expected_value)
+        or actual[field] != expected_value
+        for field, expected_value in expected.items()
+    ):
+        raise V1InternalRepeatabilityEvidenceError(f"{label}_invalid")
+    return actual
+
+
 def _require_int(value: object, minimum: int, maximum: int, label: str) -> int:
     if not isinstance(value, int) or isinstance(value, bool) or not minimum <= value <= maximum:
         raise V1InternalRepeatabilityEvidenceError(f"{label}_invalid")
@@ -240,6 +253,12 @@ def _require_number(value: object, minimum: float, maximum: float, label: str) -
 
 def _require_pattern(value: object, pattern: re.Pattern[str], label: str) -> str:
     if not isinstance(value, str) or pattern.fullmatch(value) is None:
+        raise V1InternalRepeatabilityEvidenceError(f"{label}_invalid")
+    return value
+
+
+def _require_enum(value: object, allowed: set[str], label: str) -> str:
+    if not isinstance(value, str) or value not in allowed:
         raise V1InternalRepeatabilityEvidenceError(f"{label}_invalid")
     return value
 
@@ -316,9 +335,11 @@ def _validate_stages(value: object, label: str) -> bool:
     statuses: list[str] = []
     for index, (item, expected_name) in enumerate(zip(value, STAGES, strict=True), start=1):
         stage = _require_fields(item, _STAGE_FIELDS, f"{label}_stage_{index}")
-        if stage["name"] != expected_name or stage["status"] not in STAGE_STATUSES:
+        if stage["name"] != expected_name:
             raise V1InternalRepeatabilityEvidenceError(f"{label}_stage_{index}_invalid")
-        status = str(stage["status"])
+        status = _require_enum(
+            stage["status"], STAGE_STATUSES, f"{label}_stage_{index}"
+        )
         exit_code = stage["exit_code"]
         if status == "not_attempted":
             if exit_code is not None:
@@ -357,7 +378,10 @@ def _validate_run(
     label = f"run_{index}"
     run = _require_fields(value, _RUN_FIELDS, label)
     run_id = _require_pattern(run["run_id"], _RUN_ID_RE, f"{label}_id")
-    if run["run_index"] != index or run["candidate_artifact_digest"] != artifact_digest:
+    run_index = _require_int(
+        run["run_index"], 1, EXPECTED_RUN_COUNT, f"{label}_index"
+    )
+    if run_index != index or run["candidate_artifact_digest"] != artifact_digest:
         raise V1InternalRepeatabilityEvidenceError(f"{label}_binding_invalid")
 
     started_at = _require_timestamp(run["started_at"], f"{label}_started_at")
@@ -371,18 +395,20 @@ def _validate_run(
     if abs(duration - measured) > 0.05:
         raise V1InternalRepeatabilityEvidenceError(f"{label}_duration_mismatch")
 
-    isolation = _require_fields(run["isolation"], _ISOLATION_FIELDS, f"{label}_isolation")
-    if isolation != {field: True for field in _ISOLATION_FIELDS}:
-        raise V1InternalRepeatabilityEvidenceError(f"{label}_isolation_invalid")
+    _require_literal_mapping(
+        run["isolation"],
+        {field: True for field in _ISOLATION_FIELDS},
+        f"{label}_isolation",
+    )
 
     completed = _validate_stages(run["stages"], label)
     expected_outcome = "passed" if completed else "failed"
     if run["outcome"] != expected_outcome:
         raise V1InternalRepeatabilityEvidenceError(f"{label}_outcome_invalid")
     if completed:
-        observed = _require_fields(run["observed"], _OBSERVED_FIELDS, f"{label}_observed")
-        if observed != expected_observation():
-            raise V1InternalRepeatabilityEvidenceError(f"{label}_observation_invalid")
+        _require_literal_mapping(
+            run["observed"], expected_observation(), f"{label}_observation"
+        )
     elif run["observed"] is not None:
         raise V1InternalRepeatabilityEvidenceError(f"{label}_observation_invalid")
     return completed, finished_at, run_id
@@ -392,11 +418,14 @@ def validate_evidence(value: object) -> dict[str, object]:
     """Validate the strict contract and return its bounded release decision."""
 
     root = _require_fields(value, _ROOT_FIELDS, "evidence")
-    if root["schema_id"] != SCHEMA_ID or root["schema_version"] != SCHEMA_VERSION:
+    if root["schema_id"] != SCHEMA_ID:
         raise V1InternalRepeatabilityEvidenceError("evidence_schema_invalid")
-    evidence_kind = root["evidence_kind"]
-    if evidence_kind not in EVIDENCE_KINDS:
-        raise V1InternalRepeatabilityEvidenceError("evidence_kind_invalid")
+    _require_int(
+        root["schema_version"], SCHEMA_VERSION, SCHEMA_VERSION, "evidence_schema"
+    )
+    evidence_kind = _require_enum(
+        root["evidence_kind"], EVIDENCE_KINDS, "evidence_kind"
+    )
     if root["gate_issue"] != GATE_ISSUE:
         raise V1InternalRepeatabilityEvidenceError("gate_issue_invalid")
 
@@ -410,14 +439,12 @@ def validate_evidence(value: object) -> dict[str, object]:
     ):
         raise V1InternalRepeatabilityEvidenceError("candidate_identity_invalid")
 
-    attestation = _require_fields(
-        root["execution_attestation"], _ATTESTATION_FIELDS, "execution_attestation"
+    _require_literal_mapping(
+        root["execution_attestation"],
+        execution_attestation(),
+        "execution_attestation",
     )
-    if attestation != execution_attestation():
-        raise V1InternalRepeatabilityEvidenceError("execution_attestation_invalid")
-    task = _require_fields(root["task"], _TASK_FIELDS, "task")
-    if task != task_contract():
-        raise V1InternalRepeatabilityEvidenceError("task_contract_invalid")
+    _require_literal_mapping(root["task"], task_contract(), "task_contract")
 
     runs = root["runs"]
     if not isinstance(runs, list) or len(runs) != EXPECTED_RUN_COUNT:

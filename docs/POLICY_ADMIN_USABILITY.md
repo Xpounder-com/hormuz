@@ -29,11 +29,13 @@ python tools/verify_v1_internal_repeatability_evidence.py \
 ```
 
 The selected Python must already have Hormuz's runtime dependencies. The runner
-creates child virtual environments without `pip`, uses the preprovisioned
-dependency layer offline, and loads Hormuz itself only from the validated
-archive. It writes one owner-only evidence file, never raw output or local
-paths. A failed stage remains in the invocation as bounded stage and exit-code
-metadata and prevents promotion.
+checks the installed distribution versions against the requirements in the
+validated archive before using their paths. It then creates child virtual
+environments without `pip`, uses the preprovisioned dependency layer offline,
+and loads Hormuz itself only from the validated archive. It writes one
+owner-only evidence file, never raw output or local paths. A failed or timed-out
+stage remains in the invocation as bounded stage and exit-code metadata and
+prevents promotion.
 
 Any changed archive gets a new SHA-256 digest and invalidates the evidence. The
 final tag is created only after five exact-candidate runs pass, and promotion

@@ -13,16 +13,18 @@ import hashlib
 import io
 import json
 import os
+import re
 import stat
 import subprocess
 import sys
 import tarfile
 import tempfile
 import time
+import tomllib
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 try:
     from tools import v1_candidate
@@ -36,33 +38,44 @@ MAX_EXTRACTED_BYTES = 256 * 1024 * 1024
 MAX_EXTRACTED_FILE_BYTES = 32 * 1024 * 1024
 COMMAND_TIMEOUT_SECONDS = 120
 _SETUP_IDENTITY_TOKEN = "v1-sandbox-setup-only"
+_EXPECTED_RUNTIME_REQUIREMENTS = frozenset(
+    {
+        "PyJWT[crypto]>=2.13,<3",
+        "cryptography>=42",
+    }
+)
+_FINAL_RUNTIME_VERSION_RE = re.compile(
+    r"(?P<release>[0-9]+(?:\.[0-9]+)*)(?:\.post[0-9]+)?"
+    r"(?:\+[0-9A-Za-z]+(?:[._-][0-9A-Za-z]+)*)?\Z"
+)
 
 _DEPENDENCY_PATH_PROBE = r"""
+import importlib.metadata
 import importlib.util
 import json
 import pathlib
-import sys
 
 paths = []
-for module_name in ("jwt", "cryptography"):
+versions = {}
+for distribution_name, module_name in (("PyJWT", "jwt"), ("cryptography", "cryptography")):
     spec = importlib.util.find_spec(module_name)
     if spec is None or spec.origin is None:
         raise SystemExit(2)
-    origin = pathlib.Path(spec.origin).resolve()
-    matches = []
-    for value in sys.path:
-        if not value:
-            continue
-        candidate = pathlib.Path(value).resolve()
-        try:
-            origin.relative_to(candidate)
-        except ValueError:
-            continue
-        matches.append(candidate)
-    if not matches:
+    try:
+        distribution = importlib.metadata.distribution(distribution_name)
+    except importlib.metadata.PackageNotFoundError:
         raise SystemExit(2)
-    paths.append(str(max(matches, key=lambda path: len(path.parts))))
-print(json.dumps(sorted(set(paths))))
+    origin = pathlib.Path(spec.origin).resolve()
+    package_root = pathlib.Path(distribution.locate_file("")).resolve()
+    try:
+        origin.relative_to(package_root)
+    except ValueError:
+        raise SystemExit(2)
+    if not package_root.is_dir():
+        raise SystemExit(2)
+    paths.append(str(package_root))
+    versions[distribution_name] = distribution.version
+print(json.dumps({"paths": sorted(set(paths)), "versions": versions}, sort_keys=True))
 """
 
 _SOURCE_PROBE = r"""
@@ -185,7 +198,68 @@ def _run(
         raise V1InternalRepeatabilityRunError("subprocess_unavailable") from error
 
 
-def _dependency_paths(python: Path, temporary: Path) -> list[str]:
+def _archived_runtime_requirements(source_root: Path) -> None:
+    try:
+        value = tomllib.loads(
+            (source_root / "pyproject.toml").read_text(encoding="utf-8")
+        )
+        dependencies = value["project"]["dependencies"]
+    except (KeyError, OSError, TypeError, UnicodeError, tomllib.TOMLDecodeError) as error:
+        raise V1InternalRepeatabilityRunError(
+            "candidate_runtime_requirements_invalid"
+        ) from error
+    if (
+        not isinstance(dependencies, list)
+        or len(dependencies) != len(_EXPECTED_RUNTIME_REQUIREMENTS)
+        or any(not isinstance(item, str) for item in dependencies)
+        or set(dependencies) != _EXPECTED_RUNTIME_REQUIREMENTS
+    ):
+        raise V1InternalRepeatabilityRunError(
+            "candidate_runtime_requirements_invalid"
+        )
+
+
+def _final_release(value: object) -> tuple[int, ...]:
+    if not isinstance(value, str):
+        raise V1InternalRepeatabilityRunError("dependency_version_probe_invalid")
+    match = _FINAL_RUNTIME_VERSION_RE.fullmatch(value)
+    if match is None:
+        raise V1InternalRepeatabilityRunError(
+            "preprovisioned_dependency_versions_unsupported"
+        )
+    return tuple(int(part) for part in match.group("release").split("."))
+
+
+def _validate_dependency_probe(value: object, source_root: Path) -> list[str]:
+    _archived_runtime_requirements(source_root)
+    if not isinstance(value, dict) or set(value) != {"paths", "versions"}:
+        raise V1InternalRepeatabilityRunError("dependency_path_probe_invalid")
+    paths = value["paths"]
+    versions = value["versions"]
+    if (
+        not isinstance(paths, list)
+        or not paths
+        or any(not isinstance(path, str) or not Path(path).is_dir() for path in paths)
+        or not isinstance(versions, dict)
+        or set(versions) != {"PyJWT", "cryptography"}
+    ):
+        raise V1InternalRepeatabilityRunError("dependency_path_probe_invalid")
+    jwt_version = _final_release(versions["PyJWT"])
+    cryptography_version = _final_release(versions["cryptography"])
+    if not (
+        jwt_version >= (2, 13)
+        and jwt_version < (3,)
+        and cryptography_version >= (42,)
+    ):
+        raise V1InternalRepeatabilityRunError(
+            "preprovisioned_dependency_versions_unsupported"
+        )
+    return paths
+
+
+def _dependency_paths(
+    python: Path, temporary: Path, source_root: Path
+) -> list[str]:
     result = _run(
         [str(python), "-I", "-B", "-c", _DEPENDENCY_PATH_PROBE],
         cwd=temporary,
@@ -194,16 +268,10 @@ def _dependency_paths(python: Path, temporary: Path) -> list[str]:
     if result.returncode != 0:
         raise V1InternalRepeatabilityRunError("preprovisioned_dependencies_unavailable")
     try:
-        paths = json.loads(result.stdout)
+        value = json.loads(result.stdout)
     except json.JSONDecodeError as error:
         raise V1InternalRepeatabilityRunError("dependency_path_probe_invalid") from error
-    if (
-        not isinstance(paths, list)
-        or not paths
-        or any(not isinstance(path, str) or not Path(path).is_dir() for path in paths)
-    ):
-        raise V1InternalRepeatabilityRunError("dependency_path_probe_invalid")
-    return paths
+    return _validate_dependency_probe(value, source_root)
 
 
 def _load_candidate(
@@ -633,9 +701,35 @@ def _complete_command_stage(
     records[index].update(status="completed", exit_code=expected)
 
 
-def _fail_internal_stage(records: list[dict[str, object]], index: int) -> None:
+def _fail_internal_stage(
+    records: list[dict[str, object]], index: int
+) -> NoReturn:
     records[index].update(status="failed", exit_code=255)
     raise _StageFailure(255)
+
+
+def _run_command_stage(
+    records: list[dict[str, object]],
+    index: int,
+    python: Path,
+    source_root: Path,
+    dependency_paths: list[str],
+    arguments: list[str],
+    *,
+    workspace: Path,
+) -> subprocess.CompletedProcess[str]:
+    try:
+        result = _run_cli(
+            python,
+            source_root,
+            dependency_paths,
+            arguments,
+            workspace=workspace,
+        )
+    except V1InternalRepeatabilityRunError:
+        _fail_internal_stage(records, index)
+    _complete_command_stage(records, index, result)
+    return result
 
 
 def _execute_one_run(
@@ -671,7 +765,9 @@ def _execute_one_run(
     observed: dict[str, object] | None = None
     common = ["--config", str(config_path)]
     try:
-        created = _run_cli(
+        _run_command_stage(
+            stages,
+            0,
             virtual_environment,
             source_root,
             dependency_paths,
@@ -688,7 +784,6 @@ def _execute_one_run(
             ],
             workspace=workspace,
         )
-        _complete_command_stage(stages, 0, created)
 
         try:
             _modify_candidate(candidate_path)
@@ -696,16 +791,19 @@ def _execute_one_run(
             _fail_internal_stage(stages, 1)
         stages[1].update(status="completed", exit_code=0)
 
-        validated = _run_cli(
+        _run_command_stage(
+            stages,
+            2,
             virtual_environment,
             source_root,
             dependency_paths,
             [*common, "policy", "validate", str(candidate_path)],
             workspace=workspace,
         )
-        _complete_command_stage(stages, 2, validated)
 
-        compared = _run_cli(
+        compared = _run_command_stage(
+            stages,
+            3,
             virtual_environment,
             source_root,
             dependency_paths,
@@ -722,23 +820,25 @@ def _execute_one_run(
             ],
             workspace=workspace,
         )
-        _complete_command_stage(stages, 3, compared)
         try:
             _validate_comparison(_decode_contract(compared.stdout, "comparison"))
         except V1InternalRepeatabilityRunError:
             stages[3].update(status="failed", exit_code=255)
             raise _StageFailure(255)
 
-        scenarios = _run_cli(
+        _run_command_stage(
+            stages,
+            4,
             virtual_environment,
             source_root,
             dependency_paths,
             ["policy", "scenarios", "validate", str(scenarios_path)],
             workspace=workspace,
         )
-        _complete_command_stage(stages, 4, scenarios)
 
-        evaluated = _run_cli(
+        evaluated = _run_command_stage(
+            stages,
+            5,
             virtual_environment,
             source_root,
             dependency_paths,
@@ -757,7 +857,6 @@ def _execute_one_run(
             ],
             workspace=workspace,
         )
-        _complete_command_stage(stages, 5, evaluated)
         try:
             _validate_evaluation(_decode_contract(evaluated.stdout, "evaluation"))
         except V1InternalRepeatabilityRunError:
@@ -835,8 +934,8 @@ def run_checkpoint(
 
     with tempfile.TemporaryDirectory(prefix="hormuz-v1-repeatability-") as temporary:
         root = Path(temporary)
-        dependency_paths = _dependency_paths(python, root)
         source_root = _extract_source(archive_payload, root / "source")
+        dependency_paths = _dependency_paths(python, root, source_root)
         runs = [
             _execute_one_run(
                 run_index=index,
