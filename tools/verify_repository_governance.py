@@ -132,13 +132,13 @@ CANDIDATE_CREDENTIAL_STEP_SHA256 = {
         "1ce7b6af2e80d3e28713d9f1323849f400b65fc9ec26632139909c535738074b"
     ),
     "Fail closed before the one permitted archive build": (
-        "1c281cdff63dc6a05d3a6210a38eda943e0fd3d08bb48d6ad16d5c2ac959231b"
+        "3367c255ca98d444ce3bfe462ed36fe49786c39158cdd0d306f994f79fb98f37"
     ),
     "Create one digest-addressed immutable candidate prerelease": (
         "7673292094a48ca04d3a6efa612f1fe12dbefba173ca7ce74f1f46b6314b3481"
     ),
     "Re-download and prove exact immutable candidate custody": (
-        "394a6a100e43e4a240a62dbe3930031459f92a9bbe6b18d46237da12236705a2"
+        "6f860d808e652dbd6094b10bcb323f3397b81eee0cd0454ecfd8b0053e6f6259"
     ),
 }
 CANDIDATE_FREEZE_JOB_SHA256 = {
@@ -146,11 +146,14 @@ CANDIDATE_FREEZE_JOB_SHA256 = {
         "d997a87355493a01d811044f7ff2f291b470122e411d6dd6e45226ebd21c85a1"
     ),
     "freeze": (
-        "95a5baf2fbbf8f62c2c09b320773a75d1ef13ce12a5189ba739161d12216147b"
+        "56be4e1bc9886abb0d02718d762420e139b380e92d9b81a3782d9fd696b7195b"
     ),
 }
 CANDIDATE_FREEZE_WORKFLOW_SHA256 = (
-    "c252c43dc284deee55b7e4a14075239fec155639ec8475e52c5a2fdc9a15bafa"
+    "922f322b90b9dafd871b5c023083b06dca2ddf3f51515cd0ce832e0fa9326c76"
+)
+CANDIDATE_TOOL_SHA256 = (
+    "befc54446f6a2b912b1ba5d0ff982abb32d9700beea0dad55f9fa04fc8c26ab8"
 )
 PermissionSpec = str | dict[str, str]
 
@@ -1234,6 +1237,14 @@ def _validate_workflows(
 
 def validate_repository_governance(root: Path) -> dict[str, object]:
     root = root.resolve()
+    try:
+        candidate_tool = (root / "tools/v1_candidate.py").read_bytes()
+    except OSError as exc:
+        raise RepositoryGovernanceError(
+            "candidate custody tool is unavailable"
+        ) from exc
+    if hashlib.sha256(candidate_tool).hexdigest() != CANDIDATE_TOOL_SHA256:
+        raise RepositoryGovernanceError("candidate custody tool bytes changed")
     manifest = _read_json(root / MANIFEST_PATH)
     checks = _validate_manifest(manifest)
     _validate_rulesets(root, checks)

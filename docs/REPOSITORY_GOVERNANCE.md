@@ -48,11 +48,13 @@ controls:
    permission syntax. It binds all credential-bearing steps to the protected
    `freeze` job, permits only the declared literal workflow environments and
    secret expressions, and pins the complete byte content of the release
-   workflow, both release jobs, and every credential-bearing step. Inserted
-   setup steps therefore cannot poison later credential-bearing commands, and
-   workflow, job, or step controls cannot turn a failed authorization into
-   success. The custody environment must contain exactly the two release-token
-   names before checkout or build.
+   workflow, both release jobs, every credential-bearing step, and the
+   repository custody tool invoked by those steps. Repository code runs with
+   GitHub credentials and GitHub persistence-file paths removed from its
+   environment. Inserted setup steps therefore cannot poison later
+   credential-bearing commands, and workflow, job, or step controls cannot
+   turn a failed authorization into success. The custody environment must
+   contain exactly the two release-token names before checkout or build.
 2. `main` cannot be deleted or force-pushed. Every change uses a pull request,
    resolves review threads, is tested against current `main`, and passes all 11
    release-blocking checks from the GitHub Actions app.

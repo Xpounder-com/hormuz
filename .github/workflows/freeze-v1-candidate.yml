@@ -164,7 +164,15 @@ jobs:
               "/repos/$GITHUB_REPOSITORY/actions/runs/$freeze_run_id/jobs?filter=all&per_page=100" \
               > "$freeze_jobs_dir/$freeze_run_id.json"
           done
-          python -I -B tools/v1_candidate.py freeze-authorization \
+          env \
+            -u GH_ADMIN_TOKEN \
+            -u GH_TOKEN \
+            -u GITHUB_ENV \
+            -u GITHUB_OUTPUT \
+            -u GITHUB_PATH \
+            -u GITHUB_STATE \
+            -u GITHUB_STEP_SUMMARY \
+            python -I -B tools/v1_candidate.py freeze-authorization \
             --runs-api "$freeze_runs_path" \
             --jobs-directory "$freeze_jobs_dir" \
             --source-commit "$GITHUB_SHA" \
@@ -173,7 +181,7 @@ jobs:
               echo "the exact source commit already has another successfully authorized freeze run; create a new commit instead of rebuilding" >&2
               exit 1
             }
-          package_version="$(python -c 'import pathlib, tomllib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"])')"
+          package_version="$(python -I -B -c 'import pathlib, tomllib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"])')"
           [[ "$package_version" == "1.0.0" ]] || {
             echo "candidate package version must be exactly 1.0.0" >&2
             exit 1
@@ -212,7 +220,7 @@ jobs:
           GH_TOKEN="$GH_ADMIN_TOKEN" gh api \
             "/repos/$GITHUB_REPOSITORY/environments/v1-release-custody" \
             > "$release_environment_path"
-          release_environment_contract="$(python -c '
+          release_environment_contract="$(python -I -B -c '
           import json, pathlib, sys
           value = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
           steward = sys.argv[2]
@@ -352,7 +360,15 @@ jobs:
             > "$verification_dir/release-api.json"
           GH_TOKEN="$GH_ADMIN_TOKEN" gh api "/repos/$GITHUB_REPOSITORY/immutable-releases" \
             > "$verification_dir/immutable-api.json"
-          python tools/v1_candidate.py custody \
+          env \
+            -u GH_ADMIN_TOKEN \
+            -u GH_TOKEN \
+            -u GITHUB_ENV \
+            -u GITHUB_OUTPUT \
+            -u GITHUB_PATH \
+            -u GITHUB_STATE \
+            -u GITHUB_STEP_SUMMARY \
+            python -I -B tools/v1_candidate.py custody \
             --manifest "$verification_dir/hormuz-v1.0.0-candidate-manifest.json" \
             --archive "$verification_dir/hormuz-1.0.0.tar.gz" \
             --release-api "$verification_dir/release-api.json" \

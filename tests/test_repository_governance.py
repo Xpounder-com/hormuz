@@ -18,6 +18,11 @@ REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
 class RepositoryGovernanceTests(unittest.TestCase):
     def _copy_contract(self, target: Path) -> None:
         shutil.copytree(REPOSITORY_ROOT / ".github", target / ".github")
+        (target / "tools").mkdir()
+        shutil.copy2(
+            REPOSITORY_ROOT / "tools/v1_candidate.py",
+            target / "tools/v1_candidate.py",
+        )
 
     def test_repository_governance_contract_passes(self) -> None:
         result = validate_repository_governance(REPOSITORY_ROOT)
@@ -472,6 +477,65 @@ class RepositoryGovernanceTests(unittest.TestCase):
                     ):
                         validate_repository_governance(root)
 
+    def test_repository_tool_invocations_scrub_credentials_and_persistence(
+        self,
+    ) -> None:
+        scrubbed_names = (
+            "GH_ADMIN_TOKEN",
+            "GH_TOKEN",
+            "GITHUB_ENV",
+            "GITHUB_OUTPUT",
+            "GITHUB_PATH",
+            "GITHUB_STATE",
+            "GITHUB_STEP_SUMMARY",
+        )
+        for name in scrubbed_names:
+            with self.subTest(name=name):
+                with tempfile.TemporaryDirectory() as temporary:
+                    root = Path(temporary)
+                    self._copy_contract(root)
+                    workflow = root / ".github/workflows/freeze-v1-candidate.yml"
+                    value = workflow.read_text(encoding="utf-8")
+                    scrub_line = f"            -u {name} \\\n"
+                    self.assertEqual(value.count(scrub_line), 2)
+                    workflow.write_text(
+                        value.replace(scrub_line, ""),
+                        encoding="utf-8",
+                    )
+                    with self.assertRaisesRegex(
+                        RepositoryGovernanceError,
+                        "candidate freeze credential boundary changed",
+                    ):
+                        validate_repository_governance(root)
+
+    def test_admin_scope_python_cannot_import_repository_modules(self) -> None:
+        isolated_invocations = (
+            "          python -I -B -c '\n",
+            '          package_version="$(python -I -B -c \'',
+            '          release_environment_contract="$(python -I -B -c \'',
+        )
+        for invocation in isolated_invocations:
+            with self.subTest(invocation=invocation):
+                with tempfile.TemporaryDirectory() as temporary:
+                    root = Path(temporary)
+                    self._copy_contract(root)
+                    workflow = root / ".github/workflows/freeze-v1-candidate.yml"
+                    value = workflow.read_text(encoding="utf-8")
+                    self.assertEqual(value.count(invocation), 1)
+                    workflow.write_text(
+                        value.replace(
+                            invocation,
+                            invocation.replace("python -I -B", "python"),
+                            1,
+                        ),
+                        encoding="utf-8",
+                    )
+                    with self.assertRaisesRegex(
+                        RepositoryGovernanceError,
+                        "candidate freeze credential boundary changed",
+                    ):
+                        validate_repository_governance(root)
+
     def test_candidate_jobs_cannot_add_path_poisoning_steps(self) -> None:
         insertions = (
             (
@@ -646,6 +710,22 @@ class RepositoryGovernanceTests(unittest.TestCase):
             with self.assertRaisesRegex(
                 RepositoryGovernanceError,
                 "candidate freeze workflow bytes changed",
+            ):
+                validate_repository_governance(root)
+
+    def test_candidate_custody_tool_bytes_are_pinned(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._copy_contract(root)
+            tool = root / "tools/v1_candidate.py"
+            tool.write_text(
+                tool.read_text(encoding="utf-8")
+                + '\nraise RuntimeError("credential probe")\n',
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                RepositoryGovernanceError,
+                "candidate custody tool bytes changed",
             ):
                 validate_repository_governance(root)
 
