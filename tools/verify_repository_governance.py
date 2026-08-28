@@ -387,6 +387,7 @@ def _parse_permissions(
         )
 
     permissions: dict[str, str] = {}
+    entry_indent: int | None = None
     for index in range(declaration_index + 1, end_index):
         line = lines[index]
         if not line.strip() or line.lstrip().startswith("#"):
@@ -394,11 +395,13 @@ def _parse_permissions(
         current_indent = _yaml_indent(line, label=label)
         if current_indent <= indent:
             break
-        if current_indent != indent + 2:
+        if entry_indent is None:
+            entry_indent = current_indent
+        if current_indent != entry_indent:
             raise RepositoryGovernanceError(
                 f"workflow permissions use unsupported YAML structure: {label}"
             )
-        entry = _permission_key_and_value(line, indent=indent + 2)
+        entry = _permission_key_and_value(line, indent=entry_indent)
         if entry is None:
             raise RepositoryGovernanceError(
                 f"workflow permissions use unsupported YAML syntax: {label}"
@@ -474,6 +477,7 @@ def _workflow_permissions(
         label=f"{workflow_name}:workflow",
     )
     job_starts: list[tuple[str, int]] = []
+    job_indent: int | None = None
     for index in range(jobs_index + 1, len(lines)):
         line = lines[index]
         if not line.strip() or line.lstrip().startswith("#"):
@@ -481,9 +485,15 @@ def _workflow_permissions(
         indent = _yaml_indent(line, label=workflow_name)
         if indent == 0:
             break
-        if indent != 2:
+        if job_indent is None:
+            job_indent = indent
+        if indent < job_indent:
+            raise RepositoryGovernanceError(
+                f"workflow jobs use inconsistent indentation: {workflow_name}"
+            )
+        if indent != job_indent:
             continue
-        job = _permission_key_and_value(line, indent=2)
+        job = _permission_key_and_value(line, indent=job_indent)
         if job is None or _plain_yaml_value(job[1], label=workflow_name):
             raise RepositoryGovernanceError(
                 f"workflow job must use a plain block mapping: {workflow_name}"
@@ -502,6 +512,7 @@ def _workflow_permissions(
             else len(lines)
         )
         permission_declarations: list[int] = []
+        field_indent: int | None = None
         for index in range(start_index + 1, end_index):
             line = lines[index]
             if not line.strip() or line.lstrip().startswith("#"):
@@ -510,17 +521,34 @@ def _workflow_permissions(
             if indent == 0:
                 end_index = index
                 break
-            if indent == 4 and line.startswith("    <<:"):
+            assert job_indent is not None
+            if indent <= job_indent:
+                raise RepositoryGovernanceError(
+                    f"workflow job uses inconsistent indentation: {workflow_name}:{job_name}"
+                )
+            if field_indent is None:
+                field_indent = indent
+            if indent < field_indent:
+                raise RepositoryGovernanceError(
+                    f"workflow job uses inconsistent indentation: {workflow_name}:{job_name}"
+                )
+            if indent != field_indent:
+                continue
+            if line[field_indent:].startswith("<<:"):
                 raise RepositoryGovernanceError(
                     f"workflow job uses unsupported YAML merge: {workflow_name}:{job_name}"
                 )
             entry = _permission_key_and_value(line, indent=indent)
-            if indent == 4 and entry is None:
+            if entry is None:
                 raise RepositoryGovernanceError(
                     f"workflow job uses unsupported mapping syntax: {workflow_name}:{job_name}"
                 )
-            if indent == 4 and entry is not None and entry[0] == "permissions":
+            if entry[0] == "permissions":
                 permission_declarations.append(index)
+        if field_indent is None:
+            raise RepositoryGovernanceError(
+                f"workflow job mapping is empty: {workflow_name}:{job_name}"
+            )
         if len(permission_declarations) > 1:
             raise RepositoryGovernanceError(
                 f"workflow job repeats permissions: {workflow_name}:{job_name}"
@@ -529,7 +557,7 @@ def _workflow_permissions(
             _parse_permissions(
                 lines,
                 permission_declarations[0],
-                indent=4,
+                indent=field_indent,
                 end_index=end_index,
                 label=f"{workflow_name}:{job_name}",
             )

@@ -274,6 +274,35 @@ class RepositoryGovernanceTests(unittest.TestCase):
             ):
                 validate_repository_governance(root)
 
+    def test_nonstandard_job_indentation_cannot_hide_write_all(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._copy_contract(root)
+            workflow = root / ".github/workflows/rogue.yml"
+            workflow.write_text(
+                """name: Rogue candidate writer
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  poison:
+     permissions: write-all
+     runs-on: ubuntu-24.04
+     steps:
+       - run: 'true'
+""",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                RepositoryGovernanceError,
+                "only the steward-gated candidate freeze job",
+            ):
+                validate_repository_governance(root)
+
 
 if __name__ == "__main__":
     unittest.main()
