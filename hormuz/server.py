@@ -15,6 +15,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Mapping
 from urllib.parse import urlsplit
 
+from . import __version__
 from .auth import AuthenticationError, Authenticator
 from .config import GatewayConfig, Identity, ModelRoute, UpstreamConfig
 from .contracts import (
@@ -820,7 +821,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         headers = {
             "Content-Type": "application/json",
             "Accept": self.headers.get("Accept", "application/json"),
-            "User-Agent": self.headers.get("User-Agent", "Hormuz/0.1.3"),
+            "User-Agent": self.headers.get("User-Agent", f"Hormuz/{__version__}"),
         }
         if protocol == "openai":
             headers["Authorization"] = f"Bearer {upstream_key}"

@@ -22,8 +22,8 @@ EVIDENCE_FIXTURE = (
     ROOT
     / "tests"
     / "fixtures"
-    / "policy_admin_usability"
-    / "complete-synthetic-v2.json"
+    / "v1_internal_repeatability"
+    / "complete-synthetic-v1.json"
 )
 
 
@@ -87,9 +87,6 @@ class V1CandidateTests(unittest.TestCase):
             )
         )
         value["evidence_kind"] = "candidate_gate_evidence"
-        value["operator_attestation"][
-            "distinct_humans_verified_off_repository"
-        ] = True
         candidate = manifest["candidate"]
         assert isinstance(candidate, dict)
         value["candidate"] = {
@@ -99,8 +96,8 @@ class V1CandidateTests(unittest.TestCase):
             "source_commit": candidate["source_commit"],
             "frozen_at": candidate["frozen_at"],
         }
-        for session in value["sessions"]:
-            session["candidate_artifact_digest"] = candidate["artifact_digest"]
+        for run in value["runs"]:
+            run["candidate_artifact_digest"] = candidate["artifact_digest"]
         path = directory / "real-evidence.json"
         path.write_text(json.dumps(value), encoding="utf-8")
         return path
@@ -1383,8 +1380,8 @@ class V1CandidateTests(unittest.TestCase):
             "pyproject-hooks==1.2.0": (
                 "9e5c6bfa8dcc30091c74b0cf803c81fdd29d94f01992a7707bc97babb1141913"
             ),
-            "setuptools==80.9.0": (
-                "062d34222ad13e0cc312a4c02d73f059e86a4acbfbdea8f8f76b28c99f306922"
+            "setuptools==83.0.0": (
+                "29b23c360f22f414dc7336bb39178cc7bcbf6021ed2733cde173f09dba19abb3"
             ),
         }
         self.assertEqual(lock.count("--hash=sha256:"), len(expected))
@@ -1398,7 +1395,7 @@ class V1CandidateTests(unittest.TestCase):
         self.assertEqual(
             pyproject["build-system"],
             {
-                "requires": ["setuptools==80.9.0"],
+                "requires": ["setuptools==83.0.0"],
                 "build-backend": "setuptools.build_meta",
             },
         )
@@ -1472,7 +1469,7 @@ class V1CandidateTests(unittest.TestCase):
             script,
         )
         self.assertIn(
-            '"$checkout_commit:tools/verify_policy_admin_usability_evidence.py"',
+            '"$checkout_commit:tools/verify_v1_internal_repeatability_evidence.py"',
             script,
         )
         self.assertNotIn('python3 "$tool"', script)

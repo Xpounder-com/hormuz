@@ -174,7 +174,7 @@ class OciPublicMetadataTests(unittest.TestCase):
         )
         self.assertIn("must fail closed before the artifact is admitted", normalized)
         self.assertIn(
-            "v0.1.3` is the current supported signed Hormuz release", normalized
+            "v0.1.3` is the previously verified signed Hormuz reference", normalized
         )
         self.assertIn("v0.1.1` remains the prior supported digest", normalized)
         self.assertIn("failed `v0.1.2` attempt is not a supported release", normalized)

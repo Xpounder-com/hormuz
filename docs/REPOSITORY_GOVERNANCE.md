@@ -1,6 +1,6 @@
 # Repository governance
 
-Hormuz's source repository is a security boundary for the public alpha. The
+Hormuz's source repository is a security boundary for the v1 release line. The
 checked-in contract at
 `.github/repository-governance-v1.json` fixes the intended repository metadata,
 workflow permissions, required checks, ruleset payloads, and public-transition
@@ -16,7 +16,7 @@ also capture allowlisted API evidence when applying or reviewing those settings.
 
 ## Two explicit phases
 
-| Control | Pre-public audit | Public alpha |
+| Control | Pre-public audit | Public release |
 |---|---|---|
 | Repository visibility | Private | Public only after the disclosure gate closes and the owner authorizes the transition |
 | Action references | Every external Action pinned to a full commit SHA | Same |
@@ -80,7 +80,7 @@ Q&A, and Show and tell. Public issue forms and Discussions must never request or
 contain provider credentials, customer prompts, outputs, or proprietary data.
 Security reports use GitHub's private security-advisory path.
 
-The repository description and topics describe only the public-alpha gateway
+The repository description and topics describe only the bounded gateway
 boundary: policy enforcement, routing, redaction, and content-free usage/cost
 evidence for Codex and Claude Code. They do not claim enterprise readiness or
 include the separately packaged context experiment.

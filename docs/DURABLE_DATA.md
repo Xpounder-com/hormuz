@@ -1,6 +1,6 @@
 # Durable data boundary
 
-Hormuz's public alpha is self-hosted. Hormuz does not operate a hosted customer-data service, and the project has no remote control plane that can
+Hormuz v1 is self-hosted. Hormuz does not operate a hosted customer-data service, and the project has no remote control plane that can
 export or delete an organization's deployment. The machine-readable source of
 truth for this document is
 [`durable-data-v1.json`](durable-data-v1.json).
@@ -53,7 +53,7 @@ customer-operated copy with its own obligations.
 
 ## Export, retention, backup, and deletion
 
-For the public alpha, customer database and backup operators are responsible
+For the v1 self-hosted release, customer database and backup operators are responsible
 for export, retention, backup, restore, and deletion using their controlled
 infrastructure. Hormuz does not introduce `tenant_data_admin`, automated
 tenant deletion, tenant-deletion approval workflows, or a tenant-lifecycle

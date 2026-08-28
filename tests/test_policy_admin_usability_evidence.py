@@ -1053,6 +1053,10 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
         self.assertIn(
             "include tools/verify_policy_admin_usability_evidence.py\n", manifest
         )
+        self.assertIn(
+            "include tools/verify_v1_internal_repeatability_evidence.py\n", manifest
+        )
+        self.assertIn("include tools/run_v1_internal_repeatability.py\n", manifest)
         self.assertIn("include tools/v1_candidate.py\n", manifest)
         self.assertIn("include tools/promote_v1_candidate.sh\n", manifest)
         self.assertIn("include requirements/v1-source-build.lock\n", manifest)
@@ -1060,14 +1064,15 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
         self.assertIn("recursive-include tests *.py *.json\n", manifest)
         self.assertIn("include examples/policy-admin-usability-baseline.json\n", manifest)
         self.assertIn("include examples/policy-admin-usability-scenarios.json\n", manifest)
+        self.assertIn("deterministic\ninternal repeatability", guide)
         self.assertIn("0/5", guide)
         self.assertIn("0/3", guide)
-        self.assertIn("Issue #110", guide)
-        self.assertIn("separate", guide)
+        self.assertIn("issue #110", guide)
         self.assertIn("v1.0.0", guide)
-        self.assertIn("promote the exact tested archive and digest", guide)
-        self.assertIn("before starting any measured\nPostgreSQL session", guide)
-        self.assertIn("administrator workflow's usability", guide)
+        self.assertIn("hormuz.v1-internal-repeatability-evidence", guide)
+        self.assertIn("never rebuilds or uploads replacement source bytes", guide)
+        self.assertIn("Deferred human PostgreSQL task card", guide)
+        self.assertIn("not v1.0.0 release dependencies", guide)
         self.assertEqual(
             set(verify_core_wheel.REQUIRED_POLICY_ADMIN_USABILITY_SDIST_PATHS),
             {
@@ -1077,8 +1082,10 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
                 "examples/policy-admin-usability-scenarios.json",
                 "requirements/v1-source-build.lock",
                 "tools/promote_v1_candidate.sh",
+                "tools/run_v1_internal_repeatability.py",
                 "tools/v1_candidate.py",
                 "tools/verify_policy_admin_usability_evidence.py",
+                "tools/verify_v1_internal_repeatability_evidence.py",
             },
         )
 

@@ -57,21 +57,26 @@ class QuietAlphaEvidenceTests(unittest.TestCase):
             ["developer", "engineering_admin", "platform", "security"],
         )
 
-    def test_release_identity_matches_package_guide_and_fixture(self) -> None:
+    def test_archived_release_identity_matches_guide_and_fixture(self) -> None:
         metadata = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-        package_version = metadata["project"]["version"]
+        current_package_version = metadata["project"]["version"]
+        archived_package_version = quiet_alpha.PACKAGE_VERSION
         guide = (ROOT / "docs" / "QUIET_ALPHA.md").read_text(encoding="utf-8")
         fixture = self._fixture()
 
-        self.assertEqual(quiet_alpha.PACKAGE_VERSION, package_version)
-        self.assertEqual(quiet_alpha.PROGRAM, f"hormuz-v{package_version}-quiet-alpha")
-        self.assertIn(f'"package_version": "{package_version}"', guide)
+        self.assertEqual(archived_package_version, "0.1.3")
+        self.assertNotEqual(archived_package_version, current_package_version)
+        self.assertEqual(
+            quiet_alpha.PROGRAM,
+            f"hormuz-v{archived_package_version}-quiet-alpha",
+        )
+        self.assertIn(f'"package_version": "{archived_package_version}"', guide)
         self.assertIn("--branch v0.1.3", guide)
         self.assertIn(quiet_alpha.RELEASE_SOURCE_COMMIT, guide)
         self.assertEqual(fixture["program"], quiet_alpha.PROGRAM)
         self.assertTrue(
             all(
-                session["package_version"] == package_version
+                session["package_version"] == archived_package_version
                 and session["source_commit"] == quiet_alpha.RELEASE_SOURCE_COMMIT
                 for session in fixture["sessions"]
             )

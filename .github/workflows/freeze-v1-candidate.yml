@@ -837,8 +837,8 @@ jobs:
                   gate
                   == {
                       "issue": "https://github.com/Xpounder-com/hormuz/issues/173",
-                      "evidence_schema_id": "hormuz.policy-admin-usability-evidence",
-                      "evidence_schema_version": 2,
+                      "evidence_schema_id": "hormuz.v1-internal-repeatability-evidence",
+                      "evidence_schema_version": 1,
                       "session_digest_binding_required": True,
                       "changed_artifact_invalidates_evidence": True,
                   },

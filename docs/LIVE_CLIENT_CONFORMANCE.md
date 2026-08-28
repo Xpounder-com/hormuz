@@ -101,7 +101,7 @@ python tools/verify_live_client_conformance.py \
 
 Both exact client executables must already be first on `PATH`. A one-provider
 run is allowed for diagnosis, but its artifact is marked `scope: partial` and
-cannot close the public-alpha client gate.
+cannot close the bounded two-client conformance gate.
 
 ## Evidence contract
 

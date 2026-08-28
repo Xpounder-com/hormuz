@@ -303,13 +303,14 @@ The output path must not exist. Hormuz creates it with mode `0700`, writes all
 artifacts with mode `0600`, and refuses to overwrite an existing file,
 directory, link, or special path. The final `policy apply`, `policy history`,
 and `policy rollback` lines are real managed commands shown for the operator;
-the demo does not execute them. This proves only the policy-administration UX,
+the demo does not execute them. This demonstrates only the policy-administration UX,
 not completion of the enterprise v1 release gate.
 
-The independent v1 gate and its fixed offline/PostgreSQL task cards are defined
-in [POLICY_ADMIN_USABILITY.md](POLICY_ADMIN_USABILITY.md). The gate remains at
-0/5 offline and 0/3 PostgreSQL participants until qualifying external evidence
-exists; the demo and synthetic contract fixture cannot increase either count.
+The v1 candidate checkpoint is defined in
+[POLICY_ADMIN_USABILITY.md](POLICY_ADMIN_USABILITY.md). It requires five
+isolated internal repetitions against one exact frozen archive and proves only
+mechanical offline-workflow repeatability. The separate external-human and
+PostgreSQL study remains deferred at 0/5 and 0/3 under issue #110.
 
 ## Compare and preview a candidate
 
@@ -503,7 +504,7 @@ use only the spaced command tree.
 
 ## Interface and current boundary
 
-The product interface is CLI-first. Internally the CLI authenticates a credential and calls `PolicyControlService`; it never writes PostgreSQL tables directly and does not accept a self-asserted actor. The present alpha implementation runs that service boundary in the CLI process with the dedicated control credential. Run it only from a locked-down administrator environment: possession of that control credential is already root policy authority. A remote API or restricted local control socket can use the same service contract later without changing bootstrap, authorization, staging, activation, or rollback semantics.
+The product interface is CLI-first. Internally the CLI authenticates a credential and calls `PolicyControlService`; it never writes PostgreSQL tables directly and does not accept a self-asserted actor. The v1 implementation runs that service boundary in the CLI process with the dedicated control credential. Run it only from a locked-down administrator environment: possession of that control credential is already root policy authority. A remote API or restricted local control socket can use the same service contract later without changing bootstrap, authorization, staging, activation, or rollback semantics.
 
 The control plane is a bounded shared-state implementation, not a completed production deployment. External-IdP conformance, secret rotation/KMS, tamper-evident retention, TLS/HA, pooling, backup/PITR, and multi-instance operational drills remain separate release gates. See [STORAGE.md](STORAGE.md), [OIDC.md](OIDC.md), and [ROADMAP.md](ROADMAP.md).
 

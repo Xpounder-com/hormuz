@@ -10,11 +10,14 @@ budgets, and secret-egress rules apply, routes allowed traffic to OpenAI or
 Anthropic, and records versioned metadata-only evidence. Employees keep their
 existing AI clients; company provider credentials stay on the Hormuz service.
 
-Hormuz is a **public open-source alpha** and is **not production-ready** or an
-enterprise-HA release. External onboarding validation pending: **0/5**
-independent testers. Use it with synthetic data for evaluation. Its current
-proofs do not establish production security, availability, disaster recovery,
-provider-invoice accuracy, or suitability for customer secrets.
+Hormuz 1.0 is the first stable CLI and policy/evidence-contract release line.
+It is self-hosted and does not claim blanket production certification,
+enterprise HA, customer SLA, or independent security review. The v1 release
+checkpoint requires five isolated internal repetitions of one exact offline
+policy workflow plus exact-byte candidate custody. Passing proves only that
+bounded repeatability claim. It does not prove external human usability,
+PostgreSQL administrator state transitions, market demand, provider-invoice
+accuracy, or suitability for customer secrets.
 
 ## Try the real gateway without a provider account
 
@@ -72,26 +75,21 @@ hormuz policy demo --output ./policy-demo
 The new directory is mode `0700` and every artifact is mode `0600`. The demo
 ends with real `policy apply`, `policy history`, and `policy rollback` commands
 for a separately configured managed deployment, but never executes them. This
-is a policy-UX milestone, not evidence that the enterprise v1 release gate is
-complete.
+is a policy-UX demonstration, not production-deployment certification.
 
-The separate [independent administrator protocol](docs/POLICY_ADMIN_USABILITY.md)
-holds the v1 usability claim at **0/5** offline and **0/3** PostgreSQL
-participants until qualifying external evidence exists. Its strict aggregate
-checks one frozen `v1.0.0` source-archive candidate, exact task order, unaided
-completion, offline-cohort completion before PostgreSQL, apply/rollback state,
-and blocker retests without retaining policy, request, credential, identity, or
-free-form content. A passing candidate must be promoted with exactly the tested
-bytes and SHA-256 digest; it is never rebuilt after the gate. Synthetic and
-internal runs never count. Passing proves only administrator-workflow usability
-and state correctness, not complete enterprise readiness or market validation.
+The [v1 custody and repeatability protocol](docs/POLICY_ADMIN_USABILITY.md)
+checks one frozen `v1.0.0` source archive in five fresh virtual environments,
+workspaces, and zero-usage SQLite databases. Its versioned aggregate contains
+only exact digests, timestamps, stage/exit status, and bounded semantic
+outcomes. Promotion accepts only that candidate's unchanged bytes; it never
+rebuilds. Passing proves deterministic internal workflow repeatability, not a
+five-person usability study or managed PostgreSQL correctness.
 
-Independent testers should follow the
-[public-alpha onboarding guide](docs/QUIET_ALPHA.md). Its strict aggregate uses
-opaque participant IDs and fixed metadata enums; Hormuz adds no product
-telemetry, and internal or synthetic runs cannot satisfy external onboarding
-validation. Issue #110 remains open after publication and must close before
-Hormuz claims validated onboarding or advances beyond alpha.
+External onboarding remains an optional, deferred study in
+[QUIET_ALPHA.md](docs/QUIET_ALPHA.md). Its strict aggregate uses opaque
+participant IDs and fixed metadata enums; Hormuz adds no product telemetry.
+Issue #110 must close before Hormuz claims validated human onboarding, but it is
+not a dependency for the bounded v1 internal-repeatability claim.
 
 ## What works
 
@@ -147,15 +145,15 @@ Hormuz governs provider-bound requests and their organizational usage
 evidence. It is not an identity provider, model, organizational memory,
 metadata compiler, or employee-productivity system.
 
-| Status | Public-alpha boundary |
+| Status | v1 boundary |
 | --- | --- |
-| Production-ready | None claimed. The alpha is for evaluation and tester-led hardening. |
-| Implemented alpha | OpenAI/Anthropic-compatible gateway paths, policy enforcement, secret controls, identity binding, and metadata-only usage/evidence. |
+| Production-certified | None claimed. v1.0.0 stabilizes the public contract; deployment fitness remains operator- and environment-specific. |
+| Implemented v1 core | OpenAI/Anthropic-compatible gateway paths, policy enforcement, secret controls, identity binding, and metadata-only usage/evidence. |
 | Verified reference | Only the exact evidence-gated profiles in [SUPPORT.md](SUPPORT.md), including the Linux Python matrix and published signed `v0.1.3` `linux/amd64` OCI runtime. A verified reference is not unrestricted certification. |
-| Verified alpha evidence | Exact Codex `0.147.0` / OpenAI and Claude Code `2.1.233` / Anthropic same-revision BYO-provider evidence is recorded in [#115](https://github.com/Xpounder-com/hormuz/issues/115). It does not prove provider-invoice reconciliation, every client feature, traffic bypassing Hormuz, or enterprise production readiness. |
+| Verified client evidence | Exact Codex `0.147.0` / OpenAI and Claude Code `2.1.233` / Anthropic same-revision BYO-provider evidence is recorded in [#115](https://github.com/Xpounder-com/hormuz/issues/115). It does not prove provider-invoice reconciliation, every client feature, traffic bypassing Hormuz, or enterprise production readiness. |
 | Experimental | The context experiment is a separate package and is absent from the core wheel and gateway runtime. |
 | Deferred | Organizational memory, ticketing, workflow/productivity measurement, and new reporting dimensions are outside the current core. |
-| Unfinished | External onboarding validation, production HA/DR, cloud-specific certification, and independent review remain separate milestones. The initial bounded tester-recruitment announcement does not imply their completion. |
+| Unfinished | External onboarding validation, production HA/DR, cloud-specific certification, and independent review remain separate milestones. v1.0.0 does not imply their completion. |
 
 ## Configure real providers and clients
 
@@ -433,17 +431,16 @@ The GitHub publication gate also tests Python 3.11 through 3.14, builds and inst
 
 ## Roadmap boundary
 
-The current hardening program focuses on a minimal gateway core: policy enforcement, versioned PostgreSQL policy administration, accounting, deterministic secret egress, metadata-only audit, and OIDC JWT verification. The package boundary and policy/evidence contract are explicit, the SQLite/PostgreSQL compatibility seam is tested, and the non-root OCI reference runtime is published as a signed `v0.1.3` digest with validated SBOM/provenance and a fix-aware vulnerability gate. A disposable logical PostgreSQL backup/restore exercise now proves a narrow recovery path, but it is not production backup/PITR or DR evidence. Before an enterprise release Hormuz still needs live customer-account certification, migration of every secret class, TLS and deployment hardening, shared PostgreSQL operations, production backup/PITR, multi-instance coordination, and independent review. It is not building an organizational-memory or workflow product.
+The current hardening program focuses on a minimal gateway core: policy enforcement, versioned PostgreSQL policy administration, accounting, deterministic secret egress, metadata-only audit, and OIDC JWT verification. The package boundary and policy/evidence contract are explicit, the SQLite/PostgreSQL compatibility seam is tested, and the non-root OCI reference runtime is published as a signed `v0.1.3` digest with validated SBOM/provenance and a fix-aware vulnerability gate. A disposable logical PostgreSQL backup/restore exercise now proves a narrow recovery path, but it is not production backup/PITR or DR evidence. Before a broad production-deployment claim, Hormuz still needs live customer-account certification, migration of every secret class, TLS and deployment hardening, shared PostgreSQL operations, production backup/PITR, multi-instance coordination, and independent review. It is not building an organizational-memory or workflow product.
 
 ## Community and support
 
 Read [contribution guidance](CONTRIBUTING.md) before proposing a change and
-[public-alpha support](SUPPORT.md) before filing an installation or
+[support boundaries](SUPPORT.md) before filing an installation or
 compatibility report. Suspected vulnerabilities must follow the
 [private security path](SECURITY.md), never a public issue. Participation is
 governed by the [Code of Conduct](CODE_OF_CONDUCT.md).
 
-The evidence-grounded [launch package](docs/launch/README.md) is intentionally
-marked as a non-publishable draft until the final post-change copy audit and
-owner approval. Its initial publication recruits public-alpha testers; #110
-continues afterward as the external onboarding-validation milestone.
+The evidence-grounded [launch package](docs/launch/README.md) is archived
+v0.1.3 recruitment material. Issue #110 preserves any future external
+onboarding-validation study.

@@ -4,7 +4,7 @@ Hormuz sits between an employee's existing AI client and the provider API. The e
 
 Use TLS and an organization-controlled hostname outside local development. The examples below use `https://hormuz.example.com` as that deployment URL.
 
-The public-alpha compatibility baseline is Codex CLI `0.147.0` and Claude Code
+The v1 compatibility baseline is Codex CLI `0.147.0` and Claude Code
 `2.1.233`. Blocking CI installs those exact releases; a separate weekly canary
 checks the latest releases without provider credentials. A newer client is not
 part of the supported baseline until its protocol path is deliberately
@@ -90,7 +90,7 @@ For a company rollout, endpoint management should install the client configurati
 
 Hormuz governs the model-provider request path. It does not govern Codex or
 Claude Code shell commands, MCP servers, Git traffic, browser requests, or
-other client-side tools. The current public-alpha protocol boundary is OpenAI
+other client-side tools. The current v1 protocol boundary is OpenAI
 Responses and Anthropic Messages/count-tokens over HTTP/SSE; unsupported
 features and fail-closed behavior are listed in
 [live client conformance](LIVE_CLIENT_CONFORMANCE.md#unsupported-and-failure-behavior).

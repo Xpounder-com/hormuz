@@ -20,7 +20,7 @@ usage() {
 Usage:
   tools/promote_v1_candidate.sh \
     --candidate-tag CANDIDATE_TAG_FROM_MANIFEST \
-    --evidence /private/path/policy-admin-usability-evidence.json \
+    --evidence /private/path/v1-internal-repeatability-evidence.json \
     [--output /private/path/promotion-proof]
 
 The command verifies the real #173 gate, creates the protected annotated
@@ -72,7 +72,7 @@ done
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 repository_root="$(cd "$script_dir/.." && pwd -P)"
 [[ -f "$script_dir/v1_candidate.py" ]] || fail "candidate_tool_missing"
-[[ -f "$script_dir/verify_policy_admin_usability_evidence.py" ]] \
+[[ -f "$script_dir/verify_v1_internal_repeatability_evidence.py" ]] \
   || fail "gate_validator_missing"
 [[ "$(git -C "$repository_root" rev-parse --show-toplevel)" == "$repository_root" ]] \
   || fail "repository_checkout_required"
@@ -116,11 +116,11 @@ git -C "$repository_root" show \
   "$checkout_commit:tools/v1_candidate.py" \
   >"$trusted_tools_dir/v1_candidate.py"
 git -C "$repository_root" show \
-  "$checkout_commit:tools/verify_policy_admin_usability_evidence.py" \
-  >"$trusted_tools_dir/verify_policy_admin_usability_evidence.py"
+  "$checkout_commit:tools/verify_v1_internal_repeatability_evidence.py" \
+  >"$trusted_tools_dir/verify_v1_internal_repeatability_evidence.py"
 chmod 600 \
   "$trusted_tools_dir/v1_candidate.py" \
-  "$trusted_tools_dir/verify_policy_admin_usability_evidence.py"
+  "$trusted_tools_dir/verify_v1_internal_repeatability_evidence.py"
 
 run_candidate_tool() {
   "${SAFE_PYTHON[@]}" -c '

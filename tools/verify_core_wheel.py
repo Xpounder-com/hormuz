@@ -73,8 +73,10 @@ REQUIRED_POLICY_ADMIN_USABILITY_SDIST_PATHS = (
     "examples/policy-admin-usability-scenarios.json",
     "requirements/v1-source-build.lock",
     "tools/promote_v1_candidate.sh",
+    "tools/run_v1_internal_repeatability.py",
     "tools/v1_candidate.py",
     "tools/verify_policy_admin_usability_evidence.py",
+    "tools/verify_v1_internal_repeatability_evidence.py",
 )
 
 

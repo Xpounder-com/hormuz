@@ -1,0 +1,257 @@
+{
+  "schema_id": "hormuz.v1-internal-repeatability-evidence",
+  "schema_version": 1,
+  "evidence_kind": "synthetic_test_fixture",
+  "gate_issue": "https://github.com/Xpounder-com/hormuz/issues/173",
+  "generated_at": "2026-08-27T11:00:05Z",
+  "candidate": {
+    "target_version": "v1.0.0",
+    "artifact_kind": "source_archive",
+    "artifact_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "source_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "frozen_at": "2026-08-27T10:00:00Z"
+  },
+  "execution_attestation": {
+    "automation_only": true,
+    "human_participant_count": 0,
+    "postgresql_session_count": 0,
+    "all_invocation_runs_included": true,
+    "one_archive_used_for_all_runs": true,
+    "provider_credentials_unset": true,
+    "policy_admin_credentials_unset": true,
+    "no_external_usability_claim": true,
+    "no_postgresql_state_claim": true
+  },
+  "task": {
+    "workflow_id": "standard-output-cap-offline-v1",
+    "repetition_count": 5,
+    "baseline_asset_sha256": "sha256:fbd93fa23264617604d80732dfb8821089a58d0cfa2c0af939f08dbe471cc826",
+    "candidate_asset_sha256": "sha256:9c5d162f4979c2497237517618cb7ce2a7bf9893d3d0eadec09a5e47293cd3d8",
+    "scenario_suite_asset_sha256": "sha256:e62e9c6bc1df830c2049f59e1ab0804f0bcd5a50d1debb8dc1d6ac2fc6476f91",
+    "baseline_content_sha256": "9c0003887b437aa19de4274e8cb04a46ad402cbbfe06b02a16164c012500ea8a",
+    "candidate_content_sha256": "a160954974f6d63e5863dc787cd2f9343d924bdbd261f0b1906ca882c3bbf212",
+    "scenario_suite_content_sha256": "792b02e08c5b3920898e85f9e828dc1cbc647cc8356e737546a35803f0e15ea9",
+    "change_path": "policies.organization.max_output_tokens",
+    "before": 16000,
+    "after": 4000,
+    "scenario_id": "output-cap",
+    "usage_basis": "current"
+  },
+  "runs": [
+    {
+      "run_id": "v1ir:10000000-0000-4000-8000-000000000001",
+      "run_index": 1,
+      "candidate_artifact_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "started_at": "2026-08-27T11:00:00.000000Z",
+      "finished_at": "2026-08-27T11:00:00.500000Z",
+      "duration_seconds": 0.5,
+      "isolation": {
+        "fresh_virtual_environment": true,
+        "fresh_working_directory": true,
+        "fresh_sqlite_database": true,
+        "candidate_source_loaded_from_archive": true,
+        "network_guard_enabled": true,
+        "provider_credentials_unset": true,
+        "policy_admin_credentials_unset": true,
+        "setup_current_usage_zero": true
+      },
+      "stages": [
+        {"name": "create_from_template", "status": "completed", "exit_code": 0},
+        {"name": "modify_policy", "status": "completed", "exit_code": 0},
+        {"name": "validate_policy", "status": "completed", "exit_code": 0},
+        {"name": "compare_policy", "status": "completed", "exit_code": 1},
+        {"name": "run_saved_scenarios", "status": "completed", "exit_code": 0},
+        {"name": "evaluate_policy", "status": "completed", "exit_code": 1}
+      ],
+      "outcome": "passed",
+      "observed": {
+        "source_package_version": "1.0.0",
+        "baseline_version_id": "sha256:9c0003887b437aa19de4274e8cb04a46ad402cbbfe06b02a16164c012500ea8a",
+        "candidate_version_id": "sha256:a160954974f6d63e5863dc787cd2f9343d924bdbd261f0b1906ca882c3bbf212",
+        "suite_id": "sha256:792b02e08c5b3920898e85f9e828dc1cbc647cc8356e737546a35803f0e15ea9",
+        "comparison_exit_code": 1,
+        "comparison_change_count": 1,
+        "evaluation_exit_code": 1,
+        "evaluation_scenario_count": 1,
+        "evaluation_changed_count": 1,
+        "baseline_allowed": true,
+        "candidate_allowed": true,
+        "baseline_max_output_tokens": 16000,
+        "candidate_max_output_tokens": 4000,
+        "current_usage_zero": true
+      }
+    },
+    {
+      "run_id": "v1ir:10000000-0000-4000-8000-000000000002",
+      "run_index": 2,
+      "candidate_artifact_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "started_at": "2026-08-27T11:00:01.000000Z",
+      "finished_at": "2026-08-27T11:00:01.500000Z",
+      "duration_seconds": 0.5,
+      "isolation": {
+        "fresh_virtual_environment": true,
+        "fresh_working_directory": true,
+        "fresh_sqlite_database": true,
+        "candidate_source_loaded_from_archive": true,
+        "network_guard_enabled": true,
+        "provider_credentials_unset": true,
+        "policy_admin_credentials_unset": true,
+        "setup_current_usage_zero": true
+      },
+      "stages": [
+        {"name": "create_from_template", "status": "completed", "exit_code": 0},
+        {"name": "modify_policy", "status": "completed", "exit_code": 0},
+        {"name": "validate_policy", "status": "completed", "exit_code": 0},
+        {"name": "compare_policy", "status": "completed", "exit_code": 1},
+        {"name": "run_saved_scenarios", "status": "completed", "exit_code": 0},
+        {"name": "evaluate_policy", "status": "completed", "exit_code": 1}
+      ],
+      "outcome": "passed",
+      "observed": {
+        "source_package_version": "1.0.0",
+        "baseline_version_id": "sha256:9c0003887b437aa19de4274e8cb04a46ad402cbbfe06b02a16164c012500ea8a",
+        "candidate_version_id": "sha256:a160954974f6d63e5863dc787cd2f9343d924bdbd261f0b1906ca882c3bbf212",
+        "suite_id": "sha256:792b02e08c5b3920898e85f9e828dc1cbc647cc8356e737546a35803f0e15ea9",
+        "comparison_exit_code": 1,
+        "comparison_change_count": 1,
+        "evaluation_exit_code": 1,
+        "evaluation_scenario_count": 1,
+        "evaluation_changed_count": 1,
+        "baseline_allowed": true,
+        "candidate_allowed": true,
+        "baseline_max_output_tokens": 16000,
+        "candidate_max_output_tokens": 4000,
+        "current_usage_zero": true
+      }
+    },
+    {
+      "run_id": "v1ir:10000000-0000-4000-8000-000000000003",
+      "run_index": 3,
+      "candidate_artifact_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "started_at": "2026-08-27T11:00:02.000000Z",
+      "finished_at": "2026-08-27T11:00:02.500000Z",
+      "duration_seconds": 0.5,
+      "isolation": {
+        "fresh_virtual_environment": true,
+        "fresh_working_directory": true,
+        "fresh_sqlite_database": true,
+        "candidate_source_loaded_from_archive": true,
+        "network_guard_enabled": true,
+        "provider_credentials_unset": true,
+        "policy_admin_credentials_unset": true,
+        "setup_current_usage_zero": true
+      },
+      "stages": [
+        {"name": "create_from_template", "status": "completed", "exit_code": 0},
+        {"name": "modify_policy", "status": "completed", "exit_code": 0},
+        {"name": "validate_policy", "status": "completed", "exit_code": 0},
+        {"name": "compare_policy", "status": "completed", "exit_code": 1},
+        {"name": "run_saved_scenarios", "status": "completed", "exit_code": 0},
+        {"name": "evaluate_policy", "status": "completed", "exit_code": 1}
+      ],
+      "outcome": "passed",
+      "observed": {
+        "source_package_version": "1.0.0",
+        "baseline_version_id": "sha256:9c0003887b437aa19de4274e8cb04a46ad402cbbfe06b02a16164c012500ea8a",
+        "candidate_version_id": "sha256:a160954974f6d63e5863dc787cd2f9343d924bdbd261f0b1906ca882c3bbf212",
+        "suite_id": "sha256:792b02e08c5b3920898e85f9e828dc1cbc647cc8356e737546a35803f0e15ea9",
+        "comparison_exit_code": 1,
+        "comparison_change_count": 1,
+        "evaluation_exit_code": 1,
+        "evaluation_scenario_count": 1,
+        "evaluation_changed_count": 1,
+        "baseline_allowed": true,
+        "candidate_allowed": true,
+        "baseline_max_output_tokens": 16000,
+        "candidate_max_output_tokens": 4000,
+        "current_usage_zero": true
+      }
+    },
+    {
+      "run_id": "v1ir:10000000-0000-4000-8000-000000000004",
+      "run_index": 4,
+      "candidate_artifact_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "started_at": "2026-08-27T11:00:03.000000Z",
+      "finished_at": "2026-08-27T11:00:03.500000Z",
+      "duration_seconds": 0.5,
+      "isolation": {
+        "fresh_virtual_environment": true,
+        "fresh_working_directory": true,
+        "fresh_sqlite_database": true,
+        "candidate_source_loaded_from_archive": true,
+        "network_guard_enabled": true,
+        "provider_credentials_unset": true,
+        "policy_admin_credentials_unset": true,
+        "setup_current_usage_zero": true
+      },
+      "stages": [
+        {"name": "create_from_template", "status": "completed", "exit_code": 0},
+        {"name": "modify_policy", "status": "completed", "exit_code": 0},
+        {"name": "validate_policy", "status": "completed", "exit_code": 0},
+        {"name": "compare_policy", "status": "completed", "exit_code": 1},
+        {"name": "run_saved_scenarios", "status": "completed", "exit_code": 0},
+        {"name": "evaluate_policy", "status": "completed", "exit_code": 1}
+      ],
+      "outcome": "passed",
+      "observed": {
+        "source_package_version": "1.0.0",
+        "baseline_version_id": "sha256:9c0003887b437aa19de4274e8cb04a46ad402cbbfe06b02a16164c012500ea8a",
+        "candidate_version_id": "sha256:a160954974f6d63e5863dc787cd2f9343d924bdbd261f0b1906ca882c3bbf212",
+        "suite_id": "sha256:792b02e08c5b3920898e85f9e828dc1cbc647cc8356e737546a35803f0e15ea9",
+        "comparison_exit_code": 1,
+        "comparison_change_count": 1,
+        "evaluation_exit_code": 1,
+        "evaluation_scenario_count": 1,
+        "evaluation_changed_count": 1,
+        "baseline_allowed": true,
+        "candidate_allowed": true,
+        "baseline_max_output_tokens": 16000,
+        "candidate_max_output_tokens": 4000,
+        "current_usage_zero": true
+      }
+    },
+    {
+      "run_id": "v1ir:10000000-0000-4000-8000-000000000005",
+      "run_index": 5,
+      "candidate_artifact_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "started_at": "2026-08-27T11:00:04.000000Z",
+      "finished_at": "2026-08-27T11:00:04.500000Z",
+      "duration_seconds": 0.5,
+      "isolation": {
+        "fresh_virtual_environment": true,
+        "fresh_working_directory": true,
+        "fresh_sqlite_database": true,
+        "candidate_source_loaded_from_archive": true,
+        "network_guard_enabled": true,
+        "provider_credentials_unset": true,
+        "policy_admin_credentials_unset": true,
+        "setup_current_usage_zero": true
+      },
+      "stages": [
+        {"name": "create_from_template", "status": "completed", "exit_code": 0},
+        {"name": "modify_policy", "status": "completed", "exit_code": 0},
+        {"name": "validate_policy", "status": "completed", "exit_code": 0},
+        {"name": "compare_policy", "status": "completed", "exit_code": 1},
+        {"name": "run_saved_scenarios", "status": "completed", "exit_code": 0},
+        {"name": "evaluate_policy", "status": "completed", "exit_code": 1}
+      ],
+      "outcome": "passed",
+      "observed": {
+        "source_package_version": "1.0.0",
+        "baseline_version_id": "sha256:9c0003887b437aa19de4274e8cb04a46ad402cbbfe06b02a16164c012500ea8a",
+        "candidate_version_id": "sha256:a160954974f6d63e5863dc787cd2f9343d924bdbd261f0b1906ca882c3bbf212",
+        "suite_id": "sha256:792b02e08c5b3920898e85f9e828dc1cbc647cc8356e737546a35803f0e15ea9",
+        "comparison_exit_code": 1,
+        "comparison_change_count": 1,
+        "evaluation_exit_code": 1,
+        "evaluation_scenario_count": 1,
+        "evaluation_changed_count": 1,
+        "baseline_allowed": true,
+        "candidate_allowed": true,
+        "baseline_max_output_tokens": 16000,
+        "candidate_max_output_tokens": 4000,
+        "current_usage_zero": true
+      }
+    }
+  ]
+}

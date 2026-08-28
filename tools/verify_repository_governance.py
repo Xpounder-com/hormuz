@@ -137,7 +137,7 @@ CANDIDATE_CREDENTIAL_STEP_SHA256 = {
         "45da1f4a8eca5a51ca9af737c16c93a90624c9cad2136d14a5176fe3c0cf9d57"
     ),
     "Revalidate controls, publish the verified draft, and seal custody": (
-        "6c28ea758335ba292e301949c4e13283b880e4d91ddb6af7d79d65a9d82f2ab3"
+        "0fce0100430f6f50bd08d83740de7ac3612f12d7939f7a289786cd808501a81b"
     ),
     "Verify the published immutable candidate and attestations": (
         "2580ad938db646bfbec7fe4585d2f75e286ba36f310179d68577bd1f6f05391d"
@@ -147,13 +147,13 @@ CANDIDATE_FREEZE_JOB_SHA256 = {
     "authorize": "17dcbe2c36d7cbd38e2c63df0924b54201aa7ef9fed255d21fd995c1856c8451",
     "preflight": "1c7966ebc828b5a40295c793aff5ec2b6d0ce6af8a4efe87f27893fa42487c91",
     "build": "bbdb6cc17297f7a013067f435f9323703f0093ef9013a4b53abfd4dc8d9dc834",
-    "publish": "45e9f5d8ee73e9959c1325d7942723b834077117d756d2b95ad4912aed2bc325",
+    "publish": "78a87fa576b5a68658adefd9f8085663e2bbe60bcabf5d112224c186d5b9a0d3",
 }
 CANDIDATE_FREEZE_WORKFLOW_SHA256 = (
-    "550d9cd192c435568812363eec7dd6f7fb6724611c1ec89921f1daabb5063771"
+    "be973d04f6b27f009b68651805a5b5d2611fe34f77faf1b6f80c5dea235b8055"
 )
 CANDIDATE_TOOL_SHA256 = (
-    "befc54446f6a2b912b1ba5d0ff982abb32d9700beea0dad55f9fa04fc8c26ab8"
+    "07e5dbab2d40ccbf32a6d446b926e251710a424f60f56a6242f00303b522c36c"
 )
 PermissionSpec = str | dict[str, str]
 
