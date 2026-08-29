@@ -11,10 +11,11 @@ import tempfile
 import textwrap
 import tomllib
 import unittest
+import urllib.error
 from pathlib import Path
 from unittest import mock
 
-from tools import v1_candidate
+from tools import v1_candidate, verify_core_wheel
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -39,6 +40,31 @@ class V1CandidateTests(unittest.TestCase):
         source = workflow.split(start, 1)[1].split(end, 1)[0]
         namespace: dict[str, object] = {"__name__": "workflow_contract_test"}
         exec(compile(textwrap.dedent(source), "embedded-publisher.py", "exec"), namespace)
+        return namespace
+
+    def _publisher_credential_preflight_namespace(self) -> dict[str, object]:
+        workflow = (ROOT / ".github/workflows/freeze-v1-candidate.yml").read_text(
+            encoding="utf-8"
+        )
+        step_name = (
+            "      - name: Authenticate the publisher credential before "
+            "the one permitted build\n"
+        )
+        self.assertEqual(workflow.count(step_name), 1)
+        step = workflow.split(step_name, 1)[1].split("\n  build:\n", 1)[0]
+        source = step.split("/usr/bin/python3 -I -B - <<'PYTHON'\n", 1)[1].split(
+            "\n          PYTHON",
+            1,
+        )[0]
+        namespace: dict[str, object] = {"__name__": "workflow_contract_test"}
+        exec(
+            compile(
+                textwrap.dedent(source),
+                "embedded-publisher-credential-preflight.py",
+                "exec",
+            ),
+            namespace,
+        )
         return namespace
 
     def _archive(self, directory: Path, *, marker: str = "first") -> Path:
@@ -1275,12 +1301,150 @@ class V1CandidateTests(unittest.TestCase):
         self.assertNotIn("extract", publish)
         self.assertEqual(
             workflow.count("GH_PUBLISH_TOKEN: ${{ secrets.V1_RELEASE_PUBLISH_TOKEN }}"),
-            1,
+            2,
         )
         self.assertEqual(
             workflow.count("GH_ADMIN_TOKEN: ${{ secrets.V1_RELEASE_ADMIN_TOKEN }}"),
             3,
         )
+        credential_preflight = workflow.split(
+            "      - name: Authenticate the publisher credential before the one permitted build\n",
+            1,
+        )[1].split("\n  build:\n", 1)[0]
+        self.assertIn('get_json(token, "/user")', credential_preflight)
+        self.assertIn(
+            'get_json(token, f"/repos/{REPOSITORY}")', credential_preflight
+        )
+        self.assertIn('"mutation_performed": False', credential_preflight)
+        self.assertIn("expected=(422,)", credential_preflight)
+        self.assertIn("releases_after_probe == releases", credential_preflight)
+        self.assertIn('GH_TOKEN="$GH_ADMIN_TOKEN" gh api "/user"', workflow)
+        self.assertIn('candidate_ruleset.get("current_user_can_bypass") != "always"', workflow)
+        self.assertIn("release_steward_cannot_bypass_candidate_ruleset", workflow)
+        self.assertNotIn("GH_ADMIN_TOKEN", credential_preflight)
+        self.assertNotIn("actions/checkout", credential_preflight)
+
+    def test_publisher_secret_helper_uses_exact_stdin_without_a_body_literal(
+        self,
+    ) -> None:
+        helper_path = ROOT / "tools/set_v1_release_publisher_secret.zsh"
+        helper = helper_path.read_text(encoding="utf-8")
+        manifest = (ROOT / "MANIFEST.in").read_text(encoding="utf-8")
+
+        self.assertIn("IFS= read -r -s publisher_token", helper)
+        self.assertIn('if [[ "${publisher_token}" == *[[:space:]]* ]]', helper)
+        self.assertIn('if [[ "${publisher_probe_status}" != "422" ]]', helper)
+        self.assertIn("/usr/bin/python3 -I -B -", helper)
+        self.assertIn(
+            '"orgs/Xpounder-com/memberships/${authorized_steward}"',
+            helper,
+        )
+        self.assertGreaterEqual(helper.count("--hostname github.com"), 6)
+        self.assertIn(
+            'if print -rn -- "${publisher_token}" | env -u GH_TOKEN -u GITHUB_TOKEN',
+            helper,
+        )
+        storage_command = helper.split(
+            'if print -rn -- "${publisher_token}"', 1
+        )[1].split("; then", 1)[0]
+        self.assertIn('gh secret set "${secret_name}"', storage_command)
+        self.assertIn('--repo "github.com/${repository}"', storage_command)
+        self.assertIn('--env "${environment_name}"', storage_command)
+        self.assertNotIn("--body", storage_command)
+        self.assertIn(
+            "include tools/set_v1_release_publisher_secret.zsh",
+            manifest,
+        )
+        helper_archive_path = "tools/set_v1_release_publisher_secret.zsh"
+        self.assertIn(helper_archive_path, v1_candidate.REQUIRED_ARCHIVE_PATHS)
+        self.assertIn(
+            helper_archive_path,
+            verify_core_wheel.REQUIRED_POLICY_ADMIN_USABILITY_SDIST_PATHS,
+        )
+
+    def test_publisher_requires_effective_candidate_ruleset_bypass(self) -> None:
+        namespace = self._publisher_namespace()
+
+        ruleset_summaries = [
+            {
+                "id": 11,
+                "name": "Owner-created candidate tags",
+                "source_type": "Repository",
+                "target": "tag",
+                "enforcement": "active",
+            },
+            {
+                "id": 12,
+                "name": "Immutable version tags",
+                "source_type": "Repository",
+                "target": "tag",
+                "enforcement": "active",
+            },
+        ]
+        namespace["list_pages"] = lambda _token, _path: ruleset_summaries
+        bypass_mode = "always"
+
+        def ruleset_api(
+            _token: str,
+            method: str,
+            path: str,
+            **_kwargs: object,
+        ) -> tuple[int, object]:
+            self.assertEqual(method, "GET")
+            if path == "/user":
+                return 200, {"login": "steward"}
+            if path.endswith("/rulesets/11"):
+                return 200, {
+                    "current_user_can_bypass": bypass_mode,
+                    "bypass_actors": [
+                        {
+                            "actor_id": None,
+                            "actor_type": "OrganizationAdmin",
+                            "bypass_mode": "always",
+                        }
+                    ],
+                    "conditions": {
+                        "ref_name": {
+                            "exclude": [],
+                            "include": ["refs/tags/candidate-v1.0.0-*"],
+                        }
+                    },
+                    "rules": [{"type": "creation"}],
+                }
+            if path.endswith("/rulesets/12"):
+                return 200, {
+                    "bypass_actors": [],
+                    "conditions": {
+                        "ref_name": {
+                            "exclude": [],
+                            "include": [
+                                "refs/tags/candidate-v1.0.0-*",
+                                "refs/tags/v*",
+                            ],
+                        }
+                    },
+                    "rules": [
+                        {"type": "deletion"},
+                        {"type": "non_fast_forward"},
+                        {
+                            "type": "update",
+                            "parameters": {
+                                "update_allows_fetch_and_merge": False
+                            },
+                        },
+                    ],
+                }
+            self.fail(f"unexpected API call: {method} {path}")
+
+        namespace["api_json"] = ruleset_api
+        namespace["validate_rulesets"]("admin-token", "steward")
+
+        bypass_mode = None
+        with self.assertRaisesRegex(
+            namespace["ContractError"],
+            "release_steward_cannot_bypass_candidate_ruleset",
+        ):
+            namespace["validate_rulesets"]("admin-token", "steward")
 
     def test_publisher_validates_the_fixed_transfer_contract(self) -> None:
         namespace = self._publisher_namespace()
@@ -1307,6 +1471,119 @@ class V1CandidateTests(unittest.TestCase):
             self.assertEqual(
                 stat.S_IMODE((directory / v1_candidate.MANIFEST_NAME).stat().st_mode),
                 0o600,
+            )
+
+    def test_publisher_credential_preflight_labels_invalid_token_bytes(self) -> None:
+        namespace = self._publisher_credential_preflight_namespace()
+        get_json = namespace["get_json"]
+        credential_error = namespace["CredentialError"]
+        failure = urllib.error.HTTPError(
+            "https://api.github.com/user",
+            401,
+            "Bad credentials",
+            {},
+            None,
+        )
+        with mock.patch.object(namespace["OPENER"], "open", side_effect=failure):
+            with self.assertRaisesRegex(
+                credential_error,
+                "publisher_token_authentication_failed",
+            ):
+                get_json("invalid-token", "/user")
+
+    def test_publisher_credential_preflight_requires_write_without_mutation(
+        self,
+    ) -> None:
+        namespace = self._publisher_credential_preflight_namespace()
+        observed: dict[str, object] = {}
+        failure = urllib.error.HTTPError(
+            "https://api.github.com/repos/Xpounder-com/hormuz/releases",
+            422,
+            "Validation Failed",
+            {},
+            io.BytesIO(b'{"message":"Validation Failed"}'),
+        )
+
+        def reject_invalid_release(request: object, *, timeout: int) -> None:
+            observed["method"] = request.get_method()
+            observed["data"] = request.data
+            observed["timeout"] = timeout
+            raise failure
+
+        with mock.patch.object(
+            namespace["OPENER"],
+            "open",
+            side_effect=reject_invalid_release,
+        ):
+            status, response = namespace["api_json"](
+                "publisher-token",
+                "POST",
+                "/repos/Xpounder-com/hormuz/releases",
+                value={},
+                expected=(422,),
+            )
+        self.assertEqual(status, 422)
+        self.assertEqual(response, {"message": "Validation Failed"})
+        self.assertEqual(
+            observed,
+            {"method": "POST", "data": b"{}", "timeout": 30},
+        )
+
+    def test_publisher_reauthenticates_and_probes_write_before_mutation(
+        self,
+    ) -> None:
+        namespace = self._publisher_namespace()
+        calls: list[tuple[str, str, object, tuple[int, ...]]] = []
+        release_snapshots = [[{"id": 1, "tag_name": "existing"}]] * 2
+
+        def fake_api_json(
+            _token: str,
+            method: str,
+            path: str,
+            *,
+            value: object = None,
+            expected: tuple[int, ...] = (200,),
+        ) -> tuple[int, object]:
+            calls.append((method, path, value, expected))
+            if method == "GET" and path == "/user":
+                return 200, {"login": "steward"}
+            if method == "POST" and path.endswith("/releases"):
+                return 422, {"message": "Validation Failed"}
+            self.fail(f"unexpected API call: {method} {path}")
+
+        namespace["api_json"] = fake_api_json
+        namespace["release_list"] = lambda _token: release_snapshots.pop(0)
+        namespace["validate_publisher_credential"](
+            "publisher-token",
+            "steward",
+            probe_write=True,
+        )
+        self.assertEqual(release_snapshots, [])
+        self.assertEqual(
+            calls,
+            [
+                ("GET", "/user", None, (200,)),
+                (
+                    "POST",
+                    "/repos/Xpounder-com/hormuz/releases",
+                    {},
+                    (422,),
+                ),
+            ],
+        )
+
+        namespace["api_json"] = lambda *_args, **_kwargs: (
+            200,
+            {"login": "another-administrator"},
+        )
+        with self.assertRaisesRegex(
+            namespace["ContractError"],
+            "publisher_token_actor_invalid",
+        ):
+            namespace["validate_publisher_credential"](
+                "publisher-token",
+                "steward",
+                probe_write=False,
             )
 
     def test_publisher_rejects_untrusted_transfer_drift(self) -> None:
@@ -1393,9 +1670,20 @@ class V1CandidateTests(unittest.TestCase):
 
     def test_publisher_hashes_remote_draft_bytes_before_publication(self) -> None:
         workflow = (ROOT / ".github/workflows/freeze-v1-candidate.yml").read_text()
+        live_controls = workflow.split(
+            "          def validate_live_controls(",
+            1,
+        )[1].split("\n          def expected_notes", 1)[0]
+        self.assertLess(
+            live_controls.index("validate_publisher_credential("),
+            live_controls.index("immutable-releases"),
+        )
         publisher = workflow.split("          def publish_candidate():", 1)[1].split(
             "          if __name__ == \"__main__\":", 1
         )[0]
+        first_control_check = publisher.index("validate_live_controls(")
+        first_mutation = publisher.index('"POST"', first_control_check)
+        self.assertLess(first_control_check, first_mutation)
         create_draft = publisher.index('"draft": True')
         first_download = publisher.index("download_and_compare(", create_draft)
         immediate_recheck = publisher.index(

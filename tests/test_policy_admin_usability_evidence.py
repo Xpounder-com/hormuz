@@ -1059,6 +1059,9 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
         self.assertIn("include tools/run_v1_internal_repeatability.py\n", manifest)
         self.assertIn("include tools/v1_candidate.py\n", manifest)
         self.assertIn("include tools/promote_v1_candidate.sh\n", manifest)
+        self.assertIn(
+            "include tools/set_v1_release_publisher_secret.zsh\n", manifest
+        )
         self.assertIn("include requirements/v1-source-build.lock\n", manifest)
         self.assertIn("recursive-include docs *.md\n", manifest)
         self.assertIn("recursive-include tests *.py *.json\n", manifest)
@@ -1083,6 +1086,7 @@ class PolicyAdminUsabilityEvidenceTests(unittest.TestCase):
                 "requirements/v1-source-build.lock",
                 "tools/promote_v1_candidate.sh",
                 "tools/run_v1_internal_repeatability.py",
+                "tools/set_v1_release_publisher_secret.zsh",
                 "tools/v1_candidate.py",
                 "tools/verify_policy_admin_usability_evidence.py",
                 "tools/verify_v1_internal_repeatability_evidence.py",

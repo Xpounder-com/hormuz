@@ -108,6 +108,7 @@ jobs:
           [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 1
           [[ "$GITHUB_RUN_ID" =~ ^[1-9][0-9]*$ && "$GITHUB_RUN_ATTEMPT" == "1" ]] || exit 1
           [[ -n "$AUTHORIZED_STEWARD" ]] || exit 1
+          [[ "$AUTHORIZED_STEWARD" =~ ^[A-Za-z0-9][A-Za-z0-9-]{0,38}$ && "$AUTHORIZED_STEWARD" != *- ]] || exit 1
           [[ "$GITHUB_ACTOR" == "$AUTHORIZED_STEWARD" ]] || exit 1
           [[ "$GITHUB_TRIGGERING_ACTOR" == "$AUTHORIZED_STEWARD" ]] || exit 1
           [[ -n "${GH_ADMIN_TOKEN:-}" ]] || {
@@ -189,6 +190,8 @@ jobs:
             "/repos/$GITHUB_REPOSITORY/releases?per_page=100" > "$releases_path"
           immutable_path="$RUNNER_TEMP/immutable-releases.json"
           GH_TOKEN="$GH_ADMIN_TOKEN" gh api "/repos/$GITHUB_REPOSITORY/immutable-releases" > "$immutable_path"
+          admin_identity_path="$RUNNER_TEMP/release-admin-identity.json"
+          GH_TOKEN="$GH_ADMIN_TOKEN" gh api "/user" > "$admin_identity_path"
           rulesets_path="$RUNNER_TEMP/rulesets.json"
           GH_TOKEN="$GH_ADMIN_TOKEN" gh api --paginate --slurp \
             "/repos/$GITHUB_REPOSITORY/rulesets?includes_parents=true&per_page=100" > "$rulesets_path"
@@ -210,6 +213,7 @@ jobs:
           /usr/bin/python3 -I -B - \
             "$current_run_path" "$freeze_runs_path" "$freeze_jobs_dir" \
             "$main_path" "$ci_runs_path" "$releases_path" "$immutable_path" \
+            "$admin_identity_path" \
             "$rulesets_path" "$candidate_ruleset_path" "$immutable_ruleset_path" \
             "$environment_path" "$environment_secrets_path" \
             "$GITHUB_SHA" "$GITHUB_RUN_ID" "$AUTHORIZED_STEWARD" <<'PYTHON'
@@ -247,6 +251,7 @@ jobs:
               ci_file,
               releases_file,
               immutable_file,
+              admin_identity_file,
               rulesets_file,
               candidate_ruleset_file,
               immutable_ruleset_file,
@@ -376,6 +381,12 @@ jobs:
           immutable = load(immutable_file)
           if not isinstance(immutable, dict) or immutable.get("enabled") is not True:
               raise SystemExit("immutable GitHub Releases must be enabled")
+          admin_identity = load(admin_identity_file)
+          if not (
+              isinstance(admin_identity, dict)
+              and admin_identity.get("login") == steward
+          ):
+              raise SystemExit("release administration token must authenticate as the designated steward")
           ruleset_pages = load(rulesets_file)
           rulesets = []
           if not isinstance(ruleset_pages, list):
@@ -399,13 +410,14 @@ jobs:
           candidate_ruleset = load(candidate_ruleset_file)
           if (
               not isinstance(candidate_ruleset, dict)
+              or candidate_ruleset.get("current_user_can_bypass") != "always"
               or candidate_ruleset.get("bypass_actors")
               != [{"actor_id": None, "actor_type": "OrganizationAdmin", "bypass_mode": "always"}]
               or (candidate_ruleset.get("conditions") or {}).get("ref_name")
               != {"exclude": [], "include": ["refs/tags/candidate-v1.0.0-*"]}
               or [rule.get("type") for rule in candidate_ruleset.get("rules", [])] != ["creation"]
           ):
-              raise SystemExit("candidate tag creation ruleset contract changed")
+              raise SystemExit("designated release steward cannot bypass the candidate tag creation ruleset")
           immutable_ruleset = load(immutable_ruleset_file)
           immutable_rules = immutable_ruleset.get("rules", []) if isinstance(immutable_ruleset, dict) else []
           if (
@@ -460,6 +472,179 @@ jobs:
 
           assert_api_absent "$GH_READ_TOKEN" "/repos/$GITHUB_REPOSITORY/git/ref/tags/v1.0.0" "final-v1.0.0-tag"
           assert_api_absent "$GH_READ_TOKEN" "/repos/$GITHUB_REPOSITORY/releases/tags/v1.0.0" "final-v1.0.0-release"
+
+      - name: Authenticate the publisher credential before the one permitted build
+        env:
+          GH_PUBLISH_TOKEN: ${{ secrets.V1_RELEASE_PUBLISH_TOKEN }}
+          AUTHORIZED_STEWARD: ${{ vars.V1_RELEASE_STEWARD }}
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+        run: |
+          set -euo pipefail
+          umask 077
+          /usr/bin/python3 -I -B - <<'PYTHON'
+          import json
+          import os
+          import re
+          import urllib.error
+          import urllib.request
+
+          REPOSITORY = "Xpounder-com/hormuz"
+          WORKFLOW_REF = f"{REPOSITORY}/.github/workflows/freeze-v1-candidate.yml@refs/heads/main"
+          API_VERSION = "2022-11-28"
+          MAXIMUM_RESPONSE_BYTES = 8 * 1024 * 1024
+
+          class CredentialError(RuntimeError):
+              pass
+
+          def require(condition, label):
+              if not condition:
+                  raise CredentialError(label)
+
+          def strict_object(pairs):
+              value = {}
+              for key, item in pairs:
+                  if key in value:
+                      raise CredentialError("publisher_api_duplicate_json_member")
+                  value[key] = item
+              return value
+
+          def reject_constant(_value):
+              raise CredentialError("publisher_api_non_finite_number")
+
+          class RejectRedirectHandler(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, request, fp, code, message, headers, new_url):
+                  raise CredentialError("publisher_api_redirect_forbidden")
+
+          OPENER = urllib.request.build_opener(RejectRedirectHandler())
+
+          def api_json(token, method, path, *, value=None, expected=(200,)):
+              body = None
+              if value is not None:
+                  body = json.dumps(
+                      value,
+                      sort_keys=True,
+                      separators=(",", ":"),
+                      allow_nan=False,
+                  ).encode("utf-8")
+              request = urllib.request.Request(
+                  f"https://api.github.com{path}",
+                  data=body,
+                  headers={
+                      "Accept": "application/vnd.github+json",
+                      "Authorization": f"Bearer {token}",
+                      **({"Content-Type": "application/json"} if body is not None else {}),
+                      "User-Agent": "hormuz-v1-publisher-credential-preflight",
+                      "X-GitHub-Api-Version": API_VERSION,
+                  },
+                  method=method,
+              )
+              try:
+                  response = OPENER.open(request, timeout=30)
+              except urllib.error.HTTPError as error:
+                  if error.code == 401:
+                      raise CredentialError("publisher_token_authentication_failed") from error
+                  if error.code == 403:
+                      raise CredentialError("publisher_token_authorization_failed") from error
+                  if error.code not in expected:
+                      raise CredentialError(
+                          f"publisher_api_unexpected_status:{error.code}"
+                      ) from error
+                  response = error
+              except (OSError, TimeoutError) as error:
+                  raise CredentialError("publisher_api_unavailable") from error
+              with response:
+                  status_code = response.getcode()
+                  require(
+                      status_code in expected,
+                      f"publisher_api_unexpected_status:{status_code}",
+                  )
+                  payload = response.read(MAXIMUM_RESPONSE_BYTES + 1)
+              require(
+                  len(payload) <= MAXIMUM_RESPONSE_BYTES,
+                  "publisher_api_response_too_large",
+              )
+              try:
+                  value = json.loads(
+                      payload.decode("utf-8"),
+                      object_pairs_hook=strict_object,
+                      parse_constant=reject_constant,
+                  )
+              except CredentialError:
+                  raise
+              except (UnicodeError, json.JSONDecodeError, RecursionError) as error:
+                  raise CredentialError("publisher_api_invalid_json") from error
+              return status_code, value
+
+          def get_json(token, path):
+              _status, value = api_json(token, "GET", path)
+              return value
+
+          def main():
+              token = os.environ.get("GH_PUBLISH_TOKEN", "")
+              steward = os.environ.get("AUTHORIZED_STEWARD", "")
+              require(token != "", "publisher_token_missing")
+              require(steward != "", "publisher_steward_missing")
+              require(os.environ.get("GITHUB_REPOSITORY") == REPOSITORY, "publisher_repository_invalid")
+              require(os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch", "publisher_event_invalid")
+              require(os.environ.get("WORKFLOW_REF") == WORKFLOW_REF, "publisher_workflow_ref_invalid")
+              require(os.environ.get("GITHUB_REF") == "refs/heads/main", "publisher_ref_invalid")
+              require(os.environ.get("GITHUB_REF_PROTECTED") == "true", "publisher_ref_unprotected")
+              require(os.environ.get("GITHUB_RUN_ATTEMPT") == "1", "publisher_rerun_forbidden")
+              require(re.fullmatch(r"[0-9a-f]{40}", os.environ.get("GITHUB_SHA", "")) is not None, "publisher_source_sha_invalid")
+              require(os.environ.get("GITHUB_ACTOR") == steward, "publisher_actor_invalid")
+              require(os.environ.get("GITHUB_TRIGGERING_ACTOR") == steward, "publisher_triggering_actor_invalid")
+
+              identity = get_json(token, "/user")
+              require(
+                  isinstance(identity, dict) and identity.get("login") == steward,
+                  "publisher_token_actor_invalid",
+              )
+              repository = get_json(token, f"/repos/{REPOSITORY}")
+              require(
+                  isinstance(repository, dict)
+                  and repository.get("full_name") == REPOSITORY,
+                  "publisher_token_repository_invalid",
+              )
+              releases = get_json(token, f"/repos/{REPOSITORY}/releases?per_page=1")
+              require(isinstance(releases, list), "publisher_token_release_access_invalid")
+              status, rejected = api_json(
+                  token,
+                  "POST",
+                  f"/repos/{REPOSITORY}/releases",
+                  value={},
+                  expected=(422,),
+              )
+              require(
+                  status == 422 and isinstance(rejected, dict),
+                  "publisher_token_write_probe_invalid",
+              )
+              releases_after_probe = get_json(
+                  token,
+                  f"/repos/{REPOSITORY}/releases?per_page=1",
+              )
+              require(
+                  releases_after_probe == releases,
+                  "publisher_token_write_probe_changed_release_state",
+              )
+              print(
+                  json.dumps(
+                      {
+                          "status": "publisher_credential_authenticated",
+                          "actor": steward,
+                          "repository": REPOSITORY,
+                          "mutation_performed": False,
+                      },
+                      sort_keys=True,
+                      separators=(",", ":"),
+                  )
+              )
+
+          if __name__ == "__main__":
+              try:
+                  main()
+              except CredentialError as error:
+                  raise SystemExit(f"publisher credential preflight failed: {error}") from error
+          PYTHON
 
   build:
     name: Build the candidate once without publisher authority
@@ -982,7 +1167,12 @@ jobs:
                   "workflow_run_identity_invalid",
               )
 
-          def validate_rulesets(admin_token):
+          def validate_rulesets(admin_token, steward):
+              _status, identity = api_json(admin_token, "GET", "/user")
+              require(
+                  isinstance(identity, dict) and identity.get("login") == steward,
+                  "release_admin_token_actor_invalid",
+              )
               rulesets = list_pages(admin_token, f"/repos/{REPOSITORY}/rulesets?includes_parents=true")
               observed = [
                   item
@@ -1007,12 +1197,13 @@ jobs:
               )
               require(
                   isinstance(candidate, dict)
+                  and candidate.get("current_user_can_bypass") == "always"
                   and candidate.get("bypass_actors")
                   == [{"actor_id": None, "actor_type": "OrganizationAdmin", "bypass_mode": "always"}]
                   and (candidate.get("conditions") or {}).get("ref_name")
                   == {"exclude": [], "include": ["refs/tags/candidate-v1.0.0-*"]}
                   and [rule.get("type") for rule in candidate.get("rules", [])] == ["creation"],
-                  "candidate_creation_ruleset_invalid",
+                  "release_steward_cannot_bypass_candidate_ruleset",
               )
               _status, immutable = api_json(
                   admin_token,
@@ -1080,11 +1271,40 @@ jobs:
           def release_list(publish_token):
               return list_pages(publish_token, f"/repos/{REPOSITORY}/releases")
 
+          def validate_publisher_credential(publish_token, steward, *, probe_write):
+              _status, identity = api_json(publish_token, "GET", "/user")
+              require(
+                  isinstance(identity, dict) and identity.get("login") == steward,
+                  "publisher_token_actor_invalid",
+              )
+              if probe_write:
+                  releases_before_probe = release_list(publish_token)
+                  status, rejected = api_json(
+                      publish_token,
+                      "POST",
+                      f"/repos/{REPOSITORY}/releases",
+                      value={},
+                      expected=(422,),
+                  )
+                  require(
+                      status == 422 and isinstance(rejected, dict),
+                      "publisher_token_write_probe_invalid",
+                  )
+                  require(
+                      release_list(publish_token) == releases_before_probe,
+                      "publisher_token_write_probe_changed_release_state",
+                  )
+
           def validate_live_controls(admin_token, read_token, publish_token, transfer, steward, *, release_id=None, draft=None):
               validate_run_context(read_token, transfer["source_sha"], int(os.environ["GITHUB_RUN_ID"]), steward)
+              validate_publisher_credential(
+                  publish_token,
+                  steward,
+                  probe_write=release_id is None,
+              )
               _status, immutable = api_json(admin_token, "GET", f"/repos/{REPOSITORY}/immutable-releases")
               require(isinstance(immutable, dict) and immutable.get("enabled") is True, "immutable_releases_disabled")
-              validate_rulesets(admin_token)
+              validate_rulesets(admin_token, steward)
               validate_environment(admin_token, steward)
               releases = release_list(publish_token)
               require(all(isinstance(item, dict) for item in releases), "release_list_invalid")

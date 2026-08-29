@@ -134,20 +134,42 @@ Environments and verifies the live settings.
 `V1_RELEASE_PUBLISH_TOKEN` is a short-lived, fine-grained personal access token
 for this repository with Contents read/write and no Administration or
 Environments permission. Its owner must be an organization administrator so it
-can pass the candidate-tag creation ruleset. `preflight` sees only the
-administration token and boolean presence/equality results for the publisher
-token. The publisher credential itself is injected into one workflow-embedded
-publication step only. That step executes no checked-out code and independently
-repeats the credential and live-control checks immediately before mutation.
-Revoke or rotate the publisher token after a successful freeze.
+can pass the candidate-tag creation ruleset. The first `preflight` step sees
+only the administration token and boolean presence/equality results for the
+publisher token. A separate step on the same protected, no-checkout runner then
+receives only the publisher token and performs bounded GitHub API requests to
+authenticate its actor and repository access before the one permitted build.
+It also submits an intentionally incomplete release request: a write-capable
+token must receive `422`, and the validated release listing must remain
+semantically unchanged across the probe. A `401` or `403`, any other status, or
+any release state change fails closed. The probe performs no mutation and emits
+no credential material.
+
+Set or rotate that protected-environment secret from an interactive terminal
+with `tools/set_v1_release_publisher_secret.zsh`. The helper reads the token
+without echo, authenticates its owner and effective release-write permission,
+then passes the exact value to `gh secret set` on standard input. It deliberately
+omits `--body`: GitHub CLI reads standard input only when that option is absent;
+`--body -` would store a literal hyphen instead of the token. The helper never
+prints or persists the credential.
+
+The publisher credential is later injected again only into the
+workflow-embedded publication step after the second environment approval. That
+step executes no checked-out code and independently reauthenticates the token as
+the designated steward, repeats the no-mutation write probe, and rechecks the
+live controls immediately before its first mutation. Revoke or rotate the
+publisher token after a successful freeze.
 
 Before checkout or build, `preflight` lists the protected environment's secret
 metadata and requires exactly `V1_RELEASE_ADMIN_TOKEN` and
 `V1_RELEASE_PUBLISH_TOKEN`. A repository- or organization-level secret with the
 same name cannot satisfy that check; both custody credentials must be stored in
-the reviewed environment. The administration token's owner must also be an
-organization administrator; GitHub otherwise withholds ruleset bypass actors
-from the read response and the workflow fails closed before the archive build.
+the reviewed environment. The administration token must authenticate as the
+designated steward, and GitHub's detailed candidate-ruleset response must report
+`current_user_can_bypass: "always"` for that exact token owner. This proves the
+effective candidate-tag capability without requiring organization-membership
+read access; a missing, stale, or non-bypassing steward fails closed before the
+archive build.
 
 Immutable Releases must already be enabled, the protected environment must
 match the steward contract, and one active, no-bypass tag ruleset must protect

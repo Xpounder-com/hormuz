@@ -89,6 +89,7 @@ EXPECTED_WORKFLOW_SECRET_EXPRESSIONS = {
             "${{ secrets.V1_RELEASE_ADMIN_TOKEN != "
             "secrets.V1_RELEASE_PUBLISH_TOKEN }}"
         ),
+        "${{ secrets.V1_RELEASE_PUBLISH_TOKEN }}",
         "${{ secrets.V1_RELEASE_ADMIN_TOKEN }}",
         "${{ secrets.V1_RELEASE_PUBLISH_TOKEN }}",
         (
@@ -134,10 +135,13 @@ CANONICAL_WORKFLOW_NAMES = frozenset(
 )
 CANDIDATE_CREDENTIAL_STEP_SHA256 = {
     "Verify credentials and live controls before the one permitted build": (
-        "45da1f4a8eca5a51ca9af737c16c93a90624c9cad2136d14a5176fe3c0cf9d57"
+        "446ef1824e8593950491f4b35eb02a3535ec63ff714d61b47c7de5f16a870693"
+    ),
+    "Authenticate the publisher credential before the one permitted build": (
+        "7a49bd36a93f1ad50e905363112bb5c86ac50c55a00c19be83608b9f0d8471e2"
     ),
     "Revalidate controls, publish the verified draft, and seal custody": (
-        "64aeceed43675e5a5313ca2266c28759ad43c385a4a1250c8e6be02a6c5bc67b"
+        "d4c81896f26c49be54b7d9d20e5a7785cac062cc6673def7652db3cf43e35abd"
     ),
     "Verify the published immutable candidate and attestations": (
         "2580ad938db646bfbec7fe4585d2f75e286ba36f310179d68577bd1f6f05391d"
@@ -145,15 +149,15 @@ CANDIDATE_CREDENTIAL_STEP_SHA256 = {
 }
 CANDIDATE_FREEZE_JOB_SHA256 = {
     "authorize": "17dcbe2c36d7cbd38e2c63df0924b54201aa7ef9fed255d21fd995c1856c8451",
-    "preflight": "1c7966ebc828b5a40295c793aff5ec2b6d0ce6af8a4efe87f27893fa42487c91",
+    "preflight": "d888d54f6a88a34ee537a93b7c611f9be59ccbcbc4dad77ec1a132e9d623489c",
     "build": "bbdb6cc17297f7a013067f435f9323703f0093ef9013a4b53abfd4dc8d9dc834",
-    "publish": "4f16752889464e9e5ff5471450af9605d4acab248de07d773f7b602a6efb9863",
+    "publish": "eefb21561e28cf8d0c1cd02170eb68ecea373e2beec1461b4fcaee22f307605b",
 }
 CANDIDATE_FREEZE_WORKFLOW_SHA256 = (
-    "b618d5ac6ff155e8d03577ef373c67bb0cbec2dcf316f208a6d696f265546db2"
+    "b3a606831e3f3b6e6182345a128ded2a4dd4db1d65bb97e711d75970246e18f6"
 )
 CANDIDATE_TOOL_SHA256 = (
-    "78686950d0fbda2effe8d824f691325c122880a2278ee22246350bed1c2e5fa5"
+    "03a67b662fffd621b10187bf1c41ecb520bbe641ef7cd797fa02e230a80fe88c"
 )
 PermissionSpec = str | dict[str, str]
 
@@ -693,13 +697,20 @@ def _validate_candidate_freeze_authorization(text: str) -> None:
 
 def _validate_candidate_freeze_credentials(text: str) -> None:
     preflight_name = "Verify credentials and live controls before the one permitted build"
+    readiness_name = (
+        "Authenticate the publisher credential before the one permitted build"
+    )
     publish_name = "Revalidate controls, publish the verified draft, and seal custody"
     verify_name = "Verify the published immutable candidate and attestations"
     publish = _workflow_named_step(text, name=publish_name)
     verify = _workflow_named_step(text, name=verify_name)
     preflight = _workflow_named_step(text, name=preflight_name)
+    readiness = _workflow_named_step(text, name=readiness_name)
     preflight_environment = _workflow_step_environment(
         preflight, name=preflight_name
+    )
+    readiness_environment = _workflow_step_environment(
+        readiness, name=readiness_name
     )
     publish_environment = _workflow_step_environment(
         publish, name=publish_name
@@ -709,6 +720,7 @@ def _validate_candidate_freeze_credentials(text: str) -> None:
     )
     credential_steps = (
         (preflight, preflight_name),
+        (readiness, readiness_name),
         (publish, publish_name),
         (verify, verify_name),
     )
@@ -747,12 +759,18 @@ def _validate_candidate_freeze_credentials(text: str) -> None:
         "AUTHORIZED_STEWARD": "${{ vars.V1_RELEASE_STEWARD }}",
         "WORKFLOW_REF": "${{ github.workflow_ref }}",
     }
+    expected_readiness_environment = {
+        "GH_PUBLISH_TOKEN": "${{ secrets.V1_RELEASE_PUBLISH_TOKEN }}",
+        "AUTHORIZED_STEWARD": "${{ vars.V1_RELEASE_STEWARD }}",
+        "WORKFLOW_REF": "${{ github.workflow_ref }}",
+    }
     expected_verify_environment = {
         "GH_TOKEN": "${{ github.token }}",
         "GH_ADMIN_TOKEN": "${{ secrets.V1_RELEASE_ADMIN_TOKEN }}",
     }
     if (
         preflight_environment != expected_preflight_environment
+        or readiness_environment != expected_readiness_environment
         or publish_environment != expected_publish_environment
         or verify_environment != expected_verify_environment
     ):
@@ -760,9 +778,16 @@ def _validate_candidate_freeze_credentials(text: str) -> None:
             "candidate freeze credential boundary changed"
         )
     if (
-        "V1_RELEASE_PUBLISH_TOKEN" in preflight
-        and "PUBLISH_TOKEN_CONFIGURED" not in preflight
-    ) or "V1_RELEASE_PUBLISH_TOKEN" in verify or "GH_PUBLISH_TOKEN" in verify:
+        "PUBLISH_TOKEN_CONFIGURED" not in preflight
+        or "${{ secrets.V1_RELEASE_PUBLISH_TOKEN }}" in preflight
+        or readiness.count("${{ secrets.V1_RELEASE_PUBLISH_TOKEN }}") != 1
+        or "GH_ADMIN_TOKEN" in readiness
+        or "GH_READ_TOKEN" in readiness
+        or "actions/checkout" in readiness
+        or "python tools/" in readiness
+        or "V1_RELEASE_PUBLISH_TOKEN" in verify
+        or "GH_PUBLISH_TOKEN" in verify
+    ):
         raise RepositoryGovernanceError(
             "candidate freeze credential boundary changed"
         )
