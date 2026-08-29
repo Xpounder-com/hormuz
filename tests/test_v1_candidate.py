@@ -15,7 +15,7 @@ import urllib.error
 from pathlib import Path
 from unittest import mock
 
-from tools import v1_candidate
+from tools import v1_candidate, verify_core_wheel
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -1318,8 +1318,122 @@ class V1CandidateTests(unittest.TestCase):
         self.assertIn('"mutation_performed": False', credential_preflight)
         self.assertIn("expected=(422,)", credential_preflight)
         self.assertIn("releases_after_probe == releases", credential_preflight)
+        self.assertIn(
+            "/orgs/Xpounder-com/memberships/$AUTHORIZED_STEWARD",
+            workflow,
+        )
+        self.assertIn("release_steward_not_organization_admin", workflow)
         self.assertNotIn("GH_ADMIN_TOKEN", credential_preflight)
         self.assertNotIn("actions/checkout", credential_preflight)
+
+    def test_publisher_secret_helper_uses_exact_stdin_without_a_body_literal(
+        self,
+    ) -> None:
+        helper_path = ROOT / "tools/set_v1_release_publisher_secret.zsh"
+        helper = helper_path.read_text(encoding="utf-8")
+        manifest = (ROOT / "MANIFEST.in").read_text(encoding="utf-8")
+
+        self.assertIn("IFS= read -r -s publisher_token", helper)
+        self.assertIn('if [[ "${publisher_token}" == *[[:space:]]* ]]', helper)
+        self.assertIn('if [[ "${publisher_probe_status}" != "422" ]]', helper)
+        self.assertIn("/usr/bin/python3 -I -B -", helper)
+        self.assertIn(
+            '"orgs/Xpounder-com/memberships/${authorized_steward}"',
+            helper,
+        )
+        self.assertGreaterEqual(helper.count("--hostname github.com"), 6)
+        self.assertIn(
+            'if print -rn -- "${publisher_token}" | env -u GH_TOKEN -u GITHUB_TOKEN',
+            helper,
+        )
+        storage_command = helper.split(
+            'if print -rn -- "${publisher_token}"', 1
+        )[1].split("; then", 1)[0]
+        self.assertIn('gh secret set "${secret_name}"', storage_command)
+        self.assertIn('--repo "github.com/${repository}"', storage_command)
+        self.assertIn('--env "${environment_name}"', storage_command)
+        self.assertNotIn("--body", storage_command)
+        self.assertIn(
+            "include tools/set_v1_release_publisher_secret.zsh",
+            manifest,
+        )
+        helper_archive_path = "tools/set_v1_release_publisher_secret.zsh"
+        self.assertIn(helper_archive_path, v1_candidate.REQUIRED_ARCHIVE_PATHS)
+        self.assertIn(
+            helper_archive_path,
+            verify_core_wheel.REQUIRED_POLICY_ADMIN_USABILITY_SDIST_PATHS,
+        )
+
+    def test_publisher_requires_active_organization_admin_steward(self) -> None:
+        namespace = self._publisher_namespace()
+
+        def environment_api(
+            _token: str,
+            method: str,
+            path: str,
+            **_kwargs: object,
+        ) -> tuple[int, object]:
+            self.assertEqual(method, "GET")
+            if path == "/orgs/Xpounder-com/memberships/steward":
+                return 200, {
+                    "state": "active",
+                    "role": "admin",
+                    "user": {"login": "steward"},
+                    "organization": {"login": "Xpounder-com"},
+                }
+            if path == "/repos/Xpounder-com/hormuz/environments/v1-release-custody":
+                return 200, {
+                    "name": "v1-release-custody",
+                    "deployment_branch_policy": {
+                        "protected_branches": True,
+                        "custom_branch_policies": False,
+                    },
+                    "protection_rules": [
+                        {
+                            "type": "required_reviewers",
+                            "prevent_self_review": False,
+                            "reviewers": [
+                                {
+                                    "type": "User",
+                                    "reviewer": {"login": "steward"},
+                                }
+                            ],
+                        }
+                    ],
+                }
+            if path.endswith("/secrets?per_page=100&page=1"):
+                return 200, {
+                    "secrets": [
+                        {"name": "V1_RELEASE_ADMIN_TOKEN"},
+                        {"name": "V1_RELEASE_PUBLISH_TOKEN"},
+                    ]
+                }
+            self.fail(f"unexpected API call: {method} {path}")
+
+        namespace["api_json"] = environment_api
+        namespace["validate_environment"]("admin-token", "steward")
+
+        def non_admin_api(
+            _token: str,
+            _method: str,
+            path: str,
+            **_kwargs: object,
+        ) -> tuple[int, object]:
+            if path == "/orgs/Xpounder-com/memberships/steward":
+                return 200, {
+                    "state": "active",
+                    "role": "member",
+                    "user": {"login": "steward"},
+                    "organization": {"login": "Xpounder-com"},
+                }
+            self.fail(f"unexpected API call: {path}")
+
+        namespace["api_json"] = non_admin_api
+        with self.assertRaisesRegex(
+            namespace["ContractError"],
+            "release_steward_not_organization_admin",
+        ):
+            namespace["validate_environment"]("admin-token", "steward")
 
     def test_publisher_validates_the_fixed_transfer_contract(self) -> None:
         namespace = self._publisher_namespace()

@@ -108,6 +108,7 @@ jobs:
           [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]] || exit 1
           [[ "$GITHUB_RUN_ID" =~ ^[1-9][0-9]*$ && "$GITHUB_RUN_ATTEMPT" == "1" ]] || exit 1
           [[ -n "$AUTHORIZED_STEWARD" ]] || exit 1
+          [[ "$AUTHORIZED_STEWARD" =~ ^[A-Za-z0-9][A-Za-z0-9-]{0,38}$ && "$AUTHORIZED_STEWARD" != *- ]] || exit 1
           [[ "$GITHUB_ACTOR" == "$AUTHORIZED_STEWARD" ]] || exit 1
           [[ "$GITHUB_TRIGGERING_ACTOR" == "$AUTHORIZED_STEWARD" ]] || exit 1
           [[ -n "${GH_ADMIN_TOKEN:-}" ]] || {
@@ -189,6 +190,8 @@ jobs:
             "/repos/$GITHUB_REPOSITORY/releases?per_page=100" > "$releases_path"
           immutable_path="$RUNNER_TEMP/immutable-releases.json"
           GH_TOKEN="$GH_ADMIN_TOKEN" gh api "/repos/$GITHUB_REPOSITORY/immutable-releases" > "$immutable_path"
+          steward_membership_path="$RUNNER_TEMP/steward-membership.json"
+          GH_TOKEN="$GH_ADMIN_TOKEN" gh api "/orgs/Xpounder-com/memberships/$AUTHORIZED_STEWARD" > "$steward_membership_path"
           rulesets_path="$RUNNER_TEMP/rulesets.json"
           GH_TOKEN="$GH_ADMIN_TOKEN" gh api --paginate --slurp \
             "/repos/$GITHUB_REPOSITORY/rulesets?includes_parents=true&per_page=100" > "$rulesets_path"
@@ -210,6 +213,7 @@ jobs:
           /usr/bin/python3 -I -B - \
             "$current_run_path" "$freeze_runs_path" "$freeze_jobs_dir" \
             "$main_path" "$ci_runs_path" "$releases_path" "$immutable_path" \
+            "$steward_membership_path" \
             "$rulesets_path" "$candidate_ruleset_path" "$immutable_ruleset_path" \
             "$environment_path" "$environment_secrets_path" \
             "$GITHUB_SHA" "$GITHUB_RUN_ID" "$AUTHORIZED_STEWARD" <<'PYTHON'
@@ -247,6 +251,7 @@ jobs:
               ci_file,
               releases_file,
               immutable_file,
+              steward_membership_file,
               rulesets_file,
               candidate_ruleset_file,
               immutable_ruleset_file,
@@ -376,6 +381,27 @@ jobs:
           immutable = load(immutable_file)
           if not isinstance(immutable, dict) or immutable.get("enabled") is not True:
               raise SystemExit("immutable GitHub Releases must be enabled")
+          steward_membership = load(steward_membership_file)
+          membership_user = (
+              steward_membership.get("user")
+              if isinstance(steward_membership, dict)
+              else None
+          )
+          membership_organization = (
+              steward_membership.get("organization")
+              if isinstance(steward_membership, dict)
+              else None
+          )
+          if not (
+              isinstance(steward_membership, dict)
+              and steward_membership.get("state") == "active"
+              and steward_membership.get("role") == "admin"
+              and isinstance(membership_user, dict)
+              and membership_user.get("login") == steward
+              and isinstance(membership_organization, dict)
+              and membership_organization.get("login") == "Xpounder-com"
+          ):
+              raise SystemExit("release steward must be an active organization administrator")
           ruleset_pages = load(rulesets_file)
           rulesets = []
           if not isinstance(ruleset_pages, list):
@@ -1209,6 +1235,25 @@ jobs:
               )
 
           def validate_environment(admin_token, steward):
+              _status, membership = api_json(
+                  admin_token,
+                  "GET",
+                  f"/orgs/Xpounder-com/memberships/{urllib.parse.quote(steward, safe='')}",
+              )
+              membership_user = membership.get("user") if isinstance(membership, dict) else None
+              membership_organization = (
+                  membership.get("organization") if isinstance(membership, dict) else None
+              )
+              require(
+                  isinstance(membership, dict)
+                  and membership.get("state") == "active"
+                  and membership.get("role") == "admin"
+                  and isinstance(membership_user, dict)
+                  and membership_user.get("login") == steward
+                  and isinstance(membership_organization, dict)
+                  and membership_organization.get("login") == "Xpounder-com",
+                  "release_steward_not_organization_admin",
+              )
               _status, environment = api_json(
                   admin_token, "GET", f"/repos/{REPOSITORY}/environments/{ENVIRONMENT}"
               )

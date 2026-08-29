@@ -144,6 +144,15 @@ token must receive `422`, and the validated release listing must remain
 semantically unchanged across the probe. A `401` or `403`, any other status, or
 any release state change fails closed. The probe performs no mutation and emits
 no credential material.
+
+Set or rotate that protected-environment secret from an interactive terminal
+with `tools/set_v1_release_publisher_secret.zsh`. The helper reads the token
+without echo, authenticates its owner and effective release-write permission,
+then passes the exact value to `gh secret set` on standard input. It deliberately
+omits `--body`: GitHub CLI reads standard input only when that option is absent;
+`--body -` would store a literal hyphen instead of the token. The helper never
+prints or persists the credential.
+
 The publisher credential is later injected again only into the
 workflow-embedded publication step after the second environment approval. That
 step executes no checked-out code and independently reauthenticates the token as

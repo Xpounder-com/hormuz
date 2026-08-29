@@ -19,6 +19,7 @@ include tools/verify_v1_internal_repeatability_evidence.py
 include tools/run_v1_internal_repeatability.py
 include tools/v1_candidate.py
 include tools/promote_v1_candidate.sh
+include tools/set_v1_release_publisher_secret.zsh
 include tools/verify_deployment_contract.py
 include tools/verify_durable_data_inventory.py
 include tools/oidc_reference_conformance.py
