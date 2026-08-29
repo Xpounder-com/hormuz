@@ -1316,6 +1316,8 @@ class V1CandidateTests(unittest.TestCase):
             'get_json(token, f"/repos/{REPOSITORY}")', credential_preflight
         )
         self.assertIn('"mutation_performed": False', credential_preflight)
+        self.assertIn("expected=(422,)", credential_preflight)
+        self.assertIn("releases_after_probe == releases", credential_preflight)
         self.assertNotIn("GH_ADMIN_TOKEN", credential_preflight)
         self.assertNotIn("actions/checkout", credential_preflight)
 
@@ -1363,6 +1365,101 @@ class V1CandidateTests(unittest.TestCase):
                 "publisher_token_authentication_failed",
             ):
                 get_json("invalid-token", "/user")
+
+    def test_publisher_credential_preflight_requires_write_without_mutation(
+        self,
+    ) -> None:
+        namespace = self._publisher_credential_preflight_namespace()
+        observed: dict[str, object] = {}
+        failure = urllib.error.HTTPError(
+            "https://api.github.com/repos/Xpounder-com/hormuz/releases",
+            422,
+            "Validation Failed",
+            {},
+            io.BytesIO(b'{"message":"Validation Failed"}'),
+        )
+
+        def reject_invalid_release(request: object, *, timeout: int) -> None:
+            observed["method"] = request.get_method()
+            observed["data"] = request.data
+            observed["timeout"] = timeout
+            raise failure
+
+        with mock.patch.object(
+            namespace["OPENER"],
+            "open",
+            side_effect=reject_invalid_release,
+        ):
+            status, response = namespace["api_json"](
+                "publisher-token",
+                "POST",
+                "/repos/Xpounder-com/hormuz/releases",
+                value={},
+                expected=(422,),
+            )
+        self.assertEqual(status, 422)
+        self.assertEqual(response, {"message": "Validation Failed"})
+        self.assertEqual(
+            observed,
+            {"method": "POST", "data": b"{}", "timeout": 30},
+        )
+
+    def test_publisher_reauthenticates_and_probes_write_before_mutation(
+        self,
+    ) -> None:
+        namespace = self._publisher_namespace()
+        calls: list[tuple[str, str, object, tuple[int, ...]]] = []
+        release_snapshots = [[{"id": 1, "tag_name": "existing"}]] * 2
+
+        def fake_api_json(
+            _token: str,
+            method: str,
+            path: str,
+            *,
+            value: object = None,
+            expected: tuple[int, ...] = (200,),
+        ) -> tuple[int, object]:
+            calls.append((method, path, value, expected))
+            if method == "GET" and path == "/user":
+                return 200, {"login": "steward"}
+            if method == "POST" and path.endswith("/releases"):
+                return 422, {"message": "Validation Failed"}
+            self.fail(f"unexpected API call: {method} {path}")
+
+        namespace["api_json"] = fake_api_json
+        namespace["release_list"] = lambda _token: release_snapshots.pop(0)
+        namespace["validate_publisher_credential"](
+            "publisher-token",
+            "steward",
+            probe_write=True,
+        )
+        self.assertEqual(release_snapshots, [])
+        self.assertEqual(
+            calls,
+            [
+                ("GET", "/user", None, (200,)),
+                (
+                    "POST",
+                    "/repos/Xpounder-com/hormuz/releases",
+                    {},
+                    (422,),
+                ),
+            ],
+        )
+
+        namespace["api_json"] = lambda *_args, **_kwargs: (
+            200,
+            {"login": "another-administrator"},
+        )
+        with self.assertRaisesRegex(
+            namespace["ContractError"],
+            "publisher_token_actor_invalid",
+        ):
+            namespace["validate_publisher_credential"](
+                "publisher-token",
+                "steward",
+                probe_write=False,
+            )
 
     def test_publisher_rejects_untrusted_transfer_drift(self) -> None:
         namespace = self._publisher_namespace()
@@ -1448,9 +1545,20 @@ class V1CandidateTests(unittest.TestCase):
 
     def test_publisher_hashes_remote_draft_bytes_before_publication(self) -> None:
         workflow = (ROOT / ".github/workflows/freeze-v1-candidate.yml").read_text()
+        live_controls = workflow.split(
+            "          def validate_live_controls(",
+            1,
+        )[1].split("\n          def expected_notes", 1)[0]
+        self.assertLess(
+            live_controls.index("validate_publisher_credential("),
+            live_controls.index("immutable-releases"),
+        )
         publisher = workflow.split("          def publish_candidate():", 1)[1].split(
             "          if __name__ == \"__main__\":", 1
         )[0]
+        first_control_check = publisher.index("validate_live_controls(")
+        first_mutation = publisher.index('"POST"', first_control_check)
+        self.assertLess(first_control_check, first_mutation)
         create_draft = publisher.index('"draft": True')
         first_download = publisher.index("download_and_compare(", create_draft)
         immediate_recheck = publisher.index(

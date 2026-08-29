@@ -138,10 +138,10 @@ CANDIDATE_CREDENTIAL_STEP_SHA256 = {
         "45da1f4a8eca5a51ca9af737c16c93a90624c9cad2136d14a5176fe3c0cf9d57"
     ),
     "Authenticate the publisher credential before the one permitted build": (
-        "50f200f3214e161d6c195f8079a54dc95ca2a83de16dde53957e07093d29db3a"
+        "7a49bd36a93f1ad50e905363112bb5c86ac50c55a00c19be83608b9f0d8471e2"
     ),
     "Revalidate controls, publish the verified draft, and seal custody": (
-        "64aeceed43675e5a5313ca2266c28759ad43c385a4a1250c8e6be02a6c5bc67b"
+        "127ed1748082372c6641075a2a4bb17fe1aee192983c9f88b6ee457b841f899f"
     ),
     "Verify the published immutable candidate and attestations": (
         "2580ad938db646bfbec7fe4585d2f75e286ba36f310179d68577bd1f6f05391d"
@@ -149,12 +149,12 @@ CANDIDATE_CREDENTIAL_STEP_SHA256 = {
 }
 CANDIDATE_FREEZE_JOB_SHA256 = {
     "authorize": "17dcbe2c36d7cbd38e2c63df0924b54201aa7ef9fed255d21fd995c1856c8451",
-    "preflight": "019f6fa2158461bc3ad0eabace9e35e1c8c3539a72a1c0c6bfb4c5582c814714",
+    "preflight": "2f1f89e8a5bfca41743154344166b854927827ae7d275c944fa937e5c8aede7c",
     "build": "bbdb6cc17297f7a013067f435f9323703f0093ef9013a4b53abfd4dc8d9dc834",
-    "publish": "4f16752889464e9e5ff5471450af9605d4acab248de07d773f7b602a6efb9863",
+    "publish": "9a7c47adfc2d611a5535dc8ad171342c6642a5479a4ef221fbd88acd54d010ce",
 }
 CANDIDATE_FREEZE_WORKFLOW_SHA256 = (
-    "2ed1edaeb57893fe2dcd7e617a98b7a53422b15422d37a8ebc621a40fc31b9fe"
+    "c87868137499b1b5a47252a084af1bd74fddf133f9749334a33bcabc04275d5d"
 )
 CANDIDATE_TOOL_SHA256 = (
     "78686950d0fbda2effe8d824f691325c122880a2278ee22246350bed1c2e5fa5"

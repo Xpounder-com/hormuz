@@ -505,15 +505,26 @@ jobs:
 
           OPENER = urllib.request.build_opener(RejectRedirectHandler())
 
-          def get_json(token, path):
+          def api_json(token, method, path, *, value=None, expected=(200,)):
+              body = None
+              if value is not None:
+                  body = json.dumps(
+                      value,
+                      sort_keys=True,
+                      separators=(",", ":"),
+                      allow_nan=False,
+                  ).encode("utf-8")
               request = urllib.request.Request(
                   f"https://api.github.com{path}",
+                  data=body,
                   headers={
                       "Accept": "application/vnd.github+json",
                       "Authorization": f"Bearer {token}",
+                      **({"Content-Type": "application/json"} if body is not None else {}),
                       "User-Agent": "hormuz-v1-publisher-credential-preflight",
                       "X-GitHub-Api-Version": API_VERSION,
                   },
+                  method=method,
               )
               try:
                   response = OPENER.open(request, timeout=30)
@@ -522,20 +533,26 @@ jobs:
                       raise CredentialError("publisher_token_authentication_failed") from error
                   if error.code == 403:
                       raise CredentialError("publisher_token_authorization_failed") from error
-                  raise CredentialError(
-                      f"publisher_api_unexpected_status:{error.code}"
-                  ) from error
+                  if error.code not in expected:
+                      raise CredentialError(
+                          f"publisher_api_unexpected_status:{error.code}"
+                      ) from error
+                  response = error
               except (OSError, TimeoutError) as error:
                   raise CredentialError("publisher_api_unavailable") from error
               with response:
-                  require(response.getcode() == 200, "publisher_api_unexpected_status")
+                  status_code = response.getcode()
+                  require(
+                      status_code in expected,
+                      f"publisher_api_unexpected_status:{status_code}",
+                  )
                   payload = response.read(MAXIMUM_RESPONSE_BYTES + 1)
               require(
                   len(payload) <= MAXIMUM_RESPONSE_BYTES,
                   "publisher_api_response_too_large",
               )
               try:
-                  return json.loads(
+                  value = json.loads(
                       payload.decode("utf-8"),
                       object_pairs_hook=strict_object,
                       parse_constant=reject_constant,
@@ -544,6 +561,11 @@ jobs:
                   raise
               except (UnicodeError, json.JSONDecodeError, RecursionError) as error:
                   raise CredentialError("publisher_api_invalid_json") from error
+              return status_code, value
+
+          def get_json(token, path):
+              _status, value = api_json(token, "GET", path)
+              return value
 
           def main():
               token = os.environ.get("GH_PUBLISH_TOKEN", "")
@@ -573,6 +595,25 @@ jobs:
               )
               releases = get_json(token, f"/repos/{REPOSITORY}/releases?per_page=1")
               require(isinstance(releases, list), "publisher_token_release_access_invalid")
+              status, rejected = api_json(
+                  token,
+                  "POST",
+                  f"/repos/{REPOSITORY}/releases",
+                  value={},
+                  expected=(422,),
+              )
+              require(
+                  status == 422 and isinstance(rejected, dict),
+                  "publisher_token_write_probe_invalid",
+              )
+              releases_after_probe = get_json(
+                  token,
+                  f"/repos/{REPOSITORY}/releases?per_page=1",
+              )
+              require(
+                  releases_after_probe == releases,
+                  "publisher_token_write_probe_changed_release_state",
+              )
               print(
                   json.dumps(
                       {
@@ -1212,8 +1253,37 @@ jobs:
           def release_list(publish_token):
               return list_pages(publish_token, f"/repos/{REPOSITORY}/releases")
 
+          def validate_publisher_credential(publish_token, steward, *, probe_write):
+              _status, identity = api_json(publish_token, "GET", "/user")
+              require(
+                  isinstance(identity, dict) and identity.get("login") == steward,
+                  "publisher_token_actor_invalid",
+              )
+              if probe_write:
+                  releases_before_probe = release_list(publish_token)
+                  status, rejected = api_json(
+                      publish_token,
+                      "POST",
+                      f"/repos/{REPOSITORY}/releases",
+                      value={},
+                      expected=(422,),
+                  )
+                  require(
+                      status == 422 and isinstance(rejected, dict),
+                      "publisher_token_write_probe_invalid",
+                  )
+                  require(
+                      release_list(publish_token) == releases_before_probe,
+                      "publisher_token_write_probe_changed_release_state",
+                  )
+
           def validate_live_controls(admin_token, read_token, publish_token, transfer, steward, *, release_id=None, draft=None):
               validate_run_context(read_token, transfer["source_sha"], int(os.environ["GITHUB_RUN_ID"]), steward)
+              validate_publisher_credential(
+                  publish_token,
+                  steward,
+                  probe_write=release_id is None,
+              )
               _status, immutable = api_json(admin_token, "GET", f"/repos/{REPOSITORY}/immutable-releases")
               require(isinstance(immutable, dict) and immutable.get("enabled") is True, "immutable_releases_disabled")
               validate_rulesets(admin_token)
