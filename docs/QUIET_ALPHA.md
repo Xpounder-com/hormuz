@@ -1,16 +1,20 @@
-# Deferred external onboarding validation
+# Historical v0.1.3 external onboarding protocol
 
-This document preserves the v0.1.3 external-onboarding protocol for a possible
-future study. It is not a v1.0.0 release dependency. External onboarding
-validation remains **0/5** independent completions. Issue #110
-tracks whether independent developers, security reviewers, platform engineers,
-and engineering administrators can install the public checkout and finish the
-provider-free demonstration using only public repository material.
+This document and `hormuz.quiet-alpha-evidence` v1 preserve the v0.1.3 protocol
+for compatibility and historical audit. They are not accepted for the active
+v1.0.0 study. Use [EXTERNAL_ONBOARDING.md](EXTERNAL_ONBOARDING.md) and
+`tools/verify_external_onboarding_evidence.py` for current issue #110 work.
 
-This deferred study must close before Hormuz claims validated human onboarding
-or uses its results for stronger commercial-readiness claims. Internal,
-maintainer-assisted, agent, sandbox, and synthetic runs do not count toward the
-five independent completions.
+No completion recorded under this historical protocol is silently migrated to
+the v1.0.0 artifact. The active count remains **0/5** independent initial
+completions and zero returning users until real v1.0.0 evidence is collected.
+The historical requirements below remain unchanged so prior references retain
+their original meaning.
+
+Under the historical v0.1.3 rules, this study would have had to close before a
+validated-human-onboarding claim. Internal, maintainer-assisted, agent,
+sandbox, and synthetic runs did not count toward its five independent
+completions. The active v1.0.0 contract applies that boundary independently.
 
 Anyone may run the public test and file a sanitized installation report. To
 keep opaque participant IDs from becoming a durable GitHub-identity mapping,
