@@ -1321,6 +1321,32 @@ class V1CandidateTests(unittest.TestCase):
         self.assertNotIn("GH_ADMIN_TOKEN", credential_preflight)
         self.assertNotIn("actions/checkout", credential_preflight)
 
+    def test_publisher_secret_helper_uses_exact_stdin_without_a_body_literal(
+        self,
+    ) -> None:
+        helper_path = ROOT / "tools/set_v1_release_publisher_secret.zsh"
+        helper = helper_path.read_text(encoding="utf-8")
+        manifest = (ROOT / "MANIFEST.in").read_text(encoding="utf-8")
+
+        self.assertIn("IFS= read -r -s publisher_token", helper)
+        self.assertIn('if [[ "${publisher_token}" == *[[:space:]]* ]]', helper)
+        self.assertIn('if [[ "${publisher_probe_status}" != "422" ]]', helper)
+        self.assertIn(
+            'if print -rn -- "${publisher_token}" | env -u GH_TOKEN -u GITHUB_TOKEN',
+            helper,
+        )
+        storage_command = helper.split(
+            'if print -rn -- "${publisher_token}"', 1
+        )[1].split("; then", 1)[0]
+        self.assertIn('gh secret set "${secret_name}"', storage_command)
+        self.assertIn('--repo "${repository}"', storage_command)
+        self.assertIn('--env "${environment_name}"', storage_command)
+        self.assertNotIn("--body", storage_command)
+        self.assertIn(
+            "include tools/set_v1_release_publisher_secret.zsh",
+            manifest,
+        )
+
     def test_publisher_validates_the_fixed_transfer_contract(self) -> None:
         namespace = self._publisher_namespace()
         validate_transfer = namespace["validate_transfer"]
