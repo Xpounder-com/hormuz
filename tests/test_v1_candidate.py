@@ -11,6 +11,7 @@ import tempfile
 import textwrap
 import tomllib
 import unittest
+import urllib.error
 from pathlib import Path
 from unittest import mock
 
@@ -39,6 +40,31 @@ class V1CandidateTests(unittest.TestCase):
         source = workflow.split(start, 1)[1].split(end, 1)[0]
         namespace: dict[str, object] = {"__name__": "workflow_contract_test"}
         exec(compile(textwrap.dedent(source), "embedded-publisher.py", "exec"), namespace)
+        return namespace
+
+    def _publisher_credential_preflight_namespace(self) -> dict[str, object]:
+        workflow = (ROOT / ".github/workflows/freeze-v1-candidate.yml").read_text(
+            encoding="utf-8"
+        )
+        step_name = (
+            "      - name: Authenticate the publisher credential before "
+            "the one permitted build\n"
+        )
+        self.assertEqual(workflow.count(step_name), 1)
+        step = workflow.split(step_name, 1)[1].split("\n  build:\n", 1)[0]
+        source = step.split("/usr/bin/python3 -I -B - <<'PYTHON'\n", 1)[1].split(
+            "\n          PYTHON",
+            1,
+        )[0]
+        namespace: dict[str, object] = {"__name__": "workflow_contract_test"}
+        exec(
+            compile(
+                textwrap.dedent(source),
+                "embedded-publisher-credential-preflight.py",
+                "exec",
+            ),
+            namespace,
+        )
         return namespace
 
     def _archive(self, directory: Path, *, marker: str = "first") -> Path:
@@ -1275,12 +1301,23 @@ class V1CandidateTests(unittest.TestCase):
         self.assertNotIn("extract", publish)
         self.assertEqual(
             workflow.count("GH_PUBLISH_TOKEN: ${{ secrets.V1_RELEASE_PUBLISH_TOKEN }}"),
-            1,
+            2,
         )
         self.assertEqual(
             workflow.count("GH_ADMIN_TOKEN: ${{ secrets.V1_RELEASE_ADMIN_TOKEN }}"),
             3,
         )
+        credential_preflight = workflow.split(
+            "      - name: Authenticate the publisher credential before the one permitted build\n",
+            1,
+        )[1].split("\n  build:\n", 1)[0]
+        self.assertIn('get_json(token, "/user")', credential_preflight)
+        self.assertIn(
+            'get_json(token, f"/repos/{REPOSITORY}")', credential_preflight
+        )
+        self.assertIn('"mutation_performed": False', credential_preflight)
+        self.assertNotIn("GH_ADMIN_TOKEN", credential_preflight)
+        self.assertNotIn("actions/checkout", credential_preflight)
 
     def test_publisher_validates_the_fixed_transfer_contract(self) -> None:
         namespace = self._publisher_namespace()
@@ -1308,6 +1345,24 @@ class V1CandidateTests(unittest.TestCase):
                 stat.S_IMODE((directory / v1_candidate.MANIFEST_NAME).stat().st_mode),
                 0o600,
             )
+
+    def test_publisher_credential_preflight_labels_invalid_token_bytes(self) -> None:
+        namespace = self._publisher_credential_preflight_namespace()
+        get_json = namespace["get_json"]
+        credential_error = namespace["CredentialError"]
+        failure = urllib.error.HTTPError(
+            "https://api.github.com/user",
+            401,
+            "Bad credentials",
+            {},
+            None,
+        )
+        with mock.patch.object(namespace["OPENER"], "open", side_effect=failure):
+            with self.assertRaisesRegex(
+                credential_error,
+                "publisher_token_authentication_failed",
+            ):
+                get_json("invalid-token", "/user")
 
     def test_publisher_rejects_untrusted_transfer_drift(self) -> None:
         namespace = self._publisher_namespace()

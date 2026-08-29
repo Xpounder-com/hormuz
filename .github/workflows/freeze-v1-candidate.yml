@@ -461,6 +461,138 @@ jobs:
           assert_api_absent "$GH_READ_TOKEN" "/repos/$GITHUB_REPOSITORY/git/ref/tags/v1.0.0" "final-v1.0.0-tag"
           assert_api_absent "$GH_READ_TOKEN" "/repos/$GITHUB_REPOSITORY/releases/tags/v1.0.0" "final-v1.0.0-release"
 
+      - name: Authenticate the publisher credential before the one permitted build
+        env:
+          GH_PUBLISH_TOKEN: ${{ secrets.V1_RELEASE_PUBLISH_TOKEN }}
+          AUTHORIZED_STEWARD: ${{ vars.V1_RELEASE_STEWARD }}
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+        run: |
+          set -euo pipefail
+          umask 077
+          /usr/bin/python3 -I -B - <<'PYTHON'
+          import json
+          import os
+          import re
+          import urllib.error
+          import urllib.request
+
+          REPOSITORY = "Xpounder-com/hormuz"
+          WORKFLOW_REF = f"{REPOSITORY}/.github/workflows/freeze-v1-candidate.yml@refs/heads/main"
+          API_VERSION = "2022-11-28"
+          MAXIMUM_RESPONSE_BYTES = 8 * 1024 * 1024
+
+          class CredentialError(RuntimeError):
+              pass
+
+          def require(condition, label):
+              if not condition:
+                  raise CredentialError(label)
+
+          def strict_object(pairs):
+              value = {}
+              for key, item in pairs:
+                  if key in value:
+                      raise CredentialError("publisher_api_duplicate_json_member")
+                  value[key] = item
+              return value
+
+          def reject_constant(_value):
+              raise CredentialError("publisher_api_non_finite_number")
+
+          class RejectRedirectHandler(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, request, fp, code, message, headers, new_url):
+                  raise CredentialError("publisher_api_redirect_forbidden")
+
+          OPENER = urllib.request.build_opener(RejectRedirectHandler())
+
+          def get_json(token, path):
+              request = urllib.request.Request(
+                  f"https://api.github.com{path}",
+                  headers={
+                      "Accept": "application/vnd.github+json",
+                      "Authorization": f"Bearer {token}",
+                      "User-Agent": "hormuz-v1-publisher-credential-preflight",
+                      "X-GitHub-Api-Version": API_VERSION,
+                  },
+              )
+              try:
+                  response = OPENER.open(request, timeout=30)
+              except urllib.error.HTTPError as error:
+                  if error.code == 401:
+                      raise CredentialError("publisher_token_authentication_failed") from error
+                  if error.code == 403:
+                      raise CredentialError("publisher_token_authorization_failed") from error
+                  raise CredentialError(
+                      f"publisher_api_unexpected_status:{error.code}"
+                  ) from error
+              except (OSError, TimeoutError) as error:
+                  raise CredentialError("publisher_api_unavailable") from error
+              with response:
+                  require(response.getcode() == 200, "publisher_api_unexpected_status")
+                  payload = response.read(MAXIMUM_RESPONSE_BYTES + 1)
+              require(
+                  len(payload) <= MAXIMUM_RESPONSE_BYTES,
+                  "publisher_api_response_too_large",
+              )
+              try:
+                  return json.loads(
+                      payload.decode("utf-8"),
+                      object_pairs_hook=strict_object,
+                      parse_constant=reject_constant,
+                  )
+              except CredentialError:
+                  raise
+              except (UnicodeError, json.JSONDecodeError, RecursionError) as error:
+                  raise CredentialError("publisher_api_invalid_json") from error
+
+          def main():
+              token = os.environ.get("GH_PUBLISH_TOKEN", "")
+              steward = os.environ.get("AUTHORIZED_STEWARD", "")
+              require(token != "", "publisher_token_missing")
+              require(steward != "", "publisher_steward_missing")
+              require(os.environ.get("GITHUB_REPOSITORY") == REPOSITORY, "publisher_repository_invalid")
+              require(os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch", "publisher_event_invalid")
+              require(os.environ.get("WORKFLOW_REF") == WORKFLOW_REF, "publisher_workflow_ref_invalid")
+              require(os.environ.get("GITHUB_REF") == "refs/heads/main", "publisher_ref_invalid")
+              require(os.environ.get("GITHUB_REF_PROTECTED") == "true", "publisher_ref_unprotected")
+              require(os.environ.get("GITHUB_RUN_ATTEMPT") == "1", "publisher_rerun_forbidden")
+              require(re.fullmatch(r"[0-9a-f]{40}", os.environ.get("GITHUB_SHA", "")) is not None, "publisher_source_sha_invalid")
+              require(os.environ.get("GITHUB_ACTOR") == steward, "publisher_actor_invalid")
+              require(os.environ.get("GITHUB_TRIGGERING_ACTOR") == steward, "publisher_triggering_actor_invalid")
+
+              identity = get_json(token, "/user")
+              require(
+                  isinstance(identity, dict) and identity.get("login") == steward,
+                  "publisher_token_actor_invalid",
+              )
+              repository = get_json(token, f"/repos/{REPOSITORY}")
+              require(
+                  isinstance(repository, dict)
+                  and repository.get("full_name") == REPOSITORY,
+                  "publisher_token_repository_invalid",
+              )
+              releases = get_json(token, f"/repos/{REPOSITORY}/releases?per_page=1")
+              require(isinstance(releases, list), "publisher_token_release_access_invalid")
+              print(
+                  json.dumps(
+                      {
+                          "status": "publisher_credential_authenticated",
+                          "actor": steward,
+                          "repository": REPOSITORY,
+                          "mutation_performed": False,
+                      },
+                      sort_keys=True,
+                      separators=(",", ":"),
+                  )
+              )
+
+          if __name__ == "__main__":
+              try:
+                  main()
+              except CredentialError as error:
+                  raise SystemExit(f"publisher credential preflight failed: {error}") from error
+          PYTHON
+
   build:
     name: Build the candidate once without publisher authority
     needs: preflight
