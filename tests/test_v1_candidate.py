@@ -120,7 +120,9 @@ class V1CandidateTests(unittest.TestCase):
             "draft": False,
             "prerelease": True,
             "immutable": True,
-            "created_at": "2025-08-27T10:01:00Z",
+            # GitHub reports the tagged source commit date here, not the time
+            # at which the release record was created or published.
+            "created_at": "2025-08-27T09:50:00Z",
             "published_at": "2025-08-27T10:04:00Z",
             "assets": [
                 {
@@ -564,6 +566,32 @@ class V1CandidateTests(unittest.TestCase):
                     second_tag,
                 )
 
+    def test_promotion_accepts_release_created_at_from_source_commit(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            archive = self._archive(root)
+            manifest = self._manifest_value(archive)
+            manifest_path = self._write_manifest(root, manifest)
+            evidence = self._evidence(root, manifest)
+            release, immutable = self._api_files(root, manifest_path, manifest, archive)
+            freeze_run = self._freeze_run(root, manifest)
+            custody_tag = self._custody_tag(root, manifest)
+            release_value = json.loads(release.read_text())
+            release_value["created_at"] = "2025-08-20T10:00:00Z"
+            release.write_text(json.dumps(release_value), encoding="utf-8")
+
+            result = v1_candidate.validate_promotion(
+                manifest_path,
+                archive,
+                evidence,
+                release,
+                immutable,
+                freeze_run,
+                custody_tag,
+            )
+
+            self.assertEqual(result["status"], "eligible_for_metadata_promotion")
+
     def test_synthetic_gate_evidence_cannot_authorize_promotion(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -637,6 +665,90 @@ class V1CandidateTests(unittest.TestCase):
 
             with self.assertRaisesRegex(
                 v1_candidate.V1CandidateError, "release_asset_chronology_invalid"
+            ):
+                v1_candidate.validate_promotion(
+                    manifest_path,
+                    archive,
+                    evidence,
+                    release,
+                    immutable,
+                    freeze_run,
+                    custody_tag,
+                )
+
+    def test_promotion_rejects_an_asset_created_before_the_freeze(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            archive = self._archive(root)
+            manifest = self._manifest_value(archive)
+            manifest_path = self._write_manifest(root, manifest)
+            evidence = self._evidence(root, manifest)
+            release, immutable = self._api_files(root, manifest_path, manifest, archive)
+            freeze_run = self._freeze_run(root, manifest)
+            custody_tag = self._custody_tag(root, manifest)
+            release_value = json.loads(release.read_text())
+            release_value["assets"][0]["created_at"] = "2025-08-27T09:59:00Z"
+            release_value["assets"][0]["updated_at"] = "2025-08-27T09:59:00Z"
+            release.write_text(json.dumps(release_value), encoding="utf-8")
+
+            with self.assertRaisesRegex(
+                v1_candidate.V1CandidateError, "release_asset_chronology_invalid"
+            ):
+                v1_candidate.validate_promotion(
+                    manifest_path,
+                    archive,
+                    evidence,
+                    release,
+                    immutable,
+                    freeze_run,
+                    custody_tag,
+                )
+
+    def test_promotion_rejects_publication_after_the_freeze_run(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            archive = self._archive(root)
+            manifest = self._manifest_value(archive)
+            manifest_path = self._write_manifest(root, manifest)
+            evidence = self._evidence(root, manifest)
+            release, immutable = self._api_files(root, manifest_path, manifest, archive)
+            freeze_run = self._freeze_run(root, manifest)
+            custody_tag = self._custody_tag(root, manifest)
+            release_value = json.loads(release.read_text())
+            release_value["published_at"] = "2025-08-27T10:06:00Z"
+            release.write_text(json.dumps(release_value), encoding="utf-8")
+
+            with self.assertRaisesRegex(
+                v1_candidate.V1CandidateError,
+                "candidate_release_chronology_invalid",
+            ):
+                v1_candidate.validate_promotion(
+                    manifest_path,
+                    archive,
+                    evidence,
+                    release,
+                    immutable,
+                    freeze_run,
+                    custody_tag,
+                )
+
+    def test_promotion_rejects_release_created_at_after_publication(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            archive = self._archive(root)
+            manifest = self._manifest_value(archive)
+            manifest_path = self._write_manifest(root, manifest)
+            evidence = self._evidence(root, manifest)
+            release, immutable = self._api_files(root, manifest_path, manifest, archive)
+            freeze_run = self._freeze_run(root, manifest)
+            custody_tag = self._custody_tag(root, manifest)
+            release_value = json.loads(release.read_text())
+            release_value["created_at"] = "2025-08-27T10:05:00Z"
+            release.write_text(json.dumps(release_value), encoding="utf-8")
+
+            with self.assertRaisesRegex(
+                v1_candidate.V1CandidateError,
+                "candidate_release_chronology_invalid",
             ):
                 v1_candidate.validate_promotion(
                     manifest_path,

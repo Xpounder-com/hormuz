@@ -256,8 +256,12 @@ The command downloads the immutable candidate assets and validates the real evid
 their exact digest before it creates anything. It also queries the recorded
 Actions run and requires a successful first attempt of the canonical freeze
 workflow on protected `main`, at the manifest's source commit, with the freeze
-time and both release-asset creation times inside that run. An asset replaced
-after the freeze run therefore fails even if it has the expected name. The
+time before both release-asset creation and update times, followed by release
+publication before the run completes. GitHub's release `created_at` field is
+the date of the commit used for the release, not the release-record creation
+time; it remains validated source metadata but does not bound asset upload.
+An asset created before the freeze or replaced after publication therefore
+fails even if it has the expected name. The
 digest-addressed custody tag must also remain a lightweight pointer to that
 source commit. The tag is re-fetched and revalidated during every later
 promotion phase; the no-bypass tag-immutability ruleset also covers these
