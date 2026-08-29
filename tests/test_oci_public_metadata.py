@@ -174,11 +174,16 @@ class OciPublicMetadataTests(unittest.TestCase):
         )
         self.assertIn("must fail closed before the artifact is admitted", normalized)
         self.assertIn(
-            "v0.1.3` is the previously verified signed Hormuz reference", normalized
+            "`v0.1.3` remains a separately verified historical reference", normalized
         )
-        self.assertIn("v0.1.1` remains the prior supported digest", normalized)
+        self.assertIn("The prior supported rollback target", normalized)
+        self.assertIn(
+            "sha256:1bbcca3490a7a5b004a880f42e8250acb91ce566a9c59f3263d7b279568efb5a",
+            normalized,
+        )
         self.assertIn("failed `v0.1.2` attempt is not a supported release", normalized)
-        self.assertIn("does not itself prove cross-version rollback", normalized)
+        self.assertIn("bounded cross-version drill", normalized)
+        self.assertIn("does not prove production deployment rollback", normalized)
         self.assertIn("issues/135", normalized)
 
     @staticmethod
