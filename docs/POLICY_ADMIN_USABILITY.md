@@ -134,12 +134,22 @@ Environments and verifies the live settings.
 `V1_RELEASE_PUBLISH_TOKEN` is a short-lived, fine-grained personal access token
 for this repository with Contents read/write and no Administration or
 Environments permission. Its owner must be an organization administrator so it
-can pass the candidate-tag creation ruleset. `preflight` sees only the
-administration token and boolean presence/equality results for the publisher
-token. The publisher credential itself is injected into one workflow-embedded
-publication step only. That step executes no checked-out code and independently
-repeats the credential and live-control checks immediately before mutation.
-Revoke or rotate the publisher token after a successful freeze.
+can pass the candidate-tag creation ruleset. The first `preflight` step sees
+only the administration token and boolean presence/equality results for the
+publisher token. A separate step on the same protected, no-checkout runner then
+receives only the publisher token and performs bounded GitHub API requests to
+authenticate its actor and repository access before the one permitted build.
+It also submits an intentionally incomplete release request: a write-capable
+token must receive `422`, and the validated release listing must remain
+semantically unchanged across the probe. A `401` or `403`, any other status, or
+any release state change fails closed. The probe performs no mutation and emits
+no credential material.
+The publisher credential is later injected again only into the
+workflow-embedded publication step after the second environment approval. That
+step executes no checked-out code and independently reauthenticates the token as
+the designated steward, repeats the no-mutation write probe, and rechecks the
+live controls immediately before its first mutation. Revoke or rotate the
+publisher token after a successful freeze.
 
 Before checkout or build, `preflight` lists the protected environment's secret
 metadata and requires exactly `V1_RELEASE_ADMIN_TOKEN` and

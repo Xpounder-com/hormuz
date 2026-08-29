@@ -241,10 +241,52 @@ class RepositoryGovernanceTests(unittest.TestCase):
             self._copy_contract(root)
             workflow = root / ".github/workflows/freeze-v1-candidate.yml"
             value = workflow.read_text(encoding="utf-8")
+            publication_environment = (
+                "          GH_READ_TOKEN: ${{ github.token }}\n"
+                "          GH_ADMIN_TOKEN: ${{ secrets.V1_RELEASE_ADMIN_TOKEN }}\n"
+                "          GH_PUBLISH_TOKEN: ${{ secrets.V1_RELEASE_PUBLISH_TOKEN }}\n"
+            )
+            self.assertEqual(value.count(publication_environment), 1)
             workflow.write_text(
                 value.replace(
-                    "GH_PUBLISH_TOKEN: ${{ secrets.V1_RELEASE_PUBLISH_TOKEN }}",
-                    "GH_PUBLISH_TOKEN: ${{ github.token }}",
+                    publication_environment,
+                    publication_environment.replace(
+                        "GH_PUBLISH_TOKEN: ${{ secrets.V1_RELEASE_PUBLISH_TOKEN }}",
+                        "GH_PUBLISH_TOKEN: ${{ github.token }}",
+                    ),
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                RepositoryGovernanceError,
+                "workflow secret expression contract changed",
+            ):
+                validate_repository_governance(root)
+
+    def test_candidate_publisher_preflight_cannot_fall_back_to_github_token(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._copy_contract(root)
+            workflow = root / ".github/workflows/freeze-v1-candidate.yml"
+            value = workflow.read_text(encoding="utf-8")
+            readiness_environment = (
+                "      - name: Authenticate the publisher credential before "
+                "the one permitted build\n"
+                "        env:\n"
+                "          GH_PUBLISH_TOKEN: "
+                "${{ secrets.V1_RELEASE_PUBLISH_TOKEN }}\n"
+            )
+            self.assertEqual(value.count(readiness_environment), 1)
+            workflow.write_text(
+                value.replace(
+                    readiness_environment,
+                    readiness_environment.replace(
+                        "${{ secrets.V1_RELEASE_PUBLISH_TOKEN }}",
+                        "${{ github.token }}",
+                    ),
                     1,
                 ),
                 encoding="utf-8",
@@ -442,6 +484,19 @@ class RepositoryGovernanceTests(unittest.TestCase):
                     "the one permitted build\n"
                     "        env:\n"
                     "          # token persistence probe\n"
+                ),
+            ),
+            (
+                (
+                    "      - name: Authenticate the publisher credential before "
+                    "the one permitted build\n"
+                    "        env:\n"
+                ),
+                (
+                    "      - name: Authenticate the publisher credential before "
+                    "the one permitted build\n"
+                    "        env:\n"
+                    "          # publisher readiness persistence probe\n"
                 ),
             ),
             (
