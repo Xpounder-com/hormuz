@@ -1768,7 +1768,7 @@ class V1CandidateTests(unittest.TestCase):
         self.assertTrue(any(method == "POST" for method, _path in calls))
         self.assertFalse(any(method == "PATCH" for method, _path in calls))
 
-    def test_source_build_frontend_and_backend_are_exactly_hash_locked(self) -> None:
+    def test_published_v1_source_lock_and_current_backend_are_explicit(self) -> None:
         lock = (ROOT / "requirements/v1-source-build.lock").read_text()
         expected = {
             "build==1.3.0": (
@@ -1791,11 +1791,13 @@ class V1CandidateTests(unittest.TestCase):
                 lock,
             )
 
+        # The published v1 lock remains historical release evidence. Current
+        # development names its build backend independently and exactly.
         pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text())
         self.assertEqual(
             pyproject["build-system"],
             {
-                "requires": ["setuptools==83.0.0"],
+                "requires": ["setuptools==84.0.0"],
                 "build-backend": "setuptools.build_meta",
             },
         )
