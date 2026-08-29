@@ -816,7 +816,11 @@ def _validate_asset_chronology(
     release_published_at = _timestamp_value(
         release.get("published_at"), "candidate_release_published_at"
     )
-    if not frozen_at <= release_created_at <= release_published_at <= run_updated_at:
+    # GitHub's release API defines created_at as the date of the commit used for
+    # the release, not the time at which the release record was created. Keep it
+    # as validated source metadata, but use assets and published_at for custody
+    # chronology.
+    if not release_created_at <= release_published_at <= run_updated_at:
         raise V1CandidateError("candidate_release_chronology_invalid")
     assets = release.get("assets")
     assert isinstance(assets, list)
@@ -824,7 +828,7 @@ def _validate_asset_chronology(
         assert isinstance(asset, dict)
         created_at = _timestamp_value(asset.get("created_at"), "release_asset_created_at")
         updated_at = _timestamp_value(asset.get("updated_at"), "release_asset_updated_at")
-        if not release_created_at <= created_at <= updated_at <= release_published_at:
+        if not frozen_at <= created_at <= updated_at <= release_published_at:
             raise V1CandidateError("release_asset_chronology_invalid")
 
 
