@@ -1318,11 +1318,9 @@ class V1CandidateTests(unittest.TestCase):
         self.assertIn('"mutation_performed": False', credential_preflight)
         self.assertIn("expected=(422,)", credential_preflight)
         self.assertIn("releases_after_probe == releases", credential_preflight)
-        self.assertIn(
-            "/orgs/Xpounder-com/memberships/$AUTHORIZED_STEWARD",
-            workflow,
-        )
-        self.assertIn("release_steward_not_organization_admin", workflow)
+        self.assertIn('GH_TOKEN="$GH_ADMIN_TOKEN" gh api "/user"', workflow)
+        self.assertIn('candidate_ruleset.get("current_user_can_bypass") != "always"', workflow)
+        self.assertIn("release_steward_cannot_bypass_candidate_ruleset", workflow)
         self.assertNotIn("GH_ADMIN_TOKEN", credential_preflight)
         self.assertNotIn("actions/checkout", credential_preflight)
 
@@ -1364,76 +1362,89 @@ class V1CandidateTests(unittest.TestCase):
             verify_core_wheel.REQUIRED_POLICY_ADMIN_USABILITY_SDIST_PATHS,
         )
 
-    def test_publisher_requires_active_organization_admin_steward(self) -> None:
+    def test_publisher_requires_effective_candidate_ruleset_bypass(self) -> None:
         namespace = self._publisher_namespace()
 
-        def environment_api(
+        ruleset_summaries = [
+            {
+                "id": 11,
+                "name": "Owner-created candidate tags",
+                "source_type": "Repository",
+                "target": "tag",
+                "enforcement": "active",
+            },
+            {
+                "id": 12,
+                "name": "Immutable version tags",
+                "source_type": "Repository",
+                "target": "tag",
+                "enforcement": "active",
+            },
+        ]
+        namespace["list_pages"] = lambda _token, _path: ruleset_summaries
+        bypass_mode = "always"
+
+        def ruleset_api(
             _token: str,
             method: str,
             path: str,
             **_kwargs: object,
         ) -> tuple[int, object]:
             self.assertEqual(method, "GET")
-            if path == "/orgs/Xpounder-com/memberships/steward":
+            if path == "/user":
+                return 200, {"login": "steward"}
+            if path.endswith("/rulesets/11"):
                 return 200, {
-                    "state": "active",
-                    "role": "admin",
-                    "user": {"login": "steward"},
-                    "organization": {"login": "Xpounder-com"},
-                }
-            if path == "/repos/Xpounder-com/hormuz/environments/v1-release-custody":
-                return 200, {
-                    "name": "v1-release-custody",
-                    "deployment_branch_policy": {
-                        "protected_branches": True,
-                        "custom_branch_policies": False,
-                    },
-                    "protection_rules": [
+                    "current_user_can_bypass": bypass_mode,
+                    "bypass_actors": [
                         {
-                            "type": "required_reviewers",
-                            "prevent_self_review": False,
-                            "reviewers": [
-                                {
-                                    "type": "User",
-                                    "reviewer": {"login": "steward"},
-                                }
-                            ],
+                            "actor_id": None,
+                            "actor_type": "OrganizationAdmin",
+                            "bypass_mode": "always",
                         }
                     ],
+                    "conditions": {
+                        "ref_name": {
+                            "exclude": [],
+                            "include": ["refs/tags/candidate-v1.0.0-*"],
+                        }
+                    },
+                    "rules": [{"type": "creation"}],
                 }
-            if path.endswith("/secrets?per_page=100&page=1"):
+            if path.endswith("/rulesets/12"):
                 return 200, {
-                    "secrets": [
-                        {"name": "V1_RELEASE_ADMIN_TOKEN"},
-                        {"name": "V1_RELEASE_PUBLISH_TOKEN"},
-                    ]
+                    "bypass_actors": [],
+                    "conditions": {
+                        "ref_name": {
+                            "exclude": [],
+                            "include": [
+                                "refs/tags/candidate-v1.0.0-*",
+                                "refs/tags/v*",
+                            ],
+                        }
+                    },
+                    "rules": [
+                        {"type": "deletion"},
+                        {"type": "non_fast_forward"},
+                        {
+                            "type": "update",
+                            "parameters": {
+                                "update_allows_fetch_and_merge": False
+                            },
+                        },
+                    ],
                 }
             self.fail(f"unexpected API call: {method} {path}")
 
-        namespace["api_json"] = environment_api
-        namespace["validate_environment"]("admin-token", "steward")
+        namespace["api_json"] = ruleset_api
+        namespace["validate_rulesets"]("admin-token", "steward")
 
-        def non_admin_api(
-            _token: str,
-            _method: str,
-            path: str,
-            **_kwargs: object,
-        ) -> tuple[int, object]:
-            if path == "/orgs/Xpounder-com/memberships/steward":
-                return 200, {
-                    "state": "active",
-                    "role": "member",
-                    "user": {"login": "steward"},
-                    "organization": {"login": "Xpounder-com"},
-                }
-            self.fail(f"unexpected API call: {path}")
-
-        namespace["api_json"] = non_admin_api
+        bypass_mode = None
         with self.assertRaisesRegex(
             namespace["ContractError"],
-            "release_steward_not_organization_admin",
+            "release_steward_cannot_bypass_candidate_ruleset",
         ):
-            namespace["validate_environment"]("admin-token", "steward")
+            namespace["validate_rulesets"]("admin-token", "steward")
 
     def test_publisher_validates_the_fixed_transfer_contract(self) -> None:
         namespace = self._publisher_namespace()
