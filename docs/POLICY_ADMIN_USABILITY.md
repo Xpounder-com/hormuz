@@ -164,9 +164,12 @@ Before checkout or build, `preflight` lists the protected environment's secret
 metadata and requires exactly `V1_RELEASE_ADMIN_TOKEN` and
 `V1_RELEASE_PUBLISH_TOKEN`. A repository- or organization-level secret with the
 same name cannot satisfy that check; both custody credentials must be stored in
-the reviewed environment. The administration token's owner must also be an
-organization administrator; GitHub otherwise withholds ruleset bypass actors
-from the read response and the workflow fails closed before the archive build.
+the reviewed environment. The administration token must authenticate as the
+designated steward, and GitHub's detailed candidate-ruleset response must report
+`current_user_can_bypass: "always"` for that exact token owner. This proves the
+effective candidate-tag capability without requiring organization-membership
+read access; a missing, stale, or non-bypassing steward fails closed before the
+archive build.
 
 Immutable Releases must already be enabled, the protected environment must
 match the steward contract, and one active, no-bypass tag ruleset must protect
