@@ -221,16 +221,34 @@ entries remain historical evidence and must not be deleted or represented as
 revoked certificates. A verifier configured with a different expected
 identity must fail closed before the artifact is admitted.
 
-`v0.1.3` is the previously verified signed Hormuz reference. The v1.0.0 OCI
-artifact is produced only after exact-byte candidate promotion; verify the
-immutable release metadata before treating it as current. `v0.1.1` remains the
-prior supported digest and its original signature/attestation identity remains
-part of that rollback boundary; the failed `v0.1.2` attempt is not a supported
-release. The existence of two supported signed releases does not itself prove
-cross-version rollback. Issue
-[#135](https://github.com/Xpounder-com/hormuz/issues/135) must still exercise
-the first real cross-version application rollback, while storage rollback
-remains a separate compatibility and recovery boundary.
+The current `v1.0.0` release is
+`sha256:e74fd7c527d257ff337510436f25a0eaf1e2fb799e1258566c9f393025e6b5a3`.
+The prior supported rollback target is the original `v0.1.1` digest
+`sha256:1bbcca3490a7a5b004a880f42e8250acb91ce566a9c59f3263d7b279568efb5a`.
+`v0.1.3` remains a separately verified historical reference, while the failed
+`v0.1.2` attempt is not a supported release.
+
+Run the bounded cross-version drill only from a trusted checkout with Docker,
+ORAS `1.3.4`, and Cosign `v3.1.3`:
+
+```bash
+HORMUZ_OCI_ROLLBACK_EVIDENCE_DIR="$(mktemp -d)" \
+  ./tools/verify_oci_cross_version_rollback.sh
+```
+
+The drill verifies both source identities, recursively copies each subject and
+its exact signature, CycloneDX, and SLSA manifest digests into a disposable
+loopback registry, verifies the copied graph under the original protected
+workflow identity, starts and cleanly stops `v1.0.0`, then selects `v0.1.1` by
+digest and repeats the provider-free runtime/readiness proof. It never builds,
+re-signs, moves a tag, reuses application storage, or performs a database
+down-migration. Its owner-only summary is content-free.
+
+This closes only the signed-application-artifact rollback exercise in
+[#135](https://github.com/Xpounder-com/hormuz/issues/135). It does not prove
+production deployment rollback, customer-data recovery, schema downgrade
+compatibility, HA/DR, or a registry-retention SLA; those remain separate
+operator and compatibility boundaries.
 
 ## Run with explicit runtime inputs
 
