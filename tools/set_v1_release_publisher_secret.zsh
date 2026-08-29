@@ -7,12 +7,24 @@ readonly repository="Xpounder-com/hormuz"
 readonly environment_name="v1-release-custody"
 readonly secret_name="V1_RELEASE_PUBLISH_TOKEN"
 
-authorized_steward="$(env -u GH_TOKEN -u GITHUB_TOKEN gh api \
+authorized_steward="$(env -u GH_TOKEN -u GITHUB_TOKEN gh api --hostname github.com \
   "repos/${repository}/actions/variables/V1_RELEASE_STEWARD" \
   --jq .value)" || {
   print -u2 "Could not resolve the authorized steward with local GitHub authentication."
   exit 2
 }
+
+authorized_membership="$(env -u GH_TOKEN -u GITHUB_TOKEN gh api --hostname github.com \
+  "orgs/Xpounder-com/memberships/${authorized_steward}" \
+  --jq '[.state, .role, .user.login] | @tsv')" || {
+  print -u2 "Could not verify the authorized steward's organization role."
+  exit 2
+}
+expected_membership=$'active\tadmin\t'"${authorized_steward}"
+if [[ "${authorized_membership}" != "${expected_membership}" ]]; then
+  print -u2 "The authorized steward is not an active Xpounder-com organization administrator."
+  exit 2
+fi
 
 clear_publisher_token() {
   publisher_token=""
@@ -47,7 +59,7 @@ if [[ "${publisher_token}" != github_pat_* ]]; then
   exit 2
 fi
 
-publisher_actor="$(GH_TOKEN="${publisher_token}" gh api user --jq .login 2>/dev/null)" || {
+publisher_actor="$(GH_TOKEN="${publisher_token}" gh api --hostname github.com user --jq .login 2>/dev/null)" || {
   print -u2 "The publisher token did not authenticate; the GitHub secret was not changed."
   exit 2
 }
@@ -57,7 +69,7 @@ if [[ "${publisher_actor}" != "${authorized_steward}" ]]; then
   exit 2
 fi
 
-publisher_repository="$(GH_TOKEN="${publisher_token}" gh api \
+publisher_repository="$(GH_TOKEN="${publisher_token}" gh api --hostname github.com \
   "repos/${repository}" --jq .full_name 2>/dev/null)" || {
   print -u2 "The publisher token cannot access the Hormuz repository; the GitHub secret was not changed."
   exit 2
@@ -68,7 +80,7 @@ if [[ "${publisher_repository}" != "${repository}" ]]; then
   exit 2
 fi
 
-publisher_release_shape="$(GH_TOKEN="${publisher_token}" gh api \
+publisher_release_shape="$(GH_TOKEN="${publisher_token}" gh api --hostname github.com \
   "repos/${repository}/releases?per_page=1" --jq type 2>/dev/null)" || {
   print -u2 "The publisher token cannot inspect the release namespace; the GitHub secret was not changed."
   exit 2
@@ -79,7 +91,7 @@ if [[ "${publisher_release_shape}" != "array" ]]; then
   exit 2
 fi
 
-publisher_releases_before="$(GH_TOKEN="${publisher_token}" gh api --paginate \
+publisher_releases_before="$(GH_TOKEN="${publisher_token}" gh api --hostname github.com --paginate \
   "repos/${repository}/releases?per_page=100" \
   --jq '.[] | [.id, .tag_name, .draft, .prerelease, .updated_at] | @json' \
   2>/dev/null)" || {
@@ -90,7 +102,7 @@ publisher_releases_before="$(GH_TOKEN="${publisher_token}" gh api --paginate \
 publisher_probe_status="$(
   PUBLISHER_REPOSITORY="${repository}" \
   PUBLISHER_TOKEN="${publisher_token}" \
-  /usr/bin/python3 - <<'PY'
+  /usr/bin/python3 -I -B - <<'PY'
 import os
 import sys
 import urllib.error
@@ -137,7 +149,7 @@ if [[ "${publisher_probe_status}" != "422" ]]; then
   exit 2
 fi
 
-publisher_releases_after="$(GH_TOKEN="${publisher_token}" gh api --paginate \
+publisher_releases_after="$(GH_TOKEN="${publisher_token}" gh api --hostname github.com --paginate \
   "repos/${repository}/releases?per_page=100" \
   --jq '.[] | [.id, .tag_name, .draft, .prerelease, .updated_at] | @json' \
   2>/dev/null)" || {
@@ -156,7 +168,7 @@ print "Publisher token authenticated with release-write authority for ${authoriz
 # "--body -" stores a literal hyphen and must never be used here.
 if print -rn -- "${publisher_token}" | env -u GH_TOKEN -u GITHUB_TOKEN \
   gh secret set "${secret_name}" \
-  --repo "${repository}" \
+  --repo "github.com/${repository}" \
   --env "${environment_name}"; then
   print "Publisher secret updated. You may close this terminal."
 else
