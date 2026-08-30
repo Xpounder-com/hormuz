@@ -1,0 +1,22 @@
+{
+  "schema": "hormuz.marketing-claims.v1",
+  "reviewed_at": "2026-08-30",
+  "evidence_revision": "38e7ba883b4f37d9f4d75664ccf0bc3f74d88230",
+  "public_author": "Mehrdad Zaker",
+  "contact": "zaker.mehrdad@gmail.com",
+  "website_implementation_authorized": true,
+  "social_outreach_status": "draft_not_sent",
+  "commercial_terms_status": "not_agreed",
+  "claims": [
+    { "id": "open_core", "claim": "Apache-2.0 self-hosted core", "sources": ["LICENSE", "README.md"] },
+    { "id": "clients", "claim": "Pinned Codex and Claude Code protocol paths", "sources": ["docs/CLIENTS.md", "SUPPORT.md"] },
+    { "id": "policy", "claim": "Monotone policy overlays and governed administration", "sources": ["docs/POLICY_CONTROL.md"] },
+    { "id": "identity", "claim": "OIDC JWT verification, not a Hormuz session broker", "sources": ["docs/OIDC.md"] },
+    { "id": "secrets", "claim": "Deterministic redact, deny, off; not complete semantic DLP", "sources": ["docs/SECRET_CONTROLS.md"] },
+    { "id": "usage", "claim": "Captured gateway traffic, current UTC month, configured-rate-card estimates", "sources": ["docs/USAGE.md"] },
+    { "id": "evidence", "claim": "Routine metadata-only evidence excludes prompt and response bodies", "sources": ["docs/AUDIT.md", "hormuz/demo.py"] },
+    { "id": "maturity", "claim": "v1.0.0 source contracts; v0.1.3 signed OCI reference; no blanket production certification", "sources": ["SUPPORT.md", "docs/OCI.md", "docs/ROADMAP.md"] },
+    { "id": "demo", "claim": "Real recorded synthetic CLI runs, not independent people or customer proof", "sources": ["website/public/demo/gateway.json", "website/public/demo/policy.json"] }
+  ],
+  "nonclaims": ["OpenAI endorsement or selection", "customer testimonials", "validated demand", "provider invoice reconciliation", "managed SaaS", "24/7 SLA", "independent security certification", "shipped v1.1 portfolio features", "native Hormuz login/refresh sessions", "per-inference human approvals"]
+}

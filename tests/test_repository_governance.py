@@ -96,6 +96,60 @@ class RepositoryGovernanceTests(unittest.TestCase):
             ):
                 validate_repository_governance(root)
 
+    def test_pages_publisher_is_main_only_after_a_read_only_build(self) -> None:
+        mutations = (
+            ("github.event_name != 'pull_request'", "true"),
+            ("github.ref == 'refs/heads/main'", "true"),
+            ("github.repository == 'Xpounder-com/hormuz'", "true"),
+            ("    needs: build\n", ""),
+            ("  build:\n", "  build:\n    permissions:\n      pages: write\n"),
+            ("      id-token: write\n", "      id-token: write\n      packages: write\n"),
+            ("          path: website/out\n", "          path: .\n"),
+            ("        id: deployment\n", "        id: deployment\n        continue-on-error: true\n"),
+        )
+        for original, replacement in mutations:
+            with self.subTest(original=original), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                self._copy_contract(root)
+                workflow = root / ".github/workflows/website.yml"
+                value = workflow.read_text(encoding="utf-8")
+                self.assertIn(original, value)
+                workflow.write_text(value.replace(original, replacement), encoding="utf-8")
+                with self.assertRaisesRegex(
+                    RepositoryGovernanceError, "Pages publication boundary changed"
+                ):
+                    validate_repository_governance(root)
+
+    def test_pages_publisher_cannot_execute_checkout_or_shell_steps(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._copy_contract(root)
+            workflow = root / ".github/workflows/website.yml"
+            value = workflow.read_text(encoding="utf-8")
+            workflow.write_text(
+                value + "      - name: Unexpected shell step\n        run: echo unsafe\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                RepositoryGovernanceError, "Pages publication boundary changed"
+            ):
+                validate_repository_governance(root)
+
+    def test_pages_write_authority_is_not_available_to_other_workflows(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._copy_contract(root)
+            workflow = root / ".github/workflows/ci.yml"
+            value = workflow.read_text(encoding="utf-8")
+            workflow.write_text(
+                value.replace("  contents: read\n", "  contents: read\n  pages: write\n", 1),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                RepositoryGovernanceError, "Pages write authority is forbidden"
+            ):
+                validate_repository_governance(root)
+
     def test_pull_request_target_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
