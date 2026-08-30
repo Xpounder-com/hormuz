@@ -109,6 +109,30 @@ migration, wire field, command, version bump, or release is provided by this
 gate. Close #213 only after review, package/client checks, and exact-main CI;
 #214 and the downstream portfolio issues remain separate gates.
 
+## v1.1.0 registry transition preflight
+
+The [#214/#215 transition guide](REGISTRY_TRANSITION.md) records the exact
+released-v1 source baseline, compatibility inventory, stop/migrate/restart
+boundary, and safe rollback decision. Its strict plan verifier cannot label
+the checkpoint as registry implementation or final-candidate acceptance.
+
+`tests.test_sqlite_registry_transition` and
+`tests.test_postgres_registry_transition` test real missing-next-migration
+failures, transaction rollback/retry with explicitly synthetic DDL, unchanged
+v1 rows/unknown holds, fresh released-v1 rejection of partial/newer state,
+and isolated old-pair backup/restore. PostgreSQL tests also characterize that
+already-running readiness checks do not continuously revalidate the schema.
+All migration/writer processes must be quiesced; rolling upgrades are not
+proven. The existing required PostgreSQL job runs these tests from an
+isolated current wheel against a separately installed digest-pinned v1 source
+archive. Release-dependent local skips are not transition evidence.
+
+The source archive must contain the guide, machine-readable plan, verifier,
+baseline manifest, and backend fixtures. Populated policy/custody recovery,
+real registry DDL and domain/auth/RLS behavior, exact final signed OCI/Compose
+transitions, and post-write forward recovery remain #214/#215 implementation
+and final-candidate gates. Do not close #214 on preflight evidence.
+
 ## Live pinned-client release gate
 
 The manual `Live BYO-provider client conformance` workflow and

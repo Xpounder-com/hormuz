@@ -79,6 +79,24 @@ REQUIRED_POLICY_ADMIN_USABILITY_SDIST_PATHS = (
     "tools/verify_policy_admin_usability_evidence.py",
     "tools/verify_v1_internal_repeatability_evidence.py",
 )
+REQUIRED_REGISTRY_PREFLIGHT_SDIST_PATHS = (
+    "docs/REGISTRY_TRANSITION.md",
+    "docs/registry-transition-plan-v1.json",
+    "docs/portfolio-intelligence-contract-v1.json",
+    "docs/portfolio-intelligence-wire-v1.json",
+    "tools/verify_registry_transition_plan.py",
+    "tools/verify_core_wheel.py",
+    "tools/verify_portfolio_intelligence_contract.py",
+    "tools/_portfolio_wire_contract.py",
+    "tools/v1_candidate.py",
+    "tests/_registry_transition_fixture.py",
+    "tests/_postgres_fixture.py",
+    "tests/test_registry_transition_plan.py",
+    "tests/test_sqlite_registry_transition.py",
+    "tests/test_postgres_registry_transition.py",
+    "tests/test_postgres_test_boundaries.py",
+    "tests/fixtures/portfolio_intelligence/v1.0.0-contract-manifest.json",
+)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -103,6 +121,7 @@ def main(argv: list[str] | None = None) -> int:
     _assert_compose_sdist_boundary(sdist)
     _assert_helm_sdist_boundary(sdist)
     _assert_policy_admin_usability_sdist_boundary(sdist)
+    _assert_registry_preflight_sdist_boundary(sdist)
     _verify_isolated_install(wheel, config, python)
     print(
         "verified core distribution boundary: no context/runtime data and complete deployment/usability assets"
@@ -171,6 +190,16 @@ def _assert_policy_admin_usability_sdist_boundary(path: Path) -> None:
             "Policy-administrator usability kit incomplete in "
             f"{path.name}: {', '.join(sorted(missing))}"
         )
+
+
+def _assert_registry_preflight_sdist_boundary(path: Path) -> None:
+    members = tuple(name.lstrip("./") for name in _sdist_members(path))
+    missing = [
+        required for required in REQUIRED_REGISTRY_PREFLIGHT_SDIST_PATHS
+        if not any(f"/{member}".endswith(f"/{required}") for member in members)
+    ]
+    if missing:
+        raise RuntimeError(f"Registry preflight incomplete in {path.name}: {', '.join(sorted(missing))}")
 
 
 def _verify_isolated_install(wheel: Path, config_template: Path, base_python: Path) -> None:

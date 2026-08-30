@@ -225,6 +225,12 @@ The first #214 checkpoint unblocks the corresponding feature work only after
 #214 remains open until the final candidate satisfies its complete artifact,
 migration, rollback, and recovery gate before the v1.1.0 tag.
 
+The [registry transition preflight](REGISTRY_TRANSITION.md) freezes #215's
+SQLite 4-to-5 / PostgreSQL 8-to-9 plan, released-v1 baseline, red-first
+transition probes, and quiesced old-application/database pair rollback rule.
+Its acceptance is registry-specific; test-only migration probes do not
+implement the registry or satisfy #214's final-candidate gate.
+
 Browser sessions, content inspection/persistence, HA/SLA claims, independent
 security certification, and broad multi-profile upgrades are conditional gates,
 not permissions hidden inside this contract.

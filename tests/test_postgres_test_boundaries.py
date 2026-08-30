@@ -12,6 +12,17 @@ else:  # Isolated wheel compatibility discovery uses the tests directory as its 
 
 ROOT = Path(__file__).resolve().parents[1]
 EXPECTED_OWNERS = {
+    "test_postgres_registry_transition": (
+        "PostgresRegistryTransitionTests",
+        {
+            "test_registry_postgres_migration_is_red_until_feature_implementation",
+            "test_postgres_probe_failure_rolls_back_and_retry_preserves_v1_rows",
+            "test_postgres_partial_upgrade_refuses_migration_and_runtime_without_changes",
+            "test_released_postgres_binary_preserves_old_state_and_refuses_newer_or_partial_state",
+            "test_postgres_quiesced_verified_pair_restore_keeps_unknown_holds",
+            "test_postgres_candidate_writes_remain_present_for_forward_recovery",
+        },
+    ),
     "test_postgres_migration_rls": (
         "PostgresMigrationRLSTests",
         {
@@ -153,7 +164,7 @@ class PostgresTestBoundaryTests(unittest.TestCase):
             suite = unittest.defaultTestLoader.loadTestsFromName(f"{module_name}.{class_name}")
             self.assertEqual(suite.countTestCases(), len(expected_methods), module_name)
 
-        self.assertEqual(len(owned), 64)
+        self.assertEqual(len(owned), 70)
         self.assertFalse((ROOT / "tests" / "test_postgres.py").exists())
         self.assertFalse(
             any(name.startswith("test_") for name in PostgresTestCase.__dict__),

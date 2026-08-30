@@ -1,0 +1,61 @@
+{
+  "schema_id": "hormuz.registry-transition-plan",
+  "schema_version": 1,
+  "stage": "pre_implementation",
+  "target_release": "1.1.0",
+  "feature_issue": 215,
+  "gate_issue": 214,
+  "registry_implemented": false,
+  "final_candidate_accepted": false,
+  "baseline": {
+    "release": "v1.0.0",
+    "source_commit": "2fc0605252e41f731c85cc9146fbff6eb3b34669",
+    "archive_name": "hormuz-1.0.0.tar.gz",
+    "archive_sha256": "2c3b16c1742ee76032a33f3714492a8d8515c5291d4d57520441882cd8bc5b5a",
+    "manifest_sha256": "85774aa45a8b30be88d1cb1a7b543222cc1396523aec31c17de07470b09d56b2",
+    "contract_manifest_sha256": "6e7f264de74f8f998842b49001a61b3640a05927d74bb31e4eec5ff8ab89504f"
+  },
+  "transitions": {
+    "sqlite": {"from": 4, "to": 5},
+    "postgresql": {"from": 8, "to": 9}
+  },
+  "compatibility": {
+    "existing_v1_behavior": "unchanged",
+    "legacy_manifest": "preserve_including_historical_release_line",
+    "provider_replay": "never_automatic",
+    "existing_rows": "no_rewrite_or_backfill",
+    "uncertain_reservations": "retain_until_explicit_reconciliation",
+    "migration_execution": "serialized_operator_with_writers_quiesced",
+    "registry_wire_sha256": "26ef36b12d475d5b8354e45abfc92c76187ca6ff5aafb4b0ebce6fab439feb80"
+  },
+  "rollback": {
+    "old_binary_on_new_schema": "storage_schema_newer_than_binary",
+    "partial_schema": "storage_schema_partial_upgrade",
+    "in_place_downgrade": false,
+    "before_writes": "restore_verified_pair_before_resuming_writes",
+    "after_writes": "preserve_candidate_and_recover_forward",
+    "unknown_write_count": "preserve_candidate_and_recover_forward",
+    "restore_destination": "new_isolated_destination",
+    "retain_candidate_snapshot": true
+  },
+  "registry_routes": [
+    "GET /v1/admin/portfolio/work-bindings",
+    "GET /v1/admin/portfolio/work-scopes",
+    "GET /v1/admin/portfolio/work-scopes/{work_scope_id}",
+    "POST /v1/admin/portfolio/work-bindings",
+    "POST /v1/admin/portfolio/work-scopes",
+    "POST /v1/admin/portfolio/work-scopes/{work_scope_id}/versions"
+  ],
+  "required_cases": [
+    "released_baseline_identity",
+    "v1_rows_and_holds_preserved",
+    "unimplemented_registry_migration_red",
+    "transaction_failure_and_retry_probe",
+    "partial_state_fails_closed",
+    "released_binary_rejects_newer_state",
+    "quiesced_verified_pair_restore",
+    "writes_require_forward_recovery",
+    "legacy_contract_preserved",
+    "registry_wire_contract_frozen"
+  ]
+}
