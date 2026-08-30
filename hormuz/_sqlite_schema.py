@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from typing import Protocol
 
 
-SQLITE_SCHEMA_VERSION = 4
+SQLITE_SCHEMA_VERSION = 5
 
 
 class StorageErrorFactory(Protocol):
@@ -422,6 +422,10 @@ def verify_applied_sqlite_schema_shape(
 ) -> None:
     """Reject a migration ledger whose claimed durable objects are absent."""
 
+    if version >= 5:
+        from ._portfolio_schema import verify_sqlite_registry
+        verify_sqlite_registry(connection, error_factory)
+
     required = {
         "gateway_usage_events": {
             "id",
@@ -649,6 +653,10 @@ def apply_sqlite_migration(
         return
     if version == 4:
         _execute_statements(connection, _AUDIT_CHAIN_SCHEMA_STATEMENTS)
+        return
+    if version == 5:
+        from ._portfolio_schema import sqlite_statements
+        _execute_statements(connection, sqlite_statements())
         return
     raise error_factory("storage_schema_migration_unsupported")
 

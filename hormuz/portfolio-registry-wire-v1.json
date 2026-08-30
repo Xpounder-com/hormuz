@@ -1,0 +1,823 @@
+{
+  "$defs": {
+    "cost_basis": {
+      "type": "string",
+      "enum": [
+        "provider_final",
+        "provider_aggregate",
+        "configured_rate_card_estimate",
+        "allocated_estimate",
+        "credit_or_discount",
+        "not_available"
+      ],
+      "description": "Original cost evidence basis. No aggregate or estimate can be relabeled as final granular invoice evidence."
+    },
+    "count": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991,
+      "description": "Non-negative JSON-safe exact count. Unknown is represented by explicit null only where the containing field permits it."
+    },
+    "display_name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 120,
+      "pattern": "^[^\\u0000-\\u001f\\u007f]*(?![\\s\\S])",
+      "description": "Administrator-entered registry label, at most 120 Unicode code points. Never copied from external work content and never included in routine logs or release evidence."
+    },
+    "evidence_level": {
+      "type": "string",
+      "enum": [
+        "descriptive",
+        "associated",
+        "controlled"
+      ],
+      "description": "Controlled requires separately approved predeclared design; connectors are descriptive and deterministic joins associated."
+    },
+    "external_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:=+-]*(?![\\s\\S])",
+      "description": "Verified connector source identifier. The connector must select the source ID field, never encode a title, path, URL, body, or actor name as an ID."
+    },
+    "hormuz.external-work-binding-event": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_id": {
+          "type": "string",
+          "const": "hormuz.external-work-binding-event",
+          "description": "Immutable Hormuz schema identity."
+        },
+        "schema_version": {
+          "type": "integer",
+          "const": 1,
+          "description": "Version 1 of this planned wire contract."
+        },
+        "organization_id": {
+          "$ref": "#/$defs/opaque_id",
+          "description": "Server-resolved organization; output only, never accepted as input authority."
+        },
+        "binding_event_id": {
+          "$ref": "#/$defs/opaque_id",
+          "description": "Immutable append-only binding event."
+        },
+        "connector_id": {
+          "$ref": "#/$defs/opaque_id",
+          "description": "Server-bound connector ID."
+        },
+        "external_object_id": {
+          "$ref": "#/$defs/external_id"
+        },
+        "work_scope": {
+          "$ref": "#/$defs/work_scope_ref"
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "active",
+            "superseded",
+            "tombstoned"
+          ],
+          "description": "Binding lifecycle."
+        },
+        "supersedes_event_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/opaque_id"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Previous binding event, not an overwritten row."
+        },
+        "actor_id": {
+          "$ref": "#/$defs/opaque_id",
+          "description": "Authorized actor resolved server-side."
+        },
+        "reason_code": {
+          "$ref": "#/$defs/reason_code"
+        },
+        "event_at": {
+          "$ref": "#/$defs/timestamp",
+          "description": "Source/domain event time as observed; never scope authority."
+        },
+        "observed_at": {
+          "$ref": "#/$defs/timestamp",
+          "description": "Connector/server observation time, preserved separately."
+        },
+        "ingested_at": {
+          "$ref": "#/$defs/timestamp",
+          "description": "Database commit time authoritative for receipt and retention."
+        }
+      },
+      "required": [
+        "schema_id",
+        "schema_version",
+        "organization_id",
+        "binding_event_id",
+        "connector_id",
+        "external_object_id",
+        "work_scope",
+        "state",
+        "supersedes_event_id",
+        "actor_id",
+        "reason_code",
+        "event_at",
+        "observed_at",
+        "ingested_at"
+      ],
+      "description": "Content-free source binding event; no repository/workspace name, URL, title, or body."
+    },
+    "hormuz.external-work-binding-page": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_id": {
+          "type": "string",
+          "const": "hormuz.external-work-binding-page",
+          "description": "Immutable Hormuz schema identity."
+        },
+        "schema_version": {
+          "type": "integer",
+          "const": 1,
+          "description": "Version 1 of this planned wire contract."
+        },
+        "organization_id": {
+          "$ref": "#/$defs/opaque_id",
+          "description": "Server-resolved organization; output only, never accepted as input authority."
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/hormuz.external-work-binding-event"
+          },
+          "minItems": 0,
+          "maxItems": 100,
+          "description": "Authorized frozen-window records in deterministic time-plus-ID order."
+        },
+        "as_of": {
+          "$ref": "#/$defs/timestamp",
+          "description": "Frozen query snapshot ceiling; unchanged across cursor pages."
+        },
+        "has_more": {
+          "type": "boolean",
+          "description": "True only if another authorized page exists."
+        },
+        "next_cursor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/opaque_cursor"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Non-null exactly when has_more is true; cursor binds scope, filters, window, ordering, and schema."
+        }
+      },
+      "required": [
+        "schema_id",
+        "schema_version",
+        "organization_id",
+        "items",
+        "as_of",
+        "has_more",
+        "next_cursor"
+      ],
+      "description": "Closed collection envelope. Unsupported role/resource combinations are denied before query; this schema never grants access."
+    },
+    "hormuz.external-work-binding-request": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_id": {
+          "type": "string",
+          "const": "hormuz.external-work-binding-request",
+          "description": "Immutable Hormuz schema identity."
+        },
+        "schema_version": {
+          "type": "integer",
+          "const": 1,
+          "description": "Version 1 of this planned wire contract."
+        },
+        "connector_id": {
+          "$ref": "#/$defs/opaque_id",
+          "description": "Authorized server-side connector reference."
+        },
+        "external_object_id": {
+          "$ref": "#/$defs/external_id"
+        },
+        "work_scope": {
+          "$ref": "#/$defs/work_scope_ref",
+          "description": "Exact authorized work-scope version."
+        },
+        "expected_binding_event_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/opaque_id"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Current binding event for compare-and-set; null means no prior binding."
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "active",
+            "tombstoned"
+          ],
+          "description": "Append binding or tombstone, not payload mutation."
+        },
+        "reason_code": {
+          "type": "string",
+          "enum": [
+            "bound",
+            "corrected",
+            "tombstoned"
+          ],
+          "description": "Fixed binding change classification."
+        }
+      },
+      "required": [
+        "schema_id",
+        "schema_version",
+        "connector_id",
+        "external_object_id",
+        "work_scope",
+        "expected_binding_event_id",
+        "state",
+        "reason_code"
+      ],
+      "description": "Bind verified opaque source metadata to one authorized scope. Connector/body identifiers never provide tenant authority."
+    },
+    "hormuz.portfolio-error": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_id": {
+          "type": "string",
+          "const": "hormuz.portfolio-error",
+          "description": "Immutable Hormuz schema identity."
+        },
+        "schema_version": {
+          "type": "integer",
+          "const": 1,
+          "description": "Version 1 of this planned wire contract."
+        },
+        "code": {
+          "type": "string",
+          "enum": [
+            "invalid_request",
+            "unauthenticated",
+            "forbidden",
+            "not_found",
+            "idempotency_conflict",
+            "version_conflict",
+            "cursor_invalid",
+            "evidence_inconclusive",
+            "recommendation_stale",
+            "rate_limited",
+            "unavailable"
+          ],
+          "description": "Stable portfolio-only error classification; existing provider errors remain unchanged."
+        },
+        "request_id": {
+          "$ref": "#/$defs/opaque_id",
+          "description": "Server-issued content-free diagnostic correlation ID."
+        },
+        "retryable": {
+          "type": "boolean",
+          "description": "Only safe read/idempotent retry is permitted; never authorizes provider replay."
+        },
+        "retry_after_seconds": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/count"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional server backoff encoded as explicit null if absent."
+        },
+        "reason_code": {
+          "type": "string",
+          "enum": [
+            "invalid_shape",
+            "unknown_field",
+            "invalid_reference",
+            "unauthorized_scope",
+            "conflicting_identity",
+            "stale_version",
+            "invalid_cursor",
+            "insufficient_evidence",
+            "expired",
+            "capacity",
+            "dependency_unavailable"
+          ],
+          "description": "Allowlisted content-free detail; never echo the rejected field value, body, secret, or work content."
+        }
+      },
+      "required": [
+        "schema_id",
+        "schema_version",
+        "code",
+        "request_id",
+        "retryable",
+        "retry_after_seconds",
+        "reason_code"
+      ],
+      "description": "Versioned content-free administrator error. Caller renders localized fixed messages from code; there is no free-text reflection field."
+    },
+    "hormuz.portfolio-query": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100,
+          "default": 50,
+          "description": "Maximum page size. Server applies 50 when omitted; a smaller page may be returned."
+        },
+        "cursor": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048,
+          "pattern": "^[A-Za-z0-9_-]+(?![\\s\\S])",
+          "description": "Opaque authenticated frozen-window cursor; never decoded as client authority."
+        },
+        "start_at": {
+          "$ref": "#/$defs/timestamp",
+          "description": "Inclusive event/creation-time filter; requires end_at."
+        },
+        "end_at": {
+          "$ref": "#/$defs/timestamp",
+          "description": "Exclusive event/creation-time filter; requires start_at."
+        },
+        "work_scope_id": {
+          "$ref": "#/$defs/opaque_id",
+          "description": "Optional scope filter intersected with server authorization."
+        },
+        "connector_id": {
+          "$ref": "#/$defs/opaque_id",
+          "description": "Optional connector filter, never connector authority."
+        },
+        "provider_id": {
+          "$ref": "#/$defs/opaque_id",
+          "description": "Optional actual-provider filter."
+        },
+        "model_id": {
+          "$ref": "#/$defs/opaque_id",
+          "description": "Optional actual-model filter."
+        },
+        "cost_basis": {
+          "$ref": "#/$defs/cost_basis",
+          "description": "Optional cost-basis filter."
+        },
+        "evidence_level": {
+          "$ref": "#/$defs/evidence_level",
+          "description": "Optional evidence filter; cannot upgrade evidence."
+        },
+        "version": {
+          "$ref": "#/$defs/version",
+          "description": "Exact version for a versioned singleton; omitted means current authorized version."
+        }
+      },
+      "required": [],
+      "description": "Typed query parameters after bounded single-value parsing. No organization, actor, team, arbitrary sort, or free-text filters. Identity/version markers are catalogue metadata, not query parameters.",
+      "dependentRequired": {
+        "start_at": [
+          "end_at"
+        ],
+        "end_at": [
+          "start_at"
+        ]
+      },
+      "x-hormuz-schema-id": "hormuz.portfolio-query",
+      "x-hormuz-schema-version": 1
+    },
+    "hormuz.work-scope-create-request": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_id": {
+          "type": "string",
+          "const": "hormuz.work-scope-create-request",
+          "description": "Immutable Hormuz schema identity."
+        },
+        "schema_version": {
+          "type": "integer",
+          "const": 1,
+          "description": "Version 1 of this planned wire contract."
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "portfolio",
+            "initiative",
+            "use_case"
+          ],
+          "description": "Immutable scope kind."
+        },
+        "parent_work_scope_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/opaque_id"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Nearest configured authorized ancestor; null means organization root."
+        },
+        "owner_team_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/opaque_id"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Authorized existing owner-team reference, not a grant of team access."
+        },
+        "display_name": {
+          "$ref": "#/$defs/display_name"
+        }
+      },
+      "required": [
+        "schema_id",
+        "schema_version",
+        "kind",
+        "parent_work_scope_id",
+        "owner_team_id",
+        "display_name"
+      ],
+      "description": "Create an organization-local scope. IDs, version, actor, and times are server-assigned. No external titles or body-supplied tenant."
+    },
+    "hormuz.work-scope-page": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_id": {
+          "type": "string",
+          "const": "hormuz.work-scope-page",
+          "description": "Immutable Hormuz schema identity."
+        },
+        "schema_version": {
+          "type": "integer",
+          "const": 1,
+          "description": "Version 1 of this planned wire contract."
+        },
+        "organization_id": {
+          "$ref": "#/$defs/opaque_id",
+          "description": "Server-resolved organization; output only, never accepted as input authority."
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/hormuz.work-scope-version"
+          },
+          "minItems": 0,
+          "maxItems": 100,
+          "description": "Authorized frozen-window records in deterministic time-plus-ID order."
+        },
+        "as_of": {
+          "$ref": "#/$defs/timestamp",
+          "description": "Frozen query snapshot ceiling; unchanged across cursor pages."
+        },
+        "has_more": {
+          "type": "boolean",
+          "description": "True only if another authorized page exists."
+        },
+        "next_cursor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/opaque_cursor"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Non-null exactly when has_more is true; cursor binds scope, filters, window, ordering, and schema."
+        }
+      },
+      "required": [
+        "schema_id",
+        "schema_version",
+        "organization_id",
+        "items",
+        "as_of",
+        "has_more",
+        "next_cursor"
+      ],
+      "description": "Closed collection envelope. Unsupported role/resource combinations are denied before query; this schema never grants access."
+    },
+    "hormuz.work-scope-version": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_id": {
+          "type": "string",
+          "const": "hormuz.work-scope-version",
+          "description": "Immutable Hormuz schema identity."
+        },
+        "schema_version": {
+          "type": "integer",
+          "const": 1,
+          "description": "Version 1 of this planned wire contract."
+        },
+        "organization_id": {
+          "$ref": "#/$defs/opaque_id",
+          "description": "Server-resolved organization; output only, never accepted as input authority."
+        },
+        "work_scope_id": {
+          "$ref": "#/$defs/opaque_id",
+          "description": "Stable organization-local scope ID."
+        },
+        "version": {
+          "$ref": "#/$defs/version",
+          "description": "Immutable scope version."
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "portfolio",
+            "initiative",
+            "use_case"
+          ],
+          "description": "Immutable canonical hierarchy kind."
+        },
+        "parent": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/work_scope_ref"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Versioned nearest configured ancestor; null means organization root."
+        },
+        "owner_team_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/opaque_id"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Existing owner-team reference, not actor performance metadata."
+        },
+        "display_name": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/display_name"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Authorized registry display only; null after label tombstone. Never included in routine evidence."
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "active",
+            "archived",
+            "tombstoned"
+          ],
+          "description": "Current version lifecycle."
+        },
+        "supersedes_version": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/version"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Prior immutable scope version, or null for creation."
+        },
+        "actor_id": {
+          "$ref": "#/$defs/opaque_id",
+          "description": "Authenticated administrator responsible for this version."
+        },
+        "reason_code": {
+          "$ref": "#/$defs/reason_code"
+        },
+        "event_at": {
+          "$ref": "#/$defs/timestamp",
+          "description": "Source/domain event time as observed; never scope authority."
+        },
+        "observed_at": {
+          "$ref": "#/$defs/timestamp",
+          "description": "Connector/server observation time, preserved separately."
+        },
+        "ingested_at": {
+          "$ref": "#/$defs/timestamp",
+          "description": "Database commit time authoritative for receipt and retention."
+        }
+      },
+      "required": [
+        "schema_id",
+        "schema_version",
+        "organization_id",
+        "work_scope_id",
+        "version",
+        "kind",
+        "parent",
+        "owner_team_id",
+        "display_name",
+        "state",
+        "supersedes_version",
+        "actor_id",
+        "reason_code",
+        "event_at",
+        "observed_at",
+        "ingested_at"
+      ],
+      "description": "Immutable bounded registry version. Labels are excluded from release/evaluation evidence even though this authorized resource permits them."
+    },
+    "hormuz.work-scope-version-request": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_id": {
+          "type": "string",
+          "const": "hormuz.work-scope-version-request",
+          "description": "Immutable Hormuz schema identity."
+        },
+        "schema_version": {
+          "type": "integer",
+          "const": 1,
+          "description": "Version 1 of this planned wire contract."
+        },
+        "expected_version": {
+          "$ref": "#/$defs/version",
+          "description": "Optimistic compare-and-set guard; mismatch fails without mutation."
+        },
+        "parent_work_scope_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/opaque_id"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Authorized nearest ancestor reference, or organization root."
+        },
+        "owner_team_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/opaque_id"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Authorized existing team ownership reference."
+        },
+        "display_name": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/display_name"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Null for a tombstoned label; not deletion of linked facts."
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "active",
+            "archived",
+            "tombstoned"
+          ],
+          "description": "Requested scope lifecycle transition."
+        },
+        "reason_code": {
+          "type": "string",
+          "enum": [
+            "corrected",
+            "reparented",
+            "archived",
+            "reactivated",
+            "tombstoned"
+          ],
+          "description": "Fixed reason for a full replacement version."
+        }
+      },
+      "required": [
+        "schema_id",
+        "schema_version",
+        "expected_version",
+        "parent_work_scope_id",
+        "owner_team_id",
+        "display_name",
+        "state",
+        "reason_code"
+      ],
+      "description": "Append a full replacement scope version, never mutate old rows. The URL owns work_scope_id; kind cannot change."
+    },
+    "opaque_cursor": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2048,
+      "pattern": "^[A-Za-z0-9_-]+(?![\\s\\S])",
+      "description": "Server-authenticated opaque cursor, never a raw SQL offset or tenant selector."
+    },
+    "opaque_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*(?![\\s\\S])",
+      "description": "Opaque server-issued or server-registered identifier, never a name, path, free-text label, or authority. Resolve within the authenticated organization; do not infer access from syntax."
+    },
+    "reason_code": {
+      "type": "string",
+      "enum": [
+        "created",
+        "corrected",
+        "reparented",
+        "archived",
+        "reactivated",
+        "tombstoned",
+        "bound",
+        "voided",
+        "accepted",
+        "rejected",
+        "superseded",
+        "expired",
+        "policy_drift",
+        "scorecard_drift",
+        "observed",
+        "duplicate",
+        "unsupported",
+        "unmatched",
+        "ambiguous",
+        "excluded",
+        "missing_evidence",
+        "below_threshold",
+        "eligible",
+        "not_applicable"
+      ],
+      "description": "Fixed content-free classification, never caller free text or the rejected value."
+    },
+    "timestamp": {
+      "type": "string",
+      "minLength": 20,
+      "maxLength": 27,
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?Z(?![\\s\\S])",
+      "description": "Valid UTC RFC3339 instant with at most microsecond precision. Invalid calendar dates are rejected; no local or client-implied time zone."
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 2147483647,
+      "description": "Positive immutable entity or rule version; never a mutable latest alias."
+    },
+    "work_scope_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "work_scope_id": {
+          "$ref": "#/$defs/opaque_id",
+          "description": "Canonical work scope in the authenticated organization."
+        },
+        "version": {
+          "$ref": "#/$defs/version",
+          "description": "Event-time version; do not rebind historical facts to the current version."
+        }
+      },
+      "required": [
+        "work_scope_id",
+        "version"
+      ],
+      "description": "Tenant-qualified versioned work scope; a primary analytic binding must resolve to kind use_case."
+    }
+  },
+  "schema_ids": [
+    "hormuz.external-work-binding-event",
+    "hormuz.external-work-binding-page",
+    "hormuz.external-work-binding-request",
+    "hormuz.portfolio-error",
+    "hormuz.portfolio-query",
+    "hormuz.work-scope-create-request",
+    "hormuz.work-scope-page",
+    "hormuz.work-scope-version",
+    "hormuz.work-scope-version-request"
+  ]
+}

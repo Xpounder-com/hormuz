@@ -17,19 +17,19 @@ from tools.verify_registry_transition_plan import (
 
 
 ROOT = Path(__file__).resolve().parents[1]
-PLAN_PATH = ROOT / "docs" / "registry-transition-plan-v1.json"
+PLAN_PATH = ROOT / "docs" / "registry-transition-plan-v2.json"
 
 
 class RegistryTransitionPlanTests(unittest.TestCase):
     def plan(self):
         return json.loads(PLAN_PATH.read_text(encoding="utf-8"))
 
-    def test_plan_is_a_registry_only_preflight_not_candidate_acceptance(self) -> None:
+    def test_plan_is_registry_implementation_not_candidate_acceptance(self) -> None:
         result = verify_registry_transition_plan(ROOT)
-        self.assertEqual(result["status"], "pre_implementation_plan_verified")
+        self.assertEqual(result["status"], "registry_implementation_plan_verified")
         self.assertEqual(result["feature_issue"], 215)
         self.assertEqual(result["registry_route_count"], 6)
-        self.assertFalse(result["registry_implemented"])
+        self.assertTrue(result["registry_implemented"])
         self.assertFalse(result["final_candidate_accepted"])
 
     def test_released_baseline_identity_cannot_be_replaced_by_current_main(self) -> None:
@@ -43,10 +43,16 @@ class RegistryTransitionPlanTests(unittest.TestCase):
     def test_preflight_cannot_claim_registry_or_final_candidate_success(self) -> None:
         for field in ("registry_implemented", "final_candidate_accepted"):
             with self.subTest(field=field):
-                plan = self.plan()
+                plan = json.loads((ROOT / "docs/registry-transition-plan-v1.json").read_text(encoding="utf-8"))
                 plan[field] = True
                 with self.assertRaisesRegex(RegistryTransitionError, "preflight_scope_changed"):
                     validate_registry_transition_plan(plan)
+
+    def test_implementation_plan_cannot_claim_final_candidate_acceptance(self) -> None:
+        plan = self.plan()
+        plan["final_candidate_accepted"] = True
+        with self.assertRaisesRegex(RegistryTransitionError, "preflight_scope_changed"):
+            validate_registry_transition_plan(plan)
 
     def test_release_and_schema_versions_remain_distinct_and_explicit(self) -> None:
         for backend, current, target in (("sqlite", 4, 5), ("postgresql", 8, 9)):
@@ -103,10 +109,20 @@ class RegistryTransitionPlanTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             (root / "docs").mkdir()
-            (root / "docs/registry-transition-plan-v1.json").write_text(
+            (root / "docs/registry-transition-plan-v2.json").write_text(
                 '{"schema_version":1,"schema_version":1}', encoding="utf-8",
             )
             with self.assertRaisesRegex(RegistryTransitionError, "transition_plan_duplicate_member"):
+                verify_registry_transition_plan(root)
+
+    def test_historical_preflight_cannot_be_substituted_for_implementation_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "docs").mkdir()
+            (root / "docs/registry-transition-plan-v2.json").write_bytes(
+                (ROOT / "docs/registry-transition-plan-v1.json").read_bytes()
+            )
+            with self.assertRaisesRegex(RegistryTransitionError, "implementation_plan_required"):
                 verify_registry_transition_plan(root)
 
     def test_invalid_or_substituted_released_archive_cannot_pass(self) -> None:

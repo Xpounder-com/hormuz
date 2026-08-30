@@ -161,7 +161,13 @@ class RuntimeCliOwnershipTests(unittest.TestCase):
         self.assertTrue(imported.isdisjoint({"cli", "hormuz.cli"}))
 
     def test_complete_primary_command_tree_is_frozen(self) -> None:
-        self.assertEqual(_command_tree(cli.build_parser()), EXPECTED_COMMAND_TREE)
+        tree = _command_tree(cli.build_parser())
+        self.assertIsInstance(tree, dict)
+        self.assertEqual(tree.pop("portfolio"), {
+            "archive": None, "bind": None, "bindings": None, "create": None,
+            "list": None, "show": None, "tombstone": None, "version": None,
+        })
+        self.assertEqual(tree, EXPECTED_COMMAND_TREE)
 
 
 if __name__ == "__main__":

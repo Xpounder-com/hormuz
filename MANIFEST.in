@@ -12,6 +12,8 @@ include docs/durable-data-v1.json
 include docs/portfolio-intelligence-contract-v1.json
 include docs/portfolio-intelligence-wire-v1.json
 include docs/registry-transition-plan-v1.json
+include docs/registry-transition-plan-v2.json
+include hormuz/portfolio-registry-wire-v1.json
 include hormuz/secret-inventory-v1.json
 include tools/_verification_runtime.py
 include tools/verify_secret_inventory.py

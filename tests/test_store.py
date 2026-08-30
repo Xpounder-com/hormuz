@@ -291,13 +291,16 @@ class UsageStoreMigrationTests(unittest.TestCase):
                     self.assertNotIn("gateway_audit_chain_heads", names)
                     self.assertNotIn("gateway_audit_chain_entries", names)
                     self.assertNotIn("gateway_audit_chain_checkpoints", names)
+                elif version == 5:
+                    self.assertIn("gateway_audit_chain_epochs", names)
+                    self.assertFalse(any(name.startswith("portfolio_") for name in names))
                 else:
                     self.fail(f"unexpected migration version: {version}")
                 original_apply_migration(connection, version)
 
             with mock.patch.object(UsageStore, "_apply_migration", side_effect=verify_then_apply) as applied:
                 store = UsageStore(path)
-            self.assertEqual([call.args[1] for call in applied.call_args_list], [3, 4])
+            self.assertEqual([call.args[1] for call in applied.call_args_list], [3, 4, 5])
             store.verify_ready()
             connection = sqlite3.connect(path)
             reservation_columns = {
@@ -315,7 +318,7 @@ class UsageStoreMigrationTests(unittest.TestCase):
             connection.close()
             self.assertIn("attempt_id", reservation_columns)
             self.assertEqual(tables, {"gateway_request_attempts", "gateway_request_attempt_events"})
-            self.assertEqual(migrations, [(1, "applied"), (2, "applied"), (3, "applied"), (4, "applied")])
+            self.assertEqual(migrations, [(1, "applied"), (2, "applied"), (3, "applied"), (4, "applied"), (5, "applied")])
             self.assertEqual(store.active_budget_reservations(organization_id="acme"), 1)
             self.assertEqual(
                 [(event["event_type"], event["requested_model"]) for event in store.audit_events(
@@ -366,7 +369,8 @@ class UsageStoreMigrationTests(unittest.TestCase):
     def test_partial_v4_upgrade_from_schema_v3_fails_before_materializing_chain_tables(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "usage.sqlite3"
-            UsageStore(path)
+            with mock.patch.object(UsageStore, "schema_version", 4):
+                UsageStore(path)
             connection = sqlite3.connect(path)
             for table in (
                 "gateway_audit_chain_checkpoints",

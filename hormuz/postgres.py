@@ -16,7 +16,7 @@ from typing import Any, Iterator, Mapping
 from .config import PostgresPoolConfig
 
 
-POSTGRES_SCHEMA_VERSION = 8
+POSTGRES_SCHEMA_VERSION = 9
 _IDENTIFIER_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 _POOL_RECONNECT_TIMEOUT_SECONDS = 15
 
@@ -231,6 +231,9 @@ def migrate_postgres(
                 if states:
                     _verify_applied_schema_shape(cursor, schema=schema, version=max(states))
                     _verify_custody_schema_shape(cursor, schema=schema, version=max(states))
+                    if max(states) >= 9:
+                        from ._portfolio_schema import verify_postgres_registry
+                        verify_postgres_registry(cursor, schema, PostgresStorageError)
                 for version in range(1, POSTGRES_SCHEMA_VERSION + 1):
                     if version in states:
                         continue
@@ -262,6 +265,9 @@ def migrate_postgres(
                     )
                 _verify_applied_schema_shape(cursor, schema=schema, version=POSTGRES_SCHEMA_VERSION)
                 _verify_custody_schema_shape(cursor, schema=schema, version=POSTGRES_SCHEMA_VERSION)
+                if POSTGRES_SCHEMA_VERSION >= 9:
+                    from ._portfolio_schema import verify_postgres_registry
+                    verify_postgres_registry(cursor, schema, PostgresStorageError)
         return PostgresSchemaStatus(version=POSTGRES_SCHEMA_VERSION, complete=True)
     except PostgresStorageError:
         raise
@@ -367,6 +373,9 @@ def _schema_migration_rows(
                 and max(states) <= POSTGRES_SCHEMA_VERSION
             ):
                 _verify_applied_schema_shape(cursor, schema=schema, version=max(states))
+                if max(states) >= 9:
+                    from ._portfolio_schema import verify_postgres_registry
+                    verify_postgres_registry(cursor, schema, PostgresStorageError)
             if (
                 verify_custody_schema
                 and states
@@ -1267,6 +1276,7 @@ def _migration_sql(
         6: "0006_custody_executor.sql",
         7: "0007_custody_lifecycle.sql",
         8: "0008_custody_evidence_retention.sql",
+        9: "0009_portfolio_registry.sql",
     }
     filename = filenames.get(version)
     if filename is None:

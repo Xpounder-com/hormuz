@@ -109,29 +109,37 @@ migration, wire field, command, version bump, or release is provided by this
 gate. Close #213 only after review, package/client checks, and exact-main CI;
 #214 and the downstream portfolio issues remain separate gates.
 
-## v1.1.0 registry transition preflight
+## v1.1.0 registry implementation and transition
 
 The [#214/#215 transition guide](REGISTRY_TRANSITION.md) records the exact
 released-v1 source baseline, compatibility inventory, stop/migrate/restart
-boundary, and safe rollback decision. Its strict plan verifier cannot label
-the checkpoint as registry implementation or final-candidate acceptance.
+boundary, and safe rollback decision. The historical version-1 preflight
+remains frozen; version 2 describes actual registry migration verification,
+never final-candidate acceptance.
 
 `tests.test_sqlite_registry_transition` and
-`tests.test_postgres_registry_transition` test real missing-next-migration
-failures, transaction rollback/retry with explicitly synthetic DDL, unchanged
+`tests.test_postgres_registry_transition` test actual SQLite 5 / PostgreSQL 9
+migrations, failure injection after real DDL, rollback/retry, unchanged
 v1 rows/unknown holds, fresh released-v1 rejection of partial/newer state,
-and isolated old-pair backup/restore. PostgreSQL tests also characterize that
+and isolated old-pair backup/restore. Populated current-candidate restores on
+both backends preserve registry history, idempotent results, continuation
+cursors, and pre/post-upgrade unknown holds without replacing the original.
+PostgreSQL tests also characterize that
 already-running readiness checks do not continuously revalidate the schema.
 All migration/writer processes must be quiesced; rolling upgrades are not
 proven. The existing required PostgreSQL job runs these tests from an
 isolated current wheel against a separately installed digest-pinned v1 source
 archive. Release-dependent local skips are not transition evidence.
 
-The source archive must contain the guide, machine-readable plan, verifier,
-baseline manifest, and backend fixtures. Populated policy/custody recovery,
-real registry DDL and domain/auth/RLS behavior, exact final signed OCI/Compose
-transitions, and post-write forward recovery remain #214/#215 implementation
-and final-candidate gates. Do not close #214 on preflight evidence.
+The source archive must contain both plans, guides, verifier, baseline manifest,
+and backend fixtures. `test_sqlite_portfolio_registry`,
+`test_postgres_portfolio_registry`, and `test_portfolio_api_cli` cover actual
+create/version/archive/binding, strict parsing, role checks before access,
+forced RLS, append-only state, concurrent idempotency/CAS, frozen cursors and
+safe audit. The required PostgreSQL job executes both registry adapters from
+the isolated installed wheel. There are 80 owned live PostgreSQL cases.
+Populated policy/custody recovery and exact final signed OCI/Compose transitions
+remain #214 final-candidate gates. Do not close #214 on registry-only evidence.
 
 ## Live pinned-client release gate
 

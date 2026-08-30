@@ -4,6 +4,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from tools import verify_postgres_backup_restore as recovery
 
@@ -15,14 +16,31 @@ POSTGRES_IMAGE = "postgres@sha256:" + ("b" * 64)
 
 class PostgresRecoverySummaryTests(unittest.TestCase):
     def _state(self) -> dict[str, object]:
-        return json.loads((FIXTURES / "state-v1.json").read_text(encoding="utf-8"))
+        state = json.loads((FIXTURES / "state-v1.json").read_text(encoding="utf-8"))
+        self.assertEqual(state["migration_version"], 8)
+        # The unchanged evidence envelope describes the existing v1 fixture
+        # coverage at the current database version, not portfolio recovery.
+        state["migration_version"] = recovery.POSTGRES_SCHEMA_VERSION
+        return state
 
     def test_compatibility_fixtures_validate(self) -> None:
         state = self._state()
         summary = json.loads((FIXTURES / "summary-v1.json").read_text(encoding="utf-8"))
+        self.assertEqual(summary["state"]["migration_version"], 8)
+        summary["state"]["migration_version"] = recovery.POSTGRES_SCHEMA_VERSION
 
         recovery._validate_state(state)
         recovery._validate_summary(summary)
+
+    def test_archived_v1_evidence_is_not_current_candidate_evidence(self) -> None:
+        state = json.loads((FIXTURES / "state-v1.json").read_text(encoding="utf-8"))
+        summary = json.loads((FIXTURES / "summary-v1.json").read_text(encoding="utf-8"))
+        with mock.patch.object(recovery, "POSTGRES_SCHEMA_VERSION", 8):
+            recovery._validate_state(state)
+            recovery._validate_summary(summary)
+        for validate, value in ((recovery._validate_state, state), (recovery._validate_summary, summary)):
+            with self.assertRaisesRegex(recovery.RecoveryDrillError, "schema_invalid"):
+                validate(value)
 
     def test_summary_is_content_free_and_binds_source_to_recovery(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

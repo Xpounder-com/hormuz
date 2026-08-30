@@ -78,7 +78,14 @@ def _canonical_bytes(config: GatewayConfig) -> bytes:
 
 
 def _snapshot_sha256(config: GatewayConfig) -> str:
-    return hashlib.sha256(_canonical_bytes(config)).hexdigest()
+    # Freeze every v1 field, without treating the separately tested, opt-in
+    # portfolio extension as a change to the legacy configuration contract.
+    value = _canonical(config, config_directory=config.source_path.parent)
+    assert isinstance(value, dict) and isinstance(value["fields"], dict)
+    assert value["fields"].pop("portfolio_control") is None
+    return hashlib.sha256(
+        json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
+    ).hexdigest()
 
 
 class ConfigurationConstructionEquivalenceTests(unittest.TestCase):
