@@ -13,27 +13,27 @@ from ..auth import AuthenticationError, Authenticator
 from ..portfolio_config import authorize
 from ..portfolio_repository import create_portfolio_repository
 from ..portfolio_service import PortfolioService
-from ..portfolio_wire import BINDINGS, SCOPES, PortfolioError, REQUEST_BYTES, canonical
+from ..portfolio_wire import ATTRIBUTIONS, BINDINGS, SCOPES, PortfolioError, REQUEST_BYTES, canonical
 from ..store_router import create_repository_bundle
 
 
 def add_portfolio_commands(subparsers: argparse._SubParsersAction) -> None:
     parser = subparsers.add_parser("portfolio", help="Administer the tenant-scoped v1.1 registry")
     commands = parser.add_subparsers(dest="portfolio_command", required=True)
-    for name in ("create", "version", "archive", "tombstone", "show", "list", "bind", "bindings"):
+    for name in ("create", "version", "archive", "tombstone", "show", "list", "bind", "bindings", "attribute", "attributions"):
         command = commands.add_parser(name)
         command.add_argument("--token-env", default="HORMUZ_PORTFOLIO_TOKEN", help="Environment variable holding an existing administrator bearer token")
         if name in {"version", "archive", "tombstone", "show"}:
             command.add_argument("work_scope_id")
-        if name in {"create", "version", "bind"}:
+        if name in {"create", "version", "bind", "attribute"}:
             command.add_argument("file", help="Strict version-1 JSON mutation request")
-        if name in {"create", "version", "archive", "tombstone", "bind"}:
+        if name in {"create", "version", "archive", "tombstone", "bind", "attribute"}:
             command.add_argument("--idempotency-key", required=True)
         if name in {"archive", "tombstone"}:
             command.add_argument("--expected-version", required=True, type=int)
         if name == "show":
             command.add_argument("--version", type=int)
-        if name in {"list", "bindings"}:
+        if name in {"list", "bindings", "attributions"}:
             command.add_argument("--limit", type=int)
             command.add_argument("--cursor")
             command.add_argument("--start-at")
@@ -57,8 +57,8 @@ def run(config, args) -> int:
         repositories = create_repository_bundle(config, portfolio_factory=create_portfolio_repository)
         service = PortfolioService(config, repositories.portfolio, authenticator)
         name = args.portfolio_command
-        method = "GET" if name in {"list", "bindings", "show"} else "POST"
-        path = BINDINGS if name in {"bind", "bindings"} else SCOPES
+        method = "GET" if name in {"list", "bindings", "show", "attributions"} else "POST"
+        path = ATTRIBUTIONS if name in {"attribute", "attributions"} else BINDINGS if name in {"bind", "bindings"} else SCOPES
         if name == "show":
             path += "/" + args.work_scope_id
         elif name in {"version", "archive", "tombstone"}:

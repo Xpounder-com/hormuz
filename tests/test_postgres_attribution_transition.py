@@ -1,4 +1,4 @@
-"""Disposable red-first #216 PostgreSQL transition; no attribution runtime."""
+"""Actual attribution migration, real predecessors, and isolated recovery."""
 
 from __future__ import annotations
 
@@ -20,20 +20,25 @@ from hormuz.portfolio_service import PortfolioService
 from hormuz.portfolio_wire import SCOPES
 from hormuz.postgres import PostgresStorageError, migrate_postgres
 from hormuz.postgres_usage_store import PostgresUsageStore
+from hormuz._attribution_schema import TABLE_DDL
+from hormuz.portfolio_repository import create_portfolio_repository
+from hormuz.portfolio_wire import ATTRIBUTIONS, canonical
 
 if __package__:
+    from ._attribution_predecessor_fixture import registry_predecessor_call
+    from ._attribution_fixture import seed_attribution_metadata
     from ._portfolio_fixture import ADMIN, registry_config, seed_registry_metadata
     from ._postgres_fixture import PostgresTestCase
     from ._registry_transition_fixture import ledger_observation, released_v1_call, seed_registry_ledger
 else:
+    from _attribution_predecessor_fixture import registry_predecessor_call
+    from _attribution_fixture import seed_attribution_metadata
     from _portfolio_fixture import ADMIN, registry_config, seed_registry_metadata
     from _postgres_fixture import PostgresTestCase
     from _registry_transition_fixture import ledger_observation, released_v1_call, seed_registry_ledger
 
 
-PROBE = "attribution_transition_test_probe"
-
-
+@unittest.skipUnless(os.environ.get("HORMUZ_TEST_REGISTRY_PYTHON"), "requires digest-pinned real registry predecessor")
 class PostgresAttributionTransitionTests(PostgresTestCase):
     def migrate(self):
         return migrate_postgres(
@@ -47,14 +52,17 @@ class PostgresAttributionTransitionTests(PostgresTestCase):
                                   runtime_role=self.runtime_role, organization_ids=("acme", "beta"))
 
     def setUp(self):
-        self.assertEqual(postgres_module.POSTGRES_SCHEMA_VERSION, 9)
+        self.assertEqual(postgres_module.POSTGRES_SCHEMA_VERSION, 10)
         self._drop_schema(self.schema)
-        self.migrate()
-        super().setUp()
-        seed_registry_ledger(self.store)
+        self.predecessor_request = {"backend": "postgresql", "schema": self.schema, "owner_dsn": self.owner_dsn,
+                                    "runtime_dsn": self.runtime_dsn, "runtime_role": self.runtime_role,
+                                    "policy_control_role": self.policy_control_role, "custody_control_role": self.custody_control_role,
+                                    "custody_executor_role": self.custody_executor_role}
+        seeded = registry_predecessor_call({**self.predecessor_request, "mode": "seed"})
+        self.assertEqual(seeded["status"], "ready")
         self.config = replace(registry_config(Path("/unused/attribution-preflight")), usage_storage=UsageStorageConfig(
             backend="postgresql", postgres_schema=self.schema, postgres_runtime_role=self.runtime_role))
-        self.writes, self.page = seed_registry_metadata(self.config, environ={"HORMUZ_POSTGRES_DSN": self.runtime_dsn})
+        self.writes, self.page = seeded["writes"], seeded["page"]
         self.before = self.snapshot()
         self.assertEqual(len(self.before["rows"]), 37)
         self.assertTrue(all(rows for table, rows in self.before["rows"].items() if table.startswith("portfolio_")))
@@ -76,18 +84,17 @@ class PostgresAttributionTransitionTests(PostgresTestCase):
         original = postgres_module._migration_sql
 
         def migration(version, schema, *roles):
-            if version != 10:
-                return original(version, schema, *roles)
-            ddl = f"CREATE TABLE {schema}.{PROBE} (organization_id TEXT NOT NULL, id TEXT PRIMARY KEY);"
+            self.assertEqual(version, 10)
+            ddl = original(version, schema, *roles)
             return ddl + (" SELECT 1 / 0;" if fail else "")
 
-        with mock.patch.object(postgres_module, "POSTGRES_SCHEMA_VERSION", 10), mock.patch.object(postgres_module, "_migration_sql", side_effect=migration):
+        with mock.patch.object(postgres_module, "_migration_sql", side_effect=migration):
             self.assertEqual(self.migrate().version, 10)
 
     def assert_prior_state_preserved(self):
         current = copy.deepcopy(self.snapshot())
-        current["rows"].pop(PROBE, None)
-        current["shape"] = [row for row in current["shape"] if not row[0].startswith(PROBE)]
+        current["rows"] = {table: rows for table, rows in current["rows"].items() if table not in TABLE_DDL}
+        current["shape"] = [row for row in current["shape"] if not row[0].startswith("portfolio_attribution_")]
         current["rows"]["hormuz_schema_migrations"] = [row for row in current["rows"]["hormuz_schema_migrations"] if json.loads(row[0])["version"] != 10]
         self.assertEqual(current, self.before)
 
@@ -122,14 +129,13 @@ class PostgresAttributionTransitionTests(PostgresTestCase):
         return (self.psycopg.conninfo.make_conninfo(self.owner_dsn, dbname=database),
                 self.psycopg.conninfo.make_conninfo(self.runtime_dsn, dbname=database))
 
-    def test_postgres_attribution_migration_is_red_until_implementation(self):
-        with mock.patch.object(postgres_module, "POSTGRES_SCHEMA_VERSION", 10):
-            with self.assertRaises(PostgresStorageError) as caught:
-                self.migrate()
-        self.assertEqual(caught.exception.code, "storage_schema_migration_unsupported")
-        self.assertEqual(self.snapshot(), self.before)
+    def test_postgres_attribution_migration_is_additive_and_idempotent(self):
+        for _ in range(2):
+            self.probe()
+            self.assertEqual(len(self.snapshot()["rows"]), 42)
+            self.assert_prior_state_preserved()
 
-    def test_postgres_attribution_probe_failure_and_retry_preserve_populated_registry(self):
+    def test_postgres_attribution_failure_and_retry_preserve_populated_registry(self):
         with self.assertRaises(PostgresStorageError) as caught:
             self.probe(fail=True)
         self.assertEqual(caught.exception.code, "storage_unavailable")
@@ -154,14 +160,13 @@ class PostgresAttributionTransitionTests(PostgresTestCase):
     def test_postgres_attribution_old_processes_refuse_next_schema(self):
         self.probe()
         before = self.snapshot()
-        with self.assertRaises(PostgresStorageError) as caught:
-            self.runtime()
-        self.assertEqual(caught.exception.code, "storage_schema_newer_than_binary")
+        self.assertEqual(registry_predecessor_call({**self.predecessor_request, "mode": "verify"}),
+                         {"status": "refused", "code": "storage_schema_newer_than_binary"})
         result = released_v1_call({"backend": "postgresql", "mode": "verify", "schema": self.schema,
                                    "runtime_dsn": self.runtime_dsn, "runtime_role": self.runtime_role})
         self.assertEqual(result, {"status": "refused", "code": "storage_schema_newer_than_binary"})
         self.assertEqual(self.snapshot(), before)
-        # Inject partial state in this disposable future-schema fixture only.
+        # Inject partial state only in this disposable candidate fixture.
         with self.psycopg.connect(self.owner_dsn) as connection:
             connection.execute(self.sql.SQL(
                 "UPDATE {}.hormuz_schema_migrations SET state='applying' WHERE version=10"
@@ -170,6 +175,8 @@ class PostgresAttributionTransitionTests(PostgresTestCase):
         with self.assertRaises(PostgresStorageError) as caught:
             self.runtime()
         self.assertEqual(caught.exception.code, "storage_schema_partial_upgrade")
+        self.assertEqual(registry_predecessor_call({**self.predecessor_request, "mode": "verify"}),
+                         {"status": "refused", "code": "storage_schema_partial_upgrade"})
         result = released_v1_call({"backend": "postgresql", "mode": "verify", "schema": self.schema,
                                    "runtime_dsn": self.runtime_dsn, "runtime_role": self.runtime_role})
         self.assertEqual(result, {"status": "refused", "code": "storage_schema_partial_upgrade"})
@@ -181,12 +188,12 @@ class PostgresAttributionTransitionTests(PostgresTestCase):
         self.probe()
         retained = self.snapshot()
         owner, runtime = self.restore(backup)
-        self.assertEqual(ledger_observation(self.runtime(runtime))["unknown_holds"], 1)
-        service = PortfolioService(self.config, RegistryRepository(self.config, environ={"HORMUZ_POSTGRES_DSN": runtime}))
-        for path, body, key, expected in self.writes:
-            self.assertEqual(service.dispatch(ADMIN, "POST", path, body=json.dumps(body).encode(), idempotency_key=key), expected)
+        request = {**self.predecessor_request, "runtime_dsn": runtime, "mode": "replay", "writes": self.writes}
+        replayed = registry_predecessor_call(request)
+        self.assertEqual(replayed["unknown_holds"], 1)
+        self.assertEqual(replayed["replays"], [write[3] for write in self.writes])
         self.assertEqual(self.snapshot(owner), self.before)
-        continuation = service.dispatch(ADMIN, "GET", SCOPES, query="cursor=" + self.page["next_cursor"])[1]
+        continuation = registry_predecessor_call({**request, "mode": "page", "cursor": self.page["next_cursor"]})["page"]
         self.assertEqual(continuation["items"], [self.writes[0][3][1]])
         self.assertIsNone(continuation["next_cursor"])
         self.assertEqual(self.snapshot(), retained)
@@ -194,16 +201,22 @@ class PostgresAttributionTransitionTests(PostgresTestCase):
     @unittest.skipUnless(os.environ.get("HORMUZ_TEST_PG_CONTAINER"), "requires disposable PostgreSQL matched backup tools")
     def test_postgres_attribution_post_checkpoint_writes_require_forward_recovery(self):
         self.probe()
-        with mock.patch.object(postgres_module, "POSTGRES_SCHEMA_VERSION", 10):
-            seed_registry_ledger(self.runtime())
-            with self.psycopg.connect(self.owner_dsn) as connection:
-                connection.execute(self.sql.SQL("INSERT INTO {}.{} VALUES ('acme','synthetic-post-checkpoint-write')").format(self.sql.Identifier(self.schema), self.sql.Identifier(PROBE)))
-            after_write = self.snapshot()
-            owner, runtime = self.restore(self.backup())
-            self.assertEqual(ledger_observation(self.runtime(runtime))["unknown_holds"], 2)
-            self.assertEqual(self.snapshot(owner), after_write)
+        seed_registry_ledger(self.runtime())
+        config, write, page, attempt_id = seed_attribution_metadata(self.config, environ={"HORMUZ_POSTGRES_DSN": self.runtime_dsn})
+        after_write = self.snapshot()
+        self.assertTrue(all(after_write["rows"][table] for table in TABLE_DDL))
+        owner, runtime = self.restore(self.backup())
+        self.assertEqual(ledger_observation(self.runtime(runtime))["unknown_holds"], 2)
+        self.assertEqual(self.snapshot(owner), after_write)
+        group = create_portfolio_repository(config, environ={"HORMUZ_POSTGRES_DSN": runtime})
+        service = PortfolioService(config, group)
+        body, key, expected = write
+        self.assertEqual(service.dispatch(ADMIN, "POST", ATTRIBUTIONS, body=canonical(body).encode(), idempotency_key=key), expected)
+        self.assertEqual(self.snapshot(owner), after_write)
+        continuation = service.dispatch(ADMIN, "GET", ATTRIBUTIONS, query="cursor=" + page["next_cursor"])[1]
+        self.assertEqual(len(continuation["items"]), 1)
+        self.assertEqual(group.attributions.attempt_facts(service.authenticate(ADMIN), attempt_id)["provider_reported_model"], "recovery-actual-v1")
         self.assertEqual(self.snapshot(), after_write)
         self.assertNotEqual(after_write, self.before)
-        with self.assertRaises(PostgresStorageError) as caught:
-            self.runtime(runtime)
-        self.assertEqual(caught.exception.code, "storage_schema_newer_than_binary")
+        self.assertEqual(registry_predecessor_call({**self.predecessor_request, "runtime_dsn": runtime, "mode": "verify"}),
+                         {"status": "refused", "code": "storage_schema_newer_than_binary"})

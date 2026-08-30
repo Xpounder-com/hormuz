@@ -21,6 +21,8 @@ unregistered table.
 
 | Data class | SQLite tables | PostgreSQL tables | Content boundary |
 | --- | --- | --- | --- |
+| `portfolio_attribution_metadata` | `portfolio_attribution_events`, `portfolio_attribution_rejections` | `portfolio_attribution_events`, `portfolio_attribution_rejections` | Immutable tenant-qualified attempt/use-case version references, source confidence, append-only corrections, and fixed-class admission receipts. Rejections are separate from eligible attempts. No request header, prompt, response, filename, source/work content, or guessed model facts. |
+| `portfolio_attribution_control` | `portfolio_attribution_audit_events`, `portfolio_attribution_cursors`, `portfolio_attribution_idempotency` | `portfolio_attribution_audit_events`, `portfolio_attribution_cursors`, `portfolio_attribution_idempotency` | Safe read/mutation audit, role-bound frozen-window cursors, keyed request digests and immutable-result references. No copied v1 financial facts or raw JSON mutation bodies. |
 | `portfolio_registry_metadata` | `portfolio_binding_events`, `portfolio_work_scope_versions` | `portfolio_binding_events`, `portfolio_work_scope_versions` | Append-only tenant-qualified scope/binding IDs, pinned hierarchy/ownership/lifecycle versions, and bounded administrator-entered scope display names. No external work content. |
 | `portfolio_registry_control` | `portfolio_audit_events`, `portfolio_cursors`, `portfolio_idempotency` | `portfolio_audit_events`, `portfolio_cursors`, `portfolio_idempotency` | Content-free audit IDs/change classes; actor/role-bound frozen-window cursor state; idempotency identities, keyed request digests, and references to immutable results. No duplicated display labels or raw request/response JSON. |
 | `schema_migration_state` | `hormuz_schema_migrations` | `hormuz_schema_migrations` | Applied migration version and state; operational metadata only. |
@@ -37,12 +39,22 @@ unregistered table.
 ## v1.1 registry data and remaining portfolio plan
 
 The #215 source implementation adds the five registry tables above in SQLite
-migration 5 and PostgreSQL migration 9. It is not a v1.1.0 release. Attribution,
-budgets, outcomes, connectors, scorecards, and recommendations remain separately
-gated and have no tables in this inventory. #214 stays open for final-candidate
+migration 5 and PostgreSQL migration 9. The #216 source implementation adds five
+separate attribution tables in SQLite migration 6 / PostgreSQL migration 10.
+Neither is a v1.1.0 release. Budgets, outcomes, connectors, scorecards and
+recommendations remain separately gated and have no tables in this inventory.
+#214 stays open for final-candidate
 transition proof. See [REGISTRY.md](REGISTRY.md) for the opt-in authority and
 [REGISTRY_TRANSITION.md](REGISTRY_TRANSITION.md) for the application/database
 pair boundary.
+
+[ATTRIBUTION.md](ATTRIBUTION.md) describes opt-in identity/client authority,
+native header handling, administrator corrections and coverage limits.
+[ATTRIBUTION_TRANSITION.md](ATTRIBUTION_TRANSITION.md) binds the real registry
+predecessor, immutable released-v1 baseline, and retained-state recovery rules.
+All five attribution tables follow the customer-controlled export/retention/
+backup/deletion boundary below; a void supersedes an assignment and does not
+erase the original event, immutable v1 facts, or existing backups.
 
 The [persistence composition boundary](ARCHITECTURE.md#usage-and-portfolio-persistence-composition)
 provides a fully declared v1 usage protocol and a typed factory slot for the

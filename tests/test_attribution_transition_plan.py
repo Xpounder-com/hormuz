@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import copy
+import contextlib
+import io
 import json
 from pathlib import Path
 import tempfile
@@ -8,18 +10,19 @@ import unittest
 from unittest import mock
 
 from tools.verify_attribution_transition_plan import (
-    AttributionTransitionError, EXPECTED, validate_attribution_transition_plan,
-    verify_attribution_transition_plan,
+    AttributionTransitionError, EXPECTED, IMPLEMENTED, validate_attribution_transition_plan,
+    verify_attribution_transition_plan, main,
 )
 from tools.verify_registry_transition_plan import RegistryTransitionError
 
 
 class AttributionTransitionPlanTests(unittest.TestCase):
-    def test_checkpoint_is_not_feature_or_candidate_acceptance(self):
+    def test_implementation_plan_is_not_candidate_acceptance(self):
         result = verify_attribution_transition_plan()
         self.assertEqual(result["feature_issue"], 216)
         self.assertEqual(result["attribution_route_count"], 2)
-        self.assertFalse(result["attribution_implemented"])
+        self.assertTrue(result["attribution_implemented"])
+        self.assertEqual(result["status"], "attribution_implementation_plan_verified")
         self.assertFalse(result["final_candidate_accepted"])
 
     def test_preflight_cannot_claim_feature_or_release_success(self):
@@ -85,7 +88,7 @@ class AttributionTransitionPlanTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             (root / "docs").mkdir()
-            (root / "docs/attribution-transition-plan-v1.json").write_text('{"schema_version":1,"schema_version":1}')
+            (root / "docs/attribution-transition-plan-v2.json").write_text('{"schema_version":2,"schema_version":2}')
             with self.assertRaisesRegex(AttributionTransitionError, "duplicate_member"):
                 verify_attribution_transition_plan(root)
 
@@ -93,7 +96,7 @@ class AttributionTransitionPlanTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             (root / "docs").mkdir()
-            (root / "docs/attribution-transition-plan-v1.json").write_bytes(b" " * 32769)
+            (root / "docs/attribution-transition-plan-v2.json").write_bytes(b" " * 32769)
             with self.assertRaisesRegex(AttributionTransitionError, "too_large"):
                 verify_attribution_transition_plan(root)
 
@@ -101,6 +104,30 @@ class AttributionTransitionPlanTests(unittest.TestCase):
         with mock.patch("tools.verify_attribution_transition_plan.verify_registry_transition_plan", side_effect=RegistryTransitionError("synthetic")):
             with self.assertRaisesRegex(AttributionTransitionError, "baseline_contract_invalid"):
                 verify_attribution_transition_plan()
+
+    def test_preflight_cannot_replace_implementation_or_change_predecessor(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "docs").mkdir()
+            (root / "docs/attribution-transition-plan-v2.json").write_text(json.dumps(EXPECTED))
+            with self.assertRaisesRegex(AttributionTransitionError, "implementation_plan_required"):
+                verify_attribution_transition_plan(root)
+        for field, value in (("registry_archive_sha256", "0" * 64), ("final_candidate_accepted", True), ("attribution_implemented", False)):
+            plan = copy.deepcopy(IMPLEMENTED)
+            plan[field] = value
+            with self.assertRaises(AttributionTransitionError):
+                validate_attribution_transition_plan(plan)
+
+    def test_registry_archive_is_required_to_match_digest_and_size(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            archive = Path(temporary) / "registry.tar"
+            for payload in (None, b"SYNTHETIC_EXCLUDED_WRONG_ARCHIVE", b"0" * (32 * 1024 * 1024 + 1)):
+                if payload is not None:
+                    archive.write_bytes(payload)
+                output = io.StringIO()
+                with contextlib.redirect_stdout(output):
+                    self.assertEqual(main(["--registry-archive", str(archive)]), 1)
+                self.assertEqual(output.getvalue().strip(), "attribution_registry_archive_invalid")
 
     def test_source_archive_requires_every_attribution_preflight_asset(self):
         from tools import verify_core_wheel as packaging

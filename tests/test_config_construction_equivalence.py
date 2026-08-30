@@ -83,6 +83,7 @@ def _snapshot_sha256(config: GatewayConfig) -> str:
     value = _canonical(config, config_directory=config.source_path.parent)
     assert isinstance(value, dict) and isinstance(value["fields"], dict)
     assert value["fields"].pop("portfolio_control") is None
+    assert value["fields"].pop("attribution_control") is None
     return hashlib.sha256(
         json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
     ).hexdigest()

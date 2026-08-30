@@ -16,12 +16,14 @@ import os
 import re
 import uuid
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Iterator, Mapping, Protocol
 from urllib.parse import urlencode
 
 from ._portfolio_sql import PortfolioSQL as _SQL, portfolio_transaction
 from .config import GatewayConfig
+from .attribution_repository import AttributionRepository
 from .portfolio_config import PortfolioPrincipal
 from .portfolio_wire import PortfolioError, RESPONSE_BYTES, canonical, query_parameters, route, validate
 from .postgres import PostgresConnectionPool
@@ -316,7 +318,23 @@ class RegistryRepository:
                 "as_of": as_of, "has_more": more, "next_cursor": next_cursor}
 
 
+@dataclass
+class PortfolioRepositories:
+    registry: RegistryRepository
+    attributions: AttributionRepository
+
+    def execute(self, principal: PortfolioPrincipal, operation: str, *, path: str,
+                scope_id: str | None, query: dict[str, Any], body: dict[str, Any] | None,
+                idempotency_key: str | None) -> tuple[int, dict[str, Any]]:
+        owner = self.attributions if operation in {"attribute", "list_attributions"} else self.registry
+        return owner.execute(principal, operation, path=path, scope_id=scope_id, query=query,
+                             body=body, idempotency_key=idempotency_key)
+
+
 def create_portfolio_repository(config: GatewayConfig, *, environ: Mapping[str, str] | None = None,
                                 connection_pool: PostgresConnectionPool | None = None,
-                                read_only: bool = False) -> PortfolioRepository:
-    return RegistryRepository(config, environ=environ, connection_pool=connection_pool, read_only=read_only)
+                                read_only: bool = False) -> PortfolioRepositories:
+    registry = RegistryRepository(config, environ=environ, connection_pool=connection_pool, read_only=read_only)
+    return PortfolioRepositories(registry, AttributionRepository(
+        config, dsn=registry._dsn, connection_pool=connection_pool, read_only=read_only,
+    ))

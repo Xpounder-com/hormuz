@@ -164,6 +164,7 @@ class RuntimeCliOwnershipTests(unittest.TestCase):
         tree = _command_tree(cli.build_parser())
         self.assertIsInstance(tree, dict)
         self.assertEqual(tree.pop("portfolio"), {
+            "attribute": None, "attributions": None,
             "archive": None, "bind": None, "bindings": None, "create": None,
             "list": None, "show": None, "tombstone": None, "version": None,
         })

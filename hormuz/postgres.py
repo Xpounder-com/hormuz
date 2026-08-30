@@ -16,7 +16,7 @@ from typing import Any, Iterator, Mapping
 from .config import PostgresPoolConfig
 
 
-POSTGRES_SCHEMA_VERSION = 9
+POSTGRES_SCHEMA_VERSION = 10
 _IDENTIFIER_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 _POOL_RECONNECT_TIMEOUT_SECONDS = 15
 
@@ -234,6 +234,9 @@ def migrate_postgres(
                     if max(states) >= 9:
                         from ._portfolio_schema import verify_postgres_registry
                         verify_postgres_registry(cursor, schema, PostgresStorageError)
+                    if max(states) >= 10:
+                        from ._attribution_schema import verify_postgres_attribution
+                        verify_postgres_attribution(cursor, schema, PostgresStorageError)
                 for version in range(1, POSTGRES_SCHEMA_VERSION + 1):
                     if version in states:
                         continue
@@ -268,6 +271,9 @@ def migrate_postgres(
                 if POSTGRES_SCHEMA_VERSION >= 9:
                     from ._portfolio_schema import verify_postgres_registry
                     verify_postgres_registry(cursor, schema, PostgresStorageError)
+                if POSTGRES_SCHEMA_VERSION >= 10:
+                    from ._attribution_schema import verify_postgres_attribution
+                    verify_postgres_attribution(cursor, schema, PostgresStorageError)
         return PostgresSchemaStatus(version=POSTGRES_SCHEMA_VERSION, complete=True)
     except PostgresStorageError:
         raise
@@ -376,6 +382,9 @@ def _schema_migration_rows(
                 if max(states) >= 9:
                     from ._portfolio_schema import verify_postgres_registry
                     verify_postgres_registry(cursor, schema, PostgresStorageError)
+                if max(states) >= 10:
+                    from ._attribution_schema import verify_postgres_attribution
+                    verify_postgres_attribution(cursor, schema, PostgresStorageError)
             if (
                 verify_custody_schema
                 and states
@@ -1277,6 +1286,7 @@ def _migration_sql(
         7: "0007_custody_lifecycle.sql",
         8: "0008_custody_evidence_retention.sql",
         9: "0009_portfolio_registry.sql",
+        10: "0010_governed_run_attribution.sql",
     }
     filename = filenames.get(version)
     if filename is None:

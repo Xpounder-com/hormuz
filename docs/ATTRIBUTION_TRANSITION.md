@@ -1,14 +1,17 @@
-# v1.1.0 governed-run attribution preflight
+# v1.1.0 governed-run attribution transition
 
-This is the **pre-implementation checkpoint for #216**, not attribution
-implementation, #214 final-candidate acceptance, or a release. The prerequisite
-#215 registry must first have exact merged-main acceptance. This plan is based
-on reviewed registry implementation commit
-`b8cec8faba8d8e48d515dfcc3ec8eeaa78fc7926` in PR #234; its gate record must name
-the resulting main commit and passing required CI before accepting this plan.
+This is #216's **source implementation and transition proof**, not #214
+final-candidate acceptance or a release. The #215 registry was accepted at main
+`ddcc15ad2774e59401be3781bfc8828c7f163e71` after exact-main CI 33338878290.
+The #216 preflight was accepted at main
+`3fd46a4979fb3ff7fa798cc2d87be179e433f129` after exact-main CI 33339514289
+attempt 2. Attempt 1 had a Kubernetes replacement-traffic timeout; a bounded
+unchanged-head retry passed. These are predecessor records, not acceptance of
+the implementation described here.
 
-[attribution-transition-plan-v1.json](attribution-transition-plan-v1.json) freezes
-the bounded change and required tests. The accepted ADR 0010, portfolio wire
+[attribution-transition-plan-v1.json](attribution-transition-plan-v1.json) remains
+the frozen historical preflight. [Version 2](attribution-transition-plan-v2.json)
+describes the actual migrations and registry predecessor. The accepted ADR 0010, portfolio wire
 bundle, immutable released-v1 source identity, and legacy manifest remain
 unchanged. [REGISTRY_TRANSITION.md](REGISTRY_TRANSITION.md) retains the exact
 v1.0.0 baseline archive/manifest digests and stop/migrate/restart procedure.
@@ -20,7 +23,7 @@ v1.0.0 baseline archive/manifest digests and stop/migrate/restart procedure.
 | SQLite migration ledger | 5 | 6 |
 | PostgreSQL migration ledger | 9 | 10 |
 | Product release target | v1.1.0 development | v1.1.0 development |
-| New attribution envelopes | Not implemented | Approved schema version 1 |
+| New attribution envelopes | Not implemented | Approved schema version 1 implemented |
 
 The immutable released-v1 baseline is still SQLite 4 / PostgreSQL 8. The final
 candidate must prove that complete transition, not merely this intermediate
@@ -34,7 +37,7 @@ gates. A work assignment is not an outcome or causal-productivity claim.
 
 ## Optional request admission and native compatibility
 
-The planned strict request header is:
+The implemented strict request header is:
 
 ```text
 X-Hormuz-Work-Scope: v1;work_scope_id=<opaque_id>;version=<canonical_positive_integer>
@@ -50,7 +53,7 @@ Authenticated explicit metadata takes precedence over an operator-authorized
 identity/client default. Otherwise the attempt is explicitly unattributed.
 Only a separately explicit active attribution requirement may deny absence;
 no legacy policy/configuration silently acquires that requirement. The new
-operator configuration must bind existing identities and clients to exact
+operator configuration binds existing identities and clients to exact
 tenant-local use-case versions, be strict/versioned/bounded, default off, and
 require the existing operator-controlled process restart. Portfolio roles
 never grant inference eligibility. Parent ownership or possession of an ID
@@ -130,42 +133,64 @@ destination with candidate state retained. For nonzero or unknown writes,
 retain the candidate and recover forward. Never decrement a ledger version,
 drop accepted metadata to make an old binary start, or replay provider work.
 
-## Executable preflight and limits
+## Executable implementation proof and limits
+
+The real registry predecessor is the reviewed #215 Git snapshot
+`b8cec8faba8d8e48d515dfcc3ec8eeaa78fc7926`, not a published release. Construct
+its deterministic archive with:
 
 ```bash
-python3 tools/verify_attribution_transition_plan.py
+git -c tar.umask=0000 archive --format=tar --prefix=hormuz-registry-baseline/ \
+  --output=/path/to/registry-baseline-b8cec8f.tar \
+  b8cec8faba8d8e48d515dfcc3ec8eeaa78fc7926
+```
+
+Required SHA-256:
+`f8cb9c0493aa54e04e4706eddd111a90b54f2c70bf9f0e6af38911ba1d03995c`.
+Install that archive with its `[postgres]` extra in a separate virtual
+environment and retain the archive at its original path. The predecessor
+fixture verifies interpreter isolation, installed versions, `direct_url`
+identity and the archive digest, and uses only digest-verified synthetic
+fixtures. It must report SQLite 5 / PostgreSQL 9.
+
+```bash
+python3 tools/verify_attribution_transition_plan.py \
+  --registry-archive /path/to/registry-baseline-b8cec8f.tar
 python3 -m unittest -v tests.test_attribution_transition_plan
 python3 -m unittest -v tests.test_sqlite_attribution_transition \
   tests.test_postgres_attribution_transition
 ```
 
-Use the same explicitly disposable `HORMUZ_TEST_POSTGRES_DSN`, matched
-`HORMUZ_TEST_PG_CONTAINER`, and digest-verified `HORMUZ_TEST_V1_PYTHON` as the
-registry transition guide. Missing environments cause explicit local skips,
-never proof. CI must provide them and run the cases from the isolated wheel.
+Set `HORMUZ_TEST_REGISTRY_PYTHON` to that isolated predecessor's interpreter.
+Also use the explicitly disposable `HORMUZ_TEST_POSTGRES_DSN`, matched
+`HORMUZ_TEST_PG_CONTAINER`, and digest-verified `HORMUZ_TEST_V1_PYTHON` from the
+registry guide. Missing environments cause explicit local skips, never proof.
+CI supplies both actual predecessors and runs the cases from the isolated wheel.
 
 The six cases on each backend seed real v1 usage/secret/attempt/unknown-hold
-state plus all five populated registry tables. They deliberately prove that
-the next migration is **missing**, then use unmistakably test-only probe DDL
-to test rollback/retry, prior-state preservation, partial/newer-state refusal,
-quiesced registry-pair restore and retained post-checkpoint writes. Exact
-registry idempotent results and cursor continuation survive an isolated
-old-pair restore. There is no
-attribution table, public endpoint or inference integration in this preflight.
-Empty policy/custody tables are not populated-domain recovery evidence.
+state plus all five registry tables with the actual predecessor. They exercise
+real additive SQLite 6 / PostgreSQL 10 migrations, failure after real DDL,
+rollback/retry, prior-state preservation, partial/newer-state refusal by both
+actual older binaries, quiesced registry-pair restore and retained
+post-checkpoint writes. Registry replays/cursors survive an isolated old-pair
+restore. Current-pair forward restores populate all five attribution tables
+and preserve corrections, receipts, cursors, actual-model facts and unknown
+holds. Empty policy/custody tables are not populated-domain recovery evidence.
 
-The feature implementation must replace the missing-migration/probe assertions
-with actual additive migrations and preserve every transition guarantee. It
-must add the full admission, two-provider no-egress, scope race, strict native
-header/body, stable-fact join, correction/CAS, RLS, content-exclusion and actual
-populated forward-restore tests listed in the machine plan. Source/wheel proof
-is not final signed-OCI/Compose proof and not external customer validation.
+The admission, shared adapter and two-provider native HTTP suites test the
+strict header/body, no-egress, scope race, immutable fact joins, append-only
+corrections/CAS, RLS, pagination, safe audit and metadata exclusions. The
+[user guide](ATTRIBUTION.md) explains configuration and command semantics.
+The source kit contains both plans and all fixtures; the wheel contains the
+separate approved attribution wire subset and migration. Source/wheel proof
+is not final signed-OCI/Compose proof or external customer validation.
 
 ## Acceptance record
 
-Accept only after #215 has exact merged-main evidence, this plan and red-first
-tests have a recorded technical-lead review, all normal required checks pass,
-and this preflight's exact merged-main CI passes. Record those links in #214,
-#216 and #226. This accepts only #216's pre-implementation checkpoint; keep
-#216's feature criteria and #214's final-candidate criteria open. No release,
-tag, deployment, external outreach or customer-data collection is authorized.
+The accepted preflight permits implementation, not automatic feature closure.
+Accept #216 only after its criteria have a technical-lead review, all normal
+required PR checks pass, normal protected merge succeeds, and every required
+exact merged-main check passes. Record links in #214, #216 and #226. The strict
+version-2 verifier reports implementation-plan verification while keeping
+`final_candidate_accepted` false. #214 and #225 remain separate gates. No
+release, tag, external outreach or customer-data collection is authorized.

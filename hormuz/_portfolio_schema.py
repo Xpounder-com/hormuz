@@ -141,7 +141,18 @@ def verify_sqlite_registry(connection, error_factory) -> None:
 
 
 def verify_postgres_registry(cursor, schema: str, error_factory) -> None:
-    for table in TABLE_DDL:
+    verify_postgres_owned_tables(cursor, schema, error_factory, TABLE_DDL, INDEX_DDL, {
+        "portfolio_audit_events": {"p": 1, "u": 1, "c": 3},
+        "portfolio_work_scope_versions": {"p": 1, "u": 1, "f": 3, "c": 8},
+        "portfolio_binding_events": {"p": 1, "u": 2, "f": 3, "c": 2},
+        "portfolio_idempotency": {"p": 1, "f": 3, "c": 3},
+        "portfolio_cursors": {"p": 1, "c": 2},
+    })
+
+
+def verify_postgres_owned_tables(cursor, schema, error_factory, tables, indexes, expected_constraints, *, trigger_type=27):
+    """Inspect source-selected append-only owners without granting authority."""
+    for table in tables:
         cursor.execute(
             "SELECT c.relrowsecurity, c.relforcerowsecurity FROM pg_class c "
             "JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=%s AND c.relname=%s AND c.relkind='r'",
@@ -171,7 +182,7 @@ def verify_postgres_registry(cursor, schema: str, error_factory) -> None:
         )
         triggers = [tuple(row.values()) if isinstance(row, dict) else row for row in cursor.fetchall()]
         body = "BEGIN RAISE EXCEPTION 'portfolio_append_only' USING ERRCODE = '23514'; END;"
-        if not any(row[:4] == (table + "_immutable", "O", 27, "portfolio_reject_mutation")
+        if not any(row[:4] == (table + "_immutable", "O", trigger_type, "portfolio_reject_mutation")
                    and " ".join(row[4].split()) == body and row[5:] == (False, schema) for row in triggers):
             raise error_factory("storage_schema_partial_upgrade")
         cursor.execute(
@@ -180,21 +191,15 @@ def verify_postgres_registry(cursor, schema: str, error_factory) -> None:
             "AND con.convalidated GROUP BY con.contype", (schema, table),
         )
         constraints = dict(tuple(row.values()) if isinstance(row, dict) else row for row in cursor.fetchall())
-        required = {
-            "portfolio_audit_events": {"p": 1, "u": 1, "c": 3},
-            "portfolio_work_scope_versions": {"p": 1, "u": 1, "f": 3, "c": 8},
-            "portfolio_binding_events": {"p": 1, "u": 2, "f": 3, "c": 2},
-            "portfolio_idempotency": {"p": 1, "f": 3, "c": 3},
-            "portfolio_cursors": {"p": 1, "c": 2},
-        }[table]
+        required = expected_constraints[table]
         if any(constraints.get(kind) != count for kind, count in required.items()):
             raise error_factory("storage_schema_partial_upgrade")
         # Read all owned columns under the checking role without enumerating data.
-        columns = [line.strip().split()[0] for line in TABLE_DDL[table].splitlines()
+        columns = [line.strip().split()[0] for line in tables[table].splitlines()
                    if line.strip() and line.strip().split()[0] not in {"PRIMARY", "UNIQUE", "FOREIGN", "REFERENCES", "CHECK", "OR"}]
         quoted = '"' + schema.replace('"', '""') + '"'
         cursor.execute(f"SELECT {', '.join(columns)} FROM {quoted}.{table} WHERE false")
     cursor.execute("SELECT indexname FROM pg_indexes WHERE schemaname=%s AND indexname LIKE 'portfolio_%%'", (schema,))
-    indexes = {next(iter(row.values())) if isinstance(row, dict) else row[0] for row in cursor.fetchall()}
-    if not set(INDEX_DDL).issubset(indexes):
+    observed_indexes = {next(iter(row.values())) if isinstance(row, dict) else row[0] for row in cursor.fetchall()}
+    if not set(indexes).issubset(observed_indexes):
         raise error_factory("storage_schema_partial_upgrade")

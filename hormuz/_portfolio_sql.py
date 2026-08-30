@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from typing import Any, Iterator
 
 from ._portfolio_schema import TABLE_DDL, verify_postgres_registry
+from ._attribution_schema import TABLE_DDL as ATTRIBUTION_TABLES, verify_postgres_attribution
 from ._sqlite_schema import SQLITE_SCHEMA_VERSION, verify_sqlite_schema_ready
 from .config import GatewayConfig
 from .portfolio_wire import PortfolioError
@@ -21,9 +22,10 @@ from .store import StorageSchemaError
 
 
 class PortfolioSQL:
-    def __init__(self, connection, *, postgres: bool):
+    def __init__(self, connection, *, postgres: bool, tables=TABLE_DDL):
         self.connection = connection
         self.postgres = postgres
+        self.tables = tables
 
     def execute(self, statement: str, values: tuple = ()):
         return self.connection.execute(statement.replace("?", "%s") if self.postgres else statement, values)
@@ -34,7 +36,7 @@ class PortfolioSQL:
 
     def insert(self, table: str, row: dict[str, Any]) -> None:
         # Callers choose fields and tables from source constants, never input.
-        if table not in TABLE_DDL:
+        if table not in self.tables:
             raise PortfolioError("unavailable")
         self.execute(
             f"INSERT INTO {table} ({', '.join(row)}) VALUES ({', '.join('?' for _ in row)})",
@@ -52,6 +54,7 @@ class PortfolioSQL:
 def portfolio_transaction(
     config: GatewayConfig, organization_id: str, *, dsn: str,
     connection_pool: PostgresConnectionPool | None,
+    tables=TABLE_DDL,
 ) -> Iterator[PortfolioSQL]:
     storage = config.usage_storage
     try:
@@ -68,7 +71,7 @@ def portfolio_transaction(
                         connection, schema_version=SQLITE_SCHEMA_VERSION,
                         maximum_supported_schema_version=SQLITE_SCHEMA_VERSION, error_factory=StorageSchemaError,
                     )
-                    yield PortfolioSQL(connection, postgres=False)
+                    yield PortfolioSQL(connection, postgres=False, tables=tables)
             finally:
                 connection.close()
         elif storage.backend == "postgresql":
@@ -85,7 +88,9 @@ def portfolio_transaction(
                     raise PortfolioError("unavailable")
                 with connection.cursor() as cursor:
                     verify_postgres_registry(cursor, storage.postgres_schema, PostgresStorageError)
-                for table in TABLE_DDL:
+                    if tables is ATTRIBUTION_TABLES:
+                        verify_postgres_attribution(cursor, storage.postgres_schema, PostgresStorageError)
+                for table in tables:
                     row = connection.execute(
                         "SELECT (has_table_privilege(current_user, %s, 'SELECT') AND "
                         "has_table_privilege(current_user, %s, 'INSERT')) AS usable, "
@@ -98,7 +103,7 @@ def portfolio_transaction(
                     "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
                     (f"portfolio:{storage.postgres_schema}:{organization_id}",),
                 )
-                yield PortfolioSQL(connection, postgres=True)
+                yield PortfolioSQL(connection, postgres=True, tables=tables)
         else:
             raise PortfolioError("unavailable")
     except (sqlite3.Error, PostgresStorageError, StorageSchemaError):
