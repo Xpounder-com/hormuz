@@ -22,6 +22,7 @@ FIXTURE_PATH = (
     / "external_onboarding"
     / "complete-synthetic-v1.json"
 )
+OLD_ARTIFACT_DIGEST = "sha256:" + "b" * 64
 
 
 class ExternalOnboardingEvidenceTests(unittest.TestCase):
@@ -45,6 +46,75 @@ class ExternalOnboardingEvidenceTests(unittest.TestCase):
 
     def _validate_future_fixture(self, value: dict[str, object]) -> dict[str, object]:
         return onboarding.validate_evidence(value)
+
+    def _old_initial(
+        self,
+        source: dict[str, object],
+        *,
+        session_id: str,
+        started_at: str,
+        participant_id: str | None = None,
+        persona: str | None = None,
+    ) -> dict[str, object]:
+        session = copy.deepcopy(source)
+        session["session_id"] = session_id
+        session["artifact_digest"] = OLD_ARTIFACT_DIGEST
+        session["package_version"] = "0.9.0"
+        session["started_at"] = started_at
+        session["returning_session"] = False
+        if participant_id is not None:
+            session["participant_id"] = participant_id
+        if persona is not None:
+            session["persona"] = persona
+        return session
+
+    def _append_resolved_origin(
+        self,
+        value: dict[str, object],
+        *,
+        started_at: str,
+        broad_workflow_change: bool,
+    ) -> dict[str, object]:
+        sessions = value["sessions"]  # type: ignore[assignment]
+        origin = self._old_initial(
+            sessions[0],  # type: ignore[index]
+            session_id="eos:30000000-0000-4000-8000-000000000001",
+            started_at=started_at,
+        )
+        finding_id = "eof:30000000-0000-4000-8000-000000000001"
+        origin["time_to_install_seconds"] = 60
+        origin["time_to_demo_seconds"] = 1
+        origin["demo_status"] = "failed"
+        origin["failure_code"] = "demo_network_boundary"
+        origin["demo_verification"] = None
+        origin["friction_categories"] = ["demo_network_boundary"]
+        origin["finding_ids"] = [finding_id]
+        sessions.append(origin)  # type: ignore[union-attr]
+        value["findings"] = [
+            {
+                "finding_id": finding_id,
+                "origin_session_id": origin["session_id"],
+                "category": "demo_network_boundary",
+                "blocker_reason": "demo_network_boundary",
+                "reference_type": "public_issue",
+                "reference": "https://github.com/Xpounder-com/hormuz/issues/110",
+                "status": "resolved",
+                "correction": {
+                    "resolution_commit": "a" * 40,
+                    "corrected_source_commit": onboarding.SOURCE_COMMIT,
+                    "corrected_artifact_digest": onboarding.ARTIFACT_DIGEST,
+                    "resolution_commit_ancestor_verified": True,
+                    "automated_regression_url": "https://github.com/Xpounder-com/hormuz/actions/runs/1",
+                    "automated_regression_source_commit": onboarding.SOURCE_COMMIT,
+                    "automated_regression_workflow_path": ".github/workflows/ci.yml",
+                    "automated_regression_binding_verified": True,
+                    "automated_regression_conclusion": "success",
+                    "retest_session_id": sessions[0]["session_id"],  # type: ignore[index]
+                    "broad_workflow_change": broad_workflow_change,
+                },
+            }
+        ]
+        return origin
 
     def test_synthetic_fixture_validates_but_never_counts_as_people(self) -> None:
         result = onboarding.validate_evidence(self._fixture())
@@ -90,6 +160,16 @@ class ExternalOnboardingEvidenceTests(unittest.TestCase):
             "2fc0605252e41f731c85cc9146fbff6eb3b34669",
         )
 
+    def test_boolean_schema_version_is_rejected(self) -> None:
+        value = self._human_evidence()
+        value["schema_version"] = True
+
+        with self.assertRaisesRegex(
+            onboarding.ExternalOnboardingEvidenceError,
+            "schema_identity_invalid",
+        ):
+            onboarding.validate_evidence(value)
+
     def test_every_counted_session_is_bound_to_the_current_artifact(self) -> None:
         value = self._human_evidence()
         value["sessions"][1]["artifact_digest"] = "sha256:" + "b" * 64  # type: ignore[index]
@@ -106,6 +186,17 @@ class ExternalOnboardingEvidenceTests(unittest.TestCase):
         value["sessions"][0]["assistance"] = "maintainer_or_private_help"  # type: ignore[index]
         result = self._validate_future_fixture(value)
         self.assertEqual(result["successful_independent_participant_count"], 4)
+
+    def test_workflow_author_or_reviewer_does_not_count(self) -> None:
+        value = self._human_evidence()
+        value["sessions"][0][  # type: ignore[index]
+            "workflow_author_or_reviewer_absent"
+        ] = False
+
+        result = self._validate_future_fixture(value)
+
+        self.assertEqual(result["successful_independent_participant_count"], 4)
+        self.assertIn("independent_install_demo_count_incomplete", result["reasons"])
 
         value = self._human_evidence()
         value["sessions"][0]["guidance_usage"] = {  # type: ignore[index]
@@ -145,6 +236,41 @@ class ExternalOnboardingEvidenceTests(unittest.TestCase):
         with self.assertRaisesRegex(
             onboarding.ExternalOnboardingEvidenceError,
             "failed_without_finding",
+        ):
+            onboarding.validate_evidence(value)
+
+    def test_mandatory_failure_cannot_be_downgraded_to_nonblocker(self) -> None:
+        value = self._human_evidence()
+        finding_id = "eof:30000000-0000-4000-8000-000000000003"
+        session = value["sessions"][0]  # type: ignore[index]
+        session["demo_status"] = "failed"
+        session["failure_code"] = "demo_network_boundary"
+        session["demo_verification"] = None
+        session["friction_categories"] = ["demo_network_boundary"]
+        session["finding_ids"] = [finding_id]
+        value["findings"] = [
+            {
+                "finding_id": finding_id,
+                "origin_session_id": session["session_id"],
+                "category": "demo_network_boundary",
+                "blocker_reason": "none",
+                "reference_type": "public_issue",
+                "reference": "https://github.com/Xpounder-com/hormuz/issues/110",
+                "status": "open",
+                "correction": None,
+            }
+        ]
+
+        with self.assertRaisesRegex(
+            onboarding.ExternalOnboardingEvidenceError,
+            "session_required_blocker_missing",
+        ):
+            onboarding.validate_evidence(value)
+
+        session["failure_code"] = "other_bounded"
+        with self.assertRaisesRegex(
+            onboarding.ExternalOnboardingEvidenceError,
+            "session_required_blocker_missing",
         ):
             onboarding.validate_evidence(value)
 
@@ -189,6 +315,23 @@ class ExternalOnboardingEvidenceTests(unittest.TestCase):
         with self.assertRaisesRegex(
             onboarding.ExternalOnboardingEvidenceError,
             "participant_sessions_overlap",
+        ):
+            onboarding.validate_evidence(value)
+
+    def test_persona_is_immutable_across_artifact_digests(self) -> None:
+        value = self._human_evidence()
+        source = value["sessions"][1]  # type: ignore[index]
+        old_session = self._old_initial(
+            source,
+            session_id="eos:30000000-0000-4000-8000-000000000002",
+            started_at="2026-08-29T14:00:00Z",
+            persona="developer",
+        )
+        value["sessions"].append(old_session)  # type: ignore[union-attr]
+
+        with self.assertRaisesRegex(
+            onboarding.ExternalOnboardingEvidenceError,
+            "participant_persona_changed",
         ):
             onboarding.validate_evidence(value)
 
@@ -293,6 +436,70 @@ class ExternalOnboardingEvidenceTests(unittest.TestCase):
             "finding_correction_not_fresh",
         ):
             onboarding.validate_evidence(value)
+
+    def test_failure_must_predate_the_corrected_artifact_freeze(self) -> None:
+        value = self._human_evidence()
+        self._append_resolved_origin(
+            value,
+            started_at="2026-08-29T15:47:00Z",
+            broad_workflow_change=False,
+        )
+
+        with self.assertRaisesRegex(
+            onboarding.ExternalOnboardingEvidenceError,
+            "finding_origin_not_before_corrected_artifact",
+        ):
+            onboarding.validate_evidence(value)
+
+    def test_broad_correction_requires_the_full_affected_cohort(self) -> None:
+        value = self._human_evidence()
+        self._append_resolved_origin(
+            value,
+            started_at="2026-08-29T13:00:00Z",
+            broad_workflow_change=True,
+        )
+        sessions = value["sessions"]  # type: ignore[assignment]
+        current_initials = list(sessions[:5])  # type: ignore[index]
+        for index, source in enumerate(current_initials[1:], start=2):
+            sessions.append(  # type: ignore[union-attr]
+                self._old_initial(
+                    source,
+                    session_id=(
+                        "eos:30000000-0000-4000-8000-"
+                        f"{index:012d}"
+                    ),
+                    started_at=f"2026-08-29T13:{index * 10:02d}:00Z",
+                )
+            )
+        sixth_participant = "eop:00000000-0000-4000-8000-000000000006"
+        old_sixth = self._old_initial(
+            current_initials[0],
+            session_id="eos:30000000-0000-4000-8000-000000000006",
+            participant_id=sixth_participant,
+            started_at="2026-08-29T13:55:00Z",
+            persona="developer",
+        )
+        sessions.append(old_sixth)  # type: ignore[union-attr]
+
+        with self.assertRaisesRegex(
+            onboarding.ExternalOnboardingEvidenceError,
+            "broad_correction_cohort_retest_incomplete",
+        ):
+            onboarding.validate_evidence(value)
+
+        current_sixth = copy.deepcopy(old_sixth)
+        current_sixth["session_id"] = (
+            "eos:40000000-0000-4000-8000-000000000006"
+        )
+        current_sixth["artifact_digest"] = onboarding.ARTIFACT_DIGEST
+        current_sixth["package_version"] = onboarding.PACKAGE_VERSION
+        current_sixth["started_at"] = "2026-08-29T17:40:00Z"
+        sessions.append(current_sixth)  # type: ignore[union-attr]
+
+        result = onboarding.validate_evidence(value)
+
+        self.assertTrue(result["validated_human_onboarding"])
+        self.assertEqual(result["participant_count"], 6)
 
     def test_cli_exit_codes_distinguish_invalid_incomplete_and_synthetic(self) -> None:
         stderr = io.StringIO()

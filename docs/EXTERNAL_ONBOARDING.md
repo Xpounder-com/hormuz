@@ -153,6 +153,8 @@ With explicit consent, the facilitator records only the strict
 - exact released artifact digest and source identity;
 - opaque participant and session IDs;
 - UTC start time, persona, coarse environment enums, and Python minor version;
+- a boolean attestation that the participant did not author or review the
+  onboarding workflow;
 - installation/demo statuses and whole-second timings;
 - assistance level and bounded shipped-material/`--help` lookup counts;
 - one fixed failure code;
@@ -206,12 +208,29 @@ These findings block completion:
 - content, credentials, tokens, customer data, or personal identity are
   exposed.
 
+The validator derives mandatory blocker treatment from the session outcome;
+the finding cannot downgrade it to `none`. `install_dependency`,
+`command_not_found`, `demo_policy`, and `documentation` failures require
+`published_guidance_failure`; `demo_network_boundary` requires the matching
+blocker; `demo_evidence` requires either `published_guidance_failure` or
+`misleading_success`; and `security` requires
+`content_or_credential_exposure`. `unsupported_platform` and `other_bounded`
+may remain nonblocking when the bounded finding supports that classification.
+For failed sessions, the equivalent installation, command-discovery,
+documentation, demo, network-boundary, evidence, and security friction
+categories carry the same requirement even if the supplied failure code is
+broader.
+
 A blocker cannot be marked resolved against the unchanged failing artifact.
 Correction requires a new immutable artifact and digest, an automated
-regression bound to the correction commit, and a fresh independent retest. If
-the correction broadly changes installation or the demo workflow, rerun the
-full affected cohort. Prior evidence remains blocker history and cannot count
-for the new digest.
+regression bound to the correction commit, and a fresh independent retest. The
+origin session must end before the corrected artifact is frozen. If the
+correction broadly changes installation or the demo workflow, every
+preregistered participant with an initial session on the failing digest must
+independently rerun the corrected digest and pass; additional participants do
+not replace anyone in that affected cohort. A participant's assigned persona
+is immutable across artifact digests. Prior evidence remains blocker history
+and cannot count for the new digest.
 
 ## Completion and nonclaims
 

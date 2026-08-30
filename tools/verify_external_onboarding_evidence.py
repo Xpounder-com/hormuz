@@ -101,6 +101,24 @@ BLOCKER_REASONS = {
     "demo_network_boundary",
     "content_or_credential_exposure",
 }
+_REQUIRED_BLOCKERS_BY_FAILURE = {
+    "install_dependency": {"published_guidance_failure"},
+    "command_not_found": {"published_guidance_failure"},
+    "demo_policy": {"published_guidance_failure"},
+    "demo_network_boundary": {"demo_network_boundary"},
+    "demo_evidence": {"published_guidance_failure", "misleading_success"},
+    "documentation": {"published_guidance_failure"},
+    "security": {"content_or_credential_exposure"},
+}
+_REQUIRED_BLOCKERS_BY_CATEGORY = {
+    "installation": {"published_guidance_failure"},
+    "command_discovery": {"published_guidance_failure"},
+    "documentation": {"published_guidance_failure"},
+    "demo_policy": {"published_guidance_failure"},
+    "demo_network_boundary": {"demo_network_boundary"},
+    "demo_evidence": {"published_guidance_failure", "misleading_success"},
+    "security": {"content_or_credential_exposure"},
+}
 REFERENCE_TYPES = {"public_issue", "private_security_advisory"}
 FINDING_STATUSES = {"open", "resolved"}
 
@@ -150,6 +168,7 @@ _SESSION_FIELDS = {
     "installation_method",
     "environment",
     "consent_content_free_recording",
+    "workflow_author_or_reviewer_absent",
     "installation_status",
     "demo_status",
     "assistance",
@@ -405,6 +424,10 @@ def _validate_session(value: object, index: int) -> dict[str, Any]:
     _validate_environment(session["environment"], f"{label}_environment")
     if session["consent_content_free_recording"] is not True:
         raise ExternalOnboardingEvidenceError(f"{label}_consent_invalid")
+    independent = _require_bool(
+        session["workflow_author_or_reviewer_absent"],
+        f"{label}_workflow_independence",
+    )
 
     installation_status = _require_enum(
         session["installation_status"], STATUSES, f"{label}_installation_status"
@@ -465,6 +488,7 @@ def _validate_session(value: object, index: int) -> dict[str, Any]:
 
     session["_guidance_qualifies"] = guidance_sources <= QUALIFYING_GUIDANCE_SOURCES
     session["_assistance_qualifies"] = assistance != "maintainer_or_private_help"
+    session["_independence_qualifies"] = independent
     return session
 
 
@@ -542,6 +566,7 @@ def _session_qualifies(session: dict[str, Any]) -> bool:
         and session["demo_status"] == "passed"
         and session["_guidance_qualifies"]
         and session["_assistance_qualifies"]
+        and session["_independence_qualifies"]
     )
 
 
@@ -549,7 +574,13 @@ def validate_evidence(value: object) -> dict[str, object]:
     """Validate one strict aggregate and return its computed milestone result."""
 
     root = _require_fields(value, _ROOT_FIELDS, "root")
-    if root["schema_id"] != SCHEMA_ID or root["schema_version"] != SCHEMA_VERSION:
+    schema_version = root["schema_version"]
+    if (
+        root["schema_id"] != SCHEMA_ID
+        or isinstance(schema_version, bool)
+        or not isinstance(schema_version, int)
+        or schema_version != SCHEMA_VERSION
+    ):
         raise ExternalOnboardingEvidenceError("schema_identity_invalid")
     evidence_kind = _require_enum(root["evidence_kind"], EVIDENCE_KINDS, "evidence_kind")
     if (
@@ -607,7 +638,14 @@ def validate_evidence(value: object) -> dict[str, object]:
 
     initial_by_key: dict[tuple[str, str], dict[str, Any]] = {}
     sessions_by_key: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    persona_by_participant: dict[str, str] = {}
     for session in sessions:
+        participant = session["participant_id"]
+        previous_persona = persona_by_participant.setdefault(
+            participant, session["persona"]
+        )
+        if previous_persona != session["persona"]:
+            raise ExternalOnboardingEvidenceError("participant_persona_changed")
         key = (session["participant_id"], session["artifact_digest"])
         sessions_by_key.setdefault(key, []).append(session)
         if not session["returning_session"]:
@@ -620,8 +658,6 @@ def validate_evidence(value: object) -> dict[str, object]:
         initial = initial_by_key[key]
         initial_start = session_times[initial["session_id"]][0]
         for session in participant_sessions:
-            if session["persona"] != initial["persona"]:
-                raise ExternalOnboardingEvidenceError("participant_persona_changed")
             if session["returning_session"]:
                 return_start = session_times[session["session_id"]][0]
                 if return_start.date() <= initial_start.date():
@@ -649,6 +685,26 @@ def validate_evidence(value: object) -> dict[str, object]:
         )
         if session["friction_categories"] != expected_categories:
             raise ExternalOnboardingEvidenceError("session_finding_invalid")
+        required_blockers = _REQUIRED_BLOCKERS_BY_FAILURE.get(
+            session["failure_code"]
+        )
+        if required_blockers and not any(
+            finding["blocker_reason"] in required_blockers for finding in linked
+        ):
+            raise ExternalOnboardingEvidenceError(
+                "session_required_blocker_missing"
+            )
+        if session["failure_code"] != "none":
+            for category in session["friction_categories"]:
+                category_blockers = _REQUIRED_BLOCKERS_BY_CATEGORY.get(category)
+                if category_blockers and not any(
+                    finding["category"] == category
+                    and finding["blocker_reason"] in category_blockers
+                    for finding in linked
+                ):
+                    raise ExternalOnboardingEvidenceError(
+                        "session_required_blocker_missing"
+                    )
 
     for finding in findings:
         origin = sessions_by_id.get(finding["origin_session_id"])
@@ -659,6 +715,10 @@ def validate_evidence(value: object) -> dict[str, object]:
             continue
         if origin["artifact_digest"] == correction["corrected_artifact_digest"]:
             raise ExternalOnboardingEvidenceError("finding_correction_not_fresh")
+        if session_times[origin["session_id"]][1] >= artifact_frozen_at:
+            raise ExternalOnboardingEvidenceError(
+                "finding_origin_not_before_corrected_artifact"
+            )
         retest = sessions_by_id.get(correction["retest_session_id"])
         if (
             retest is None
@@ -668,6 +728,22 @@ def validate_evidence(value: object) -> dict[str, object]:
             or not _session_qualifies(retest)
         ):
             raise ExternalOnboardingEvidenceError("finding_retest_invalid")
+        if correction["broad_workflow_change"]:
+            affected_participants = {
+                participant
+                for participant, digest in initial_by_key
+                if digest == origin["artifact_digest"]
+            }
+            corrected_participants = {
+                participant
+                for (participant, digest), session in initial_by_key.items()
+                if digest == correction["corrected_artifact_digest"]
+                and _session_qualifies(session)
+            }
+            if not affected_participants <= corrected_participants:
+                raise ExternalOnboardingEvidenceError(
+                    "broad_correction_cohort_retest_incomplete"
+                )
 
     current_initials = [
         session
@@ -689,6 +765,7 @@ def validate_evidence(value: object) -> dict[str, object]:
         and session["demo_status"] == "passed"
         and session["_guidance_qualifies"]
         and session["_assistance_qualifies"]
+        and session["_independence_qualifies"]
     }
     personas = {session["persona"] for session in current_initials}
     unresolved_blockers = [
