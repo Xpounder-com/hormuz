@@ -13,6 +13,7 @@ Use Node 24 (CI baseline), npm, and the committed lockfile:
 cd website
 npm ci --ignore-scripts --no-fund
 npm test
+python3 -m unittest discover -s tests -p 'test_*.py' -v
 NEXT_TELEMETRY_DISABLED=1 npm run build
 npm run typecheck
 npm run verify
@@ -35,7 +36,8 @@ the project sitemap are present. No organization-root repository was created.
 
 ## Deployment and rollback
 
-`.github/workflows/website.yml` builds on relevant PRs and main pushes. Only
+`.github/workflows/website.yml` builds on every PR and main push, including changes
+to linked root/source documents. Only
 main can upload/deploy a Pages artifact. Deployment has narrowly scoped Pages
 and OIDC permissions; PR builds cannot deploy. Product CI and branch protections
 remain unchanged. GitHub repository Pages settings must use **GitHub Actions**.
@@ -60,7 +62,10 @@ primary purpose, select appropriate hosting before adding those features.
 With Hormuz dependencies installed, run `python scripts/record-demo.py` from
 this directory (or the repository equivalent). It invokes the real CLI in a
 credential-allowlisted child environment and records unmodified output/timings,
-exit code, Python version, and source revision. `export-demo-evidence.py` uses
+exit code, Python version, and source revision. The recorder enforces its deadline
+while collecting output, reaps timed-out children, and checks staged, unstaged,
+and untracked runtime source against HEAD before and after each run.
+`export-demo-evidence.py` uses
 a separate synthetic run and preserves only schema/content-checked events.
 Both need permission to bind loopback ports. These scripts never create human
 onboarding-study evidence.
@@ -83,6 +88,8 @@ It never claims submission/delivery. No form field is sent automatically or
 saved to browser storage. Optional campaign attribution is unchecked by default.
 There is no analytics SDK or ad pixel. See `marketing/MEASUREMENT.md` for the
 manual measurement baseline and decisions required before enabling tracking.
+GitHub Pages still receives requested URLs and query strings as the hosting
+provider; optional email attribution does not prevent that initial request.
 
 Figma handoff: https://www.figma.com/design/Ax2HWqdWzVnMANEOmB5Z4z
 Public author: Mehrdad Zaker · zaker.mehrdad@gmail.com.

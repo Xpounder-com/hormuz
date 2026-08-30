@@ -8,12 +8,13 @@ marketing-packet verification, not a product-release qualification record.
 
 | Check | Observed result |
 | --- | --- |
-| `npm test` | 9 passed: project paths, contact encoding/validation, optional attribution, recording provenance, synthetic evidence, claims, and Markdown links/fragments |
+| `npm test` | 12 passed: project paths, contact encoding/validation, optional attribution, recording provenance, synthetic evidence, claims, Markdown links/fragments, workflow coverage, privacy, and sticky-ancestor regression |
+| `python3 -m unittest discover -s tests -p 'test_*.py' -v` in `website/` | 7 passed: recorder timing, silent/partial-output deadlines and child reaping, staged/unstaged/untracked/ignored source rejection, and clean-source cases |
 | `NEXT_TELEMETRY_DISABLED=1 npm run build` | Static export succeeded |
 | `npm run typecheck` | Passed |
 | `npm run verify` | 9 pages, 342 local link occurrences, 17 source-document targets passed; canonical URLs, metadata, sitemap, and downloads present |
 | `npm audit --audit-level=high` | 0 vulnerabilities reported for the locked dependencies at check time |
-| `python -m unittest -q` | 794 tests ran; OK with 64 prerequisite-dependent skips, including live/platform checks; loopback-listener permission was required |
+| `python -m unittest -q` | 795 tests ran; OK with 64 prerequisite-dependent skips, including live/platform checks; loopback-listener permission was required |
 | `python tools/verify_public_community_paths.py` | Passed, including unchanged support-matrix boundaries |
 | `python tools/verify_repository_governance.py` | Passed; new Pages publication boundary regression-tested |
 | `python tools/verify_launch_assets.py` | `passed_draft`; historical launch packet remains non-publishable |
@@ -37,6 +38,16 @@ implementation or immutable release artifact was changed.
   after selecting the visible opt-in checkbox. No email was sent.
 - All five PDF pages and all seven slides of the exported PPTX were rendered
   and individually reviewed. The editable Figma handoff was visually reviewed.
+- After the review corrections, the documentation sidebar remained at 28px
+  from the viewport top after section navigation at a scroll offset of 1833px.
+  The shared main element clips decoration without becoming a scroll container.
+- The hardened recorder ran both real demos successfully into a disposable
+  directory. Public recording bytes were left unchanged; the product source
+  tree still matches the original recorded revision.
+
+Review corrections also require the Pages workflow to remain present, run its
+checks for every PR/main push (including linked-document changes), and clarify
+that the host receives query strings even when application analytics is off.
 
 ## Deployment handoff
 

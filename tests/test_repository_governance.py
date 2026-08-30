@@ -120,6 +120,16 @@ class RepositoryGovernanceTests(unittest.TestCase):
                 ):
                     validate_repository_governance(root)
 
+    def test_pages_workflow_cannot_be_removed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._copy_contract(root)
+            (root / ".github/workflows/website.yml").unlink()
+            with self.assertRaisesRegex(
+                RepositoryGovernanceError, "Pages workflow is required"
+            ):
+                validate_repository_governance(root)
+
     def test_pages_publisher_cannot_execute_checkout_or_shell_steps(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

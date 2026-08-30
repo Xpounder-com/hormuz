@@ -1122,6 +1122,7 @@ def _validate_workflows(
     action_use_count = 0
     contents_writers: list[tuple[str, str]] = []
     pages_writers: list[tuple[str, str]] = []
+    pages_workflow_seen = False
     candidate_freeze_seen = False
     candidate_job_bytes_valid = False
     candidate_workflow_bytes_valid = False
@@ -1172,6 +1173,7 @@ def _validate_workflows(
                 f"workflow environment contract changed: {path.name}"
             )
         if path.name == "website.yml":
+            pages_workflow_seen = True
             _validate_pages_workflow(
                 workflow_permissions, jobs, job_blocks, job_fields
             )
@@ -1315,6 +1317,8 @@ def _validate_workflows(
 
     if not candidate_freeze_seen:
         raise RepositoryGovernanceError("candidate freeze workflow is required")
+    if not pages_workflow_seen:
+        raise RepositoryGovernanceError("Pages workflow is required")
     if contents_writers:
         raise RepositoryGovernanceError(
             "workflow-issued contents write is forbidden"

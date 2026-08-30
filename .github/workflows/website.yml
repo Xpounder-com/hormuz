@@ -3,9 +3,7 @@ name: Website
 on:
   push:
     branches: [main]
-    paths: ["website/**", "marketing/**", "README.md", ".github/workflows/website.yml"]
   pull_request:
-    paths: ["website/**", "marketing/**", "README.md", ".github/workflows/website.yml"]
   workflow_dispatch:
 
 permissions:
@@ -42,6 +40,8 @@ jobs:
         run: npm audit --audit-level=high
       - name: Test paths, contact privacy, claims, and recordings
         run: npm test
+      - name: Test recorder deadlines and source provenance
+        run: python3 -m unittest discover -s tests -p 'test_*.py' -v
       - name: Build static GitHub Pages export
         run: npm run build
       - name: Type-check the website

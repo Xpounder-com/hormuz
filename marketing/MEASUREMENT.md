@@ -23,8 +23,10 @@ productivity from usage data. Keep study evidence separate from sales notes.
 
 Campaign URLs may use bounded `utm_source`, `utm_medium`, and `utm_campaign`
 values, for example `?interest=pilot&utm_source=linkedin&utm_medium=founder&utm_campaign=oss_evaluation`.
-The contact page reads those locally and offers an **unchecked** checkbox to
-include them in the user-reviewed email draft. No event is sent automatically;
+The browser sends the requested URL, including its query string, to GitHub Pages
+when it loads the page; those values can be processed in hosting/security logs.
+The contact page then reads them locally and offers an **unchecked** checkbox to
+include them in the user-reviewed email draft. The application sends no analytics event;
 UTM support is not an installed analytics system. Native internal links do not
 persist campaign tags; link directly to the intended campaign landing/contact
 page when using this manual method.

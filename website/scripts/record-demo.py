@@ -11,39 +11,36 @@ import hashlib
 import json
 import os
 from pathlib import Path
-import subprocess
 import sys
-import time
 from datetime import datetime, timezone
+from recording_support import collect_output, verified_revision
 
 ROOT = Path(__file__).resolve().parents[2]
 OUTPUT = ROOT / "website/public/demo"
 
 
 def record(name: str, arguments: list[str]) -> dict:
+    revision = verified_revision(ROOT)
     # An allowlist prevents accidental provider credentials/proxy settings from
     # reaching the child. Hormuz's demo creates its own synthetic identities.
     env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "PYTHONPATH": str(ROOT), "PYTHONNOUSERSITE": "1", "PYTHONUNBUFFERED": "1", "LANG": "en_US.UTF-8"}
-    start = time.monotonic()
-    process = subprocess.Popen([sys.executable, "-u", "-m", "hormuz", *arguments], cwd=ROOT, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-    events = []
-    assert process.stdout is not None
-    for line in process.stdout:
-        events.append([round(time.monotonic() - start, 4), "o", line])
-    exit_code = process.wait(timeout=30)
+    events, exit_code, duration = collect_output(
+        [sys.executable, "-u", "-m", "hormuz", *arguments], cwd=ROOT, env=env,
+    )
+    if verified_revision(ROOT) != revision:
+        raise RuntimeError("Source HEAD changed while recording")
     transcript = "".join(event[2] for event in events)
     if exit_code != 0 or not events:
         raise RuntimeError(f"{name} failed (exit {exit_code}): {transcript}")
     if name == "gateway" and (transcript.count("PASS ") != 6 or "external provider calls: 0" not in transcript):
         raise RuntimeError("Gateway recording did not contain the six expected checks")
     command = "hormuz " + " ".join(arguments)
-    revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
     manifest = {
         "schema": "hormuz.website-recording.v1", "command": command,
         "executed_as": ["python", "-u", "-m", "hormuz", *arguments],
         "recorded_at": datetime.now(timezone.utc).isoformat(),
         "source_revision": revision, "python": sys.version.split()[0],
-        "exit_code": exit_code, "duration_seconds": round(time.monotonic() - start, 4),
+        "exit_code": exit_code, "duration_seconds": duration,
         "boundary": "Real CLI output from synthetic local inputs. Not a live-provider benchmark, customer result, or independent-user study.",
         "events": events, "transcript": transcript,
         "transcript_sha256": hashlib.sha256(transcript.encode()).hexdigest(),
@@ -56,7 +53,7 @@ def record(name: str, arguments: list[str]) -> dict:
 
 
 if __name__ == "__main__":
-    subprocess.run(["git", "diff", "--exit-code", "--", "hormuz"], cwd=ROOT, check=True, stdout=subprocess.DEVNULL)
+    verified_revision(ROOT)
     OUTPUT.mkdir(parents=True, exist_ok=True)
     for recording, args in [("gateway", ["demo"]), ("policy", ["policy", "demo"])]:
         print(json.dumps(record(recording, args)))

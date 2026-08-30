@@ -88,3 +88,25 @@ test('README and marketing relative links resolve, including Markdown fragments'
     }
   }
 });
+
+test('linked source-document changes cannot skip website verification', () => {
+  const workflow = readFileSync(new URL('../../.github/workflows/website.yml', import.meta.url), 'utf8');
+  assert.match(workflow, /  pull_request:\n/);
+  assert.doesNotMatch(workflow, /^\s+paths(?:-ignore)?:/m);
+});
+
+test('privacy notices distinguish host URL processing from application analytics', () => {
+  const page = readFileSync(new URL('../app/privacy/page.tsx', import.meta.url), 'utf8');
+  const measurement = readFileSync(new URL('../../marketing/MEASUREMENT.md', import.meta.url), 'utf8');
+  for (const text of [page, measurement]) {
+    assert.match(text, /query string/);
+    assert.match(text, /hosting\/security logs/);
+  }
+  assert.match(page, /no separate analytics or conversion event/);
+});
+
+test('the shared main element clips decoration without breaking sticky descendants', () => {
+  const css = readFileSync(new URL('../app/globals.css', import.meta.url), 'utf8');
+  assert.match(css, /main\s*\{\s*overflow:\s*clip;/);
+  assert.doesNotMatch(css, /main\s*\{[^}]*overflow:\s*(hidden|auto|scroll)/);
+});
