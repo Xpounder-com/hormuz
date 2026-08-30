@@ -103,6 +103,7 @@ test('privacy notices distinguish host URL processing from application analytics
     assert.match(text, /hosting\/security logs/);
   }
   assert.match(page, /no separate analytics or conversion event/);
+  assert.match(page, /process or save it before you send/);
 });
 
 test('the shared main element clips decoration without breaking sticky descendants', () => {
