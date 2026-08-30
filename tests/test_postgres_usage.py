@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
 from pathlib import Path
 import sqlite3
 import tempfile
 import threading
 import unittest
+from unittest import mock
 
 from hormuz.evidence import EvidenceStorageError
 from hormuz.postgres import PostgresStorageError, postgres_transaction
@@ -13,11 +15,67 @@ from hormuz.postgres_usage_store import PostgresUsageStore
 from hormuz.store import ReservationDenied, ReservationScope, UsageStore
 if __package__:
     from ._postgres_fixture import FIXTURES, PostgresTestCase, _identity, _normalized_events
+    from ._usage_repository_contract import exercise_usage_repository, ledger_clock, read_usage_repository
 else:  # Isolated wheel compatibility discovery uses the tests directory as its import root.
     from _postgres_fixture import FIXTURES, PostgresTestCase, _identity, _normalized_events
+    from _usage_repository_contract import exercise_usage_repository, ledger_clock, read_usage_repository
 
 
 class PostgresUsageEvidenceTests(PostgresTestCase):
+    def test_all_v1_operations_have_equivalent_normalized_outcomes(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            sqlite_store = UsageStore(Path(temporary) / "usage.sqlite3")
+            self.assertEqual(
+                exercise_usage_repository(self, sqlite_store),
+                exercise_usage_repository(self, self.store),
+            )
+
+    def test_read_operations_preserve_rows_and_the_existing_locking_contract(self) -> None:
+        transaction = self.store._transaction
+
+        def durable_rows():
+            tables = (
+                "hormuz_schema_migrations", "gateway_usage_events", "gateway_secret_events",
+                "gateway_budget_reservations", "gateway_request_attempts", "gateway_request_attempt_events",
+                "gateway_audit_chain_epochs", "gateway_audit_chain_heads", "gateway_audit_chain_entries",
+                "gateway_audit_chain_checkpoints",
+            )
+            rows = {}
+            with self.psycopg.connect(self.owner_dsn) as connection:
+                with connection.cursor() as cursor:
+                    for table in tables:
+                        cursor.execute(self.sql.SQL(
+                            "SELECT row_to_json(t)::text FROM {}.{} AS t ORDER BY row_to_json(t)::text"
+                        ).format(self.sql.Identifier(self.schema), self.sql.Identifier(table)))
+                        rows[table] = cursor.fetchall()
+            return rows
+
+        @contextmanager
+        def read_only_transaction(organization_id):
+            with transaction(organization_id) as connection:
+                connection.execute("SET TRANSACTION READ ONLY")
+                yield connection
+
+        for populated in (False, True):
+            with self.subTest(populated=populated):
+                if populated:
+                    exercise_usage_repository(self, self.store)
+                before = durable_rows()
+                # FOR SHARE protects a consistent verification snapshot; it
+                # is not a durable mutation but SQL READ ONLY disallows it.
+                self.store.verify_audit_chain(organization_id="acme")
+                with (
+                    mock.patch.object(self.store, "_transaction", side_effect=read_only_transaction),
+                    ledger_clock(),
+                ):
+                    read_usage_repository(self.store, verify_chain=False)
+                    with self.assertRaises(PostgresStorageError) as raised:
+                        self.store.verify_audit_chain(organization_id="acme")
+                    self.assertEqual(raised.exception.code, "storage_unavailable")
+                    with self.assertRaises(PostgresStorageError):
+                        self.store.audit_chain_head(organization_id="acme")
+                self.assertEqual(durable_rows(), before)
+
     def test_sqlite_and_postgres_have_equivalent_normalized_outcomes(self) -> None:
         identity = _identity("acme")
         with tempfile.TemporaryDirectory() as temporary:

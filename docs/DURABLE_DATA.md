@@ -42,6 +42,13 @@ land, `durable-data-v1.json` remains authoritative for every table the current
 release creates and must not list planned tables. #214 stays open for final
 candidate transition proof; #213 introduces no portfolio table or migration.
 
+The [persistence composition boundary](ARCHITECTURE.md#usage-and-portfolio-persistence-composition)
+provides a fully declared v1 usage protocol and a typed factory slot for a
+separate future portfolio owner. The bundle is an in-memory reference holder,
+not a durable data class, connection pool owner, transaction coordinator, or
+implemented portfolio store. Existing SQLite/PostgreSQL schemas, row-level
+security, and transaction ownership are unchanged.
+
 The planned plane has eight versioned entity families: work-scope versions,
 external-work binding events, governed-run attribution events, work-budget
 plans, work-outcome events, run-outcome association events, model scorecards,

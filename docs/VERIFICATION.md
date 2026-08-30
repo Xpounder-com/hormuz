@@ -52,6 +52,63 @@ view, recommendation, human pilot, causal effect, HA/SLA, or certification.
 Those remain ordered issues in
 [epic #226](https://github.com/Xpounder-com/hormuz/issues/226).
 
+## V1 usage-repository composition gate
+
+Issue #213 is a feature-free interface and factory boundary. Its checks freeze
+the exact 21 public operation names, parameters, defaults, and annotations of
+both usage adapters; retain the public protocol alias; and require concrete
+SQLite/PostgreSQL adapters to satisfy the repaired protocol structurally.
+The three audit-chain operations formerly nested under `monthly_usage_bounds`
+are protocol members. Unknown keywords and invalid argument types must fail
+the static negative fixtures.
+
+```bash
+python3 -m pip install --require-hashes -r requirements/persistence-typecheck.lock
+python3 -m mypy --strict --follow-imports=silent --disallow-any-unimported \
+  --no-incremental --python-version 3.11 \
+  hormuz/store_router.py tests/typing_fixtures/usage_repository.py
+python3 -m unittest -v tests.test_usage_repository_boundary \
+  tests.test_repository_composition tests.test_usage_repository_characterization
+```
+
+The hash-pinned type checker runs in the existing required package job and is
+not a runtime dependency. It checks the factory and structural conformance of
+the imported real adapter interfaces; it does not claim the entire legacy
+codebase is strict-typed. The source archive includes the lock and fixtures.
+
+The shared `_usage_repository_contract.py` scenario exercises all 21 operations
+before and after refactoring: both tenants, six reporting dimensions,
+actor/team/tenant-filtered reads, explicit monthly bounds, reservation refresh/release/denial,
+atomic attempt finalization and retry rejection, unknown/stale holds, audit
+export, checkpoint replay/conflict, anchor aging, and recovery epochs. Parity
+normalizes generated event IDs, event/commit clocks, and exact integral
+PostgreSQL `numeric` aggregates; it never rounds amounts or removes policy,
+tenant, token, cost-basis, coverage, state, or schema fields.
+
+With `HORMUZ_TEST_POSTGRES_DSN` pointed at a disposable PostgreSQL database,
+run `tests.test_postgres_usage`, `tests.test_postgres_request_attempts`,
+`tests.test_postgres_audit_chain`, `tests.test_postgres_migration_rls`, and
+`tests.test_postgres_pooling`. CI runs these against an isolated installed wheel.
+The full suite retains gateway, policy, exact-client, schema/migration,
+concurrency, audit, and recovery regressions. A skipped PostgreSQL suite is
+not backend parity evidence.
+
+Read checks cover empty and populated stores. SQLite uses a real read-only
+connection and compares complete dumps before/after. PostgreSQL compares all
+ten v1 ledger/migration tables before/after and runs non-locking reads in
+`READ ONLY` transactions. Chain verification keeps its existing `FOR SHARE`
+snapshot lock and needs a normal PostgreSQL transaction; SQL `READ ONLY`
+continues to reject it. `audit_chain_head` still initializes an empty epoch,
+so it is intentionally not classified as read-only. These differences are
+characterized, not changed.
+
+Factory tests cover construction ordering, exact forwarding of configuration,
+environment, read-only intent and a borrowed pool, failure propagation, and
+unchanged legacy factory behavior. No portfolio implementation, table,
+migration, wire field, command, version bump, or release is provided by this
+gate. Close #213 only after review, package/client checks, and exact-main CI;
+#214 and the downstream portfolio issues remain separate gates.
+
 ## Live pinned-client release gate
 
 The manual `Live BYO-provider client conformance` workflow and

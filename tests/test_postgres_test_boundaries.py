@@ -84,6 +84,8 @@ EXPECTED_OWNERS = {
     "test_postgres_usage": (
         "PostgresUsageEvidenceTests",
         {
+            "test_all_v1_operations_have_equivalent_normalized_outcomes",
+            "test_read_operations_preserve_rows_and_the_existing_locking_contract",
             "test_sqlite_and_postgres_have_equivalent_normalized_outcomes",
             "test_contract_fixtures_and_historical_version_are_materialized",
             "test_malformed_evidence_fails_closed_without_content",
@@ -151,7 +153,7 @@ class PostgresTestBoundaryTests(unittest.TestCase):
             suite = unittest.defaultTestLoader.loadTestsFromName(f"{module_name}.{class_name}")
             self.assertEqual(suite.countTestCases(), len(expected_methods), module_name)
 
-        self.assertEqual(len(owned), 62)
+        self.assertEqual(len(owned), 64)
         self.assertFalse((ROOT / "tests" / "test_postgres.py").exists())
         self.assertFalse(
             any(name.startswith("test_") for name in PostgresTestCase.__dict__),

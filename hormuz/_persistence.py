@@ -23,10 +23,13 @@ from .audit_chain import (
 )
 from .config import Identity
 from .contracts import (
+    ALLOCATION_BASIS_DIRECT_GATEWAY_REQUEST,
     AUDIT_CHAIN_ENTRY_LEGACY_SCHEMA_VERSION,
     AUDIT_CHAIN_ENTRY_SCHEMA_VERSION,
     AUDIT_EVENT_SCHEMA_ID,
     AUDIT_EVENT_SCHEMA_VERSION,
+    COST_BASIS_CONFIGURED_RATE_CARD_ESTIMATE,
+    COVERAGE_GATEWAY_CAPTURED_REQUESTS_ONLY,
     REQUEST_ATTEMPT_EVENT_SCHEMA_ID,
     REQUEST_ATTEMPT_EVENT_SCHEMA_VERSION,
     REQUEST_ATTEMPT_SCHEMA_ID,
@@ -183,43 +186,181 @@ class RequestAttemptStateError(RuntimeError):
 
 
 class UsageRepository(Protocol):
-    """The narrow metadata-only storage contract used by policy and gateway code."""
+    """The complete v1 ledger contract consumed by gateway, policy, and CLI code.
+
+    SQLite and PostgreSQL retain their own SQL, transactions, locks, and tenant
+    checks. Portfolio operations belong to a separate repository composed at
+    the factory boundary, not to this protocol or either usage adapter.
+    """
 
     def verify_ready(self) -> None: ...
 
-    def record(self, **kwargs: object) -> str: ...
+    def record(
+        self,
+        *,
+        identity: Identity,
+        client: str,
+        protocol: str,
+        requested_model: str,
+        resolved_alias: str | None,
+        upstream_model: str | None,
+        provider_reported_model: str | None = None,
+        policy_version: str = "legacy-unversioned",
+        policy_action: str,
+        status: str,
+        input_tokens: int = 0,
+        output_tokens: int = 0,
+        cache_read_tokens: int = 0,
+        cache_write_tokens: int = 0,
+        reasoning_tokens: int = 0,
+        cost_microusd: int = 0,
+        cost_basis: str = COST_BASIS_CONFIGURED_RATE_CARD_ESTIMATE,
+        allocation_basis: str = ALLOCATION_BASIS_DIRECT_GATEWAY_REQUEST,
+        coverage: str = COVERAGE_GATEWAY_CAPTURED_REQUESTS_ONLY,
+        provider_request_id: str | None = None,
+        redaction_count: int = 0,
+        redaction_rules: tuple[str, ...] = (),
+    ) -> str: ...
 
-    def record_secret_event(self, **kwargs: object) -> str: ...
+    def record_secret_event(
+        self,
+        *,
+        identity: Identity,
+        client: str,
+        protocol: str,
+        requested_model: str,
+        policy_version: str = "legacy-unversioned",
+        coverage: str = COVERAGE_GATEWAY_CAPTURED_REQUESTS_ONLY,
+        action: str,
+        detection_count: int,
+        rules: tuple[str, ...],
+    ) -> str: ...
 
-    def reserve_budget(self, **kwargs: object) -> str | None: ...
+    def reserve_budget(
+        self,
+        *,
+        identity: Identity,
+        scopes: tuple[ReservationScope, ...],
+        reserved_tokens: int,
+        reserved_cost_microusd: int,
+        ttl_seconds: int,
+    ) -> str | None: ...
 
-    def begin_request_attempt(self, **kwargs: object) -> RequestAttempt: ...
+    def begin_request_attempt(
+        self,
+        *,
+        identity: Identity,
+        client: str,
+        protocol: str,
+        requested_model: str,
+        resolved_alias: str | None,
+        upstream_model: str | None,
+        policy_version: str,
+        policy_action: str,
+        redaction_count: int,
+        redaction_rules: tuple[str, ...],
+        scopes: tuple[ReservationScope, ...],
+        reserved_tokens: int,
+        reserved_cost_microusd: int,
+        ttl_seconds: int,
+    ) -> RequestAttempt: ...
 
-    def finalize_request_attempt(self, **kwargs: object) -> None: ...
+    def finalize_request_attempt(
+        self,
+        *,
+        attempt: RequestAttempt,
+        organization_id: str,
+        status: str,
+        provider_reported_model: str | None = None,
+        input_tokens: int = 0,
+        output_tokens: int = 0,
+        cache_read_tokens: int = 0,
+        cache_write_tokens: int = 0,
+        reasoning_tokens: int = 0,
+        cost_microusd: int = 0,
+        provider_request_id: str | None = None,
+    ) -> None: ...
 
-    def mark_request_attempt_outcome_unknown(self, **kwargs: object) -> bool: ...
+    def mark_request_attempt_outcome_unknown(
+        self,
+        *,
+        attempt: RequestAttempt,
+        organization_id: str,
+        reason_code: str,
+    ) -> bool: ...
 
-    def sweep_stale_request_attempts(self, **kwargs: object) -> int: ...
+    def sweep_stale_request_attempts(self, *, organization_id: str | None = None) -> int: ...
 
-    def release_budget_reservation(self, reservation_id: str | None, **kwargs: object) -> None: ...
+    def release_budget_reservation(
+        self, reservation_id: str | None, *, organization_id: str | None = None,
+    ) -> None: ...
 
-    def refresh_budget_reservation(self, reservation_id: str | None, **kwargs: object) -> None: ...
+    def refresh_budget_reservation(
+        self, reservation_id: str | None, *, ttl_seconds: int, organization_id: str | None = None,
+    ) -> None: ...
 
-    def active_budget_reservations(self, **kwargs: object) -> int: ...
+    def active_budget_reservations(self, *, organization_id: str | None = None) -> int: ...
 
-    def monthly_totals(self, **kwargs: object) -> MonthlyTotals: ...
+    def monthly_totals(
+        self,
+        *,
+        actor_id: str | None = None,
+        team_id: str | None = None,
+        organization_id: str | None = None,
+        starts_at: datetime | None = None,
+        ends_before: datetime | None = None,
+    ) -> MonthlyTotals: ...
 
-    def monthly_secret_totals(self, **kwargs: object) -> SecretTotals: ...
+    def monthly_secret_totals(
+        self,
+        *,
+        actor_id: str | None = None,
+        team_id: str | None = None,
+        organization_id: str | None = None,
+    ) -> SecretTotals: ...
 
-    def summary_rows(self, **kwargs: object) -> list[dict[str, object]]: ...
+    def summary_rows(self, *, organization_id: str | None = None) -> list[dict[str, object]]: ...
 
-    def report_rows(self, **kwargs: object) -> list[dict[str, object]]: ...
+    def report_rows(
+        self,
+        *,
+        group_by: str,
+        actor_id: str | None = None,
+        team_id: str | None = None,
+        organization_id: str | None = None,
+    ) -> list[dict[str, object]]: ...
 
-    def audit_events(self, **kwargs: object) -> list[dict[str, object]]: ...
+    def audit_events(
+        self, *, since: str, kind: str = "all", organization_id: str | None = None,
+    ) -> list[dict[str, object]]: ...
 
-    def audit_chain_head(self, **kwargs: object) -> AuditChainHead: ...
+    def audit_chain_head(self, *, organization_id: str) -> AuditChainHead: ...
 
-    def audit_chain_anchor_status(self, **kwargs: object) -> AuditChainAnchorStatus: ...
+    def audit_chain_anchor_status(
+        self,
+        *,
+        organization_id: str,
+        maximum_age_seconds: int | None = None,
+        now: datetime | None = None,
+    ) -> AuditChainAnchorStatus: ...
+
+    def record_audit_chain_checkpoint(
+        self,
+        *,
+        checkpoint: Mapping[str, object],
+        artifact_sha256: str,
+        anchor_backend: str,
+        object_version: str | None,
+        anchored_at: datetime | None = None,
+    ) -> None: ...
+
+    def begin_audit_chain_epoch(
+        self, *, checkpoint: Mapping[str, object], reason_code: str,
+    ) -> AuditChainHead: ...
+
+    def verify_audit_chain(
+        self, *, organization_id: str, checkpoint: Mapping[str, object] | None = None,
+    ) -> AuditChainHead: ...
 
 
 def monthly_usage_bounds(
@@ -244,12 +385,6 @@ def monthly_usage_bounds(
     if normalized_start >= normalized_end:
         raise ValueError("usage period must have a positive duration")
     return normalized_start, normalized_end
-
-    def record_audit_chain_checkpoint(self, **kwargs: object) -> None: ...
-
-    def begin_audit_chain_epoch(self, **kwargs: object) -> AuditChainHead: ...
-
-    def verify_audit_chain(self, **kwargs: object) -> AuditChainHead: ...
 
 
 def build_request_attempt_root(

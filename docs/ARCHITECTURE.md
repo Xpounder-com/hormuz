@@ -109,6 +109,44 @@ The CLI ownership manifest is:
 - `hormuz/commands/client.py` owns Codex and Claude Code configuration rendering, credential-helper behavior, and client/auth parser registration. The façade retains legacy argv normalization and thin private compatibility wrappers only.
 - `hormuz/commands/runtime.py` owns serving, provider-free demo, diagnostics, usage status, contract inspection, storage operations, and their parser registration behind a dispatch-time runtime dependency seam. The façade remains the stable entry point, parser assembler, legacy normalization layer, and shared exception/exit-code boundary.
 
+## Usage and portfolio persistence composition
+
+The feature-free #213 boundary keeps all 21 existing v1 usage operations in
+`hormuz._persistence.UsageRepository`, with explicit parameter and return types
+matching both adapters. `hormuz.store.UsageRepository` remains the same public
+compatibility object. The contract covers readiness, usage/security records,
+budget holds, request attempts, monthly reports, audit export, checkpoints,
+epochs, and chain verification. No portfolio methods are added to it.
+
+| Owner | Responsibility |
+| --- | --- |
+| `UsageRepository` | Declare the complete existing v1 operation contract. |
+| `UsageStore` / `PostgresUsageStore` | Preserve backend-specific SQL, migrations, transactions, locks, tenant checks, RLS, and error translation. |
+| `store_router.RepositoryFactory[T]` | Type a separate repository's construction from configuration, environment, read-only intent, and a caller-owned pool. |
+| `store_router.RepositoryBundle[T]` | Keep `usage` and the separately typed future `portfolio` owner distinct. |
+
+`create_usage_store` keeps its existing signature, concrete return objects,
+and startup behavior. Only an explicit `create_repository_bundle` call invokes
+a supplied portfolio factory; this change registers no portfolio implementation
+and changes no existing gateway or CLI caller. The usage factory runs first,
+so a usage configuration/schema failure prevents the second factory from
+running. Factory failures propagate, and the caller retains responsibility for
+the shared PostgreSQL pool. Repository composition does not open a shared
+transaction or promise cross-repository atomicity.
+
+The read boundary is deliberately precise. Reporting, audit export, readiness,
+anchor status, and chain verification do not change durable rows.
+`audit_chain_head` retains its initializing behavior and is not a read-only
+operation. SQLite's explicit read-only store cannot create or migrate a file.
+PostgreSQL chain verification retains `FOR SHARE` for a consistent snapshot;
+it requires a normal transaction even though it changes no logical rows.
+The existing `read_only` factory argument affects SQLite initialization, not
+PostgreSQL credentials or transaction access mode.
+
+Future portfolio repositories require the relevant #214 compatibility preflight
+and feature gates; they must own their own protocols, schemas, and SQL beside
+the unchanged usage ledger. See the [verification record](VERIFICATION.md#v1-usage-repository-composition-gate).
+
 ## Trust boundary
 
 Hormuz is trusted with plaintext requests and responses because it must inspect and relay them. The usage store is deliberately metadata-only. Redaction runs after authentication and policy selection but before upstream serialization. The core has no context retrieval, context lifecycle, context cache, provenance, memory, or content-storage path; the separately packaged experiment is not imported by normal gateway operation. See [CONTEXT_EXPERIMENT_MIGRATION.md](CONTEXT_EXPERIMENT_MIGRATION.md).
