@@ -44,10 +44,12 @@ never rebuilds or uploads replacement source bytes.
 ## Deferred external administrator study
 
 The original five-person offline and three-person PostgreSQL protocol below is
-retained as a versioned, auditable design for possible future work under
-[issue #110](https://github.com/Xpounder-com/hormuz/issues/110). Current counts
-remain **0/5** and **0/3**. They are not v1.0.0 release dependencies and must
-not be inferred from the internal sandbox result.
+retained as a versioned, auditable design for possible future work. Current
+counts remain **0/5** and **0/3**. They are not v1.0.0 release dependencies and
+must not be inferred from the internal sandbox result. This protocol is
+separate from the installation/demo evidence tracked by
+[issue #110](https://github.com/Xpounder-com/hormuz/issues/110); the same people
+may participate in both, but neither result may be relabeled as the other.
 
 ### Qualifying participants
 

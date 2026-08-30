@@ -85,11 +85,15 @@ outcomes. Promotion accepts only that candidate's unchanged bytes; it never
 rebuilds. Passing proves deterministic internal workflow repeatability, not a
 five-person usability study or managed PostgreSQL correctness.
 
-External onboarding remains an optional, deferred study in
-[QUIET_ALPHA.md](docs/QUIET_ALPHA.md). Its strict aggregate uses opaque
-participant IDs and fixed metadata enums; Hormuz adds no product telemetry.
-Issue #110 must close before Hormuz claims validated human onboarding, but it is
-not a dependency for the bounded v1 internal-repeatability claim.
+External onboarding is now recruiting under
+[issue #110](https://github.com/Xpounder-com/hormuz/issues/110) using the
+[v1.0.0 study protocol](docs/EXTERNAL_ONBOARDING.md). Its current count is
+**0/5 independent initial completions** and **0 returning users**. Every counted
+session is bound to the immutable released source-archive digest, and its strict
+aggregate uses only opaque IDs and fixed metadata fields; Hormuz adds no product
+telemetry. Issue #110 must close before Hormuz claims validated human
+onboarding, but it is not a dependency for the already published v1.0.0 release
+or its bounded internal-repeatability claim.
 
 ## What works
 
@@ -442,5 +446,5 @@ compatibility report. Suspected vulnerabilities must follow the
 governed by the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 The evidence-grounded [launch package](docs/launch/README.md) is archived
-v0.1.3 recruitment material. Issue #110 preserves any future external
-onboarding-validation study.
+v0.1.3 recruitment material. The active v1.0.0 external-onboarding study is
+defined separately in [docs/EXTERNAL_ONBOARDING.md](docs/EXTERNAL_ONBOARDING.md).

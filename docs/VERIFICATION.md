@@ -33,12 +33,15 @@ cannot substitute for that evidence. The result does not establish
 provider-invoice reconciliation, every client feature, traffic bypassing
 Hormuz, or enterprise production readiness.
 
-## Post-publication onboarding-validation milestone
+## Active post-publication onboarding-validation milestone
 
-The invited-reviewer procedure and strict content-free aggregate are defined
-in [QUIET_ALPHA.md](QUIET_ALPHA.md). The evidence contract allows only opaque
-participant/session IDs, coarse environment enums, completion states, elapsed
-seconds, fixed failure codes, issue/advisory references, resolution commits,
+The v1.0.0 invited-reviewer procedure and strict content-free aggregate are
+defined in [EXTERNAL_ONBOARDING.md](EXTERNAL_ONBOARDING.md). Every counted
+session binds to the immutable promoted source archive at digest
+`sha256:2c3b16c1742ee76032a33f3714492a8d8515c5291d4d57520441882cd8bc5b5a`.
+The evidence contract allows only opaque participant/session IDs, coarse
+environment enums, completion states, elapsed seconds, fixed demo observations,
+failure codes, bounded guidance/friction metadata, issue/advisory references,
 and content-free attestations. It has no fields for identities, feedback text,
 prompts, responses, credentials, customer data, local paths, logs, or
 screenshots, and Hormuz contains no hidden collection path.
@@ -46,23 +49,27 @@ screenshots, and Hormuz contains no hidden collection path.
 Run the contract tests and synthetic-fixture check with:
 
 ```bash
-python -m unittest -v tests.test_quiet_alpha_evidence
-python tools/verify_quiet_alpha_evidence.py \
-  tests/fixtures/quiet_alpha/complete-synthetic-v1.json \
+python -m unittest -v tests.test_external_onboarding_evidence
+python tools/verify_external_onboarding_evidence.py \
+  tests/fixtures/external_onboarding/complete-synthetic-v1.json \
   --allow-synthetic-fixture
 ```
 
-Synthetic evidence always reports `ready_for_broad_promotion: false`. Actual
-validated-onboarding evidence additionally requires the operator to attest
-distinct humans off-repository, five independent installation/demo completions
-across all four reviewer personas, a later returning-user session, and
-resolution plus independent retest of every security or installation blocker.
-The external study is deferred and the honest count remains 0/5. Internal and
-synthetic runs do not count. Closing #110 remains mandatory before any
-validated-human-onboarding or stronger commercial-readiness claim, but it is
-not a v1.0.0 release dependency. The validator does not prove the
+Synthetic evidence always reports `validated_human_onboarding: false`. Actual
+evidence requires an off-repository distinct-human attestation, five to ten
+preregistered participants, at least five independent installation/demo
+completions across all four reviewer personas, a later returning-user session,
+and correction plus automated regression and independent retest of every
+blocker. Recruitment is active; the honest count remains 0/5 initial
+completions and zero returning users. Internal and synthetic runs do not count.
+Closing #110 remains mandatory before any validated-human-onboarding claim, but
+it is not a v1.0.0 release dependency. The validator does not prove the
 off-repository identity attestation or replace #115's separately completed
 live-provider evidence.
+
+The older [QUIET_ALPHA.md](QUIET_ALPHA.md) protocol and
+`hormuz.quiet-alpha-evidence` v1 validator remain archived v0.1.3 compatibility
+material. They cannot satisfy the active v1.0.0 milestone.
 
 ## Durable-data inventory boundary
 
@@ -167,7 +174,7 @@ the deferred human-evidence schema, synthetic evidence, incomplete runs, and
 any widened claim boundary. Passing proves deterministic internal offline
 workflow repeatability only.
 
-## Deferred independent administrator study
+## Separate deferred independent administrator study
 
 The external protocol and strict content-free aggregate are defined in
 [POLICY_ADMIN_USABILITY.md](POLICY_ADMIN_USABILITY.md). Verify the contract and
@@ -206,10 +213,12 @@ change requires every participant in the affected track to rerun against the
 new digest.
 
 Synthetic and internal results never satisfy this deferred human study. The
-current count remains 0/5 offline and 0/3 PostgreSQL under issue #110. The
-legacy human-evidence schema is not accepted by the current v1 candidate
-manifest or promotion command and must not be reported as completed from the
-internal sandbox result.
+current count remains 0/5 offline and 0/3 PostgreSQL. This is separate from the
+installation/demo evidence tracked by issue #110: the same people may
+participate in both, but neither result may be relabeled as the other. The
+legacy human-evidence schema is not accepted by the v1 candidate manifest or
+promotion command and must not be reported as completed from the internal
+sandbox result.
 
 ## Launch-claim boundary
 

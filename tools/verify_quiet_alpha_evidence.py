@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate post-publication onboarding evidence without retaining tester content.
+"""Validate the archived v0.1.3 onboarding-evidence contract.
 
 The aggregate records only allowlisted environment and completion metadata.
 Names, handles, email addresses, feedback text, prompts, responses, credentials,
@@ -8,7 +8,8 @@ schema. Synthetic fixtures are useful for contract tests but can never satisfy
 the external onboarding-validation milestone. The schema-v1 `quiet-alpha`,
 `release_gate`, and `broad_promotion` names remain compatibility identifiers;
 they gate validated-onboarding and beyond-alpha claims, not the bounded initial
-tester-recruitment announcement.
+tester-recruitment announcement. This compatibility validator cannot satisfy
+the active v1.0.0 external-onboarding contract tracked by issue #110.
 """
 
 from __future__ import annotations
