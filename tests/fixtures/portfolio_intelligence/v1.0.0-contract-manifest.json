@@ -1,0 +1,651 @@
+{
+  "compatibility": {
+    "addition_rule": "New optional fields require a new documented schema version before release.",
+    "breaking_change_rule": "Removed fields, changed types, changed semantics, or new required fields require a new schema version and migration guidance.",
+    "current_release_line": "0.2",
+    "legacy_audit_read": "Audit chain entry version 1 remains readable for historical gateway evidence. Version 2 is limited to the documented custody source union; verifiers fail closed for unsupported entry or source versions.",
+    "provider_protocol_rule": "OpenAI and Anthropic response bodies remain provider-owned. Hormuz metadata is versioned through X-Hormuz-Contract."
+  },
+  "content_boundary": "No schema in this manifest permits prompts, responses, secret values, matched detector values, filenames, or source content.",
+  "error_codes": [
+    "gateway_upstream_error",
+    "gateway_upstream_not_configured",
+    "hormuz_budget_denied",
+    "hormuz_custody_restricted",
+    "hormuz_policy_denied",
+    "hormuz_provider_policy_denied",
+    "hormuz_secret_detected",
+    "hormuz_storage_unavailable",
+    "invalid_content_length",
+    "invalid_json",
+    "invalid_request",
+    "length_required",
+    "not_found",
+    "request_too_large",
+    "unauthorized"
+  ],
+  "policy_action_semantics": {
+    "allowed": "The requested route was allowed without a route substitution or output cap.",
+    "budget_reservation_denied": "Actual usage plus the active reservation would exceed a configured limit.",
+    "capped": "The policy lowered the maximum output-token bound.",
+    "denied": "Policy denied the request before provider egress.",
+    "fallback": "The requested model was rerouted to the configured compatible fallback. The wire value remains fallback for compatibility.",
+    "provider_policy_denied": "Hormuz denied a provider-storage or background-mode policy conflict before provider egress.",
+    "redacted": "A supported request shape had protected material replaced before provider serialization.",
+    "secret_denied": "Hormuz denied protected material before provider egress."
+  },
+  "request_status_semantics": {
+    "denied": "Hormuz denied the request before provider egress.",
+    "failed": "The provider or relay failed without a provider rate-limit response.",
+    "rate_limited": "The provider returned HTTP 429 after Hormuz allowed and forwarded the request.",
+    "succeeded": "A provider response completed with a 2xx status and the downstream relay remained connected."
+  },
+  "schema_id": "hormuz.policy-evidence-manifest",
+  "schema_version": 1,
+  "schemas": [
+    {
+      "delivery": "response",
+      "fields": [
+        "schema_id",
+        "schema_version",
+        "status",
+        "service",
+        "protocols"
+      ],
+      "legacy": false,
+      "ownership": "hormuz",
+      "schema_id": "hormuz.gateway-health",
+      "schema_version": 1
+    },
+    {
+      "delivery": "response",
+      "fields": [
+        "schema_id",
+        "schema_version",
+        "status",
+        "service",
+        "reason"
+      ],
+      "legacy": false,
+      "ownership": "hormuz",
+      "schema_id": "hormuz.gateway-readiness",
+      "schema_version": 1
+    },
+    {
+      "delivery": "response",
+      "fields": [
+        "schema_id",
+        "schema_version",
+        "actor_id",
+        "actor_name",
+        "team_id",
+        "team_name",
+        "organization_id",
+        "identity_type",
+        "allowed_clients",
+        "authentication_source"
+      ],
+      "legacy": false,
+      "ownership": "hormuz",
+      "schema_id": "hormuz.gateway-identity",
+      "schema_version": 1
+    },
+    {
+      "delivery": "response",
+      "fields": [
+        "schema_id",
+        "schema_version",
+        "month",
+        "requests",
+        "denied_requests",
+        "rate_limited_requests",
+        "input_tokens",
+        "output_tokens",
+        "cache_read_tokens",
+        "cache_write_tokens",
+        "reasoning_tokens",
+        "cost_usd",
+        "cost_basis",
+        "allocation_basis",
+        "coverage",
+        "redactions",
+        "secret_events",
+        "secret_detections",
+        "secret_denied_requests"
+      ],
+      "legacy": false,
+      "ownership": "hormuz",
+      "schema_id": "hormuz.gateway-usage-summary",
+      "schema_version": 1
+    },
+    {
+      "delivery": "response",
+      "fields": [
+        "schema_id",
+        "schema_version",
+        "error"
+      ],
+      "legacy": true,
+      "ownership": "hormuz",
+      "schema_id": "hormuz.gateway-error",
+      "schema_version": 1
+    },
+    {
+      "delivery": "response",
+      "fields": [
+        "schema_id",
+        "schema_version",
+        "error"
+      ],
+      "legacy": true,
+      "ownership": "hormuz",
+      "schema_id": "hormuz.gateway-error",
+      "schema_version": 2
+    },
+    {
+      "delivery": "response",
+      "fields": [
+        "schema_id",
+        "schema_version",
+        "error"
+      ],
+      "legacy": false,
+      "ownership": "hormuz",
+      "schema_id": "hormuz.gateway-error",
+      "schema_version": 3
+    },
+    {
+      "delivery": "cli-output",
+      "fields": [
+        "schema_id",
+        "schema_version",
+        "allowed",
+        "action",
+        "reason",
+        "requested_model",
+        "resolved_alias",
+        "routed_model",
+        "max_output_tokens",
+        "policy_version"
+      ],
+      "legacy": false,
+      "ownership": "hormuz",
+      "schema_id": "hormuz.policy-decision",
+      "schema_version": 1
+    },
+    {
+      "delivery": "cli-output",
+      "fields": [
+        "schema_id",
+        "schema_version",
+        "organization_id",
+        "initialized",
+        "active",
+        "versions",
+        "administrators"
+      ],
+      "legacy": false,
+      "ownership": "hormuz",
+      "schema_id": "hormuz.policy-control-status",
+      "schema_version": 1
+    },
+    {
+      "delivery": "cli-output",
+      "fields": [
+        "schema_id",
+        "schema_version",
+        "organization_id",
+        "baseline",
+        "candidate",
+        "identical",
+        "changes"
+      ],
+      "legacy": false,
+      "ownership": "hormuz",
+      "schema_id": "hormuz.policy-comparison",
+      "schema_version": 1
+    },
+    {
+      "delivery": "cli-output",
+      "fields": [
+        "schema_id",
+        "schema_version",
+        "organization_id",
+        "evaluated_at",
+        "usage_period",
+        "usage_basis",
+        "request",
+        "baseline",
+        "candidate"
+      ],
+      "legacy": false,
+      "ownership": "hormuz",
+      "schema_id": "hormuz.policy-preview",
+      "schema_version": 1
+    },
+    {
+      "delivery": "cli-output",
+      "fields": [
+        "schema_id",
+        "schema_version",
+        "organization_id",
+        "scenarios"
+      ],
+      "legacy": false,
+      "ownership": "hormuz",
+      "schema_id": "hormuz.policy-scenario-suite",
+      "schema_version": 1
+    },
+    {
+      "delivery": "cli-output",
+      "fields": [
+        "schema_id",
+        "schema_version",
+        "organization_id",
+        "evaluated_at",
+        "usage_period",
+        "usage_basis",
+        "suite",
+        "baseline",
+        "candidate",
+        "summary",
+        "scenarios"
+      ],
+      "legacy": false,
+      "ownership": "hormuz",
+      "schema_id": "hormuz.policy-evaluation",
+      "schema_version": 1
+    },
+    {
+      "delivery": "cli-output",
+      "fields": [
+        "schema_id",
+        "schema_version",
+        "organization_id",
+        "limit",
+        "has_more",
+        "events"
+      ],
+      "legacy": false,
+      "ownership": "hormuz",
+      "schema_id": "hormuz.policy-history",
+      "schema_version": 1
+    },
+    {
+      "delivery": "durable-evidence",
+      "fields": [
+        "schema_id",
+        "schema_version",
+        "organization_id",
+        "policies",
+        "egress_controls"
+      ],
+      "legacy": false,
+      "ownership": "hormuz",
+      "schema_id": "hormuz.policy-document",
+      "schema_version": 1
+    },
+    {
+      "delivery": "durable-evidence",
+      "fields": [
+        "event_schema_id",
+        "event_schema_version",
+        "event_type",
+        "organization_id",
+        "occurred_at",
+        "opaque actor identity key",
+        "version_id",
+        "generation",
+        "reason_code",
+        "content-free structural metadata"
+      ],
+      "legacy": false,
+      "ownership": "hormuz",
+      "schema_id": "hormuz.policy-control-event",
+      "schema_version": 1
+    },
+    {
+      "delivery": "cli-output",
+      "fields": [
+        "schema_id",
+        "schema_version",
+        "organization_id",
+        "initialized",
+        "administrators",
+        "content-free operation approvals"
+      ],
+      "legacy": true,
+      "ownership": "hormuz",
+      "schema_id": "hormuz.custody-control-status",
+      "schema_version": 1
+    },
+    {
+      "delivery": "cli-output",
+      "fields": [
+        "schema_id",
+        "schema_version",
+        "organization_id",
+        "initialized",
+        "administrators",
+        "content-free operation approvals",
+        "content-free routine execution attempts"
+      ],
+      "legacy": true,
+      "ownership": "hormuz",
+      "schema_id": "hormuz.custody-control-status",
+      "schema_version": 2
+    },
+    {
+      "delivery": "cli-output",
+      "fields": [
+        "schema_id",
+        "schema_version",
+        "organization_id",
+        "initialized",
+        "administrators",
+        "content-free operation approvals",
+        "content-free governed custody execution attempts"
+      ],
+      "legacy": false,
+      "ownership": "hormuz",
+      "schema_id": "hormuz.custody-control-status",
+      "schema_version": 3
+    },
+    {
+      "delivery": "durable-evidence",
+      "fields": [
+        "event_schema_id",
+        "event_schema_version",
+        "organization_id",
+        "event_type",
+        "opaque actor identity key",
+        "operation type and risk",
+        "target and parameter digests",
+        "approval counts and expiry"
+      ],
+      "legacy": false,
+      "ownership": "hormuz",
+      "schema_id": "hormuz.custody-control-event",
+      "schema_version": 1
+    },
+    {
+      "delivery": "durable-evidence",
+      "fields": [
+        "execution_id",
+        "operation_id",
+        "routine operation type",
+        "target and parameter digests",
+        "protected input reference digest",
+        "claimed_at",
+        "state"
+      ],
+      "legacy": true,
+      "ownership": "hormuz",
+      "schema_id": "hormuz.custody-execution-attempt",
+      "schema_version": 1
+    },
+    {
+      "delivery": "durable-evidence",
+      "fields": [
+        "execution_id",
+        "operation_id",
+        "governed custody operation type",
+        "target and parameter digests",
+        "protected input reference digest",
+        "claimed_at",
+        "state"
+      ],
+      "legacy": false,
+      "ownership": "hormuz",
+      "schema_id": "hormuz.custody-execution-attempt",
+      "schema_version": 2
+    },
+    {
+      "delivery": "durable-evidence",
+      "fields": [
+        "execution_id",
+        "operation_id",
+        "occurred_at",
+        "sequence",
+        "state",
+        "reason_code"
+      ],
+      "legacy": false,
+      "ownership": "hormuz",
+      "schema_id": "hormuz.custody-execution-event",
+      "schema_version": 1
+    },
+    {
+      "delivery": "durable-evidence",
+      "fields": [
+        "organization_id",
+        "lifecycle_event_id",
+        "execution_id",
+        "operation_id",
+        "operation type",
+        "asset IDs and binding fingerprints",
+        "recovery resolution code",
+        "per-organization chain position and digest"
+      ],
+      "legacy": false,
+      "ownership": "hormuz",
+      "schema_id": "hormuz.custody-lifecycle-event",
+      "schema_version": 1
+    },
+    {
+      "delivery": "cli-output",
+      "fields": [
+        "schema_id",
+        "schema_version",
+        "month",
+        "group_by",
+        "filters",
+        "cost_basis",
+        "allocation_basis",
+        "coverage",
+        "rows"
+      ],
+      "legacy": false,
+      "ownership": "hormuz",
+      "schema_id": "hormuz.usage-report",
+      "schema_version": 1
+    },
+    {
+      "delivery": "durable-evidence",
+      "fields": [
+        "schema_version",
+        "event_type",
+        "metadata-only legacy audit fields"
+      ],
+      "legacy": true,
+      "ownership": "hormuz",
+      "schema_id": "hormuz.audit-event",
+      "schema_version": 1
+    },
+    {
+      "delivery": "durable-evidence",
+      "fields": [
+        "schema_id",
+        "schema_version",
+        "event_type",
+        "event-time identity binding",
+        "policy_version",
+        "requested_model",
+        "routed_model",
+        "provider_reported_model",
+        "policy_action",
+        "status",
+        "token and cost bases",
+        "allocation_basis",
+        "coverage"
+      ],
+      "legacy": false,
+      "ownership": "hormuz",
+      "schema_id": "hormuz.audit-event",
+      "schema_version": 2
+    },
+    {
+      "delivery": "durable-evidence",
+      "fields": [
+        "attempt_id",
+        "created_at",
+        "event-time identity binding",
+        "requested_model",
+        "routed_model",
+        "policy_version",
+        "policy_action",
+        "redaction metadata",
+        "reserved token and estimated cost"
+      ],
+      "legacy": false,
+      "ownership": "hormuz",
+      "schema_id": "hormuz.request-attempt",
+      "schema_version": 1
+    },
+    {
+      "delivery": "durable-evidence",
+      "fields": [
+        "id",
+        "attempt_id",
+        "organization_id",
+        "occurred_at",
+        "sequence",
+        "state",
+        "reason_code",
+        "usage_event_id"
+      ],
+      "legacy": false,
+      "ownership": "hormuz",
+      "schema_id": "hormuz.request-attempt-event",
+      "schema_version": 1
+    },
+    {
+      "delivery": "durable-evidence",
+      "fields": [
+        "schema_id",
+        "schema_version",
+        "artifact_id",
+        "organization_id",
+        "created_at",
+        "chain_algorithm",
+        "event_count",
+        "entries",
+        "head_digest"
+      ],
+      "legacy": false,
+      "ownership": "hormuz",
+      "schema_id": "hormuz.audit-anchor",
+      "schema_version": 1
+    },
+    {
+      "delivery": "durable-evidence",
+      "fields": [
+        "organization_id",
+        "chain_version",
+        "chain_epoch",
+        "sequence",
+        "previous_digest",
+        "event_digest",
+        "complete metadata-only audit event"
+      ],
+      "legacy": true,
+      "ownership": "hormuz",
+      "schema_id": "hormuz.commit-audit-chain-entry",
+      "schema_version": 1
+    },
+    {
+      "delivery": "durable-evidence",
+      "fields": [
+        "checkpoint_id",
+        "organization_id",
+        "chain_version",
+        "chain_epoch",
+        "sequence",
+        "head_digest",
+        "created_at"
+      ],
+      "legacy": false,
+      "ownership": "hormuz",
+      "schema_id": "hormuz.audit-chain-checkpoint",
+      "schema_version": 1
+    },
+    {
+      "delivery": "durable-evidence",
+      "fields": [
+        "organization_id",
+        "chain_version",
+        "chain_epoch",
+        "sequence",
+        "previous_digest",
+        "event_digest",
+        "source_schema_id",
+        "source_schema_version",
+        "source_event_id",
+        "strict allowlisted metadata-only custody source event"
+      ],
+      "legacy": false,
+      "ownership": "hormuz",
+      "schema_id": "hormuz.commit-audit-chain-entry",
+      "schema_version": 2
+    },
+    {
+      "delivery": "durable-evidence",
+      "fields": [
+        "organization_id",
+        "execution_id",
+        "attestation_kind",
+        "tenant-qualified immutable asset identities and fingerprints",
+        "occurred_at"
+      ],
+      "legacy": false,
+      "ownership": "hormuz",
+      "schema_id": "hormuz.custody-envelope-attestation",
+      "schema_version": 1
+    },
+    {
+      "delivery": "durable-evidence",
+      "fields": [
+        "organization_id",
+        "deletion_event_id",
+        "source schema and immutable source event identity",
+        "source retention and legal-hold state",
+        "decision=deletion_blocked",
+        "reason_code",
+        "occurred_at"
+      ],
+      "legacy": false,
+      "ownership": "hormuz",
+      "schema_id": "hormuz.custody-deletion-event",
+      "schema_version": 1
+    },
+    {
+      "delivery": "cli-output",
+      "fields": [
+        "schema_id",
+        "schema_version",
+        "organization_id",
+        "generated_at",
+        "strict metadata-only custody source records with v2 chain positions"
+      ],
+      "legacy": false,
+      "ownership": "hormuz",
+      "schema_id": "hormuz.custody-evidence-export",
+      "schema_version": 1
+    },
+    {
+      "delivery": "http-headers",
+      "fields": [
+        "X-Hormuz-Contract",
+        "X-Hormuz-Policy-Decision",
+        "X-Hormuz-Requested-Model",
+        "X-Hormuz-Routed-Model",
+        "X-Hormuz-Redactions",
+        "X-Hormuz-Error-Code"
+      ],
+      "legacy": false,
+      "ownership": "hormuz",
+      "schema_id": "hormuz.relay-metadata",
+      "schema_version": 1
+    }
+  ]
+}

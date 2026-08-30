@@ -10,6 +10,55 @@ hormuz contract manifest
 
 The manifest is the canonical inventory of current schema IDs, versions, error codes, enforcement meanings, and compatibility rules. The fixtures in `tests/fixtures/contracts/` are the executable examples for those contracts.
 
+## Accepted v1.1 additive contract
+
+The planned v1.1.0 portfolio-intelligence surface is frozen separately in
+[`portfolio-intelligence-contract-v1.json`](portfolio-intelligence-contract-v1.json),
+[the field-level wire-schema bundle](portfolio-intelligence-wire-v1.json),
+[ADR 0010](decisions/0010-v1.1-portfolio-intelligence-contract.md), and the
+exact [`v1.0.0` baseline fixture](../tests/fixtures/portfolio_intelligence/v1.0.0-contract-manifest.json).
+These files are design and compatibility gates; their presence does not claim
+that any new route, repository, connector, scorecard, or recommendation is
+implemented.
+
+The minor release may add new schemas and errors under the existing `/v1`
+namespace, but it may not remove or change a v1.0.0 schema, field, type,
+meaning, error code, authentication rule, request requirement, provider relay,
+ordering, pagination, idempotency, or retry behavior. New portfolio request
+and response objects are strict and independently versioned. Collection routes use tenant-bound
+opaque frozen-window cursors, and mutations require idempotency. A breaking
+change requires a compatibility adapter or a future major version.
+
+Portfolio state lives in a separate append-only plane and references the
+immutable v1 ledger. A governed attempt has at most one active primary use-case
+attribution. Cost fields retain provider-final, provider-aggregate,
+configured-estimate, allocated-estimate, credit/discount, and unavailable
+bases rather than relabeling estimates as invoices. Outcome evidence is
+descriptive, associated, or controlled; scorecards are use-case-specific
+Pareto sets, not universal model or employee rankings. Recommendations never
+apply policy automatically.
+
+The historical installed manifest reports `current_release_line: 0.2` even
+though the immutable baseline release is v1.0.0. The v1.1 contract preserves
+that exact fixture instead of silently rewriting history; issue #214 must
+version any correction and prove the application/database transition.
+
+The 26 planned Hormuz-owned wire shapes have closed, bounded definitions, not
+only names: fields, types, requiredness, nullability, enums, exact decimal
+costs, and semantics are digest-frozen together. The current executable
+manifest must validate before additive comparison, including every newly
+registered schema and error. The historical fixture is checked against its
+immutable digest, not reinterpreted with a future current-version validator.
+The compatibility block itself is immutable until #214 supplies an explicitly
+versioned transition. Changing only the manifest version is not a waiver.
+
+Verify this accepted boundary with:
+
+```bash
+python3 tools/verify_portfolio_intelligence_contract.py
+python3 -m unittest -v tests.test_portfolio_intelligence_contract tests.test_portfolio_wire_contract
+```
+
 ## Ownership and wire convention
 
 Hormuz-owned JSON objects include both fields below and are strictly validated before they are sent or persisted:

@@ -32,6 +32,39 @@ unregistered table.
 | `custody_lifecycle_and_projection` | — | `custody_envelope_attestations`, `custody_lifecycle_asset_identities`, `custody_lifecycle_chain_heads`, `custody_lifecycle_events`, `custody_runtime_projection_acks`, `custody_runtime_projection_barriers`, `custody_runtime_projection_heads`, `custody_runtime_projection_restrictions`, `custody_runtime_replicas` | Immutable asset identities/fingerprints, restriction events, projection versions, replica leases/acknowledgments, recovery codes, hashes, and envelope attestations. It stores no customer KMS key or provider credential plaintext. |
 | `custody_deletion_block_evidence` | — | `custody_deletion_events` | Evidence that a custody-history deletion request was blocked by retention, legal hold, or stronger-approval requirements. This table is not a delete executor and cannot authorize tenant deletion. |
 
+## Planned v1.1 portfolio data
+
+The accepted v1.1.0 design introduces a separate append-only portfolio plane;
+it is not part of the currently implemented table inventory above. Its
+migrations belong to feature issues after the feature-free #213 seam and the
+relevant #214 pre-implementation plan/tests are accepted. Until those migrations
+land, `durable-data-v1.json` remains authoritative for every table the current
+release creates and must not list planned tables. #214 stays open for final
+candidate transition proof; #213 introduces no portfolio table or migration.
+
+The planned plane has eight versioned entity families: work-scope versions,
+external-work binding events, governed-run attribution events, work-budget
+plans, work-outcome events, run-outcome association events, model scorecards,
+and policy recommendations. Each is tenant-qualified by `organization_id`.
+Mutable business facts are expressed as immutable versions, events, or
+supersession links; no new table may update the v1 request-attempt, usage,
+policy, or audit evidence in place.
+
+Permitted values are bounded metadata such as opaque identifiers, timestamps,
+fixed enums, counts, token and cost components with explicit bases, coverage,
+digests, and one bounded administrator-supplied work-scope display name. The
+plane excludes prompts, responses, code, patches, paths, filenames, ticket or
+project titles and bodies, comments, review text, raw connector payloads,
+credentials, and secret or matched-detector values. Signed connector ingress
+may hold bounded raw bytes only long enough to verify a signature and parse an
+allowlisted event; it does not persist those bytes.
+
+The implementation gate must extend the machine-readable durable-data
+inventory, SQLite/PostgreSQL ownership checks, forced-RLS tests, migrations,
+rollback/recovery rules, exports, retention, and deletion documentation before
+any portfolio store ships. See
+[PORTFOLIO_INTELLIGENCE.md](PORTFOLIO_INTELLIGENCE.md).
+
 ## Files and external artifacts
 
 | Artifact | Created when | Location and content boundary | Operator authority |

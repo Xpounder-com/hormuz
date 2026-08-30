@@ -4,7 +4,66 @@ Hormuz is a model-neutral enterprise AI gateway and policy control plane for emp
 
 This roadmap is evidence-gated. A milestone is not complete because code exists or a narrow test passes. Every closure needs an explicit scope, executable checks, package or deployment proof where relevant, and a truthful statement of what remains unproven.
 
-## Current implementation order
+## v1.1.0 current implementation order
+
+The accepted [portfolio-intelligence contract](PORTFOLIO_INTELLIGENCE.md) and
+[ADR 0010](decisions/0010-v1.1-portfolio-intelligence-contract.md) define the
+next minor release. The work is organized under
+[epic #226](https://github.com/Xpounder-com/hormuz/issues/226) and must proceed
+through these gates in order:
+
+1. **Freeze the boundary and preserve v1.** Complete the accepted contract
+   ([#212](https://github.com/Xpounder-com/hormuz/issues/212)) and the
+   behavior-preserving persistence composition seam
+   ([#213](https://github.com/Xpounder-com/hormuz/issues/213)). Before each
+   feature migration/API change, accept its compatibility plan and red-first
+   transition, rollback, and recovery tests in
+   [#214](https://github.com/Xpounder-com/hormuz/issues/214). Feature PRs must
+   pass their applicable transition tests before merge; final candidate proof
+   is not a prerequisite for building the features it must test.
+2. **Make finance evidence trustworthy.** Preserve exact provider and
+   configured cost bases ([#8](https://github.com/Xpounder-com/hormuz/issues/8)),
+   then add the versioned work registry, single-primary attribution, scoped
+   budget plans, and outcome evidence contract
+   ([#215](https://github.com/Xpounder-com/hormuz/issues/215)–[#218](https://github.com/Xpounder-com/hormuz/issues/218)).
+3. **Connect external observations safely.** Add signed, metadata-only GitHub
+   and Linear ingress before deterministic run-to-outcome associations
+   ([#219](https://github.com/Xpounder-com/hormuz/issues/219)–[#221](https://github.com/Xpounder-com/hormuz/issues/221)).
+4. **Turn evidence into bounded decisions.** Build per-use-case Pareto
+   scorecards, role-scoped aggregate views, and reviewable recommendations
+   that never apply policy automatically
+   ([#222](https://github.com/Xpounder-com/hormuz/issues/222)–[#224](https://github.com/Xpounder-com/hormuz/issues/224)).
+5. **Prove the release claim.** Close #214 with the exact final candidate's
+   v1.0.0-to-v1.1.0 artifact, migration, rollback, and recovery evidence. Run
+   the preregistered, immutable-candidate external validation gate in
+   [#225](https://github.com/Xpounder-com/hormuz/issues/225). Internal,
+   synthetic, or observational evidence cannot be relabeled as that proof.
+
+#214 has two checkpoints: accepted pre-implementation plans/tests unblock the
+corresponding feature work after #212 and #213 close; final candidate evidence
+closes #214 before the v1.1.0 tag. Keep #214 open between those checkpoints and
+record acceptance with exact reviewed commits and test references. #213 itself
+remains feature-free and introduces no portfolio schema or migration.
+
+Every issue inherits the release gates in #226: authorization before access,
+strict versioned schemas, metadata-only persistence and evidence, tenant
+isolation, bounded resources, additive v1 compatibility, migration and
+rollback proof, clean-package inspection, and explicit nonclaims. Browser
+sessions, content inspection or persistence, HA/SLA claims, independent
+security certification, and broad multi-profile upgrades remain conditional
+gates; a feature needing one must stop until its linked issue is completed.
+
+Refactoring is in scope only when it creates the approved seam for a current
+work order while preserving behavior. #213 is therefore the repository and
+service extraction point; feature issues must build on that seam rather than
+mix portfolio state into the immutable v1 request and usage ledger.
+
+Every PR follows the [technical-lead merge policy](../CONTRIBUTING.md#technical-lead-merge-policy):
+evaluate the linked issue and exact diff, resolve substantive findings, verify
+the applicable gates, then merge under the owner's standing authorization.
+Recheck the resulting `main` evidence before claiming issue completion.
+
+## v1.0.0 foundation implementation history
 
 ### 1. Separate the deprecated context experiment
 
@@ -210,19 +269,24 @@ account-free disposable reference only; they are not a customer SLA,
 production certification, or broad Kubernetes, CNI, PostgreSQL, custody, or
 regional-failure claim.
 
-## Feature-freeze rule
+## Historical v1.0.0 feature-freeze rule
 
-> A change is current-priority only if it removes deprecated context coupling, stabilizes the policy/evidence contract, fixes a security or correctness defect, or closes a production-readiness gate.
+Before v1.0.0, a change was current-priority only if it removed deprecated
+context coupling, stabilized the policy/evidence contract, fixed a security or
+correctness defect, or closed a production-readiness gate. The ordered v1.1.0
+gate above now supersedes that release-specific prioritization.
 
 Work is organized as a small PR for one issue and one verifiable outcome. Contract and package evidence are required before merge. Schema compatibility, migration, rollback, recovery, and failure behavior are implementation work, not deferred operational cleanup.
 
-## Deferred during hardening
+## Historical deferrals and continuing boundaries
 
-The existing local allocation engine and CLI remain part of gateway economics, but receive only correctness, compatibility, or security fixes during this phase. Do not expand:
+The v1.0.0 hardening phase deferred the items below. Epic #226 now authorizes
+only the explicitly gated metadata-only portfolio work described above; it
+does not authorize the broader versions of these capabilities:
 
-- remote cost-allocation APIs, allocation roles, response variants, or reporting dimensions;
+- unversioned cost-allocation APIs, unrestricted allocation roles, or ad hoc reporting dimensions;
 - new DLP detector families unless they close a demonstrated bypass;
-- ticketing, productivity, quality, or workflow integrations;
+- ticket, source, productivity, quality, or workflow content ingestion;
 - new context, memory, lifecycle, cache, retrieval, provenance, or content-governance capabilities.
 
 The separately packaged context experiment is outside the core release surface. It does not make Hormuz an organizational-memory system; the AI Metadata Compiler remains the separate product for enterprise asset ingestion, normalization, claims, provenance, and freshness.

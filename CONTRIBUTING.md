@@ -80,6 +80,33 @@ Complete the pull-request template. A reviewer should be able to determine:
   evidence;
 - the exact support and production-readiness boundary after the change.
 
+### Technical-lead merge policy
+
+Every PR needs a technical-lead evaluation of the exact proposed commit and
+its linked issue before merge. Passing CI or resolving review threads alone
+is not that evaluation.
+
+1. Read the issue's acceptance criteria, dependencies, and claim boundaries;
+   distinguish a prerequisite checkpoint from final issue or release closure.
+2. Review the diff and surrounding code for correctness, compatibility,
+   authorization, tenant isolation, privacy, failure/retry behavior, and
+   maintainability. Evaluate each finding on evidence, not severity labels alone.
+3. Verify meaningful tests, required CI, and package or migration evidence
+   appropriate to the change. Record skipped checks and residual risks.
+4. Fix substantiated blockers, re-review the changed commit, and record the
+   findings and their disposition on the PR.
+5. For an owner-approved work order, merge the reviewed head once its gates
+   pass; the owner's standing policy does not require another routine merge
+   confirmation. Unresolved product/security decisions, expanded scope,
+   missing required approvals, or failed protection gates still block merging.
+6. Verify the resulting `main` commit and its checks, then reconcile linked
+   issues against their actual acceptance evidence. A merged slice is not a
+   completed release or evidence that its downstream features exist.
+
+Use normal branch protections without bypass. Merge authorization does not
+authorize release publication, deployment, destructive cleanup, or activation
+of a conditional roadmap gate.
+
 Hormuz does not currently require a contributor license agreement or a special
 commit-signing scheme. By submitting a contribution, you agree that it may be
 distributed under the repository's Apache-2.0 license.
