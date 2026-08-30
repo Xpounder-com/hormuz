@@ -100,7 +100,7 @@ def _dispatch(handler: GatewayRequestHandler) -> None:
         _browser_page(
             handler,
             "Connect your AI client",
-            "Continue only if you just started Hormuz login in your own terminal. "
+            "Continue only if you just started sign-in in your own Hormuz client. "
             "This connects that client to your organization's governed AI access.",
             cookie=cookie,
             authorization_url=authorization_url,
@@ -119,7 +119,7 @@ def _dispatch(handler: GatewayRequestHandler) -> None:
             provider_error=values.get("error"),
             response_issuer=values.get("iss"),
         )
-        _browser_page(handler, "Connected", "Return to your terminal to finish. You can close this page.", cookie="")
+        _browser_page(handler, "Connected", "Return to Hormuz to finish. You can close this page.", cookie="")
         return
     if handler.command != "POST":
         handler._send_error("not_found", "Route not found", HTTPStatus.NOT_FOUND)
