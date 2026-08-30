@@ -137,9 +137,33 @@ and backend fixtures. `test_sqlite_portfolio_registry`,
 create/version/archive/binding, strict parsing, role checks before access,
 forced RLS, append-only state, concurrent idempotency/CAS, frozen cursors and
 safe audit. The required PostgreSQL job executes both registry adapters from
-the isolated installed wheel. There are 80 owned live PostgreSQL cases.
+the isolated installed wheel. The registry-era suite owns 80 live PostgreSQL
+cases; the attribution preflight below adds six, for 86 total owned cases.
 Populated policy/custody recovery and exact final signed OCI/Compose transitions
 remain #214 final-candidate gates. Do not close #214 on registry-only evidence.
+
+## v1.1.0 attribution pre-implementation checkpoint
+
+The [#214/#216 preflight](ATTRIBUTION_TRANSITION.md) freezes a bounded optional
+admission contract and reserved SQLite 5-to-6 / PostgreSQL 9-to-10 transitions.
+It is not attribution implementation: production has no next migration yet.
+The strict machine-plan verifier checks the accepted registry and frozen
+released-v1/portfolio contracts, and never returns feature or candidate success.
+
+Eleven plan tests and six transition tests per backend exercise the missing-next-
+migration witness, test-only DDL rollback/retry, all populated registry tables,
+unchanged v1 rows and unknown holds, partial/newer-state refusal by current and
+actual released-v1 binaries, isolated old-pair restore and retained candidate
+post-checkpoint writes. The PostgreSQL job supplies the released binary and
+matched backup tools; local skips are not evidence. These 12 transition tests
+must also run from the isolated wheel, and the unpacked source archive must
+contain the complete preflight kit. Empty policy/custody tables do not prove
+populated-domain recovery. The eventual feature must replace test probes with
+actual migrations and add its admission/API/tenant/no-egress proofs.
+
+Accept only after the registry dependency and this preflight each have exact
+merged-main CI and recorded technical-lead review. Acceptance unblocks only
+#216 implementation; #214 final-candidate and #225 external validation stay open.
 
 ## Live pinned-client release gate
 

@@ -12,6 +12,17 @@ else:  # Isolated wheel compatibility discovery uses the tests directory as its 
 
 ROOT = Path(__file__).resolve().parents[1]
 EXPECTED_OWNERS = {
+    "test_postgres_attribution_transition": (
+        "PostgresAttributionTransitionTests",
+        {
+            "test_postgres_attribution_migration_is_red_until_implementation",
+            "test_postgres_attribution_probe_failure_and_retry_preserve_populated_registry",
+            "test_postgres_attribution_partial_state_refuses_before_repair",
+            "test_postgres_attribution_old_processes_refuse_next_schema",
+            "test_postgres_attribution_quiesced_registry_pair_restore_preserves_replays",
+            "test_postgres_attribution_post_checkpoint_writes_require_forward_recovery",
+        },
+    ),
     "test_postgres_portfolio_registry": (
         "PostgresPortfolioRegistryTests",
         {
@@ -179,7 +190,7 @@ class PostgresTestBoundaryTests(unittest.TestCase):
             suite = unittest.defaultTestLoader.loadTestsFromName(f"{module_name}.{class_name}")
             self.assertEqual(suite.countTestCases(), len(expected_methods), module_name)
 
-        self.assertEqual(len(owned), 80)
+        self.assertEqual(len(owned), 86)
         self.assertFalse((ROOT / "tests" / "test_postgres.py").exists())
         self.assertFalse(
             any(name.startswith("test_") for name in PostgresTestCase.__dict__),

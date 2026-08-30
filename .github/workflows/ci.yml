@@ -165,6 +165,9 @@ jobs:
           python tools/verify_registry_transition_plan.py \
             --baseline-archive "$RUNNER_TEMP/hormuz-1.0.0.tar.gz" \
             --baseline-manifest "$RUNNER_TEMP/hormuz-v1.0.0-candidate-manifest.json"
+          python tools/verify_attribution_transition_plan.py \
+            --baseline-archive "$RUNNER_TEMP/hormuz-1.0.0.tar.gz" \
+            --baseline-manifest "$RUNNER_TEMP/hormuz-v1.0.0-candidate-manifest.json"
           python -m venv "$RUNNER_TEMP/hormuz-v1-baseline"
           "$RUNNER_TEMP/hormuz-v1-baseline/bin/python" -m pip install \
             "$RUNNER_TEMP/hormuz-1.0.0.tar.gz[postgres]"
@@ -185,7 +188,9 @@ jobs:
           tar -xzf dist/hormuz-*.tar.gz -C "$RUNNER_TEMP/registry-preflight-source"
           cd "$RUNNER_TEMP/registry-preflight-source"/hormuz-*
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" tools/verify_registry_transition_plan.py
-          "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -m unittest -v tests.test_registry_transition_plan
+          "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" tools/verify_attribution_transition_plan.py
+          "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -m unittest -v \
+            tests.test_registry_transition_plan tests.test_attribution_transition_plan
       - name: Prove PostgreSQL migration and repository compatibility
         env:
           HORMUZ_TEST_POSTGRES_DSN: postgresql://postgres:hormuz-test-password@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/hormuz_test
@@ -202,6 +207,10 @@ jobs:
             -v
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -m unittest discover \
             -s "$GITHUB_WORKSPACE/tests" \
+            -p test_sqlite_attribution_transition.py \
+            -v
+          "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -m unittest discover \
+            -s "$GITHUB_WORKSPACE/tests" \
             -p test_sqlite_portfolio_registry.py \
             -v
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -m unittest discover \
@@ -215,6 +224,10 @@ jobs:
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -m unittest discover \
             -s "$GITHUB_WORKSPACE/tests" \
             -p test_postgres_registry_transition.py \
+            -v
+          "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -m unittest discover \
+            -s "$GITHUB_WORKSPACE/tests" \
+            -p test_postgres_attribution_transition.py \
             -v
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -m unittest discover \
             -s "$GITHUB_WORKSPACE/tests" \
