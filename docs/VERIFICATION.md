@@ -2,6 +2,32 @@
 
 This file records executable evidence for client/provider compatibility. It intentionally contains no provider credentials, prompts, responses beyond fixed test markers, or employee secrets.
 
+## v1.1 portfolio-intelligence contract gate
+
+The accepted v1.1.0 design, exact v1.0.0 baseline manifest, documentation set,
+and additive-compatibility guard are verified with:
+
+```bash
+python3 tools/verify_portfolio_intelligence_contract.py
+python3 -m unittest -v tests.test_portfolio_intelligence_contract
+```
+
+The verifier rejects duplicate or unknown contract fields, baseline-fixture
+drift, removed or changed v1 schemas and errors, changed v1 authentication or
+request, ordering, pagination, idempotency, or retry requirements; boolean
+schema versions; drifted identity, lifecycle, time, evidence-threshold, or
+self-scope rules; multiple active primary use cases per attempt; missing content
+exclusions; automatic policy application; and drift in the accepted decision
+record. The source-distribution gate requires the contract, verifier, fixture,
+and documentation to ship together.
+
+Passing this gate proves only an internally consistent plan and an additive
+v1.0.0 compatibility boundary. It does not prove a portfolio repository,
+migration, connector, budget, outcome association, scorecard, authorization
+view, recommendation, human pilot, causal effect, HA/SLA, or certification.
+Those remain ordered issues in
+[epic #226](https://github.com/Xpounder-com/hormuz/issues/226).
+
 ## Live pinned-client release gate
 
 The manual `Live BYO-provider client conformance` workflow and

@@ -40,6 +40,49 @@ Custody authorization (managed PostgreSQL mode)
         +--> no KMS work in the human-authorization service
 ```
 
+## Planned v1.1 portfolio plane
+
+The accepted v1.1.0 design adds a portfolio-intelligence plane beside the v1
+request and evidence path. It is planned work, not an implemented runtime
+claim:
+
+```text
+immutable v1 request / usage / policy evidence
+        |
+        +--> append-only attribution and cost-basis references
+        |
+signed metadata-only GitHub / Linear observations
+        |
+        v
+separate portfolio repository + authorization service
+        |
+        +--> versioned work scopes and budget plans
+        +--> outcome associations and evidence-qualified scorecards
+        +--> immutable, reviewable recommendations
+        |
+        v
+existing policy compare / preview / human approval path
+```
+
+The new repository owns versioned work scopes, external bindings, governed-run
+attributions, budget plans, outcome events, associations, scorecards, and
+recommendations. It references immutable v1 identities and evidence; it does
+not add portfolio columns to, rewrite, or reinterpret the v1 request-attempt
+and usage ledger. Corrections are new superseding events.
+
+HTTP handlers authenticate and authorize organization, role, work scope, and
+connector bindings before repository access or expensive work. Connector
+signatures are verified over bounded raw bytes before parsing, raw payloads are
+not retained, collection reads use tenant-bound frozen cursors, and mutations
+are idempotent. The optional request work-scope header is authorized after
+identity resolution and removed before provider egress.
+
+The seam is deliberately narrower than a reporting monolith. Scorecards are
+per use case and preserve cost basis, coverage, uncertainty, and evidence
+level. Recommendations are immutable review inputs and never call policy
+activation. See [the portfolio contract](PORTFOLIO_INTELLIGENCE.md) and
+[ADR 0010](decisions/0010-v1.1-portfolio-intelligence-contract.md).
+
 ## Code boundaries
 
 - `hormuz/server.py` owns HTTP compatibility, authentication, upstream forwarding, streaming, and protocol-shaped errors.
