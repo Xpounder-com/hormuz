@@ -25,6 +25,9 @@ def add_client_commands(
     auth_subparsers = auth.add_subparsers(dest="auth_command", required=True)
     auth_token = auth_subparsers.add_parser("token", help="Print a credential from an environment variable")
     auth_token.add_argument("--env", default="HORMUZ_OIDC_ACCESS_TOKEN", help="Credential environment variable")
+    from .session import add_session_token_arguments
+    session_token = auth_subparsers.add_parser("session", help="Print a short-lived credential from an OS-secured session")
+    add_session_token_arguments(session_token)
 
 
 def _client_config_arguments(parser: argparse.ArgumentParser) -> None:
@@ -33,7 +36,7 @@ def _client_config_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--actor", help="Configured actor ID; defaults to the first configured actor")
     parser.add_argument(
         "--auth-mode",
-        choices=["auto", "static", "oidc"],
+        choices=["auto", "static", "oidc", "session"],
         default="auto",
         help="Credential source to configure (default: static when available, otherwise OIDC)",
     )
@@ -41,6 +44,9 @@ def _client_config_arguments(parser: argparse.ArgumentParser) -> None:
         "--credential-env",
         help="Environment variable containing the credential (OIDC default: HORMUZ_OIDC_ACCESS_TOKEN)",
     )
+    parser.add_argument("--profile", default="default", help="Session secure-store profile")
+    parser.add_argument("--model", help="Configured Codex model alias when using session authentication")
+    parser.add_argument("--allow-insecure-http", action="store_true", help="Allow loopback HTTP for local session development")
 
 
 def _client(config: GatewayConfig, args: argparse.Namespace) -> int:

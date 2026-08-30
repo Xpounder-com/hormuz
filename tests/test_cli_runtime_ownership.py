@@ -37,7 +37,7 @@ EXPECTED_COMMAND_TREE = {
         },
         "export": None,
     },
-    "auth": {"token": None},
+    "auth": {"token": None, "session": None},
     "client": {"config": None},
     "contract": {"manifest": None},
     "custody": {
@@ -61,6 +61,8 @@ EXPECTED_COMMAND_TREE = {
     },
     "demo": None,
     "doctor": None,
+    "login": None,
+    "logout": None,
     "policy": {
         "activate": None,
         "administrator": {

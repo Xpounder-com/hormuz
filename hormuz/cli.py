@@ -17,6 +17,8 @@ from .commands import custody as custody_commands
 from .commands import policy as policy_commands
 from .commands import portfolio as portfolio_commands
 from .commands import runtime as runtime_commands
+from .commands import session as session_commands
+from .session_store import SessionStoreError
 from .config import ConfigError, GatewayConfig
 from .custody import CustodyError
 from .custody_runtime import (
@@ -71,6 +73,7 @@ def build_parser() -> argparse.ArgumentParser:
     portfolio_commands.add_portfolio_commands(subparsers)
 
     client_commands.add_client_commands(subparsers)
+    session_commands.add_session_commands(subparsers)
 
     audit_commands.add_audit_commands(subparsers)
 
@@ -100,6 +103,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     if args.command == "auth" and args.auth_command == "token":
         return client_commands._auth_token(args.env)
+    if args.command in {"login", "logout"} or args.command == "auth" and args.auth_command == "session":
+        return session_commands.run(args)
+    if args.command == "client" and args.auth_mode == "session":
+        return session_commands.client_config(args)
     if args.command == "contract" and args.contract_command == "manifest":
         return runtime_commands._contract_manifest()
     if args.command == "demo":
@@ -144,7 +151,7 @@ def main(argv: list[str] | None = None) -> int:
     except ConfigError as error:
         print(f"configuration error: {error}", file=sys.stderr)
         return 2
-    except (EvidenceStorageError, PostgresStorageError, StorageSchemaError, AuditChainError) as error:
+    except (EvidenceStorageError, PostgresStorageError, StorageSchemaError, AuditChainError, SessionStoreError) as error:
         print(f"storage error: {error.code}", file=sys.stderr)
         return 2
     except CustodyError as error:

@@ -41,6 +41,9 @@ _CUSTODY_MODES = frozenset(
         "external_workload_identity",
         "hormuz_encrypted_envelope",
         "external_service_encryption",
+        "session_flow_aead",
+        "keyed_hash",
+        "os_secure_store",
     }
 )
 _STORAGE_OWNERS = frozenset(
@@ -53,6 +56,7 @@ _STORAGE_OWNERS = frozenset(
         "customer_key_service",
         "customer_cloud_identity",
         "customer_object_store",
+        "client_os_secure_store",
     }
 )
 _RUNTIME_CONSUMERS = frozenset(
@@ -73,6 +77,7 @@ _RUNTIME_CONSUMERS = frozenset(
         "portfolio_control_cli",
         "storage_runtime",
         "storage_migration_cli",
+        "session_broker",
         "not_in_active_core",
     }
 )
@@ -87,6 +92,7 @@ _ROTATION_AUTHORITIES = frozenset(
         "object_storage_operator",
         "cloud_identity_operator",
         "future_design_required",
+        "session_owner",
     }
 )
 _MATERIAL_CLASSES = frozenset(
@@ -495,7 +501,12 @@ def _validate_managed_materials(
             raise SecretInventoryError("secret_inventory_managed_source_missing")
         _enum(entry, "material_class", _MATERIAL_CLASSES, "secret_inventory_material_class_invalid")
         mode = _enum(entry, "custody_mode", _CUSTODY_MODES, "secret_inventory_custody_mode_invalid")
-        if mode not in {"hormuz_encrypted_envelope", "external_service_encryption"}:
+        local_session_mode = mode in {"session_flow_aead", "keyed_hash", "os_secure_store"}
+        if local_session_mode and (
+            entry.get("key_purpose") != "session_material" or entry.get("material_class") != "session_material"
+        ):
+            raise SecretInventoryError("secret_inventory_managed_custody_invalid")
+        if not local_session_mode and mode not in {"hormuz_encrypted_envelope", "external_service_encryption"}:
             raise SecretInventoryError("secret_inventory_managed_custody_invalid")
         _enum(entry, "storage_owner", _STORAGE_OWNERS, "secret_inventory_storage_owner_invalid")
         _enum(entry, "runtime_consumer", _RUNTIME_CONSUMERS, "secret_inventory_consumer_invalid")

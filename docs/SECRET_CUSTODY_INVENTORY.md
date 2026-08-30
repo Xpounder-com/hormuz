@@ -20,7 +20,7 @@ custody integration tests separately prove encryption and recovery behavior.
 
 ## Ownership boundary
 
-The active core has two different custody categories:
+The active core has three custody categories:
 
 1. **Hormuz-managed protected material.** Provider credentials may be stored
    in owner-only encrypted envelope files. Metadata-only audit artifacts use
@@ -32,6 +32,13 @@ The active core has two different custody categories:
    and S3-compatible credentials remain owned by the customer deployment
    secret manager or the authorized operator process.
    Hormuz holds them only in process memory for their configured consumer.
+3. **Opt-in local browser sessions.** A dedicated, externally injected master
+   key derives separate HMAC and AES-GCM keys for credential hashes and
+   transient OIDC flow state. OIDC client secrets are separately injected.
+   Client access/refresh pairs are held in the OS secure store; there is no
+   plaintext-file fallback. These local session keys do not use the managed
+   KMS envelope or custody-executor lifecycle. This is a local integration
+   slice, not a claim of hosted production custody.
 
 The second category must not be recursively placed behind the same service it
 is needed to access. For example, Hormuz cannot use OpenBao Transit to decrypt
@@ -55,8 +62,8 @@ entrypoints without inspecting the credential selected by the SDK.
 | --- | --- | --- |
 | `provider_credential` | Active | Gateway provider-credential envelopes |
 | `data_encryption` | Active | Metadata-only immutable audit artifacts |
-| `identity_connector_secret` | Reserved | No active-core managed material |
-| `session_material` | Reserved | Browser-session work remains deferred |
+| `identity_connector_secret` | Reserved managed-envelope purpose | OIDC login secrets are externally injected; no connector envelope migration |
+| `session_material` | Active when login enabled | Local session master key, keyed hashes, encrypted transient flow state, and OS-secured client credentials |
 | `approval_fingerprint` | Reserved | Approval workflow is outside the reduced core |
 
 Reserved means the name and separation requirement are retained, but the core
@@ -74,6 +81,12 @@ an implemented identity-connector envelope migration.
 - Identity operators rotate static or short-lived administrator credentials;
   the policy and custody services continue to authorize the resulting principal
   rather than trusting an actor name supplied to the CLI.
+- Identity operators rotate the local session master key by replacing the
+  injected value and restarting the broker, invalidating all prior sessions
+  and pending flows. Rotate before restoring a session backup to avoid replay
+  or revocation rollback. OIDC client-secret rotation also requires a restart.
+- Session owners log out to revoke the server credential family before local
+  deletion. The helper serializes refresh using a private metadata-only lock.
 - Policy-recovery operators separately protect and rotate the opt-in break-glass
   credential.
 - Custody operators rotate key-service authorization and purpose-specific key

@@ -43,7 +43,8 @@ class SecretInventoryTests(unittest.TestCase):
         self.assertEqual(set(purposes), KEY_PURPOSES)
         self.assertEqual(purposes["provider_credential"], "active")
         self.assertEqual(purposes["data_encryption"], "active")
-        self.assertEqual(purposes["session_material"], "reserved")
+        self.assertEqual(purposes["session_material"], "active")
+        self.assertEqual(purposes["identity_connector_secret"], "reserved")
         self.assertEqual(purposes["approval_fingerprint"], "reserved")
 
     def test_missing_or_duplicate_inventory_entry_fails_closed(self) -> None:
@@ -58,6 +59,13 @@ class SecretInventoryTests(unittest.TestCase):
         with self.assertRaises(SecretInventoryError) as raised:
             validate_secret_inventory(duplicate, source_root=ROOT)
         self.assertEqual(raised.exception.code, "secret_inventory_duplicate_id")
+
+    def test_local_session_custody_does_not_relax_provider_envelope_requirements(self) -> None:
+        candidate = copy.deepcopy(self.inventory)
+        candidate["managed_materials"][0]["custody_mode"] = "keyed_hash"
+        with self.assertRaises(SecretInventoryError) as raised:
+            validate_secret_inventory(candidate, source_root=ROOT)
+        self.assertEqual(raised.exception.code, "secret_inventory_managed_custody_invalid")
 
     def test_new_environment_read_requires_inventory_review(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

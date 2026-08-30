@@ -158,6 +158,26 @@
       "postgresql_tables": [
         "custody_deletion_events"
       ]
+    },
+    {
+      "id": "browser_session_identity",
+      "content_boundary": "session_identity_and_encrypted_transient_auth",
+      "contains_prompt_or_response_body": false,
+      "sqlite_tables": [
+        "consumed_refresh_credentials",
+        "human_sessions",
+        "session_enrollments"
+      ],
+      "postgresql_tables": []
+    },
+    {
+      "id": "browser_session_security_events",
+      "content_boundary": "metadata_only_evidence",
+      "contains_prompt_or_response_body": false,
+      "sqlite_tables": [
+        "session_security_events"
+      ],
+      "postgresql_tables": []
     }
   ],
   "operator_artifacts": [
@@ -216,6 +236,22 @@
       "content_boundary": "public_source_image_sbom_provenance_and_release_metadata",
       "prompt_or_response_body_boundary": "not_customer_runtime_data",
       "customer_operator_authority": "not_customer_runtime_data"
+    },
+    {
+      "id": "session_database_file",
+      "created_when": "opt_in_browser_session_broker_startup",
+      "storage_location": "operator_selected_separate_owner_only_sqlite_file",
+      "content_boundary": "identity_bindings_keyed_credential_hashes_and_encrypted_transient_oidc_state",
+      "prompt_or_response_body_boundary": "excluded_by_hormuz_contract",
+      "customer_operator_authority": "secure_backup_retention_and_offline_deletion_with_master_key_rotation_before_restore"
+    },
+    {
+      "id": "client_session_secure_store",
+      "created_when": "successful_browser_login_or_session_refresh",
+      "storage_location": "approved_operating_system_credential_store",
+      "content_boundary": "opaque_access_refresh_pair_and_gateway_client_expiry_metadata",
+      "prompt_or_response_body_boundary": "excluded_by_hormuz_contract",
+      "customer_operator_authority": "session_owner_logs_out_to_revoke_before_local_deletion"
     }
   ],
   "customer_operator_responsibilities": [

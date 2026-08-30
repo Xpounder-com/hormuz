@@ -15,6 +15,7 @@ from ._config_values import (
     _string_tuple,
     _url,
 )
+from ._config_session import build_oidc_login
 from .config import BootstrapAdministrator, ConfigError, Identity, OIDCIssuerConfig
 
 
@@ -111,6 +112,7 @@ def build_identity_domain(raw: dict[str, Any]) -> IdentityConstruction:
                 maximum=86400,
             ),
             allow_insecure_http=allow_insecure_http,
+            login=build_oidc_login(item.get("login"), prefix=f"{prefix}.login"),
         )
         oidc_issuers[issuer] = issuer_config
         subjects_raw = item.get("subjects", [])

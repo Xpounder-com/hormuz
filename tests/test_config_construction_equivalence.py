@@ -39,6 +39,8 @@ def _canonical(value: Any, *, config_directory: Path) -> object:
         return {"config_relative_path": relative.as_posix()}
     if isinstance(value, (ipaddress.IPv4Network, ipaddress.IPv6Network)):
         return {"network": str(value)}
+    if isinstance(value, bytes):
+        return {"bytes_hex": value.hex()}
     if isinstance(value, CustodyAssetCatalog):
         return {
             "type": type(value).__name__,
@@ -90,8 +92,8 @@ def _snapshot_sha256(config: GatewayConfig) -> str:
 
 
 class ConfigurationConstructionEquivalenceTests(unittest.TestCase):
-    LOCAL_SNAPSHOT_SHA256 = "9ef62dce16327c09c99a8e8e19a021c7c9e3a7c309fd82443cc586291899adb4"
-    MANAGED_SNAPSHOT_SHA256 = "9b0cfa88c0105ad7dbd1d377399f605bcc2aefa6e21a3d3124c18559a5e26e54"
+    LOCAL_SNAPSHOT_SHA256 = "cf53bcb3b090eb158ce2717b511bceee0639174154aabcf9a3411d1812ddca9b"
+    MANAGED_SNAPSHOT_SHA256 = "6f5ac7b96e7ab26409d63df7915c1e2691fb7a02dfa5fb9658623040fdb86a51"
 
     def _local_value(self) -> dict[str, object]:
         value = json.loads((ROOT / "config.example.json").read_text(encoding="utf-8"))

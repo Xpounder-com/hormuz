@@ -25,6 +25,8 @@ unregistered table.
 | `portfolio_attribution_control` | `portfolio_attribution_audit_events`, `portfolio_attribution_cursors`, `portfolio_attribution_idempotency` | `portfolio_attribution_audit_events`, `portfolio_attribution_cursors`, `portfolio_attribution_idempotency` | Safe read/mutation audit, role-bound frozen-window cursors, keyed request digests and immutable-result references. No copied v1 financial facts or raw JSON mutation bodies. |
 | `portfolio_registry_metadata` | `portfolio_binding_events`, `portfolio_work_scope_versions` | `portfolio_binding_events`, `portfolio_work_scope_versions` | Append-only tenant-qualified scope/binding IDs, pinned hierarchy/ownership/lifecycle versions, and bounded administrator-entered scope display names. No external work content. |
 | `portfolio_registry_control` | `portfolio_audit_events`, `portfolio_cursors`, `portfolio_idempotency` | `portfolio_audit_events`, `portfolio_cursors`, `portfolio_idempotency` | Content-free audit IDs/change classes; actor/role-bound frozen-window cursor state; idempotency identities, keyed request digests, and references to immutable results. No duplicated display labels or raw request/response JSON. |
+| `browser_session_identity` | `session_enrollments`, `human_sessions`, `consumed_refresh_credentials` (separate opt-in database) | — | Exact issuer/subject, tenant/actor/team/client bindings and expiry, keyed credential hashes, and AEAD-encrypted transient nonce/PKCE verifier. No raw access/refresh credential, IdP token, authorization code, prompt, or response. |
+| `browser_session_security_events` | `session_security_events` (separate opt-in database) | — | Local metadata-only logout, refresh-replay, and mapping-removal events. These are not immutable audit-chain evidence. |
 | `schema_migration_state` | `hormuz_schema_migrations` | `hormuz_schema_migrations` | Applied migration version and state; operational metadata only. |
 | `usage_and_secret_evidence` | `gateway_secret_events`, `gateway_usage_events` | `gateway_secret_events`, `gateway_usage_events` | Event-time identity/team, client/model/policy outcome, tokens, estimated cost, provider-request metadata, and rule IDs/counts. No prompt, response, or matched secret value. |
 | `budget_reservations` | `gateway_budget_reservations` | `gateway_budget_reservations` | Temporary conservative token/cost reservations bound to organization, team, actor, and attempt metadata. |
@@ -107,6 +109,24 @@ or importing an audit export into another system creates a new
 customer-operated copy with its own obligations.
 
 ## Export, retention, backup, and deletion
+
+The opt-in local login adapter also creates `session_database_file`, an
+owner-only SQLite file plus WAL/SHM sidecars at the configured session path,
+and `client_session_secure_store`, an access/refresh pair held by the approved
+OS credential store. The session file is separate from routine usage data;
+its identity bindings are sensitive even though credential values are hashed.
+Only nonce/PKCE flow material is recoverably encrypted. Expired enrollment
+rows are removed on the next enrollment, and consumed refresh hashes expire
+after the session's absolute lifetime. Revoked/expired session rows and local
+security-event retention remain operator responsibilities. Logout revokes the
+server session before deleting the local credential record.
+
+Backups must protect both the session database and the independently injected
+master key. Restoring an old session database can otherwise resurrect revoked
+or consumed credentials: rotate the master key before restoring the local
+broker, forcing fresh logins. Online key rotation, distributed session storage,
+immutable session events, and automated tenant erasure are not implemented by
+this adapter. See [local login](HOSTED_LOGIN_LOCAL.md).
 
 For the v1 self-hosted release, customer database and backup operators are responsible
 for export, retention, backup, restore, and deletion using their controlled
