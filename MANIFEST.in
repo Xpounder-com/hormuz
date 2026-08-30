@@ -9,6 +9,7 @@ include docs/launch/claims-v2.json
 include docs/deployment-contract-v1.json
 include docs/durable-data-v1.json
 include docs/portfolio-intelligence-contract-v1.json
+include docs/portfolio-intelligence-wire-v1.json
 include hormuz/secret-inventory-v1.json
 include tools/_verification_runtime.py
 include tools/verify_secret_inventory.py
@@ -25,6 +26,7 @@ include tools/set_v1_release_publisher_secret.zsh
 include tools/verify_deployment_contract.py
 include tools/verify_durable_data_inventory.py
 include tools/verify_portfolio_intelligence_contract.py
+include tools/_portfolio_wire_contract.py
 include tools/oidc_reference_conformance.py
 include tools/verify_ceph_rgw_custody_conformance.py
 include tools/verify_dependency_licenses.py

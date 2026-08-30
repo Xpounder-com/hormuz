@@ -1,0 +1,2300 @@
+{
+  "schema_id": "hormuz.portfolio-wire-examples",
+  "schema_version": 1,
+  "evidence": "Synthetic structural examples only; external references are not live entities and these examples do not prove authorization, domain transitions, customer outcomes, or release readiness.",
+  "cases": [
+    {
+      "name": "hormuz.connector-ingest-receipt:minimal",
+      "schema_id": "hormuz.connector-ingest-receipt",
+      "value": {
+        "schema_id": "hormuz.connector-ingest-receipt",
+        "schema_version": 1,
+        "organization_id": "example-id",
+        "connector_id": "example-id",
+        "source_delivery_id": "source-id-1",
+        "receipt_id": "example-id",
+        "disposition": "accepted",
+        "accepted_event_count": 0,
+        "ingested_at": "2026-08-01T01:00:02Z"
+      }
+    },
+    {
+      "name": "hormuz.connector-ingest-receipt:populated",
+      "schema_id": "hormuz.connector-ingest-receipt",
+      "value": {
+        "schema_id": "hormuz.connector-ingest-receipt",
+        "schema_version": 1,
+        "organization_id": "example-id",
+        "connector_id": "example-id",
+        "source_delivery_id": "source-id-1",
+        "receipt_id": "example-id",
+        "disposition": "accepted",
+        "accepted_event_count": 1,
+        "ingested_at": "2026-08-01T01:00:02Z"
+      }
+    },
+    {
+      "name": "hormuz.external-work-binding-event:minimal",
+      "schema_id": "hormuz.external-work-binding-event",
+      "value": {
+        "schema_id": "hormuz.external-work-binding-event",
+        "schema_version": 1,
+        "organization_id": "example-id",
+        "binding_event_id": "example-id",
+        "connector_id": "example-id",
+        "external_object_id": "source-id-1",
+        "work_scope": {
+          "work_scope_id": "example-id",
+          "version": 1
+        },
+        "state": "active",
+        "supersedes_event_id": null,
+        "actor_id": "example-id",
+        "reason_code": "created",
+        "event_at": "2026-08-01T01:00:00Z",
+        "observed_at": "2026-08-01T01:00:01Z",
+        "ingested_at": "2026-08-01T01:00:02Z"
+      }
+    },
+    {
+      "name": "hormuz.external-work-binding-event:populated",
+      "schema_id": "hormuz.external-work-binding-event",
+      "value": {
+        "schema_id": "hormuz.external-work-binding-event",
+        "schema_version": 1,
+        "organization_id": "example-id",
+        "binding_event_id": "example-id",
+        "connector_id": "example-id",
+        "external_object_id": "source-id-1",
+        "work_scope": {
+          "work_scope_id": "example-id",
+          "version": 1
+        },
+        "state": "active",
+        "supersedes_event_id": "example-id",
+        "actor_id": "example-id",
+        "reason_code": "created",
+        "event_at": "2026-08-01T01:00:00Z",
+        "observed_at": "2026-08-01T01:00:01Z",
+        "ingested_at": "2026-08-01T01:00:02Z"
+      }
+    },
+    {
+      "name": "hormuz.external-work-binding-page:minimal",
+      "schema_id": "hormuz.external-work-binding-page",
+      "value": {
+        "schema_id": "hormuz.external-work-binding-page",
+        "schema_version": 1,
+        "organization_id": "example-id",
+        "items": [],
+        "as_of": "2026-08-03T00:00:00Z",
+        "has_more": false,
+        "next_cursor": null
+      }
+    },
+    {
+      "name": "hormuz.external-work-binding-page:populated",
+      "schema_id": "hormuz.external-work-binding-page",
+      "value": {
+        "schema_id": "hormuz.external-work-binding-page",
+        "schema_version": 1,
+        "organization_id": "example-id",
+        "items": [
+          {
+            "schema_id": "hormuz.external-work-binding-event",
+            "schema_version": 1,
+            "organization_id": "example-id",
+            "binding_event_id": "example-id",
+            "connector_id": "example-id",
+            "external_object_id": "source-id-1",
+            "work_scope": {
+              "work_scope_id": "example-id",
+              "version": 1
+            },
+            "state": "active",
+            "supersedes_event_id": "example-id",
+            "actor_id": "example-id",
+            "reason_code": "created",
+            "event_at": "2026-08-01T01:00:00Z",
+            "observed_at": "2026-08-01T01:00:01Z",
+            "ingested_at": "2026-08-01T01:00:02Z"
+          }
+        ],
+        "as_of": "2026-08-03T00:00:00Z",
+        "has_more": false,
+        "next_cursor": null
+      }
+    },
+    {
+      "name": "hormuz.external-work-binding-request:minimal",
+      "schema_id": "hormuz.external-work-binding-request",
+      "value": {
+        "schema_id": "hormuz.external-work-binding-request",
+        "schema_version": 1,
+        "connector_id": "example-id",
+        "external_object_id": "source-id-1",
+        "work_scope": {
+          "work_scope_id": "example-id",
+          "version": 1
+        },
+        "expected_binding_event_id": null,
+        "state": "active",
+        "reason_code": "bound"
+      }
+    },
+    {
+      "name": "hormuz.external-work-binding-request:populated",
+      "schema_id": "hormuz.external-work-binding-request",
+      "value": {
+        "schema_id": "hormuz.external-work-binding-request",
+        "schema_version": 1,
+        "connector_id": "example-id",
+        "external_object_id": "source-id-1",
+        "work_scope": {
+          "work_scope_id": "example-id",
+          "version": 1
+        },
+        "expected_binding_event_id": "example-id",
+        "state": "active",
+        "reason_code": "bound"
+      }
+    },
+    {
+      "name": "hormuz.governed-run-attribution-event:minimal",
+      "schema_id": "hormuz.governed-run-attribution-event",
+      "value": {
+        "schema_id": "hormuz.governed-run-attribution-event",
+        "schema_version": 1,
+        "organization_id": "example-id",
+        "attribution_event_id": "example-id",
+        "request_attempt_id": "example-id",
+        "work_scope": null,
+        "confidence": "authorized_post_run",
+        "state": "voided",
+        "supersedes_event_id": null,
+        "actor_id": null,
+        "reason_code": "voided",
+        "event_at": "2026-08-01T01:00:00Z",
+        "observed_at": "2026-08-01T01:00:01Z",
+        "ingested_at": "2026-08-01T01:00:02Z"
+      }
+    },
+    {
+      "name": "hormuz.governed-run-attribution-event:populated",
+      "schema_id": "hormuz.governed-run-attribution-event",
+      "value": {
+        "schema_id": "hormuz.governed-run-attribution-event",
+        "schema_version": 1,
+        "organization_id": "example-id",
+        "attribution_event_id": "example-id",
+        "request_attempt_id": "example-id",
+        "work_scope": {
+          "work_scope_id": "example-id",
+          "version": 1
+        },
+        "confidence": "authorized_post_run",
+        "state": "active",
+        "supersedes_event_id": "example-id",
+        "actor_id": "example-id",
+        "reason_code": "created",
+        "event_at": "2026-08-01T01:00:00Z",
+        "observed_at": "2026-08-01T01:00:01Z",
+        "ingested_at": "2026-08-01T01:00:02Z"
+      }
+    },
+    {
+      "name": "hormuz.governed-run-attribution-page:minimal",
+      "schema_id": "hormuz.governed-run-attribution-page",
+      "value": {
+        "schema_id": "hormuz.governed-run-attribution-page",
+        "schema_version": 1,
+        "organization_id": "example-id",
+        "items": [],
+        "as_of": "2026-08-03T00:00:00Z",
+        "has_more": false,
+        "next_cursor": null
+      }
+    },
+    {
+      "name": "hormuz.governed-run-attribution-page:populated",
+      "schema_id": "hormuz.governed-run-attribution-page",
+      "value": {
+        "schema_id": "hormuz.governed-run-attribution-page",
+        "schema_version": 1,
+        "organization_id": "example-id",
+        "items": [
+          {
+            "schema_id": "hormuz.governed-run-attribution-event",
+            "schema_version": 1,
+            "organization_id": "example-id",
+            "attribution_event_id": "example-id",
+            "request_attempt_id": "example-id",
+            "work_scope": {
+              "work_scope_id": "example-id",
+              "version": 1
+            },
+            "confidence": "authorized_post_run",
+            "state": "active",
+            "supersedes_event_id": "example-id",
+            "actor_id": "example-id",
+            "reason_code": "created",
+            "event_at": "2026-08-01T01:00:00Z",
+            "observed_at": "2026-08-01T01:00:01Z",
+            "ingested_at": "2026-08-01T01:00:02Z"
+          }
+        ],
+        "as_of": "2026-08-03T00:00:00Z",
+        "has_more": false,
+        "next_cursor": null
+      }
+    },
+    {
+      "name": "hormuz.governed-run-attribution-request:minimal",
+      "schema_id": "hormuz.governed-run-attribution-request",
+      "value": {
+        "schema_id": "hormuz.governed-run-attribution-request",
+        "schema_version": 1,
+        "request_attempt_id": "example-id",
+        "work_scope": null,
+        "expected_attribution_event_id": null,
+        "state": "voided",
+        "reason_code": "voided"
+      }
+    },
+    {
+      "name": "hormuz.governed-run-attribution-request:populated",
+      "schema_id": "hormuz.governed-run-attribution-request",
+      "value": {
+        "schema_id": "hormuz.governed-run-attribution-request",
+        "schema_version": 1,
+        "request_attempt_id": "example-id",
+        "work_scope": {
+          "work_scope_id": "example-id",
+          "version": 1
+        },
+        "expected_attribution_event_id": "example-id",
+        "state": "active",
+        "reason_code": "bound"
+      }
+    },
+    {
+      "name": "hormuz.model-scorecard:minimal",
+      "schema_id": "hormuz.model-scorecard",
+      "value": {
+        "schema_id": "hormuz.model-scorecard",
+        "schema_version": 1,
+        "organization_id": "example-id",
+        "scorecard_id": "example-id",
+        "version": 1,
+        "work_scope": {
+          "work_scope_id": "example-id",
+          "version": 1
+        },
+        "window": {
+          "start_at": "2026-08-01T00:00:00Z",
+          "end_at": "2026-08-02T00:00:00Z"
+        },
+        "generated_at": "2026-08-03T00:00:00Z",
+        "expires_at": "2026-09-01T00:00:00Z",
+        "state": "inconclusive",
+        "evidence_level": "descriptive",
+        "controlled_design": null,
+        "coverage": {
+          "eligible_governed_attempts": {
+            "numerator": "0",
+            "denominator": "0",
+            "ratio": null,
+            "reason_code": "missing_evidence"
+          },
+          "eligible_governed_spend": {
+            "numerator": "0",
+            "denominator": "0",
+            "ratio": null,
+            "reason_code": "missing_evidence"
+          },
+          "eligible_external_outcome_events": {
+            "numerator": "0",
+            "denominator": "0",
+            "ratio": null,
+            "reason_code": "missing_evidence"
+          },
+          "eligible_association_candidates": {
+            "numerator": "0",
+            "denominator": "0",
+            "ratio": null,
+            "reason_code": "missing_evidence"
+          },
+          "pricing": {
+            "numerator": "0",
+            "denominator": "0",
+            "ratio": null,
+            "reason_code": "missing_evidence"
+          },
+          "connector": {
+            "numerator": "0",
+            "denominator": "0",
+            "ratio": null,
+            "reason_code": "missing_evidence"
+          },
+          "association": {
+            "numerator": "0",
+            "denominator": "0",
+            "ratio": null,
+            "reason_code": "missing_evidence"
+          }
+        },
+        "cohorts": [
+          {
+            "cohort_id": "cohort-1",
+            "actual_model": null,
+            "policy": null,
+            "rate_card": null,
+            "cost_basis": "provider_final",
+            "cost_components": [],
+            "connector_coverage": {
+              "numerator": "0",
+              "denominator": "0",
+              "ratio": null,
+              "reason_code": "missing_evidence"
+            },
+            "association_rule": null,
+            "eligibility": {
+              "rule": null,
+              "declared_at": null,
+              "minimum_coverage": null,
+              "minimum_sample": null,
+              "sample_count": 0,
+              "observed_coverage": 0,
+              "status": "inconclusive"
+            },
+            "metrics": {
+              "use_case_attributed_spend_coverage": {
+                "rule": null,
+                "value": null,
+                "numerator": null,
+                "denominator": null,
+                "unit": "ratio",
+                "status": "inconclusive",
+                "reason_code": "missing_evidence"
+              },
+              "quality_qualified_cost_per_accepted_work_item": {
+                "rule": null,
+                "value": null,
+                "numerator": null,
+                "denominator": null,
+                "unit": "currency_per_accepted_item",
+                "status": "inconclusive",
+                "reason_code": "missing_evidence"
+              },
+              "optimization_lift_vs_declared_baseline": {
+                "rule": null,
+                "value": null,
+                "numerator": null,
+                "denominator": null,
+                "unit": "relative_lift",
+                "status": "inconclusive",
+                "reason_code": "missing_evidence"
+              }
+            },
+            "drivers": {
+              "actual_model_mix": [],
+              "cache_and_token_mix": {
+                "input_tokens": null,
+                "output_tokens": null,
+                "cached_input_tokens": null,
+                "reasoning_tokens": null
+              },
+              "latency": {
+                "p50_ms": null,
+                "p95_ms": null
+              },
+              "retries": 0,
+              "first_pass_success": {
+                "numerator": "0",
+                "denominator": "0",
+                "ratio": null,
+                "reason_code": "missing_evidence"
+              },
+              "fallback_and_denial_rate": {
+                "fallback": {
+                  "numerator": "0",
+                  "denominator": "0",
+                  "ratio": null,
+                  "reason_code": "missing_evidence"
+                },
+                "denial": {
+                  "numerator": "0",
+                  "denominator": "0",
+                  "ratio": null,
+                  "reason_code": "missing_evidence"
+                }
+              }
+            },
+            "guardrails": {
+              "quality": {
+                "state": "inconclusive",
+                "rule": null,
+                "value": null,
+                "reason_code": "missing_evidence"
+              },
+              "reversion_or_defect": {
+                "state": "inconclusive",
+                "rule": null,
+                "value": null,
+                "reason_code": "missing_evidence"
+              },
+              "reliability": {
+                "state": "inconclusive",
+                "rule": null,
+                "value": null,
+                "reason_code": "missing_evidence"
+              },
+              "privacy": {
+                "state": "inconclusive",
+                "rule": null,
+                "value": null,
+                "reason_code": "missing_evidence"
+              },
+              "budget": {
+                "state": "inconclusive",
+                "rule": null,
+                "value": null,
+                "reason_code": "missing_evidence"
+              },
+              "coverage_and_sample_eligibility": {
+                "state": "inconclusive",
+                "rule": null,
+                "value": null,
+                "reason_code": "missing_evidence"
+              },
+              "freshness": {
+                "state": "inconclusive",
+                "rule": null,
+                "value": null,
+                "reason_code": "missing_evidence"
+              },
+              "comparability": {
+                "state": "inconclusive",
+                "rule": null,
+                "value": null,
+                "reason_code": "missing_evidence"
+              }
+            }
+          }
+        ],
+        "baseline_cohort_id": null,
+        "pareto_cohort_ids": [],
+        "decision_owner_id": "example-id",
+        "review_after": "2026-08-15T00:00:00Z",
+        "supersedes_version": null,
+        "reason_code": "missing_evidence"
+      }
+    },
+    {
+      "name": "hormuz.model-scorecard:populated",
+      "schema_id": "hormuz.model-scorecard",
+      "value": {
+        "schema_id": "hormuz.model-scorecard",
+        "schema_version": 1,
+        "organization_id": "example-id",
+        "scorecard_id": "example-id",
+        "version": 1,
+        "work_scope": {
+          "work_scope_id": "example-id",
+          "version": 1
+        },
+        "window": {
+          "start_at": "2026-08-01T00:00:00Z",
+          "end_at": "2026-08-02T00:00:00Z"
+        },
+        "generated_at": "2026-08-03T00:00:00Z",
+        "expires_at": "2026-09-01T00:00:00Z",
+        "state": "eligible",
+        "evidence_level": "associated",
+        "controlled_design": null,
+        "coverage": {
+          "eligible_governed_attempts": {
+            "numerator": "1",
+            "denominator": "2",
+            "ratio": 0.5,
+            "reason_code": "eligible"
+          },
+          "eligible_governed_spend": {
+            "numerator": "1",
+            "denominator": "2",
+            "ratio": 0.5,
+            "reason_code": "eligible"
+          },
+          "eligible_external_outcome_events": {
+            "numerator": "1",
+            "denominator": "2",
+            "ratio": 0.5,
+            "reason_code": "eligible"
+          },
+          "eligible_association_candidates": {
+            "numerator": "1",
+            "denominator": "2",
+            "ratio": 0.5,
+            "reason_code": "eligible"
+          },
+          "pricing": {
+            "numerator": "1",
+            "denominator": "2",
+            "ratio": 0.5,
+            "reason_code": "eligible"
+          },
+          "connector": {
+            "numerator": "1",
+            "denominator": "2",
+            "ratio": 0.5,
+            "reason_code": "eligible"
+          },
+          "association": {
+            "numerator": "1",
+            "denominator": "2",
+            "ratio": 0.5,
+            "reason_code": "eligible"
+          }
+        },
+        "cohorts": [
+          {
+            "cohort_id": "cohort-1",
+            "actual_model": {
+              "provider_id": "example-id",
+              "model_id": "example-id",
+              "model_version": "example-id"
+            },
+            "policy": {
+              "id": "example-id",
+              "version": 1
+            },
+            "rate_card": {
+              "id": "example-id",
+              "version": 1
+            },
+            "cost_basis": "provider_final",
+            "cost_components": [
+              {
+                "basis": "provider_final",
+                "amount": "1",
+                "currency": "USD",
+                "rate_card": {
+                  "id": "example-id",
+                  "version": 1
+                },
+                "provenance_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              }
+            ],
+            "connector_coverage": {
+              "numerator": "1",
+              "denominator": "2",
+              "ratio": 0.5,
+              "reason_code": "eligible"
+            },
+            "association_rule": {
+              "rule_id": "example-id",
+              "version": 1,
+              "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "eligibility": {
+              "rule": {
+                "rule_id": "example-id",
+                "version": 1,
+                "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              },
+              "declared_at": "2026-07-31T00:00:00Z",
+              "minimum_coverage": 0.5,
+              "minimum_sample": 1,
+              "sample_count": 1,
+              "observed_coverage": 0.5,
+              "status": "eligible"
+            },
+            "metrics": {
+              "use_case_attributed_spend_coverage": {
+                "rule": {
+                  "rule_id": "example-id",
+                  "version": 1,
+                  "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                },
+                "value": "0.5",
+                "numerator": "1",
+                "denominator": "2",
+                "unit": "ratio",
+                "status": "eligible",
+                "reason_code": "eligible"
+              },
+              "quality_qualified_cost_per_accepted_work_item": {
+                "rule": {
+                  "rule_id": "example-id",
+                  "version": 1,
+                  "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                },
+                "value": "0.5",
+                "numerator": "1",
+                "denominator": "2",
+                "unit": "currency_per_accepted_item",
+                "status": "eligible",
+                "reason_code": "eligible"
+              },
+              "optimization_lift_vs_declared_baseline": {
+                "rule": {
+                  "rule_id": "example-id",
+                  "version": 1,
+                  "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                },
+                "value": "0.5",
+                "numerator": "1",
+                "denominator": "2",
+                "unit": "relative_lift",
+                "status": "eligible",
+                "reason_code": "eligible"
+              }
+            },
+            "drivers": {
+              "actual_model_mix": [
+                {
+                  "model": {
+                    "provider_id": "example-id",
+                    "model_id": "example-id",
+                    "model_version": "example-id"
+                  },
+                  "attempt_count": 1
+                }
+              ],
+              "cache_and_token_mix": {
+                "input_tokens": 1,
+                "output_tokens": 1,
+                "cached_input_tokens": 1,
+                "reasoning_tokens": 1
+              },
+              "latency": {
+                "p50_ms": "1",
+                "p95_ms": "1"
+              },
+              "retries": 1,
+              "first_pass_success": {
+                "numerator": "1",
+                "denominator": "2",
+                "ratio": 0.5,
+                "reason_code": "eligible"
+              },
+              "fallback_and_denial_rate": {
+                "fallback": {
+                  "numerator": "1",
+                  "denominator": "2",
+                  "ratio": 0.5,
+                  "reason_code": "eligible"
+                },
+                "denial": {
+                  "numerator": "1",
+                  "denominator": "2",
+                  "ratio": 0.5,
+                  "reason_code": "eligible"
+                }
+              }
+            },
+            "guardrails": {
+              "quality": {
+                "state": "pass",
+                "rule": {
+                  "rule_id": "example-id",
+                  "version": 1,
+                  "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                },
+                "value": "1",
+                "reason_code": "eligible"
+              },
+              "reversion_or_defect": {
+                "state": "pass",
+                "rule": {
+                  "rule_id": "example-id",
+                  "version": 1,
+                  "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                },
+                "value": "1",
+                "reason_code": "eligible"
+              },
+              "reliability": {
+                "state": "pass",
+                "rule": {
+                  "rule_id": "example-id",
+                  "version": 1,
+                  "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                },
+                "value": "1",
+                "reason_code": "eligible"
+              },
+              "privacy": {
+                "state": "pass",
+                "rule": {
+                  "rule_id": "example-id",
+                  "version": 1,
+                  "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                },
+                "value": "1",
+                "reason_code": "eligible"
+              },
+              "budget": {
+                "state": "pass",
+                "rule": {
+                  "rule_id": "example-id",
+                  "version": 1,
+                  "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                },
+                "value": "1",
+                "reason_code": "eligible"
+              },
+              "coverage_and_sample_eligibility": {
+                "state": "pass",
+                "rule": {
+                  "rule_id": "example-id",
+                  "version": 1,
+                  "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                },
+                "value": "1",
+                "reason_code": "eligible"
+              },
+              "freshness": {
+                "state": "pass",
+                "rule": {
+                  "rule_id": "example-id",
+                  "version": 1,
+                  "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                },
+                "value": "1",
+                "reason_code": "eligible"
+              },
+              "comparability": {
+                "state": "pass",
+                "rule": {
+                  "rule_id": "example-id",
+                  "version": 1,
+                  "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                },
+                "value": "1",
+                "reason_code": "eligible"
+              }
+            }
+          }
+        ],
+        "baseline_cohort_id": "cohort-1",
+        "pareto_cohort_ids": [
+          "cohort-1"
+        ],
+        "decision_owner_id": "example-id",
+        "review_after": "2026-08-15T00:00:00Z",
+        "supersedes_version": 1,
+        "reason_code": "eligible"
+      }
+    },
+    {
+      "name": "hormuz.model-scorecard-page:minimal",
+      "schema_id": "hormuz.model-scorecard-page",
+      "value": {
+        "schema_id": "hormuz.model-scorecard-page",
+        "schema_version": 1,
+        "organization_id": "example-id",
+        "items": [],
+        "as_of": "2026-08-03T00:00:00Z",
+        "has_more": false,
+        "next_cursor": null
+      }
+    },
+    {
+      "name": "hormuz.model-scorecard-page:populated",
+      "schema_id": "hormuz.model-scorecard-page",
+      "value": {
+        "schema_id": "hormuz.model-scorecard-page",
+        "schema_version": 1,
+        "organization_id": "example-id",
+        "items": [
+          {
+            "schema_id": "hormuz.model-scorecard",
+            "schema_version": 1,
+            "organization_id": "example-id",
+            "scorecard_id": "example-id",
+            "version": 1,
+            "work_scope": {
+              "work_scope_id": "example-id",
+              "version": 1
+            },
+            "window": {
+              "start_at": "2026-08-01T00:00:00Z",
+              "end_at": "2026-08-02T00:00:00Z"
+            },
+            "generated_at": "2026-08-03T00:00:00Z",
+            "expires_at": "2026-09-01T00:00:00Z",
+            "state": "eligible",
+            "evidence_level": "associated",
+            "controlled_design": null,
+            "coverage": {
+              "eligible_governed_attempts": {
+                "numerator": "1",
+                "denominator": "2",
+                "ratio": 0.5,
+                "reason_code": "eligible"
+              },
+              "eligible_governed_spend": {
+                "numerator": "1",
+                "denominator": "2",
+                "ratio": 0.5,
+                "reason_code": "eligible"
+              },
+              "eligible_external_outcome_events": {
+                "numerator": "1",
+                "denominator": "2",
+                "ratio": 0.5,
+                "reason_code": "eligible"
+              },
+              "eligible_association_candidates": {
+                "numerator": "1",
+                "denominator": "2",
+                "ratio": 0.5,
+                "reason_code": "eligible"
+              },
+              "pricing": {
+                "numerator": "1",
+                "denominator": "2",
+                "ratio": 0.5,
+                "reason_code": "eligible"
+              },
+              "connector": {
+                "numerator": "1",
+                "denominator": "2",
+                "ratio": 0.5,
+                "reason_code": "eligible"
+              },
+              "association": {
+                "numerator": "1",
+                "denominator": "2",
+                "ratio": 0.5,
+                "reason_code": "eligible"
+              }
+            },
+            "cohorts": [
+              {
+                "cohort_id": "cohort-1",
+                "actual_model": {
+                  "provider_id": "example-id",
+                  "model_id": "example-id",
+                  "model_version": "example-id"
+                },
+                "policy": {
+                  "id": "example-id",
+                  "version": 1
+                },
+                "rate_card": {
+                  "id": "example-id",
+                  "version": 1
+                },
+                "cost_basis": "provider_final",
+                "cost_components": [
+                  {
+                    "basis": "provider_final",
+                    "amount": "1",
+                    "currency": "USD",
+                    "rate_card": {
+                      "id": "example-id",
+                      "version": 1
+                    },
+                    "provenance_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                  }
+                ],
+                "connector_coverage": {
+                  "numerator": "1",
+                  "denominator": "2",
+                  "ratio": 0.5,
+                  "reason_code": "eligible"
+                },
+                "association_rule": {
+                  "rule_id": "example-id",
+                  "version": 1,
+                  "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                },
+                "eligibility": {
+                  "rule": {
+                    "rule_id": "example-id",
+                    "version": 1,
+                    "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                  },
+                  "declared_at": "2026-07-31T00:00:00Z",
+                  "minimum_coverage": 0.5,
+                  "minimum_sample": 1,
+                  "sample_count": 1,
+                  "observed_coverage": 0.5,
+                  "status": "eligible"
+                },
+                "metrics": {
+                  "use_case_attributed_spend_coverage": {
+                    "rule": {
+                      "rule_id": "example-id",
+                      "version": 1,
+                      "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                    },
+                    "value": "0.5",
+                    "numerator": "1",
+                    "denominator": "2",
+                    "unit": "ratio",
+                    "status": "eligible",
+                    "reason_code": "eligible"
+                  },
+                  "quality_qualified_cost_per_accepted_work_item": {
+                    "rule": {
+                      "rule_id": "example-id",
+                      "version": 1,
+                      "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                    },
+                    "value": "0.5",
+                    "numerator": "1",
+                    "denominator": "2",
+                    "unit": "currency_per_accepted_item",
+                    "status": "eligible",
+                    "reason_code": "eligible"
+                  },
+                  "optimization_lift_vs_declared_baseline": {
+                    "rule": {
+                      "rule_id": "example-id",
+                      "version": 1,
+                      "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                    },
+                    "value": "0.5",
+                    "numerator": "1",
+                    "denominator": "2",
+                    "unit": "relative_lift",
+                    "status": "eligible",
+                    "reason_code": "eligible"
+                  }
+                },
+                "drivers": {
+                  "actual_model_mix": [
+                    {
+                      "model": {
+                        "provider_id": "example-id",
+                        "model_id": "example-id",
+                        "model_version": "example-id"
+                      },
+                      "attempt_count": 1
+                    }
+                  ],
+                  "cache_and_token_mix": {
+                    "input_tokens": 1,
+                    "output_tokens": 1,
+                    "cached_input_tokens": 1,
+                    "reasoning_tokens": 1
+                  },
+                  "latency": {
+                    "p50_ms": "1",
+                    "p95_ms": "1"
+                  },
+                  "retries": 1,
+                  "first_pass_success": {
+                    "numerator": "1",
+                    "denominator": "2",
+                    "ratio": 0.5,
+                    "reason_code": "eligible"
+                  },
+                  "fallback_and_denial_rate": {
+                    "fallback": {
+                      "numerator": "1",
+                      "denominator": "2",
+                      "ratio": 0.5,
+                      "reason_code": "eligible"
+                    },
+                    "denial": {
+                      "numerator": "1",
+                      "denominator": "2",
+                      "ratio": 0.5,
+                      "reason_code": "eligible"
+                    }
+                  }
+                },
+                "guardrails": {
+                  "quality": {
+                    "state": "pass",
+                    "rule": {
+                      "rule_id": "example-id",
+                      "version": 1,
+                      "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                    },
+                    "value": "1",
+                    "reason_code": "eligible"
+                  },
+                  "reversion_or_defect": {
+                    "state": "pass",
+                    "rule": {
+                      "rule_id": "example-id",
+                      "version": 1,
+                      "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                    },
+                    "value": "1",
+                    "reason_code": "eligible"
+                  },
+                  "reliability": {
+                    "state": "pass",
+                    "rule": {
+                      "rule_id": "example-id",
+                      "version": 1,
+                      "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                    },
+                    "value": "1",
+                    "reason_code": "eligible"
+                  },
+                  "privacy": {
+                    "state": "pass",
+                    "rule": {
+                      "rule_id": "example-id",
+                      "version": 1,
+                      "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                    },
+                    "value": "1",
+                    "reason_code": "eligible"
+                  },
+                  "budget": {
+                    "state": "pass",
+                    "rule": {
+                      "rule_id": "example-id",
+                      "version": 1,
+                      "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                    },
+                    "value": "1",
+                    "reason_code": "eligible"
+                  },
+                  "coverage_and_sample_eligibility": {
+                    "state": "pass",
+                    "rule": {
+                      "rule_id": "example-id",
+                      "version": 1,
+                      "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                    },
+                    "value": "1",
+                    "reason_code": "eligible"
+                  },
+                  "freshness": {
+                    "state": "pass",
+                    "rule": {
+                      "rule_id": "example-id",
+                      "version": 1,
+                      "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                    },
+                    "value": "1",
+                    "reason_code": "eligible"
+                  },
+                  "comparability": {
+                    "state": "pass",
+                    "rule": {
+                      "rule_id": "example-id",
+                      "version": 1,
+                      "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                    },
+                    "value": "1",
+                    "reason_code": "eligible"
+                  }
+                }
+              }
+            ],
+            "baseline_cohort_id": "cohort-1",
+            "pareto_cohort_ids": [
+              "cohort-1"
+            ],
+            "decision_owner_id": "example-id",
+            "review_after": "2026-08-15T00:00:00Z",
+            "supersedes_version": 1,
+            "reason_code": "eligible"
+          }
+        ],
+        "as_of": "2026-08-03T00:00:00Z",
+        "has_more": false,
+        "next_cursor": null
+      }
+    },
+    {
+      "name": "hormuz.policy-recommendation:minimal",
+      "schema_id": "hormuz.policy-recommendation",
+      "value": {
+        "schema_id": "hormuz.policy-recommendation",
+        "schema_version": 1,
+        "organization_id": "example-id",
+        "recommendation_id": "example-id",
+        "version": 1,
+        "work_scope": {
+          "work_scope_id": "example-id",
+          "version": 1
+        },
+        "scorecard": {
+          "id": "example-id",
+          "version": 1
+        },
+        "policy": {
+          "id": "example-id",
+          "version": 1
+        },
+        "policy_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "proposal": {
+          "change_type": "budget_plan_change",
+          "candidate_policy_digest": null,
+          "candidate_budget_plan": {
+            "id": "budget-plan-2",
+            "version": 2
+          }
+        },
+        "evidence_level": "descriptive",
+        "window": {
+          "start_at": "2026-08-01T00:00:00Z",
+          "end_at": "2026-08-02T00:00:00Z"
+        },
+        "coverage": {
+          "eligible_governed_attempts": {
+            "numerator": "0",
+            "denominator": "0",
+            "ratio": null,
+            "reason_code": "missing_evidence"
+          },
+          "eligible_governed_spend": {
+            "numerator": "0",
+            "denominator": "0",
+            "ratio": null,
+            "reason_code": "missing_evidence"
+          },
+          "eligible_external_outcome_events": {
+            "numerator": "0",
+            "denominator": "0",
+            "ratio": null,
+            "reason_code": "missing_evidence"
+          },
+          "eligible_association_candidates": {
+            "numerator": "0",
+            "denominator": "0",
+            "ratio": null,
+            "reason_code": "missing_evidence"
+          },
+          "pricing": {
+            "numerator": "0",
+            "denominator": "0",
+            "ratio": null,
+            "reason_code": "missing_evidence"
+          },
+          "connector": {
+            "numerator": "0",
+            "denominator": "0",
+            "ratio": null,
+            "reason_code": "missing_evidence"
+          },
+          "association": {
+            "numerator": "0",
+            "denominator": "0",
+            "ratio": null,
+            "reason_code": "missing_evidence"
+          }
+        },
+        "guardrails": {
+          "quality": {
+            "state": "inconclusive",
+            "rule": null,
+            "value": null,
+            "reason_code": "missing_evidence"
+          },
+          "reversion_or_defect": {
+            "state": "inconclusive",
+            "rule": null,
+            "value": null,
+            "reason_code": "missing_evidence"
+          },
+          "reliability": {
+            "state": "inconclusive",
+            "rule": null,
+            "value": null,
+            "reason_code": "missing_evidence"
+          },
+          "privacy": {
+            "state": "inconclusive",
+            "rule": null,
+            "value": null,
+            "reason_code": "missing_evidence"
+          },
+          "budget": {
+            "state": "inconclusive",
+            "rule": null,
+            "value": null,
+            "reason_code": "missing_evidence"
+          },
+          "coverage_and_sample_eligibility": {
+            "state": "inconclusive",
+            "rule": null,
+            "value": null,
+            "reason_code": "missing_evidence"
+          },
+          "freshness": {
+            "state": "inconclusive",
+            "rule": null,
+            "value": null,
+            "reason_code": "missing_evidence"
+          },
+          "comparability": {
+            "state": "inconclusive",
+            "rule": null,
+            "value": null,
+            "reason_code": "missing_evidence"
+          }
+        },
+        "actual_models": [
+          {
+            "provider_id": "example-id",
+            "model_id": "example-id",
+            "model_version": null
+          }
+        ],
+        "rate_cards": [],
+        "state": "pending",
+        "created_at": "2026-08-03T00:00:00Z",
+        "expires_at": "2026-09-01T00:00:00Z",
+        "latest_decision_event_id": null,
+        "supersedes_version": null,
+        "reason_code": "created",
+        "automatic_application": false
+      }
+    },
+    {
+      "name": "hormuz.policy-recommendation:populated",
+      "schema_id": "hormuz.policy-recommendation",
+      "value": {
+        "schema_id": "hormuz.policy-recommendation",
+        "schema_version": 1,
+        "organization_id": "example-id",
+        "recommendation_id": "example-id",
+        "version": 1,
+        "work_scope": {
+          "work_scope_id": "example-id",
+          "version": 1
+        },
+        "scorecard": {
+          "id": "example-id",
+          "version": 1
+        },
+        "policy": {
+          "id": "example-id",
+          "version": 1
+        },
+        "policy_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "proposal": {
+          "change_type": "budget_plan_change",
+          "candidate_policy_digest": null,
+          "candidate_budget_plan": {
+            "id": "budget-plan-2",
+            "version": 2
+          }
+        },
+        "evidence_level": "descriptive",
+        "window": {
+          "start_at": "2026-08-01T00:00:00Z",
+          "end_at": "2026-08-02T00:00:00Z"
+        },
+        "coverage": {
+          "eligible_governed_attempts": {
+            "numerator": "1",
+            "denominator": "2",
+            "ratio": 0.5,
+            "reason_code": "eligible"
+          },
+          "eligible_governed_spend": {
+            "numerator": "1",
+            "denominator": "2",
+            "ratio": 0.5,
+            "reason_code": "eligible"
+          },
+          "eligible_external_outcome_events": {
+            "numerator": "1",
+            "denominator": "2",
+            "ratio": 0.5,
+            "reason_code": "eligible"
+          },
+          "eligible_association_candidates": {
+            "numerator": "1",
+            "denominator": "2",
+            "ratio": 0.5,
+            "reason_code": "eligible"
+          },
+          "pricing": {
+            "numerator": "1",
+            "denominator": "2",
+            "ratio": 0.5,
+            "reason_code": "eligible"
+          },
+          "connector": {
+            "numerator": "1",
+            "denominator": "2",
+            "ratio": 0.5,
+            "reason_code": "eligible"
+          },
+          "association": {
+            "numerator": "1",
+            "denominator": "2",
+            "ratio": 0.5,
+            "reason_code": "eligible"
+          }
+        },
+        "guardrails": {
+          "quality": {
+            "state": "pass",
+            "rule": {
+              "rule_id": "example-id",
+              "version": 1,
+              "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "value": "1",
+            "reason_code": "eligible"
+          },
+          "reversion_or_defect": {
+            "state": "pass",
+            "rule": {
+              "rule_id": "example-id",
+              "version": 1,
+              "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "value": "1",
+            "reason_code": "eligible"
+          },
+          "reliability": {
+            "state": "pass",
+            "rule": {
+              "rule_id": "example-id",
+              "version": 1,
+              "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "value": "1",
+            "reason_code": "eligible"
+          },
+          "privacy": {
+            "state": "pass",
+            "rule": {
+              "rule_id": "example-id",
+              "version": 1,
+              "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "value": "1",
+            "reason_code": "eligible"
+          },
+          "budget": {
+            "state": "pass",
+            "rule": {
+              "rule_id": "example-id",
+              "version": 1,
+              "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "value": "1",
+            "reason_code": "eligible"
+          },
+          "coverage_and_sample_eligibility": {
+            "state": "pass",
+            "rule": {
+              "rule_id": "example-id",
+              "version": 1,
+              "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "value": "1",
+            "reason_code": "eligible"
+          },
+          "freshness": {
+            "state": "pass",
+            "rule": {
+              "rule_id": "example-id",
+              "version": 1,
+              "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "value": "1",
+            "reason_code": "eligible"
+          },
+          "comparability": {
+            "state": "pass",
+            "rule": {
+              "rule_id": "example-id",
+              "version": 1,
+              "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "value": "1",
+            "reason_code": "eligible"
+          }
+        },
+        "actual_models": [
+          {
+            "provider_id": "example-id",
+            "model_id": "example-id",
+            "model_version": "example-id"
+          }
+        ],
+        "rate_cards": [
+          {
+            "id": "example-id",
+            "version": 1
+          }
+        ],
+        "state": "pending",
+        "created_at": "2026-08-03T00:00:00Z",
+        "expires_at": "2026-09-01T00:00:00Z",
+        "latest_decision_event_id": "example-id",
+        "supersedes_version": 1,
+        "reason_code": "created",
+        "automatic_application": false
+      }
+    },
+    {
+      "name": "hormuz.policy-recommendation-decision-request:minimal",
+      "schema_id": "hormuz.policy-recommendation-decision-request",
+      "value": {
+        "schema_id": "hormuz.policy-recommendation-decision-request",
+        "schema_version": 1,
+        "expected_version": 1,
+        "decision": "rejected",
+        "reason_code": "rejected",
+        "pre_apply_evidence": null
+      }
+    },
+    {
+      "name": "hormuz.policy-recommendation-decision-request:populated",
+      "schema_id": "hormuz.policy-recommendation-decision-request",
+      "value": {
+        "schema_id": "hormuz.policy-recommendation-decision-request",
+        "schema_version": 1,
+        "expected_version": 1,
+        "decision": "accepted",
+        "reason_code": "accepted",
+        "pre_apply_evidence": {
+          "semantic_compare": {
+            "evidence_id": "example-id",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          "request_preview": {
+            "evidence_id": "example-id",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          "saved_scenario_evaluation": {
+            "evidence_id": "example-id",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          "rollback_plan": {
+            "evidence_id": "example-id",
+            "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        }
+      }
+    },
+    {
+      "name": "hormuz.policy-recommendation-page:minimal",
+      "schema_id": "hormuz.policy-recommendation-page",
+      "value": {
+        "schema_id": "hormuz.policy-recommendation-page",
+        "schema_version": 1,
+        "organization_id": "example-id",
+        "items": [],
+        "as_of": "2026-08-03T00:00:00Z",
+        "has_more": false,
+        "next_cursor": null
+      }
+    },
+    {
+      "name": "hormuz.policy-recommendation-page:populated",
+      "schema_id": "hormuz.policy-recommendation-page",
+      "value": {
+        "schema_id": "hormuz.policy-recommendation-page",
+        "schema_version": 1,
+        "organization_id": "example-id",
+        "items": [
+          {
+            "schema_id": "hormuz.policy-recommendation",
+            "schema_version": 1,
+            "organization_id": "example-id",
+            "recommendation_id": "example-id",
+            "version": 1,
+            "work_scope": {
+              "work_scope_id": "example-id",
+              "version": 1
+            },
+            "scorecard": {
+              "id": "example-id",
+              "version": 1
+            },
+            "policy": {
+              "id": "example-id",
+              "version": 1
+            },
+            "policy_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "proposal": {
+              "change_type": "budget_plan_change",
+              "candidate_policy_digest": null,
+              "candidate_budget_plan": {
+                "id": "budget-plan-2",
+                "version": 2
+              }
+            },
+            "evidence_level": "descriptive",
+            "window": {
+              "start_at": "2026-08-01T00:00:00Z",
+              "end_at": "2026-08-02T00:00:00Z"
+            },
+            "coverage": {
+              "eligible_governed_attempts": {
+                "numerator": "1",
+                "denominator": "2",
+                "ratio": 0.5,
+                "reason_code": "eligible"
+              },
+              "eligible_governed_spend": {
+                "numerator": "1",
+                "denominator": "2",
+                "ratio": 0.5,
+                "reason_code": "eligible"
+              },
+              "eligible_external_outcome_events": {
+                "numerator": "1",
+                "denominator": "2",
+                "ratio": 0.5,
+                "reason_code": "eligible"
+              },
+              "eligible_association_candidates": {
+                "numerator": "1",
+                "denominator": "2",
+                "ratio": 0.5,
+                "reason_code": "eligible"
+              },
+              "pricing": {
+                "numerator": "1",
+                "denominator": "2",
+                "ratio": 0.5,
+                "reason_code": "eligible"
+              },
+              "connector": {
+                "numerator": "1",
+                "denominator": "2",
+                "ratio": 0.5,
+                "reason_code": "eligible"
+              },
+              "association": {
+                "numerator": "1",
+                "denominator": "2",
+                "ratio": 0.5,
+                "reason_code": "eligible"
+              }
+            },
+            "guardrails": {
+              "quality": {
+                "state": "pass",
+                "rule": {
+                  "rule_id": "example-id",
+                  "version": 1,
+                  "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                },
+                "value": "1",
+                "reason_code": "eligible"
+              },
+              "reversion_or_defect": {
+                "state": "pass",
+                "rule": {
+                  "rule_id": "example-id",
+                  "version": 1,
+                  "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                },
+                "value": "1",
+                "reason_code": "eligible"
+              },
+              "reliability": {
+                "state": "pass",
+                "rule": {
+                  "rule_id": "example-id",
+                  "version": 1,
+                  "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                },
+                "value": "1",
+                "reason_code": "eligible"
+              },
+              "privacy": {
+                "state": "pass",
+                "rule": {
+                  "rule_id": "example-id",
+                  "version": 1,
+                  "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                },
+                "value": "1",
+                "reason_code": "eligible"
+              },
+              "budget": {
+                "state": "pass",
+                "rule": {
+                  "rule_id": "example-id",
+                  "version": 1,
+                  "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                },
+                "value": "1",
+                "reason_code": "eligible"
+              },
+              "coverage_and_sample_eligibility": {
+                "state": "pass",
+                "rule": {
+                  "rule_id": "example-id",
+                  "version": 1,
+                  "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                },
+                "value": "1",
+                "reason_code": "eligible"
+              },
+              "freshness": {
+                "state": "pass",
+                "rule": {
+                  "rule_id": "example-id",
+                  "version": 1,
+                  "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                },
+                "value": "1",
+                "reason_code": "eligible"
+              },
+              "comparability": {
+                "state": "pass",
+                "rule": {
+                  "rule_id": "example-id",
+                  "version": 1,
+                  "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                },
+                "value": "1",
+                "reason_code": "eligible"
+              }
+            },
+            "actual_models": [
+              {
+                "provider_id": "example-id",
+                "model_id": "example-id",
+                "model_version": "example-id"
+              }
+            ],
+            "rate_cards": [
+              {
+                "id": "example-id",
+                "version": 1
+              }
+            ],
+            "state": "pending",
+            "created_at": "2026-08-03T00:00:00Z",
+            "expires_at": "2026-09-01T00:00:00Z",
+            "latest_decision_event_id": "example-id",
+            "supersedes_version": 1,
+            "reason_code": "created",
+            "automatic_application": false
+          }
+        ],
+        "as_of": "2026-08-03T00:00:00Z",
+        "has_more": false,
+        "next_cursor": null
+      }
+    },
+    {
+      "name": "hormuz.portfolio-error:minimal",
+      "schema_id": "hormuz.portfolio-error",
+      "value": {
+        "schema_id": "hormuz.portfolio-error",
+        "schema_version": 1,
+        "code": "invalid_request",
+        "request_id": "example-id",
+        "retryable": false,
+        "retry_after_seconds": null,
+        "reason_code": "invalid_shape"
+      }
+    },
+    {
+      "name": "hormuz.portfolio-error:populated",
+      "schema_id": "hormuz.portfolio-error",
+      "value": {
+        "schema_id": "hormuz.portfolio-error",
+        "schema_version": 1,
+        "code": "rate_limited",
+        "request_id": "example-id",
+        "retryable": true,
+        "retry_after_seconds": 30,
+        "reason_code": "capacity"
+      }
+    },
+    {
+      "name": "hormuz.portfolio-query:minimal",
+      "schema_id": "hormuz.portfolio-query",
+      "value": {}
+    },
+    {
+      "name": "hormuz.portfolio-query:populated",
+      "schema_id": "hormuz.portfolio-query",
+      "value": {
+        "limit": 50,
+        "start_at": "2026-08-01T00:00:00Z",
+        "end_at": "2026-08-02T00:00:00Z",
+        "work_scope_id": "scope-1"
+      }
+    },
+    {
+      "name": "hormuz.run-outcome-association-event:minimal",
+      "schema_id": "hormuz.run-outcome-association-event",
+      "value": {
+        "schema_id": "hormuz.run-outcome-association-event",
+        "schema_version": 1,
+        "organization_id": "example-id",
+        "association_event_id": "example-id",
+        "outcome": {
+          "connector_id": "example-id",
+          "source_event_id": "source-id-1"
+        },
+        "request_attempt_id": null,
+        "work_scope": null,
+        "rule": null,
+        "candidate_count": 0,
+        "state": "unmatched",
+        "evidence_level": "descriptive",
+        "supersedes_event_id": null,
+        "reason_code": "unmatched",
+        "event_at": "2026-08-01T01:00:00Z",
+        "observed_at": "2026-08-01T01:00:01Z",
+        "ingested_at": "2026-08-01T01:00:02Z"
+      }
+    },
+    {
+      "name": "hormuz.run-outcome-association-event:populated",
+      "schema_id": "hormuz.run-outcome-association-event",
+      "value": {
+        "schema_id": "hormuz.run-outcome-association-event",
+        "schema_version": 1,
+        "organization_id": "example-id",
+        "association_event_id": "example-id",
+        "outcome": {
+          "connector_id": "example-id",
+          "source_event_id": "source-id-1"
+        },
+        "request_attempt_id": "example-id",
+        "work_scope": {
+          "work_scope_id": "example-id",
+          "version": 1
+        },
+        "rule": {
+          "rule_id": "example-id",
+          "version": 1,
+          "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "candidate_count": 1,
+        "state": "associated",
+        "evidence_level": "associated",
+        "supersedes_event_id": "example-id",
+        "reason_code": "bound",
+        "event_at": "2026-08-01T01:00:00Z",
+        "observed_at": "2026-08-01T01:00:01Z",
+        "ingested_at": "2026-08-01T01:00:02Z"
+      }
+    },
+    {
+      "name": "hormuz.run-outcome-association-page:minimal",
+      "schema_id": "hormuz.run-outcome-association-page",
+      "value": {
+        "schema_id": "hormuz.run-outcome-association-page",
+        "schema_version": 1,
+        "organization_id": "example-id",
+        "items": [],
+        "as_of": "2026-08-03T00:00:00Z",
+        "has_more": false,
+        "next_cursor": null
+      }
+    },
+    {
+      "name": "hormuz.run-outcome-association-page:populated",
+      "schema_id": "hormuz.run-outcome-association-page",
+      "value": {
+        "schema_id": "hormuz.run-outcome-association-page",
+        "schema_version": 1,
+        "organization_id": "example-id",
+        "items": [
+          {
+            "schema_id": "hormuz.run-outcome-association-event",
+            "schema_version": 1,
+            "organization_id": "example-id",
+            "association_event_id": "example-id",
+            "outcome": {
+              "connector_id": "example-id",
+              "source_event_id": "source-id-1"
+            },
+            "request_attempt_id": "example-id",
+            "work_scope": {
+              "work_scope_id": "example-id",
+              "version": 1
+            },
+            "rule": {
+              "rule_id": "example-id",
+              "version": 1,
+              "digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "candidate_count": 1,
+            "state": "associated",
+            "evidence_level": "associated",
+            "supersedes_event_id": "example-id",
+            "reason_code": "bound",
+            "event_at": "2026-08-01T01:00:00Z",
+            "observed_at": "2026-08-01T01:00:01Z",
+            "ingested_at": "2026-08-01T01:00:02Z"
+          }
+        ],
+        "as_of": "2026-08-03T00:00:00Z",
+        "has_more": false,
+        "next_cursor": null
+      }
+    },
+    {
+      "name": "hormuz.work-budget-plan:minimal",
+      "schema_id": "hormuz.work-budget-plan",
+      "value": {
+        "schema_id": "hormuz.work-budget-plan",
+        "schema_version": 1,
+        "organization_id": "example-id",
+        "budget_plan_id": "example-id",
+        "version": 1,
+        "work_scope": {
+          "work_scope_id": "example-id",
+          "version": 1
+        },
+        "window": {
+          "start_at": "2026-08-01T00:00:00Z",
+          "end_at": "2026-08-02T00:00:00Z"
+        },
+        "currency": "USD",
+        "amount": "0",
+        "allowed_models": null,
+        "output_token_cap": null,
+        "per_request_cost_cap": null,
+        "active_version": null,
+        "activation_generation": 0,
+        "state": null,
+        "supersedes_version": null,
+        "actor_id": "example-id",
+        "reason_code": "created",
+        "event_at": "2026-08-01T01:00:00Z",
+        "observed_at": "2026-08-01T01:00:01Z",
+        "ingested_at": "2026-08-01T01:00:02Z"
+      }
+    },
+    {
+      "name": "hormuz.work-budget-plan:populated",
+      "schema_id": "hormuz.work-budget-plan",
+      "value": {
+        "schema_id": "hormuz.work-budget-plan",
+        "schema_version": 1,
+        "organization_id": "example-id",
+        "budget_plan_id": "example-id",
+        "version": 1,
+        "work_scope": {
+          "work_scope_id": "example-id",
+          "version": 1
+        },
+        "window": {
+          "start_at": "2026-08-01T00:00:00Z",
+          "end_at": "2026-08-02T00:00:00Z"
+        },
+        "currency": "USD",
+        "amount": "1",
+        "allowed_models": [
+          {
+            "provider_id": "example-id",
+            "model_id": "example-id",
+            "model_version": "example-id"
+          }
+        ],
+        "output_token_cap": 1,
+        "per_request_cost_cap": "1",
+        "active_version": 1,
+        "activation_generation": 1,
+        "state": "active",
+        "supersedes_version": 1,
+        "actor_id": "example-id",
+        "reason_code": "created",
+        "event_at": "2026-08-01T01:00:00Z",
+        "observed_at": "2026-08-01T01:00:01Z",
+        "ingested_at": "2026-08-01T01:00:02Z"
+      }
+    },
+    {
+      "name": "hormuz.work-budget-plan-activation-request:minimal",
+      "schema_id": "hormuz.work-budget-plan-activation-request",
+      "value": {
+        "schema_id": "hormuz.work-budget-plan-activation-request",
+        "schema_version": 1,
+        "version": 1,
+        "expected_active_version": null,
+        "expected_activation_generation": 0,
+        "reason_code": "accepted"
+      }
+    },
+    {
+      "name": "hormuz.work-budget-plan-activation-request:populated",
+      "schema_id": "hormuz.work-budget-plan-activation-request",
+      "value": {
+        "schema_id": "hormuz.work-budget-plan-activation-request",
+        "schema_version": 1,
+        "version": 1,
+        "expected_active_version": 1,
+        "expected_activation_generation": 1,
+        "reason_code": "accepted"
+      }
+    },
+    {
+      "name": "hormuz.work-budget-plan-page:minimal",
+      "schema_id": "hormuz.work-budget-plan-page",
+      "value": {
+        "schema_id": "hormuz.work-budget-plan-page",
+        "schema_version": 1,
+        "organization_id": "example-id",
+        "items": [],
+        "as_of": "2026-08-03T00:00:00Z",
+        "has_more": false,
+        "next_cursor": null
+      }
+    },
+    {
+      "name": "hormuz.work-budget-plan-page:populated",
+      "schema_id": "hormuz.work-budget-plan-page",
+      "value": {
+        "schema_id": "hormuz.work-budget-plan-page",
+        "schema_version": 1,
+        "organization_id": "example-id",
+        "items": [
+          {
+            "schema_id": "hormuz.work-budget-plan",
+            "schema_version": 1,
+            "organization_id": "example-id",
+            "budget_plan_id": "example-id",
+            "version": 1,
+            "work_scope": {
+              "work_scope_id": "example-id",
+              "version": 1
+            },
+            "window": {
+              "start_at": "2026-08-01T00:00:00Z",
+              "end_at": "2026-08-02T00:00:00Z"
+            },
+            "currency": "USD",
+            "amount": "1",
+            "allowed_models": [
+              {
+                "provider_id": "example-id",
+                "model_id": "example-id",
+                "model_version": "example-id"
+              }
+            ],
+            "output_token_cap": 1,
+            "per_request_cost_cap": "1",
+            "active_version": 1,
+            "activation_generation": 1,
+            "state": "active",
+            "supersedes_version": 1,
+            "actor_id": "example-id",
+            "reason_code": "created",
+            "event_at": "2026-08-01T01:00:00Z",
+            "observed_at": "2026-08-01T01:00:01Z",
+            "ingested_at": "2026-08-01T01:00:02Z"
+          }
+        ],
+        "as_of": "2026-08-03T00:00:00Z",
+        "has_more": false,
+        "next_cursor": null
+      }
+    },
+    {
+      "name": "hormuz.work-budget-plan-request:minimal",
+      "schema_id": "hormuz.work-budget-plan-request",
+      "value": {
+        "schema_id": "hormuz.work-budget-plan-request",
+        "schema_version": 1,
+        "budget_plan_id": null,
+        "expected_version": null,
+        "work_scope": {
+          "work_scope_id": "example-id",
+          "version": 1
+        },
+        "window": {
+          "start_at": "2026-08-01T00:00:00Z",
+          "end_at": "2026-08-02T00:00:00Z"
+        },
+        "currency": "USD",
+        "amount": "0",
+        "allowed_models": null,
+        "output_token_cap": null,
+        "per_request_cost_cap": null,
+        "reason_code": "created"
+      }
+    },
+    {
+      "name": "hormuz.work-budget-plan-request:populated",
+      "schema_id": "hormuz.work-budget-plan-request",
+      "value": {
+        "schema_id": "hormuz.work-budget-plan-request",
+        "schema_version": 1,
+        "budget_plan_id": "example-id",
+        "expected_version": 1,
+        "work_scope": {
+          "work_scope_id": "example-id",
+          "version": 1
+        },
+        "window": {
+          "start_at": "2026-08-01T00:00:00Z",
+          "end_at": "2026-08-02T00:00:00Z"
+        },
+        "currency": "USD",
+        "amount": "1",
+        "allowed_models": [
+          {
+            "provider_id": "example-id",
+            "model_id": "example-id",
+            "model_version": "example-id"
+          }
+        ],
+        "output_token_cap": 1,
+        "per_request_cost_cap": "1",
+        "reason_code": "corrected"
+      }
+    },
+    {
+      "name": "hormuz.work-outcome-event:minimal",
+      "schema_id": "hormuz.work-outcome-event",
+      "value": {
+        "schema_id": "hormuz.work-outcome-event",
+        "schema_version": 1,
+        "organization_id": "example-id",
+        "connector_id": "example-id",
+        "source_event_id": "source-id-1",
+        "source_delivery_id": "source-id-1",
+        "external_object_id": "source-id-1",
+        "source_revision": null,
+        "object_type": "issue",
+        "event_type": "created",
+        "quality_state": "not_applicable",
+        "duration_ms": null,
+        "state": "observed",
+        "evidence_level": "descriptive",
+        "supersedes_source_event_id": null,
+        "provenance_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "reason_code": "observed",
+        "event_at": "2026-08-01T01:00:00Z",
+        "observed_at": "2026-08-01T01:00:01Z",
+        "ingested_at": "2026-08-01T01:00:02Z"
+      }
+    },
+    {
+      "name": "hormuz.work-outcome-event:populated",
+      "schema_id": "hormuz.work-outcome-event",
+      "value": {
+        "schema_id": "hormuz.work-outcome-event",
+        "schema_version": 1,
+        "organization_id": "example-id",
+        "connector_id": "example-id",
+        "source_event_id": "source-id-1",
+        "source_delivery_id": "source-id-1",
+        "external_object_id": "source-id-1",
+        "source_revision": "source-id-1",
+        "object_type": "issue",
+        "event_type": "created",
+        "quality_state": "not_applicable",
+        "duration_ms": "1",
+        "state": "observed",
+        "evidence_level": "descriptive",
+        "supersedes_source_event_id": "source-id-1",
+        "provenance_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "reason_code": "observed",
+        "event_at": "2026-08-01T01:00:00Z",
+        "observed_at": "2026-08-01T01:00:01Z",
+        "ingested_at": "2026-08-01T01:00:02Z"
+      }
+    },
+    {
+      "name": "hormuz.work-outcome-page:minimal",
+      "schema_id": "hormuz.work-outcome-page",
+      "value": {
+        "schema_id": "hormuz.work-outcome-page",
+        "schema_version": 1,
+        "organization_id": "example-id",
+        "items": [],
+        "as_of": "2026-08-03T00:00:00Z",
+        "has_more": false,
+        "next_cursor": null
+      }
+    },
+    {
+      "name": "hormuz.work-outcome-page:populated",
+      "schema_id": "hormuz.work-outcome-page",
+      "value": {
+        "schema_id": "hormuz.work-outcome-page",
+        "schema_version": 1,
+        "organization_id": "example-id",
+        "items": [
+          {
+            "schema_id": "hormuz.work-outcome-event",
+            "schema_version": 1,
+            "organization_id": "example-id",
+            "connector_id": "example-id",
+            "source_event_id": "source-id-1",
+            "source_delivery_id": "source-id-1",
+            "external_object_id": "source-id-1",
+            "source_revision": "source-id-1",
+            "object_type": "issue",
+            "event_type": "created",
+            "quality_state": "not_applicable",
+            "duration_ms": "1",
+            "state": "observed",
+            "evidence_level": "descriptive",
+            "supersedes_source_event_id": "source-id-1",
+            "provenance_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "reason_code": "observed",
+            "event_at": "2026-08-01T01:00:00Z",
+            "observed_at": "2026-08-01T01:00:01Z",
+            "ingested_at": "2026-08-01T01:00:02Z"
+          }
+        ],
+        "as_of": "2026-08-03T00:00:00Z",
+        "has_more": false,
+        "next_cursor": null
+      }
+    },
+    {
+      "name": "hormuz.work-scope-create-request:minimal",
+      "schema_id": "hormuz.work-scope-create-request",
+      "value": {
+        "schema_id": "hormuz.work-scope-create-request",
+        "schema_version": 1,
+        "kind": "use_case",
+        "parent_work_scope_id": null,
+        "owner_team_id": null,
+        "display_name": "Example use case"
+      }
+    },
+    {
+      "name": "hormuz.work-scope-create-request:populated",
+      "schema_id": "hormuz.work-scope-create-request",
+      "value": {
+        "schema_id": "hormuz.work-scope-create-request",
+        "schema_version": 1,
+        "kind": "use_case",
+        "parent_work_scope_id": "example-id",
+        "owner_team_id": "example-id",
+        "display_name": "Example use case"
+      }
+    },
+    {
+      "name": "hormuz.work-scope-page:minimal",
+      "schema_id": "hormuz.work-scope-page",
+      "value": {
+        "schema_id": "hormuz.work-scope-page",
+        "schema_version": 1,
+        "organization_id": "example-id",
+        "items": [],
+        "as_of": "2026-08-03T00:00:00Z",
+        "has_more": false,
+        "next_cursor": null
+      }
+    },
+    {
+      "name": "hormuz.work-scope-page:populated",
+      "schema_id": "hormuz.work-scope-page",
+      "value": {
+        "schema_id": "hormuz.work-scope-page",
+        "schema_version": 1,
+        "organization_id": "example-id",
+        "items": [
+          {
+            "schema_id": "hormuz.work-scope-version",
+            "schema_version": 1,
+            "organization_id": "example-id",
+            "work_scope_id": "example-id",
+            "version": 1,
+            "kind": "use_case",
+            "parent": {
+              "work_scope_id": "example-id",
+              "version": 1
+            },
+            "owner_team_id": "example-id",
+            "display_name": "Example use case",
+            "state": "active",
+            "supersedes_version": 1,
+            "actor_id": "example-id",
+            "reason_code": "created",
+            "event_at": "2026-08-01T01:00:00Z",
+            "observed_at": "2026-08-01T01:00:01Z",
+            "ingested_at": "2026-08-01T01:00:02Z"
+          }
+        ],
+        "as_of": "2026-08-03T00:00:00Z",
+        "has_more": false,
+        "next_cursor": null
+      }
+    },
+    {
+      "name": "hormuz.work-scope-version:minimal",
+      "schema_id": "hormuz.work-scope-version",
+      "value": {
+        "schema_id": "hormuz.work-scope-version",
+        "schema_version": 1,
+        "organization_id": "example-id",
+        "work_scope_id": "example-id",
+        "version": 1,
+        "kind": "use_case",
+        "parent": null,
+        "owner_team_id": null,
+        "display_name": null,
+        "state": "tombstoned",
+        "supersedes_version": null,
+        "actor_id": "example-id",
+        "reason_code": "tombstoned",
+        "event_at": "2026-08-01T01:00:00Z",
+        "observed_at": "2026-08-01T01:00:01Z",
+        "ingested_at": "2026-08-01T01:00:02Z"
+      }
+    },
+    {
+      "name": "hormuz.work-scope-version:populated",
+      "schema_id": "hormuz.work-scope-version",
+      "value": {
+        "schema_id": "hormuz.work-scope-version",
+        "schema_version": 1,
+        "organization_id": "example-id",
+        "work_scope_id": "example-id",
+        "version": 1,
+        "kind": "use_case",
+        "parent": {
+          "work_scope_id": "example-id",
+          "version": 1
+        },
+        "owner_team_id": "example-id",
+        "display_name": "Example use case",
+        "state": "active",
+        "supersedes_version": 1,
+        "actor_id": "example-id",
+        "reason_code": "created",
+        "event_at": "2026-08-01T01:00:00Z",
+        "observed_at": "2026-08-01T01:00:01Z",
+        "ingested_at": "2026-08-01T01:00:02Z"
+      }
+    },
+    {
+      "name": "hormuz.work-scope-version-request:minimal",
+      "schema_id": "hormuz.work-scope-version-request",
+      "value": {
+        "schema_id": "hormuz.work-scope-version-request",
+        "schema_version": 1,
+        "expected_version": 1,
+        "parent_work_scope_id": null,
+        "owner_team_id": null,
+        "display_name": null,
+        "state": "tombstoned",
+        "reason_code": "tombstoned"
+      }
+    },
+    {
+      "name": "hormuz.work-scope-version-request:populated",
+      "schema_id": "hormuz.work-scope-version-request",
+      "value": {
+        "schema_id": "hormuz.work-scope-version-request",
+        "schema_version": 1,
+        "expected_version": 1,
+        "parent_work_scope_id": "example-id",
+        "owner_team_id": "example-id",
+        "display_name": "Example use case",
+        "state": "active",
+        "reason_code": "corrected"
+      }
+    }
+  ]
+}

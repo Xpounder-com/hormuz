@@ -11,8 +11,14 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+# Direct execution starts with tools/ on sys.path. Always validate the source
+# beside this verifier, including in an unpacked sdist with no installed package.
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPOSITORY_ROOT))
+
 from hormuz._contract_schemas.manifest import validate_contract_manifest
 from hormuz.contracts import contract_manifest
+from tools._portfolio_wire_contract import PortfolioWireSchemaError, validate_wire_bundle
 
 
 SCHEMA_ID = "hormuz.portfolio-intelligence-contract"
@@ -32,6 +38,8 @@ BASELINE_MANIFEST_SHA256 = (
 )
 MAX_CONTRACT_BYTES = 256 * 1024
 MAX_BASELINE_BYTES = 256 * 1024
+WIRE_SCHEMA_PATH = Path("docs/portfolio-intelligence-wire-v1.json")
+WIRE_SCHEMA_SHA256 = "26ef36b12d475d5b8354e45abfc92c76187ca6ff5aafb4b0ebce6fab439feb80"
 
 TOP_LEVEL_FIELDS = {
     "schema_id",
@@ -69,20 +77,24 @@ ENTITY_SCHEMAS = {
     "policy_recommendation": "hormuz.policy-recommendation",
 }
 ENTITY_MUTABILITY = {
-    "append_only_versions",
-    "append_only_supersession",
-    "immutable_version_and_active_pointer",
-    "immutable_snapshot",
-    "immutable_with_append_only_status",
+    "work_scope_version": "append_only_versions",
+    "external_work_binding_event": "append_only_supersession",
+    "governed_run_attribution_event": "append_only_supersession",
+    "work_budget_plan": "immutable_version_and_active_pointer",
+    "work_outcome_event": "append_only_supersession",
+    "run_outcome_association_event": "append_only_supersession",
+    "model_scorecard": "immutable_snapshot",
+    "policy_recommendation": "immutable_with_append_only_status",
 }
 ENTITY_CONTENT_BOUNDARIES = {
-    "bounded_customer_admin_metadata",
-    "opaque_source_identifiers_only",
-    "metadata_only_evidence",
-    "financial_and_policy_metadata",
-    "opaque_source_metadata_only",
-    "aggregate_metadata_only_evidence",
-    "aggregate_decision_metadata",
+    "work_scope_version": "bounded_customer_admin_metadata",
+    "external_work_binding_event": "opaque_source_identifiers_only",
+    "governed_run_attribution_event": "metadata_only_evidence",
+    "work_budget_plan": "financial_and_policy_metadata",
+    "work_outcome_event": "opaque_source_metadata_only",
+    "run_outcome_association_event": "metadata_only_evidence",
+    "model_scorecard": "aggregate_metadata_only_evidence",
+    "policy_recommendation": "aggregate_decision_metadata",
 }
 IDENTITY_AND_LIFECYCLE = {
     "organization_id_source": "existing_authenticated_server_resolved_tenant_identity",
@@ -283,6 +295,21 @@ PRIMARY_KPIS = [
     "quality_qualified_cost_per_accepted_work_item",
     "optimization_lift_vs_declared_baseline",
 ]
+KPI_LISTS = {
+    "drivers": {
+        "actual_model_mix", "cache_and_token_mix", "latency", "retries",
+        "first_pass_success", "fallback_and_denial_rate",
+    },
+    "guardrails": {
+        "quality", "reversion_or_defect", "reliability", "privacy", "budget",
+        "coverage_and_sample_eligibility",
+    },
+    "required_dimensions": {
+        "organization", "work_scope_version", "time_window", "actual_provider",
+        "actual_model_version", "policy_version", "rate_card_version", "cost_basis",
+        "connector_coverage", "association_rule_version",
+    },
+}
 AUTHORIZATION_ROLES = [
     "portfolio_admin",
     "finance_viewer",
@@ -318,6 +345,18 @@ REQUIRED_EXCLUSIONS = {
     "prompts_or_responses",
     "raw_connector_payloads",
     "ticket_project_or_initiative_titles_or_bodies",
+}
+CONTENT_ALLOWLIST = {
+    "opaque_tenant_actor_team_application_and_work_ids",
+    "bounded_customer_admin_work_scope_display_name",
+    "provider_model_policy_rate_card_and_connector_versions",
+    "timestamps_counts_durations_tokens_and_exact_cost_components",
+    "fixed_lifecycle_quality_coverage_and_reason_codes",
+    "keyed_digests_and_content_free_provenance",
+}
+RECOMMENDATION_TYPES = {
+    "budget_plan_change", "model_allowlist_change", "model_fallback_change",
+    "output_or_cost_cap_change", "routing_policy_change",
 }
 REQUIRED_DOCUMENTATION = [
     "docs/ARCHITECTURE.md",
@@ -358,7 +397,8 @@ def _strict_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
 
 def _read_bytes(path: Path, *, maximum: int, label: str) -> bytes:
     try:
-        value = path.read_bytes()
+        with path.open("rb") as source:
+            value = source.read(maximum + 1)
     except OSError as exc:
         raise PortfolioIntelligenceContractError(f"{label}_unreadable") from exc
     if not value or len(value) > maximum:
@@ -366,8 +406,7 @@ def _read_bytes(path: Path, *, maximum: int, label: str) -> bytes:
     return value
 
 
-def _read_json(path: Path, *, maximum: int, label: str) -> dict[str, Any]:
-    raw = _read_bytes(path, maximum=maximum, label=label)
+def _parse_json(raw: bytes, *, label: str) -> dict[str, Any]:
     try:
         value = json.loads(raw, object_pairs_hook=_strict_object)
     except (UnicodeError, json.JSONDecodeError) as exc:
@@ -375,6 +414,10 @@ def _read_json(path: Path, *, maximum: int, label: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise PortfolioIntelligenceContractError(f"{label}_root_invalid")
     return value
+
+
+def _read_json(path: Path, *, maximum: int, label: str) -> dict[str, Any]:
+    return _parse_json(_read_bytes(path, maximum=maximum, label=label), label=label)
 
 
 def _require_fields(value: object, expected: set[str], label: str) -> dict[str, Any]:
@@ -425,15 +468,10 @@ def _validate_baseline(root: Path, baseline: object) -> dict[str, Any]:
     raw = _read_bytes(path, maximum=MAX_BASELINE_BYTES, label="baseline_manifest")
     if hashlib.sha256(raw).hexdigest() != BASELINE_MANIFEST_SHA256:
         raise PortfolioIntelligenceContractError("baseline_manifest_digest_mismatch")
-    manifest = _read_json(
-        path, maximum=MAX_BASELINE_BYTES, label="baseline_manifest"
-    )
-    try:
-        validate_contract_manifest(manifest)
-    except ValueError as exc:
-        raise PortfolioIntelligenceContractError(
-            "baseline_manifest_contract_invalid"
-        ) from exc
+    manifest = _parse_json(raw, label="baseline_manifest")
+    # This exact digest was validated at v1.0.0. Do not re-interpret the
+    # historical fixture through a future current-version validator: new
+    # registered errors or manifest versions must not invalidate old evidence.
     release_line = manifest.get("compatibility", {}).get("current_release_line")
     if release_line != "0.2":
         raise PortfolioIntelligenceContractError(
@@ -459,6 +497,14 @@ def _schema_identity(item: object) -> tuple[str, int]:
 def _validate_additive_manifest(
     baseline: Mapping[str, Any], current: Mapping[str, Any]
 ) -> None:
+    # A new identity is not enough: every addition must first satisfy the
+    # current executable manifest contract and registered error vocabulary.
+    try:
+        validate_contract_manifest(current)
+    except (TypeError, ValueError) as exc:
+        raise PortfolioIntelligenceContractError(
+            "current_manifest_contract_invalid"
+        ) from exc
     if current.get("schema_id") != baseline.get("schema_id"):
         raise PortfolioIntelligenceContractError("current_manifest_identity_changed")
     current_version = current.get("schema_version")
@@ -490,6 +536,7 @@ def _validate_additive_manifest(
                 f"v1_schema_changed:{identity[0]}:v{identity[1]}"
             )
     for field in (
+        "compatibility",
         "policy_action_semantics",
         "request_status_semantics",
         "content_boundary",
@@ -610,11 +657,11 @@ def _validate_entities(value: object) -> None:
         identity = (str(entity["schema_id"]), int(schema_version))
         if identity in identities:
             raise PortfolioIntelligenceContractError("entity_schema_duplicate")
-        if entity["mutability"] not in ENTITY_MUTABILITY:
+        if entity["mutability"] != ENTITY_MUTABILITY[entity_id]:
             raise PortfolioIntelligenceContractError("entity_mutability_invalid")
         if entity["tenant_key"] != "organization_id":
             raise PortfolioIntelligenceContractError("entity_tenant_key_changed")
-        if entity["content_boundary"] not in ENTITY_CONTENT_BOUNDARIES:
+        if entity["content_boundary"] != ENTITY_CONTENT_BOUNDARIES[entity_id]:
             raise PortfolioIntelligenceContractError("entity_content_boundary_invalid")
         seen.add(entity_id)
         identities.add(identity)
@@ -780,8 +827,9 @@ def _validate_kpis(value: object) -> None:
     )
     if kpis["primary"] != PRIMARY_KPIS:
         raise PortfolioIntelligenceContractError("primary_kpis_changed")
-    for field in ("drivers", "guardrails", "required_dimensions"):
-        _require_unique_strings(kpis[field], f"kpis_{field}")
+    for field, expected in KPI_LISTS.items():
+        if set(_require_unique_strings(kpis[field], f"kpis_{field}")) != expected:
+            raise PortfolioIntelligenceContractError(f"kpis_{field}_changed")
     if (
         kpis["model_selection"] != "pareto_frontier_per_use_case"
         or kpis["universal_model_rank"] != "forbidden"
@@ -821,6 +869,14 @@ def _validate_authorization_and_api(auth_value: object, api_value: object) -> No
         != "required_before_result_delivery"
         or authorization["self_scope"]
         != "existing_actor_self_usage_only_no_portfolio_outcome_or_peer_join"
+        or authorization["team_lead_scope"]
+        != "authorized_team_and_descendant_work_scopes"
+        or authorization["finance_scope"]
+        != "authorized_organization_financial_aggregates"
+        or authorization["platform_scope"]
+        != "authorized_organization_operational_aggregates"
+        or authorization["portfolio_admin_scope"]
+        != "authorized_organization_mutation"
         or authorization["role_grants_provider_access"] is not False
     ):
         raise PortfolioIntelligenceContractError("authorization_boundary_changed")
@@ -836,6 +892,7 @@ def _validate_authorization_and_api(auth_value: object, api_value: object) -> No
             "public_schema_version",
             "request_schemas",
             "response_schemas",
+            "wire_schema_bundle",
             "connector_request_ownership",
             "request_validation",
             "response_shaping",
@@ -890,6 +947,34 @@ def _validate_authorization_and_api(auth_value: object, api_value: object) -> No
         raise PortfolioIntelligenceContractError("api_behavior_changed")
 
 
+def _validate_wire_schemas(root: Path, api: dict[str, Any]) -> None:
+    if api["wire_schema_bundle"] != {
+        "path": str(WIRE_SCHEMA_PATH),
+        "sha256": WIRE_SCHEMA_SHA256,
+        "format": "json-schema-2020-12",
+        "implementation_status": "planned_not_registered",
+    }:
+        raise PortfolioIntelligenceContractError("wire_schema_reference_changed")
+    raw = _read_bytes(
+        root / WIRE_SCHEMA_PATH, maximum=MAX_CONTRACT_BYTES, label="wire_schema"
+    )
+    if hashlib.sha256(raw).hexdigest() != WIRE_SCHEMA_SHA256:
+        raise PortfolioIntelligenceContractError("wire_schema_digest_mismatch")
+    bundle = _parse_json(raw, label="wire_schema")
+    expected = set(API_REQUEST_SCHEMAS) | set(API_RESPONSE_SCHEMAS) | set(ENTITY_SCHEMAS.values())
+    try:
+        validate_wire_bundle(bundle, expected)
+    except PortfolioWireSchemaError as exc:
+        raise PortfolioIntelligenceContractError("wire_schema_contract_invalid") from exc
+    query_fields = bundle["$defs"]["hormuz.portfolio-query"]["properties"]
+    route_fields = bundle["x-hormuz-route-query-fields"]
+    if set(route_fields) != {route for route in NEW_ROUTES if route.startswith("GET ")}:
+        raise PortfolioIntelligenceContractError("wire_schema_query_routes_changed")
+    for fields in route_fields.values():
+        if not set(_require_unique_strings(fields, "wire_schema_query_fields")).issubset(query_fields):
+            raise PortfolioIntelligenceContractError("wire_schema_query_field_undefined")
+
+
 def _validate_recommendations_and_content(
     recommendation_value: object, content_value: object
 ) -> None:
@@ -906,7 +991,10 @@ def _validate_recommendations_and_content(
         },
         "recommendations",
     )
-    _require_unique_strings(recommendation["allowed_types"], "recommendation_types")
+    if set(_require_unique_strings(
+        recommendation["allowed_types"], "recommendation_types"
+    )) != RECOMMENDATION_TYPES:
+        raise PortfolioIntelligenceContractError("recommendation_types_changed")
     if (
         recommendation["source"] != "eligible_versioned_scorecard_snapshot"
         or recommendation["automatic_application"] is not False
@@ -929,8 +1017,12 @@ def _validate_recommendations_and_content(
         {"allowed", "excluded", "release_evidence", "debug_content"},
         "content_boundary",
     )
-    _require_unique_strings(content["allowed"], "content_allowed")
+    allowed = set(_require_unique_strings(content["allowed"], "content_allowed"))
     excluded = set(_require_unique_strings(content["excluded"], "content_excluded"))
+    if allowed & excluded:
+        raise PortfolioIntelligenceContractError("content_allowlist_overlap")
+    if allowed != CONTENT_ALLOWLIST:
+        raise PortfolioIntelligenceContractError("content_allowlist_changed")
     if excluded != REQUIRED_EXCLUSIONS:
         raise PortfolioIntelligenceContractError("content_exclusion_set_changed")
     if (
@@ -1015,6 +1107,7 @@ def validate_portfolio_intelligence_contract(
     _validate_budget_and_evidence(contract["budget_policy"], contract["evidence"])
     _validate_kpis(contract["kpis"])
     _validate_authorization_and_api(contract["authorization"], contract["api"])
+    _validate_wire_schemas(root, contract["api"])
     _validate_recommendations_and_content(
         contract["recommendations"], contract["content_boundary"]
     )
@@ -1029,6 +1122,8 @@ def validate_portfolio_intelligence_contract(
         "baseline_manifest_sha256": BASELINE_MANIFEST_SHA256,
         "entity_count": len(ENTITY_SCHEMAS),
         "new_route_count": len(NEW_ROUTES),
+        "wire_schema_count": len(set(API_REQUEST_SCHEMAS) | set(API_RESPONSE_SCHEMAS) | set(ENTITY_SCHEMAS.values())),
+        "wire_schema_bundle_sha256": WIRE_SCHEMA_SHA256,
         "primary_kpi_count": len(PRIMARY_KPIS),
         "child_gate_count": len(CHILD_GATES),
         "breaking_change_count": 0,
@@ -1042,7 +1137,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Verify the accepted v1.1 portfolio-intelligence contract"
     )
-    parser.add_argument("--root", type=Path, default=Path("."))
+    parser.add_argument("--root", type=Path, default=REPOSITORY_ROOT)
     args = parser.parse_args(argv)
     try:
         result = validate_portfolio_intelligence_contract(args.root)

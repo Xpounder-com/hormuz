@@ -9,7 +9,7 @@ and additive-compatibility guard are verified with:
 
 ```bash
 python3 tools/verify_portfolio_intelligence_contract.py
-python3 -m unittest -v tests.test_portfolio_intelligence_contract
+python3 -m unittest -v tests.test_portfolio_intelligence_contract tests.test_portfolio_wire_contract
 ```
 
 The verifier rejects duplicate or unknown contract fields, baseline-fixture
@@ -20,6 +20,24 @@ self-scope rules; multiple active primary use cases per attempt; missing content
 exclusions; automatic policy application; and drift in the accepted decision
 record. The source-distribution gate requires the contract, verifier, fixture,
 and documentation to ship together.
+
+Review regression checks additionally freeze the complete manifest
+compatibility block, all four role-specific scopes, every KPI driver/guardrail/
+dimension list, per-entity mutability/content mapping, the content allowlist
+(including disjointness from exclusions), and recommendation types. Newly
+added current-manifest entries must satisfy the current executable manifest
+validator before additive comparison. The immutable historical fixture remains
+digest-bound independently of later validator versions.
+
+The [wire bundle](portfolio-intelligence-wire-v1.json) defines and digest-binds
+all 26 planned payloads. Tests exercise 52 synthetic minimal/populated examples,
+every required top-level field, unknown and nested content fields, scalar and
+collection bounds, invalid dates, missing references, and unsupported schema
+keywords. These are structural examples, not live domain or authorization
+proof. The standalone command bootstraps its adjacent source root; it needs
+the declared runtime dependencies but not an installed/editable Hormuz package
+or caller-provided `PYTHONPATH`. Source-archive verification must run it from
+an unpacked archive in that configuration.
 
 Passing this gate proves only an internally consistent plan and an additive
 v1.0.0 compatibility boundary. It does not prove a portfolio repository,

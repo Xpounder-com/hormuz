@@ -14,6 +14,7 @@ The manifest is the canonical inventory of current schema IDs, versions, error c
 
 The planned v1.1.0 portfolio-intelligence surface is frozen separately in
 [`portfolio-intelligence-contract-v1.json`](portfolio-intelligence-contract-v1.json),
+[the field-level wire-schema bundle](portfolio-intelligence-wire-v1.json),
 [ADR 0010](decisions/0010-v1.1-portfolio-intelligence-contract.md), and the
 exact [`v1.0.0` baseline fixture](../tests/fixtures/portfolio_intelligence/v1.0.0-contract-manifest.json).
 These files are design and compatibility gates; their presence does not claim
@@ -42,11 +43,20 @@ though the immutable baseline release is v1.0.0. The v1.1 contract preserves
 that exact fixture instead of silently rewriting history; issue #214 must
 version any correction and prove the application/database transition.
 
+The 26 planned Hormuz-owned wire shapes have closed, bounded definitions, not
+only names: fields, types, requiredness, nullability, enums, exact decimal
+costs, and semantics are digest-frozen together. The current executable
+manifest must validate before additive comparison, including every newly
+registered schema and error. The historical fixture is checked against its
+immutable digest, not reinterpreted with a future current-version validator.
+The compatibility block itself is immutable until #214 supplies an explicitly
+versioned transition. Changing only the manifest version is not a waiver.
+
 Verify this accepted boundary with:
 
 ```bash
 python3 tools/verify_portfolio_intelligence_contract.py
-python3 -m unittest -v tests.test_portfolio_intelligence_contract
+python3 -m unittest -v tests.test_portfolio_intelligence_contract tests.test_portfolio_wire_contract
 ```
 
 ## Ownership and wire convention

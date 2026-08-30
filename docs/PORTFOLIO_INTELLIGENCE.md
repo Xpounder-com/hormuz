@@ -95,6 +95,43 @@ budget-plan activation, and explicit recommendation decisions. GitHub and
 Linear webhook bodies remain provider-owned signed bytes; Hormuz owns only the
 normalized metadata event and content-free ingestion receipt.
 
+The separate [wire-schema bundle](portfolio-intelligence-wire-v1.json) defines
+the actual version-1 fields, requiredness, nullability, scalar and collection
+bounds, fixed enums, and field semantics. Select a payload through
+`#/$defs/<schema-id>`; all references resolve within the same file. Its digest
+is pinned in the accepted contract and verifier, so removing a field, weakening
+a bound, broadening an enum, or changing a meaning cannot silently pass.
+
+| Planned payload family | Shapes | Boundary |
+| --- | ---: | --- |
+| Typed GET query | 1 | Route-specific allowlisted filters; no tenant/actor/team authority from parameters |
+| JSON mutation requests | 7 | Versioned envelope, exact references, compare-and-set/idempotency rules |
+| Entity and evidence records | 8 | Closed metadata-only fields and immutable/versioned identities |
+| Collection pages | 8 | At most 100 items, frozen `as_of`, explicit cursor continuation |
+| Ingestion receipt and error | 2 | Content-free fixed classifications; no rejected-value reflection |
+
+JSON mutation/response envelopes carry `schema_id` and `schema_version`;
+query parameters do not. Unknown fields and duplicate JSON members are rejected.
+Money is an exact decimal string with explicit currency and original cost
+basis, not a binary float. Missing dimensions or evidence use explicit nulls
+where specified, never fabricated zeros or silent omission.
+
+Creating a budget-plan version only persists it. Its activation lifecycle is
+null until an explicit activation establishes one; a separate active-version
+pointer and generation record enforcement state. Recording an accepted
+recommendation also does not activate policy. Existing authorized activation
+remains a separate action after the required checks.
+
+The bundle's transport and domain-rule sections freeze header/query parsing,
+status/error behavior, version comparisons, scope resolution, evidence
+eligibility, and privacy semantics alongside structural shapes. The offline
+fixture checker supports only the bundle's bounded JSON Schema vocabulary and
+rejects unknown keywords or remote references. It is not a runtime API or
+authorization validator. The 52 minimal/populated examples are synthetic
+structural fixtures, not evidence of implemented endpoints, valid live
+references, customer value, or release readiness. Child issues must implement
+and test the relational, temporal, authorization, and policy gates.
+
 Collection APIs use opaque frozen-window cursors with deterministic
 time-plus-ID ordering. A cursor is bound to organization, role, filters,
 window, ordering, and schema. Mutations require an idempotency key. Connector
@@ -189,7 +226,7 @@ not permissions hidden inside this contract.
 
 ```bash
 python3 tools/verify_portfolio_intelligence_contract.py
-python3 -m unittest -v tests.test_portfolio_intelligence_contract
+python3 -m unittest -v tests.test_portfolio_intelligence_contract tests.test_portfolio_wire_contract
 ```
 
 Passing proves only that the accepted plan, v1.0.0 fixture, and additive-change

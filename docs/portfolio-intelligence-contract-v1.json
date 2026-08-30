@@ -495,6 +495,12 @@
       }
     },
     "public_schema_version": 1,
+    "wire_schema_bundle": {
+      "path": "docs/portfolio-intelligence-wire-v1.json",
+      "sha256": "26ef36b12d475d5b8354e45abfc92c76187ca6ff5aafb4b0ebce6fab439feb80",
+      "format": "json-schema-2020-12",
+      "implementation_status": "planned_not_registered"
+    },
     "request_schemas": [
       "hormuz.portfolio-query",
       "hormuz.work-scope-create-request",
