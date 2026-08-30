@@ -118,7 +118,13 @@ class PortfolioAPITests(unittest.TestCase):
                 connection.putheader(name, value)
             connection.endheaders(body)
             response = connection.getresponse()
-            return response.status, json.loads(response.read()), dict(response.getheaders())
+            payload, headers = json.loads(response.read()), dict(response.getheaders())
+            if path.startswith("/v1/admin/portfolio/"):
+                self.assertEqual(
+                    headers["X-Hormuz-Contract"],
+                    f'{payload["schema_id"]};v={payload["schema_version"]}',
+                )
+            return response.status, payload, headers
         finally:
             connection.close()
 
@@ -128,7 +134,7 @@ class PortfolioAPITests(unittest.TestCase):
             status, created, headers = self.request("POST", body=request)
             self.assertEqual(status, 201)
             self.assertEqual(headers["Cache-Control"], "no-store")
-            self.assertIn("hormuz.work-scope-version", headers["X-Hormuz-Contract"])
+            self.assertEqual(headers["X-Hormuz-Contract"], "hormuz.work-scope-version;v=1")
             self.assertEqual(self.request("POST", body=request)[:2], (201, created))
             self.assertEqual(self.request(path=SCOPES + "/" + created["work_scope_id"])[:2], (200, created))
 

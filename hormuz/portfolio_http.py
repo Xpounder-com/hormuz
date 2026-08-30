@@ -6,6 +6,7 @@ import re
 import time
 from urllib.parse import urlsplit
 
+from .contracts import contract_header
 from .portfolio_wire import PortfolioError, REQUEST_BYTES
 
 
@@ -70,4 +71,7 @@ def handle_registry(handler) -> None:
         status, result = error.status, error.envelope()
     finally:
         handler.connection.settimeout(previous_timeout)
-    handler._send_json(status, result, contract_header_value=f'{result["schema_id"]};version=1')
+    handler._send_json(
+        status, result,
+        contract_header_value=contract_header(result["schema_id"], result["schema_version"]),
+    )
