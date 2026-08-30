@@ -80,8 +80,15 @@ REQUIRED_POLICY_ADMIN_USABILITY_SDIST_PATHS = (
     "tools/verify_v1_internal_repeatability_evidence.py",
 )
 REQUIRED_REGISTRY_PREFLIGHT_SDIST_PATHS = (
+    "docs/REGISTRY.md",
     "docs/REGISTRY_TRANSITION.md",
     "docs/registry-transition-plan-v1.json",
+    "docs/registry-transition-plan-v2.json",
+    "hormuz/portfolio-registry-wire-v1.json",
+    "tests/_portfolio_fixture.py",
+    "tests/test_sqlite_portfolio_registry.py",
+    "tests/test_postgres_portfolio_registry.py",
+    "tests/test_portfolio_api_cli.py",
     "docs/portfolio-intelligence-contract-v1.json",
     "docs/portfolio-intelligence-wire-v1.json",
     "tools/verify_registry_transition_plan.py",

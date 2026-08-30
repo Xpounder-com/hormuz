@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate the #215 pre-implementation plan, never candidate acceptance.
+"""Validate the versioned #215 transition plan, never candidate acceptance.
 
 rollback_disposition is an offline decision table for supplied checkpoint facts.
 It neither verifies those facts nor performs migrations, backups, or restores.
@@ -64,6 +64,12 @@ SCOPE = {
     "feature_issue": 215, "gate_issue": 214,
     "registry_implemented": False, "final_candidate_accepted": False,
 }
+IMPLEMENTATION_SCOPE = {**SCOPE, "schema_version": 2, "stage": "implementation_verification", "registry_implemented": True}
+IMPLEMENTATION_CASES = [
+    "actual_registry_migration_additive" if name == "unimplemented_registry_migration_red" else
+    "registry_transaction_failure_and_retry" if name == "transaction_failure_and_retry_probe" else name
+    for name in REQUIRED_CASES
+]
 
 
 class RegistryTransitionError(ValueError):
@@ -86,17 +92,19 @@ def _same(actual: object, expected: object) -> bool:
 
 
 def validate_registry_transition_plan(plan: object) -> None:
+    implementation = isinstance(plan, dict) and type(plan.get("schema_version")) is int and plan["schema_version"] == 2
+    scope = IMPLEMENTATION_SCOPE if implementation else SCOPE
     sections = {
         "baseline": (BASELINE, "baseline_binding_changed"),
         "transitions": ({"sqlite": {"from": 4, "to": 5}, "postgresql": {"from": 8, "to": 9}}, "schema_transition_changed"),
         "compatibility": (COMPATIBILITY, "transition_policy_changed"),
         "rollback": (ROLLBACK, "transition_policy_changed"),
         "registry_routes": (REGISTRY_ROUTES, "registry_routes_changed"),
-        "required_cases": (REQUIRED_CASES, "transition_cases_changed"),
+        "required_cases": (IMPLEMENTATION_CASES if implementation else REQUIRED_CASES, "transition_cases_changed"),
     }
     if not isinstance(plan, dict) or set(plan) != set(SCOPE) | set(sections):
         raise RegistryTransitionError("transition_plan_fields_invalid")
-    if any(not _same(plan[key], value) for key, value in SCOPE.items()):
+    if any(not _same(plan[key], value) for key, value in scope.items()):
         raise RegistryTransitionError("preflight_scope_changed")
     for key, (expected, code) in sections.items():
         if not _same(plan[key], expected):
@@ -132,7 +140,7 @@ def verify_registry_transition_plan(root: Path = ROOT) -> dict[str, object]:
             result[key] = value
         return result
 
-    path = root / "docs/registry-transition-plan-v1.json"
+    path = root / "docs/registry-transition-plan-v2.json"
     try:
         with path.open("rb") as source:
             payload = source.read(32769)
@@ -140,6 +148,8 @@ def verify_registry_transition_plan(root: Path = ROOT) -> dict[str, object]:
             raise RegistryTransitionError("transition_plan_too_large")
         plan = json.loads(payload, object_pairs_hook=unique_members)
         validate_registry_transition_plan(plan)
+        if plan["schema_version"] != 2:
+            raise RegistryTransitionError("implementation_plan_required")
         for relative, digest in (
             ("tests/fixtures/portfolio_intelligence/v1.0.0-contract-manifest.json", BASELINE["contract_manifest_sha256"]),
             ("docs/portfolio-intelligence-wire-v1.json", COMPATIBILITY["registry_wire_sha256"]),
@@ -155,10 +165,10 @@ def verify_registry_transition_plan(root: Path = ROOT) -> dict[str, object]:
     except (OSError, UnicodeError, json.JSONDecodeError, KeyError, TypeError) as error:
         raise RegistryTransitionError("transition_plan_unreadable") from error
     return {
-        "status": "pre_implementation_plan_verified", "feature_issue": 215,
+        "status": "registry_implementation_plan_verified", "feature_issue": 215,
         "target_release": "1.1.0", "registry_route_count": len(REGISTRY_ROUTES),
         "baseline_archive_sha256": BASELINE["archive_sha256"],
-        "registry_implemented": False, "final_candidate_accepted": False,
+        "registry_implemented": True, "final_candidate_accepted": False,
     }
 
 

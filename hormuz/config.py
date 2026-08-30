@@ -13,6 +13,7 @@ from ._config_input import (
     MAX_CONFIGURATION_NODES,
 )
 from .custody_lifecycle import CustodyLifecycleConfig
+from .portfolio_config import PortfolioConfig
 
 
 class ConfigError(ValueError):
@@ -369,6 +370,7 @@ class GatewayConfig:
     key_custody: KeyCustodyConfig | None = None
     audit_anchor: AuditAnchorConfig | None = None
     audit_chain: AuditChainConfig | None = None
+    portfolio_control: PortfolioConfig | None = None
 
     @classmethod
     def load(cls, path: str | Path, *, environ: dict[str, str] | None = None) -> "GatewayConfig":

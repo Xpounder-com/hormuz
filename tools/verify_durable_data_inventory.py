@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import re
 import sys
@@ -114,6 +115,20 @@ def _unique_sorted_strings(value: object, label: str) -> list[str]:
 
 def _schema_tables(root: Path) -> tuple[set[str], set[str]]:
     sqlite = set(SQLITE_TABLE.findall(_read_text(root / SQLITE_SCHEMA_PATH)))
+    # The new separate repository owns a literal table declaration catalogue.
+    # Inspect literals without importing/executing a checkout under verification.
+    registry = ast.parse(_read_text(root / "hormuz/_portfolio_schema.py"))
+    declarations = next((node.value for node in registry.body if isinstance(node, ast.Assign)
+                         and any(isinstance(target, ast.Name) and target.id == "TABLE_DDL" for target in node.targets)), None)
+    if declarations is None:
+        raise DurableDataInventoryError("registry_schema_tables_missing")
+    try:
+        registry_tables = ast.literal_eval(declarations)
+    except (ValueError, TypeError):
+        raise DurableDataInventoryError("registry_schema_tables_invalid") from None
+    if not isinstance(registry_tables, dict) or not all(isinstance(name, str) and re.fullmatch(r"portfolio_[a-z_]+", name) for name in registry_tables):
+        raise DurableDataInventoryError("registry_schema_tables_invalid")
+    sqlite.update(registry_tables)
     postgres_sources = [_read_text(root / POSTGRES_RUNTIME_PATH)]
     migration_root = root / POSTGRES_MIGRATION_PATH
     try:

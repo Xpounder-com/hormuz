@@ -1,9 +1,11 @@
-"""Pre-implementation probes, not proof of a real registry migration."""
+"""Real registry migration and released-v1 application/database-pair proof."""
 
 from __future__ import annotations
 
 import copy
+from dataclasses import replace
 import hashlib
+import json
 import os
 from pathlib import Path
 import shutil
@@ -14,13 +16,18 @@ from unittest import mock
 
 from hormuz.contracts import contract_manifest
 from hormuz.store import StorageSchemaError, UsageStore
+from hormuz.portfolio_repository import RegistryRepository
+from hormuz.portfolio_service import PortfolioService
+from hormuz.portfolio_wire import SCOPES
 if __package__:
+    from ._portfolio_fixture import ADMIN, registry_config, seed_registry_metadata
     from ._registry_transition_fixture import (
-        PROBE_TABLE, ledger_observation, released_v1_call, seed_registry_ledger, sqlite_backup, sqlite_snapshot,
+        ledger_observation, released_v1_call, seed_registry_ledger, sqlite_backup, sqlite_snapshot,
     )
 else:
+    from _portfolio_fixture import ADMIN, registry_config, seed_registry_metadata
     from _registry_transition_fixture import (
-        PROBE_TABLE, ledger_observation, released_v1_call, seed_registry_ledger, sqlite_backup, sqlite_snapshot,
+        ledger_observation, released_v1_call, seed_registry_ledger, sqlite_backup, sqlite_snapshot,
     )
 
 
@@ -30,50 +37,49 @@ class SQLiteRegistryTransitionTests(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
         self.path = self.root / "usage.sqlite3"
-        seed_registry_ledger(UsageStore(self.path))
+        with mock.patch.object(UsageStore, "schema_version", 4):
+            seed_registry_ledger(UsageStore(self.path))
         self.before = sqlite_snapshot(self.path)
         self.assertEqual(len(self.before["rows"]), 10)
 
     def probe(self, *, fail: bool = False) -> None:
-        # Deliberately NOT registry DDL: exercise the existing transaction owner.
+        # Apply real migration 5; inject failure after its actual DDL to prove
+        # the production transaction rolls everything back before retry.
+        original = UsageStore._apply_migration
         def apply(connection, version):
             self.assertEqual(version, 5)
-            connection.execute(f"CREATE TABLE {PROBE_TABLE} (id INTEGER PRIMARY KEY)")
-            connection.execute(f"INSERT INTO {PROBE_TABLE} VALUES (1)")
+            original(connection, version)
             if fail:
                 raise RuntimeError("synthetic_migration_failure")
 
         with (
-            mock.patch.object(UsageStore, "schema_version", 5),
             mock.patch.object(UsageStore, "_apply_migration", side_effect=apply),
         ):
             UsageStore(self.path).verify_ready()
 
     def assert_v1_preserved(self) -> None:
         after = copy.deepcopy(sqlite_snapshot(self.path))
-        after["objects"] = [row for row in after["objects"] if row[2] != PROBE_TABLE]
-        after["rows"].pop(PROBE_TABLE, None)
+        after["objects"] = [row for row in after["objects"] if not row[2].startswith("portfolio_")]
+        after["rows"] = {key: value for key, value in after["rows"].items() if not key.startswith("portfolio_")}
         after["rows"]["hormuz_schema_migrations"] = [
             row for row in after["rows"]["hormuz_schema_migrations"] if row[0] != 5
         ]
         self.assertEqual(after, self.before)
 
-    def test_registry_sqlite_migration_is_red_until_feature_implementation(self) -> None:
-        self.assertEqual(UsageStore.schema_version, 4)
+    def test_registry_sqlite_migration_is_additive_and_idempotent(self) -> None:
+        self.assertEqual(UsageStore.schema_version, 5)
         for _ in range(2):
-            with mock.patch.object(UsageStore, "schema_version", 5):
-                with self.assertRaises(StorageSchemaError) as raised:
-                    UsageStore(self.path)
-            self.assertEqual(raised.exception.code, "storage_schema_migration_unsupported")
-            self.assertEqual(sqlite_snapshot(self.path), self.before)
+            UsageStore(self.path).verify_ready()
+            self.assertEqual(len(sqlite_snapshot(self.path)["rows"]), 15)
+            self.assert_v1_preserved()
 
-    def test_sqlite_probe_failure_rolls_back_and_retry_preserves_v1_rows(self) -> None:
+    def test_sqlite_registry_failure_rolls_back_and_retry_preserves_v1_rows(self) -> None:
         with self.assertRaisesRegex(RuntimeError, "synthetic_migration_failure"):
             self.probe(fail=True)
         self.assertEqual(sqlite_snapshot(self.path), self.before)
         self.probe()
         after = sqlite_snapshot(self.path)
-        self.assertEqual(after["rows"][PROBE_TABLE], [(1,)])
+        self.assertEqual(after["rows"]["portfolio_work_scope_versions"], [])
         self.probe()  # Applied migration is not executed again.
         self.assertEqual(sqlite_snapshot(self.path), after)
         self.assert_v1_preserved()
@@ -100,7 +106,7 @@ class SQLiteRegistryTransitionTests(unittest.TestCase):
         self.assertEqual(ledger_observation(UsageStore(self.path)), {
             key: seeded[key] for key in ("unknown_holds", "audit_sequence", "usage_events")
         })
-        self.assertEqual(sqlite_snapshot(self.path), self.before)
+        self.assert_v1_preserved()
         self.probe()
         for state, expected in (("applied", "storage_schema_newer_than_binary"), ("applying", "storage_schema_partial_upgrade")):
             with sqlite3.connect(self.path) as connection:
@@ -133,6 +139,8 @@ class SQLiteRegistryTransitionTests(unittest.TestCase):
 
     def test_sqlite_candidate_writes_remain_present_for_forward_recovery(self) -> None:
         self.probe()
+        config = replace(registry_config(self.root), database_path=self.path)
+        writes, page = seed_registry_metadata(config)
         with mock.patch.object(UsageStore, "schema_version", 5):
             candidate = UsageStore(self.path)
             seed_registry_ledger(candidate)
@@ -142,10 +150,27 @@ class SQLiteRegistryTransitionTests(unittest.TestCase):
             self.probe()
             self.assertEqual(sqlite_snapshot(self.path), after_write)
         with self.assertRaises(StorageSchemaError) as raised:
-            UsageStore(self.path)
+            UsageStore(self.path, maximum_supported_schema_version=4)
         self.assertEqual(raised.exception.code, "storage_schema_newer_than_binary")
         self.assertEqual(sqlite_snapshot(self.path), after_write)
         self.assertNotEqual(after_write["rows"]["gateway_usage_events"], self.before["rows"]["gateway_usage_events"])
+        self.assertTrue(all(rows for table, rows in after_write["rows"].items() if table.startswith("portfolio_")))
+        retained = self.root / "retained-populated-candidate.sqlite3"
+        restored = self.root / "forward-recovered.sqlite3"
+        sqlite_backup(self.path, retained)
+        sqlite_backup(retained, restored)
+        self.assertEqual(sqlite_snapshot(restored), after_write)
+        self.assertEqual(ledger_observation(UsageStore(restored))["unknown_holds"], 2)
+        service = PortfolioService(config, RegistryRepository(replace(config, database_path=restored)))
+        for path, body, key, expected in writes:
+            self.assertEqual(service.dispatch(ADMIN, "POST", path, body=json.dumps(body).encode(), idempotency_key=key), expected)
+        self.assertEqual(sqlite_snapshot(restored), after_write)  # Replays append nothing.
+        self.assertTrue(page["has_more"])
+        continued = service.dispatch(ADMIN, "GET", SCOPES, query="cursor=" + page["next_cursor"])[1]
+        self.assertEqual(continued["as_of"], page["as_of"])
+        self.assertEqual(len(continued["items"]), 1)
+        self.assertEqual(sqlite_snapshot(self.path), after_write)
+        self.assertEqual(sqlite_snapshot(retained), after_write)
 
 
 if __name__ == "__main__":

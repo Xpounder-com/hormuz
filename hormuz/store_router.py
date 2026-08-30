@@ -82,10 +82,10 @@ def create_repository_bundle(
     connection_pool: PostgresConnectionPool | None = None,
     read_only: bool = False,
 ) -> RepositoryBundle[RepositoryT]:
-    """Compose a future portfolio owner beside the unchanged v1 usage ledger.
+    """Compose an explicitly supplied owner beside the unchanged v1 usage ledger.
 
-    No portfolio implementation is registered by this refactor; its factory
-    must be supplied explicitly after the feature's gates are met. Each
+    This helper registers no default portfolio implementation; the feature
+    entry point supplies its separately gated factory explicitly. Each
     repository owns its SQL and transactions. A shared pool is caller-owned,
     including when either factory fails. Only the factories acquire their
     repository connections; this helper owns no transaction or pool lifecycle

@@ -1,28 +1,28 @@
-# v1.1.0 registry compatibility and transition preflight
+# v1.1.0 registry compatibility and transition
 
-This is the **#215-specific pre-implementation checkpoint of #214**. It
-authorizes implementation only after technical review and exact merged-main
-CI, with #212 and #213 already accepted. It does not close #214, implement
-#215, or authorize a v1.1.0 release. The controlling plan is
-[registry-transition-plan-v1.json](registry-transition-plan-v1.json), under
-[ADR 0010](decisions/0010-v1.1-portfolio-intelligence-contract.md).
+This guide now covers the **#215 registry implementation**, following the
+accepted #214 registry preflight in PR #232. The historical
+[version-1 preflight plan](registry-transition-plan-v1.json) remains unchanged.
+The [version-2 implementation plan](registry-transition-plan-v2.json) replaces
+only its phase and missing-migration probes with real migration verification;
+baseline digests, compatibility and rollback policy remain identical.
+Neither plan closes #214 or authorizes a v1.1.0 release. See
+[REGISTRY.md](REGISTRY.md) for the new operations and operator authority.
 
 ## Versions and exact baseline
 
 The product target is **v1.1.0**. Product versions, database migration integers,
 and version-1 wire envelopes are separate identifiers:
 
-| Boundary | Released v1.0.0 | Planned #215 target |
+| Boundary | Released v1.0.0 | #215 implementation |
 | --- | --- | --- |
 | SQLite migration ledger | 4 | 5 |
 | PostgreSQL migration ledger | 8 | 9 |
 | Existing v1 API, evidence, configuration, policy, and CLI | Existing contracts | Unchanged |
 | Portfolio registry request/response envelopes | Absent | Additive schema version 1 |
 
-The migration numbers reserve the next available steps for the registry. If
-another accepted feature consumes either step first, revise and review this
-plan before implementing #215; never reuse a migration number or edit an
-already-applied migration.
+These migration numbers now belong to the registry. Later features must use
+new migration numbers; never reuse a number or edit an applied migration.
 
 The baseline is the immutable [v1.0.0 release](https://github.com/Xpounder-com/hormuz/releases/tag/v1.0.0),
 source commit `2fc0605252e41f731c85cc9146fbff6eb3b34669`. Its final release
@@ -103,8 +103,8 @@ portfolio tables exist, not for the test probe.
 
 ## Operator sequence and rollback decision
 
-This sequence is a plan for the feature implementation, not an executable
-v1.1.0 deployment procedure. No registry migration is currently bundled.
+Both registry migrations are bundled. This remains the bounded registry
+operator sequence, not final v1.1.0 candidate/production deployment acceptance.
 
 1. Identify the exact old application artifact, database schema and backup,
    configurations, role bindings, and evidence/checkpoint references. Confirm
@@ -145,13 +145,14 @@ would require a separate explicit decision and evidence; this plan does not
 authorize it. `rollback_disposition()` is only an offline decision table for
 supplied facts, not a backup verifier, write counter, or restore executor.
 
-## Executable preflight and evidence limits
+## Executable implementation checks and evidence limits
 
-Run the plan and source-level checks:
+Run the versioned plan and source-level checks:
 
 ```bash
 python3 tools/verify_registry_transition_plan.py
 python3 -m unittest -v tests.test_registry_transition_plan tests.test_sqlite_registry_transition
+python3 -m unittest -v tests.test_sqlite_portfolio_registry tests.test_portfolio_api_cli
 ```
 
 To run actual released-binary checks, download the two exact assets above
@@ -178,16 +179,16 @@ python3 -m unittest -v tests.test_sqlite_registry_transition \
   tests.test_postgres_registry_transition tests.test_postgres_test_boundaries
 ```
 
-| Frozen case | Evidence provided by this checkpoint |
+| Case | Evidence provided by the implementation tests |
 | --- | --- |
 | Released baseline identity | Exact source and manifest digests; isolated installed-source provenance; legacy manifest equality. |
 | v1 rows and holds preserved | All 10 SQLite / 32 PostgreSQL table snapshots compared; seeded usage, secret, attempt, reservation, and audit evidence preserved. Policy/custody tables are empty in these fixtures, not populated-domain recovery proof. |
-| Unimplemented registry migration red | Ask the real runner for SQLite 5 / PostgreSQL 9: exact `storage_schema_migration_unsupported`, no durable change, same result on retry. The test passes by confirming the real feature is still absent. |
-| Transaction failure and retry probe | Test-only `registry_transition_test_probe` DDL fails after a write, rolls back, then retries once without duplicates or v1 changes. This is transaction-mechanics proof, **not registry DDL proof**. |
+| Actual registry migration | Real SQLite 4-to-5 / PostgreSQL 8-to-9 DDL creates five new tables, preserves the v1 snapshot, and is idempotent. |
+| Transaction failure and retry | Failure injected after the actual registry DDL rolls back tables and ledger; retry applies it once. Registry mutations additionally prove atomic record/audit/idempotency rollback. |
 | Partial and newer state | Fresh current/released binaries and migrators refuse the relevant markers without mutation; startup-only PostgreSQL checking is characterized. |
 | Quiesced verified pair restore | Consistent SQLite backup and PostgreSQL logical dump restore into fresh test destinations; released v1 opens restored state with the unknown hold intact. The candidate remains available. |
-| Writes require forward recovery | Probe-era v1 writes and unknown holds survive retry/reopen. The decision table rejects old-backup restore after writes or uncertainty. No real v1.1 recovery executor is claimed. |
-| Legacy and registry wire contracts | Existing contract validator, digest bindings, six-route scope, and negative plan tests. No new endpoint/domain implementation is claimed. |
+| Writes require forward recovery | Populated registry versions, bindings, audit, idempotency and cursors plus post-upgrade v1 writes/unknown holds survive retry and current-candidate backup/restore into a fresh destination. Replays return the exact original results without new writes; a saved cursor continues. Original candidate state remains intact. The decision table rejects old-backup restore after writes or uncertainty. No automatic recovery executor is claimed. |
+| Legacy and registry wire contracts | Existing contract validator, digest bindings, six-route scope, negative plan tests, CLI/HTTP operation tests, and installed schema parity. |
 
 The existing required PostgreSQL CI job runs both backends' transition tests
 against an isolated current wheel and an independently installed released
@@ -199,20 +200,12 @@ archive. CI and artifact identities belong in the issue/PR review record.
 
 ## Required next evidence and gate acceptance
 
-Accept this checkpoint only with the reviewed PR head, exact merged-main SHA,
-green required jobs, and the released baseline digests recorded under #214
-and #215. This acceptance removes only #215's pre-implementation blocker;
-#215's implementation acceptance criteria remain unchecked. Other features
-still need their own #214 checkpoint.
-
-In #215, replace the deliberately red missing-migration assertions with
-tests of the **actual** version-5/version-9 migrations. Retain the old-binary
-refusal, no-rewrite, rollback, partial-failure, and retry guarantees. Update
-the preflight phase assertions/summary explicitly; do not retain an
-"unimplemented" claim after adding the feature or simply delete failing
-guards. Add actual registry create/list/show/version/archive/binding,
-authorization-before-access, forced-RLS, concurrency, cursor, idempotency,
-audit, and content-exclusion tests before merging feature code.
+Accept #215 only with the reviewed PR head, exact merged-main SHA, green
+required jobs, baseline digests, actual migration/rollback tests and registry
+authorization/RLS/concurrency/package evidence recorded under #214 and #215.
+The old missing-migration guards are replaced, not skipped: version 2 requires
+the actual DDL and its failure/retry proof. Other features still need their own
+#214 checkpoint. Source implementation and a verified plan are not a release.
 
 Final closure of #214 additionally requires real final-candidate migration
 and recovery with populated usage/policy/custody/registry history; full

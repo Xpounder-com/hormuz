@@ -21,6 +21,8 @@ unregistered table.
 
 | Data class | SQLite tables | PostgreSQL tables | Content boundary |
 | --- | --- | --- | --- |
+| `portfolio_registry_metadata` | `portfolio_binding_events`, `portfolio_work_scope_versions` | `portfolio_binding_events`, `portfolio_work_scope_versions` | Append-only tenant-qualified scope/binding IDs, pinned hierarchy/ownership/lifecycle versions, and bounded administrator-entered scope display names. No external work content. |
+| `portfolio_registry_control` | `portfolio_audit_events`, `portfolio_cursors`, `portfolio_idempotency` | `portfolio_audit_events`, `portfolio_cursors`, `portfolio_idempotency` | Content-free audit IDs/change classes; actor/role-bound frozen-window cursor state; idempotency identities, keyed request digests, and references to immutable results. No duplicated display labels or raw request/response JSON. |
 | `schema_migration_state` | `hormuz_schema_migrations` | `hormuz_schema_migrations` | Applied migration version and state; operational metadata only. |
 | `usage_and_secret_evidence` | `gateway_secret_events`, `gateway_usage_events` | `gateway_secret_events`, `gateway_usage_events` | Event-time identity/team, client/model/policy outcome, tokens, estimated cost, provider-request metadata, and rule IDs/counts. No prompt, response, or matched secret value. |
 | `budget_reservations` | `gateway_budget_reservations` | `gateway_budget_reservations` | Temporary conservative token/cost reservations bound to organization, team, actor, and attempt metadata. |
@@ -32,22 +34,23 @@ unregistered table.
 | `custody_lifecycle_and_projection` | — | `custody_envelope_attestations`, `custody_lifecycle_asset_identities`, `custody_lifecycle_chain_heads`, `custody_lifecycle_events`, `custody_runtime_projection_acks`, `custody_runtime_projection_barriers`, `custody_runtime_projection_heads`, `custody_runtime_projection_restrictions`, `custody_runtime_replicas` | Immutable asset identities/fingerprints, restriction events, projection versions, replica leases/acknowledgments, recovery codes, hashes, and envelope attestations. It stores no customer KMS key or provider credential plaintext. |
 | `custody_deletion_block_evidence` | — | `custody_deletion_events` | Evidence that a custody-history deletion request was blocked by retention, legal hold, or stronger-approval requirements. This table is not a delete executor and cannot authorize tenant deletion. |
 
-## Planned v1.1 portfolio data
+## v1.1 registry data and remaining portfolio plan
 
-The accepted v1.1.0 design introduces a separate append-only portfolio plane;
-it is not part of the currently implemented table inventory above. Its
-migrations belong to feature issues after the feature-free #213 seam and the
-relevant #214 pre-implementation plan/tests are accepted. Until those migrations
-land, `durable-data-v1.json` remains authoritative for every table the current
-release creates and must not list planned tables. #214 stays open for final
-candidate transition proof; #213 introduces no portfolio table or migration.
+The #215 source implementation adds the five registry tables above in SQLite
+migration 5 and PostgreSQL migration 9. It is not a v1.1.0 release. Attribution,
+budgets, outcomes, connectors, scorecards, and recommendations remain separately
+gated and have no tables in this inventory. #214 stays open for final-candidate
+transition proof. See [REGISTRY.md](REGISTRY.md) for the opt-in authority and
+[REGISTRY_TRANSITION.md](REGISTRY_TRANSITION.md) for the application/database
+pair boundary.
 
 The [persistence composition boundary](ARCHITECTURE.md#usage-and-portfolio-persistence-composition)
-provides a fully declared v1 usage protocol and a typed factory slot for a
-separate future portfolio owner. The bundle is an in-memory reference holder,
+provides a fully declared v1 usage protocol and a typed factory slot for the
+separate registry owner. The bundle is an in-memory reference holder,
 not a durable data class, connection pool owner, transaction coordinator, or
-implemented portfolio store. Existing SQLite/PostgreSQL schemas, row-level
-security, and transaction ownership are unchanged.
+portfolio store itself. The registry owns its new SQL/transactions and borrows
+the existing runtime pool without owning its lifetime. Existing v1 evidence
+and its access controls are unchanged.
 
 The planned plane has eight versioned entity families: work-scope versions,
 external-work binding events, governed-run attribution events, work-budget

@@ -35,10 +35,14 @@ from .custody_runtime_projection import CustodyRuntimeProjection, CustodyRuntime
 from .evidence import EvidenceStorageError
 from .policy import PolicyDecision, PolicyEngine
 from .policy_runtime import PolicyRuntime
+from .portfolio_http import handle_registry
+from .portfolio_repository import create_portfolio_repository
+from .portfolio_service import PortfolioService
+from .portfolio_wire import PREFIX as PORTFOLIO_PREFIX
 from .postgres import PostgresStorageError
 from .redaction import RedactionError, SecretRedactor
 from .store import RequestAttempt, ReservationDenied, StorageSchemaError, UsageRepository
-from .store_router import create_postgres_runtime_pool, create_usage_store
+from .store_router import create_postgres_runtime_pool, create_repository_bundle, create_usage_store
 from .usage import ResponseUsageParser
 
 
@@ -67,7 +71,16 @@ class GatewayServer(ThreadingHTTPServer):
         self.authenticator = Authenticator(config)
         self.postgres_pool = create_postgres_runtime_pool(config)
         try:
-            self.store: UsageRepository = create_usage_store(config, connection_pool=self.postgres_pool)
+            self.store: UsageRepository
+            if config.portfolio_control is None:
+                self.store = create_usage_store(config, connection_pool=self.postgres_pool)
+                portfolio = create_portfolio_repository(config, connection_pool=self.postgres_pool, environ=environ)
+            else:
+                repositories = create_repository_bundle(
+                    config, portfolio_factory=create_portfolio_repository, connection_pool=self.postgres_pool,
+                )
+                self.store, portfolio = repositories.usage, repositories.portfolio
+            self.portfolio_service = PortfolioService(config, portfolio, self.authenticator)
             policy_runtime = PolicyRuntime(config, connection_pool=self.postgres_pool)
             self.policy_engine = PolicyEngine(config, self.store, policy_runtime=policy_runtime)
             self.policy_engine.policy_runtime.verify_active_policies()
@@ -229,6 +242,9 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802
         path = urlsplit(self.path).path
+        if path.startswith(PORTFOLIO_PREFIX + "/"):
+            handle_registry(self)
+            return
         if path == "/health":
             self._send_contract_json(
                 HTTPStatus.OK,
@@ -324,6 +340,9 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802
         self._response_started = False
         path = urlsplit(self.path).path
+        if path.startswith(PORTFOLIO_PREFIX + "/"):
+            handle_registry(self)
+            return
         routes = {
             "/v1/responses": ("openai", "codex", True),
             "/v1/responses/compact": ("openai", "codex", True),
@@ -916,6 +935,11 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def log_message(self, format: str, *args: object) -> None:
+        # BaseHTTPRequestHandler otherwise logs the raw URL, including rejected
+        # free-text query fields. New registry diagnostics never reflect it.
+        if getattr(self, "path", "").startswith(PORTFOLIO_PREFIX):
+            LOGGER.debug("portfolio_http_request")
+            return
         LOGGER.debug("http " + format, *args)
 
 

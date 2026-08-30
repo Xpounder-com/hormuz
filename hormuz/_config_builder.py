@@ -30,6 +30,7 @@ from ._config_policy import (
 )
 from ._config_routing import build_model_route_domain, build_upstream_domain
 from ._config_values import _integer
+from .portfolio_config import build_portfolio_config
 from .config import (
     ConfigError,
     GatewayConfig,
@@ -197,6 +198,10 @@ def _build_gateway_config(
         custody_executor=custody_control_domain.executor,
         custody_retention=custody_control_domain.retention,
         custody_lifecycle=custody_lifecycle,
+        portfolio_control=build_portfolio_config(
+            raw.get("portfolio_control"),
+            (*static_identities, *identities_by_subject.values()),
+        ),
         key_custody=key_custody,
         audit_anchor=external_custody_domain.audit_anchor,
         audit_chain=external_custody_domain.audit_chain,

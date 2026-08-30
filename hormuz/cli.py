@@ -15,6 +15,7 @@ from .commands import audit as audit_commands
 from .commands import client as client_commands
 from .commands import custody as custody_commands
 from .commands import policy as policy_commands
+from .commands import portfolio as portfolio_commands
 from .commands import runtime as runtime_commands
 from .config import ConfigError, GatewayConfig
 from .custody import CustodyError
@@ -67,6 +68,7 @@ def build_parser() -> argparse.ArgumentParser:
     runtime_commands.add_runtime_commands(subparsers)
 
     policy_commands.add_policy_commands(subparsers)
+    portfolio_commands.add_portfolio_commands(subparsers)
 
     client_commands.add_client_commands(subparsers)
 
@@ -125,6 +127,8 @@ def main(argv: list[str] | None = None) -> int:
                     analysis_context, args, _policy_command_dependencies()
                 )
         config = GatewayConfig.load(args.config)
+        if args.command == "portfolio":
+            return portfolio_commands.run(config, args)
         if args.command in {"serve", "doctor", "status", "storage"}:
             return runtime_commands._runtime(config, args, _runtime_command_dependencies())
         if args.command == "policy" and args.policy_control_command == "check":

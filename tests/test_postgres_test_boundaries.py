@@ -12,11 +12,26 @@ else:  # Isolated wheel compatibility discovery uses the tests directory as its 
 
 ROOT = Path(__file__).resolve().parents[1]
 EXPECTED_OWNERS = {
+    "test_postgres_portfolio_registry": (
+        "PostgresPortfolioRegistryTests",
+        {
+            "test_postgres_registry_lifecycle_and_hierarchy",
+            "test_postgres_registry_authorization_before_access",
+            "test_postgres_registry_idempotency_and_versions",
+            "test_postgres_registry_frozen_pagination",
+            "test_postgres_registry_authorized_bindings",
+            "test_postgres_registry_concurrent_writers",
+            "test_postgres_registry_atomic_failure_and_safe_audit",
+            "test_postgres_registry_strict_input",
+            "test_postgres_registry_forced_rls_and_append_only",
+            "test_postgres_registry_pool_reuse_and_rls_shape_fail_closed",
+        },
+    ),
     "test_postgres_registry_transition": (
         "PostgresRegistryTransitionTests",
         {
-            "test_registry_postgres_migration_is_red_until_feature_implementation",
-            "test_postgres_probe_failure_rolls_back_and_retry_preserves_v1_rows",
+            "test_registry_postgres_migration_is_additive_and_idempotent",
+            "test_postgres_registry_failure_rolls_back_and_retry_preserves_v1_rows",
             "test_postgres_partial_upgrade_refuses_migration_and_runtime_without_changes",
             "test_released_postgres_binary_preserves_old_state_and_refuses_newer_or_partial_state",
             "test_postgres_quiesced_verified_pair_restore_keeps_unknown_holds",
@@ -164,7 +179,7 @@ class PostgresTestBoundaryTests(unittest.TestCase):
             suite = unittest.defaultTestLoader.loadTestsFromName(f"{module_name}.{class_name}")
             self.assertEqual(suite.countTestCases(), len(expected_methods), module_name)
 
-        self.assertEqual(len(owned), 70)
+        self.assertEqual(len(owned), 80)
         self.assertFalse((ROOT / "tests" / "test_postgres.py").exists())
         self.assertFalse(
             any(name.startswith("test_") for name in PostgresTestCase.__dict__),

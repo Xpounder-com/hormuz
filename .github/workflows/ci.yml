@@ -202,6 +202,18 @@ jobs:
             -v
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -m unittest discover \
             -s "$GITHUB_WORKSPACE/tests" \
+            -p test_sqlite_portfolio_registry.py \
+            -v
+          "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -m unittest discover \
+            -s "$GITHUB_WORKSPACE/tests" \
+            -p test_portfolio_api_cli.py \
+            -v
+          "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -m unittest discover \
+            -s "$GITHUB_WORKSPACE/tests" \
+            -p test_postgres_portfolio_registry.py \
+            -v
+          "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -m unittest discover \
+            -s "$GITHUB_WORKSPACE/tests" \
             -p test_postgres_registry_transition.py \
             -v
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -m unittest discover \
