@@ -271,9 +271,24 @@ class AttributionRepository:
             cursor = sql.one("SELECT * FROM portfolio_attribution_cursors WHERE organization_id=? AND cursor_id=?", (organization, query["cursor"]))
             if cursor is None or (cursor["actor_id"], cursor["authority_json"]) != (principal.actor_id, principal.cursor_authority):
                 raise PortfolioError("cursor_invalid")
+            try:
+                validate(cursor["as_of"], "timestamp")
+                validate(cursor["after_at"], "timestamp")
+                validate(cursor["after_id"], "opaque_id")
+                if not isinstance(cursor["filters_json"], str) or len(cursor["filters_json"]) > 4096:
+                    raise PortfolioError("unavailable")
+                filters = json.loads(cursor["filters_json"])
+                validate(filters, "hormuz.portfolio-query")
+                if (type(cursor["snapshot_sequence"]) is not int or cursor["snapshot_sequence"] < 0
+                        or set(filters) - {"work_scope_id", "start_at", "end_at"}
+                        or canonical(filters) != cursor["filters_json"]):
+                    raise PortfolioError("unavailable")
+                filters = query_parameters(urlencode(filters), "list_attributions")
+            except (PortfolioError, ValueError, TypeError, RecursionError):
+                raise PortfolioError("unavailable") from None
             if (datetime.fromisoformat(now) - datetime.fromisoformat(cursor["as_of"])).total_seconds() > 3600:
                 raise PortfolioError("cursor_invalid")
-            snapshot, as_of, filters = cursor["snapshot_sequence"], cursor["as_of"], json.loads(cursor["filters_json"])
+            snapshot, as_of = cursor["snapshot_sequence"], cursor["as_of"]
         where, values = ["organization_id=?", "sequence<=?"], [organization, snapshot]
         if "work_scope_id" in filters:
             where.append("work_scope_id=?")

@@ -291,6 +291,17 @@ class AttributionAssertions:
         with mock.patch.object(PortfolioSQL, "now", return_value=expired):
             self.error("cursor_invalid", lambda: self.call(query="cursor=" + page["next_cursor"]))
         self.assertEqual(len(self.call(query="work_scope_id=" + self.scope["work_scope_id"])["items"]), 4)
+        one = PortfolioSQL.one
+        for corrupt_filters in ("not-json", "null", " " * 4097, '{"prompt":"SYNTHETIC_EXCLUDED"}', '{"limit":100}', '{"work_scope_id":"a","work_scope_id":"b"}'):
+            def corrupt(sql, statement, values=()):
+                row = one(sql, statement, values)
+                if row is not None and statement.startswith("SELECT * FROM portfolio_attribution_cursors"):
+                    return {**row, "filters_json": corrupt_filters}
+                return row
+            before = self.attribution_rows()
+            with mock.patch.object(PortfolioSQL, "one", corrupt):
+                self.error("unavailable", lambda: self.call(query="cursor=" + page["next_cursor"]))
+            self.assertEqual(self.attribution_rows(), before)
 
     def check_rejections_are_not_fabricated_attempts_or_work_content(self):
         before = self.v1_rows()
