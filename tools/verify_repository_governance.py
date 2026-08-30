@@ -117,7 +117,12 @@ EXPECTED_WORKFLOW_JOB_ENVIRONMENTS = {
     "live-client-conformance.yml": {
         "live-clients": "live-provider-conformance"
     },
+    "website.yml": {"deploy": "github-pages"},
 }
+PAGES_PUBLISH_CONDITION = (
+    "github.repository == 'Xpounder-com/hormuz' && "
+    "github.event_name != 'pull_request' && github.ref == 'refs/heads/main'"
+)
 WORKFLOW_TOP_LEVEL_FIELDS = frozenset(
     {"name", "on", "permissions", "concurrency", "jobs"}
 )
@@ -1062,6 +1067,52 @@ def _workflow_permissions(
     return workflow_permissions, jobs, job_blocks
 
 
+def _validate_pages_workflow(
+    workflow_permissions: PermissionSpec,
+    jobs: dict[str, PermissionSpec | None],
+    job_blocks: dict[str, str],
+    job_fields: dict[str, dict[str, str]],
+) -> None:
+    """Keep the static-site publisher separate from PR builds and release custody."""
+    expected_deploy_fields = {
+        "name": "Publish project site",
+        "if": PAGES_PUBLISH_CONDITION,
+        "needs": "build",
+        "runs-on": "ubuntu-latest",
+        "timeout-minutes": "10",
+        "permissions": "",
+        "environment": "github-pages",
+        "steps": "",
+    }
+    expected_deploy_steps = (
+        "      - name: Deploy verified static artifact\n"
+        "        id: deployment\n"
+        "        uses: actions/deploy-pages@"
+        "d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4\n"
+    )
+    expected_upload_step = (
+        "      - name: Upload the Pages artifact\n"
+        f"        if: {PAGES_PUBLISH_CONDITION}\n"
+        "        uses: actions/upload-pages-artifact@"
+        "7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4\n"
+        "        with:\n"
+        "          path: website/out\n"
+    )
+    if (
+        workflow_permissions != {"contents": "read"}
+        or set(jobs) != {"build", "deploy"}
+        or jobs.get("build") not in (None, {"contents": "read"})
+        or jobs.get("deploy") != {"pages": "write", "id-token": "write"}
+        or job_fields.get("deploy") != expected_deploy_fields
+        or job_blocks.get("deploy", "").partition("    steps:\n")[2]
+        != expected_deploy_steps
+        or not job_blocks.get("build", "").rstrip().endswith(
+            expected_upload_step.rstrip()
+        )
+    ):
+        raise RepositoryGovernanceError("Pages publication boundary changed")
+
+
 def _validate_workflows(
     root: Path, allowed_owners: set[str]
 ) -> tuple[int, int]:
@@ -1070,6 +1121,8 @@ def _validate_workflows(
         raise RepositoryGovernanceError("no GitHub Actions workflows found")
     action_use_count = 0
     contents_writers: list[tuple[str, str]] = []
+    pages_writers: list[tuple[str, str]] = []
+    pages_workflow_seen = False
     candidate_freeze_seen = False
     candidate_job_bytes_valid = False
     candidate_workflow_bytes_valid = False
@@ -1118,6 +1171,11 @@ def _validate_workflows(
         if actual_environments != expected_environments:
             raise RepositoryGovernanceError(
                 f"workflow environment contract changed: {path.name}"
+            )
+        if path.name == "website.yml":
+            pages_workflow_seen = True
+            _validate_pages_workflow(
+                workflow_permissions, jobs, job_blocks, job_fields
             )
         if path.name == "freeze-v1-candidate.yml":
             candidate_freeze_seen = True
@@ -1227,6 +1285,11 @@ def _validate_workflows(
             )
             if _contents_permission(effective_permissions) == "write":
                 contents_writers.append((path.name, job_name))
+            if effective_permissions == "write-all" or (
+                isinstance(effective_permissions, dict)
+                and effective_permissions.get("pages") == "write"
+            ):
+                pages_writers.append((path.name, job_name))
         uses = ANY_ACTION_USE.findall(text)
         pinned = FULL_ACTION_USE.findall(text)
         if len(uses) != len(pinned):
@@ -1254,9 +1317,15 @@ def _validate_workflows(
 
     if not candidate_freeze_seen:
         raise RepositoryGovernanceError("candidate freeze workflow is required")
+    if not pages_workflow_seen:
+        raise RepositoryGovernanceError("Pages workflow is required")
     if contents_writers:
         raise RepositoryGovernanceError(
             "workflow-issued contents write is forbidden"
+        )
+    if any(writer != ("website.yml", "deploy") for writer in pages_writers):
+        raise RepositoryGovernanceError(
+            "Pages write authority is forbidden outside the static-site publisher"
         )
     if not candidate_job_bytes_valid:
         raise RepositoryGovernanceError(

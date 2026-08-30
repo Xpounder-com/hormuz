@@ -1,0 +1,195 @@
+%PDF-1.4
+%“Œ‹ž ReportLab Generated PDF document (opensource)
+1 0 obj
+<<
+/F1 2 0 R /F2 4 0 R /F3 5 0 R
+>>
+endobj
+2 0 obj
+<<
+/BaseFont /Helvetica /Encoding /WinAnsiEncoding /Name /F1 /Subtype /Type1 /Type /Font
+>>
+endobj
+3 0 obj
+<<
+/A <<
+/S /URI /Type /Action /URI (https://xpounder-com.github.io/hormuz/)
+>> /Border [ 0 0 0 ] /Rect [ 44 24 440 43 ] /Subtype /Link /Type /Annot
+>>
+endobj
+4 0 obj
+<<
+/BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding /Name /F2 /Subtype /Type1 /Type /Font
+>>
+endobj
+5 0 obj
+<<
+/BaseFont /Symbol /Name /F3 /Subtype /Type1 /Type /Font
+>>
+endobj
+6 0 obj
+<<
+/A <<
+/S /URI /Type /Action /URI (https://github.com/Xpounder-com/hormuz/blob/main/docs/ARCHITECTURE.md)
+>> /Border [ 0 0 0 ] /Rect [ 87.1712 223.94 134.1192 234.5 ] /Subtype /Link /Type /Annot
+>>
+endobj
+7 0 obj
+<<
+/A <<
+/S /URI /Type /Action /URI (https://github.com/Xpounder-com/hormuz/blob/main/docs/AUDIT.md)
+>> /Border [ 0 0 0 ] /Rect [ 141.4584 223.94 161.5136 234.5 ] /Subtype /Link /Type /Annot
+>>
+endobj
+8 0 obj
+<<
+/A <<
+/S /URI /Type /Action /URI (https://github.com/Xpounder-com/hormuz/blob/main/docs/CLIENTS.md)
+>> /Border [ 0 0 0 ] /Rect [ 168.8528 223.94 195.7456 234.5 ] /Subtype /Link /Type /Annot
+>>
+endobj
+9 0 obj
+<<
+/Annots [ 3 0 R 6 0 R 7 0 R 8 0 R ] /Contents 22 0 R /MediaBox [ 0 0 612 792 ] /Parent 21 0 R /Resources <<
+/Font 1 0 R /ProcSet [ /PDF /Text /ImageB /ImageC /ImageI ]
+>> /Rotate 0 
+  /Trans <<
+
+>> /Type /Page
+>>
+endobj
+10 0 obj
+<<
+/A <<
+/S /URI /Type /Action /URI (https://xpounder-com.github.io/hormuz/)
+>> /Border [ 0 0 0 ] /Rect [ 44 24 440 43 ] /Subtype /Link /Type /Annot
+>>
+endobj
+11 0 obj
+<<
+/A <<
+/S /URI /Type /Action /URI (https://xpounder-com.github.io/hormuz/demo/#evidence)
+>> /Border [ 0 0 0 ] /Rect [ 70.4102 332.26 163.9544 344.5 ] /Subtype /Link /Type /Annot
+>>
+endobj
+12 0 obj
+<<
+/A <<
+/S /URI /Type /Action /URI (https://github.com/Xpounder-com/hormuz/blob/main/SECURITY.md)
+>> /Border [ 0 0 0 ] /Rect [ 82.3034 252.76 150.878 265 ] /Subtype /Link /Type /Annot
+>>
+endobj
+13 0 obj
+<<
+/A <<
+/S /URI /Type /Action /URI (https://github.com/Xpounder-com/hormuz/blob/main/marketing/TRUST.md)
+>> /Border [ 0 0 0 ] /Rect [ 87.1712 217.44 140.4728 228 ] /Subtype /Link /Type /Annot
+>>
+endobj
+14 0 obj
+<<
+/A <<
+/S /URI /Type /Action /URI (https://github.com/Xpounder-com/hormuz/blob/main/docs/OIDC.md)
+>> /Border [ 0 0 0 ] /Rect [ 147.812 217.44 169.812 228 ] /Subtype /Link /Type /Annot
+>>
+endobj
+15 0 obj
+<<
+/A <<
+/S /URI /Type /Action /URI (https://github.com/Xpounder-com/hormuz/blob/main/docs/SECRET_CONTROLS.md)
+>> /Border [ 0 0 0 ] /Rect [ 177.1512 217.44 235.8384 228 ] /Subtype /Link /Type /Annot
+>>
+endobj
+16 0 obj
+<<
+/A <<
+/S /URI /Type /Action /URI (https://github.com/Xpounder-com/hormuz/blob/main/docs/USAGE.md)
+>> /Border [ 0 0 0 ] /Rect [ 243.1776 217.44 268.6096 228 ] /Subtype /Link /Type /Annot
+>>
+endobj
+17 0 obj
+<<
+/A <<
+/S /URI /Type /Action /URI (https://github.com/Xpounder-com/hormuz/blob/main/docs/OPERATIONS.md)
+>> /Border [ 0 0 0 ] /Rect [ 275.9488 217.44 318.9896 228 ] /Subtype /Link /Type /Annot
+>>
+endobj
+18 0 obj
+<<
+/Annots [ 10 0 R 11 0 R 12 0 R 13 0 R 14 0 R 15 0 R 16 0 R 17 0 R ] /Contents 23 0 R /MediaBox [ 0 0 612 792 ] /Parent 21 0 R /Resources <<
+/Font 1 0 R /ProcSet [ /PDF /Text /ImageB /ImageC /ImageI ]
+>> /Rotate 0 
+  /Trans <<
+
+>> /Type /Page
+>>
+endobj
+19 0 obj
+<<
+/PageMode /UseNone /Pages 21 0 R /Type /Catalog
+>>
+endobj
+20 0 obj
+<<
+/Author (Mehrdad Zaker) /CreationDate (D:20260830132505-05'00') /Creator (\(unspecified\)) /Keywords () /ModDate (D:20260830132505-05'00') /Producer (ReportLab PDF Library - \(opensource\)) 
+  /Subject (\(unspecified\)) /Title (Hormuz \204 trust and data-flow brief) /Trapped /False
+>>
+endobj
+21 0 obj
+<<
+/Count 2 /Kids [ 9 0 R 18 0 R ] /Type /Pages
+>>
+endobj
+22 0 obj
+<<
+/Filter [ /ASCII85Decode /FlateDecode ] /Length 1831
+>>
+stream
+Gatm;>Bed\&:Vs/R)a#=ier0b2G\$Zdd/k`9B]#E?\CRm)r%*M*7k)]4-FF^D/i2Z-R[OTd`gq(2`Dg@qXa)e;?4A$JpZm;cX8d=5BK5Z^4YtJjQhXYN4dOLSDfP5;*`Gn)#5kr3@Q*[+cN+F-m"hD*$.mZ4[YuVjM\/9`s_fQ5b#[=cjN>8*-fkM#]a?3poQ3F/g1#pSA'E=gjT)'hu_]m;PlR1:](NqQ!@@J8neRD1LM8^s+9JOR(b=f[WFrXi'\1C'`)%751#u]b<-UE+X(5'qHH^@&/^Dp21q%1MO?8lNpgn(n&OJ1mJRJf-QaG.n9T+:^*\?u+/X!7SkO(+Dm(dk[h&3pY'fD+*(PuE],%Nj^b_:8@5]g**A;#H(Z>).9h%noKd1US:B*afJR0NGU=<*%+>FH`Ff]:eqt(p"BC(pHUJtK2U'+>-Vq4._fR^HNpo`e=2.19g26^b")QQH,&5o\,q)fI/i+5MuWg+u42TtYbf:].<i3J*JOFYY>YK4h+@D.-`6&A2\m1FW<PlpKOGg93Oh$HhX;C&3*fjrS[`#DRH4;TN4>[n+D3L<ub=XCYB8G3F_Q*B7GK:#k1W`C$r?;L\aAHU)2+sA9;D4\Ro7?Km41ggki&I[P[nAu<e?_)FB8HYCbaa9_G%DL*prP2n2+Qro?YT^"[=M97hrs_9.pGb@Ubg@uT-.)5nr8#!@mslS+kg/Vmhq9A@'J$;oc(jPg\fW#)g5l!]Sm]iZ@Mj*K%ZR=1lO1N.P.XCY3[`6=;RC!]6DaGY?%kir%I8(/(DMr@>il_:[+I(&'Ppl'OXEe$QCb.CnkbV6dfsp;o$<7L3r;5f(:8KSKaDdL(``kPEO!YTNT>f3PcSIZmml.TYTk<?=jcKU@R?1d>/4>cMsB%#E/M&$BTkm9>T37FHGOIA:Bs(Lg"-QSZP&f@`jC"!pTIRDc0\@lWYEaZ*4XQTRoLe\p&c<28)s4PNqWY"%SPK'Pd]7BTqm9[Y/h!nT3VnoB8ao?KB7/$7;3SD"Ht-A>'FZph?\HEBr2g(?I2Cp<d@ic'@t<2+1=j@]ss(,a+<ol\anJ:$6,('T]YLBEoeu;'"G-!M.#=TU4m\Ho"ltHMRg>3H'Zs_(/J&DM,;o+Rd3T!dcnOl;L6_.'ltN7]Ze+C6I,03Y2(hXW.\UdlV&r\mrV-t(L1_LNWSVn&m=mQf8Q@GE1()eYfF%4WH*(e<!(%8Etc`Y:ooJD*AA;J81;!FS=1)$NN6HU%>-'"^'58F80'([5tUUtM]"T-Sa@fcDJ,,jKlUfgH)apDiI4nngs="GgEHshQ.@7Y'Y'RjZQ*CcU7&Ys:gLgi<L)Q'd6q3fBO*l\F&UKm6PE7i4<mFX[^W'Rg5rU#M93UQPC:RE+8Z#CJ,Z,*@_M$,$JS^O2`$/Pp4/.HgQ?_bCRSUSGLGEu.O?>,:\<5;@,@Q?dT\*lWRkp]k%u@98"Gn$3p@c%L%Ng8B^f_Ho[:hYOBL2ZZZGNOO.@X;*QGOlldPc>WuJedPg<(DbF5#3@D:3eK2"Vo*W9&E0DjI2(,G'g/g>7dc$\G0h<Z":?KJ&"!c-2s%Xq[PR72,mlVFsujhIkXFdGUf!-`&j2-H.IQ^Bn75<$I6(@@rh+:31.`;5WP"VbQH2$L1VnWgoO03oP$ZDLC"BX^)V1!_:!e&51^l4!*`hRAc9^<EBTdhha*e#&h/ca1P*W`d$p8n$GM.,1qm+jLj9]$$)@"m)mEYFD+;BeR,CWhG^':PVffc?.<m@V:+%pks.ad8"HAmfqtRF#N]110J39,uea=eY<jCZZtsY.]YDT8(,q,o(rOu-iX;78U"D~>endstream
+endobj
+23 0 obj
+<<
+/Filter [ /ASCII85Decode /FlateDecode ] /Length 1919
+>>
+stream
+Gatm;a`?-*&A@B[qT,I'&1\(?#=m>X1F7=?W2S_HAN1Ni@fdKX"s?WiIC]ZA,Y''?7&;A!!\h=#If6k:JVuaarQR-K[kek-Gi8BO>C[MN+j;RtI!5/VOV:7QE=>S^q`tqSFW<jl9Rf:L+UfM65mG^bVE[tg5&0H&AEMM^2-(\Un:EA9%Zb*Y36(::NT(fIOq)_2/8-Y$ru(IcI@+?sHj1Dh>`"_@=9>,J>%i9GUfpfrKYZu-n+red@.k=I^QP(5[\?XW7$6@Fo^BKd$'XX\F($&AL]AatX<:dSaPu^+LLZ7-:HA,\e!k,H*DTBoT"LV!:1f^]lTSQKXsPs;T"I:?l1ps8o@jLir"-t`'\/=.FD(OU0"E./rg;J%m`<F8JE'Lc5$n194N:Ks2\d8\[SX+0/6QD_7rm:H3UB_A60&ua<M#&[FS<]f6nL/i3-uKVfE1(:(7DErAs*n.+C?>W_cE'R0SSG*+Z[bHPp]6u@J5Be`KBaO0TLhkfc%9VGcp'KJ7k$Q/@+'EZ9Bl)RmT@60KD4K5Ak,<&XjnSV,V^R[5=`nHH<*SMO]Tupf9r!)]H92=]oG>HmSRA!6Z%kB;sst"B3R[$=6'=MF-IK%dr0VXYDT+`Bjs=!\H0^"fbic+[W/-9#ol'!q[Zq!o>As<Sq5fe^e+qUhV>5_U](7c;;UmPjUXO@16a&csid8KTH1*U#^di7q)<DlsB%srrMh/_6k]9A#LcL'KVGg1aS;OMhLW+O*>Zf"4Uc\R7`/.iqqb@Q,"+hWYAhPZCHrF?%-nRZqc%2b(\b8SdIa,[G%i!CSJd24:7r'*a`TGJ]nos;a"JTY+Q>Pd+s7QL%YbR("b"L?DM=o9E:Y>R>GH=J=cLu!8\R$'T^)N=[DsYYhMgUA]Pe7(=ZY]-P?GdC!<K.S(T4lR?st/cs5Z?\YPDk_ILBL:@KT&X2%&4GcQP2_leW`+@2=Y!TP/hR#6JIK)nlhZp<)FVAPK?2bJ+!p&Yth_j:MkMV@TW#2aZclaU>!#-ktAQ]kj/*QE:j60V4n0m(?pQf^/I9\Hq9LK]>4=FD-o//a.,D3+L@31Wn7eV(L!mV."U3kL4]"tY1V0'-PD95u/5<:(/FE>Wj)r@]c%<)I@0DGXIiDPL*/PdsmED+g<sh!.6oTR@CUZ2:j>NU(?901]=#!<VVJK,CB=6LT)o5]&6sg#_l<jUVHqATb^;)#e5BUf-dg`GeJ`NS1B:^2G;Yl-p:16`3KMefoAA[js"eID;UsS"XWrY/S]%8u2/\"Y5=6P?O;p/\];LN.i=ZdMg7raV%X[+mSQ9cM4t#csKB8NB!*q6t!pZ5IsI@4Y$9-,>';L\f!8j;+_W#nF!)J:!GYWJ3!ee?FtC!=;30O-B`[u(r/1Aa!%?Wi2Pari3j:)!aH$mY@Otn@+Z++H0NT1W^f9ZouD9.S9=l@E//HZ8Aa+Fg$@JeT!\cIcV]N:.\h.[o\'P`6tGScKs;ifk/``u/NK;0@"26'g1UMf;,^TY1q.-4%N68;:[;`5mPLh?=JYNDnBt>)^rO#b_&saRB$FfHk;'k-X];ZNO"/ce9on=@U3,W"-?&0E\>oUl9IH]U7>fnm5)n)$2\"(%Laajd?.?1mZ^E>6)VCg\-<7Wa`Vd"8!o01NaoS3i<,%@KB.d,WGbO4'ED(M&,7$cbRPW9!cil<YlH_a/?([bG9II0]S1H\=*XBuT`?4ioN7LKu2//>2`j(i>Kp4*iWoXSFC7`k4-cn/D&K:<[dq^K]Q35=$3UjX'K[R#j!r&(^h>o3(H2.f9.=!jUHOi<Nr]N[Hn=:U[=oI&m9,+#J_:;qCn\)u9%ikIp<e!Nj%nA!2Zq/p(D-e4erh<!s023OHF8X*]*:2K7rb-]3/:AeVOK!OTmKVAQ=gaaY9-oKHYpIVTT4i39&$X?-M?~>endstream
+endobj
+xref
+0 24
+0000000000 65535 f 
+0000000061 00000 n 
+0000000112 00000 n 
+0000000219 00000 n 
+0000000386 00000 n 
+0000000498 00000 n 
+0000000575 00000 n 
+0000000790 00000 n 
+0000000999 00000 n 
+0000001210 00000 n 
+0000001441 00000 n 
+0000001609 00000 n 
+0000001808 00000 n 
+0000002012 00000 n 
+0000002224 00000 n 
+0000002429 00000 n 
+0000002647 00000 n 
+0000002855 00000 n 
+0000003068 00000 n 
+0000003332 00000 n 
+0000003402 00000 n 
+0000003707 00000 n 
+0000003774 00000 n 
+0000005697 00000 n 
+trailer
+<<
+/ID 
+[<c836837d04a1108b2642e9eda31c1dfa><c836837d04a1108b2642e9eda31c1dfa>]
+% ReportLab generated PDF document -- digest (opensource)
+
+/Info 20 0 R
+/Root 19 0 R
+/Size 24
+>>
+startxref
+7708
+%%EOF

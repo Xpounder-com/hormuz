@@ -1,0 +1,16 @@
+Hormuz zero-network policy administrator demo
+PASS created standard baseline and strict local candidate policies
+PASS validated both local policy documents
+PASS semantic comparison found 3 policy changes
+PASS created 2 explicit policy scenarios
+PASS disposable SQLite current usage: 0 requests, 0 tokens, USD 0
+PASS evaluated 2 scenarios with 2 behavior changes: 8000-token request uncapped -> capped at 4000; demo-deep allowed -> denied
+PASS network calls: 0; provider credentials: 0; policy mutations: 0
+Temporary artifacts removed; rerun with --output DIRECTORY to inspect owner-only files
+Retain the local candidate before applying it:
+  hormuz policy demo --output policy-demo
+This policy-UX demo is not evidence that the enterprise v1 release gate is complete.
+Managed next steps (shown only; never executed by this demo):
+  hormuz --config hormuz.json policy apply policy-demo/candidate.json --organization demo-organization
+  hormuz --config hormuz.json policy history --organization demo-organization --limit 20
+  hormuz --config hormuz.json policy rollback --organization demo-organization --if-active sha256:ff9423b00f326af4bf5766d75a806a40aabc5e1400107e7607ccef6dd99be001
