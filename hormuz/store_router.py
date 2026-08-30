@@ -1,14 +1,41 @@
-"""Resolve the configured metadata-only usage repository."""
+"""Resolve the v1 usage repository and compose separately owned repositories."""
 
 from __future__ import annotations
 
 import os
-from typing import Mapping
+from dataclasses import dataclass
+from typing import Generic, Mapping, Protocol, TypeVar
 
+from ._persistence import UsageRepository
 from .config import GatewayConfig
 from .postgres import PostgresConnectionPool, PostgresStorageError
 from .postgres_usage_store import PostgresUsageStore
-from .store import UsageRepository, UsageStore
+from .store import UsageStore
+
+
+RepositoryT = TypeVar("RepositoryT")
+RepositoryT_co = TypeVar("RepositoryT_co", covariant=True)
+
+
+class RepositoryFactory(Protocol[RepositoryT_co]):
+    """Construct one repository with explicit configuration and a borrowed pool."""
+
+    def __call__(
+        self,
+        config: GatewayConfig,
+        *,
+        environ: Mapping[str, str] | None = None,
+        connection_pool: PostgresConnectionPool | None = None,
+        read_only: bool = False,
+    ) -> RepositoryT_co: ...
+
+
+@dataclass(frozen=True, repr=False)
+class RepositoryBundle(Generic[RepositoryT]):
+    """Separate typed owners; no cross-repository transaction or lifecycle."""
+
+    usage: UsageRepository
+    portfolio: RepositoryT
 
 
 def create_usage_store(
@@ -45,6 +72,34 @@ def create_usage_store(
         connection_pool=connection_pool,
         audit_chain_maximum_anchor_age_seconds=audit_chain_maximum_anchor_age_seconds,
     )
+
+
+def create_repository_bundle(
+    config: GatewayConfig,
+    *,
+    portfolio_factory: RepositoryFactory[RepositoryT],
+    environ: Mapping[str, str] | None = None,
+    connection_pool: PostgresConnectionPool | None = None,
+    read_only: bool = False,
+) -> RepositoryBundle[RepositoryT]:
+    """Compose a future portfolio owner beside the unchanged v1 usage ledger.
+
+    No portfolio implementation is registered by this refactor; its factory
+    must be supplied explicitly after the feature's gates are met. Each
+    repository owns its SQL and transactions. A shared pool is caller-owned,
+    including when either factory fails. Only the factories acquire their
+    repository connections; this helper owns no transaction or pool lifecycle
+    and promises no cross-repository atomicity.
+    The legacy create_usage_store path does not call this composition helper.
+    """
+
+    usage = create_usage_store(
+        config, environ=environ, connection_pool=connection_pool, read_only=read_only,
+    )
+    portfolio = portfolio_factory(
+        config, environ=environ, connection_pool=connection_pool, read_only=read_only,
+    )
+    return RepositoryBundle(usage=usage, portfolio=portfolio)
 
 
 def create_postgres_runtime_pool(
