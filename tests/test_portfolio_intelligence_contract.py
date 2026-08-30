@@ -297,6 +297,48 @@ runpy.run_path(str(script), run_name="__main__")
             ):
                 validate_portfolio_intelligence_contract(root)
 
+    def test_contract_integer_fields_reject_boolean_and_float_aliases(self) -> None:
+        paths = [
+            (("schema_version",), 1, "contract_identity_changed"),
+            (("api", "public_schema_version"), 1, "api_behavior_changed"),
+            (("api", "error_schema_version"), 1, "api_behavior_changed"),
+            (("api", "default_page_size"), 50, "api_behavior_changed"),
+            (("api", "maximum_page_size"), 100, "api_behavior_changed"),
+            (("attribution", "active_primary_use_cases_per_attempt"), 1,
+             "attribution_contract_changed"),
+        ]
+        paths.extend(
+            (("entities", index, "schema_version"), 1, "entity_schema_version_changed")
+            for index in range(8)
+        )
+        for path, expected, error in paths:
+            for replacement in (True, float(expected)):
+                with self.subTest(path=path, replacement=replacement):
+                    def change(contract):
+                        target = contract
+                        for component in path[:-1]:
+                            target = target[component]
+                        target[path[-1]] = replacement
+                    self._assert_contract_change_rejected(change, error)
+
+    def test_contract_boolean_fields_reject_numeric_aliases(self) -> None:
+        for path, alias, error in (
+            (("baseline", "current_main_matches_release_manifest"), 1,
+             "baseline_changed"),
+            (("evidence", "temporal_proximity_is_causality"), 0,
+             "evidence_contract_changed"),
+            (("authorization", "role_grants_provider_access"), 0,
+             "authorization_boundary_changed"),
+            (("recommendations", "automatic_application"), 0,
+             "recommendation_boundary_changed"),
+        ):
+            for replacement in (alias, float(alias)):
+                with self.subTest(path=path, replacement=replacement):
+                    self._assert_contract_change_rejected(
+                        lambda contract: contract[path[0]].__setitem__(path[1], replacement),
+                        error,
+                    )
+
     def test_duplicate_json_member_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

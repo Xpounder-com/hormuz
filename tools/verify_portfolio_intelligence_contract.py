@@ -462,7 +462,7 @@ def _validate_baseline(root: Path, baseline: object) -> dict[str, Any]:
         "legacy_manifest_release_line": "0.2",
         "legacy_manifest_treatment": "preserve_v1_fixture_and_version_any_correction",
     }
-    if value != expected:
+    if value != expected or value["current_main_matches_release_manifest"] is not True:
         raise PortfolioIntelligenceContractError("baseline_changed")
     path = root / BASELINE_MANIFEST_PATH
     raw = _read_bytes(path, maximum=MAX_BASELINE_BYTES, label="baseline_manifest")
@@ -652,7 +652,7 @@ def _validate_entities(value: object) -> None:
         if entity_id in seen or ENTITY_SCHEMAS.get(entity_id) != entity["schema_id"]:
             raise PortfolioIntelligenceContractError("entity_identity_changed")
         schema_version = entity["schema_version"]
-        if isinstance(schema_version, bool) or schema_version != 1:
+        if type(schema_version) is not int or schema_version != 1:
             raise PortfolioIntelligenceContractError("entity_schema_version_changed")
         identity = (str(entity["schema_id"]), int(schema_version))
         if identity in identities:
@@ -691,6 +691,8 @@ def _validate_attribution(value: object) -> None:
         },
         "attribution",
     )
+    if type(attribution["active_primary_use_cases_per_attempt"]) is not int:
+        raise PortfolioIntelligenceContractError("attribution_contract_changed")
     if attribution != {
         "active_primary_use_cases_per_attempt": 1,
         "sources": [
@@ -791,7 +793,7 @@ def _validate_budget_and_evidence(budget_value: object, evidence_value: object) 
         },
         "evidence",
     )
-    if evidence != {
+    if evidence["temporal_proximity_is_causality"] is not False or evidence != {
         "levels": ["descriptive", "associated", "controlled"],
         "connector_default": "descriptive",
         "deterministic_join_default": "associated",
@@ -919,7 +921,7 @@ def _validate_authorization_and_api(auth_value: object, api_value: object) -> No
     if (
         api["admin_prefix"] != "/v1/admin/portfolio"
         or api["connector_prefix"] != "/v1/connectors"
-        or isinstance(api["public_schema_version"], bool)
+        or type(api["public_schema_version"]) is not int
         or api["public_schema_version"] != 1
         or api["request_schemas"] != API_REQUEST_SCHEMAS
         or api["response_schemas"] != API_RESPONSE_SCHEMAS
@@ -928,7 +930,9 @@ def _validate_authorization_and_api(auth_value: object, api_value: object) -> No
         or api["request_validation"] != "strict_unknown_fields_rejected"
         or api["response_shaping"] != "explicit_contract_no_database_rows"
         or api["collection_pagination"] != "opaque_frozen_window_cursor"
+        or type(api["default_page_size"]) is not int
         or api["default_page_size"] != 50
+        or type(api["maximum_page_size"]) is not int
         or api["maximum_page_size"] != 100
         or api["ordering"] != "event_or_creation_time_then_opaque_id"
         or api["cursor_binding"]
@@ -939,7 +943,7 @@ def _validate_authorization_and_api(auth_value: object, api_value: object) -> No
         or api["retry_behavior"]
         != "reads_safe_mutations_replay_only_by_verified_idempotency_identity"
         or api["error_schema"] != "hormuz.portfolio-error"
-        or isinstance(api["error_schema_version"], bool)
+        or type(api["error_schema_version"]) is not int
         or api["error_schema_version"] != 1
         or api["provider_route_error_delivery"]
         != "provider_native_body_plus_versioned_hormuz_header"
@@ -1082,7 +1086,7 @@ def validate_portfolio_intelligence_contract(
     _require_fields(contract, TOP_LEVEL_FIELDS, "contract")
     if (
         contract["schema_id"] != SCHEMA_ID
-        or isinstance(contract["schema_version"], bool)
+        or type(contract["schema_version"]) is not int
         or contract["schema_version"] != SCHEMA_VERSION
     ):
         raise PortfolioIntelligenceContractError("contract_identity_changed")

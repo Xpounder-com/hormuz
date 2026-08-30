@@ -211,12 +211,19 @@ another tenant's data. Privileged reads are audited before result delivery.
 
 The ordered release plan is [epic #226](https://github.com/Xpounder-com/hormuz/issues/226):
 
-1. contract, persistence seam, and exact v1 transition (#212–#214);
+1. accepted contract and feature-free persistence seam (#212–#213), followed
+   by accepted per-feature compatibility plans and red-first tests in #214;
 2. finance evidence, work registry, attribution, budgets, and outcome contract
    (#8 and #215–#218);
 3. GitHub/Linear connectors and deterministic associations (#219–#221);
 4. scorecards, role views, and reviewable recommendations (#222–#224); and
-5. the pre-registered external candidate proof (#225).
+5. exact final-candidate transition proof to close #214 and the pre-registered
+   external candidate proof (#225).
+
+The first #214 checkpoint unblocks the corresponding feature work only after
+#212 and #213 close; feature PRs must pass their applicable transition tests.
+#214 remains open until the final candidate satisfies its complete artifact,
+migration, rollback, and recovery gate before the v1.1.0 tag.
 
 Browser sessions, content inspection/persistence, HA/SLA claims, independent
 security certification, and broad multi-profile upgrades are conditional gates,

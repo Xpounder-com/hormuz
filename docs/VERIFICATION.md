@@ -29,6 +29,12 @@ added current-manifest entries must satisfy the current executable manifest
 validator before additive comparison. The immutable historical fixture remains
 digest-bound independently of later validator versions.
 
+Contract-control schema versions, attribution counts, and page sizes must be
+actual integers, not boolean or floating-point aliases. Boolean acceptance,
+causality, provider-authority, and automatic-application flags reject numeric
+aliases. These checks apply to the planning contract; they do not change the
+digest-frozen wire bundle's JSON Schema numeric semantics.
+
 The [wire bundle](portfolio-intelligence-wire-v1.json) defines and digest-binds
 all 26 planned payloads. Tests exercise 52 synthetic minimal/populated examples,
 every required top-level field, unknown and nested content fields, scalar and

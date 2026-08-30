@@ -35,9 +35,12 @@ unregistered table.
 ## Planned v1.1 portfolio data
 
 The accepted v1.1.0 design introduces a separate append-only portfolio plane;
-it is not part of the currently implemented table inventory above. Until its
-migrations land under #213–#214, `durable-data-v1.json` remains authoritative
-for every table the current release creates and must not list planned tables.
+it is not part of the currently implemented table inventory above. Its
+migrations belong to feature issues after the feature-free #213 seam and the
+relevant #214 pre-implementation plan/tests are accepted. Until those migrations
+land, `durable-data-v1.json` remains authoritative for every table the current
+release creates and must not list planned tables. #214 stays open for final
+candidate transition proof; #213 introduces no portfolio table or migration.
 
 The planned plane has eight versioned entity families: work-scope versions,
 external-work binding events, governed-run attribution events, work-budget

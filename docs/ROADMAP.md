@@ -13,12 +13,14 @@ next minor release. The work is organized under
 through these gates in order:
 
 1. **Freeze the boundary and preserve v1.** Complete the accepted contract
-   ([#212](https://github.com/Xpounder-com/hormuz/issues/212)), extract a
-   separate append-only repository and service seam
-   ([#213](https://github.com/Xpounder-com/hormuz/issues/213)), then prove the
-   exact v1.0.0-to-v1.1.0 transition, rollback, and recovery rules
-   ([#214](https://github.com/Xpounder-com/hormuz/issues/214)). No later
-   feature may merge before its required foundation gate.
+   ([#212](https://github.com/Xpounder-com/hormuz/issues/212)) and the
+   behavior-preserving persistence composition seam
+   ([#213](https://github.com/Xpounder-com/hormuz/issues/213)). Before each
+   feature migration/API change, accept its compatibility plan and red-first
+   transition, rollback, and recovery tests in
+   [#214](https://github.com/Xpounder-com/hormuz/issues/214). Feature PRs must
+   pass their applicable transition tests before merge; final candidate proof
+   is not a prerequisite for building the features it must test.
 2. **Make finance evidence trustworthy.** Preserve exact provider and
    configured cost bases ([#8](https://github.com/Xpounder-com/hormuz/issues/8)),
    then add the versioned work registry, single-primary attribution, scoped
@@ -31,10 +33,17 @@ through these gates in order:
    scorecards, role-scoped aggregate views, and reviewable recommendations
    that never apply policy automatically
    ([#222](https://github.com/Xpounder-com/hormuz/issues/222)–[#224](https://github.com/Xpounder-com/hormuz/issues/224)).
-5. **Prove the release claim.** Run the preregistered, immutable-candidate
-   external validation gate in
+5. **Prove the release claim.** Close #214 with the exact final candidate's
+   v1.0.0-to-v1.1.0 artifact, migration, rollback, and recovery evidence. Run
+   the preregistered, immutable-candidate external validation gate in
    [#225](https://github.com/Xpounder-com/hormuz/issues/225). Internal,
    synthetic, or observational evidence cannot be relabeled as that proof.
+
+#214 has two checkpoints: accepted pre-implementation plans/tests unblock the
+corresponding feature work after #212 and #213 close; final candidate evidence
+closes #214 before the v1.1.0 tag. Keep #214 open between those checkpoints and
+record acceptance with exact reviewed commits and test references. #213 itself
+remains feature-free and introduces no portfolio schema or migration.
 
 Every issue inherits the release gates in #226: authorization before access,
 strict versioned schemas, metadata-only persistence and evidence, tenant
@@ -48,6 +57,11 @@ Refactoring is in scope only when it creates the approved seam for a current
 work order while preserving behavior. #213 is therefore the repository and
 service extraction point; feature issues must build on that seam rather than
 mix portfolio state into the immutable v1 request and usage ledger.
+
+Every PR follows the [technical-lead merge policy](../CONTRIBUTING.md#technical-lead-merge-policy):
+evaluate the linked issue and exact diff, resolve substantive findings, verify
+the applicable gates, then merge under the owner's standing authorization.
+Recheck the resulting `main` evidence before claiming issue completion.
 
 ## v1.0.0 foundation implementation history
 
