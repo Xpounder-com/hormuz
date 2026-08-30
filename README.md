@@ -1,93 +1,360 @@
 # Hormuz
 
+[![CI](https://github.com/Xpounder-com/hormuz/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Xpounder-com/hormuz/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/Xpounder-com/hormuz)](https://github.com/Xpounder-com/hormuz/releases)
+[![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB.svg?logo=python&logoColor=white)](pyproject.toml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
-Keep Codex and Claude Code. Put company policy in between.
+**Self-hosted AI policy, usage, and evidence control for Codex and Claude Code.**
 
-Hormuz is a CLI-first AI gateway and control plane. It authenticates the person
-and team behind each request, enforces which clients, models, output limits,
-budgets, and secret-egress rules apply, routes allowed traffic to OpenAI or
-Anthropic, and records versioned metadata-only evidence. Employees keep their
-existing AI clients; company provider credentials stay on the Hormuz service.
+Keep the AI clients people already use. Put organization policy between those
+clients and model providers.
 
-Hormuz 1.0 is the first stable CLI and policy/evidence-contract release line.
-It is self-hosted and does not claim blanket production certification,
-enterprise HA, customer SLA, or independent security review. The v1 release
-checkpoint requires five isolated internal repetitions of one exact offline
-policy workflow plus exact-byte candidate custody. Passing proves only that
-bounded repeatability claim. It does not prove external human usability,
-PostgreSQL administrator state transitions, market demand, provider-invoice
-accuracy, or suitability for customer secrets.
+Hormuz is a CLI-first gateway that authenticates the person and team behind each
+request, applies model and budget policy, controls secret egress, routes allowed
+traffic to OpenAI or Anthropic, and records metadata-only evidence. Provider
+credentials remain on the Hormuz service; prompts and responses are relayed, not
+written to the usage database.
 
-## Try the real gateway without a provider account
+> [!IMPORTANT]
+> Hormuz 1.0 is the first stable CLI and policy/evidence-contract release line.
+> Release qualification included five isolated internal repetitions of one exact
+> offline policy workflow plus exact-byte candidate custody. That bounded result
+> does not prove external human usability, blanket production fitness, customer
+> SLA coverage, provider billing accuracy, or independent security review.
 
-From a clean checkout on the release-gated Linux source path:
+[Website](https://xpounder-com.github.io/hormuz/) ·
+[Recorded demo](https://xpounder-com.github.io/hormuz/demo/) ·
+[Enterprise evaluation](https://xpounder-com.github.io/hormuz/enterprise/)
 
-```bash
+[Benefits](#why-hormuz) · [Quickstart](#quickstart) ·
+[Usage reporting](#usage-visibility-without-content-capture) ·
+[Documentation](#documentation) · [Contributing](#contributing-and-community)
+
+## Why Hormuz
+
+| Benefit | What Hormuz provides |
+| --- | --- |
+| Preserve developer workflows | Codex and Claude Code continue to use their native OpenAI- and Anthropic-compatible protocols. |
+| Centralize AI policy | Enforce allowed clients and models, fallbacks, output caps, monthly token limits, and USD budgets at organization, team, and person scope. |
+| Understand adoption and spend | Group current-month requests, tokens, and estimated cost by organization, team, person, model, client, or provider. |
+| Attribute usage responsibly | Bind each request to a unique human or workload identity and preserve event-time team attribution without storing prompts or responses. |
+| Reduce secret-egress risk | Detect, redact, or deny configured credentials and high-confidence secret formats before provider serialization. |
+| Keep control in your environment | Self-host the gateway and metadata store, keep provider keys server-side, and export versioned evidence for independent analysis. |
+
+Hormuz is designed for usage governance, not employee surveillance. Token volume
+and estimated spend describe consumption; they are not measures of productivity,
+quality, or individual performance.
+
+<a id="try-the-real-gateway-without-a-provider-account"></a>
+
+## Quickstart
+
+The provider-free demo exercises the real HTTP gateway, policy, redaction,
+request-attempt, and SQLite evidence paths with disposable loopback providers:
+
+~~~bash
+git clone --branch v1.0.0 --depth 1 https://github.com/Xpounder-com/hormuz.git
+cd hormuz
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --editable .
 hormuz demo
-```
+~~~
 
-The install may download Python dependencies. The demonstration itself uses
-only disposable loopback listeners: it needs no configuration, API key, model
-account, or provider network call. It sends synthetic requests through the
-real Hormuz HTTP, policy, redaction, request-attempt, and SQLite evidence path,
-then reports:
+The commands above select the stable v1.0.0 source tag. Installation downloads
+Python dependencies; the demo itself uses only disposable local loopback
+providers. No OpenAI or Anthropic account is required. A successful run reports:
 
-```text
+~~~text
 PASS allowed request reached the loopback provider simulator
 PASS unapproved model was rerouted and output-capped
 PASS detected secret was redacted before provider egress
 PASS denied request made no provider call
 PASS content-free evidence validated: 4 usage events, 1 security event
 PASS external provider calls: 0 (3 loopback simulator calls)
-```
+~~~
 
-The command validates the existing versioned evidence contracts, proves its
-synthetic request, response, identity, and credential values are absent from
-the ledger, and removes the temporary configuration and database before it
-exits. It is an executable product tour, not a provider-compatibility or
-production-deployment claim. Its `PASS` lines are human diagnostic output, not
-a new machine-readable compatibility contract.
+Try the separate zero-network policy-administration workflow:
 
-## Try policy administration without PostgreSQL
-
-Run the separate zero-network administrator workflow:
-
-```bash
+~~~bash
 hormuz policy demo
-```
+~~~
 
-It creates and validates local baseline/candidate policies, reports their
-semantic changes, creates two explicit scenarios, and evaluates current
-behavior against a disposable SQLite ledger containing exactly zero usage. It
-demonstrates a real model denial and an 8,000-token request being capped at
-4,000; it does not invent budget usage, contact a provider, or simulate policy
-activation. Temporary files are removed by default. To inspect owner-only
-artifacts without replacing anything that already exists:
+Both demos remove their temporary state by default. They are executable product
+tours, not provider-compatibility or production-deployment certifications. See
+[policy administrator usability](docs/POLICY_ADMIN_USABILITY.md) for the exact
+v1 repeatability and custody boundary.
 
-```bash
-hormuz policy demo --output ./policy-demo
-```
+## Usage visibility without content capture
 
-The new directory is mode `0700` and every artifact is mode `0600`. The demo
-ends with real `policy apply`, `policy history`, and `policy rollback` commands
-for a separately configured managed deployment, but never executes them. This
-is a policy-UX demonstration, not production-deployment certification.
+Hormuz records one metadata-only event for each accounted generation attempt.
+The event includes the organization, person, team, identity type, client,
+provider, requested and routed model, provider-reported token categories,
+configured-rate-card estimate, policy outcome, status, and redaction count.
 
-The [v1 custody and repeatability protocol](docs/POLICY_ADMIN_USABILITY.md)
-checks one frozen `v1.0.0` source archive in five fresh virtual environments,
-workspaces, and zero-usage SQLite databases. Its versioned aggregate contains
-only exact digests, timestamps, stage/exit status, and bounded semantic
-outcomes. Promotion accepts only that candidate's unchanged bytes; it never
-rebuilds. Passing proves deterministic internal workflow repeatability, not a
-five-person usability study or managed PostgreSQL correctness.
+Use the built-in report to answer common operational questions:
+
+| Question | Command |
+| --- | --- |
+| How much is each person using? | `hormuz --config hormuz.json status --group-by person` |
+| Which models drive token consumption and cost? | `hormuz --config hormuz.json status --group-by model` |
+| What is one team's model mix? | `hormuz --config hormuz.json status --group-by model --team engineering` |
+| Which providers does one identity use? | `hormuz --config hormuz.json status --group-by provider --actor alice` |
+| How can another tool consume the report? | `hormuz --config hormuz.json status --group-by person --json` |
+
+Rows include request outcomes, input and output tokens, cache-read and
+cache-write tokens, reasoning tokens, total tokens, estimated cost, active
+actors, redactions, and applicable budget utilization.
+
+<details>
+<summary>Example metadata-only JSON report (synthetic)</summary>
+
+~~~json
+{
+  "schema_id": "hormuz.usage-report",
+  "schema_version": 1,
+  "month": "current",
+  "group_by": "person",
+  "filters": {
+    "actor_id": null,
+    "team_id": null
+  },
+  "cost_basis": "configured_rate_card_estimate",
+  "allocation_basis": "direct_gateway_request",
+  "coverage": "gateway_captured_requests_only",
+  "rows": [
+    {
+      "scope_id": "alice",
+      "scope_name": "Alice Example",
+      "team_id": "engineering",
+      "team_name": "Engineering",
+      "requests": 3,
+      "succeeded": 2,
+      "failed": 0,
+      "denied": 1,
+      "rate_limited": 0,
+      "input_tokens": 120,
+      "output_tokens": 30,
+      "cache_read_tokens": 20,
+      "cache_write_tokens": 0,
+      "reasoning_tokens": 7,
+      "total_tokens": 150,
+      "cost_microusd": 120,
+      "cost_usd": 0.00012,
+      "budget_usd": 500.0,
+      "budget_remaining_usd": 499.99988,
+      "budget_used_percent": 0.000024,
+      "active_actors": 1,
+      "redactions": 1
+    }
+  ]
+}
+~~~
+
+</details>
+
+Reports cover the current UTC month and only requests captured by Hormuz.
+Per-person attribution requires a unique identity for every human, service
+account, and CI workload; shared credentials collapse attribution. Costs are
+configured-rate-card estimates until separately reconciled with provider
+invoices. Read [usage, cost, and budget reporting](docs/USAGE.md) for the exact
+field semantics and coverage limits.
+
+## What works
+
+### Gateway, identity, and policy
+
+- OpenAI-compatible `POST /v1/responses` proxying, including streaming.
+- Anthropic-compatible `POST /v1/messages`, `/v1/messages/count_tokens`, and
+  streaming.
+- Provider model IDs by default, with optional organization aliases and
+  policy-driven fallback routing.
+- Organization, team, and person policy overlays that can only become more
+  restrictive.
+- Output-token caps, monthly token limits, USD budgets, and atomic reservations
+  that close the concurrent-request budget race.
+- Unique bootstrap identities and generic OIDC JWT access-token mapping with
+  strict discovery, issuer, audience, expiry, asymmetric-signature, subject, and
+  signing-key-rotation checks.
+- Immutable PostgreSQL-backed policy documents with authenticated bootstrap,
+  semantic comparison, preview, audited activation, history, and rollback.
+
+### Usage, evidence, and security
+
+- Per-person, team, model, client, provider, and organization reporting.
+- Input, output, cache-read, cache-write, and reasoning-token accounting when
+  providers report those values.
+- SQLite metadata storage by default, with an optional PostgreSQL adapter for
+  the same usage and evidence contract.
+- Metadata-only JSONL audit export with private file permissions and a SHA-256
+  checksum.
+- Per-organization, digest-linked audit chains with explicit recovery epochs
+  and optional external Object Lock checkpoints.
+- Pre-provider secret redaction or denial without retaining matched values.
+- OpenAI response storage and background mode disabled by default as enforceable
+  provider policy.
+- Versioned content-free contracts and a strict durable-data inventory.
+
+### Packaging and operations
+
+- Python 3.11 through 3.14 in blocking Linux CI.
+- A deterministic, non-root Linux `amd64` OCI image identified by immutable
+  digest, with keyless Cosign signing, CycloneDX SBOM, bounded provenance, and
+  vulnerability and reproducibility gates.
+- A provider-free single-VM Docker Compose evaluation profile.
+- An optional Kubernetes and Helm multi-replica reference with customer-supplied
+  immutable inputs and default-deny network policy.
+- Optional PostgreSQL compatibility, migration, row-security, pooling,
+  interruption, backup/restore, and bounded HA reference proofs.
+- Versioned liveness and readiness endpoints plus graceful shutdown.
+
+The included rate cards are examples current as of August 15, 2026. Verify them
+against provider pricing before production use and reconcile estimates against
+provider invoices before describing spend as final.
+
+## How it works
+
+~~~text
+Codex / Claude Code
+        |
+        v
+authenticated person + team
+        |
+        v
+policy: allow / deny / reroute / cap / reserve budget
+        |
+        v
+secret control: allow / redact / deny
+        |
+        v
+OpenAI / Anthropic
+
+Every accounted outcome -> versioned metadata-only evidence
+~~~
+
+Hormuz governs provider-bound requests and their organizational usage evidence.
+It is not an identity provider, model, organizational-memory system, metadata
+compiler, provider billing authority, or employee-productivity system.
+
+See [architecture](docs/ARCHITECTURE.md) for request flow, trust boundaries, and
+component ownership.
+
+## Configure providers and clients
+
+Hormuz requires Python 3.11 or newer. Start from the example configuration and
+keep all credentials outside source control:
+
+~~~bash
+cp config.example.json hormuz.json
+export HORMUZ_TOKEN="replace-with-a-long-random-identity-token"
+export OPENAI_API_KEY="your-company-openai-key"
+export ANTHROPIC_API_KEY="your-company-anthropic-key"
+python3 -m hormuz --config hormuz.json doctor
+python3 -m hormuz --config hormuz.json serve
+~~~
+
+In another terminal, print the settings for an existing AI client:
+
+~~~bash
+python3 -m hormuz --config hormuz.json client config codex
+python3 -m hormuz --config hormuz.json client config claude
+~~~
+
+People authenticate to Hormuz with unique identities. Hormuz removes the Hormuz
+credential before egress and authenticates upstream with the organization's
+provider key. Continue with the [Codex and Claude Code client guide](docs/CLIENTS.md).
+
+## Policy workflow
+
+Create and validate a policy locally before touching provider or managed
+deployment state:
+
+~~~bash
+python3 -m hormuz policy templates
+python3 -m hormuz --config hormuz.json policy create \
+  --template standard \
+  --output engineering-standard.json
+python3 -m hormuz --config hormuz.json policy validate engineering-standard.json
+~~~
+
+Review behavior and then apply with an optional optimistic-concurrency guard:
+
+~~~bash
+python3 -m hormuz --config hormuz.json policy compare engineering-standard.json \
+  --organization xpounder
+python3 -m hormuz --config hormuz.json policy preview engineering-standard.json \
+  --organization xpounder \
+  --actor alice \
+  --client codex \
+  --protocol openai \
+  --model gpt-5.4-mini \
+  --max-output-tokens 1000
+python3 -m hormuz --config hormuz.json policy apply engineering-standard.json \
+  --organization xpounder \
+  --if-active sha256:...
+~~~
+
+Inspect or reverse managed state with `policy show`, `policy history`,
+`policy export`, and `policy rollback`. The [policy control
+guide](docs/POLICY_CONTROL.md) documents authority, immutable versions,
+concurrency, rollback, and compatibility behavior.
+
+## Deployment options
+
+| Path | Intended use | Boundary |
+| --- | --- | --- |
+| Source + SQLite | Local evaluation and one-process operation | Not a shared or HA store |
+| [Signed OCI image](docs/OCI.md) | Separately versioned `v0.1.3` Linux `amd64` reference | Digest is the artifact contract; no mutable `latest` tag; not the v1.0.0 source release |
+| [Docker Compose](deploy/compose/README.md) | Provider-free single-VM evaluation or pilot | One gateway replica; not HA or production certification |
+| [Kubernetes + Helm](deploy/kubernetes/README.md) | Bounded multi-replica reference | Customer-operated PostgreSQL and ingress; not general HA/DR certification |
+
+Public TLS remains a customer-controlled ingress responsibility. Read
+[deployment](docs/DEPLOYMENT.md), [storage](docs/STORAGE.md), and
+[operations](docs/OPERATIONS.md) before using a shared environment.
+
+## Documentation
+
+| Topic | Guide |
+| --- | --- |
+| Architecture and trust boundaries | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
+| Codex and Claude Code setup | [docs/CLIENTS.md](docs/CLIENTS.md) |
+| Policy administration | [docs/POLICY_CONTROL.md](docs/POLICY_CONTROL.md) |
+| Usage, tokens, cost, and budgets | [docs/USAGE.md](docs/USAGE.md) |
+| Secret-egress controls | [docs/SECRET_CONTROLS.md](docs/SECRET_CONTROLS.md) |
+| Audit contracts and export | [docs/AUDIT.md](docs/AUDIT.md) |
+| Persistence and migrations | [docs/STORAGE.md](docs/STORAGE.md) |
+| Deployment and recovery | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) and [docs/DISASTER_RECOVERY.md](docs/DISASTER_RECOVERY.md) |
+| OCI signing and supply chain | [docs/OCI.md](docs/OCI.md) |
+| Executable verification evidence | [docs/VERIFICATION.md](docs/VERIFICATION.md) |
+| Compatibility and support | [SUPPORT.md](SUPPORT.md) |
+| Roadmap and maturity gates | [docs/ROADMAP.md](docs/ROADMAP.md) |
+
+Inspect the versioned public contracts before integrating an external report or
+audit consumer:
+
+~~~bash
+python3 -m hormuz contract manifest
+~~~
+
+## Project status and scope
+
+| Status | Current boundary |
+| --- | --- |
+| Stable public contract | v1.0.0 stabilizes the CLI and policy/evidence contracts. |
+| Production certification | None claimed; deployment fitness remains operator- and environment-specific. |
+| Verified references | Only the exact profiles documented in [SUPPORT.md](SUPPORT.md) and their retained evidence. |
+| Unfinished | Independent external onboarding, general production HA/DR, cloud certification, complete provider-account coverage, and independent review. |
+
+Exact same-revision Codex/OpenAI and Claude Code/Anthropic BYO-provider evidence
+is recorded in [issue #115](https://github.com/Xpounder-com/hormuz/issues/115).
+It does not prove provider-invoice reconciliation or every client feature.
+It does not prove enterprise production readiness.
+It does not cover traffic bypassing Hormuz.
 
 External onboarding is now recruiting under
 [issue #110](https://github.com/Xpounder-com/hormuz/issues/110) using the
-[v1.0.0 study protocol](docs/EXTERNAL_ONBOARDING.md). Its current count is
+[v1.0.0 study protocol](docs/EXTERNAL_ONBOARDING.md). As of August 30, 2026, its published count is
 **0/5 independent initial completions** and **0 returning users**. Every counted
 session is bound to the immutable released source-archive digest, and its strict
 aggregate uses only opaque IDs and fixed metadata fields; Hormuz adds no product
@@ -95,356 +362,71 @@ telemetry. Issue #110 must close before Hormuz claims validated human
 onboarding, but it is not a dependency for the already published v1.0.0 release
 or its bounded internal-repeatability claim.
 
-## What works
-
-- OpenAI-compatible `POST /v1/responses` proxying, including streaming.
-- Anthropic-compatible `POST /v1/messages`, `/v1/messages/count_tokens`, and streaming.
-- Provider model IDs by default, preserving native client model behavior; optional company aliases remain supported.
-- Organization, team, and person policy overlays that can only become more restrictive.
-- Optional PostgreSQL-backed immutable policy documents with one-time authenticated administrator bootstrap, audited activation/rollback, and request-pinned policy versions.
-- Model fallback, output-token caps, monthly token limits, and USD budget limits.
-- Per-person attribution using unique bootstrap tokens or generic OIDC JWT access tokens mapped by issuer and subject.
-- Input, output, cache-read, cache-write, and reasoning-token accounting when providers report them.
-- Metadata-only usage ledger: SQLite by default, with an optional PostgreSQL adapter for the same narrow usage/evidence contract. Prompts and responses are relayed, not persisted.
-- A strict [durable-data inventory](docs/DURABLE_DATA.md) naming every Hormuz-created database class and operator artifact; the self-hosted alpha leaves export, retention, backup, restore, and deletion to customer operators and makes no universal-erasure claim across external systems.
-- Metadata-only JSONL audit export for usage and secret-egress evidence, with private file permissions and a SHA-256 checksum.
-- Per-organization commit-time audit chains for new metadata-only usage and secret-egress events, with explicit recovery epochs and optional asynchronous Object Lock checkpoints.
-- Pre-provider secret redaction or denial with built-in detectors, custom environment-provided values, and metadata-only detection evidence.
-- A versioned, machine-enforced active-core secret inventory that assigns every environment or ambient credential read an owner, consumer, custody mode, and rotation boundary without reading or serializing secret values.
-- OpenAI response storage and background mode disabled by default as enforceable provider privacy policy.
-- Configuration output for installed Codex and Claude Code clients.
-- Generic OIDC discovery/JWKS verification with strict issuer, audience, expiry, asymmetric-algorithm, subject-mapping, and signing-key-rotation enforcement.
-- Versioned unauthenticated liveness and dependency-readiness probes for deployment health checks; readiness never calls a provider and turns unavailable before graceful shutdown drains requests.
-- Bounded, duplicate-free, schema-strict configuration loading before any identity, secret, storage, provider, or listener initialization.
-- A customer-controlled TLS reference boundary: public TLS stays at customer ingress, while a non-loopback Hormuz listener requires an authenticated, network-restricted proxy hop.
-- A deterministic `linux/amd64`, non-root OCI runtime with hash-locked Python wheels, externally mounted configuration, and durable SQLite data.
-- A published `v0.1.3` `linux/amd64` OCI artifact identified by immutable digest: keyless GitHub OIDC/Cosign signing with public Rekor, strictly validated registry-only CycloneDX and bounded provenance attestations, exact-workflow verification, anonymous GHCR pull, and no mutable `latest` tag.
-- OCI supply-chain evidence that blocks fixable HIGH/CRITICAL findings while retaining all other scanner observations, plus a two-build byte-for-byte reproducibility gate.
-- A versioned single-Linux-VM Docker Compose profile with one signed Hormuz digest, one private persistent PostgreSQL digest, protected file-mounted secrets, a customer-operated external-DSN path, and a provider-free clean-VM proof; it is for evaluation and pilots, not HA or production certification.
-- An optional vendor-neutral Kubernetes/Helm profile using the same signed digest, standard Kubernetes APIs, an internal ClusterIP, customer-supplied immutable inputs, customer-operated PostgreSQL, default-deny network policy, and a pinned disposable Kind/Cilium proof.
-- A first exact PostgreSQL HA reference using CloudNativePG `1.30.0` and three PostgreSQL `16.15` instances that proves safe primary promotion, quorum-loss refusal, fail-closed gateway backpressure, reconnection without gateway restart, durable-state continuity, and no automatic provider replay. It is verification infrastructure, not part of the Helm chart or a general HA/DR certification.
-- A digest-pinned, disposable PostgreSQL logical backup-and-restore exercise that verifies metadata-only governed state and retains only a content-free recovery summary.
-
-The included rate cards are examples current as of August 15, 2026. Treat them
-as versioned configuration: verify them against provider pricing before
-production use and reconcile estimated spend against provider invoices.
-
-## Architecture and maturity
-
-```text
-Codex / Claude Code
-        |
-authenticated person + team
-        |
-policy -> allow / deny / reroute / cap
-        |
-secret control -> redact / deny
-        |
-OpenAI / Anthropic
-
-Every governed outcome -> versioned metadata-only evidence
-```
-
-Hormuz governs provider-bound requests and their organizational usage
-evidence. It is not an identity provider, model, organizational memory,
-metadata compiler, or employee-productivity system.
-
-| Status | v1 boundary |
-| --- | --- |
-| Production-certified | None claimed. v1.0.0 stabilizes the public contract; deployment fitness remains operator- and environment-specific. |
-| Implemented v1 core | OpenAI/Anthropic-compatible gateway paths, policy enforcement, secret controls, identity binding, and metadata-only usage/evidence. |
-| Verified reference | Only the exact evidence-gated profiles in [SUPPORT.md](SUPPORT.md), including the Linux Python matrix and published signed `v0.1.3` `linux/amd64` OCI runtime. A verified reference is not unrestricted certification. |
-| Verified client evidence | Exact Codex `0.147.0` / OpenAI and Claude Code `2.1.233` / Anthropic same-revision BYO-provider evidence is recorded in [#115](https://github.com/Xpounder-com/hormuz/issues/115). It does not prove provider-invoice reconciliation, every client feature, traffic bypassing Hormuz, or enterprise production readiness. |
-| Experimental | The context experiment is a separate package and is absent from the core wheel and gateway runtime. |
-| Deferred | Organizational memory, ticketing, workflow/productivity measurement, and new reporting dimensions are outside the current core. |
-| Unfinished | External onboarding validation, production HA/DR, cloud-specific certification, and independent review remain separate milestones. v1.0.0 does not imply their completion. |
-
-## Configure real providers and clients
-
-Hormuz requires Python 3.11 or newer. OIDC verification uses PyJWT and `cryptography`; signature verification is intentionally delegated to maintained security libraries rather than implemented in Hormuz.
-
-```bash
-cp config.example.json hormuz.json
-export HORMUZ_TOKEN="replace-with-a-long-random-employee-token"
-export OPENAI_API_KEY="your-company-openai-key"
-export ANTHROPIC_API_KEY="your-company-anthropic-key"
-python3 -m hormuz --config hormuz.json doctor
-python3 -m hormuz --config hormuz.json serve
-```
-
-In another terminal, print the configuration for an existing client:
-
-```bash
-python3 -m hormuz --config hormuz.json client config codex
-python3 -m hormuz --config hormuz.json client config claude
-```
-
-Employees authenticate to Hormuz with their unique `HORMUZ_TOKEN`. Hormuz removes that credential and authenticates upstream with the company's provider key.
-
-Continue with [Codex setup](docs/CLIENTS.md#codex),
-[Claude Code setup](docs/CLIENTS.md#claude-code), the
-[signed OCI digest verification boundary](docs/OCI.md#protected-release-workflow),
-the [single-VM Compose pilot](deploy/compose/README.md), or the optional
-[Kubernetes + Helm multi-replica reference](deploy/kubernetes/README.md). The
-[Kubernetes disaster-recovery runbook](docs/DISASTER_RECOVERY.md) defines the
-separate recovery authority, admission, promotion, rollback, and evidence
-boundary.
-The accepted [v1 deployment contract](docs/decisions/0009-v1-deployment-profiles-and-recovery-objectives.md)
-sets reference-rehearsal targets of a five-minute RPO and a 60-minute internal
-RTO while requiring publication of complete end-to-end recovery time. These
-are not customer SLAs. The dedicated recovery job must satisfy both thresholds
-and retain its strict content-free artifact before issue #105 can close.
-
-## Policies and usage
-
-List the built-in starting points and create a complete v1 policy document
-without loading runtime, provider, database, or policy-administrator
-credentials:
-
-```bash
-python3 -m hormuz policy templates
-python3 -m hormuz --config hormuz.json policy create \
-  --template standard \
-  --output engineering-standard.json
-```
-
-The built-ins are `standard` (configured clients/models, secret redaction,
-16,000-token output cap), `strict` (configured clients/models, secret denial,
-4,000-token cap), and `lockdown` (deny every client and model). They do not
-invent fallbacks, tenant scopes, credentials, or monetary budgets. Optional
-`--monthly-budget-usd` and `--per-actor-monthly-budget-usd` flags add explicit
-budget limits. One configured organization is selected automatically; a
-multi-organization configuration requires `--organization`.
-
-Validate a managed-policy document locally without loading runtime, provider,
-database, or policy-administrator credentials:
-
-```bash
-python3 -m hormuz --config hormuz.json policy validate engineering-standard.json
-```
-
-Successful validation prints the immutable policy digest and scope counts.
-Invalid documents return a schema-owned field path, a content-safe reason, and
-an actionable hint when one is available; submitted policy values are never
-repeated in the diagnostic.
-
-Apply a reviewed candidate in one command. File reading, validation, and
-canonicalization finish before Hormuz acquires the tenant database lock; staging
-and activation then commit atomically:
-
-```bash
-python3 -m hormuz --config hormuz.json policy apply engineering-standard.json \
-  --organization xpounder \
-  --if-active sha256:...
-```
-
-`--if-active` is optional and prevents replacing a version another
-administrator activated after the review. Applying the active document changes
-neither its generation nor its history. Applying an already staged inactive
-document records only activation; applying a new document records staging and
-then activation in deterministic order. The command never prompts: use
-`policy compare` and `policy preview` as the deliberate review steps.
-
-Undo the latest activation generation without looking up a timestamp or staged
-version:
-
-```bash
-python3 -m hormuz --config hormuz.json policy rollback \
-  --organization xpounder \
-  --if-active sha256:...
-```
-
-Rollback is a new audited activation of the version used by the immediately
-preceding generation. Consequently, running rollback repeatedly can toggle
-between the version just left and the version just restored. Advanced workflows
-may still select an earlier active version with `--version sha256:...`.
-
-After activation, an authenticated policy administrator can inspect the active
-document, read a bounded lifecycle timeline, or export an owner-only copy.
-`show` and `export` accept `--version sha256:...` to select a non-active immutable
-version. History defaults to the latest 20 events and is capped at 100:
-
-```bash
-python3 -m hormuz --config hormuz.json policy show \
-  --organization xpounder
-python3 -m hormuz --config hormuz.json policy history \
-  --organization xpounder \
-  --limit 20 \
-  --json
-python3 -m hormuz --config hormuz.json policy export \
-  --organization xpounder \
-  --output active-policy.json
-```
-
-The `hormuz.policy-history` v1 contract contains only staged, activated, and
-rolled-back lifecycle metadata: immutable version/digest, time, opaque actor
-reference, activation generation, and a structural change summary. Export is
-atomic with mode `0600`, refuses links and special files, and requires
-`--force` to replace a regular file.
-
-Compare a local or saved candidate semantically before activation. The output
-uses normalized policy paths, ignores irrelevant object and allowlist order,
-and identifies both documents by immutable version and digest:
-
-```bash
-python3 -m hormuz --config hormuz.json policy compare engineering-strict.json \
-  --organization xpounder \
-  --json
-```
-
-Exit status is `0` when the documents are semantically identical, `1` when
-they differ, and `2` on error. Use `--version sha256:...` for a saved candidate
-and `--against-version sha256:...` for a non-active baseline. To compare two
-local files against SQLite-backed local state without a policy-administrator
-credential, select the baseline explicitly:
-
-```bash
-python3 -m hormuz --config hormuz.json policy compare engineering-strict.json \
-  --baseline engineering-standard.json \
-  --organization xpounder \
-  --json
-```
-
-Credential-free mode requires all three conditions: a local `--baseline`, a
-local positional candidate, and SQLite usage storage. Selecting an active or
-saved baseline, selecting a saved candidate, or configuring PostgreSQL usage
-requires current persisted policy-administrator authorization. Mixed modes do
-not fall back to offline operation.
-
-Preview one explicit request against a pinned baseline (active by default) and
-a candidate, without calling a model or reserving budget:
-
-```bash
-python3 -m hormuz --config hormuz.json policy preview engineering-strict.json \
-  --organization xpounder \
-  --actor alice \
-  --client codex \
-  --protocol openai \
-  --model gpt-5.4-mini \
-  --max-output-tokens 1000 \
-  --json
-```
-
-The `hormuz.policy-preview` v1 result includes `evaluated_at`, the current UTC
-usage period, `usage_basis: current`, and separate baseline/candidate
-decisions. Exit status is `0` when the candidate allows the request, `3` when
-it denies, and `2` on error. The selected baseline is pinned before candidate
-loading, so a concurrent activation cannot mix policy versions. Preview is a
-point-in-time evaluation; later usage or reservations can change live
-admission. `--baseline FILE` selects a local baseline under the same explicit
-offline/authentication rules described above.
-
-Save repeatable requests in a portable suite without loading configuration,
-credentials, or PostgreSQL, then evaluate the complete suite against a
-candidate:
-
-```bash
-python3 -m hormuz policy scenarios create \
-  --organization xpounder \
-  --id codex-default \
-  --actor alice \
-  --client codex \
-  --protocol openai \
-  --model gpt-5.4-mini \
-  --max-output-tokens 1000 \
-  --output engineering-scenarios.json
-
-python3 -m hormuz --config hormuz.json policy evaluate engineering-strict.json \
-  --organization xpounder \
-  --scenarios engineering-scenarios.json \
-  --output engineering-evaluation.json \
-  --json
-```
-
-Use `policy scenarios add` for additional explicit requests and `policy
-scenarios validate` to identify a suite by its canonical SHA-256 digest. A
-suite contains at most 100 scenarios, has no prompt or response field, and is
-written atomically with mode `0600`. Evaluation pins both policies once, takes
-one current-usage snapshot per referenced actor, and makes no provider call,
-reservation, usage write, or policy change. Exit status is `0` when behavior
-is unchanged across the suite, `1` when any scenario changes, and `2` on error;
-an intentional denial is evaluation data rather than a command failure.
-`--baseline FILE` permits local baseline/candidate evaluation against current
-SQLite usage without policy-administrator credentials; any saved version or
-PostgreSQL usage access remains authenticated and fails closed otherwise.
-
-Evaluate the active policy only, using the long-standing automation contract:
-
-```bash
-python3 -m hormuz --config hormuz.json policy check \
-  --actor alice \
-  --client codex \
-  --protocol openai \
-  --model gpt-5.5 \
-  --max-output-tokens 50000
-```
-
-Inspect current-month usage:
-
-```bash
-python3 -m hormuz --config hormuz.json status
-python3 -m hormuz --config hormuz.json status --group-by team
-python3 -m hormuz --config hormuz.json status --group-by model --team engineering
-python3 -m hormuz --config hormuz.json status --json
-```
-
-Inspect the versioned policy/evidence schemas before integrating a report or audit export:
-
-```bash
-python3 -m hormuz contract manifest
-```
-
-Export metadata-only audit evidence for the current month:
-
-```bash
-python3 -m hormuz --config hormuz.json audit export \
-  --kind all \
-  --output hormuz-audit.jsonl
-```
-
-Inspect the current per-organization commit-time chain without contacting an
-external storage service:
-
-```bash
-python3 -m hormuz --config hormuz.json audit chain status
-```
-
-Primary command names use separate words rather than hyphenated command
-tokens. The earlier hyphenated top-level spellings remain hidden compatibility
-aliases for existing automation in v1; in particular, the legacy check
-invocation retains the exact `hormuz.policy-decision` v1 JSON and exit-code
-behavior of `policy check`.
-
-The deprecated context-pack experiment is intentionally outside the core gateway. See [docs/CONTEXT_EXPERIMENT_MIGRATION.md](docs/CONTEXT_EXPERIMENT_MIGRATION.md) for the separate package and its temporary compatibility shim.
-
-See [docs/PUBLIC_DISCLOSURE.md](docs/PUBLIC_DISCLOSURE.md) for the private-to-public disclosure and licensing gate, [docs/ROADMAP.md](docs/ROADMAP.md) for the evidence-gated enterprise program, [docs/POLICY_CONTROL.md](docs/POLICY_CONTROL.md) for policy root authority, [docs/CUSTODY_CONTROL.md](docs/CUSTODY_CONTROL.md) for tenant custody authority and lifecycle approvals, [docs/CONTRACTS.md](docs/CONTRACTS.md) for the versioned policy/evidence contract and migration boundary, [docs/STORAGE.md](docs/STORAGE.md) for SQLite/PostgreSQL setup, upgrade, rollback, and recovery boundaries, [docs/OPERATIONS.md](docs/OPERATIONS.md) for liveness, readiness, and shutdown behavior, [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for the customer-controlled TLS and trusted-proxy boundary, [docs/DISASTER_RECOVERY.md](docs/DISASTER_RECOVERY.md) for the Kubernetes enterprise-reference recovery runbook, [docs/OCI.md](docs/OCI.md) for the non-root reference container boundary, [deploy/compose/README.md](deploy/compose/README.md) for the single-VM pilot deployment, [deploy/kubernetes/README.md](deploy/kubernetes/README.md) for the optional multi-replica Helm profile, [docs/decisions/README.md](docs/decisions/README.md) for proposed and accepted architecture decisions, [docs/CLIENTS.md](docs/CLIENTS.md) for Codex and Claude Code setup, [docs/LIVE_CLIENT_CONFORMANCE.md](docs/LIVE_CLIENT_CONFORMANCE.md) for the real BYO-provider release gate, [docs/OIDC.md](docs/OIDC.md) for generic enterprise identity, [docs/OIDC_PROVIDER_CONFORMANCE.md](docs/OIDC_PROVIDER_CONFORMANCE.md) for the bounded external-provider reference proof, [docs/USAGE.md](docs/USAGE.md) for team/person/model cost and budget reporting, [docs/AUDIT.md](docs/AUDIT.md) for the export contract and limitations, [docs/CUSTODY.md](docs/CUSTODY.md) for optional self-hosted or AWS custody and immutable audit anchors, [docs/SECRET_CUSTODY_INVENTORY.md](docs/SECRET_CUSTODY_INVENTORY.md) for the machine-enforced active secret-ownership boundary, [docs/CEPH_RGW_CONFORMANCE.md](docs/CEPH_RGW_CONFORMANCE.md) for the first verified self-hosted reference and its exact boundary, [docs/SECRET_CONTROLS.md](docs/SECRET_CONTROLS.md) for the egress boundary, [docs/VERIFICATION.md](docs/VERIFICATION.md) for executable compatibility evidence, and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the request path and current trust boundary.
-
-## Test
-
-```bash
-python3 -m unittest -v
-```
-
-The suite uses local fake OpenAI and Anthropic endpoints and does not need real provider credentials. The Codex test runs against an installed `codex` executable when present. The official Claude Code executable test is opt-in because `npx` may download the client:
-
-```bash
-HORMUZ_RUN_CLAUDE_CLIENT_TEST=1 python3 -m unittest -v
-```
-
-The GitHub publication gate also tests Python 3.11 through 3.14, builds and installs the distribution wheel, verifies pinned official Codex and Claude Code releases, and runs a non-blocking weekly canary against their latest releases. See [docs/VERIFICATION.md](docs/VERIFICATION.md) for the exact boundary.
-
-## Roadmap boundary
-
-The current hardening program focuses on a minimal gateway core: policy enforcement, versioned PostgreSQL policy administration, accounting, deterministic secret egress, metadata-only audit, and OIDC JWT verification. The package boundary and policy/evidence contract are explicit, the SQLite/PostgreSQL compatibility seam is tested, and the non-root OCI reference runtime is published as a signed `v0.1.3` digest with validated SBOM/provenance and a fix-aware vulnerability gate. A disposable logical PostgreSQL backup/restore exercise now proves a narrow recovery path, but it is not production backup/PITR or DR evidence. Before a broad production-deployment claim, Hormuz still needs live customer-account certification, migration of every secret class, TLS and deployment hardening, shared PostgreSQL operations, production backup/PITR, multi-instance coordination, and independent review. It is not building an organizational-memory or workflow product.
-
-## Community and support
-
-Read [contribution guidance](CONTRIBUTING.md) before proposing a change and
-[support boundaries](SUPPORT.md) before filing an installation or
-compatibility report. Suspected vulnerabilities must follow the
-[private security path](SECURITY.md), never a public issue. Participation is
-governed by the [Code of Conduct](CODE_OF_CONDUCT.md).
-
-The evidence-grounded [launch package](docs/launch/README.md) is archived
-v0.1.3 recruitment material. The active v1.0.0 external-onboarding study is
-defined separately in [docs/EXTERNAL_ONBOARDING.md](docs/EXTERNAL_ONBOARDING.md).
+## Open source and enterprise evaluation
+
+The core gateway is Apache-2.0 and independently useful. Existing identity,
+policy, budget, secret-control, and evidence features remain in the open core.
+The initial paid offer is a scoped, founder-led evaluation or integration
+engagement around the same product—not an established proprietary edition,
+hosted service, certification, or 24/7 SLA.
+
+See the [OSS/support comparison](https://xpounder-com.github.io/hormuz/enterprise/),
+[proposed pilot scope](marketing/PILOT.md),
+[buyer resources](https://xpounder-com.github.io/hormuz/resources/), and
+[security brief](marketing/TRUST.md). Scope, price, capacity, support hours,
+response targets, and terms must be agreed before work begins.
+
+Public maintainer: **Mehrdad Zaker**. For evaluation inquiries, use
+`zaker.mehrdad@gmail.com` or the
+[local email-draft form](https://xpounder-com.github.io/hormuz/contact/).
+Vulnerabilities must still follow [SECURITY.md](SECURITY.md).
+
+The [current marketing packet](marketing/README.md) is separate from the
+archived, non-publishable v0.1.3 drafts in [docs/launch](docs/launch/README.md).
+
+## Development and testing
+
+The default suite uses local fake providers and requires no OpenAI or Anthropic
+credential:
+
+~~~bash
+python tools/verify_secret_inventory.py
+python -m unittest -v
+~~~
+
+To validate the public contribution, support, and documentation surfaces:
+
+~~~bash
+python tools/verify_public_community_paths.py
+python -m unittest -v tests.test_public_community_paths
+~~~
+
+Blocking CI runs on Python 3.11, 3.12, 3.13, and 3.14, builds and installs the
+distribution, executes the provider-free quickstart, and runs the unit and
+gateway integration suite. Additional PostgreSQL, deployment, live-provider,
+and supply-chain checks retain their own explicit prerequisites and claims. See
+[verification](docs/VERIFICATION.md) for the complete test boundary.
+
+## Contributing and community
+
+Contributions that make Hormuz safer, easier to operate, or easier to verify are
+welcome.
+
+- Read [CONTRIBUTING.md](CONTRIBUTING.md) before proposing a change.
+- Join [Discussions](https://github.com/Xpounder-com/hormuz/discussions/211) or
+  choose a [bounded newcomer task](marketing/CONTRIBUTOR_STARTERS.md).
+- Follow the [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) in every project space.
+- Check [SUPPORT.md](SUPPORT.md) before filing an installation or compatibility
+  report.
+- Report suspected vulnerabilities through the private process in
+  [SECURITY.md](SECURITY.md), never a public issue.
+- Use the [issue tracker](https://github.com/Xpounder-com/hormuz/issues) for
+  synthetic, reproducible bugs, documentation problems, and feature proposals.
+
+Community support is best effort and carries no response, remediation, uptime,
+compatibility, or enterprise-support SLA.
+
+## License
+
+Hormuz is available under the Apache License 2.0. See `LICENSE` for the full
+terms.

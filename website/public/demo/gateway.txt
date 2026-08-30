@@ -1,0 +1,8 @@
+Hormuz provider-free governed-policy demo
+PASS allowed request reached the loopback provider simulator
+PASS unapproved model was rerouted and output-capped
+PASS detected secret was redacted before provider egress
+PASS denied request made no provider call
+PASS content-free evidence validated: 4 usage events, 1 security event
+PASS external provider calls: 0 (3 loopback simulator calls)
+Completed in 1.04 seconds; temporary evidence removed
