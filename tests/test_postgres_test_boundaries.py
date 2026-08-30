@@ -12,11 +12,38 @@ else:  # Isolated wheel compatibility discovery uses the tests directory as its 
 
 ROOT = Path(__file__).resolve().parents[1]
 EXPECTED_OWNERS = {
+    "test_postgres_attribution": (
+        "PostgresAttributionTests",
+        {
+            "test_postgres_attribution_sources_and_immutable_facts",
+            "test_postgres_attribution_corrections_voids_and_idempotency",
+            "test_postgres_attribution_authority_before_lookup_and_join",
+            "test_postgres_attribution_scope_race",
+            "test_postgres_attribution_concurrency",
+            "test_postgres_attribution_atomicity_and_read_audit",
+            "test_postgres_attribution_frozen_pagination",
+            "test_postgres_attribution_rejection_coverage",
+            "test_postgres_attribution_invalid_requests",
+            "test_postgres_attribution_forced_rls_append_only_and_missing_shape",
+        },
+    ),
+    "test_postgres_attribution_gateway": (
+        "PostgresAttributionGatewayTests",
+        {
+            "test_postgres_native_success_bodies_models_and_header_stripping",
+            "test_postgres_rejection_precedes_budget_policy_and_provider",
+            "test_postgres_failed_attribution_commit_retains_uncertain_hold",
+            "test_postgres_scope_change_after_reservation_never_egresses",
+            "test_postgres_unattributed_and_nonaccounted_behavior",
+            "test_postgres_identity_cannot_gain_attribution_authority",
+            "test_postgres_admin_http_correction_contract",
+        },
+    ),
     "test_postgres_attribution_transition": (
         "PostgresAttributionTransitionTests",
         {
-            "test_postgres_attribution_migration_is_red_until_implementation",
-            "test_postgres_attribution_probe_failure_and_retry_preserve_populated_registry",
+            "test_postgres_attribution_migration_is_additive_and_idempotent",
+            "test_postgres_attribution_failure_and_retry_preserve_populated_registry",
             "test_postgres_attribution_partial_state_refuses_before_repair",
             "test_postgres_attribution_old_processes_refuse_next_schema",
             "test_postgres_attribution_quiesced_registry_pair_restore_preserves_replays",
@@ -190,7 +217,7 @@ class PostgresTestBoundaryTests(unittest.TestCase):
             suite = unittest.defaultTestLoader.loadTestsFromName(f"{module_name}.{class_name}")
             self.assertEqual(suite.countTestCases(), len(expected_methods), module_name)
 
-        self.assertEqual(len(owned), 86)
+        self.assertEqual(len(owned), 103)
         self.assertFalse((ROOT / "tests" / "test_postgres.py").exists())
         self.assertFalse(
             any(name.startswith("test_") for name in PostgresTestCase.__dict__),

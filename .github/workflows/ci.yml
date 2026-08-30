@@ -171,6 +171,19 @@ jobs:
           python -m venv "$RUNNER_TEMP/hormuz-v1-baseline"
           "$RUNNER_TEMP/hormuz-v1-baseline/bin/python" -m pip install \
             "$RUNNER_TEMP/hormuz-1.0.0.tar.gz[postgres]"
+      - name: Verify and install the real registry predecessor
+        run: |
+          git fetch --no-tags origin b8cec8faba8d8e48d515dfcc3ec8eeaa78fc7926
+          git -c tar.umask=0000 archive --format=tar --prefix=hormuz-registry-baseline/ \
+            --output="$RUNNER_TEMP/registry-baseline-b8cec8f.tar" \
+            b8cec8faba8d8e48d515dfcc3ec8eeaa78fc7926
+          python tools/verify_attribution_transition_plan.py \
+            --baseline-archive "$RUNNER_TEMP/hormuz-1.0.0.tar.gz" \
+            --baseline-manifest "$RUNNER_TEMP/hormuz-v1.0.0-candidate-manifest.json" \
+            --registry-archive "$RUNNER_TEMP/registry-baseline-b8cec8f.tar"
+          python -m venv "$RUNNER_TEMP/hormuz-registry-baseline"
+          "$RUNNER_TEMP/hormuz-registry-baseline/bin/python" -m pip install \
+            "$RUNNER_TEMP/registry-baseline-b8cec8f.tar[postgres]"
       - name: Build the candidate wheel
         run: |
           python -m pip install build==1.3.0
@@ -182,7 +195,7 @@ jobs:
             dist/hormuz-*.whl \
             'psycopg[binary]>=3.3.4,<3.4' \
             'psycopg-pool>=3.3.1,<3.4'
-      - name: Exercise the preflight kit from the unpacked source archive
+      - name: Exercise the transition kit from the unpacked source archive
         run: |
           mkdir "$RUNNER_TEMP/registry-preflight-source"
           tar -xzf dist/hormuz-*.tar.gz -C "$RUNNER_TEMP/registry-preflight-source"
@@ -196,11 +209,17 @@ jobs:
           HORMUZ_TEST_POSTGRES_DSN: postgresql://postgres:hormuz-test-password@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/hormuz_test
           HORMUZ_TEST_PG_CONTAINER: ${{ job.services.postgres.id }}
           HORMUZ_TEST_V1_PYTHON: ${{ runner.temp }}/hormuz-v1-baseline/bin/python
+          HORMUZ_TEST_REGISTRY_PYTHON: ${{ runner.temp }}/hormuz-registry-baseline/bin/python
         run: |
           test -x "$HORMUZ_TEST_V1_PYTHON"
+          test -x "$HORMUZ_TEST_REGISTRY_PYTHON"
           test -n "$HORMUZ_TEST_PG_CONTAINER"
           test -n "$HORMUZ_TEST_POSTGRES_DSN"
           cd "$RUNNER_TEMP"
+          for module in test_attribution_admission test_attribution_schema test_sqlite_attribution test_attribution_gateway test_postgres_attribution test_postgres_attribution_gateway; do
+            "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -m unittest discover \
+              -s "$GITHUB_WORKSPACE/tests" -p "${module}.py" -v
+          done
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -m unittest discover \
             -s "$GITHUB_WORKSPACE/tests" \
             -p test_sqlite_registry_transition.py \

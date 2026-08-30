@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Validate only the #216 pre-implementation contract, never feature acceptance."""
+"""Validate the #216 implementation plan, never final-candidate acceptance."""
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 
@@ -135,6 +136,15 @@ EXPECTED = json.loads(r'''{
   ]
 }''')
 
+IMPLEMENTED = {
+    **EXPECTED, "schema_version": 2, "stage": "feature_implementation", "attribution_implemented": True,
+    "preflight_main_commit": "3fd46a4979fb3ff7fa798cc2d87be179e433f129",
+    "registry_archive_sha256": "f8cb9c0493aa54e04e4706eddd111a90b54f2c70bf9f0e6af38911ba1d03995c",
+    "registry_archive_kind": "deterministic_git_snapshot_not_published_release",
+    "registry_archive_prefix": "hormuz-registry-baseline/",
+    "registry_archive_tar_umask": "0000",
+}
+
 
 class AttributionTransitionError(ValueError):
     """Safe, fixed preflight diagnostics."""
@@ -143,7 +153,8 @@ class AttributionTransitionError(ValueError):
 def validate_attribution_transition_plan(value: object) -> None:
     try:
         actual = json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False)
-        expected = json.dumps(EXPECTED, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        baseline = IMPLEMENTED if isinstance(value, dict) and value.get("schema_version") == 2 else EXPECTED
+        expected = json.dumps(baseline, sort_keys=True, separators=(",", ":"), allow_nan=False)
     except (ValueError, TypeError, RecursionError):
         raise AttributionTransitionError("attribution_plan_invalid") from None
     if actual != expected:
@@ -160,24 +171,27 @@ def verify_attribution_transition_plan(root: Path = ROOT) -> dict[str, object]:
         return result
 
     try:
-        with (root / "docs/attribution-transition-plan-v1.json").open("rb") as source:
+        with (root / "docs/attribution-transition-plan-v2.json").open("rb") as source:
             payload = source.read(32769)
         if len(payload) > 32768:
             raise AttributionTransitionError("attribution_plan_too_large")
         value = json.loads(payload, object_pairs_hook=unique)
         validate_attribution_transition_plan(value)
+        if value["schema_version"] != 2:
+            raise AttributionTransitionError("attribution_implementation_plan_required")
         registry = verify_registry_transition_plan(root)
     except (OSError, UnicodeError, json.JSONDecodeError, RecursionError):
         raise AttributionTransitionError("attribution_plan_unreadable") from None
     except RegistryTransitionError:
         raise AttributionTransitionError("attribution_baseline_contract_invalid") from None
     return {
-        "schema_id": EXPECTED["schema_id"], "schema_version": 1,
-        "status": "pre_implementation_plan_verified", "target_release": "1.1.0",
+        "schema_id": EXPECTED["schema_id"], "schema_version": 2,
+        "status": "attribution_implementation_plan_verified", "target_release": "1.1.0",
         "feature_issue": 216, "attribution_route_count": 2,
         "registry_source_commit": EXPECTED["registry_source_commit"],
         "baseline_archive_sha256": registry["baseline_archive_sha256"],
-        "attribution_implemented": False, "final_candidate_accepted": False,
+        "registry_archive_sha256": IMPLEMENTED["registry_archive_sha256"],
+        "attribution_implemented": True, "final_candidate_accepted": False,
     }
 
 
@@ -185,6 +199,7 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--baseline-archive", type=Path)
     parser.add_argument("--baseline-manifest", type=Path)
+    parser.add_argument("--registry-archive", type=Path)
     args = parser.parse_args(argv)
     try:
         if (args.baseline_archive is None) != (args.baseline_manifest is None):
@@ -192,7 +207,15 @@ def main(argv=None) -> int:
         result = verify_attribution_transition_plan()
         if args.baseline_archive is not None:
             verify_released_baseline(args.baseline_archive, args.baseline_manifest)
+        if args.registry_archive is not None:
+            try:
+                if (args.registry_archive.stat().st_size > 32 * 1024 * 1024 or
+                        hashlib.sha256(args.registry_archive.read_bytes()).hexdigest() != IMPLEMENTED["registry_archive_sha256"]):
+                    raise AttributionTransitionError("attribution_registry_archive_invalid")
+            except OSError:
+                raise AttributionTransitionError("attribution_registry_archive_invalid") from None
         result["released_baseline_archive_verified"] = args.baseline_archive is not None
+        result["registry_baseline_archive_verified"] = args.registry_archive is not None
         print(json.dumps(result, sort_keys=True))
         return 0
     except (AttributionTransitionError, RegistryTransitionError) as error:

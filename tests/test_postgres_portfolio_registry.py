@@ -20,9 +20,6 @@ else:
 class PostgresPortfolioRegistryTests(RegistryAssertions, PostgresTestCase):
     def setUp(self):
         super().setUp()
-        with self.psycopg.connect(self.owner_dsn) as connection:
-            connection.execute(self.sql.SQL("TRUNCATE {} ").format(self.sql.SQL(", ").join(
-                self.sql.SQL("{}.{}").format(self.sql.Identifier(self.schema), self.sql.Identifier(table)) for table in TABLE_DDL)))
         self.config = replace(registry_config(Path("/unused/registry-test")), usage_storage=UsageStorageConfig(
             backend="postgresql", postgres_schema=self.schema, postgres_runtime_role=self.runtime_role))
         self.registry_environment = {"HORMUZ_POSTGRES_DSN": self.runtime_dsn}

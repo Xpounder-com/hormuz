@@ -19,6 +19,7 @@ from hormuz.store import StorageSchemaError, UsageStore
 from hormuz.portfolio_repository import RegistryRepository
 from hormuz.portfolio_service import PortfolioService
 from hormuz.portfolio_wire import SCOPES
+from hormuz._portfolio_schema import TABLE_DDL as REGISTRY_TABLES
 if __package__:
     from ._portfolio_fixture import ADMIN, registry_config, seed_registry_metadata
     from ._registry_transition_fixture import (
@@ -43,13 +44,13 @@ class SQLiteRegistryTransitionTests(unittest.TestCase):
         self.assertEqual(len(self.before["rows"]), 10)
 
     def probe(self, *, fail: bool = False) -> None:
-        # Apply real migration 5; inject failure after its actual DDL to prove
-        # the production transaction rolls everything back before retry.
+        # Retain the migration-5 failure witness while the full current
+        # transition also advances through attribution migration 6.
         original = UsageStore._apply_migration
         def apply(connection, version):
-            self.assertEqual(version, 5)
+            self.assertIn(version, (5, 6))
             original(connection, version)
-            if fail:
+            if fail and version == 5:
                 raise RuntimeError("synthetic_migration_failure")
 
         with (
@@ -62,15 +63,15 @@ class SQLiteRegistryTransitionTests(unittest.TestCase):
         after["objects"] = [row for row in after["objects"] if not row[2].startswith("portfolio_")]
         after["rows"] = {key: value for key, value in after["rows"].items() if not key.startswith("portfolio_")}
         after["rows"]["hormuz_schema_migrations"] = [
-            row for row in after["rows"]["hormuz_schema_migrations"] if row[0] != 5
+            row for row in after["rows"]["hormuz_schema_migrations"] if row[0] not in {5, 6}
         ]
         self.assertEqual(after, self.before)
 
     def test_registry_sqlite_migration_is_additive_and_idempotent(self) -> None:
-        self.assertEqual(UsageStore.schema_version, 5)
+        self.assertEqual(UsageStore.schema_version, 6)
         for _ in range(2):
             UsageStore(self.path).verify_ready()
-            self.assertEqual(len(sqlite_snapshot(self.path)["rows"]), 15)
+            self.assertEqual(len(sqlite_snapshot(self.path)["rows"]), 20)
             self.assert_v1_preserved()
 
     def test_sqlite_registry_failure_rolls_back_and_retry_preserves_v1_rows(self) -> None:
@@ -141,20 +142,19 @@ class SQLiteRegistryTransitionTests(unittest.TestCase):
         self.probe()
         config = replace(registry_config(self.root), database_path=self.path)
         writes, page = seed_registry_metadata(config)
-        with mock.patch.object(UsageStore, "schema_version", 5):
-            candidate = UsageStore(self.path)
-            seed_registry_ledger(candidate)
-            self.assertEqual(ledger_observation(candidate)["unknown_holds"], 2)
-            after_write = sqlite_snapshot(self.path)
-            # Retry/reopen keeps both pre- and post-checkpoint writes and holds.
-            self.probe()
-            self.assertEqual(sqlite_snapshot(self.path), after_write)
+        candidate = UsageStore(self.path)
+        seed_registry_ledger(candidate)
+        self.assertEqual(ledger_observation(candidate)["unknown_holds"], 2)
+        after_write = sqlite_snapshot(self.path)
+        # Retry/reopen keeps both pre- and post-checkpoint writes and holds.
+        self.probe()
+        self.assertEqual(sqlite_snapshot(self.path), after_write)
         with self.assertRaises(StorageSchemaError) as raised:
             UsageStore(self.path, maximum_supported_schema_version=4)
         self.assertEqual(raised.exception.code, "storage_schema_newer_than_binary")
         self.assertEqual(sqlite_snapshot(self.path), after_write)
         self.assertNotEqual(after_write["rows"]["gateway_usage_events"], self.before["rows"]["gateway_usage_events"])
-        self.assertTrue(all(rows for table, rows in after_write["rows"].items() if table.startswith("portfolio_")))
+        self.assertTrue(all(after_write["rows"][table] for table in REGISTRY_TABLES))
         retained = self.root / "retained-populated-candidate.sqlite3"
         restored = self.root / "forward-recovered.sqlite3"
         sqlite_backup(self.path, retained)

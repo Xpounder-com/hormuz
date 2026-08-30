@@ -19,6 +19,7 @@ from hormuz.config import UsageStorageConfig
 from hormuz.portfolio_repository import RegistryRepository
 from hormuz.portfolio_service import PortfolioService
 from hormuz.portfolio_wire import SCOPES
+from hormuz._portfolio_schema import TABLE_DDL as REGISTRY_TABLES
 from hormuz.postgres import PostgresStorageError, migrate_postgres
 from hormuz.postgres_usage_store import PostgresUsageStore
 if __package__:
@@ -76,22 +77,22 @@ class PostgresRegistryTransitionTests(PostgresTestCase):
     def probe(self, *, fail=False):
         original = postgres_module._migration_sql
         def migration(version, schema, *roles):
-            self.assertEqual(version, 9)
+            self.assertIn(version, (9, 10))
             ddl = original(version, schema, *roles)
-            if fail:
+            if fail and version == 9:
                 ddl += " SELECT 1 / 0;"
             return ddl
 
         with (
             mock.patch.object(postgres_module, "_migration_sql", side_effect=migration),
         ):
-            self.assertEqual(self.migrate().version, 9)
+            self.assertEqual(self.migrate().version, 10)
 
     def assert_v1_preserved(self):
         after = copy.deepcopy(self.snapshot())
         after["rows"] = {key: value for key, value in after["rows"].items() if not key.startswith("portfolio_")}
         after["rows"]["hormuz_schema_migrations"] = [
-            row for row in after["rows"]["hormuz_schema_migrations"] if json.loads(row[0])["version"] != 9
+            row for row in after["rows"]["hormuz_schema_migrations"] if json.loads(row[0])["version"] not in {9, 10}
         ]
         after["shape"] = [row for row in after["shape"] if not row[0].startswith("portfolio_")]
         self.assertEqual(after, self.before)
@@ -105,10 +106,10 @@ class PostgresRegistryTransitionTests(PostgresTestCase):
         }
 
     def test_registry_postgres_migration_is_additive_and_idempotent(self) -> None:
-        self.assertEqual(postgres_module.POSTGRES_SCHEMA_VERSION, 9)
+        self.assertEqual(postgres_module.POSTGRES_SCHEMA_VERSION, 10)
         for _ in range(2):
             self.migrate()
-            self.assertEqual(len(self.snapshot()["rows"]), 37)
+            self.assertEqual(len(self.snapshot()["rows"]), 42)
             self.assert_v1_preserved()
 
     def test_postgres_registry_failure_rolls_back_and_retry_preserves_v1_rows(self) -> None:
@@ -211,16 +212,15 @@ class PostgresRegistryTransitionTests(PostgresTestCase):
         config = replace(registry_config(Path("/unused/registry-transition")), usage_storage=UsageStorageConfig(
             backend="postgresql", postgres_schema=self.schema, postgres_runtime_role=self.runtime_role))
         writes, page = seed_registry_metadata(config, environ={"HORMUZ_POSTGRES_DSN": self.runtime_dsn})
-        with mock.patch.object(postgres_module, "POSTGRES_SCHEMA_VERSION", 9):
-            candidate = PostgresUsageStore(
-                self.runtime_dsn, schema=self.schema, runtime_role=self.runtime_role,
-                organization_ids=("acme", "beta"),
-            )
-            seed_registry_ledger(candidate)
-            self.assertEqual(ledger_observation(candidate)["unknown_holds"], 2)
-            after_write = self.snapshot()
-            self.probe()
-            self.assertEqual(self.snapshot(), after_write)
+        candidate = PostgresUsageStore(
+            self.runtime_dsn, schema=self.schema, runtime_role=self.runtime_role,
+            organization_ids=("acme", "beta"),
+        )
+        seed_registry_ledger(candidate)
+        self.assertEqual(ledger_observation(candidate)["unknown_holds"], 2)
+        after_write = self.snapshot()
+        self.probe()
+        self.assertEqual(self.snapshot(), after_write)
         self.store.verify_ready()  # Existing readiness alone is insufficient.
         with mock.patch.object(postgres_module, "POSTGRES_SCHEMA_VERSION", 8):
             with self.assertRaises(PostgresStorageError) as raised:
@@ -228,7 +228,7 @@ class PostgresRegistryTransitionTests(PostgresTestCase):
         self.assertEqual(raised.exception.code, "storage_schema_newer_than_binary")
         self.assertEqual(self.snapshot(), after_write)
         self.assertNotEqual(after_write["rows"]["gateway_usage_events"], self.before["rows"]["gateway_usage_events"])
-        self.assertTrue(all(rows for table, rows in after_write["rows"].items() if table.startswith("portfolio_")))
+        self.assertTrue(all(after_write["rows"][table] for table in REGISTRY_TABLES))
         connection_info = self.psycopg.conninfo.conninfo_to_dict(self.owner_dsn)
         prefix = ["docker", "exec", "-i", os.environ["HORMUZ_TEST_PG_CONTAINER"]]
         dumped = subprocess.run(

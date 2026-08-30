@@ -31,6 +31,7 @@ from ._config_policy import (
 from ._config_routing import build_model_route_domain, build_upstream_domain
 from ._config_values import _integer
 from .portfolio_config import build_portfolio_config
+from .attribution_config import build_attribution_config
 from .config import (
     ConfigError,
     GatewayConfig,
@@ -200,6 +201,10 @@ def _build_gateway_config(
         custody_lifecycle=custody_lifecycle,
         portfolio_control=build_portfolio_config(
             raw.get("portfolio_control"),
+            (*static_identities, *identities_by_subject.values()),
+        ),
+        attribution_control=build_attribution_config(
+            raw.get("attribution_control"),
             (*static_identities, *identities_by_subject.values()),
         ),
         key_custody=key_custody,

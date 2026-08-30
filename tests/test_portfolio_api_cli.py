@@ -224,3 +224,45 @@ class PortfolioCLITests(unittest.TestCase):
         self.assertEqual(status, 2)
         self.assertEqual(error["code"], "forbidden")
         self.assertFalse(self.config.database_path.exists())
+
+    def test_cli_attribution_correction_replay_void_and_list(self):
+        if __package__:
+            from ._attribution_fixture import attribution_request, seed_attribution_metadata
+        else:
+            from _attribution_fixture import attribution_request, seed_attribution_metadata
+        from hormuz.portfolio_wire import canonical
+
+        _, prior, _, attempt_id = seed_attribution_metadata(self.config)
+        scope = {"work_scope_id": prior[2][1]["work_scope"]["work_scope_id"], "version": 1}
+        body = attribution_request(attempt_id, scope, prior[2][1]["attribution_event_id"])
+        self.request_path.write_text(canonical(body))
+        arguments = ("attribute", str(self.request_path), "--idempotency-key", "cli-attribution")
+        status, corrected = self.command(*arguments)
+        self.assertEqual(status, 0)
+        self.assertEqual(corrected["confidence"], "authorized_post_run")
+        self.assertEqual(self.command(*arguments), (0, corrected))
+        page = self.command("attributions", "--limit", "1")[1]
+        self.assertEqual(len(page["items"]), 1)
+        self.assertTrue(page["has_more"])
+        continuation = self.command("attributions", "--limit", "1", "--cursor", page["next_cursor"])[1]
+        self.assertEqual(continuation["as_of"], page["as_of"])
+        self.assertNotEqual(continuation["items"], page["items"])
+        last = self.command("attributions", "--limit", "1", "--cursor", continuation["next_cursor"])[1]
+        seen = page["items"] + continuation["items"] + last["items"]
+        self.assertEqual(len(seen), 3)
+        self.assertIn(corrected, seen)
+        self.assertIn(prior[2][1], seen)
+        self.assertFalse(last["has_more"])
+        self.request_path.write_text(canonical(attribution_request(
+            attempt_id, None, corrected["attribution_event_id"], state="voided", reason_code="voided",
+        )))
+        self.assertEqual(self.command(*arguments)[1]["code"], "idempotency_conflict")
+        self.assertEqual(self.command("attribute", str(self.request_path), "--idempotency-key", "cli-void")[1]["state"], "voided")
+
+    def test_denied_attribution_cli_never_opens_request_or_database(self):
+        with mock.patch.dict(os.environ, {"HORMUZ_PORTFOLIO_TOKEN": VIEWER}):
+            with mock.patch("hormuz.commands.portfolio.create_repository_bundle", side_effect=AssertionError("denied_database_access")):
+                for arguments in (("attribute", str(self.root / "not-present.json"), "--idempotency-key", "denied"), ("attributions",)):
+                    status, error = self.command(*arguments)
+                    self.assertEqual((status, error["code"]), (2, "forbidden"))
+        self.assertFalse(self.config.database_path.exists())

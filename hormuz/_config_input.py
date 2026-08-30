@@ -76,6 +76,7 @@ _ROOT_CONFIGURATION_FIELDS = frozenset(
         "audit_anchor",
         "audit_chain",
         "portfolio_control",
+        "attribution_control",
     }
 )
 _LISTEN_FIELDS = frozenset({"host", "port"})

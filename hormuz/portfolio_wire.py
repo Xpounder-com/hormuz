@@ -23,6 +23,7 @@ RESPONSE_BYTES = 1048576
 PREFIX = "/v1/admin/portfolio"
 SCOPES = PREFIX + "/work-scopes"
 BINDINGS = PREFIX + "/work-bindings"
+ATTRIBUTIONS = PREFIX + "/attributions"
 ERRORS = {
     "invalid_request": (400, "invalid_shape"),
     "unauthenticated": (401, "unauthorized_scope"),
@@ -102,8 +103,15 @@ def catalogue() -> dict[str, Any]:
     return json.loads(resources.files("hormuz").joinpath("portfolio-registry-wire-v1.json").read_text("utf-8"))
 
 
+@lru_cache(maxsize=1)
+def attribution_catalogue() -> dict[str, Any]:
+    return json.loads(resources.files("hormuz").joinpath("portfolio-attribution-wire-v1.json").read_text("utf-8"))
+
+
 def validate(value: object, name: str) -> None:
     definitions = catalogue()["$defs"]
+    if name not in definitions:
+        definitions = attribution_catalogue()["$defs"]
     if name not in definitions:
         raise PortfolioError("invalid_request")
 
@@ -173,6 +181,8 @@ def validate(value: object, name: str) -> None:
 
 
 def route(method: str, path: str) -> tuple[str, str | None]:
+    if path == ATTRIBUTIONS and method in {"GET", "POST"}:
+        return ("list_attributions" if method == "GET" else "attribute", None)
     if method == "GET" and path in {SCOPES, BINDINGS}:
         return ("list_scopes" if path == SCOPES else "list_bindings", None)
     if method == "POST" and path in {SCOPES, BINDINGS}:
@@ -196,7 +206,7 @@ def query_parameters(raw: str, operation: str) -> dict[str, Any]:
     allowed = {"version"} if operation == "show_scope" else {"limit", "cursor", "start_at", "end_at", "work_scope_id"}
     if operation == "list_bindings":
         allowed.add("connector_id")
-    if operation not in {"show_scope", "list_scopes", "list_bindings"}:
+    if operation not in {"show_scope", "list_scopes", "list_bindings", "list_attributions"}:
         allowed = set()
     result = {}
     for key, value in pairs:

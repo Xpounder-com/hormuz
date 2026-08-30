@@ -17,6 +17,7 @@ from urllib.parse import urlsplit
 
 from . import __version__
 from .auth import AuthenticationError, Authenticator
+from .attribution_admission import AdmissionError, REQUEST_HEADER as ATTRIBUTION_REQUEST_HEADER, RESULT_HEADER as ATTRIBUTION_RESULT_HEADER, select_admission
 from .config import GatewayConfig, Identity, ModelRoute, UpstreamConfig
 from .contracts import (
     ALLOCATION_BASIS_DIRECT_GATEWAY_REQUEST,
@@ -81,6 +82,7 @@ class GatewayServer(ThreadingHTTPServer):
                 )
                 self.store, portfolio = repositories.usage, repositories.portfolio
             self.portfolio_service = PortfolioService(config, portfolio, self.authenticator)
+            self.attribution_repository = portfolio.attributions
             policy_runtime = PolicyRuntime(config, connection_pool=self.postgres_pool)
             self.policy_engine = PolicyEngine(config, self.store, policy_runtime=policy_runtime)
             self.policy_engine.policy_runtime.verify_active_policies()
@@ -241,6 +243,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         return False
 
     def do_GET(self) -> None:  # noqa: N802
+        self._attribution_result = None
         path = urlsplit(self.path).path
         if path.startswith(PORTFOLIO_PREFIX + "/"):
             handle_registry(self)
@@ -339,6 +342,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         self._response_started = False
+        self._attribution_result = None
         path = urlsplit(self.path).path
         if path.startswith(PORTFOLIO_PREFIX + "/"):
             handle_registry(self)
@@ -366,6 +370,8 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 client=default_client,
                 account_usage=account_usage,
             )
+        except AdmissionError as error:
+            self._reject_attribution(identity, default_client, protocol, error)
         except _STORAGE_FAILURES as error:
             self._send_storage_failure(protocol, error)
 
@@ -383,6 +389,12 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         client: str,
         account_usage: bool,
     ) -> None:
+        admission = select_admission(
+            self.server.config, identity, client, self.headers.get_all(ATTRIBUTION_REQUEST_HEADER, []),
+            account_usage=account_usage,
+        )
+        if admission is not None:
+            self.server.attribution_repository.preflight(identity, client, protocol, admission)
         request_body = self._read_json_body()
         if request_body is None:
             return
@@ -612,6 +624,23 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                     code="hormuz_budget_denied",
                 )
                 return
+        if admission is not None and attempt is not None:
+            try:
+                self.server.attribution_repository.admit(identity, client, protocol, admission, attempt.attempt_id)
+            except AdmissionError as error:
+                if error.status < 500:
+                    # This handler has not called _forward: a known scope
+                    # rejection can settle at zero. Uncertain storage failures
+                    # keep their v1 hold; no cross-repository atomicity/replay.
+                    try:
+                        self.server.store.finalize_request_attempt(
+                            attempt=attempt, organization_id=identity.organization_id,
+                            status="failed", cost_microusd=0,
+                        )
+                    except _STORAGE_FAILURES:
+                        raise AdmissionError("dependency_unavailable", 503) from None
+                raise
+            self._attribution_result = admission.result_header
         self._forward(
             identity=identity,
             protocol=protocol,
@@ -684,6 +713,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         self.send_header("X-Hormuz-Policy-Decision", policy_action)
         self.send_header("X-Hormuz-Requested-Model", decision.requested_model)
         self.send_header("X-Hormuz-Routed-Model", route.upstream_model)
+        self._send_attribution_header()
         if redaction_count:
             self.send_header("X-Hormuz-Redactions", str(redaction_count))
         for name, value in response.headers.items():
@@ -875,6 +905,21 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             error_code=code,
         )
 
+    def _reject_attribution(self, identity, client, protocol, error: AdmissionError) -> None:
+        try:
+            self.server.attribution_repository.record_rejection(identity, client, protocol, error)
+        except AdmissionError as storage_error:
+            error = storage_error
+        self.close_connection = True
+        self._attribution_result = error.result_header
+        self._send_protocol_error(protocol, "Work attribution admission was not accepted.",
+                                  HTTPStatus(error.status), code="hormuz_attribution_" + error.reason)
+
+    def _send_attribution_header(self) -> None:
+        value = getattr(self, "_attribution_result", None)
+        if value is not None:
+            self.send_header(ATTRIBUTION_RESULT_HEADER, value)
+
     def _send_error(self, code: str, message: str, status: HTTPStatus) -> None:
         self._send_contract_json(status, ERROR_SCHEMA_ID, {"error": {"code": code, "message": message}})
 
@@ -931,6 +976,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             self.send_header("X-Hormuz-Contract", contract_header_value)
         if error_code is not None:
             self.send_header("X-Hormuz-Error-Code", error_code)
+        self._send_attribution_header()
         self.end_headers()
         self.wfile.write(body)
 

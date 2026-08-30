@@ -23,6 +23,12 @@ class RepositoryCompositionTests(unittest.TestCase):
             ROOT / "config.example.json", environ={"HORMUZ_TOKEN": "synthetic-test-token"},
         )
 
+    def test_registry_sql_facade_keeps_shared_patch_identity(self) -> None:
+        from hormuz._portfolio_sql import PortfolioSQL
+        from hormuz.portfolio_repository import _SQL
+
+        self.assertIs(_SQL, PortfolioSQL)
+
     def test_legacy_factory_still_returns_only_the_concrete_usage_adapter(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             config = replace(self.config, database_path=Path(temporary) / "usage.sqlite3")

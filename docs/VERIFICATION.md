@@ -119,7 +119,7 @@ never final-candidate acceptance.
 
 `tests.test_sqlite_registry_transition` and
 `tests.test_postgres_registry_transition` test actual SQLite 5 / PostgreSQL 9
-migrations, failure injection after real DDL, rollback/retry, unchanged
+migrations (then cumulative current migrations), failure injection after real DDL, rollback/retry, unchanged
 v1 rows/unknown holds, fresh released-v1 rejection of partial/newer state,
 and isolated old-pair backup/restore. Populated current-candidate restores on
 both backends preserve registry history, idempotent results, continuation
@@ -138,32 +138,35 @@ create/version/archive/binding, strict parsing, role checks before access,
 forced RLS, append-only state, concurrent idempotency/CAS, frozen cursors and
 safe audit. The required PostgreSQL job executes both registry adapters from
 the isolated installed wheel. The registry-era suite owns 80 live PostgreSQL
-cases; the attribution preflight below adds six, for 86 total owned cases.
+cases; attribution adds six transition, ten adapter and seven native gateway
+cases, for 103 total owned cases.
 Populated policy/custody recovery and exact final signed OCI/Compose transitions
 remain #214 final-candidate gates. Do not close #214 on registry-only evidence.
 
-## v1.1.0 attribution pre-implementation checkpoint
+## v1.1.0 attribution implementation and transition
 
-The [#214/#216 preflight](ATTRIBUTION_TRANSITION.md) freezes a bounded optional
-admission contract and reserved SQLite 5-to-6 / PostgreSQL 9-to-10 transitions.
-It is not attribution implementation: production has no next migration yet.
-The strict machine-plan verifier checks the accepted registry and frozen
-released-v1/portfolio contracts, and never returns feature or candidate success.
+The [#214/#216 transition](ATTRIBUTION_TRANSITION.md) implements the accepted
+optional admission contract and SQLite 5-to-6 / PostgreSQL 9-to-10 transitions.
+The frozen version-1 plan remains historical; version 2 and the strict verifier
+pin the real registry predecessor while preserving the released-v1/portfolio
+contracts and keeping final-candidate acceptance false.
 
-Eleven plan tests and six transition tests per backend exercise the missing-next-
-migration witness, test-only DDL rollback/retry, all populated registry tables,
-unchanged v1 rows and unknown holds, partial/newer-state refusal by current and
-actual released-v1 binaries, isolated old-pair restore and retained candidate
-post-checkpoint writes. The PostgreSQL job supplies the released binary and
-matched backup tools; local skips are not evidence. These 12 transition tests
-must also run from the isolated wheel, and the unpacked source archive must
-contain the complete preflight kit. Empty policy/custody tables do not prove
-populated-domain recovery. The eventual feature must replace test probes with
-actual migrations and add its admission/API/tenant/no-egress proofs.
+Six transition tests per backend exercise actual DDL rollback/retry, all
+populated registry tables, unchanged v1 rows and unknown holds, partial/newer
+state refusal by actual registry and released-v1 binaries, isolated old-pair
+restore and current-pair forward recovery with all attribution tables populated.
+Set `HORMUZ_TEST_REGISTRY_PYTHON` and `HORMUZ_TEST_V1_PYTHON` to the independently
+installed digest-pinned predecessors, plus disposable `HORMUZ_TEST_POSTGRES_DSN`
+and matched `HORMUZ_TEST_PG_CONTAINER`. CI supplies all four; local skips are
+not evidence. The unpacked source kit must contain both plans and every helper.
+Empty policy/custody tables do not prove populated-domain recovery.
 
-Accept only after the registry dependency and this preflight each have exact
-merged-main CI and recorded technical-lead review. Acceptance unblocks only
-#216 implementation; #214 final-candidate and #225 external validation stay open.
+The required job also runs both attribution adapters, pure admission/schema
+tests, CLI/API tests and OpenAI/Anthropic JSON/streaming/compact no-egress proofs
+from the isolated installed wheel. Feature acceptance requires reviewed PR
+evidence and exact merged-main CI; #214 final-candidate and #225 external
+validation remain open. No unit, migration or synthetic provider test is an
+independent customer session.
 
 ## Live pinned-client release gate
 

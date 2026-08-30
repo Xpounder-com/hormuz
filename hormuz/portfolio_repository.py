@@ -14,20 +14,19 @@ import hmac
 import json
 import os
 import re
-import sqlite3
 import uuid
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Iterator, Mapping, Protocol
 from urllib.parse import urlencode
 
-from ._portfolio_schema import TABLE_DDL, verify_postgres_registry
-from ._sqlite_schema import SQLITE_SCHEMA_VERSION, verify_sqlite_schema_ready
+from ._portfolio_sql import PortfolioSQL as _SQL, portfolio_transaction
 from .config import GatewayConfig
+from .attribution_repository import AttributionRepository
 from .portfolio_config import PortfolioPrincipal
 from .portfolio_wire import PortfolioError, RESPONSE_BYTES, canonical, query_parameters, route, validate
-from .postgres import PostgresConnectionPool, PostgresStorageError, postgres_transaction
-from .store import StorageSchemaError
+from .postgres import PostgresConnectionPool
 
 
 class PortfolioRepository(Protocol):
@@ -36,34 +35,6 @@ class PortfolioRepository(Protocol):
         scope_id: str | None, query: dict[str, Any], body: dict[str, Any] | None,
         idempotency_key: str | None,
     ) -> tuple[int, dict[str, Any]]: ...
-
-
-class _SQL:
-    def __init__(self, connection, *, postgres: bool):
-        self.connection = connection
-        self.postgres = postgres
-
-    def execute(self, statement: str, values: tuple = ()):
-        return self.connection.execute(statement.replace("?", "%s") if self.postgres else statement, values)
-
-    def one(self, statement: str, values: tuple = ()) -> dict[str, Any] | None:
-        row = self.execute(statement, values).fetchone()
-        return dict(row) if row is not None else None
-
-    def insert(self, table: str, row: dict[str, Any]) -> None:
-        # Callers choose fields and tables from source constants, never input.
-        if table not in TABLE_DDL:
-            raise PortfolioError("unavailable")
-        self.execute(
-            f"INSERT INTO {table} ({', '.join(row)}) VALUES ({', '.join('?' for _ in row)})",
-            tuple(row.values()),
-        )
-
-    def now(self) -> str:
-        statement = "SELECT clock_timestamp() AS now" if self.postgres else "SELECT strftime('%Y-%m-%dT%H:%M:%fZ', 'now') AS now"
-        value = self.one(statement)["now"]
-        instant = value if isinstance(value, datetime) else datetime.fromisoformat(value)
-        return instant.astimezone(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
 
 
 class RegistryRepository:
@@ -89,56 +60,10 @@ class RegistryRepository:
     @contextmanager
     def _transaction(self, principal: PortfolioPrincipal) -> Iterator[_SQL]:
         self._authorize(principal)  # Before opening a connection or lookup.
-        storage = self.config.usage_storage
-        try:
-            if storage.backend == "sqlite":
-                connection = sqlite3.connect(
-                    f"{self.config.database_path.resolve().as_uri()}?mode=rw", uri=True, timeout=5,
-                )
-                connection.row_factory = sqlite3.Row
-                try:
-                    connection.execute("PRAGMA foreign_keys = ON")
-                    with connection:
-                        connection.execute("BEGIN IMMEDIATE")
-                        verify_sqlite_schema_ready(
-                            connection, schema_version=SQLITE_SCHEMA_VERSION,
-                            maximum_supported_schema_version=SQLITE_SCHEMA_VERSION, error_factory=StorageSchemaError,
-                        )
-                        yield _SQL(connection, postgres=False)
-                finally:
-                    connection.close()
-            elif storage.backend == "postgresql":
-                with postgres_transaction(
-                    self._dsn, schema=storage.postgres_schema, runtime_role=storage.postgres_runtime_role,
-                    organization_id=principal.organization_id, connection_pool=self._pool,
-                ) as connection:
-                    connection.execute("SET LOCAL lock_timeout = '5s'")
-                    connection.execute("SET LOCAL statement_timeout = '10s'")
-                    role = connection.execute(
-                        "SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname=current_user"
-                    ).fetchone()
-                    if not role or role["rolsuper"] or role["rolbypassrls"]:
-                        raise PortfolioError("unavailable")
-                    with connection.cursor() as cursor:
-                        verify_postgres_registry(cursor, storage.postgres_schema, PostgresStorageError)
-                    for table in TABLE_DDL:
-                        row = connection.execute(
-                            "SELECT (has_table_privilege(current_user, %s, 'SELECT') AND "
-                            "has_table_privilege(current_user, %s, 'INSERT')) AS usable, "
-                            "has_table_privilege(current_user, %s, 'UPDATE,DELETE,TRUNCATE') AS excessive",
-                            (f'"{storage.postgres_schema}".{table}',) * 3,
-                        ).fetchone()
-                        if not row["usable"] or row["excessive"]:
-                            raise PortfolioError("unavailable")
-                    connection.execute(
-                        "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
-                        (f"portfolio:{storage.postgres_schema}:{principal.organization_id}",),
-                    )
-                    yield _SQL(connection, postgres=True)
-            else:
-                raise PortfolioError("unavailable")
-        except (sqlite3.Error, PostgresStorageError, StorageSchemaError):
-            raise PortfolioError("unavailable") from None
+        with portfolio_transaction(
+            self.config, principal.organization_id, dsn=self._dsn, connection_pool=self._pool,
+        ) as sql:
+            yield sql
 
     def execute(
         self, principal: PortfolioPrincipal, operation: str, *, path: str,
@@ -393,7 +318,23 @@ class RegistryRepository:
                 "as_of": as_of, "has_more": more, "next_cursor": next_cursor}
 
 
+@dataclass
+class PortfolioRepositories:
+    registry: RegistryRepository
+    attributions: AttributionRepository
+
+    def execute(self, principal: PortfolioPrincipal, operation: str, *, path: str,
+                scope_id: str | None, query: dict[str, Any], body: dict[str, Any] | None,
+                idempotency_key: str | None) -> tuple[int, dict[str, Any]]:
+        owner = self.attributions if operation in {"attribute", "list_attributions"} else self.registry
+        return owner.execute(principal, operation, path=path, scope_id=scope_id, query=query,
+                             body=body, idempotency_key=idempotency_key)
+
+
 def create_portfolio_repository(config: GatewayConfig, *, environ: Mapping[str, str] | None = None,
                                 connection_pool: PostgresConnectionPool | None = None,
-                                read_only: bool = False) -> PortfolioRepository:
-    return RegistryRepository(config, environ=environ, connection_pool=connection_pool, read_only=read_only)
+                                read_only: bool = False) -> PortfolioRepositories:
+    registry = RegistryRepository(config, environ=environ, connection_pool=connection_pool, read_only=read_only)
+    return PortfolioRepositories(registry, AttributionRepository(
+        config, dsn=registry._dsn, connection_pool=connection_pool, read_only=read_only,
+    ))
