@@ -67,6 +67,18 @@ class SecretInventoryTests(unittest.TestCase):
             validate_secret_inventory(candidate, source_root=ROOT)
         self.assertEqual(raised.exception.code, "secret_inventory_managed_custody_invalid")
 
+    def test_invitation_handoff_is_restricted_to_its_operator_writer(self) -> None:
+        candidate = copy.deepcopy(self.inventory)
+        candidate["environment_reads"][1]["custody_mode"] = "private_invitation_handoff"
+        with self.assertRaisesRegex(SecretInventoryError, "secret_inventory_secret_custody_invalid"):
+            validate_secret_inventory(candidate, source_root=ROOT)
+        candidate = copy.deepcopy(self.inventory)
+        handoff = next(item for item in candidate["managed_materials"] if item["id"] == "team-invitation-handoff")
+        handoff["source_module"] = "hormuz/session_store.py"
+        handoff["source_qualname"] = "SQLiteSessionStore._digest"
+        with self.assertRaisesRegex(SecretInventoryError, "secret_inventory_managed_custody_invalid"):
+            validate_secret_inventory(candidate, source_root=ROOT)
+
     def test_new_environment_read_requires_inventory_review(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

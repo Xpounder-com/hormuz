@@ -13,6 +13,11 @@ was previously implemented in experimental commit `49d3086`. Only the session
 components were adapted; directory/SCIM, retired context features, and the old
 capability-based administrator API were not imported.
 
+The next opt-in slice adds [local team onboarding](TEAM_ONBOARDING.md): a
+server-local operator can create teams, issue browser invitations and remove
+member access. It does not grant employee sessions administrator privileges or
+change the existing native client protocol.
+
 ## Verify locally
 
 Install the checkout in an isolated Python environment, then run:
@@ -116,6 +121,7 @@ or duplicate fields, ambiguous body framing, and bodies over 16 KiB.
 | --- | --- | --- |
 | `POST /enrollments` | `client`, independent `enrollment_secret`, optional configured `issuer` and `organization_id` | 201: enrollment ID, login URL, expiry, polling interval |
 | `GET /login?enrollment=...` | Non-credential enrollment ID | 200: browser confirmation page and temporary HTTP-only cookie |
+| `POST /invitations/accept` | Opt-in browser form: invitation code, enrollment and state; matching Origin and browser cookie | 200: sign-in confirmation link; no credential; invitation is consumed only after verified IdP callback |
 | `POST /callback` | IdP form containing `state`, `code`, optional `iss`; browser cookie required | 200: completion page with no credential |
 | `POST /enrollments/{id}/redeem` | Original enrollment secret | 200: access/refresh pair and access/session expiry; 409 while unavailable |
 | `POST /refresh` | Current refresh credential | 200: rotated access/refresh pair with unchanged absolute expiry |
@@ -156,11 +162,12 @@ See the [secret inventory](SECRET_CUSTODY_INVENTORY.md) and
 This is a single-node reference implementation with a bounded process-wide
 authentication request limit and enrollment capacity. Before a paid hosted
 pilot, implement/verify the production HTTP adapter, persistent distributed
-sessions and throttling, tenant-scoped provider custody, administrator
-revocation, durable identity lifecycle, immutable session security evidence,
+sessions and throttling, tenant-scoped provider custody, administrator web
+sessions/roles beyond local operator removal, directory synchronization, immutable session security evidence,
 real IdP and official-client refresh/401 behavior, and cross-platform secure
-storage. Restoring a session backup requires master-key rotation to prevent
-revocation rollback. A signed/notarized Mac wrapper, customer dashboard,
+storage. Restoring a session-only backup requires master-key rotation to prevent
+credential replay; a managed directory additionally needs the recovery work
+described in [team onboarding](TEAM_ONBOARDING.md). A signed/notarized Mac wrapper, customer dashboard,
 Render deployment, billing, operational recovery, and compatible provider
 failover remain separate milestones. This slice makes no availability or
 latency guarantee and performs no deployment or billing operation.

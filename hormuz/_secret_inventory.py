@@ -44,6 +44,7 @@ _CUSTODY_MODES = frozenset(
         "session_flow_aead",
         "keyed_hash",
         "os_secure_store",
+        "private_invitation_handoff",
     }
 )
 _STORAGE_OWNERS = frozenset(
@@ -78,6 +79,7 @@ _RUNTIME_CONSUMERS = frozenset(
         "storage_runtime",
         "storage_migration_cli",
         "session_broker",
+        "team_operator_cli",
         "not_in_active_core",
     }
 )
@@ -471,6 +473,8 @@ def _validate_sources(
             "secret_inventory_material_class_invalid",
         )
         custody_mode = _enum(entry, "custody_mode", _CUSTODY_MODES, "secret_inventory_custody_mode_invalid")
+        if custody_mode == "private_invitation_handoff":
+            raise SecretInventoryError("secret_inventory_secret_custody_invalid")
         _enum(entry, "storage_owner", _STORAGE_OWNERS, "secret_inventory_storage_owner_invalid")
         _enum(entry, "runtime_consumer", _RUNTIME_CONSUMERS, "secret_inventory_consumer_invalid")
         _enum(entry, "rotation_authority", _ROTATION_AUTHORITIES, "secret_inventory_rotation_authority_invalid")
@@ -501,7 +505,15 @@ def _validate_managed_materials(
             raise SecretInventoryError("secret_inventory_managed_source_missing")
         _enum(entry, "material_class", _MATERIAL_CLASSES, "secret_inventory_material_class_invalid")
         mode = _enum(entry, "custody_mode", _CUSTODY_MODES, "secret_inventory_custody_mode_invalid")
-        local_session_mode = mode in {"session_flow_aead", "keyed_hash", "os_secure_store"}
+        local_session_mode = mode in {"session_flow_aead", "keyed_hash", "os_secure_store", "private_invitation_handoff"}
+        if mode == "private_invitation_handoff" and (
+            coordinate.source_module != "hormuz/commands/onboarding.py"
+            or coordinate.source_qualname != "_write_invitation"
+            or entry.get("storage_owner") != "customer_filesystem"
+            or entry.get("runtime_consumer") != "team_operator_cli"
+            or entry.get("rotation_authority") != "identity_operator"
+        ):
+            raise SecretInventoryError("secret_inventory_managed_custody_invalid")
         if local_session_mode and (
             entry.get("key_purpose") != "session_material" or entry.get("material_class") != "session_material"
         ):

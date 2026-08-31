@@ -37,6 +37,7 @@ EXPECTED_ARTIFACT_IDS = {
     "sqlite_database_file",
     "session_database_file",
     "client_session_secure_store",
+    "team_invitation_file",
 }
 EXPECTED_EXCLUDED_SYSTEM_IDS = {
     "client_local_history",
@@ -137,6 +138,10 @@ def _schema_tables(root: Path) -> tuple[set[str], set[str]]:
             raise DurableDataInventoryError("sqlite_table_owned_more_than_once")
         sqlite.update(registry_tables)
     session_tables = set(SQLITE_TABLE.findall(_read_text(root / SESSION_SCHEMA_PATH)))
+    onboarding_tables = set(SQLITE_TABLE.findall(_read_text(root / "hormuz/_onboarding_schema.py")))
+    if session_tables.intersection(onboarding_tables):
+        raise DurableDataInventoryError("sqlite_table_owned_more_than_once")
+    session_tables.update(onboarding_tables)
     if sqlite.intersection(session_tables):
         raise DurableDataInventoryError("sqlite_table_owned_more_than_once")
     sqlite.update(session_tables)

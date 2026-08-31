@@ -40,6 +40,15 @@ The active core has three custody categories:
    KMS envelope or custody-executor lifecycle. This is a local integration
    slice, not a claim of hosted production custody.
 
+   Team invitation codes have a separate, explicit handoff boundary: the local
+   operator writes a new POSIX mode-0600 file for manual private delivery. The
+   session database stores only keyed invitation/recipient hashes. This is not a
+   plaintext fallback for access/refresh credentials or provider keys. The inventory
+   restricts this handoff mode to the invitation writer. Operators own delivery,
+   revocation and file retention; reinvitation never changes an established subject.
+   The shared master key cannot be rotated in place without a recipient-hash
+   migration plan; see [managed-directory recovery limits](TEAM_ONBOARDING.md).
+
 The second category must not be recursively placed behind the same service it
 is needed to access. For example, Hormuz cannot use OpenBao Transit to decrypt
 the OpenBao token required to reach Transit, and it cannot use a database-backed

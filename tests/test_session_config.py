@@ -79,3 +79,19 @@ class SessionConfigTests(unittest.TestCase):
         self.value["authentication"]["oidc"]["issuers"][0]["login"]["client_secret_env"] = "TEST_PROVIDER_KEY"
         with self.assertRaisesRegex(ConfigError, "dedicated"):
             self.load()
+
+    def test_onboarding_allows_empty_subjects_only_for_an_explicit_login_broker(self):
+        self.value["authentication"]["oidc"]["issuers"][0]["subjects"] = []
+        with self.assertRaisesRegex(ConfigError, "subject mapping"):
+            self.load()
+        self.value["authentication"]["session_broker"]["onboarding_enabled"] = True
+        config = self.load()
+        self.assertTrue(config.session_broker.onboarding_enabled)
+        self.assertEqual(config.identities_by_subject, {})
+        self.value["authentication"]["session_broker"]["onboarding_enabled"] = "true"
+        with self.assertRaises(ConfigError):
+            self.load()
+        self.value["authentication"]["session_broker"]["onboarding_enabled"] = True
+        del self.value["authentication"]["oidc"]["issuers"][0]["login"]
+        with self.assertRaises(ConfigError):
+            self.load()

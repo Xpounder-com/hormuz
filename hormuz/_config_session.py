@@ -69,6 +69,7 @@ def build_session_broker(raw: dict[str, Any], *, source_path: Path) -> SessionBr
         absolute_ttl_seconds=_integer(item.get("absolute_ttl_seconds", 43200), f"{prefix}.absolute_ttl_seconds", minimum=access_ttl, maximum=43200),
         enrollment_ttl_seconds=_integer(item.get("enrollment_ttl_seconds", 300), f"{prefix}.enrollment_ttl_seconds", minimum=60, maximum=600),
         allow_insecure_http=insecure,
+        onboarding_enabled=_boolean(item.get("onboarding_enabled", False), f"{prefix}.onboarding_enabled"),
     )
 
 

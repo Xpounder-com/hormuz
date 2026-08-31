@@ -27,6 +27,8 @@ class IdentityConstruction:
 
 
 def build_identity_domain(raw: dict[str, Any]) -> IdentityConstruction:
+    broker = raw.get("authentication", {}).get("session_broker", {})
+    managed_login = broker.get("enabled") is True and broker.get("onboarding_enabled") is True
     identities_raw = raw.get("identities", [])
     if not isinstance(identities_raw, list):
         raise ConfigError("identities must be an array")
@@ -118,7 +120,7 @@ def build_identity_domain(raw: dict[str, Any]) -> IdentityConstruction:
         subjects_raw = item.get("subjects", [])
         if not isinstance(subjects_raw, list):
             raise ConfigError(f"{prefix}.subjects must be an array")
-        if not subjects_raw:
+        if not subjects_raw and not (managed_login and issuer_config.login is not None):
             raise ConfigError(f"{prefix}.subjects must contain at least one subject mapping")
         for subject_index, subject_value in enumerate(subjects_raw):
             subject_prefix = f"{prefix}.subjects[{subject_index}]"
@@ -152,7 +154,9 @@ def build_identity_domain(raw: dict[str, Any]) -> IdentityConstruction:
                 ),
                 authentication_source=f"oidc:{issuer}",
             )
-    if not static_identities and not identities_by_subject:
+    if not static_identities and not identities_by_subject and not (
+        managed_login and any(issuer.login is not None for issuer in oidc_issuers.values())
+    ):
         raise ConfigError("At least one static identity or OIDC subject mapping is required")
     _validate_identity_consistency((*static_identities, *identities_by_subject.values()))
     return IdentityConstruction(

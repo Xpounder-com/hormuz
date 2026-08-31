@@ -199,6 +199,19 @@ class Authenticator:
         issuer_name: str,
         nonce: str,
     ) -> str:
+        claims = self.validate_login_claims(token, issuer_name=issuer_name, nonce=nonce)
+        subject = claims["sub"]
+        self.identity_for_subject(issuer_name, subject)
+        return subject
+
+    def validate_login_claims(
+        self,
+        token: str,
+        *,
+        issuer_name: str,
+        nonce: str,
+    ) -> dict[str, Any]:
+        """Authenticate an ID token; the caller must separately authorize membership."""
         issuer = self._config.oidc_issuers.get(issuer_name)
         if issuer is None or issuer.login is None:
             raise AuthenticationError("login_issuer_unavailable")
@@ -221,8 +234,7 @@ class Authenticator:
         subject = claims.get("sub")
         if not isinstance(subject, str) or not subject:
             raise AuthenticationError("invalid_subject")
-        self.identity_for_subject(issuer.issuer, subject)
-        return subject
+        return claims
 
 
     def _validate_jwt(

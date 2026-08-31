@@ -100,15 +100,34 @@ def _dispatch(handler: GatewayRequestHandler) -> None:
         _browser_page(
             handler,
             "Connect your AI client",
-            "Continue only if you just started Hormuz login in your own terminal. "
+            "Continue only if you just started Hormuz login in your own app or terminal. "
             "This connects that client to your organization's governed AI access.",
             cookie=cookie,
             authorization_url=authorization_url,
+            invitation_form=(enrollment_id, parse_qs(urlsplit(authorization_url).query)["state"][0])
+                if broker.config.session_broker.onboarding_enabled else None,
         )
         return
     if request.query:
         # Codes, credentials, or callback state in URL queries are never accepted.
         raise SessionBrokerError("session_query_not_allowed")
+    if handler.command == "POST" and path == "/v1/auth/invitations/accept":
+        if handler.headers.get_all("Origin", []) != [broker.config.session_broker.public_base_url]:
+            raise SessionBrokerError("invalid_invitation_origin")
+        values = _form(_read_body(handler, "application/x-www-form-urlencoded").decode("utf-8"),
+                       allowed={"enrollment", "state", "invitation_code"})
+        enrollment_id = values.get("enrollment", "")
+        if not _ENROLLMENT.fullmatch(enrollment_id):
+            raise SessionBrokerError("invalid_enrollment")
+        authorization_url = broker.attach_invitation(
+            enrollment_id=enrollment_id, state=values.get("state", ""),
+            browser_cookie=_browser_cookie(handler), code=values.get("invitation_code", ""),
+        )
+        # A fresh link avoids forwarding the form (or relying on browsers' CSP
+        # handling of cross-origin form redirects) to the identity provider.
+        _browser_page(handler, "Invitation ready", "Sign in with the identity your operator invited.",
+                      cookie=_browser_cookie(handler), authorization_url=authorization_url)
+        return
     if handler.command == "POST" and path == "/v1/auth/callback":
         raw = _read_body(handler, "application/x-www-form-urlencoded")
         values = _form(raw.decode("utf-8"), allowed={"code", "state", "iss", "error", "error_description", "error_uri", "session_state"})
@@ -220,22 +239,34 @@ def _browser_cookie(handler: GatewayRequestHandler) -> str:
     return item.value if item is not None else ""
 
 
-def _browser_page(handler: GatewayRequestHandler, title: str, message: str, *, cookie: str, authorization_url: str | None = None) -> None:
+def _browser_page(handler: GatewayRequestHandler, title: str, message: str, *, cookie: str, authorization_url: str | None = None, invitation_form: tuple[str, str] | None = None) -> None:
     content = f"<!doctype html><html lang='en'><meta charset='utf-8'><title>Hormuz</title><h1>{title}</h1><p>{message}</p>"
     if authorization_url is not None:
         content += f'<p><a href="{html.escape(authorization_url, quote=True)}" rel="noreferrer">Continue to sign in</a></p>'
+    if invitation_form is not None:
+        enrollment_id, state = invitation_form
+        content += (
+            '<p>Joining a team for the first time? Enter the invitation code your operator gave you.</p>'
+            '<form method="post" action="/v1/auth/invitations/accept" autocomplete="off">'
+            f'<input type="hidden" name="enrollment" value="{html.escape(enrollment_id, quote=True)}">'
+            f'<input type="hidden" name="state" value="{html.escape(state, quote=True)}">'
+            '<label>Invitation code <input name="invitation_code" type="password" required '
+            'minlength="49" maxlength="49" autocomplete="off" spellcheck="false"></label> '
+            '<button type="submit">Use invitation</button></form>'
+        )
     content += "</html>"
     body = content.encode("utf-8")
     config = handler.server.config.session_broker
     secure = config.public_base_url.startswith("https:")
-    attrs = "; Path=/; Secure; HttpOnly; SameSite=None" if secure else "; Path=/v1/auth/callback; HttpOnly; SameSite=Lax"
+    local_path = "/v1/auth" if config.onboarding_enabled else "/v1/auth/callback"
+    attrs = "; Path=/; Secure; HttpOnly; SameSite=None" if secure else f"; Path={local_path}; HttpOnly; SameSite=Lax"
     max_age = config.enrollment_ttl_seconds if cookie else 0
     handler.send_response(HTTPStatus.OK)
     handler.send_header("Content-Type", "text/html; charset=utf-8")
     handler.send_header("Content-Length", str(len(body)))
     handler.send_header("Cache-Control", "no-store")
     handler.send_header("Referrer-Policy", "no-referrer")
-    handler.send_header("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'; base-uri 'none'")
+    handler.send_header("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
     handler.send_header("X-Content-Type-Options", "nosniff")
     handler.send_header("Set-Cookie", f"{_cookie_name(handler)}={cookie}; Max-Age={max_age}{attrs}")
     handler.end_headers()

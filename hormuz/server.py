@@ -857,7 +857,10 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             try:
                 if candidate.startswith("hox_a_") and self.server.session_broker is not None:
                     return self.server.session_broker.authenticate(candidate)
-                return self.server.authenticator.authenticate(candidate)
+                identity = self.server.authenticator.authenticate(candidate)
+                if self.server.session_broker is not None and self.server.session_broker.directory.manages_organization(identity.organization_id):
+                    raise AuthenticationError("managed_organization_session_required")
+                return identity
             except AuthenticationError as error:
                 if error.code.startswith("session_store_"):
                     self._send_error("hormuz_storage_unavailable", "Session authentication is unavailable", HTTPStatus.SERVICE_UNAVAILABLE)

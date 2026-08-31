@@ -266,6 +266,7 @@ class SessionBrokerConfig:
     absolute_ttl_seconds: int = 43200
     enrollment_ttl_seconds: int = 300
     allow_insecure_http: bool = False
+    onboarding_enabled: bool = False
 
 
 @dataclass(frozen=True)

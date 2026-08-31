@@ -18,9 +18,10 @@ from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from ._session_schema import validate_session_schema
+from ._onboarding_schema import INDEX_DDL as ONBOARDING_INDEX_DDL, TABLE_DDL as ONBOARDING_TABLE_DDL
 
 
-SESSION_STORE_SCHEMA_VERSION = 2
+SESSION_STORE_SCHEMA_VERSION = 3
 
 
 
@@ -49,6 +50,7 @@ class AuthorizationFlow:
     nonce: str = field(repr=False)
     pkce_verifier: str = field(repr=False)
     organization_id: str | None = None
+    invitation_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -85,6 +87,7 @@ class SessionPrincipal:
     access_expires_at: datetime
     session_expires_at: datetime
     authorization_version: int = 1
+    membership_id: str | None = None
 
 
 
@@ -250,7 +253,7 @@ class SQLiteSessionStore:
             row = connection.execute(
                 """
                 SELECT id, issuer, client_name, browser_cookie_hash, encrypted_flow,
-                       expires_at, organization_id
+                       expires_at, organization_id, invitation_id
                 FROM session_enrollments
                 WHERE state_hash = ? AND status = 'authorizing'
                 """,
@@ -289,6 +292,7 @@ class SQLiteSessionStore:
                     if row["organization_id"] is not None
                     else None
                 ),
+                invitation_id=row["invitation_id"],
             )
 
     def authorize_enrollment(
@@ -359,7 +363,8 @@ class SQLiteSessionStore:
             row = connection.execute(
                 """
                 SELECT secret_hash, issuer, subject, client_name, organization_id,
-                       actor_id, team_id, clearance, status, expires_at
+                       actor_id, team_id, clearance, status, expires_at,
+                       membership_id, authorization_version
                 FROM session_enrollments WHERE id = ?
                 """,
                 (enrollment_id,),
@@ -374,14 +379,15 @@ class SQLiteSessionStore:
                 )
             ):
                 raise SessionStoreError("enrollment_not_redeemable")
+            self._require_active_membership(connection, row)
             connection.execute(
                 """
                 INSERT INTO human_sessions (
                     id, issuer, subject, client_name, access_hash, refresh_hash,
                     access_expires_at, absolute_expires_at, generation,
                     created_at, refreshed_at, organization_id, actor_id, team_id,
-                    clearance
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)
+                    clearance, membership_id, authorization_version
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     session_id,
@@ -398,6 +404,8 @@ class SQLiteSessionStore:
                     row["actor_id"],
                     row["team_id"],
                     row["clearance"],
+                    row["membership_id"],
+                    row["authorization_version"],
                 ),
             )
             connection.execute(
@@ -420,7 +428,7 @@ class SQLiteSessionStore:
                 """
                 SELECT id, issuer, subject, client_name, organization_id,
                        actor_id, team_id, clearance, access_expires_at,
-                       absolute_expires_at, revoked_at
+                       absolute_expires_at, revoked_at, membership_id, authorization_version
                 FROM human_sessions WHERE access_hash = ?
                 """,
                 (credential_hash,),
@@ -431,6 +439,7 @@ class SQLiteSessionStore:
             absolute_expires_at = _parse_time(row["absolute_expires_at"])
             if access_expires_at <= now or absolute_expires_at <= now:
                 raise SessionStoreError("expired_session_credential")
+            self._require_active_membership(connection, row)
             return SessionPrincipal(
                 session_id=str(row["id"]),
                 issuer=str(row["issuer"]),
@@ -442,6 +451,8 @@ class SQLiteSessionStore:
                 clearance=str(row["clearance"]),
                 access_expires_at=access_expires_at,
                 session_expires_at=absolute_expires_at,
+                membership_id=row["membership_id"],
+                authorization_version=int(row["authorization_version"]),
             )
 
     def refresh(self, refresh_token: str) -> SessionCredentialPair:
@@ -454,7 +465,9 @@ class SQLiteSessionStore:
                 connection.execute("BEGIN IMMEDIATE")
                 row = connection.execute(
                     """
-                    SELECT id, absolute_expires_at, revoked_at
+                    SELECT id, absolute_expires_at, revoked_at, membership_id,
+                           authorization_version, organization_id, issuer, subject,
+                           actor_id, team_id, clearance, client_name
                     FROM human_sessions WHERE refresh_hash = ?
                     """,
                     (old_hash,),
@@ -492,6 +505,7 @@ class SQLiteSessionStore:
                 if row["revoked_at"] is not None or absolute_expires_at <= now:
                     connection.rollback()
                     raise SessionStoreError("expired_session_credential")
+                self._require_active_membership(connection, row)
                 pair = self._new_pair(now=now, absolute_expires_at=absolute_expires_at)
                 connection.execute(
                     """
@@ -618,6 +632,29 @@ class SQLiteSessionStore:
 
 
 
+    @staticmethod
+    def _require_active_membership(connection: sqlite3.Connection, row: sqlite3.Row) -> None:
+        """Called inside the credential operation's transaction, never from a cache."""
+        if row["membership_id"] is None:
+            managed = connection.execute(
+                "SELECT id FROM onboarding_organizations WHERE id = ?", (row["organization_id"],),
+            ).fetchone()
+            if managed is not None:
+                raise SessionStoreError("session_authorization_removed")
+            return
+        member = connection.execute(
+            """
+            SELECT allowed_clients FROM onboarding_memberships
+            WHERE id = ? AND organization_id = ? AND issuer = ? AND subject = ?
+              AND id = ? AND team_id = ? AND clearance = ?
+              AND status = 'active' AND authorization_version = ?
+            """,
+            (row["membership_id"], row["organization_id"], row["issuer"], row["subject"],
+             row["actor_id"], row["team_id"], row["clearance"], row["authorization_version"]),
+        ).fetchone()
+        if member is None or row["client_name"] not in json.loads(member["allowed_clients"]):
+            raise SessionStoreError("session_authorization_removed")
+
     def _new_pair(
         self,
         *,
@@ -707,7 +744,7 @@ class SQLiteSessionStore:
             version = int(connection.execute("PRAGMA user_version").fetchone()[0])
             if version > SESSION_STORE_SCHEMA_VERSION:
                 raise SessionStoreError("session_store_schema_newer_than_binary")
-            if version not in {0, SESSION_STORE_SCHEMA_VERSION}:
+            if version not in {0, 2, SESSION_STORE_SCHEMA_VERSION}:
                 raise SessionStoreError("session_store_schema_migration_required")
             if version == SESSION_STORE_SCHEMA_VERSION:
                 connection.execute(
@@ -721,10 +758,28 @@ class SQLiteSessionStore:
                 )
                 self._validate_content_free_schema(connection)
                 return
+            if version == 2:
+                self._migrate_onboarding_schema(connection)
+                return
             connection.execute("PRAGMA journal_mode = WAL")
-            connection.executescript(
-                """
-                BEGIN IMMEDIATE;
+            connection.execute("BEGIN IMMEDIATE")
+            # Another process may have initialized this file since our first
+            # version read. Never reset a committed schema to the v2 baseline.
+            version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+            if version in {2, SESSION_STORE_SCHEMA_VERSION}:
+                self._migrate_onboarding_schema(connection)
+                return
+            if version > SESSION_STORE_SCHEMA_VERSION:
+                raise SessionStoreError("session_store_schema_newer_than_binary")
+            if version != 0:
+                raise SessionStoreError("session_store_schema_migration_required")
+            if connection.execute(
+                "SELECT name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'"
+            ).fetchone() is not None:
+                raise SessionStoreError("session_store_schema_incompatible")
+            # Execute this fixed DDL one statement at a time: executescript
+            # would implicitly commit before the entire initialization finishes.
+            for statement in """
                 CREATE TABLE IF NOT EXISTS session_enrollments (
                     id TEXT PRIMARY KEY,
                     secret_hash BLOB,
@@ -795,10 +850,34 @@ class SQLiteSessionStore:
                         target_team_id, occurred_at, id
                     );
                 PRAGMA user_version = 2;
-                COMMIT;
-                """
-            )
+                """.split(";"):
+                if statement.strip():
+                    connection.execute(statement)
+            self._migrate_onboarding_schema(connection)
+
+    def _migrate_onboarding_schema(self, connection: sqlite3.Connection) -> None:
+        # Preserve v2 hash/encryption derivation: adding membership does not rotate
+        # existing credentials. DDL, validation and version change commit together.
+        if not connection.in_transaction:
+            connection.execute("BEGIN IMMEDIATE")
+        version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+        if version == SESSION_STORE_SCHEMA_VERSION:
             self._validate_content_free_schema(connection)
+            return
+        if version != 2 or not validate_session_schema(connection, version=2):
+            raise SessionStoreError("session_store_schema_incompatible")
+        for table in ("session_enrollments", "human_sessions"):
+            connection.execute(f"ALTER TABLE {table} ADD COLUMN membership_id TEXT")
+            connection.execute(
+                f"ALTER TABLE {table} ADD COLUMN authorization_version INTEGER NOT NULL DEFAULT 1 CHECK (authorization_version >= 1)"
+            )
+        connection.execute("ALTER TABLE session_enrollments ADD COLUMN invitation_id TEXT")
+        for statement in ONBOARDING_TABLE_DDL.values():
+            connection.execute(statement)
+        for statement in ONBOARDING_INDEX_DDL:
+            connection.execute(statement)
+        connection.execute("PRAGMA user_version = 3")
+        self._validate_content_free_schema(connection)
 
     def _validate_content_free_schema(self, connection: sqlite3.Connection) -> None:
         if not validate_session_schema(connection):

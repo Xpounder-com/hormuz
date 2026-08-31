@@ -86,6 +86,9 @@ def _snapshot_sha256(config: GatewayConfig) -> str:
     assert isinstance(value, dict) and isinstance(value["fields"], dict)
     assert value["fields"].pop("portfolio_control") is None
     assert value["fields"].pop("attribution_control") is None
+    # The explicitly opt-in directory adds one default-false field. Keep every
+    # preceding field's frozen digest, rather than replacing the baseline.
+    assert value["fields"]["session_broker"]["fields"].pop("onboarding_enabled") is False
     return hashlib.sha256(
         json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
     ).hexdigest()

@@ -18,6 +18,7 @@ from .commands import policy as policy_commands
 from .commands import portfolio as portfolio_commands
 from .commands import runtime as runtime_commands
 from .commands import session as session_commands
+from .commands import onboarding as onboarding_commands
 from .session_store import SessionStoreError
 from .config import ConfigError, GatewayConfig
 from .custody import CustodyError
@@ -74,6 +75,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     client_commands.add_client_commands(subparsers)
     session_commands.add_session_commands(subparsers)
+    onboarding_commands.add_onboarding_commands(subparsers)
 
     audit_commands.add_audit_commands(subparsers)
 
@@ -134,6 +136,8 @@ def main(argv: list[str] | None = None) -> int:
                     analysis_context, args, _policy_command_dependencies()
                 )
         config = GatewayConfig.load(args.config)
+        if args.command == "team":
+            return onboarding_commands.run(config, args)
         if args.command == "portfolio":
             return portfolio_commands.run(config, args)
         if args.command in {"serve", "doctor", "status", "storage"}:

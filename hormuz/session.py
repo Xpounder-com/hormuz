@@ -13,6 +13,7 @@ from typing import Any
 
 from .auth import AuthenticationError, Authenticator, _validate_remote_url
 from .config import GatewayConfig, Identity
+from .onboarding import TeamDirectory
 from .session_store import (
     Enrollment,
     SQLiteSessionStore,
@@ -54,6 +55,7 @@ class SessionBroker:
         self.config = config
         self.authenticator = authenticator
         self.store = store
+        self.directory = TeamDirectory(config, store)
         self.callback_url = config.session_broker.public_base_url + "/v1/auth/callback"
 
     def create_enrollment(
@@ -81,6 +83,8 @@ class SessionBroker:
             organizations = list(self.authenticator.organizations_for_issuer(issuer.issuer))
         except AuthenticationError as error:
             raise SessionBrokerError(error.code) from None
+        if self.config.session_broker.onboarding_enabled:
+            organizations = sorted(set(organizations).union(self.directory.organizations_for_issuer(issuer.issuer)))
         if organization_id is None:
             if len(organizations) != 1:
                 raise SessionBrokerError("organization_required")
@@ -112,6 +116,16 @@ class SessionBroker:
             nonce=nonce,
             pkce_verifier=verifier,
         )
+        return self._authorization_url(flow, state), browser_cookie
+
+    def attach_invitation(self, *, enrollment_id: str, state: str, browser_cookie: str, code: str) -> str:
+        if not self.config.session_broker.onboarding_enabled:
+            raise SessionBrokerError("onboarding_disabled")
+        flow = self.directory.attach_invitation(enrollment_id=enrollment_id, state=state, browser_cookie=browser_cookie, code=code)
+        return self._authorization_url(flow, state)
+
+    def _authorization_url(self, flow, state: str) -> str:
+        enrollment_id = flow.enrollment_id
         issuer = self.config.oidc_issuers.get(flow.issuer)
         if issuer is None or issuer.login is None:
             self.store.fail_enrollment(enrollment_id=enrollment_id)
@@ -122,7 +136,7 @@ class SessionBroker:
             self.store.fail_enrollment(enrollment_id=enrollment_id)
             raise SessionBrokerError(error.code) from error
         challenge = base64.urlsafe_b64encode(
-            hashlib.sha256(verifier.encode("ascii")).digest()
+            hashlib.sha256(flow.pkce_verifier.encode("ascii")).digest()
         ).rstrip(b"=").decode("ascii")
         try:
             authorization_url = _build_authorization_url(
@@ -134,15 +148,16 @@ class SessionBroker:
                     "redirect_uri": self.callback_url,
                     "scope": " ".join(issuer.login.scopes),
                     "state": state,
-                    "nonce": nonce,
+                    "nonce": flow.nonce,
                     "code_challenge": challenge,
                     "code_challenge_method": "S256",
+                    **({"claims": json.dumps({"id_token": {"email": {"essential": True}, "email_verified": {"essential": True}}}, separators=(",", ":"))} if flow.invitation_id else {}),
                 },
             )
         except SessionBrokerError:
             self.store.fail_enrollment(enrollment_id=enrollment_id)
             raise
-        return authorization_url, browser_cookie
+        return authorization_url
 
     def complete_authorization(
         self,
@@ -185,11 +200,17 @@ class SessionBroker:
             id_token = token_response.get("id_token")
             if not isinstance(id_token, str):
                 raise SessionBrokerError("id_token_missing")
-            subject = self.authenticator.validate_login_id_token(
+            claims = self.authenticator.validate_login_claims(
                 id_token,
                 issuer_name=flow.issuer,
                 nonce=flow.nonce,
             )
+            if self.directory.manages_organization(flow.organization_id):
+                if not self.config.session_broker.onboarding_enabled:
+                    raise SessionBrokerError("onboarding_disabled")
+                self.directory.authorize_enrollment(flow=flow, claims=claims)
+                return
+            subject = claims["sub"]
             identity = self.authenticator.identity_for_subject(flow.issuer, subject)
             if identity.identity_type != "human":
                 raise AuthenticationError("human_subject_required")
@@ -250,8 +271,13 @@ class SessionBroker:
         except SessionStoreError as error:
             raise AuthenticationError(error.code) from error
         try:
-            identity = self.authenticator.identity_for_subject(principal.issuer, principal.subject)
-        except AuthenticationError:
+            if principal.membership_id is not None:
+                if not self.config.session_broker.onboarding_enabled:
+                    raise AuthenticationError("session_authorization_removed")
+                identity = self.directory.identity_for_session(principal)
+            else:
+                identity = self.authenticator.identity_for_subject(principal.issuer, principal.subject)
+        except (AuthenticationError, SessionStoreError):
             identity = None
         issuer = self.config.oidc_issuers.get(principal.issuer)
         if issuer is None or issuer.login is None or identity is None or identity.identity_type != "human" or (

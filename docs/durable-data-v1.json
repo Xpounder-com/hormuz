@@ -5,6 +5,20 @@
   "hosted_customer_data_service": false,
   "database_classes": [
     {
+      "id": "team_onboarding_identity",
+      "content_boundary": "identity_and_policy_metadata",
+      "contains_prompt_or_response_body": false,
+      "sqlite_tables": ["onboarding_invitations", "onboarding_memberships", "onboarding_organizations", "onboarding_teams"],
+      "postgresql_tables": []
+    },
+    {
+      "id": "team_onboarding_events",
+      "content_boundary": "metadata_only_evidence",
+      "contains_prompt_or_response_body": false,
+      "sqlite_tables": ["onboarding_events"],
+      "postgresql_tables": []
+    },
+    {
       "id": "portfolio_attribution_metadata",
       "content_boundary": "metadata_only_evidence",
       "contains_prompt_or_response_body": false,
@@ -181,6 +195,14 @@
     }
   ],
   "operator_artifacts": [
+    {
+      "id": "team_invitation_file",
+      "created_when": "operator_issues_or_reissues_a_team_invitation",
+      "storage_location": "new_operator_selected_posix_owner_only_file",
+      "content_boundary": "one_time_invitation_code_and_gateway_organization_member_expiry_metadata",
+      "prompt_or_response_body_boundary": "excluded_by_hormuz_contract",
+      "customer_operator_authority": "private_manual_delivery_revocation_expiry_retention_and_deletion"
+    },
     {
       "id": "sqlite_database_file",
       "created_when": "gateway_startup_or_first_local_operation",

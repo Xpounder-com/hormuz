@@ -27,6 +27,8 @@ unregistered table.
 | `portfolio_registry_control` | `portfolio_audit_events`, `portfolio_cursors`, `portfolio_idempotency` | `portfolio_audit_events`, `portfolio_cursors`, `portfolio_idempotency` | Content-free audit IDs/change classes; actor/role-bound frozen-window cursor state; idempotency identities, keyed request digests, and references to immutable results. No duplicated display labels or raw request/response JSON. |
 | `browser_session_identity` | `session_enrollments`, `human_sessions`, `consumed_refresh_credentials` (separate opt-in database) | — | Exact issuer/subject, tenant/actor/team/client bindings and expiry, keyed credential hashes, and AEAD-encrypted transient nonce/PKCE verifier. No raw access/refresh credential, IdP token, authorization code, prompt, or response. |
 | `browser_session_security_events` | `session_security_events` (separate opt-in database) | — | Local metadata-only logout, refresh-replay, and mapping-removal events. These are not immutable audit-chain evidence. |
+| `team_onboarding_identity` | `onboarding_organizations`, `onboarding_teams`, `onboarding_memberships`, `onboarding_invitations` (session database) | — | Operator-assigned identity metadata, stable subject bindings, membership status/version and keyed recipient/code hashes. No raw email or invitation code. |
+| `team_onboarding_events` | `onboarding_events` (session database) | — | Transactional organization, team, invitation and member transitions with a truthful local-operator/member actor. Not immutable audit-chain evidence. |
 | `schema_migration_state` | `hormuz_schema_migrations` | `hormuz_schema_migrations` | Applied migration version and state; operational metadata only. |
 | `usage_and_secret_evidence` | `gateway_secret_events`, `gateway_usage_events` | `gateway_secret_events`, `gateway_usage_events` | Event-time identity/team, client/model/policy outcome, tokens, estimated cost, provider-request metadata, and rule IDs/counts. No prompt, response, or matched secret value. |
 | `budget_reservations` | `gateway_budget_reservations` | `gateway_budget_reservations` | Temporary conservative token/cost reservations bound to organization, team, actor, and attempt metadata. |
@@ -110,11 +112,23 @@ customer-operated copy with its own obligations.
 
 ## Export, retention, backup, and deletion
 
+The team operator command creates `team_invitation_file`, a new POSIX owner-only
+file containing a one-time secret code and connection metadata for manual private
+delivery. Keep it out of repositories, logs and shared artifacts; delete it after
+delivery/expiry under your retention policy and revoke outstanding invitations
+before disposing of a lost file. The operator-supplied recipient-email input file
+also remains under the operator's retention/deletion control. This preview does
+not send email or automatically erase these files or their backups.
+
 The opt-in local login adapter also creates `session_database_file`, an
 owner-only SQLite file plus WAL/SHM sidecars at the configured session path,
 and `client_session_secure_store`, an access/refresh pair held by the approved
 OS credential store. The session file is separate from routine usage data;
-its identity bindings are sensitive even though credential values are hashed.
+schema 3 also stores managed membership, invitation hashes and local transition
+events. See [team onboarding](TEAM_ONBOARDING.md) for the schema 2 upgrade and
+offboarding/reinvite behavior. Membership tombstones prevent email reuse from
+reassigning an established account and must not be deleted to re-enable access.
+Its identity bindings are sensitive even though credential values are hashed.
 Only nonce/PKCE flow material is recoverably encrypted. Expired enrollment
 rows are removed on the next enrollment, and consumed refresh hashes expire
 after the session's absolute lifetime. Revoked/expired session rows and local
@@ -127,6 +141,12 @@ or consumed credentials: rotate the master key before restoring the local
 broker, forcing fresh logins. Online key rotation, distributed session storage,
 immutable session events, and automated tenant erasure are not implemented by
 this adapter. See [local login](HOSTED_LOGIN_LOCAL.md).
+
+That session-only reset is insufficient once managed team onboarding is in use:
+recipient hashes also depend on the key, and restored membership decisions can
+be stale. Managed-directory key migration and revocation reconciliation are
+explicit deployment gates in [team onboarding](TEAM_ONBOARDING.md); do not serve
+a restored directory as if an old backup preserved current access decisions.
 
 For the v1 self-hosted release, customer database and backup operators are responsible
 for export, retention, backup, restore, and deletion using their controlled
