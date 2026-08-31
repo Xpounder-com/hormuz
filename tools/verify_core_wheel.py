@@ -148,6 +148,16 @@ REQUIRED_OUTCOME_PREFLIGHT_SDIST_PATHS = (
     "tests/test_sqlite_outcome_transition.py",
     "tests/test_postgres_outcome_transition.py",
 )
+REQUIRED_FINANCE_PREFLIGHT_SDIST_PATHS = (
+    "docs/FINANCE_TRANSITION.md",
+    "docs/finance-transition-plan-v1.json",
+    "docs/finance-source-contract-v1.json",
+    "tools/verify_finance_transition_plan.py",
+    "tests/_finance_predecessor_fixture.py",
+    "tests/test_finance_transition_plan.py",
+    "tests/test_sqlite_finance_transition.py",
+    "tests/test_postgres_finance_transition.py",
+)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -175,6 +185,7 @@ def main(argv: list[str] | None = None) -> int:
     _assert_registry_preflight_sdist_boundary(sdist)
     _assert_attribution_preflight_sdist_boundary(sdist)
     _assert_outcome_preflight_sdist_boundary(sdist)
+    _assert_finance_preflight_sdist_boundary(sdist)
     _verify_isolated_install(wheel, config, python)
     print(
         "verified core distribution boundary: no context/runtime data and complete deployment/usability assets"
@@ -273,6 +284,16 @@ def _assert_outcome_preflight_sdist_boundary(path: Path) -> None:
     ]
     if missing:
         raise RuntimeError(f"Outcome preflight incomplete in {path.name}: {', '.join(sorted(missing))}")
+
+
+def _assert_finance_preflight_sdist_boundary(path: Path) -> None:
+    members = tuple(name.lstrip("./") for name in _sdist_members(path))
+    missing = [
+        required for required in REQUIRED_FINANCE_PREFLIGHT_SDIST_PATHS
+        if not any(f"/{member}".endswith(f"/{required}") for member in members)
+    ]
+    if missing:
+        raise RuntimeError(f"Finance preflight incomplete in {path.name}: {', '.join(sorted(missing))}")
 
 
 def _verify_isolated_install(wheel: Path, config_template: Path, base_python: Path) -> None:
