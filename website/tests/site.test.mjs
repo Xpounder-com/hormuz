@@ -5,10 +5,10 @@ import { createHash } from 'node:crypto';
 import { sitePath, siteUrl, CONTACT_EMAIL } from '../lib/site.mjs';
 import { buildInquiry, campaignSource } from '../lib/contact.mjs';
 
-test('every native site path has the GitHub project prefix', () => {
-  assert.equal(sitePath('/'), '/hormuz/');
-  assert.equal(sitePath('/docs/#quickstart'), '/hormuz/docs/#quickstart');
-  assert.equal(siteUrl('/contact/'), 'https://xpounder-com.github.io/hormuz/contact/');
+test('native paths and metadata use the dedicated organization root', () => {
+  assert.equal(sitePath('/'), '/');
+  assert.equal(sitePath('/docs/#quickstart'), '/docs/#quickstart');
+  assert.equal(siteUrl('/contact/'), 'https://usehormuz.github.io/contact/');
   assert.throws(() => sitePath('https://example.com'));
   assert.throws(() => sitePath('//example.com'));
 });

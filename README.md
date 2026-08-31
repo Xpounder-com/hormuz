@@ -23,9 +23,9 @@ written to the usage database.
 > does not prove external human usability, blanket production fitness, customer
 > SLA coverage, provider billing accuracy, or independent security review.
 
-[Website](https://xpounder-com.github.io/hormuz/) ·
-[Recorded demo](https://xpounder-com.github.io/hormuz/demo/) ·
-[Enterprise evaluation](https://xpounder-com.github.io/hormuz/enterprise/)
+[Website](https://usehormuz.github.io/) ·
+[Recorded demo](https://usehormuz.github.io/demo/) ·
+[Enterprise evaluation](https://usehormuz.github.io/enterprise/)
 
 [Benefits](#why-hormuz) · [Quickstart](#quickstart) ·
 [Usage reporting](#usage-visibility-without-content-capture) ·
@@ -371,15 +371,15 @@ The initial paid offer is a scoped, founder-led evaluation or integration
 engagement around the same product—not an established proprietary edition,
 hosted service, certification, or 24/7 SLA.
 
-See the [OSS/support comparison](https://xpounder-com.github.io/hormuz/enterprise/),
+See the [OSS/support comparison](https://usehormuz.github.io/enterprise/),
 [proposed pilot scope](marketing/PILOT.md),
-[buyer resources](https://xpounder-com.github.io/hormuz/resources/), and
+[buyer resources](https://usehormuz.github.io/resources/), and
 [security brief](marketing/TRUST.md). Scope, price, capacity, support hours,
 response targets, and terms must be agreed before work begins.
 
 Public maintainer: **Mehrdad Zaker**. For evaluation inquiries, use
 `zaker.mehrdad@gmail.com` or the
-[local email-draft form](https://xpounder-com.github.io/hormuz/contact/).
+[local email-draft form](https://usehormuz.github.io/contact/).
 Vulnerabilities must still follow [SECURITY.md](SECURITY.md).
 
 The [current marketing packet](marketing/README.md) is separate from the

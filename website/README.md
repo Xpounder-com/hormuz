@@ -1,6 +1,9 @@
-# Hormuz project website
+# Hormuz website
 
-Static Next.js export deployed at **https://xpounder-com.github.io/hormuz/**.
+Static Next.js export for **https://usehormuz.github.io/**. This repository
+remains the authoritative website source; the dedicated
+[`usehormuz/usehormuz.github.io`](https://github.com/usehormuz/usehormuz.github.io)
+repository pins a reviewed source commit for publication.
 The existing Hormuz visual system is retained. This project site emphasizes
 open-source documentation, demos, and community; enterprise information is
 secondary and there is no checkout, hosted application, or form backend.
@@ -20,36 +23,72 @@ npm run verify
 node scripts/serve-preview.mjs
 ```
 
-Preview: `http://127.0.0.1:3100/hormuz/`. The build output is `out/` and is
+Preview: `http://127.0.0.1:3100/`. The build output is `out/` and is
 gitignored. Google-hosted Geist fonts are fetched at build time and self-hosted
 in the export; visitors do not request the Google font service.
 
-`basePath` is fixed at `/hormuz`; **native anchors are not automatically
-rewritten by Next.js**. Use `sitePath` and `siteUrl` for routes/assets/metadata.
+`basePath` is empty for the dedicated organization-root site. Use the shared
+`sitePath` and `siteUrl` helpers for routes/assets/metadata; the origin and
+route inventory live in `lib/site.mjs`.
 The verifier checks every exported local link, source-document target, fragment,
 canonical URL, OG image, download, and sitemap entry. It does not claim that an
 external website will stay online or that search engines have indexed the site.
 
-`/hormuz/robots.txt` is supplied for portability, but a project cannot control
-the origin-root `/robots.txt` with this repository. Per-page robot metadata and
-the project sitemap are present. No organization-root repository was created.
+The root site owns `/robots.txt` and `/sitemap.xml`. Canonicals and social images
+use the new origin. Neither the product repository nor its release, package,
+or container identity changes with the website address.
 
 ## Deployment and rollback
 
-`.github/workflows/website.yml` builds on every PR and main push, including changes
-to linked root/source documents. Only
-main can upload/deploy a Pages artifact. Deployment has narrowly scoped Pages
+`.github/workflows/website.yml` checks the root export on every PR and main push,
+including changes to linked root/source documents. It then prepares compatibility
+pages for the former `https://xpounder-com.github.io/hormuz/` address. Only main
+can upload/deploy those redirects. Deployment retains narrowly scoped Pages
 and OIDC permissions; PR builds cannot deploy. Product CI and branch protections
-remain unchanged. GitHub repository Pages settings must use **GitHub Actions**.
+remain unchanged. Both repositories' Pages settings use **GitHub Actions**.
 
-To update: open a normal PR, review claims and rendered pages, wait for all
-required checks plus Website checks, then merge through the permitted workflow.
-The main-branch workflow publishes that validated static export. Verify the live
-home, demo, Docs, contact, and downloads after deployment before changing inbound
-links or announcing the update.
+The dedicated website repository checks out an exact 40-character source commit
+from this public repository, installs locked dependencies, and runs the website
+tests, build, type check, and export verifier before publishing the root export.
+It does **not** run `prepare:legacy`. No cross-repository write token is needed.
+The artifact contains the public `/site-source.json` pin. A separate read-only
+CI job verifies the live pin, nine routes, metadata, and four downloads after
+deployment, without giving verification code Pages or OIDC write permissions.
+Update its source pin through a reviewed PR after the corresponding product
+source change passes review and CI; source changes do not silently republish the
+canonical website.
 
-To roll back: use a reviewed revert PR for the website changes and let the same
-workflow deploy it. Do not rewrite main or bypass protections. The original
+For the initial migration, publish and verify the new root site from the reviewed
+migration commit **before** merging the product change that enables old-address
+redirects. Check all nine routes, recordings, contact draft behavior, PDFs, PPTX,
+mobile navigation, and metadata. Then merge through the protected workflow,
+verify the old route redirects and downloads, and update inbound repository links.
+An unavailable organization or unverified target is a cutover blocker, not a
+reason to replace the working site early.
+
+The legacy export preserves known route fragments, drops query strings (which
+can contain private text), suppresses the old URL as a referrer, and provides a
+manual link plus an immediate no-JavaScript refresh fallback. The immediate fallback follows
+[Google's redirect guidance](https://developers.google.com/search/docs/crawling-indexing/301-redirects).
+Static Pages cannot return custom HTTP 301 responses; these
+are HTML redirects with canonical links. Unknown old routes show a safe link
+to the new home instead of forwarding arbitrary destinations. Existing asset
+and download URLs remain available. To check this export locally after a build:
+
+```sh
+npm run verify
+npm run prepare:legacy
+node scripts/serve-preview.mjs --legacy
+```
+
+This preview uses `http://127.0.0.1:3100/hormuz/`. Rebuild before previewing or
+publishing the canonical root site again; `prepare:legacy` modifies only the
+gitignored `out/` artifact, never source files or release artifacts.
+
+To roll back the root site, restore a previously verified source pin through a
+reviewed PR in the website repository. To restore the old full project site,
+revert the migration through a reviewed product PR and its existing workflow.
+Do not rewrite main or bypass protections. The original
 Sites deployment is retained until the replacement is verified; this repository
 does not silently delete it or mutate the immutable product release artifacts.
 

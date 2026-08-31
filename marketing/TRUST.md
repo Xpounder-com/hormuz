@@ -49,7 +49,7 @@ your environment instead of treating a reference profile as blanket approval.
 
 ## Inspect the proof
 
-The [demo page](https://xpounder-com.github.io/hormuz/demo/) includes real CLI
+The [demo page](https://usehormuz.github.io/demo/) includes real CLI
 recordings and a JSONL sample from a separate synthetic run: four usage events
 and one secret-control event, validated before export. No customer data is used.
 See [audit schemas](../docs/AUDIT.md), [architecture](../docs/ARCHITECTURE.md),
