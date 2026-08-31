@@ -20,10 +20,16 @@ test('dedicated publication uses read-only source builds and a main-only Pages b
   assert.equal((workflow.match(/pages: write/g) || []).length, 1);
   assert.equal((workflow.match(/id-token: write/g) || []).length, 1);
   const guard = "if: github.repository == 'usehormuz/usehormuz.github.io' && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'";
-  assert.equal(workflow.split(guard).length - 1, 2);
+  assert.equal(workflow.split(guard).length - 1, 3);
   assert.match(workflow, /ref: \$\{\{ steps\.source\.outputs\.revision \}\}/);
   assert.match(workflow, /repository: Xpounder-com\/hormuz/);
-  assert.equal((workflow.match(/persist-credentials: false/g) || []).length, 2);
+  assert.equal((workflow.match(/persist-credentials: false/g) || []).length, 3);
+  assert.match(workflow, /cp site-source\.json product\/website\/out\/site-source\.json/);
+  assert.match(workflow, /needs: deploy/);
+  assert.match(workflow, /run: node scripts\/verify-live-site\.mjs/);
+  const deploy = workflow.split('\n  deploy:\n')[1].split('\n  verify:\n')[0];
+  assert.equal((deploy.match(/uses:/g) || []).length, 1);
+  assert.doesNotMatch(deploy, /run:|checkout|setup-node/);
   assert.doesNotMatch(workflow, /contents: write|pull_request_target|prepare:legacy|secrets\./);
   for (const [, action] of workflow.matchAll(/uses: ([^\s]+)/g)) assert.match(action, /@[a-f0-9]{40}$/);
 });

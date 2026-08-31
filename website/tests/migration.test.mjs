@@ -38,6 +38,8 @@ test('all known old routes use fixed new destinations and retain fragments only'
   assert.equal(new Set(SITE_ROUTES).size, SITE_ROUTES.length);
   for (const route of SITE_ROUTES) {
     const html = legacyPage(route);
+    assert.ok(html.includes('<meta name="referrer" content="no-referrer">'));
+    assert.ok(html.indexOf('name="referrer"') < html.indexOf('<script>'));
     assert.ok(html.includes(`<link rel="canonical" href="${siteUrl(route)}">`));
     assert.ok(html.includes(`<noscript><meta http-equiv="refresh" content="0;url=${siteUrl(route)}"></noscript>`));
     assert.doesNotMatch(html, /noindex/);

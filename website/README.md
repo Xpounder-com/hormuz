@@ -51,6 +51,9 @@ The dedicated website repository checks out an exact 40-character source commit
 from this public repository, installs locked dependencies, and runs the website
 tests, build, type check, and export verifier before publishing the root export.
 It does **not** run `prepare:legacy`. No cross-repository write token is needed.
+The artifact contains the public `/site-source.json` pin. A separate read-only
+CI job verifies the live pin, nine routes, metadata, and four downloads after
+deployment, without giving verification code Pages or OIDC write permissions.
 Update its source pin through a reviewed PR after the corresponding product
 source change passes review and CI; source changes do not silently republish the
 canonical website.
@@ -64,8 +67,8 @@ An unavailable organization or unverified target is a cutover blocker, not a
 reason to replace the working site early.
 
 The legacy export preserves known route fragments, drops query strings (which
-can contain private text), and provides a manual link plus an immediate
-no-JavaScript refresh fallback. The immediate fallback follows
+can contain private text), suppresses the old URL as a referrer, and provides a
+manual link plus an immediate no-JavaScript refresh fallback. The immediate fallback follows
 [Google's redirect guidance](https://developers.google.com/search/docs/crawling-indexing/301-redirects).
 Static Pages cannot return custom HTTP 301 responses; these
 are HTML redirects with canonical links. Unknown old routes show a safe link

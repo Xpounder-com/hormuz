@@ -13,7 +13,7 @@ export function legacyPage(route, { redirect = true } = {}) {
   const navigation = redirect ? `<noscript><meta http-equiv="refresh" content="0;url=${target}"></noscript>
 <script>window.location.replace(${JSON.stringify(target)} + window.location.hash);</script>` : '';
   return `<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="referrer" content="no-referrer">
 <title>Hormuz has moved</title>${redirect ? '' : '<meta name="robots" content="noindex, follow">'}<link rel="canonical" href="${target}">
 ${navigation}
 <style>body{margin:0;background:#f5f5f0;color:#14252b;font:1.15rem/1.6 system-ui,sans-serif}main{max-width:42rem;margin:15vh auto;padding:2rem}a{color:#06675f;text-underline-offset:.2em}a:focus-visible{outline:3px solid #06675f;outline-offset:5px}</style>

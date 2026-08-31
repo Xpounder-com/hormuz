@@ -103,3 +103,22 @@ remote checks, and live verification of the new root site (including mobile
 navigation and downloads) before merging the old-address redirect cutover.
 Old public URLs have not been changed by these local checks. Deployment evidence
 and the exact source pin belong in the migration PR and publication repository.
+## Publication safeguards — 2026-08-31
+
+Follow-up review before the root-site publication added an explicit
+`no-referrer` policy to the compatibility pages. The destination remains fixed,
+fragments are retained, and query strings are not forwarded.
+
+The dedicated publication workflow now includes its validated public source pin
+in the artifact and uses a separate read-only post-deploy job to verify the live
+pin, all nine canonical routes, robots/sitemap metadata, and four download
+signatures. The privileged Pages job still executes only the pinned deployment
+action; verification receives no Pages or OIDC write permission.
+
+Local checks after these changes: 23 Node tests and 9 Python tests passed;
+static build, type check, and export verification passed (9 pages, 342 local
+links, 17 source targets). Workflow YAML parsing and permission-boundary checks
+passed. Negative cases cover stale/invalid source pins, redirects, network
+failure, missing routes, incorrect canonicals, HTML in place of downloads, and
+incomplete metadata. These are local checks, not a claim that the new host is
+already live. Live browser and document-layout QA remain separate gates.

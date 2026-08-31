@@ -6,8 +6,8 @@ The website source stays in `Xpounder-com/hormuz/website`.
 
 ## Repository contents
 
-Copy `root-pages.yml` to `.github/workflows/website.yml` and
-`verify-source-pin.mjs` to `scripts/verify-source-pin.mjs` in the dedicated
+Copy `root-pages.yml` to `.github/workflows/website.yml`, plus
+`verify-source-pin.mjs` and `verify-live-site.mjs` to `scripts/` in the dedicated
 website repository. Add `site-source.json` with exactly these fields:
 
 ```json
@@ -22,6 +22,11 @@ commit after review and required CI. The validator rejects movable branches,
 tags, abbreviated SHAs, alternate repositories, extra fields, and newline
 injection. Existence is verified by the pinned checkout action. Review/CI
 approval is a human publication gate, not something the JSON format can prove.
+The validated pin is included in the public artifact as `/site-source.json`.
+A separate, read-only post-deploy job verifies that pin, all nine canonical
+routes, robots/sitemap metadata, and the four download signatures. It follows
+no redirects and fails on stale source or unavailable content. Interactive
+browser and document-layout QA remain separate checks.
 
 Copy the existing Apache-2.0 license without changing product ownership. Use
 GitHub Free, a public repository, Pages with GitHub Actions, and main-only Pages
