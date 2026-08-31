@@ -83,3 +83,27 @@ class SQLiteFinanceTests(FinanceAssertions, unittest.TestCase):
         self.error("unavailable", lambda: self.register(repository=repository))
         self.error("unavailable", lambda: self.get(repository=repository))
         self.assertFalse(path.exists())
+
+    def test_sqlite_finance_malformed_audit_maximum_fails_closed_without_writes(self):
+        # SQLite's BIGINT affinity and numeric CHECK admit text, blobs and
+        # fractional/out-of-range reals. Exercise actual stored values, not mocks.
+        for sequence in ("SYNTHETIC_EXCLUDED", b"SYNTHETIC_EXCLUDED", 1.5,
+                         float("inf"), float(9223372036854775808), 9223372036854775807):
+            with self.subTest(sequence=sequence), tempfile.TemporaryDirectory() as directory:
+                config = registry_config(Path(directory))
+                UsageStore(config.database_path)
+                repository = create_finance_repository(config)
+                self.register(repository=repository)
+                with sqlite3.connect(config.database_path) as connection:
+                    connection.execute(
+                        f"INSERT INTO {AUDIT} SELECT organization_id, ?, ?, actor_id, 'read', "
+                        f"rate_card_id, version, content_digest, occurred_at FROM {AUDIT} WHERE sequence=1",
+                        ("0" * 32, sequence),
+                    )
+                    maximum = connection.execute(f"SELECT MAX(sequence) FROM {AUDIT}").fetchone()[0]
+                    self.assertEqual(maximum, sequence)
+                    self.assertIs(type(maximum), type(sequence))
+                before = sqlite_snapshot(config.database_path)
+                self.error("unavailable", lambda: self.register(repository=repository, version=2))
+                self.error("unavailable", lambda: self.get(repository=repository))
+                self.assertEqual(sqlite_snapshot(config.database_path), before)

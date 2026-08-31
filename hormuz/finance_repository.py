@@ -128,10 +128,13 @@ class FinanceRateCardRepository:
 
     @staticmethod
     def _audit(sql, principal, operation, card, event_id, now):
-        sequence = int(sql.one("SELECT COALESCE(MAX(sequence),0) AS sequence FROM portfolio_finance_audit_events WHERE organization_id=?",
-                               (principal.organization_id,))["sequence"]) + 1
-        if not 1 <= sequence <= 9223372036854775807:
+        maximum = sql.one("SELECT COALESCE(MAX(sequence),0) AS sequence FROM portfolio_finance_audit_events WHERE organization_id=?",
+                          (principal.organization_id,))["sequence"]
+        # SQLite may store non-integers despite BIGINT affinity and CHECKs.
+        # Never coerce malformed history or overflow the next audit sequence.
+        if type(maximum) is not int or not 0 <= maximum < 9223372036854775807:
             raise FinanceRepositoryError("unavailable")
+        sequence = maximum + 1
         body = card.as_mapping()
         sql.insert("portfolio_finance_audit_events", {
             "organization_id": principal.organization_id, "event_id": event_id, "sequence": sequence,

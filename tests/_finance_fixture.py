@@ -168,6 +168,23 @@ class FinanceAssertions:
         self.assertEqual(self.finance_rows(), before)
         self.assertEqual(self.get(), first)
 
+    def test_rate_card_audit_sequence_limit_never_wraps_or_partially_writes(self):
+        first = self.register()
+        with self.repository._transaction(ADMIN) as sql:
+            sql.insert(AUDIT, {
+                "organization_id": ADMIN.organization_id, "event_id": "0" * 32,
+                "sequence": 9223372036854775806, "actor_id": ADMIN.actor_id, "operation": "read",
+                "rate_card_id": "synthetic-rate-card", "version": 1,
+                "content_digest": first.card.content_digest, "occurred_at": sql.now(),
+            })
+        last = self.register(version=2)
+        self.assertEqual(last.sequence, 9223372036854775807)
+        before = self.finance_rows()
+        self.error("unavailable", lambda: self.register(version=3))
+        self.error("unavailable", self.get)
+        self.assertEqual(self.register(version=2), last)
+        self.assertEqual(self.finance_rows(), before)
+
     def test_rate_card_concurrent_replicas_bind_one_identity_to_one_receipt(self):
         barrier = threading.Barrier(4)
 
