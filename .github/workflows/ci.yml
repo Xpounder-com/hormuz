@@ -100,6 +100,15 @@ jobs:
             > "$RUNNER_TEMP/context-pack.json"
           CONTEXT_PACK_PATH="$RUNNER_TEMP/context-pack.json" "$RUNNER_TEMP/hormuz-wheel/bin/python" -c 'import json, os, pathlib; value = json.loads(pathlib.Path(os.environ["CONTEXT_PACK_PATH"]).read_text()); assert value["schema_version"] == "hormuz.context-pack.v1"; assert value["items"]'
           "$RUNNER_TEMP/hormuz-wheel/bin/python" -m unittest discover -s experiments/context/tests -v
+      - name: Verify exact finance values from the installed core wheel
+        run: |
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/hormuz-wheel/bin/python" -I -m unittest discover \
+            -s "$GITHUB_WORKSPACE/tests" -p test_finance_values.py -v
+          "$RUNNER_TEMP/hormuz-wheel/bin/python" -I -m unittest discover \
+            -s "$GITHUB_WORKSPACE/tests" -p test_finance_usage.py -v
+          "$RUNNER_TEMP/hormuz-wheel/bin/python" -I -m unittest discover \
+            -s "$GITHUB_WORKSPACE/tests" -p test_finance_rate_cards.py -v
       - name: Verify the resolved license boundary for every declared extra
         run: |
           python -m venv "$RUNNER_TEMP/hormuz-license"
