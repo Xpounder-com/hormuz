@@ -353,7 +353,8 @@
         "provenance_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "evidence_level": "descriptive",
         "association_eligibility": "inconclusive",
-        "reader_role": "portfolio_admin"
+        "reader_role": "portfolio_admin",
+        "commit_sequence": 1
       }
     },
     {
@@ -420,7 +421,8 @@
         "provenance_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "evidence_level": "descriptive",
         "association_eligibility": "inconclusive",
-        "reader_role": "portfolio_admin"
+        "reader_role": "portfolio_admin",
+        "commit_sequence": 1
       }
     },
     {
@@ -516,7 +518,8 @@
             "provenance_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             "evidence_level": "descriptive",
             "association_eligibility": "inconclusive",
-            "reader_role": "portfolio_admin"
+            "reader_role": "portfolio_admin",
+            "commit_sequence": 1
           }
         ],
         "has_more": false,

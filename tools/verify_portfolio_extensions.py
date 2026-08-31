@@ -24,8 +24,12 @@ from tools._portfolio_wire_contract import (
 )
 
 CONTRACT_PATH = "docs/portfolio-extension-contract-v1.json"
-MANIFEST_SHA256 = "2d83530ee7ea10ec5dcaf7249a7ed7b3ece1e5b9a7822c0e36ef21a9cac70171"
+MANIFEST_SHA256 = "8ff2069fc5dec957a9ec1980087c94fbc259f61f5b07ec71f51357af8453fda4"
 MAX_FILE_BYTES = 256 * 1024
+MAX_PAYLOAD_BYTES = 1024 * 1024
+# Every JSON member occupies at least one byte. This is a conservative walk
+# bound, not an undocumented restriction tighter than the wire byte limit.
+MAX_PAYLOAD_MEMBERS = MAX_PAYLOAD_BYTES
 FROZEN_FILES = {
     "docs/portfolio-intelligence-contract-v1.json": "40c27f7555631d2ecaa004f6481eef07d565ccebcb5e206106c5820ee3586c49",
     "docs/portfolio-intelligence-wire-v1.json": "26ef36b12d475d5b8354e45abfc92c76187ca6ff5aafb4b0ebce6fab439feb80",
@@ -39,7 +43,7 @@ FROZEN_FILES = {
 WIRE_FILES = {
     "budget": {
         "path": "docs/work-budget-reports-wire-v1.json",
-        "sha256": "fedc765980a6b40e05dde9d08fd92b724f390d6d59feb217c70374c07c19ddf4",
+        "sha256": "6a45a010de84273be45da85115d8d41267d5689addd29df592c47e8704a29cbf",
         "schema_ids": [
             "hormuz.work-budget-preview",
             "hormuz.work-budget-report"
@@ -47,7 +51,7 @@ WIRE_FILES = {
     },
     "linear": {
         "path": "docs/linear-context-wire-v1.json",
-        "sha256": "80acbb06480e3b156d8bbb81fe2aad8bfb287b135c43f1770ec124ca8927d19e",
+        "sha256": "66a708b9456ced1fd0c919cd1a92b4f461d3900e11766e01afd64c29e2d958f0",
         "schema_ids": [
             "hormuz.linear-context-event",
             "hormuz.linear-context-page",
@@ -56,7 +60,7 @@ WIRE_FILES = {
     }
 }
 FIXTURE_PATH = "tests/fixtures/portfolio_intelligence/extension-v1-examples.json"
-FIXTURE_SHA256 = "44d92038776d2fcc53c4144d4e918b4b198070b6fab8f2790e82d072fd36e9da"
+FIXTURE_SHA256 = "c707e4080181c06d139203a6287025587acd1e01bc2785e70d734fde68089d2a"
 DOCUMENTATION = (
     "docs/PORTFOLIO_EXTENSIONS.md",
     "docs/decisions/0011-additive-budget-reports-and-linear-context.md",
@@ -124,15 +128,19 @@ def _integer_payload(value):
     pending, members = [(value, 0)], 0
     while pending:
         item, depth = pending.pop()
-        if depth > 16 or members > 16384:
+        if depth > 16 or members > MAX_PAYLOAD_MEMBERS:
             _fail("extension_payload_bounds")
         if isinstance(item, float):
             _fail("extension_payload_integer_required")
         if isinstance(item, dict):
             members += len(item)
+            if members > MAX_PAYLOAD_MEMBERS:
+                _fail("extension_payload_bounds")
             pending.extend((child, depth + 1) for child in item.values())
         elif isinstance(item, list):
             members += len(item)
+            if members > MAX_PAYLOAD_MEMBERS:
+                _fail("extension_payload_bounds")
             pending.extend((child, depth + 1) for child in item)
 
 
@@ -157,6 +165,11 @@ def _preview(value):
         _fail("extension_preview_counts_invalid")
     elif counts["inconclusive_attempts"] and value["result"] != "inconclusive":
         _fail("extension_preview_evidence_missing")
+    if value["result"] == "compatible" and (
+            not counts["evaluated_attempts"] or counts["denied_attempts"] or value["restriction_reasons"]):
+        _fail("extension_preview_result_invalid")
+    if value["result"] == "would_restrict" and not counts["denied_attempts"]:
+        _fail("extension_preview_result_invalid")
     if value["result"] == "would_restrict" and not value["restriction_reasons"]:
         _fail("extension_preview_restriction_missing")
 
@@ -190,6 +203,10 @@ def _financial_observation(item, currency):
     if item["scope_status"] != "matches_work_scope":
         if item["amount"] is not None or item["currency"] is not None or item["reason_code"] != "scope_mismatch":
             _fail("extension_finance_scope_invalid")
+        return
+    if item["reason_code"] in ("missing_evidence", "unsupported_currency", "not_available"):
+        if item["amount"] is not None or item["currency"] is not None:
+            _fail("extension_finance_currency_or_amount_invalid")
         return
     if item["amount"] is None or item["currency"] != currency or item["reason_code"] != "known":
         _fail("extension_finance_currency_or_amount_invalid")
@@ -308,6 +325,10 @@ def _context(value):
         _fail("extension_context_delivery_invalid")
     if value["supersedes_context_event_id"] == value["context_event_id"]:
         _fail("extension_context_self_supersession")
+    if value["supersedes_context_event_id"] is not None and (
+            revision["kind"] == "unknown" or value["ordering_state"] != "current"
+            or value["relationship_coverage"] != "complete"):
+        _fail("extension_context_supersession_invalid")
     # Source/observation/DB clocks may differ. Do not falsify or order them as
     # causal proof. The source clock only restricts eligibility, not retention.
 
@@ -315,17 +336,20 @@ def _context(value):
 def _page(value):
     if value["has_more"] != (value["next_cursor"] is not None) or (value["has_more"] and not value["items"]):
         _fail("extension_page_cursor_invalid")
-    identities, ordering = set(), []
+    identities, sequences, ordering = set(), set(), []
     for item in value["items"]:
         _context(item)
         if item["organization_id"] != value["organization_id"]:
             _fail("extension_page_scope_invalid")
-        if _time(item["ingested_at"]) > _time(value["as_of"]) or value["snapshot_sequence"] == 0:
+        if item["commit_sequence"] > value["snapshot_sequence"]:
             _fail("extension_page_snapshot_invalid")
         identity = item["connector_id"], item["context_event_id"]
         if identity in identities:
             _fail("extension_page_identity_duplicate")
         identities.add(identity)
+        if item["commit_sequence"] in sequences:
+            _fail("extension_page_sequence_duplicate")
+        sequences.add(item["commit_sequence"])
         ordering.append((_time(item["event_at"] or item["observed_at"]), *identity))
     if ordering != sorted(ordering, reverse=True):
         _fail("extension_page_order_invalid")

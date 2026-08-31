@@ -27,12 +27,18 @@ Reports are scoped aggregates; unknowns remain null, evidence bases separate,
 and broader provider totals cannot become work-scope costs. An optional exact
 linear committed-estimate projection is explicitly not predictive confidence,
 guaranteed savings or final invoice spend, and excludes pending/uncertain holds.
+The derived remaining amount covers the full subtraction range without
+widening financial inputs. Reports name a positive historical activation;
+unavailable amounts keep their known source provenance without becoming zero.
 
 Linear context retains typed metadata and parent sets independently of issue
 outcomes. Parent relationships do not grant authority, select a primary work
 scope or prove that an AI run caused an outcome. Raw context remains
 administrator-only. Missing/partial parent coverage cannot remove prior links.
 A separate operator retention marker cannot impersonate provider deletion.
+Supersession requires a complete, current, known source revision. A distinct
+positive database commit sequence defines page membership independently of
+cross-component wall clocks. These fields remain design metadata, not live proof.
 
 ## Alternatives
 

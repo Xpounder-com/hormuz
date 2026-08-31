@@ -245,7 +245,7 @@
         "reason_code",
         "allocation_rule"
       ],
-      "description": "Separate observation, not an additive line item. Broader/unattributed amounts are withheld from work-scope reports; unknown amount/currency are null. A digest or provider API alone does not prove final invoice authority."
+      "description": "Separate observation, not an additive line item. Broader/unattributed amounts are withheld from work-scope reports; unknown amount/currency are null. A digest or provider API alone does not prove final invoice authority. Exact-scope observations retain known basis/source/provenance when amount and currency are null with missing_evidence, unsupported_currency or not_available; such a row is not a known monetary fact."
     },
     "enforcement": {
       "type": "object",
@@ -291,7 +291,7 @@
         "remaining_amount": {
           "anyOf": [
             {
-              "$ref": "#/$defs/signed_decimal"
+              "$ref": "#/$defs/remaining_decimal"
             },
             {
               "type": "null"
@@ -666,7 +666,8 @@
             "compatible",
             "would_restrict",
             "inconclusive"
-          ]
+          ],
+          "description": "Compatible requires a complete nonempty simulation with zero denials/inconclusive attempts and no restriction reasons. Would-restrict requires known denied attempts and reasons. Unknown, empty or inconclusive evidence cannot claim compatibility."
         },
         "restriction_reasons": {
           "type": "array",
@@ -761,7 +762,7 @@
           "$ref": "#/$defs/version_ref"
         },
         "activation_generation": {
-          "$ref": "#/$defs/count"
+          "$ref": "#/$defs/version"
         },
         "policy": {
           "$ref": "#/$defs/policy_ref"
@@ -830,6 +831,13 @@
         "coverage"
       ],
       "description": "Planned immutable authorized work-scope aggregate. Authority and team/role restrictions apply before data access/aggregation, not after raw peer rows are loaded. No new current runtime role capability."
+    },
+    "remaining_decimal": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 39,
+      "pattern": "^-?(?:0|[1-9][0-9]{0,18})(?:\\.[0-9]{1,18})?(?![\\s\\S])",
+      "description": "Exact derived signed remaining amount, up to 19 integer and 18 fractional digits so subtraction of three 18/18 charges is always representable. Not a wider money-input type."
     }
   },
   "oneOf": [
@@ -856,9 +864,9 @@
     "compatibility": "New named output records only. Frozen work-budget-plan/request/activation, v1 manifest, routes, errors, CLI behavior and immutable usage remain unchanged. Existing clients require no edits; no deprecation.",
     "atomicity_gate": "Before #217 runtime acceptance, one transaction must cover every old and work-scope ceiling with deterministic organization/period/scope lock order. Preserve off-path facades and driver/pool ownership. Prove independent PostgreSQL replicas, failure/retry and unknown holds; shared helpers alone are not atomicity.",
     "financial_evidence": "Never reveal or apportion broader provider-account totals through work-scope observations. Final cost needs authoritative finalized evidence matching exact scope. No allocation algorithm, FX, invoice settlement or automatic rate change is approved. Reservations remain separate from financial observations.",
-    "remaining": "Exact signed plan minus committed estimates minus pending and uncertain reservations; unknown input gives null. Replacement, hierarchy change and emergency tightening never reset spend or release unknown holds.",
+    "remaining": "Exact signed plan minus committed estimates minus pending and uncertain reservations; unknown input gives null. Replacement, hierarchy change and emergency tightening never reset spend or release unknown holds. The derived remaining field supports 19 integer digits; input monetary facts remain limited to 18 integer digits and 18 fractional digits.",
     "forecast": "Optional linear committed-estimate projection: committed_amount * full_period_seconds / elapsed_seconds; complete covered/priced population, matching currency, 0 < elapsed < period. Pin rule/version and inputs. Exact 18/18 without implicit rounding; otherwise unavailable. Excludes reservations, promises no prediction/confidence and never activates policy.",
-    "preview": "Existing policy comparison/scenario boundary; candidate/policy/work-scope/input bindings, eight ceiling classes, maximum 900-second expiry, explicit counts/inconclusive evidence. Activation separately revalidates authority, digests, generation and caps; preview is not a permit.",
+    "preview": "Existing policy comparison/scenario boundary; candidate/policy/work-scope/input bindings, eight ceiling classes, maximum 900-second expiry, explicit counts/inconclusive evidence. Activation separately revalidates authority, digests, generation and caps; preview is not a permit. Compatible means a nonempty complete all-allowed simulation with no restriction reasons; would_restrict requires known denials and reasons. Reports require a positive historical activation generation; never-activated candidates belong to preview.",
     "bounds": "One work-scope report, maximum 100 observations and 1 MiB output; no truncation disguised as complete coverage. Fixed resource-limit failure before delivery. Query/CLI activation and execution-time budgets remain #214/#217/#223 work.",
     "claims": "No procurement, causal productivity, employee ranking, guaranteed savings, automatic policy activation, live finance verification, populated recovery or final-candidate proof."
   }

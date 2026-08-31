@@ -144,6 +144,22 @@ class PortfolioExtensionContractTests(unittest.TestCase):
         value["result"] = "compatible"
         self.rejected(value, "extension_preview_evidence_missing")
 
+    def test_preview_result_and_reasons_match_known_simulation_outcomes(self):
+        value = self.example("hormuz.work-budget-preview")
+        value.update(result="compatible", restriction_reasons=[])
+        self.rejected(value, "extension_preview_result_invalid")
+        value["simulation"].update(allowed_attempts=20, denied_attempts=0)
+        self.validate(value)
+        value["restriction_reasons"] = ["budget_ceiling"]
+        self.rejected(value, "extension_preview_result_invalid")
+        value["result"] = "would_restrict"
+        self.rejected(value, "extension_preview_result_invalid")
+        value.update(result="compatible", restriction_reasons=[])
+        value["simulation"].update(evaluated_attempts=0, allowed_attempts=0)
+        self.rejected(value, "extension_preview_result_invalid")
+        value["result"] = "inconclusive"
+        self.validate(value)
+
     def test_remaining_budget_preserves_unknown_and_signed_overspend(self):
         value = self.example("hormuz.work-budget-report")
         value["enforcement"]["remaining_amount"] = "99"
@@ -155,6 +171,27 @@ class PortfolioExtensionContractTests(unittest.TestCase):
         value["plan_amount"] = "1"
         value["enforcement"]["remaining_amount"] = "-11"
         self.validate(value)
+
+    def test_remaining_amount_covers_the_full_exact_subtraction_range(self):
+        for amount, remaining in (
+                ("999999999999999999", "-2999999999999999997"),
+                ("999999999999999999.999999999999999999",
+                 "-2999999999999999999.999999999999999997")):
+            with self.subTest(amount=amount):
+                value = self.example("hormuz.work-budget-report", "minimal")
+                value["plan_amount"] = "0"
+                value["enforcement"].update(committed_amount=amount, pending_reservation_amount=amount,
+                                             uncertain_reservation_amount=amount,
+                                             remaining_amount=remaining, over_cap_attempts=0,
+                                             reason_code="known")
+                self.validate(value)
+                value["enforcement"]["remaining_amount"] = "-1"
+                self.rejected(value, "extension_remaining_amount_invalid")
+
+    def test_report_requires_a_positive_actual_activation_generation(self):
+        value = self.example("hormuz.work-budget-report")
+        value["activation_generation"] = 0
+        self.rejected(value)
 
     def test_broader_totals_cannot_be_disclosed_as_work_scope_cost(self):
         value = self.example("hormuz.work-budget-report")
@@ -173,6 +210,24 @@ class PortfolioExtensionContractTests(unittest.TestCase):
         value = self.example("hormuz.work-budget-report")
         value["financial_observations"][0]["rate_card"] = None
         self.rejected(value, "extension_rate_card_missing")
+
+    def test_exact_scope_unknown_amount_preserves_known_provider_provenance(self):
+        for reason in ("missing_evidence", "unsupported_currency", "not_available"):
+            with self.subTest(reason=reason):
+                value = self.example("hormuz.work-budget-report", "minimal")
+                value["financial_observations"][0].update(
+                    basis="provider_aggregate", source_kind="provider_api", finalization="unconfirmed",
+                    scope_status="matches_work_scope", reason_code=reason)
+                original = copy.deepcopy(value)
+                self.validate(value)
+                self.assertEqual(value, original)
+                value["financial_observations"][0]["amount"] = "0"
+                self.rejected(value, "extension_finance_currency_or_amount_invalid")
+        value = self.example("hormuz.work-budget-report", "minimal")
+        value["financial_observations"][0].update(
+            basis="provider_aggregate", source_kind="provider_api", finalization="unconfirmed",
+            scope_status="matches_work_scope", reason_code="known")
+        self.rejected(value, "extension_finance_currency_or_amount_invalid")
 
     def test_provider_final_requires_authoritative_finalized_scope(self):
         for change in ({"finalization": "unconfirmed"}, {"source_kind": "configured_rates"},
@@ -356,6 +411,26 @@ class PortfolioExtensionContractTests(unittest.TestCase):
         value["revision"]["value"] = "2026-08-99T00:00:00Z"
         self.rejected(value, "extension_revision_invalid")
 
+    def test_linear_supersession_requires_current_known_complete_revision(self):
+        target = "44444444-4444-4444-8444-444444444444"
+        for state in ("late", "incomparable", "unknown"):
+            with self.subTest(ordering_state=state):
+                value = self.example("hormuz.linear-context-event")
+                value.update(ordering_state=state, supersedes_context_event_id=target)
+                self.rejected(value, "extension_context_supersession_invalid")
+        value = self.example("hormuz.linear-context-event", "minimal")
+        value["supersedes_context_event_id"] = target
+        self.rejected(value, "extension_context_supersession_invalid")
+        for coverage in ("partial", "unknown", "not_applicable"):
+            with self.subTest(relationship_coverage=coverage):
+                value = self.example("hormuz.linear-context-event")
+                value.update(relationship_coverage=coverage, relationships=[],
+                             supersedes_context_event_id=target)
+                self.rejected(value, "extension_context_supersession_invalid")
+        value = self.example("hormuz.linear-context-event")
+        value["supersedes_context_event_id"] = target
+        self.validate(value)
+
     def test_linear_ingestion_clock_is_distinct_and_page_cannot_leak_other_tenants(self):
         value = self.example("hormuz.linear-context-event")
         value["ingested_at"] = "2026-08-31T11:59:00Z"
@@ -365,7 +440,62 @@ class PortfolioExtensionContractTests(unittest.TestCase):
         self.rejected(page, "extension_page_scope_invalid")
         page = self.example("hormuz.linear-context-page")
         page["items"][0]["ingested_at"] = "2026-08-31T12:01:00Z"
+        self.validate(page)  # A database sequence, not a cross-clock comparison, defines membership.
+
+    def test_linear_commit_sequence_is_required_and_positive(self):
+        for replacement in (None, 0, True, 1.0):
+            with self.subTest(sequence=replacement):
+                value = self.example("hormuz.linear-context-event")
+                if replacement is None:
+                    value.pop("commit_sequence", None)
+                else:
+                    value["commit_sequence"] = replacement
+                self.rejected(value)
+
+    def test_linear_page_uses_commit_sequence_even_when_timestamp_looks_older(self):
+        page = self.example("hormuz.linear-context-page")
+        page["items"][0].update(commit_sequence=2, ingested_at="2026-08-31T11:58:00Z")
         self.rejected(page, "extension_page_snapshot_invalid")
+
+    def test_linear_page_rejects_duplicate_commit_sequences(self):
+        page = self.example("hormuz.linear-context-page")
+        page["items"][0]["commit_sequence"] = 1
+        duplicate = copy.deepcopy(page["items"][0])
+        duplicate["context_event_id"] = "00000000-0000-4000-8000-000000000000"
+        page["items"].append(duplicate)
+        self.rejected(page, "extension_page_sequence_duplicate")
+
+    def large_context_page(self, relationship_count):
+        page = self.example("hormuz.linear-context-page", "minimal")
+        page["snapshot_sequence"] = 100
+        for index in range(100):
+            item = self.example("hormuz.linear-context-event")
+            item["context_event_id"] = f"50000000-0000-4000-8000-{index:012x}"
+            item["source_delivery_id"] = f"60000000-0000-4000-8000-{index:012x}"
+            item["object"]["id"] = f"40000000-0000-4000-8000-{index:012x}"
+            item["binding"].update(binding_event_id=f"binding-test-{index}", registry_sequence=index + 1)
+            if "commit_sequence" in item:
+                item["commit_sequence"] = index + 1
+            item["source_team_ids"] = [f"20000000-0000-4000-8000-{team:012x}" for team in range(100)]
+            item["relationships"] = [
+                {"kind": "initiative_project", "parent": {
+                    "kind": "initiative", "id": f"30000000-0000-4000-8000-{parent:012x}"}}
+                for parent in range(relationship_count)]
+            page["items"].append(item)
+        page["items"].reverse()
+        return page
+
+    def test_linear_page_can_use_the_advertised_array_bounds_below_one_mib(self):
+        page = self.large_context_page(20)
+        self.assertGreaterEqual(verifier.MAX_PAYLOAD_MEMBERS,
+                                self.bundles["linear"]["x-hormuz-transport"]["response_maximum_bytes"])
+        self.assertLess(len(json.dumps(page, separators=(",", ":")).encode("utf-8")), 1048576)
+        self.validate(page)
+
+    def test_linear_page_above_one_mib_is_rejected_without_truncation(self):
+        page = self.large_context_page(100)
+        self.assertGreater(len(json.dumps(page, separators=(",", ":")).encode("utf-8")), 1048576)
+        self.rejected(page, "wire_payload_bytes_exceeded")
 
     def test_linear_cursor_pair_and_snapshot_bounds_are_consistent(self):
         for has_more, cursor in ((True, None), (False, "opaque")):

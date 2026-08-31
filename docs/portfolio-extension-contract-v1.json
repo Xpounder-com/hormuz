@@ -32,7 +32,7 @@
   "wire_files": {
     "budget": {
       "path": "docs/work-budget-reports-wire-v1.json",
-      "sha256": "fedc765980a6b40e05dde9d08fd92b724f390d6d59feb217c70374c07c19ddf4",
+      "sha256": "6a45a010de84273be45da85115d8d41267d5689addd29df592c47e8704a29cbf",
       "schema_ids": [
         "hormuz.work-budget-preview",
         "hormuz.work-budget-report"
@@ -40,7 +40,7 @@
     },
     "linear": {
       "path": "docs/linear-context-wire-v1.json",
-      "sha256": "80acbb06480e3b156d8bbb81fe2aad8bfb287b135c43f1770ec124ca8927d19e",
+      "sha256": "66a708b9456ced1fd0c919cd1a92b4f461d3900e11766e01afd64c29e2d958f0",
       "schema_ids": [
         "hormuz.linear-context-event",
         "hormuz.linear-context-page",
@@ -50,7 +50,7 @@
   },
   "fixtures": {
     "path": "tests/fixtures/portfolio_intelligence/extension-v1-examples.json",
-    "sha256": "44d92038776d2fcc53c4144d4e918b4b198070b6fab8f2790e82d072fd36e9da",
+    "sha256": "c707e4080181c06d139203a6287025587acd1e01bc2785e70d734fde68089d2a",
     "count": 10,
     "synthetic": true
   },

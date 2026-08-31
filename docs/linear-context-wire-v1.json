@@ -359,6 +359,9 @@
         "reader_role": {
           "type": "string",
           "const": "portfolio_admin"
+        },
+        "commit_sequence": {
+          "$ref": "#/$defs/version"
         }
       },
       "required": [
@@ -391,7 +394,8 @@
         "provenance_digest",
         "evidence_level",
         "association_eligibility",
-        "reader_role"
+        "reader_role",
+        "commit_sequence"
       ],
       "description": "Planned authenticated metadata-only source observation. Existing issue lifecycle outcomes remain in the frozen work-outcome record. Context neither replaces nor counts as an outcome; fixture validation is not source authentication."
     },
@@ -559,12 +563,12 @@
     "compatibility": "Keep frozen issue/PR outcome event/page/receipt, project-binding configuration and route/CLI/manifest contracts unchanged. Initiative/project/cycle and relationship context use these new IDs; no entity relabeling or issue-only scope reduction.",
     "authentication_gate": "#220 must freeze raw-byte HMAC, independently authenticated workspace/team/webhook and explicitly typed entity/container authority, permission checks, rotation and durable replay identity. Existing project-only enrollment is not permission for every initiative, cycle or team. Output fields are not credentials or authority.",
     "provider_mapping_gate": "Normalized representation types are not proof of supported provider payload/actions. #220 must pin/test the actual entity/action/state/relationship mapping and API/schema revision. Unknown/malformed data causes no normalized mutation. All four entity types remain in scope.",
-    "relationships": "Typed parent sets stay separate from the Hormuz hierarchy. Never infer authority, AI attribution, ownership or primary initiative. Partial/missing coverage cannot remove earlier links; only complete comparable revisions may replace the current projection. Changes append facts; old context never retargets.",
+    "relationships": "Typed parent sets stay separate from the Hormuz hierarchy. Never infer authority, AI attribution, ownership or primary initiative. Partial/missing coverage cannot remove earlier links; only complete comparable revisions may replace the current projection. Changes append facts; old context never retargets. A non-null supersedes_context_event_id additionally requires a known revision, current ordering state and complete relationship coverage, including an explicitly complete empty set when no parents apply.",
     "privacy": "Raw context/retention is portfolio_admin only. Finance/platform/team/self gain no raw source/peer access. #223 aggregate views must authorize before lookup/join and not leak private-team projects through public initiatives. Reader and source authority are independent.",
     "ordering": "Preserve source/observed/commit times; unknown source time stays null and unmatched. Same authenticated identity/bytes replays original receipt; conflicts fail closed. UUID/delivery order is not source order. Compare only in the same trusted domain; late/equal-conflicting/incomparable facts never overwrite newer authoritative state. No provider-work replay.",
     "retention": "Separate authorized append-only retention marker, audit and idempotency. Logical tombstone hides target and invalidates old cursor generations without resurrecting older state. Source deletion is distinct. Preserve linked finance/audit facts; no universal erasure.",
-    "pagination": "Default 50, max 100, one-hour cursor TTL; descending event_at with observed_at fallback, connector_id, context_event_id. Freeze sequence/as_of, filters, authority and retention generation. Reject scope/filter/order drift before query. Time fallback is ordering only, not source fact.",
-    "delivery_gate": "Maximum 1 MiB record/page, 100 relationships/teams; provider ingress depth 16 and 4096 JSON members. #220 must prove end-to-end durable acknowledgment within Linear's documented 5-second response limit including auth/read/parse/commit. Per-statement limits are not that proof; no ingress activated.",
+    "pagination": "Default 50, max 100, one-hour cursor TTL; descending event_at with observed_at fallback, connector_id, context_event_id. Freeze sequence/as_of, filters, authority and retention generation. Reject scope/filter/order drift before query. Time fallback is ordering only, not source fact. Each stored context record carries a positive server-assigned commit_sequence from the organization's context stream. Items must have distinct commit sequences at or below snapshot_sequence. Cross-component ingested_at/as_of comparisons never establish membership; sequence fields in synthetic fixtures do not prove actual database membership.",
+    "delivery_gate": "Maximum 1 MiB record/page, 100 relationships/teams; provider ingress depth 16 and 4096 JSON members. #220 must prove end-to-end durable acknowledgment within Linear's documented 5-second response limit including auth/read/parse/commit. Per-statement limits are not that proof; no ingress activated. The offline emitted-payload check uses the 1 MiB compact ASCII JSON byte limit; no smaller aggregate-member cap overrides valid wire arrays. Provider-ingress limits are a separate future receiver boundary.",
     "claims": "Descriptive metadata only, inconclusive association eligibility; no content, credentials, names, titles, URLs, rankings or causal claims. Synthetic verified_connector fixtures are not live proof. Live workspace/webhook authorization and #225 pilot consent are separate."
   }
 }
