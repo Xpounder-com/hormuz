@@ -36,6 +36,10 @@ resources:
     cpu: "2"
     memory: 2Gi
 
+# Allow Service routing to withdraw the terminating endpoint before SIGTERM.
+# Include this window plus the longest upstream request and evidence-finalization
+# time in terminationGracePeriodSeconds. Measure and tune for your own cluster.
+endpointDrainSeconds: 10
 terminationGracePeriodSeconds: 660
 
 podDisruptionBudget:
