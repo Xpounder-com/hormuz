@@ -292,8 +292,12 @@ class OutcomeRepository:
             raise PortfolioError("invalid_request")
         organization, connector, delivery = binding.organization_id, binding.connector_id, verified.source_delivery_id
         with self._transaction(organization) as sql:
-            if self._replay(sql, binding, verified, raw, keys) is not None:
-                return
+            # Another normalizer version may have accepted these exact bytes
+            # after our initial replay check. That durable receipt wins over
+            # the losing worker's error; propagate it without new writes.
+            receipt = self._replay(sql, binding, verified, raw, keys)
+            if receipt is not None:
+                return receipt
             if sql.one("SELECT source_delivery_id FROM portfolio_outcome_dead_letters WHERE organization_id=? AND connector_id=? AND source_delivery_id=?",
                        (organization, connector, delivery)) is not None:
                 return

@@ -146,10 +146,12 @@ class OutcomeIngestor:
                 "invalid_request", "forbidden", "idempotency_conflict", "unavailable",
             } else "unavailable"
             safe = PortfolioError(code)
-            self.repository._record_failure(
+            receipt = self.repository._record_failure(
                 binding=binding, verified=verified, raw=raw, keys=self.keys,
                 observed_at=observed_at, reason=safe.reason,
             )
+            if receipt is not None:
+                return receipt
             raise safe from None
         # No raw JSON object or free-text exception crosses the storage boundary.
         # Exact bytes are used solely for the keyed replay fingerprint.
@@ -165,8 +167,10 @@ class OutcomeIngestor:
             reasons = {"invalid_request": "invalid_shape", "not_found": "invalid_shape",
                        "idempotency_conflict": "conflicting_identity", "version_conflict": "conflicting_identity"}
             if error.code in reasons:
-                self.repository._record_failure(
+                receipt = self.repository._record_failure(
                     binding=binding, verified=verified, raw=raw, keys=self.keys,
                     observed_at=observed_at, reason=reasons[error.code],
                 )
+                if receipt is not None:
+                    return receipt
             raise

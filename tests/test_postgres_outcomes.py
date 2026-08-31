@@ -93,6 +93,9 @@ class PostgresOutcomeTests(OutcomeAssertions, PostgresTestCase):
     def test_postgres_outcome_concurrency_and_cursors(self):
         self.check_concurrent_replicas_and_frozen_pagination()
 
+    def test_postgres_outcome_mixed_normalizer_race(self):
+        self.check_mixed_normalizer_race_returns_the_winning_receipt()
+
     def test_postgres_outcome_forced_rls_privileges_and_bounded_statement(self):
         self.ingest()
         with self.repository._transaction("acme") as sql:

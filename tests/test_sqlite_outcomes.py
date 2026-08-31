@@ -79,6 +79,9 @@ class SQLiteOutcomeTests(OutcomeAssertions, unittest.TestCase):
     def test_sqlite_outcome_concurrency_and_cursors(self):
         self.check_concurrent_replicas_and_frozen_pagination()
 
+    def test_sqlite_outcome_mixed_normalizer_race(self):
+        self.check_mixed_normalizer_race_returns_the_winning_receipt()
+
     def test_sqlite_outcome_immutable_tables(self):
         self.ingest()
         self.ingest([self.source(source_revision="5", revision_order="5")])

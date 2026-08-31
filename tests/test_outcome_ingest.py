@@ -30,6 +30,7 @@ class OutcomeIngestTests(unittest.TestCase):
         self.adapter.normalize.return_value = [observation()]
         self.repository = mock.Mock()
         self.repository._replay_verified.return_value = None
+        self.repository._record_failure.return_value = None
         self.repository._accept_verified.return_value = {"synthetic": "receipt"}
         self.keys = OutcomeKeys("v1", {"v1": b"k" * 32})
         self.ingestor = OutcomeIngestor(self.config, self.repository, "acme", "github-one", self.adapter, self.keys)
@@ -78,6 +79,15 @@ class OutcomeIngestTests(unittest.TestCase):
         self.adapter.normalize.assert_not_called()
         self.repository._accept_verified.assert_not_called()
         self.repository._record_failure.assert_not_called()
+
+    def test_receipt_won_during_failure_recording_wins_over_both_failure_paths(self):
+        receipt = {"synthetic": "winning-receipt"}
+        self.repository._record_failure.return_value = receipt
+        self.adapter.normalize.side_effect = PortfolioError("invalid_request")
+        self.assertEqual(self.ingestor.ingest({}, b"{}"), receipt)
+        self.adapter.normalize.side_effect = None
+        self.repository._accept_verified.side_effect = PortfolioError("not_found")
+        self.assertEqual(self.ingestor.ingest({}, b"{}"), receipt)
 
     def test_bounds_safe_failures_and_no_automatic_retries(self):
         self.error("invalid_request", lambda: self.ingestor.ingest({}, b"x" * 1048577))

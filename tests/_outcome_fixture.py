@@ -426,3 +426,38 @@ class OutcomeAssertions:
         self.error("cursor_invalid", lambda: self.page("cursor=" + first["next_cursor"], token=OTHER))
         self.error("cursor_invalid", lambda: self.page("cursor=" + first["next_cursor"] + "&connector_id=github-one"))
         self.error("cursor_invalid", lambda: self.page("cursor=forged"))
+
+    def check_mixed_normalizer_race_returns_the_winning_receipt(self):
+        for failure in ("normalization", "repository"):
+            with self.subTest(failure=failure):
+                source, delivery = self.source(), str(uuid4())
+                raw = canonical({"observations": [source]}).encode()
+                losing_repository = create_portfolio_repository(self.config, environ=self.environment).outcomes
+                adapter = SyntheticOutcomeAdapter()
+                if failure == "normalization":
+                    adapter.normalize = mock.Mock(side_effect=PortfolioError("invalid_request"))
+                else:
+                    adapter.normalize = mock.Mock(return_value=[{**source, "supersedes_source_event_id": str(uuid4()), "reason_code": "corrected"}])
+                losing = OutcomeIngestor(self.config, losing_repository, "acme", "github-one", adapter, self.keys)
+                reached_failure, winner_committed = threading.Event(), threading.Event()
+                original_record = losing_repository._record_failure
+
+                def record_after_winner(**kwargs):
+                    reached_failure.set()
+                    if not winner_committed.wait(timeout=10):
+                        raise AssertionError("synthetic-winner-not-committed")
+                    return original_record(**kwargs)
+
+                with mock.patch.object(losing_repository, "_record_failure", side_effect=record_after_winner):
+                    with ThreadPoolExecutor(max_workers=1) as pool:
+                        future = pool.submit(self.ingest, delivery=delivery, raw=raw, ingestor=losing)
+                        try:
+                            self.assertTrue(reached_failure.wait(timeout=10))
+                            receipt = self.ingest(delivery=delivery, raw=raw)
+                            before = self.outcome_rows()
+                        finally:
+                            winner_committed.set()
+                        self.assertEqual(future.result(timeout=10), receipt)
+                self.assertEqual(self.outcome_rows(), before)
+                self.assertEqual(adapter.normalize.call_count, 1)
+        self.assertEqual(self.outcome_rows()["portfolio_outcome_dead_letters"], [])
