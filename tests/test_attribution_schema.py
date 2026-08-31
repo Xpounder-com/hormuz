@@ -11,15 +11,16 @@ from hormuz.store import StorageSchemaError, UsageStore
 
 
 class AttributionSchemaTests(unittest.TestCase):
-    def test_real_sqlite_six_installs_exact_append_only_owned_tables(self):
-        self.assertEqual(UsageStore.schema_version, 6)
+    def test_attribution_six_remains_exact_in_current_cumulative_schema(self):
+        self.assertEqual(UsageStore.schema_version, 7)
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "usage.sqlite3"
             UsageStore(path).verify_ready()
             with sqlite3.connect(path) as connection:
                 tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
                 self.assertTrue(set(TABLE_DDL).issubset(tables))
-                self.assertEqual(len(tables), 20)
+                self.assertEqual(len(tables), 29)
+                self.assertEqual(connection.execute("SELECT state FROM hormuz_schema_migrations WHERE version=6").fetchone(), ("applied",))
                 before = list(connection.iterdump())
             UsageStore(path).verify_ready()
             with sqlite3.connect(path) as connection:

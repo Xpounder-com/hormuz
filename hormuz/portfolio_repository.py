@@ -24,6 +24,7 @@ from urllib.parse import urlencode
 from ._portfolio_sql import PortfolioSQL as _SQL, portfolio_transaction
 from .config import GatewayConfig
 from .attribution_repository import AttributionRepository
+from .outcome_repository import OutcomeRepository
 from .portfolio_config import PortfolioPrincipal
 from .portfolio_wire import PortfolioError, RESPONSE_BYTES, canonical, query_parameters, route, validate
 from .postgres import PostgresConnectionPool
@@ -322,11 +323,14 @@ class RegistryRepository:
 class PortfolioRepositories:
     registry: RegistryRepository
     attributions: AttributionRepository
+    outcomes: OutcomeRepository | None = None
 
     def execute(self, principal: PortfolioPrincipal, operation: str, *, path: str,
                 scope_id: str | None, query: dict[str, Any], body: dict[str, Any] | None,
                 idempotency_key: str | None) -> tuple[int, dict[str, Any]]:
-        owner = self.attributions if operation in {"attribute", "list_attributions"} else self.registry
+        owner = self.outcomes if operation == "list_outcomes" else self.attributions if operation in {"attribute", "list_attributions"} else self.registry
+        if owner is None:
+            raise PortfolioError("not_found")
         return owner.execute(principal, operation, path=path, scope_id=scope_id, query=query,
                              body=body, idempotency_key=idempotency_key)
 
@@ -336,5 +340,7 @@ def create_portfolio_repository(config: GatewayConfig, *, environ: Mapping[str, 
                                 read_only: bool = False) -> PortfolioRepositories:
     registry = RegistryRepository(config, environ=environ, connection_pool=connection_pool, read_only=read_only)
     return PortfolioRepositories(registry, AttributionRepository(
+        config, dsn=registry._dsn, connection_pool=connection_pool, read_only=read_only,
+    ), OutcomeRepository(
         config, dsn=registry._dsn, connection_pool=connection_pool, read_only=read_only,
     ))

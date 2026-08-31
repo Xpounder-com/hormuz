@@ -16,8 +16,10 @@ include docs/registry-transition-plan-v2.json
 include docs/attribution-transition-plan-v1.json
 include docs/attribution-transition-plan-v2.json
 include docs/outcome-transition-plan-v1.json
+include docs/outcome-transition-plan-v2.json
 include hormuz/portfolio-registry-wire-v1.json
 include hormuz/portfolio-attribution-wire-v1.json
+include hormuz/portfolio-outcome-wire-v1.json
 include hormuz/secret-inventory-v1.json
 include tools/_verification_runtime.py
 include tools/verify_secret_inventory.py

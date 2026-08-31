@@ -138,6 +138,19 @@ class PortfolioAPITests(unittest.TestCase):
             self.assertEqual(self.request("POST", body=request)[:2], (201, created))
             self.assertEqual(self.request(path=SCOPES + "/" + created["work_scope_id"])[:2], (200, created))
 
+    def test_outcome_read_route_is_versioned_bounded_and_has_no_public_ingestion(self):
+        from hormuz.portfolio_wire import OUTCOMES
+        with mock.patch("urllib.request.urlopen", side_effect=AssertionError("unexpected-provider-egress")):
+            status, page, headers = self.request(path=OUTCOMES)
+            self.assertEqual((status, page["schema_id"], page["items"]), (200, "hormuz.work-outcome-page", []))
+            self.assertEqual(headers["Cache-Control"], "no-store")
+            self.assertEqual(self.request("POST", path=OUTCOMES, body=b"{}")[0], 404)
+            self.assertEqual(self.request(path=OUTCOMES + "?limit=101")[0], 400)
+            self.assertEqual(self.request(path=OUTCOMES, token=VIEWER)[0], 403)
+            self.assertEqual(self.request(path=OUTCOMES, token=None)[0], 401)
+        with mock.patch.object(self.server.portfolio_service.repository.outcomes, "_transaction", side_effect=AssertionError("denied-outcome-storage")):
+            self.assertEqual(self.request(path=OUTCOMES + "?title=SYNTHETIC_EXCLUDED", token=VIEWER)[0], 403)
+
     def test_registry_authentication_and_roles_precede_body_and_storage(self):
         with mock.patch.object(self.server.portfolio_service.repository, "execute", side_effect=AssertionError("unauthorized lookup")):
             for token, status in ((None, 401), ("wrong", 401), ("non-ascii-\u00e9", 401), (VIEWER, 403)):
@@ -224,6 +237,15 @@ class PortfolioCLITests(unittest.TestCase):
         self.assertEqual(status, 2)
         self.assertEqual(error["code"], "forbidden")
         self.assertFalse(self.config.database_path.exists())
+
+    def test_cli_outcomes_uses_same_contract_and_denies_before_database(self):
+        with mock.patch.dict(os.environ, {"HORMUZ_PORTFOLIO_TOKEN": VIEWER}):
+            with mock.patch("hormuz.commands.portfolio.create_repository_bundle", side_effect=AssertionError("denied-outcome-database")):
+                status, error = self.command("outcomes")
+                self.assertEqual((status, error["code"]), (2, "forbidden"))
+        self.assertFalse(self.config.database_path.exists())
+        status, page = self.command("outcomes", "--limit", "1", "--connector-id", "github-one")
+        self.assertEqual((status, page["schema_id"], page["items"]), (0, "hormuz.work-outcome-page", []))
 
     def test_cli_attribution_correction_replay_void_and_list(self):
         if __package__:
