@@ -60,7 +60,7 @@ class OnboardingMigrationTests(unittest.TestCase):
 
     def test_real_v2_schema_upgrades_without_rotating_credentials_or_losing_pending_redemption(self):
         store = self.open()
-        self.assertEqual(self.version(), 3)
+        self.assertEqual(self.version(), session_store.SESSION_STORE_SCHEMA_VERSION)
         self.assertEqual(store.authenticate_access(self.access).actor_id, "legacy-actor")
         pending = store.redeem_enrollment(enrollment_id="E" * 32, enrollment_secret=self.enrollment_secret)
         self.assertIsNone(store.authenticate_access(pending.access_token).membership_id)
@@ -101,7 +101,7 @@ class OnboardingMigrationTests(unittest.TestCase):
         with mock.patch.object(session_store, "SESSION_STORE_SCHEMA_VERSION", 2):
             with self.assertRaisesRegex(SessionStoreError, "session_store_schema_newer_than_binary"):
                 self.open()
-        self.assertEqual(self.version(), 3)
+        self.assertEqual(self.version(), session_store.SESSION_STORE_SCHEMA_VERSION)
 
     def test_concurrent_first_open_rechecks_version_before_initializing(self):
         self.path = self.path.with_name("brand-new.sqlite3")
@@ -128,7 +128,7 @@ class OnboardingMigrationTests(unittest.TestCase):
                 finally:
                     other_finished.set()
                 delayed.result(timeout=10)
-        self.assertEqual(self.version(), 3)
+        self.assertEqual(self.version(), session_store.SESSION_STORE_SCHEMA_VERSION)
         self.open().check_available()
 
     def test_failed_first_open_leaves_no_partially_initialized_schema(self):
@@ -142,7 +142,7 @@ class OnboardingMigrationTests(unittest.TestCase):
             self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 0)
             self.assertIsNone(connection.execute("SELECT name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'").fetchone())
         self.open().check_available()
-        self.assertEqual(self.version(), 3)
+        self.assertEqual(self.version(), session_store.SESSION_STORE_SCHEMA_VERSION)
 
 
 if __name__ == "__main__":

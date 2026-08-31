@@ -19,9 +19,10 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from ._session_schema import validate_session_schema
 from ._onboarding_schema import INDEX_DDL as ONBOARDING_INDEX_DDL, TABLE_DDL as ONBOARDING_TABLE_DDL
+from ._console_schema import INDEX_DDL as CONSOLE_INDEX_DDL, TABLE_DDL as CONSOLE_TABLE_DDL
 
 
-SESSION_STORE_SCHEMA_VERSION = 3
+SESSION_STORE_SCHEMA_VERSION = 4
 
 
 
@@ -744,7 +745,7 @@ class SQLiteSessionStore:
             version = int(connection.execute("PRAGMA user_version").fetchone()[0])
             if version > SESSION_STORE_SCHEMA_VERSION:
                 raise SessionStoreError("session_store_schema_newer_than_binary")
-            if version not in {0, 2, SESSION_STORE_SCHEMA_VERSION}:
+            if version not in {0, 2, 3, SESSION_STORE_SCHEMA_VERSION}:
                 raise SessionStoreError("session_store_schema_migration_required")
             if version == SESSION_STORE_SCHEMA_VERSION:
                 connection.execute(
@@ -758,7 +759,7 @@ class SQLiteSessionStore:
                 )
                 self._validate_content_free_schema(connection)
                 return
-            if version == 2:
+            if version in {2, 3}:
                 self._migrate_onboarding_schema(connection)
                 return
             connection.execute("PRAGMA journal_mode = WAL")
@@ -766,7 +767,7 @@ class SQLiteSessionStore:
             # Another process may have initialized this file since our first
             # version read. Never reset a committed schema to the v2 baseline.
             version = int(connection.execute("PRAGMA user_version").fetchone()[0])
-            if version in {2, SESSION_STORE_SCHEMA_VERSION}:
+            if version in {2, 3, SESSION_STORE_SCHEMA_VERSION}:
                 self._migrate_onboarding_schema(connection)
                 return
             if version > SESSION_STORE_SCHEMA_VERSION:
@@ -861,8 +862,8 @@ class SQLiteSessionStore:
         if not connection.in_transaction:
             connection.execute("BEGIN IMMEDIATE")
         version = int(connection.execute("PRAGMA user_version").fetchone()[0])
-        if version == SESSION_STORE_SCHEMA_VERSION:
-            self._validate_content_free_schema(connection)
+        if version in {3, SESSION_STORE_SCHEMA_VERSION}:
+            self._migrate_console_schema(connection)
             return
         if version != 2 or not validate_session_schema(connection, version=2):
             raise SessionStoreError("session_store_schema_incompatible")
@@ -877,6 +878,23 @@ class SQLiteSessionStore:
         for statement in ONBOARDING_INDEX_DDL:
             connection.execute(statement)
         connection.execute("PRAGMA user_version = 3")
+        self._migrate_console_schema(connection)
+
+    def _migrate_console_schema(self, connection: sqlite3.Connection) -> None:
+        # Membership removal and console revocation share this database/transaction.
+        if not connection.in_transaction:
+            connection.execute("BEGIN IMMEDIATE")
+        version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+        if version == SESSION_STORE_SCHEMA_VERSION:
+            self._validate_content_free_schema(connection)
+            return
+        if version != 3 or not validate_session_schema(connection, version=3):
+            raise SessionStoreError("session_store_schema_incompatible")
+        for statement in CONSOLE_TABLE_DDL.values():
+            connection.execute(statement)
+        for statement in CONSOLE_INDEX_DDL:
+            connection.execute(statement)
+        connection.execute("PRAGMA user_version = 4")
         self._validate_content_free_schema(connection)
 
     def _validate_content_free_schema(self, connection: sqlite3.Connection) -> None:

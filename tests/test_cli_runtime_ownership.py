@@ -171,6 +171,7 @@ class RuntimeCliOwnershipTests(unittest.TestCase):
             "list": None, "show": None, "tombstone": None, "version": None,
         })
         self.assertEqual(tree.pop("team"), {
+            "administrators": {"grant": None, "list": None, "revoke": None},
             "organization": {"create": None, "list": None},
             "create": None, "list": None, "invite": None,
             "members": {"list": None, "disable": None, "reinvite": None},

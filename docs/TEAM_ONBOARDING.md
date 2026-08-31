@@ -120,6 +120,12 @@ onboarding session.
 
 ## Storage and upgrades
 
+The [administrator console](ADMIN_CONSOLE_LOCAL.md) now upgrades session storage
+to schema 4, preserving the v2 key derivation and v3 membership behavior below.
+It adds separate operator grants and browser sessions; member removal revokes
+those grants and sessions in the same transaction. Reinvitation never restores
+an administrator grant. Console enablement is separate and off by default.
+
 Session schema 3 adds a closed set of team/membership/invitation/event tables and
 version bindings on existing enrollments and sessions. Stop all broker/operator
 processes and make a SQLite-consistent private backup before upgrading. A valid
@@ -145,8 +151,8 @@ not an externally anchored or tamper-proof audit service.
 
 ## Remaining production gates
 
-Real identity-provider claim configuration and browser testing, administrator web
-sessions and role management, tenant-specific provider credentials and policies,
+Real identity-provider claim configuration and browser testing, qualification of
+the new local administrator console, tenant-specific provider credentials and policies,
 distributed persistence/rate limits, signed client distribution, Render deployment
 and recovery evidence, service monitoring, and a real customer pilot remain separate
 work. A free hosting instance is not evidence of latency or availability guarantees.

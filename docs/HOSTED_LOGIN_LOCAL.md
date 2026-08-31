@@ -18,6 +18,11 @@ server-local operator can create teams, issue browser invitations and remove
 member access. It does not grant employee sessions administrator privileges or
 change the existing native client protocol.
 
+The [local administrator console](ADMIN_CONSOLE_LOCAL.md) builds on that directory
+with separate browser sessions, explicit operator grants, scoped usage reporting
+and member removal. It remains an opt-in draft, not a hosted launch or a real-IdP
+qualification. Employee access credentials remain unable to administer a team.
+
 ## Verify locally
 
 Install the checkout in an isolated Python environment, then run:

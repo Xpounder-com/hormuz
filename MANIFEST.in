@@ -18,6 +18,7 @@ include docs/attribution-transition-plan-v2.json
 include hormuz/portfolio-registry-wire-v1.json
 include hormuz/portfolio-attribution-wire-v1.json
 include hormuz/secret-inventory-v1.json
+include hormuz/console.css
 include tools/_verification_runtime.py
 include tools/verify_secret_inventory.py
 include tools/verify_public_community_paths.py

@@ -82,6 +82,21 @@ an implemented identity-connector envelope migration.
 
 ## Rotation and revocation ownership
 
+The opt-in [administrator console](ADMIN_CONSOLE_LOCAL.md) reuses the separately
+derived session hash/AEAD keys for its opaque cookie hashes and transient OIDC
+flow. Its `console-browser-cookies` entry narrowly permits the `_cookie_header`
+writer to hand a short-lived HttpOnly credential to the browser. That custody
+mode is rejected for environment reads, ambient credentials and other writers;
+it does not relax provider envelope custody. HTTPS cookies are host-only and
+Secure; explicit loopback HTTP is for local development only. Console cookies,
+flow cookies and CSRF tokens have built-in redaction patterns.
+
+Operator grant changes and revocation invalidate console sessions; member removal
+revokes both native and console sessions and the grant atomically. A new console
+login replaces prior console sessions for the grant. Console logout leaves native
+client sessions unchanged. Browser and server expiry enforce a bounded lifetime.
+The browser's own backup/retention behavior remains under user control.
+
 - Provider credential operators replace an environment-injected credential or
   use the custody operator path to seal and rewrap an envelope.
 - Database operators rotate the distinct runtime, migration, policy-control,
@@ -90,10 +105,15 @@ an implemented identity-connector envelope migration.
 - Identity operators rotate static or short-lived administrator credentials;
   the policy and custody services continue to authorize the resulting principal
   rather than trusting an actor name supplied to the CLI.
-- Identity operators rotate the local session master key by replacing the
+- For configured-subject-only deployments, identity operators rotate the local session master key by replacing the
   injected value and restarting the broker, invalidating all prior sessions
   and pending flows. Rotate before restoring a session backup to avoid replay
   or revocation rollback. OIDC client-secret rotation also requires a restart.
+- Once managed memberships are enabled, one-way recipient hashes and restored
+  access decisions require a directory migration/revocation reconciliation plan.
+  Simple key replacement is not a complete managed-directory recovery procedure;
+  see [team onboarding](TEAM_ONBOARDING.md). Console grants and revocations must
+  also be reconciled before a restored directory serves traffic.
 - Session owners log out to revoke the server credential family before local
   deletion. The helper serializes refresh using a private metadata-only lock.
 - Policy-recovery operators separately protect and rotate the opt-in break-glass

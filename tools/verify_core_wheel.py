@@ -130,9 +130,11 @@ SESSION_PROOF_TEST_MODULES = (
     "tests.test_session_config", "tests.test_session_store", "tests.test_credential_store",
     "tests.test_session_broker", "tests.test_onboarding_store", "tests.test_onboarding_http",
     "tests.test_onboarding_migration", "tests.test_team_commands",
+    "tests.test_console_store", "tests.test_console_http", "tests.test_console_migration",
 )
 SESSION_PROOF_SDIST_PATHS = (
     "tests/__init__.py", "tests/_session_fixtures.py", "tests/fixtures/session-store-v2.json",
+    "tests/_console_fixtures.py", "tests/fixtures/session-store-v3.json",
     *(name.replace(".", "/") + ".py" for name in SESSION_PROOF_TEST_MODULES),
 )
 

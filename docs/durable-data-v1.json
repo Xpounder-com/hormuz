@@ -5,6 +5,27 @@
   "hosted_customer_data_service": false,
   "database_classes": [
     {
+      "id": "console_authorization",
+      "content_boundary": "identity_and_policy_metadata",
+      "contains_prompt_or_response_body": false,
+      "sqlite_tables": ["console_grants"],
+      "postgresql_tables": []
+    },
+    {
+      "id": "console_sessions",
+      "content_boundary": "session_identity_and_encrypted_transient_auth",
+      "contains_prompt_or_response_body": false,
+      "sqlite_tables": ["console_login_flows", "console_sessions"],
+      "postgresql_tables": []
+    },
+    {
+      "id": "console_events",
+      "content_boundary": "metadata_only_evidence",
+      "contains_prompt_or_response_body": false,
+      "sqlite_tables": ["console_events"],
+      "postgresql_tables": []
+    },
+    {
       "id": "team_onboarding_identity",
       "content_boundary": "identity_and_policy_metadata",
       "contains_prompt_or_response_body": false,
@@ -195,6 +216,14 @@
     }
   ],
   "operator_artifacts": [
+    {
+      "id": "console_browser_cookies",
+      "created_when": "operator_granted_member_starts_or_completes_console_login",
+      "storage_location": "browser_http_only_cookie_store",
+      "content_boundary": "opaque_short_lived_console_session_and_login_flow_credentials",
+      "prompt_or_response_body_boundary": "excluded_by_hormuz_contract",
+      "customer_operator_authority": "member_or_operator_revocation_browser_logout_and_expiry_no_credential_export"
+    },
     {
       "id": "team_invitation_file",
       "created_when": "operator_issues_or_reissues_a_team_invitation",

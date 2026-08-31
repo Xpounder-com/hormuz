@@ -131,6 +131,31 @@ class TeamCommandTests(unittest.TestCase):
         status, out, _ = self.command("members", "list", "--organization", "customer-a")
         self.assertEqual((status, out), (2, ""))
 
+    def test_console_grants_are_explicit_operator_actions_even_while_web_console_is_off(self):
+        from hormuz.config import GatewayConfig
+        from hormuz.onboarding import TeamDirectory
+        from hormuz.session_store import SQLiteSessionStore
+        from tests._console_fixtures import activate_member
+        config = GatewayConfig.load(self.path, environ=fixture_environment())
+        settings = config.session_broker
+        self.assertFalse(settings.console_enabled)
+        store = SQLiteSessionStore(settings.database_path, master_key=settings.master_key, audience=settings.public_base_url,
+                                    access_ttl_seconds=600, absolute_ttl_seconds=43200, enrollment_ttl_seconds=300)
+        directory = TeamDirectory(config, store)
+        member, _ = activate_member(store, directory)
+        arguments = ("--organization", "customer-a", "--member", member.membership_id)
+        status, out, err = self.command("administrators", "grant", *arguments, "--role", "member_admin")
+        self.assertEqual((status, err), (0, ""))
+        self.assertTrue(json.loads(out)["changed"])
+        self.assertFalse(json.loads(self.command("administrators", "grant", *arguments, "--role", "member_admin")[1])["changed"])
+        status, out, _ = self.command("administrators", "list", "--organization", "customer-a")
+        self.assertEqual(status, 0)
+        self.assertEqual(json.loads(out)["items"][0]["membership_id"], member.membership_id)
+        self.assertNotIn("subject", out)
+        self.assertNotIn("email", out)
+        self.assertEqual(self.command("administrators", "revoke", *arguments)[0], 0)
+        self.assertFalse(json.loads(self.command("administrators", "revoke", *arguments)[1])["changed"])
+
 
 if __name__ == "__main__":
     unittest.main()

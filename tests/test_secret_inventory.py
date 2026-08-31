@@ -62,7 +62,8 @@ class SecretInventoryTests(unittest.TestCase):
 
     def test_local_session_custody_does_not_relax_provider_envelope_requirements(self) -> None:
         candidate = copy.deepcopy(self.inventory)
-        candidate["managed_materials"][0]["custody_mode"] = "keyed_hash"
+        provider = next(item for item in candidate["managed_materials"] if item["id"] == "provider-credential-envelope")
+        provider["custody_mode"] = "keyed_hash"
         with self.assertRaises(SecretInventoryError) as raised:
             validate_secret_inventory(candidate, source_root=ROOT)
         self.assertEqual(raised.exception.code, "secret_inventory_managed_custody_invalid")
@@ -77,6 +78,20 @@ class SecretInventoryTests(unittest.TestCase):
         handoff["source_module"] = "hormuz/session_store.py"
         handoff["source_qualname"] = "SQLiteSessionStore._digest"
         with self.assertRaisesRegex(SecretInventoryError, "secret_inventory_managed_custody_invalid"):
+            validate_secret_inventory(candidate, source_root=ROOT)
+
+    def test_console_cookie_custody_cannot_be_reused_for_other_secret_sources(self) -> None:
+        for field, value in (("source_qualname", "_cookie"), ("storage_owner", "customer_filesystem"),
+                             ("runtime_consumer", "gateway_runtime"), ("rotation_authority", "identity_operator"),
+                             ("key_purpose", "provider_credential")):
+            candidate = copy.deepcopy(self.inventory)
+            entry = next(item for item in candidate["managed_materials"] if item["id"] == "console-browser-cookies")
+            entry[field] = value
+            with self.subTest(field=field), self.assertRaises(SecretInventoryError):
+                validate_secret_inventory(candidate, source_root=ROOT)
+        candidate = copy.deepcopy(self.inventory)
+        candidate["environment_reads"][1]["custody_mode"] = "browser_http_only_cookie"
+        with self.assertRaisesRegex(SecretInventoryError, "secret_inventory_secret_custody_invalid"):
             validate_secret_inventory(candidate, source_root=ROOT)
 
     def test_new_environment_read_requires_inventory_review(self) -> None:

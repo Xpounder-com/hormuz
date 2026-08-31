@@ -45,6 +45,7 @@ _CUSTODY_MODES = frozenset(
         "keyed_hash",
         "os_secure_store",
         "private_invitation_handoff",
+        "browser_http_only_cookie",
     }
 )
 _STORAGE_OWNERS = frozenset(
@@ -58,6 +59,7 @@ _STORAGE_OWNERS = frozenset(
         "customer_cloud_identity",
         "customer_object_store",
         "client_os_secure_store",
+        "client_browser",
     }
 )
 _RUNTIME_CONSUMERS = frozenset(
@@ -80,6 +82,7 @@ _RUNTIME_CONSUMERS = frozenset(
         "storage_migration_cli",
         "session_broker",
         "team_operator_cli",
+        "admin_console",
         "not_in_active_core",
     }
 )
@@ -473,7 +476,7 @@ def _validate_sources(
             "secret_inventory_material_class_invalid",
         )
         custody_mode = _enum(entry, "custody_mode", _CUSTODY_MODES, "secret_inventory_custody_mode_invalid")
-        if custody_mode == "private_invitation_handoff":
+        if custody_mode in {"private_invitation_handoff", "browser_http_only_cookie"}:
             raise SecretInventoryError("secret_inventory_secret_custody_invalid")
         _enum(entry, "storage_owner", _STORAGE_OWNERS, "secret_inventory_storage_owner_invalid")
         _enum(entry, "runtime_consumer", _RUNTIME_CONSUMERS, "secret_inventory_consumer_invalid")
@@ -505,7 +508,15 @@ def _validate_managed_materials(
             raise SecretInventoryError("secret_inventory_managed_source_missing")
         _enum(entry, "material_class", _MATERIAL_CLASSES, "secret_inventory_material_class_invalid")
         mode = _enum(entry, "custody_mode", _CUSTODY_MODES, "secret_inventory_custody_mode_invalid")
-        local_session_mode = mode in {"session_flow_aead", "keyed_hash", "os_secure_store", "private_invitation_handoff"}
+        local_session_mode = mode in {"session_flow_aead", "keyed_hash", "os_secure_store", "private_invitation_handoff", "browser_http_only_cookie"}
+        if mode == "browser_http_only_cookie" and (
+            coordinate.source_module != "hormuz/console_http.py"
+            or coordinate.source_qualname != "_cookie_header"
+            or entry.get("storage_owner") != "client_browser"
+            or entry.get("runtime_consumer") != "admin_console"
+            or entry.get("rotation_authority") != "session_owner"
+        ):
+            raise SecretInventoryError("secret_inventory_managed_custody_invalid")
         if mode == "private_invitation_handoff" and (
             coordinate.source_module != "hormuz/commands/onboarding.py"
             or coordinate.source_qualname != "_write_invitation"

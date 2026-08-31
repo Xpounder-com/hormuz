@@ -25,7 +25,7 @@ SESSION_V2_TABLE_COLUMNS = {
 }
 
 
-SESSION_TABLE_COLUMNS = {
+SESSION_V3_TABLE_COLUMNS = {
     **SESSION_V2_TABLE_COLUMNS,
     "session_enrollments": SESSION_V2_TABLE_COLUMNS["session_enrollments"] + (
         "invitation_id", "membership_id", "authorization_version",
@@ -50,9 +50,32 @@ SESSION_TABLE_COLUMNS = {
 }
 
 
-def validate_session_schema(connection: sqlite3.Connection, *, version: int = 3) -> bool:
+SESSION_TABLE_COLUMNS = {
+    **SESSION_V3_TABLE_COLUMNS,
+    "console_grants": (
+        "id", "organization_id", "membership_id", "role", "status",
+        "authorization_version", "created_at", "updated_at",
+    ),
+    "console_login_flows": (
+        "id", "organization_id", "issuer", "state_hash", "browser_cookie_hash",
+        "encrypted_flow", "status", "created_at", "expires_at",
+    ),
+    "console_sessions": (
+        "id", "organization_id", "membership_id", "grant_id", "membership_version",
+        "grant_version", "credential_hash", "created_at", "last_seen_at", "expires_at", "revoked_at",
+    ),
+    "console_events": (
+        "id", "organization_id", "event_type", "decision_actor_id",
+        "target_membership_id", "grant_id", "session_id", "occurred_at",
+    ),
+}
+
+
+def validate_session_schema(connection: sqlite3.Connection, *, version: int = 4) -> bool:
     """Reject unexpected durable fields, tables, views, or triggers at startup."""
-    tables = SESSION_V2_TABLE_COLUMNS if version == 2 else SESSION_TABLE_COLUMNS
+    tables = {2: SESSION_V2_TABLE_COLUMNS, 3: SESSION_V3_TABLE_COLUMNS, 4: SESSION_TABLE_COLUMNS}.get(version)
+    if tables is None:
+        return False
     objects = connection.execute(
         "SELECT name, type FROM sqlite_master WHERE type IN ('table', 'view', 'trigger') "
         "AND name NOT LIKE 'sqlite_%'"

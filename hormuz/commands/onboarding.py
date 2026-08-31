@@ -9,6 +9,7 @@ import stat
 from pathlib import Path
 
 from ..config import GatewayConfig
+from ..console_store import CONSOLE_ROLES, ConsoleStore
 from ..onboarding import Invitation, TeamDirectory
 from ..session_store import SQLiteSessionStore, SessionStoreError
 
@@ -58,6 +59,17 @@ def add_onboarding_commands(subparsers: argparse._SubParsersAction) -> None:
     events = commands.add_parser("events", help="List metadata-only local operator/member transitions")
     _scope(events)
     _pagination(events)
+    administrators = commands.add_parser("administrators", help="Manage separate console grants (server operator only)")
+    admin_commands = administrators.add_subparsers(dest="administrator_command", required=True)
+    for action in ("grant", "list", "revoke"):
+        command = admin_commands.add_parser(action)
+        _scope(command)
+        if action == "list":
+            _pagination(command)
+        else:
+            command.add_argument("--member", required=True)
+        if action == "grant":
+            command.add_argument("--role", required=True, choices=CONSOLE_ROLES)
 
 
 def _scope(parser: argparse.ArgumentParser) -> None:
@@ -104,6 +116,14 @@ def run(config: GatewayConfig, args: argparse.Namespace) -> int:
         result = directory.disable_member(organization_id=args.organization, membership_id=args.member)
     elif action == "invitations" and args.invitation_command == "revoke":
         result = {"revoked": directory.revoke_invitation(organization_id=args.organization, invitation_id=args.invitation)}
+    elif action == "administrators":
+        console = ConsoleStore(store, directory)
+        if args.administrator_command == "grant":
+            result = console.grant(organization_id=args.organization, membership_id=args.member, role=args.role)
+        elif args.administrator_command == "revoke":
+            result = console.revoke(organization_id=args.organization, membership_id=args.member)
+        else:
+            result = console.list_grants(organization_id=args.organization, after=args.after, limit=args.limit)
     else:
         kind = {"organization": "organizations", "list": "teams", "members": "memberships", "invitations": "invitations", "events": "events"}[action]
         result = directory.list_records(kind, organization_id=getattr(args, "organization", None), after=args.after, limit=args.limit)

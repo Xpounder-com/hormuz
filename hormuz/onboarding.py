@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
 from .config import GatewayConfig, Identity
+from ._console_authority import revoke_member_console_access
 from .session_store import (
     AuthorizationFlow, SQLiteSessionStore, SessionPrincipal, SessionStoreError,
     _isoformat, _parse_time, _require_binding, _require_secret,
@@ -233,7 +234,8 @@ class TeamDirectory:
             connection.execute("BEGIN IMMEDIATE")
             return self._disable(connection, self._member(connection, organization_id, membership_id))
 
-    def _disable(self, connection: sqlite3.Connection, member: sqlite3.Row) -> dict[str, object]:
+    def _disable(self, connection: sqlite3.Connection, member: sqlite3.Row, *,
+                 decision_actor: str = "server_local_operator", decision_scope: str = "server_local") -> dict[str, object]:
         result = {"changed": False, "sessions_revoked": 0, "enrollments_invalidated": 0, "invitations_revoked": 0}
         if member["status"] == "disabled":
             return result
@@ -252,7 +254,7 @@ class TeamDirectory:
         for session in sessions:
             self.store._record_event(connection, session_id=session["id"], event_type="membership_disabled", occurred_at=now,
                                      organization_id=scope[0], target_actor_id=scope[1], target_team_id=member["team_id"],
-                                     decision_actor_id="server_local_operator", decision_scope="server_local", reason_code="membership_disabled")
+                                     decision_actor_id=decision_actor, decision_scope=decision_scope, reason_code="membership_disabled")
         result["invitations_revoked"] = connection.execute(
             "UPDATE onboarding_invitations SET status = 'revoked', secret_hash = NULL, completed_at = ? WHERE organization_id = ? AND membership_id = ? AND status = 'pending'", (_isoformat(now), *scope),
         ).rowcount
@@ -264,7 +266,8 @@ class TeamDirectory:
               AND status IN ('pending', 'authorizing', 'exchanging', 'authorized')
             """, scope,
         ).rowcount
-        self._event(connection, scope[0], "member_disabled", team_id=member["team_id"], membership_id=scope[1])
+        revoke_member_console_access(connection, now, *scope, actor_id=decision_actor)
+        self._event(connection, scope[0], "member_disabled", team_id=member["team_id"], membership_id=scope[1], decision_actor=decision_actor)
         result["changed"] = True
         return result
 

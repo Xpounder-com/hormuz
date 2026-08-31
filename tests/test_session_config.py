@@ -25,6 +25,7 @@ class SessionConfigTests(unittest.TestCase):
 
     def test_approved_defaults_hide_resolved_secrets(self):
         config = self.load()
+        self.assertFalse(config.session_broker.console_enabled)
         self.assertEqual(config.session_broker.access_ttl_seconds, 600)
         self.assertEqual(config.session_broker.absolute_ttl_seconds, 43200)
         self.assertNotIn(CLIENT_SECRET, repr(config))
@@ -78,6 +79,16 @@ class SessionConfigTests(unittest.TestCase):
     def test_oidc_credentials_cannot_reuse_a_provider_secret_variable(self):
         self.value["authentication"]["oidc"]["issuers"][0]["login"]["client_secret_env"] = "TEST_PROVIDER_KEY"
         with self.assertRaisesRegex(ConfigError, "dedicated"):
+            self.load()
+
+    def test_console_flag_requires_boolean_and_managed_onboarding_before_resolving_secrets(self):
+        self.value["authentication"]["session_broker"]["console_enabled"] = True
+        with self.assertRaisesRegex(ConfigError, "managed team onboarding"):
+            self.load(environ={})
+        self.value["authentication"]["session_broker"]["onboarding_enabled"] = True
+        self.assertTrue(self.load().session_broker.console_enabled)
+        self.value["authentication"]["session_broker"]["console_enabled"] = "true"
+        with self.assertRaises(ConfigError):
             self.load()
 
     def test_onboarding_allows_empty_subjects_only_for_an_explicit_login_broker(self):

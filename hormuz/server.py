@@ -47,6 +47,8 @@ from .store_router import create_postgres_runtime_pool, create_repository_bundle
 from .session import SessionBroker
 from .session_http import SessionRequestLimit, handle_session_request
 from .session_store import SQLiteSessionStore, SessionStoreError
+from .console import ConsoleService
+from .console_http import handle_console_request
 from .usage import ResponseUsageParser
 
 
@@ -75,6 +77,8 @@ class GatewayServer(ThreadingHTTPServer):
         self.authenticator = Authenticator(config)
         self.session_broker: SessionBroker | None = None
         self.session_request_limit = SessionRequestLimit()
+        self.console_request_limit = SessionRequestLimit()
+        self.console: ConsoleService | None = None
         self.postgres_pool = create_postgres_runtime_pool(config)
         try:
             if config.session_broker.enabled:
@@ -96,6 +100,8 @@ class GatewayServer(ThreadingHTTPServer):
                     config, portfolio_factory=create_portfolio_repository, connection_pool=self.postgres_pool,
                 )
                 self.store, portfolio = repositories.usage, repositories.portfolio
+            if self.session_broker is not None and config.session_broker.console_enabled:
+                self.console = ConsoleService(self.session_broker, self.store)
             self.portfolio_service = PortfolioService(config, portfolio, self.authenticator)
             self.attribution_repository = portfolio.attributions
             policy_runtime = PolicyRuntime(config, connection_pool=self.postgres_pool)
@@ -270,6 +276,9 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         if path.startswith(PORTFOLIO_PREFIX + "/"):
             handle_registry(self)
             return
+        if path == "/console" or path.startswith(("/console/", "/v1/admin/")):
+            handle_console_request(self)
+            return
         if path.startswith("/v1/auth/"):
             handle_session_request(self)
             return
@@ -371,6 +380,9 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         path = urlsplit(self.path).path
         if path.startswith(PORTFOLIO_PREFIX + "/"):
             handle_registry(self)
+            return
+        if path == "/console" or path.startswith(("/console/", "/v1/admin/")):
+            handle_console_request(self)
             return
         if path.startswith("/v1/auth/"):
             handle_session_request(self)
