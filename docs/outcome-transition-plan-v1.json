@@ -1,0 +1,113 @@
+{
+  "schema_id": "hormuz.outcome-transition-plan",
+  "schema_version": 1,
+  "stage": "pre_implementation",
+  "target_release": "1.1.0",
+  "feature_issue": 218,
+  "gate_issue": 214,
+  "outcome_implemented": false,
+  "final_candidate_accepted": false,
+  "predecessor": {
+    "source_commit": "ade456b90a3f065ebee5b51893dbf111e815ff05",
+    "merged_main_commit": "ec7c5d89149b8e172a9c8da76b1e0a259bdf24bc",
+    "archive_sha256": "c838abe03ff4ceba5145da37cfafe1c4b81a2dc64a88ed7c9a503f5fda742d72",
+    "archive_kind": "deterministic_git_snapshot_not_published_release",
+    "archive_prefix": "hormuz-attribution-baseline/",
+    "archive_tar_umask": "0000"
+  },
+  "transitions": {
+    "sqlite": {
+      "from": 6,
+      "to": 7
+    },
+    "postgresql": {
+      "from": 10,
+      "to": 11
+    }
+  },
+  "compatibility": {
+    "existing_v1_behavior": "unchanged",
+    "existing_registry_and_attribution": "preserve_all_rows_versions_cursors_replays_and_immutable_fact_links",
+    "approved_public_wire": "unchanged_digest_pinned_v1_outcome_page_event_and_receipt",
+    "work_scope_provenance": "separate_immutable_internal_record_of_authorized_connector_parent_object_binding_and_exact_work_scope_version",
+    "source_authority": "server_registered_connector_and_verified_delivery_never_body_supplied_tenant_or_installation",
+    "authentication_time": "before_json_parsing_normalization_storage_or_external_lookup",
+    "privileged_reads": "portfolio_admin_only_until_separate_role_scoped_view_gate_commit_audit_before_delivery",
+    "mutation_boundary": "one_transaction_for_receipt_observations_context_coverage_and_safe_audit",
+    "provider_replay": "never_automatic",
+    "uncertain_reservations": "preserve_without_release_or_replay"
+  },
+  "evidence": {
+    "raw_source_observation": "bounded_allowlisted_metadata_only_not_raw_payload",
+    "normalized_event": "closed_hormuz_work_outcome_event_v1",
+    "derived_eligibility": "separate_from_source_fact_inconclusive_without_versioned_predeclared_rule",
+    "default_evidence_level": "descriptive",
+    "associated_evidence": "requires_separate_221_join",
+    "controlled_evidence": "requires_separately_approved_predeclared_design",
+    "correction": "append_prior_identity_authenticated_connector_or_actor_fixed_reason_and_time",
+    "retention": "append_tombstones_preserve_linked_financial_and_audit_facts_customer_owned_backup_policy",
+    "scope_changes": "retain_event_time_binding_do_not_retarget_historical_observations",
+    "current_state": "compare_only_verified_source_revisions_in_one_ordering_domain_never_lexically_guess",
+    "unknown_or_incomparable_revision": "retain_observation_and_ordering_uncertainty_never_erase_later_authoritative_state",
+    "coverage": "retain_unsupported_unmatched_ambiguous_late_excluded_superseded_and_failed_members",
+    "provenance": "tenant_keyed_allowlisted_metadata_with_explicit_key_version_no_secret_values",
+    "delivery_fingerprint": "tenant_keyed_exact_verified_bytes_no_raw_payload_retention",
+    "idempotency": "same_authenticated_delivery_and_fingerprint_returns_original_receipt_without_writes_conflict_fails_closed"
+  },
+  "limits": {
+    "maximum_request_bytes": 1048576,
+    "maximum_json_depth": 16,
+    "maximum_json_members": 4096,
+    "maximum_events_per_delivery": 100,
+    "ingestion_concurrency_per_process": 8,
+    "request_read_timeout_seconds": 10,
+    "database_statement_timeout_ms": 5000,
+    "internal_automatic_retry_attempts": 0,
+    "maximum_dead_letter_metadata_bytes": 2048
+  },
+  "feature_surfaces": {
+    "administrator_routes": [
+      "GET /v1/admin/portfolio/outcomes"
+    ],
+    "connector_routes_activated": [],
+    "connector_foundation": "internal_source_neutral_verified_delivery_boundary_only",
+    "cli": "additive_portfolio_outcomes_read",
+    "new_durable_schema_versions": 1
+  },
+  "rollback": {
+    "writers": "stop_all_writers_and_pools_serialize_migration_restart_fresh_processes",
+    "in_place_downgrade": false,
+    "old_binary_new_schema": "refuse",
+    "before_writes": "restore_verified_application_database_pair_into_separate_destination",
+    "after_writes": "retain_candidate_and_recover_forward",
+    "unknown_write_count": "retain_candidate_and_recover_forward",
+    "retain_candidate_snapshot": true
+  },
+  "required_preflight_cases": [
+    "missing_next_migration_is_red",
+    "probe_failure_rollback_and_retry",
+    "all_populated_registry_attribution_and_v1_state_preserved",
+    "partial_state_fails_closed",
+    "actual_attribution_and_released_v1_binaries_refuse_next_schema",
+    "quiesced_attribution_pair_restore_preserves_both_replays_and_cursors",
+    "post_checkpoint_writes_require_forward_recovery",
+    "legacy_and_approved_wire_digests_unchanged",
+    "source_kit_and_isolated_wheel_proof"
+  ],
+  "required_implementation_cases": [
+    "real_additive_migrations_replace_test_probes",
+    "strict_versioned_observation_context_receipt_and_coverage_contracts",
+    "connector_authentication_and_tenant_scope_before_parse_or_storage",
+    "bytes_depth_members_concurrency_timeout_retry_and_dead_letter_bounds",
+    "exact_redelivery_conflict_and_concurrent_replicas",
+    "late_unknown_and_incomparable_source_revisions",
+    "append_only_corrections_tombstones_and_retention",
+    "unchanged_public_outcome_wire_and_event_time_work_scope_binding",
+    "no_association_or_controlled_claim_from_connector_observations",
+    "safe_audited_read_and_frozen_role_scoped_pagination",
+    "sqlite_postgresql_parity_forced_rls_and_outage",
+    "raw_payload_content_secret_and_log_exclusion",
+    "all_populated_outcome_tables_and_replay_state_forward_restore",
+    "connector_author_guidance_rotation_disablement_and_incident_response"
+  ]
+}
