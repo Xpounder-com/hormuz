@@ -42,7 +42,10 @@ unknown, not supplied to this known-amount helper as zero.
 
 `decode_provider_json` bounds a page to 1 MiB, 16 nested containers and 65,536
 members, with numeric lexemes bounded to 128 characters. It rejects duplicate
-members, malformed Unicode and non-finite/oversized numbers. The decoded page
+members, malformed Unicode and non-finite/unrepresentable numbers, preserving
+the fixed resource-limit error for oversized lexemes. Bounded finite numeric
+metadata is decoded exactly without imposing money-specific precision; that
+limit is enforced when an actual monetary field is normalized. The decoded page
 exists only in caller memory; callers must discard it after allowlisted
 normalization. Collection-level 16 MiB / 32-page / 4,096-record / deadline,
 pagination, conflict and authorization checks remain future adapter work.
@@ -59,7 +62,8 @@ The source dialects are documented in the frozen
 | Request count | Native count when returned | Unknown in this profile |
 
 Known counts are nonnegative integers at most `2^63 - 1`. Booleans, strings,
-floats, overflow and inconsistent known partitions fail. Source-native counts
+floats, overflow and inconsistent known partitions fail. A fully known modality
+partition must equal its parent, not merely stay below it. Source-native counts
 remain separate from derived totals. Cached/uncached modality fields are
 subcategories, not additional input. No arbitrary work text, user IDs, keys,
 unrecognized fields or raw provider object is retained by the usage vector.
@@ -92,7 +96,9 @@ model tiers and tool charges are not silently included.
 
 The caller supplies the exact tenant, actual model, event time, tier and batch
 state; a mismatch or unknown dimension returns an unavailable estimate with a
-fixed reason. No automatic batch discount, model-alias substitution, historical
+fixed reason and null amount/currency, as required by the frozen finance wire.
+The configured currency remains available separately on the immutable rate card.
+No automatic batch discount, model-alias substitution, historical
 backfill, invoice inference or proportional allocation occurs. Known complete
 zero usage produces an explicitly estimated zero; missing metadata does not.
 

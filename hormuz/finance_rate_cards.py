@@ -116,7 +116,10 @@ class RateCard:
 
 
 def rate_card_from_mapping(value: object) -> RateCard:
-    body = _validated_body(value)
+    try:
+        body = _validated_body(value)
+    except FinanceValueError:
+        raise FinanceValueError("finance_invalid_rate_card") from None
     result = RateCard(json.dumps(body, sort_keys=True, separators=(",", ":"), ensure_ascii=True))
     return result
 
@@ -124,7 +127,7 @@ def rate_card_from_mapping(value: object) -> RateCard:
 @dataclass(frozen=True)
 class CostEstimate:
     amount: str | None
-    currency: str
+    currency: str | None
     cost_basis: str
     reason_code: str
     rate_card_id: str
@@ -142,7 +145,8 @@ def estimate_usage(card: RateCard, usage: UsageVector, *, organization_id: str, 
     body = card.as_mapping()
 
     def result(reason, amount=None):
-        return CostEstimate(amount, body["currency"], "configured_rate_card_estimate" if amount is not None else "not_available",
+        return CostEstimate(amount, body["currency"] if amount is not None else None,
+                            "configured_rate_card_estimate" if amount is not None else "not_available",
                             reason, body["rate_card_id"], body["version"], card.content_digest)
 
     try:

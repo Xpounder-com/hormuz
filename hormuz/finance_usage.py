@@ -60,9 +60,9 @@ def _normalized(provider, native):
             uncached = total - read - write
         # Uncached modalities and cached modalities are distinct subcategories;
         # neither is added on top of the already inclusive input total.
-        _bounded_parts(uncached, tuple(native[f"input_{kind}_tokens"] for kind in ("text", "image", "audio")))
-        _bounded_parts(read, tuple(native[f"input_cached_{kind}_tokens"] for kind in ("text", "image", "audio")))
-        _bounded_parts(native["output_tokens"], tuple(native[f"output_{kind}_tokens"] for kind in ("text", "image", "audio")))
+        _bounded_parts(uncached, tuple(native[f"input_{kind}_tokens"] for kind in ("text", "image", "audio")), complete=True)
+        _bounded_parts(read, tuple(native[f"input_cached_{kind}_tokens"] for kind in ("text", "image", "audio")), complete=True)
+        _bounded_parts(native["output_tokens"], tuple(native[f"output_{kind}_tokens"] for kind in ("text", "image", "audio")), complete=True)
         counts.update(input_tokens=total, uncached_input_tokens=uncached, cache_read_tokens=read,
                       cache_write_tokens=write, request_count=native["num_model_requests"])
     elif provider == "anthropic":

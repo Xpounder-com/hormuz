@@ -81,6 +81,13 @@ class FinanceRateCardTests(unittest.TestCase):
                 self.assertIsNone(result.amount)
                 self.assertEqual(result.reason_code, reason)
 
+    def test_unavailable_estimate_has_null_amount_and_currency(self):
+        result = estimate_usage(rate_card_from_mapping(rate_card()), normalize_provider_usage("openai", openai_usage()),
+                                **{**estimate_context(), "actual_model": None})
+        self.assertEqual(result.cost_basis, "not_available")
+        self.assertIsNone(result.amount)
+        self.assertIsNone(result.currency)
+
     def test_rates_never_apply_an_implicit_batch_discount(self):
         body = rate_card()
         body["batch"] = True
@@ -196,6 +203,17 @@ class FinanceRateCardTests(unittest.TestCase):
         for body in variants:
             with self.assertRaises(FinanceValueError):
                 rate_card_from_mapping(body)
+
+    def test_invalid_money_in_a_card_uses_the_rate_card_error_boundary(self):
+        for rate in ("NaN", "1e2", "0." + "0" * 18 + "1", "9" * 19):
+            body = rate_card()
+            body["rates"]["output"] = rate
+            with self.subTest(rate=rate), self.assertRaises(FinanceValueError) as caught:
+                rate_card_from_mapping(body)
+            self.assertEqual(str(caught.exception), "finance_invalid_rate_card")
+        with self.assertRaises(FinanceValueError) as caught:
+            rate_card_from_mapping({**rate_card(), "currency": "invalid"})
+        self.assertEqual(str(caught.exception), "finance_invalid_rate_card")
 
 
 if __name__ == "__main__":

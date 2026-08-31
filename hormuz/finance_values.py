@@ -161,7 +161,10 @@ def decode_provider_json(data: bytes) -> dict:
             raise FinanceValueError("finance_source_limit_exceeded")
         with exact_context():
             number = Decimal(value)
-            decimal_text(number)
+        # A page also carries non-money metadata. Money precision belongs to
+        # provider_amount; keep bounded finite numeric lexemes exact here.
+        if not number.is_finite():
+            raise FinanceValueError("finance_invalid_source")
         return number
 
     def nonfinite(_value):
@@ -170,6 +173,8 @@ def decode_provider_json(data: bytes) -> dict:
     try:
         value = json.loads(data.decode("utf-8"), object_pairs_hook=pairs, parse_int=integer,
                            parse_float=fractional, parse_constant=nonfinite)
+    except FinanceValueError:
+        raise
     except (ValueError, UnicodeError, RecursionError, InvalidOperation):
         raise FinanceValueError("finance_invalid_source") from None
     if type(value) is not dict:

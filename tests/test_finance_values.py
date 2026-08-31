@@ -62,9 +62,24 @@ class FinanceValueTests(unittest.TestCase):
 
     def test_json_duplicate_nonfinite_invalid_unicode_and_wrong_top_level_fail(self):
         for body in (b'{"a":1,"a":2}', b'{"a":NaN}', b'{"a":Infinity}', b'{"a":"\\ud800"}',
-                     b'{"a":1e1000000}', b'[]', b'null', b'{"a":' + b'9' * 129 + b'}', b'\xff'):
+                     b'[]', b'null', b'{"a":' + b'9' * 129 + b'}', b'\xff'):
             with self.subTest(body=body[:20]), self.assertRaises(FinanceValueError):
                 decode_provider_json(body)
+
+    def test_oversized_numeric_lexemes_preserve_the_resource_limit_code(self):
+        for number in (b"9" * 129, b"0." + b"9" * 127):
+            with self.assertRaises(FinanceValueError) as caught:
+                decode_provider_json(b'{"a":' + number + b'}')
+            self.assertEqual(str(caught.exception), "finance_source_limit_exceeded")
+
+    def test_nonmoney_numeric_metadata_is_not_limited_to_money_precision(self):
+        for native in ("0.0000000000000000001", "1e1000000", "1e-1000000"):
+            with self.subTest(native=native):
+                row = decode_provider_json(('{"metadata":' + native + '}').encode())
+                self.assertEqual(row["metadata"], Decimal(native))
+                with self.assertRaises(FinanceValueError) as caught:
+                    provider_amount("openai", row["metadata"], "usd")
+                self.assertEqual(str(caught.exception), "finance_invalid_amount")
 
     def test_json_resource_bounds_and_quoted_brackets(self):
         self.assertEqual(decode_provider_json(b'{"a":"[[[\\\"{{}"}'), {"a": '[[["{{}'})

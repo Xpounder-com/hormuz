@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import FrozenInstanceError, replace
 import unittest
 
-from hormuz.finance_values import FinanceValueError
+from hormuz.finance_values import FinanceValueError, decode_provider_json
 from hormuz.finance_usage import normalize_provider_usage
 
 if __package__:
@@ -71,6 +71,18 @@ class FinanceUsageTests(unittest.TestCase):
             with self.subTest(change=change), self.assertRaises(FinanceValueError):
                 normalize_provider_usage("openai", {**openai_usage(), **change})
 
+    def test_complete_modality_partitions_cannot_undercount_their_parent(self):
+        for field, value in (("input_text_tokens", 500), ("input_cached_text_tokens", 200),
+                             ("output_text_tokens", 100)):
+            with self.subTest(field=field), self.assertRaises(FinanceValueError):
+                normalize_provider_usage("openai", {**openai_usage(), field: value})
+
+    def test_incomplete_modality_metadata_stays_unknown(self):
+        row = {**openai_usage(), "input_text_tokens": None}
+        usage = normalize_provider_usage("openai", row)
+        self.assertIsNone(dict(usage.native_counts)["input_text_tokens"])
+        self.assertEqual(usage.count("uncached_input_tokens"), 600)
+
     def test_counts_are_bounded_nonnegative_integers_not_booleans_or_floats(self):
         for provider, source, name in (("openai", openai_usage(), "input_tokens"),
                                        ("anthropic", anthropic_usage(), "uncached_input_tokens")):
@@ -87,9 +99,11 @@ class FinanceUsageTests(unittest.TestCase):
     def test_unknown_fields_and_work_text_are_not_retained(self):
         row = {**openai_usage(), "description": "SYNTHETIC_EXCLUDED", "user_id": "SYNTHETIC_EXCLUDED",
                "api_key": "SYNTHETIC_EXCLUDED", "reasoning_tokens": 123}
+        row.update(decode_provider_json(b'{"fractional_metadata":0.0000000000000000001,"large_metadata":1e1000000}'))
         usage = normalize_provider_usage("openai", row)
         self.assertNotIn("SYNTHETIC_EXCLUDED", repr(usage))
         self.assertIsNone(usage.count("reasoning_tokens"))
+        self.assertEqual(usage, normalize_provider_usage("openai", openai_usage()))
 
     def test_wrong_provider_or_source_object_fails(self):
         for provider, row in (("unsupported", openai_usage()), ("openai", anthropic_usage()),
