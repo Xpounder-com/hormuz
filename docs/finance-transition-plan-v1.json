@@ -1,0 +1,177 @@
+{
+  "schema_id": "hormuz.finance-transition-plan",
+  "schema_version": 1,
+  "stage": "pre_implementation",
+  "target_release": "1.1.0",
+  "feature_issue": 8,
+  "gate_issue": 214,
+  "finance_implemented": false,
+  "live_finance_verified": false,
+  "final_candidate_accepted": false,
+  "base_main_commit": "c6d9558add40df71cc9ffbbaaf07d280e70e821c",
+  "predecessor": {
+    "source_commit": "aa648edf64df9f4a0c426ad73a95852f11561099",
+    "merged_main_commit": "fefd3ebc27e4340a169588dc190e11f874d8e949",
+    "archive_sha256": "fbbe1178607a38c5f390b96c646f5a93414523b37f553abb7d830d42f30ff056",
+    "archive_kind": "deterministic_git_snapshot_not_published_release",
+    "archive_prefix": "hormuz-outcome-baseline/",
+    "archive_tar_umask": "0000",
+    "runtime_files": 105
+  },
+  "transitions": {
+    "sqlite": {
+      "from": 7,
+      "to": 8
+    },
+    "postgresql": {
+      "from": 11,
+      "to": 12
+    }
+  },
+  "compatibility": {
+    "existing_v1_behavior": "unchanged_required_fields_auth_errors_cost_coverage_pagination_config_defaults_policy_and_CLI",
+    "existing_portfolio_state": "preserve_all_registry_attribution_outcome_rows_versions_cursors_receipts_replays_and_immutable_links",
+    "existing_public_wire": "unchanged_frozen_v1_manifest_portfolio_contract_and_all_implemented_wire_catalogues",
+    "legacy_estimates": "never_update_usage_rows_or_widen_v1_cost_basis_enums_never_backfill_missing_native_fields",
+    "additive_finance_boundary": "separate_versioned_finance_records_and_CLI_outputs_no_new_HTTP_route_or_privilege_from_this_checkpoint",
+    "request_accounting": "new_native_metadata_is_a_separate_versioned_sidecar_linked_to_exact_attempt_no_reinterpretation_of_v1_input_token_semantics",
+    "feature_seam": "separate_finance_repository_borrows_pool_and_tenant_transaction_never_widens_v1_usage_facade",
+    "mutation": "receipt_observations_provenance_idempotency_and_safe_audit_commit_together_no_network_inside_transaction",
+    "authority": "explicit_tenant_bound_operator_or_authenticated_principal_before_io_revalidate_scope_at_commit",
+    "role_views": "no_new_raw_record_access_for_finance_platform_team_or_self_roles_aggregate_views_require_223",
+    "uncertainty": "preserve_unknown_holds_never_replay_provider_work_or_release_reservations_for_reconciliation"
+  },
+  "accounting": {
+    "bases": [
+      "configured_rate_card_estimate",
+      "provider_aggregate",
+      "provider_final",
+      "allocated_estimate",
+      "credit_or_discount",
+      "not_available"
+    ],
+    "provider_final": "only_authoritative_finalized_fact_at_its_actual_accounting_scope_with_source_and_period_evidence_not_every_cost_report",
+    "automatic_person_or_team_allocation": false,
+    "allocated_estimate": "no_new_allocation_algorithm_authorized_a_later_approved_method_must_pin_version_weights_coverage_and_rounding",
+    "variance_proves_gateway_bypass": false,
+    "money": "finite_exact_decimal_strings_up_to_18_integer_and_18_fraction_digits_preserve_currency_no_implicit_FX",
+    "signed_amounts": "preserve_source_sign_and_unclassified_adjustments_no_guessing_credit_from_description_or_negative_total",
+    "rate_cards": "immutable_tenant_provider_actual_model_effective_interval_currency_version_and_content_digest_explicit_cache_and_tier_rules",
+    "reprice": "new_rate_card_or_reconciliation_never_changes_prior_cost_snapshot_unknown_legacy_rate_provenance_remains_unknown",
+    "normalization": "preserve_provider_native_counts_and_normalized_input_output_cache_read_cache_write_TTL_reasoning_billable_tokens_with_unknown_states",
+    "overlap": "input_cache_partitions_and_reasoning_in_output_are_counted_once_no_cross_provider_field_semantics_assumed",
+    "treatment": [
+      "credits",
+      "discounts",
+      "batch",
+      "rounding",
+      "failed",
+      "rate_limited",
+      "outcome_unknown",
+      "invoice_adjustment",
+      "unsupported_tier_or_modality"
+    ],
+    "coverage": "attributed_unattributed_unpriced_unbound_provider_scope_unsupported_known_bypassed_and_unknown_bypass_are_distinct_denominators",
+    "report_dimensions": [
+      "organization",
+      "team",
+      "actor",
+      "application",
+      "provider",
+      "model"
+    ],
+    "dimension_authority": "use_immutable_gateway_facts_and_exact_versioned_bindings_only_missing_final_granularity_remains_unsupported",
+    "exceptions": "versioned_absolute_and_relative_thresholds_explicit_zero_denominator_unknown_scope_and_amounts_append_only_review_decisions",
+    "privacy": "person_dimension_is_operational_cost_coverage_not_productivity_ranking_raw_peer_access_or_causal_claim"
+  },
+  "source_contract": "finance-source-contract-v1.json",
+  "limits": {
+    "maximum_page_bytes": 1048576,
+    "maximum_total_bytes": 16777216,
+    "maximum_pages": 32,
+    "maximum_records": 4096,
+    "maximum_window_days": 31,
+    "maximum_json_depth": 16,
+    "maximum_json_members_per_page": 65536,
+    "request_timeout_seconds": 10,
+    "collection_deadline_seconds": 60,
+    "maximum_retries_per_page": 2,
+    "maximum_retry_delay_seconds": 5,
+    "concurrent_collections_per_process": 4,
+    "database_statement_timeout_ms": 5000,
+    "maximum_opaque_cursor_bytes": 2048,
+    "maximum_error_metadata_bytes": 2048
+  },
+  "failure": {
+    "http": "fixed_official_HTTPS_GET_only_TLS_verified_no_redirects_no_provider_model_requests_no_401_or_403_retries",
+    "retry": "only_transient_network_429_and_5xx_within_global_deadline_and_retry_after_limit_no_sleep_past_deadline",
+    "incomplete": "no_successful_partial_snapshot_prior_complete_snapshot_retained_with_explicit_staleness_or_failure",
+    "receipt_race": "same_tenant_import_identity_and_normalized_content_return_original_receipt_conflicting_content_fails_closed",
+    "snapshot_consistency": "pagination_complete_does_not_prove_provider_point_in_time_consistency_record_observation_window",
+    "errors": "fixed_codes_never_response_body_or_exception_text_credentials_absent_from_argv_logs_database_and_export",
+    "credentials": "operator_selected_env_reference_only_no_new_secret_manager_credential_persistence_rotation_or_creation",
+    "retention": "append_supersession_tombstones_retain_linked_finance_audit_and_customer_owned_backups_no_universal_erasure"
+  },
+  "feature_surfaces": {
+    "new_http_routes": [],
+    "planned_cli": [
+      "finance rate-card",
+      "finance import",
+      "finance fetch",
+      "finance reconcile"
+    ],
+    "planned_schema_families": [
+      "hormuz.finance-source-binding",
+      "hormuz.finance-rate-card",
+      "hormuz.finance-usage-fact",
+      "hormuz.finance-observation",
+      "hormuz.finance-import-receipt",
+      "hormuz.finance-review-policy",
+      "hormuz.finance-reconciliation",
+      "hormuz.finance-review-event",
+      "hormuz.finance-error"
+    ],
+    "schedulers_activated": [],
+    "live_provider_accounts_configured": [],
+    "source_adapters": "separate_OpenAI_and_Anthropic_pure_normalizers_plus_bounded_transport_injected_for_tests",
+    "optional_refactoring": "extract_only_shared_decimal_validation_or_transport_bounds_when_two_adapters_need_identical_behavior_no_generalized_repository_rewrite"
+  },
+  "rollback": {
+    "writers": "stop_all_writers_and_pools_serialize_migration_restart_fresh_processes",
+    "in_place_downgrade": false,
+    "old_binary_new_schema": "refuse",
+    "before_writes": "restore_verified_application_database_pair_into_separate_destination",
+    "after_writes": "retain_candidate_and_recover_forward",
+    "unknown_write_count": "retain_candidate_and_recover_forward",
+    "retain_candidate_snapshot": true
+  },
+  "required_preflight_cases": [
+    "missing_next_migration_is_red",
+    "probe_failure_rollback_and_retry",
+    "all_populated_registry_attribution_outcome_and_v1_state_preserved",
+    "partial_state_fails_closed",
+    "actual_outcome_and_released_v1_binaries_refuse_next_schema",
+    "quiesced_outcome_pair_restore_preserves_all_replays_cursors_and_facts",
+    "post_checkpoint_writes_require_forward_recovery",
+    "legacy_and_approved_wire_digests_unchanged",
+    "source_kit_and_isolated_wheel_proof"
+  ],
+  "required_implementation_cases": [
+    "actual_additive_migrations_replace_probes",
+    "strict_versioned_finance_contracts_and_tenant_RLS",
+    "OpenAI_and_Anthropic_documented_source_fixtures",
+    "native_and_normalized_usage_missing_and_overlapping_categories",
+    "two_immutable_rate_card_versions_and_different_cache_rules",
+    "exact_fractional_cent_currency_credit_batch_rounding_and_invoice_cases",
+    "no_aggregate_to_final_granular_relabeling",
+    "source_binding_role_and_credential_boundaries",
+    "bounded_transport_pagination_retry_deadline_and_redirect_refusal",
+    "duplicate_conflict_and_two_replica_receipt_races",
+    "atomic_import_and_outage_recovery",
+    "explicit_all_dimensions_coverage_thresholds_and_unresolved_exceptions",
+    "all_populated_finance_tables_and_receipts_forward_restore",
+    "prior_transition_suites_preserve_their_actual_predecessors",
+    "source_wheel_content_and_secret_inventory_checks",
+    "separate_live_customer_evidence_and_final_candidate_gate"
+  ]
+}

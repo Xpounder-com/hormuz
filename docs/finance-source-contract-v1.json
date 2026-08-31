@@ -1,0 +1,158 @@
+{
+  "schema_id": "hormuz.finance-source-contract",
+  "schema_version": 1,
+  "reviewed_on": "2026-08-31",
+  "provider_reports_are_final_invoices": false,
+  "scope": "First-party API usage and cost reporting only; no Claude Enterprise, ChatGPT seat analytics, cloud reseller billing, or employee surveillance",
+  "providers": {
+    "openai": {
+      "documentation": [
+        "https://developers.openai.com/api/reference/python/resources/admin/subresources/organization/subresources/usage/methods/completions",
+        "https://developers.openai.com/api/reference/python/resources/admin/subresources/organization/subresources/usage/methods/costs",
+        "https://developers.openai.com/cookbook/examples/completions_usage_api"
+      ],
+      "host": "api.openai.com",
+      "usage_path": "/v1/organization/usage/completions",
+      "cost_path": "/v1/organization/costs",
+      "method": "GET",
+      "credential": "explicitly_authorized_admin_capable_credential_in_authorization_header_never_assume_model_key_permission",
+      "time_parameters": [
+        "start_time",
+        "end_time"
+      ],
+      "time_unit": "inclusive_exclusive_UTC_unix_seconds",
+      "cost_bucket_width": "1d",
+      "cost_amount_unit": "major_currency_decimal",
+      "cost_group_by": [
+        "project_id",
+        "line_item",
+        "api_key_id"
+      ],
+      "usage_group_by": [
+        "project_id",
+        "api_key_id",
+        "model",
+        "batch",
+        "service_tier"
+      ],
+      "cost_metadata": [
+        "amount.value",
+        "amount.currency",
+        "project_id",
+        "api_key_id",
+        "quantity",
+        "quantity_unit"
+      ],
+      "cost_text_handling": "line_item_is_not_work_text_authority_use_known_classification_or_tenant_keyed_fingerprint_never_infer_adjustment_from_free_text",
+      "usage_native_counts": [
+        "input_tokens",
+        "output_tokens",
+        "num_model_requests",
+        "input_cached_tokens",
+        "input_cache_write_tokens",
+        "input_uncached_tokens",
+        "input_text_tokens",
+        "input_image_tokens",
+        "input_audio_tokens",
+        "input_cached_text_tokens",
+        "input_cached_image_tokens",
+        "input_cached_audio_tokens",
+        "output_text_tokens",
+        "output_image_tokens",
+        "output_audio_tokens"
+      ],
+      "cache_accounting": "input_tokens_includes_cached_and_cache_write_tokens_subcategories_overlap_never_add_them_twice",
+      "unsupported_finance_sources": [
+        "ChatGPT_seat_or_Work_analytics",
+        "unmapped_Scale_Tier_commitments",
+        "third_party_gateway_or_reseller_invoices",
+        "per_request_invoice_lines_not_returned_by_costs_api"
+      ],
+      "missing_metadata": "nullable_or_absent_counts_and_dimensions_remain_unknown_never_zero_or_inferred",
+      "pagination": [
+        "has_more",
+        "next_page"
+      ],
+      "buckets": "data[].start_time_end_time_results"
+    },
+    "anthropic": {
+      "documentation": [
+        "https://platform.claude.com/docs/en/manage-claude/usage-cost-api",
+        "https://platform.claude.com/docs/en/api/admin/usage_report/retrieve_messages",
+        "https://platform.claude.com/docs/en/api/admin/cost_report/retrieve"
+      ],
+      "host": "api.anthropic.com",
+      "usage_path": "/v1/organizations/usage_report/messages",
+      "cost_path": "/v1/organizations/cost_report",
+      "method": "GET",
+      "credential": "explicitly_authorized_Admin_API_key_in_x_api_key_header_not_a_workspace_key",
+      "api_version": "2023-06-01",
+      "time_parameters": [
+        "starting_at",
+        "ending_at"
+      ],
+      "time_unit": "UTC_RFC3339_day_aligned_bounds_provider_buckets_must_match_requested_window",
+      "cost_bucket_width": "1d",
+      "cost_amount_unit": "USD_fractional_cents_divide_by_100_exactly",
+      "cost_group_by": [
+        "workspace_id",
+        "description"
+      ],
+      "usage_group_by": [
+        "workspace_id",
+        "api_key_id",
+        "model",
+        "service_tier",
+        "context_window",
+        "inference_geo"
+      ],
+      "cost_metadata": [
+        "amount",
+        "currency",
+        "workspace_id",
+        "model",
+        "cost_type",
+        "token_type",
+        "service_tier",
+        "context_window",
+        "inference_geo"
+      ],
+      "cost_text_handling": "description_is_not_parsed_to_invent_model_or_credit_authority_use_structured_fields_and_tenant_keyed_fingerprint",
+      "usage_native_counts": [
+        "uncached_input_tokens",
+        "cache_read_input_tokens",
+        "cache_creation.ephemeral_5m_input_tokens",
+        "cache_creation.ephemeral_1h_input_tokens",
+        "output_tokens",
+        "server_tool_use.web_search_requests"
+      ],
+      "cache_accounting": "uncached_input_cache_read_and_5m_1h_cache_creation_are_distinct_input_categories_sum_once_preserve_TTL_categories",
+      "unsupported_finance_sources": [
+        "priority_tier_costs",
+        "Claude_Platform_on_AWS_programmatic_reporting",
+        "Claude_Enterprise_Analytics",
+        "Bedrock_Vertex_Foundry_reseller_billing",
+        "fast_mode_beta_cost_verification_without_separate_profile",
+        "final_credit_or_invoice_statement_not_present_in_cost_report"
+      ],
+      "missing_metadata": "reasoning_tokens_request_count_or_other_unreturned_fields_are_unknown_not_zero",
+      "pagination": [
+        "has_more",
+        "next_page"
+      ],
+      "buckets": "data[].starting_at_ending_at_results"
+    }
+  },
+  "common": {
+    "query_authority": "server_resolved_Hormuz_tenant_and_explicit_operator_versioned_provider_account_binding_before_network_or_file_parse",
+    "provider_account_evidence": "record_operator_attestation_separately_from_authenticated_transport_never_claim_response_proves_account_binding",
+    "file_import_evidence": "customer_supplied_export_contract_tested_scope_unverified_no_live_verified_flag_from_file_fields",
+    "authenticated_import_evidence": "record_fixed_endpoint_query_filters_window_parser_version_pages_and_credential_reference_version_without_secret",
+    "data_minimization": "keep_only_typed_allowlisted_metadata_discard_raw_JSON_unrecognized_text_headers_credentials_and_free_form_errors",
+    "decimal_arithmetic": "decode_JSON_numbers_as_Decimal_preserve_native_amount_text_no_binary_float_or_implicit_currency_conversion",
+    "duplicate_or_partial_data": "reject_duplicate_JSON_members_nonfinite_amounts_repeated_cursors_inconsistent_buckets_missing_pages_and_conflicting_duplicate_records",
+    "refresh": "append_new_snapshot_of_mutable_source_totals_explicit_supersession_never_add_overlapping_snapshots_or_reprice_history",
+    "source_failure": "bounded_401_403_429_5xx_network_and_schema_errors_keep_prior_snapshot_and_explicit_gap_never_zero_cost_success",
+    "live_label": "requires_successful_customer_authorized_read_or_import_and_scope_provenance_not_fixtures_or_permission_probe"
+  }
+}
