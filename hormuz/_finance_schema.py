@@ -81,4 +81,3 @@ def verify_postgres_finance(cursor, schema: str, error_factory) -> None:
         for table, ddl in TABLE_DDL.items()
     }
     verify_postgres_owned_tables(cursor, schema, error_factory, TABLE_DDL, {}, expected, trigger_type=58)
-

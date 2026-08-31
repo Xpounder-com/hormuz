@@ -83,4 +83,3 @@ class SQLiteFinanceTests(FinanceAssertions, unittest.TestCase):
         self.error("unavailable", lambda: self.register(repository=repository))
         self.error("unavailable", lambda: self.get(repository=repository))
         self.assertFalse(path.exists())
-
