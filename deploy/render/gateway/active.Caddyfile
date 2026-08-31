@@ -1,0 +1,76 @@
+{
+	admin off
+	auto_https off
+	persist_config off
+	grace_period 3s
+	log {
+		output discard
+	}
+	servers {
+		protocols h1
+		max_header_size 16KB
+		timeouts {
+			read_header 5s
+			read_body 5s
+			write 30s
+			idle 5s
+		}
+	}
+}
+
+# Render terminates public TLS. Only this listener is exposed; the gateway
+# binds loopback and independently validates the hop, Host, Origin and session.
+:{$PORT:10000} {
+	bind 0.0.0.0
+	header {
+		-Server
+		Cache-Control "no-store"
+		X-Content-Type-Options "nosniff"
+		X-Robots-Tag "noindex, nofollow, noarchive"
+	}
+	@login {
+		path /health /ready /console /console/* /v1/auth/* /v1/admin/* /v1/gateway/whoami /v1/gateway/usage
+	}
+	handle @login {
+		request_body {
+			max_size 16KB
+		}
+		reverse_proxy 127.0.0.1:8787 {
+			# Setting replaces all caller-supplied values. Never adapt/export the
+			# live configuration; this runtime placeholder stays out of the file.
+			header_up X-Hormuz-Ingress-Credential {env.HORMUZ_INGRESS_CREDENTIAL}
+			header_up -Forwarded
+			header_up -X-Forwarded-*
+			header_up -X-Api-Key
+			header_up -X-Hormuz-Organization
+			header_up -X-Hormuz-Team
+			header_up -X-Hormuz-User
+			header_up -Idempotency-Key
+			header_up -X-Idempotency-Key
+			lb_retries 0
+			unhealthy_request_count 32
+			transport http {
+				versions 1.1
+				network_proxy none
+				keepalive off
+				compression off
+				max_conns_per_host 32
+				max_response_header 16KB
+				dial_timeout 2s
+				response_header_timeout 25s
+				read_timeout 5s
+				write_timeout 5s
+			}
+		}
+	}
+	handle {
+		respond "{\"schema_id\":\"hormuz.hosted-staging\",\"schema_version\":1,\"status\":\"route_disabled\",\"inference_enabled\":false}" 503 {
+			close
+		}
+	}
+	handle_errors {
+		respond "{\"schema_id\":\"hormuz.hosted-staging\",\"schema_version\":1,\"status\":\"request_rejected\",\"inference_enabled\":false}" {err.status_code} {
+			close
+		}
+	}
+}

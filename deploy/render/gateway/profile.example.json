@@ -1,0 +1,7 @@
+{
+  "schema": "hormuz.hosted-auth-staging/v1",
+  "public_origin": "https://gateway.example.com",
+  "oidc_issuer": "https://identity.example.com/oauth2/default",
+  "oidc_client_id": "replace-with-confidential-client-id",
+  "state_directory": "/var/lib/hormuz/state"
+}

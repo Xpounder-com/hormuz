@@ -217,6 +217,30 @@
   ],
   "operator_artifacts": [
     {
+      "id": "hosted_profile_file",
+      "created_when": "operator_configures_opt_in_hosted_authentication_staging",
+      "storage_location": "operator_controlled_read_only_runtime_configuration_file",
+      "content_boundary": "public_origin_issuer_client_identifier_and_state_path_without_secret_values",
+      "prompt_or_response_body_boundary": "excluded_by_hormuz_contract",
+      "customer_operator_authority": "private_configuration_access_review_retention_and_deletion"
+    },
+    {
+      "id": "hosted_state_marker",
+      "created_when": "operator_explicitly_initializes_or_restores_hosted_staging_state",
+      "storage_location": "owner_only_initialized_json_and_sibling_empty_lifecycle_lock_file",
+      "content_boundary": "random_instance_identifier_recovery_flag_and_keyed_configuration_binding",
+      "prompt_or_response_body_boundary": "excluded_by_hormuz_contract",
+      "customer_operator_authority": "offline_backup_and_restore_with_key_origin_and_identity_binding_checks"
+    },
+    {
+      "id": "hosted_state_snapshot",
+      "created_when": "operator_runs_offline_hosted_staging_snapshot",
+      "storage_location": "new_owner_only_operator_selected_directory",
+      "content_boundary": "consistent_session_and_usage_database_copies_with_keyed_digest_manifest_no_raw_credentials",
+      "prompt_or_response_body_boundary": "excluded_by_hormuz_contract",
+      "customer_operator_authority": "private_encrypted_offsite_transfer_retention_deletion_and_restore_with_all_authority_revoked"
+    },
+    {
       "id": "console_browser_cookies",
       "created_when": "operator_granted_member_starts_or_completes_console_login",
       "storage_location": "browser_http_only_cookie_store",
@@ -294,7 +318,7 @@
       "storage_location": "operator_selected_separate_owner_only_sqlite_file",
       "content_boundary": "identity_bindings_keyed_credential_hashes_and_encrypted_transient_oidc_state",
       "prompt_or_response_body_boundary": "excluded_by_hormuz_contract",
-      "customer_operator_authority": "secure_backup_retention_and_offline_deletion_with_master_key_rotation_before_restore"
+      "customer_operator_authority": "secure_backup_retention_and_offline_deletion_with_managed_directory_revocation_reconciliation_before_restore"
     },
     {
       "id": "client_session_secure_store",

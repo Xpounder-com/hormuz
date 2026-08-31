@@ -161,6 +161,26 @@ be stale. Managed-directory key migration and revocation reconciliation are
 explicit deployment gates in [team onboarding](TEAM_ONBOARDING.md); do not serve
 a restored directory as if an old backup preserved current access decisions.
 
+The separate opt-in [hosted authentication staging profile](../deploy/render/gateway/README.md)
+adds `hosted_profile_file`, private origin/issuer/client/path configuration with no
+secret values; `hosted_state_marker`, a keyed configuration binding plus an empty
+advisory lifecycle lock; and `hosted_state_snapshot`, consistent copies of the
+session and usage databases with a keyed digest manifest. No database tables or
+request-content fields are added. The profile initializes only on an explicit
+operator command and refuses missing state or changed key/identity bindings at
+startup. Its snapshot is owner-only but is not an encrypted export. Encrypt any
+offsite copy separately; a copy on the same disk is not disaster recovery.
+
+The staging restore command preserves subject/recipient bindings and the master
+key, disables all restored memberships, and revokes native and console sessions,
+invitations, pending login flows and administrator grants before activation. Only
+explicit reinvitation and new login can restore member access; administrator
+roles require a new operator grant. This is a conservative single-node recovery
+procedure, not online key migration or restoration of decisions newer than the
+snapshot. Restoring raw files around that command is outside the supported path.
+Private transfer, backup retention, actual cloud disk recovery and access review
+remain operator responsibilities and production qualification gates.
+
 For the v1 self-hosted release, customer database and backup operators are responsible
 for export, retention, backup, restore, and deletion using their controlled
 infrastructure. Hormuz does not introduce `tenant_data_admin`, automated

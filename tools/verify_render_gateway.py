@@ -1,0 +1,233 @@
+#!/usr/bin/env python3
+"""Exercise only disposable, provider-free containers and synthetic credentials.
+
+No cloud account, production endpoint or ambient credential is accepted. Every
+Docker object is freshly named and removed; output contains checks and digests.
+"""
+
+from __future__ import annotations
+
+import argparse
+import base64
+import hashlib
+import http.client
+import json
+import subprocess
+import time
+import uuid
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+CANARY = "synthetic_hormuz_hosted_log_canary"
+SECRETS = {
+    "HORMUZ_INGRESS_CREDENTIAL": "synthetic_ingress_" + "i" * 43,
+    "HORMUZ_SESSION_MASTER_KEY": base64.b64encode(b"m" * 32).decode(),
+    "HORMUZ_OIDC_CLIENT_SECRET": "synthetic-oidc-client-secret",
+}
+PYTHON = "/opt/hormuz/bin/python"
+SETUP = '''
+import json
+from pathlib import Path
+root = Path('/var/lib/hormuz')
+for filename, state in [('profile.json', 'state'), ('restored-profile.json', 'restored')]:
+    path = root / filename
+    path.write_text(json.dumps({'schema': 'hormuz.hosted-auth-staging/v1',
+        'public_origin': 'https://gateway.example.test', 'oidc_issuer': 'https://idp.example.test',
+        'oidc_client_id': 'fixture-login', 'state_directory': str(root / state)}))
+    path.chmod(0o600)
+'''
+PROCESS_BOUNDARY = '''
+import json
+from pathlib import Path
+caddy = backend = None
+for path in Path('/proc').iterdir():
+    if not path.name.isdecimal():
+        continue
+    try:
+        command = (path / 'cmdline').read_bytes().split(b'\\0')
+        if command[:2] == [b'/usr/bin/caddy', b'run']:
+            caddy = {item.split(b'=', 1)[0].decode() for item in (path / 'environ').read_bytes().split(b'\\0') if item}
+        elif b'hormuz.hosted' in command and b'backend' in command:
+            backend = {item.split(b'=', 1)[0].decode() for item in (path / 'environ').read_bytes().split(b'\\0') if item}
+    except FileNotFoundError:
+        continue
+print(json.dumps({'uid': __import__('os').getuid(), 'caddy_names': sorted(caddy or []),
+    'backend_names': sorted(backend or []), 'backend_present': backend is not None}))
+'''
+IMAGE_SOURCES = '''
+import hashlib, json, hormuz
+from pathlib import Path
+package = Path(hormuz.__file__).parent
+paths = {'hormuz/' + name: package / name for name in
+    ('hosted.py', '_hosted_config.py', '_hosted_server.py', '_hosted_state.py', 'secret-inventory-v1.json')}
+paths.update({'deploy/render/gateway/' + name: Path('/etc/hormuz/caddy') / name
+    for name in ('active.Caddyfile', 'maintenance.Caddyfile')})
+print(json.dumps({name: hashlib.sha256(path.read_bytes()).hexdigest() for name, path in paths.items()}))
+'''
+
+
+def docker(*arguments, input_text=None, timeout=45, expected=0):
+    result = subprocess.run(["docker", *arguments], input=input_text, text=True, capture_output=True, timeout=timeout)
+    if result.returncode != expected:
+        raise RuntimeError("staging_docker_command_failed:" + arguments[0])
+    return (result.stdout + (result.stderr if arguments[0] == "logs" or expected != 0 else "")).strip()
+
+
+def verify(image: str) -> dict:
+    prefix = "hormuz-staging-check-" + uuid.uuid4().hex[:12]
+    volume = prefix + "-state"
+    containers = []
+    checks = []
+    environment = ["--env", "HORMUZ_CONFIG=/var/lib/hormuz/profile.json"]
+    for name, value in SECRETS.items():
+        environment.extend(["--env", name + "=" + value])
+    environment.extend(["--env", "UNRELATED_SECRET=" + CANARY, "--env", "HTTP_PROXY=http://untrusted.example.test:8080"])
+    common = ["--platform", "linux/amd64", "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
+              "--memory", "512m", "--pids-limit", "128", "--tmpfs", "/tmp:rw,noexec,nosuid,size=32m",
+              "--mount", "type=volume,source=" + volume + ",target=/var/lib/hormuz", *environment]
+
+    def passed(name, condition=True):
+        if not condition:
+            raise RuntimeError("staging_check_failed:" + name)
+        checks.append(name)
+
+    def start(suffix, mode):
+        name = prefix + "-" + suffix
+        containers.append(name)
+        docker("run", "--detach", "--name", name, *common, "--env", "HORMUZ_HOSTED_MODE=" + mode,
+               "-p", "127.0.0.1::10000", image)
+        return name
+
+    def execute(name, *command, input_text=None, expected=0):
+        return docker("exec", "-i", name, *command, input_text=input_text, expected=expected)
+
+    def operator(*command, expected=0):
+        return docker("run", "--rm", *common, image, *command, expected=expected)
+
+    def port(name):
+        return int(docker("port", name, "10000/tcp").rsplit(":", 1)[1])
+
+    def request(name, method, path, *, fields=(), body=None):
+        connection = http.client.HTTPConnection("127.0.0.1", port(name), timeout=3)
+        try:
+            connection.putrequest(method, path, skip_host=True, skip_accept_encoding=True)
+            if not any(key.lower() == "host" for key, _ in fields):
+                connection.putheader("Host", "gateway.example.test")
+            for key, value in fields:
+                connection.putheader(key, value)
+            if body is not None:
+                connection.putheader("Content-Length", str(len(body)))
+            connection.endheaders(body)
+            response = connection.getresponse()
+            return response.status, dict(response.getheaders()), response.read(65536)
+        finally:
+            connection.close()
+
+    def await_health(name, status):
+        deadline = time.monotonic() + 25
+        while time.monotonic() < deadline:
+            try:
+                response = request(name, "GET", "/health")
+                if json.loads(response[2]).get("status") == status:
+                    return response
+            except (OSError, ValueError, http.client.HTTPException):
+                pass
+            time.sleep(0.1)
+        raise RuntimeError("staging_startup_timeout")
+
+    def stop(name):
+        started = time.monotonic()
+        docker("stop", "--time", "25", name, timeout=30)
+        passed("clean_shutdown_" + name.rsplit("-", 1)[1],
+               time.monotonic() - started < 25 and docker("inspect", "--format", "{{.State.ExitCode}}", name) == "0")
+
+    docker("volume", "create", volume)
+    try:
+        installed_sources = json.loads(docker("run", "--rm", "-i", *common, "--entrypoint", PYTHON, image,
+                                              "-I", "-", input_text=IMAGE_SOURCES))
+        passed("installed_sources_match_checkout", all(hashlib.sha256((ROOT / name).read_bytes()).hexdigest() == digest
+                                                       for name, digest in installed_sources.items()))
+        docker("run", "--rm", "-i", *common, "--entrypoint", PYTHON, image, "-I", "-", input_text=SETUP)
+        # Model Render's root-owned, group-1000 readable secret-file mount.
+        # Elevated permissions apply ONLY to this disposable fixture setup.
+        docker("run", "--rm", *common, "--user", "0:0", "--cap-add", "CHOWN", "--cap-add", "DAC_OVERRIDE",
+               "--entrypoint", PYTHON, image, "-I", "-c",
+               "import os; from pathlib import Path; files=[Path('/var/lib/hormuz')/name for name in ('profile.json','restored-profile.json')]; [(os.chown(path,0,1000),path.chmod(0o640)) for path in files]")
+        uninitialized = start("uninitialized", "active")
+        passed("uninitialized_active_start_refused", docker("wait", uninitialized, timeout=25) == "1")
+        maintenance = start("maintenance", "maintenance")
+        await_health(maintenance, "maintenance")
+        for path in ("/ready", "/console", "/v1/auth/callback", "/v1/admin/auth/callback", "/v1/responses"):
+            passed("maintenance_closed_" + path, request(maintenance, "GET", path)[0] == 503)
+        boundary = json.loads(execute(maintenance, PYTHON, "-I", "-", input_text=PROCESS_BOUNDARY))
+        passed("maintenance_has_no_backend_or_proxy_secrets", not boundary["backend_present"] and set(boundary["caddy_names"]) == {"PORT", "XDG_CONFIG_HOME", "XDG_DATA_HOME"})
+        execute(maintenance, PYTHON, "-I", "-m", "hormuz.hosted", "initialize")
+        passed("initialization_does_not_open_maintenance", request(maintenance, "GET", "/ready")[0] == 503)
+        execute(maintenance, PYTHON, "-I", "-m", "hormuz.hosted", "team", "organization", "create",
+                "--organization", "staging-fixture", "--name", "Synthetic fixture", "--issuer", "https://idp.example.test")
+        stop(maintenance)
+        active = start("active", "active")
+        await_health(active, "authentication_staging")
+        passed("public_ready", request(active, "GET", "/ready")[0] == 200)
+        passed("public_console", request(active, "GET", "/console")[0] == 200)
+        passed("public_identity_requires_session", request(active, "GET", "/v1/gateway/whoami")[0] == 401)
+        boundary = json.loads(execute(active, PYTHON, "-I", "-", input_text=PROCESS_BOUNDARY))
+        passed("nonroot_runtime", boundary["uid"] == 65532)
+        passed("render_secret_file_group_readable", execute(active, PYTHON, "-I", "-c", "import os; print(os.getgid())") == "1000")
+        passed("proxy_has_only_ingress_secret", set(boundary["caddy_names"]) == {"PORT", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "HORMUZ_INGRESS_CREDENTIAL"})
+        passed("backend_has_only_owned_secrets", boundary["backend_present"] and set(boundary["backend_names"]) - {"LC_CTYPE"} == set(SECRETS))
+        forged = [("X-Hormuz-Ingress-Credential", CANARY), ("X-Hormuz-Ingress-Credential", "second-forged-value"),
+                  ("X-Forwarded-Host", "foreign.example.test"), ("Forwarded", "host=foreign.example.test;proto=http")]
+        passed("caller_ingress_values_are_replaced", request(active, "GET", "/ready", fields=forged)[0] == 200)
+        passed("caller_host_cannot_be_rewritten", request(active, "GET", "/console", fields=[("Host", "foreign.example.test")])[0] == 400)
+        for path in ("/v1/responses", "/v1/messages", "/v1/models", "/v1/portfolio/projects"):
+            status, headers, body = request(active, "POST", path, body=CANARY.encode())
+            passed("inference_closed_" + path, status == 503 and b'"inference_enabled":false' in body and CANARY.encode() not in body and "Server" not in headers)
+        passed("large_body_rejected", request(active, "POST", "/v1/auth/enrollments", body=b"x" * 16385)[0] == 413)
+        denied = execute(active, PYTHON, "-I", "-m", "hormuz.hosted", "snapshot", "--output-directory", "/var/lib/hormuz/blocked", expected=1)
+        passed("online_snapshot_refused", json.loads(denied)["code"] == "hosted_state_in_use")
+        # No backend port is published, and every direct hop still needs its secret.
+        direct = '''import http.client; c=http.client.HTTPConnection('127.0.0.1',8787,timeout=2); c.request('GET','/health',headers={'Host':'gateway.example.test'}); print(c.getresponse().status); c.close()'''
+        passed("direct_backend_requires_ingress_secret", execute(active, PYTHON, "-I", "-c", direct) == "401")
+        published = json.loads(docker("inspect", "--format", "{{json .HostConfig.PortBindings}}", active))
+        passed("only_proxy_port_published", set(published) == {"10000/tcp"})
+        before = execute(active, PYTHON, "-I", "-c", "import hashlib; from pathlib import Path; print(hashlib.sha256(Path('/var/lib/hormuz/state/initialized.json').read_bytes()).hexdigest())")
+        stop(active)
+        docker("start", active)
+        await_health(active, "authentication_staging")
+        after = execute(active, PYTHON, "-I", "-c", "import hashlib; from pathlib import Path; print(hashlib.sha256(Path('/var/lib/hormuz/state/initialized.json').read_bytes()).hexdigest())")
+        passed("restart_preserves_state_binding", before == after)
+        organizations = json.loads(execute(active, PYTHON, "-I", "-m", "hormuz.hosted", "team", "organization", "list"))
+        passed("restart_preserves_operator_directory", "staging-fixture" in json.dumps(organizations))
+        stop(active)
+        operator("snapshot", "--output-directory", "/var/lib/hormuz/snapshot")
+        operator("--config", "/var/lib/hormuz/restored-profile.json", "restore", "--snapshot-directory", "/var/lib/hormuz/snapshot")
+        operator("--config", "/var/lib/hormuz/restored-profile.json", "check")
+        passed("offline_snapshot_restores_and_checks")
+        for name in containers:
+            logs = docker("logs", name)
+            passed("no_canary_or_secret_in_logs_" + name.rsplit("-", 1)[1], all(value not in logs for value in (CANARY, *SECRETS.values())))
+        return {"schema_id": "hormuz.hosted-staging-verification", "schema_version": 1,
+                "passed": True, "image_id": docker("image", "inspect", "--format", "{{.Id}}", image),
+                "checks": checks, "check_count": len(checks), "real_idp_used": False,
+                "public_tls_or_browser_qualified": False, "provider_requests": 0,
+                "source_files_sha256": installed_sources}
+    finally:
+        for name in reversed(containers):
+            subprocess.run(["docker", "rm", "--force", name], capture_output=True, timeout=30)
+        subprocess.run(["docker", "volume", "rm", volume], capture_output=True, timeout=30)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--image", default="hormuz-hosted-staging:development")
+    parser.add_argument("--output", required=True, type=Path)
+    args = parser.parse_args()
+    result = verify(args.image)
+    args.output.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
+    print(json.dumps({"passed": result["passed"], "check_count": result["check_count"], "provider_requests": 0}))
+
+
+if __name__ == "__main__":
+    main()

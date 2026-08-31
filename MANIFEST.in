@@ -37,6 +37,13 @@ include tools/verify_portfolio_intelligence_contract.py
 include tools/verify_registry_transition_plan.py
 include tools/verify_attribution_transition_plan.py
 include tools/verify_core_wheel.py
+include tools/verify_render_gateway.py
+include deploy/render/gateway/Dockerfile
+include deploy/render/gateway/Dockerfile.dockerignore
+include deploy/render/gateway/active.Caddyfile
+include deploy/render/gateway/maintenance.Caddyfile
+include deploy/render/gateway/profile.example.json
+include deploy/render/gateway/README.md
 include tools/_portfolio_wire_contract.py
 include tools/oidc_reference_conformance.py
 include tools/verify_ceph_rgw_custody_conformance.py

@@ -39,6 +39,9 @@ EXPECTED_ARTIFACT_IDS = {
     "client_session_secure_store",
     "team_invitation_file",
     "console_browser_cookies",
+    "hosted_profile_file",
+    "hosted_state_marker",
+    "hosted_state_snapshot",
 }
 EXPECTED_EXCLUDED_SYSTEM_IDS = {
     "client_local_history",

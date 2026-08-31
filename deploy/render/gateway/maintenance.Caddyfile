@@ -1,0 +1,46 @@
+{
+	admin off
+	auto_https off
+	persist_config off
+	grace_period 3s
+	log {
+		output discard
+	}
+	servers {
+		protocols h1
+		max_header_size 16KB
+		timeouts {
+			read_header 5s
+			read_body 5s
+			write 5s
+			idle 5s
+		}
+	}
+}
+
+# Maintenance never starts the backend or receives any secret environment.
+:{$PORT:10000} {
+	bind 0.0.0.0
+	header {
+		-Server
+		Cache-Control "no-store"
+		Referrer-Policy "no-referrer"
+		X-Content-Type-Options "nosniff"
+		X-Robots-Tag "noindex, nofollow, noarchive"
+		Content-Security-Policy "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
+	}
+	@health {
+		method GET HEAD
+		path /health
+	}
+	handle @health {
+		respond "{\"schema_id\":\"hormuz.hosted-staging\",\"schema_version\":1,\"status\":\"maintenance\",\"inference_enabled\":false}" 200 {
+			close
+		}
+	}
+	handle {
+		respond "{\"schema_id\":\"hormuz.hosted-staging\",\"schema_version\":1,\"status\":\"maintenance\",\"inference_enabled\":false}" 503 {
+			close
+		}
+	}
+}

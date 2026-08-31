@@ -48,7 +48,7 @@ class DurableDataInventoryTests(unittest.TestCase):
         self.assertEqual(result["database_class_count"], 21)
         self.assertEqual(result["sqlite_table_count"], 33)
         self.assertEqual(result["postgresql_table_count"], 42)
-        self.assertEqual(result["operator_artifact_count"], 11)
+        self.assertEqual(result["operator_artifact_count"], 14)
         self.assertEqual(result["excluded_customer_system_count"], 7)
         self.assertFalse(result["hosted_customer_data_service"])
         self.assertFalse(result["universal_erasure_claim"])
