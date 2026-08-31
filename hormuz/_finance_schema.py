@@ -36,11 +36,24 @@ TABLE_DDL = {
 
 
 def sqlite_statements() -> tuple[str, ...]:
-    statements = [f"CREATE TABLE {name} ({ddl.format(prefix='')})" for name, ddl in TABLE_DDL.items()]
+    # No hidden rowid identity may bypass the declared conflict-key guards.
+    statements = [f"CREATE TABLE {name} ({ddl.format(prefix='')}) WITHOUT ROWID" for name, ddl in TABLE_DDL.items()]
+    conflict_keys = {
+        "portfolio_finance_audit_events": (("organization_id", "event_id"), ("organization_id", "sequence")),
+        "portfolio_finance_rate_cards": (("organization_id", "rate_card_id", "version"), ("organization_id", "receipt_id")),
+    }
     for table in TABLE_DDL:
         for operation in ("UPDATE", "DELETE"):
             statements.append(f"CREATE TRIGGER {table}_no_{operation.lower()} BEFORE {operation} ON {table} "
                               "BEGIN SELECT RAISE(ABORT, 'portfolio_append_only'); END")
+        # REPLACE's implicit deletes need not fire DELETE triggers. Refuse a
+        # collision on every declared key before insertion, independently of
+        # recursive_triggers. ABORT also undoes earlier rows of this statement.
+        conflicts = " OR ".join("(" + " AND ".join(f"{field}=NEW.{field}" for field in key) + ")"
+                                for key in conflict_keys[table])
+        statements.append(f"CREATE TRIGGER {table}_no_replace BEFORE INSERT ON {table} "
+                          f"WHEN EXISTS (SELECT 1 FROM {table} WHERE {conflicts}) "
+                          "BEGIN SELECT RAISE(ABORT, 'portfolio_append_only'); END")
     return tuple(statements)
 
 

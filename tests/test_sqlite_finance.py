@@ -58,6 +58,79 @@ class SQLiteFinanceTests(FinanceAssertions, unittest.TestCase):
             UsageStore(self.config.database_path)
         self.assertEqual(sqlite_snapshot(self.config.database_path), before)
 
+    def test_sqlite_finance_insert_conflicts_cannot_replace_history(self):
+        self.register()
+        self.get()  # A read audit has no receipt FK, so each audit key is tested independently.
+        before = sqlite_snapshot(self.config.database_path)
+        selections = (
+            (AUDIT, "organization_id, event_id, 3, actor_id, operation, rate_card_id, version, content_digest, occurred_at", "sequence=2"),
+            (AUDIT, "organization_id, '00000000000000000000000000000000', sequence, actor_id, operation, rate_card_id, version, content_digest, occurred_at", "sequence=2"),
+            (CARDS, "organization_id, rate_card_id, version, card_json, content_digest, '00000000000000000000000000000000', registered_by, registered_at, sequence", "version=1"),
+            (CARDS, "organization_id, 'other-card', version, card_json, content_digest, receipt_id, registered_by, registered_at, sequence", "version=1"),
+        )
+        for recursive_triggers in (0, 1):
+            for verb in ("INSERT OR REPLACE", "REPLACE"):
+                for table, selection, where in selections:
+                    with self.subTest(recursive_triggers=recursive_triggers, verb=verb, table=table, selection=selection):
+                        with sqlite3.connect(self.config.database_path) as connection:
+                            connection.execute("PRAGMA foreign_keys=ON")
+                            connection.execute(f"PRAGMA recursive_triggers={recursive_triggers}")
+                            with self.assertRaisesRegex(sqlite3.IntegrityError, "portfolio_append_only"):
+                                connection.execute(f"{verb} INTO {table} SELECT {selection} FROM {table} WHERE {where}")
+                        self.assertEqual(sqlite_snapshot(self.config.database_path), before)
+
+    def test_sqlite_finance_replacement_conflict_rolls_back_whole_insert(self):
+        self.register()
+        self.get()
+        before = sqlite_snapshot(self.config.database_path)
+        with sqlite3.connect(self.config.database_path) as connection:
+            connection.execute("PRAGMA recursive_triggers=OFF")
+            with self.assertRaisesRegex(sqlite3.IntegrityError, "portfolio_append_only"):
+                connection.execute(
+                    f"INSERT OR REPLACE INTO {AUDIT} "
+                    f"SELECT organization_id, '00000000000000000000000000000000', 3, actor_id, operation, "
+                    f"rate_card_id, version, content_digest, occurred_at FROM {AUDIT} WHERE sequence=2 UNION ALL "
+                    f"SELECT organization_id, event_id, 4, actor_id, operation, "
+                    f"rate_card_id, version, content_digest, occurred_at FROM {AUDIT} WHERE sequence=2"
+                )
+        self.assertEqual(sqlite_snapshot(self.config.database_path), before)
+
+    def test_sqlite_finance_has_no_hidden_rowid_replacement_key(self):
+        self.register()
+        with sqlite3.connect(self.config.database_path) as connection:
+            for table in TABLE_DDL:
+                for alias in ("rowid", "_rowid_", "oid"):
+                    with self.subTest(table=table, alias=alias):
+                        with self.assertRaisesRegex(sqlite3.OperationalError, "no such column"):
+                            connection.execute(f"SELECT {alias} FROM {table}").fetchall()
+
+    def test_sqlite_finance_missing_replacement_guards_refuse_without_repair(self):
+        for table in TABLE_DDL:
+            with self.subTest(table=table):
+                with sqlite3.connect(self.config.database_path) as connection:
+                    connection.execute(f"DROP TRIGGER {table}_no_replace")
+                before = sqlite_snapshot(self.config.database_path)
+                self.error("unavailable", self.register)
+                self.error("unavailable", self.get)
+                with self.assertRaisesRegex(StorageSchemaError, "storage_schema_partial_upgrade"):
+                    UsageStore(self.config.database_path)
+                self.assertEqual(sqlite_snapshot(self.config.database_path), before)
+                with sqlite3.connect(self.config.database_path) as connection:
+                    connection.execute(next(sql for sql in sqlite_statements() if sql.startswith(f"CREATE TRIGGER {table}_no_replace ")))
+
+    def test_sqlite_finance_hidden_rowid_schema_refuses_without_repair(self):
+        with sqlite3.connect(self.config.database_path) as connection:
+            for table in reversed(TABLE_DDL):
+                connection.execute(f"DROP TABLE {table}")
+            for statement in sqlite_statements():
+                connection.execute(statement.replace(" WITHOUT ROWID", ""))
+        before = sqlite_snapshot(self.config.database_path)
+        self.error("unavailable", self.register)
+        self.error("unavailable", self.get)
+        with self.assertRaisesRegex(StorageSchemaError, "storage_schema_partial_upgrade"):
+            UsageStore(self.config.database_path)
+        self.assertEqual(sqlite_snapshot(self.config.database_path), before)
+
     def test_sqlite_finance_corrupted_card_or_receipt_never_replays(self):
         self.register()
         for column, replacement in (("content_digest", "a" * 64), ("card_json", "{}"),

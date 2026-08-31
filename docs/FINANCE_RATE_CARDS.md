@@ -77,6 +77,12 @@ PostgreSQL uses the existing tenant transaction and shared organization advisory
 lock. Both enforce append-only mutation guards. PostgreSQL additionally requires
 forced row-level security, SELECT/INSERT-only runtime rights, and a runtime role
 without superuser/BYPASSRLS. UPDATE, DELETE and PostgreSQL TRUNCATE are refused.
+SQLite also refuses insert-time conflicts on each primary/unique key before
+`REPLACE` can delete history, with recursive triggers either enabled or disabled.
+Its two finance tables use `WITHOUT ROWID`, so an undeclared rowid cannot bypass
+those guards. A conflict aborts the whole insert statement; it cannot leave an
+earlier row of a multi-row insert committed. Repository-level exact retries still
+return the original receipt without issuing a duplicate insert.
 Database statement work is bounded at five seconds; no provider calls or internal
 automatic retries occur. Unavailable storage, invalid schema guards, audit failure
 or failed commit cannot acknowledge a registration or disclose a read result.
