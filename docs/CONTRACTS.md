@@ -59,6 +59,21 @@ python3 tools/verify_portfolio_intelligence_contract.py
 python3 -m unittest -v tests.test_portfolio_intelligence_contract tests.test_portfolio_wire_contract
 ```
 
+## Approved budget/report and Linear context additions
+
+The owner's separate #217/#220 approvals are recorded in
+[ADR 0011](decisions/0011-additive-budget-reports-and-linear-context.md).
+[PORTFOLIO_EXTENSIONS.md](PORTFOLIO_EXTENSIONS.md) describes the five independent
+version-1 budget-preview/report and Linear context/page/retention schemas.
+Their [manifest](portfolio-extension-contract-v1.json), wire definitions and
+synthetic examples are checked by `tools/verify_portfolio_extensions.py`.
+
+These are design contracts, not installed commands, HTTP routes, authorization,
+budget enforcement or a live connector. They preserve all 26 frozen portfolio
+wire shapes, the installed manifest and the immutable v1 boundary. Each feature
+still needs its own #214 transition/security checkpoint and implementation;
+#223 must implement aggregate reader roles before granting new access.
+
 ## Ownership and wire convention
 
 Hormuz-owned JSON objects include both fields below and are strictly validated before they are sent or persisted:

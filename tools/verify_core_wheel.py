@@ -170,6 +170,28 @@ REQUIRED_FINANCE_VALUES_SDIST_PATHS = (
     "tests/test_finance_rate_cards.py",
     "tests/test_finance_packaging.py",
 )
+REQUIRED_PORTFOLIO_EXTENSION_SDIST_PATHS = (
+    "docs/portfolio-extension-contract-v1.json",
+    "docs/work-budget-reports-wire-v1.json",
+    "docs/linear-context-wire-v1.json",
+    "docs/PORTFOLIO_EXTENSIONS.md",
+    "docs/decisions/0011-additive-budget-reports-and-linear-context.md",
+    "tests/fixtures/portfolio_intelligence/extension-v1-examples.json",
+    "tests/fixtures/portfolio_intelligence/wire-v1-examples.json",
+    "tools/verify_portfolio_extensions.py",
+    "tools/_portfolio_wire_contract.py",
+    "tools/verify_core_wheel.py",
+    "tests/test_portfolio_extensions.py",
+    "tests/test_portfolio_extension_packaging.py",
+    "docs/portfolio-intelligence-contract-v1.json",
+    "docs/portfolio-intelligence-wire-v1.json",
+    "hormuz/portfolio-registry-wire-v1.json",
+    "hormuz/portfolio-attribution-wire-v1.json",
+    "hormuz/portfolio-outcome-wire-v1.json",
+    "docs/finance-transition-plan-v1.json",
+    "docs/finance-source-contract-v1.json",
+    "tests/fixtures/portfolio_intelligence/v1.0.0-contract-manifest.json",
+)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -199,6 +221,7 @@ def main(argv: list[str] | None = None) -> int:
     _assert_outcome_preflight_sdist_boundary(sdist)
     _assert_finance_preflight_sdist_boundary(sdist)
     _assert_finance_values_sdist_boundary(sdist)
+    _assert_portfolio_extension_sdist_boundary(sdist)
     _verify_isolated_install(wheel, config, python)
     print(
         "verified core distribution boundary: no context/runtime data and complete deployment/usability assets"
@@ -317,6 +340,16 @@ def _assert_finance_values_sdist_boundary(path: Path) -> None:
     ]
     if missing:
         raise RuntimeError(f"Finance values incomplete in {path.name}: {', '.join(sorted(missing))}")
+
+
+def _assert_portfolio_extension_sdist_boundary(path: Path) -> None:
+    members = tuple(name.lstrip("./") for name in _sdist_members(path))
+    missing = [
+        required for required in REQUIRED_PORTFOLIO_EXTENSION_SDIST_PATHS
+        if not any(f"/{member}".endswith(f"/{required}") for member in members)
+    ]
+    if missing:
+        raise RuntimeError(f"Portfolio extensions incomplete in {path.name}: {', '.join(sorted(missing))}")
 
 
 def _verify_isolated_install(wheel: Path, config_template: Path, base_python: Path) -> None:
