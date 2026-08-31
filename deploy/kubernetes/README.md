@@ -152,9 +152,23 @@ kubectl --namespace hormuz-system rollout status \
   deployment/hormuz-hormuz --timeout=10m
 ```
 
-The chart's 660-second termination grace exceeds the default proof upstream
-timeout and lets Hormuz withdraw readiness before draining accepted handlers.
-A platform force-kill can still interrupt a stream.
+Chart `0.1.1` adds a configurable `endpointDrainSeconds` window (10 seconds by
+default) before SIGTERM. Kubernetes starts container shutdown and EndpointSlice
+withdrawal independently; stopping the listener immediately can refuse a request
+still routed to the terminating Pod. The `preStop` hook keeps Hormuz serving
+during that propagation window, then its existing SIGTERM handler withdraws
+application readiness and drains accepted handlers. See the upstream
+[Pod termination sequence](https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#pod-termination-flow)
+and [lifecycle hook timing](https://kubernetes.io/docs/concepts/containers/container-lifecycle-hooks/#hook-handler-execution).
+
+The 660-second default termination grace includes the drain window. The chart
+requires a 5–300 second window and at least 60 seconds of remaining shutdown
+budget; operators must size the **total** grace for their longest upstream
+request plus evidence finalization as well as routing propagation. The default
+is a reference setting, not a guarantee for every CNI, ingress, or load balancer.
+A platform force-kill still bypasses graceful drain and can interrupt a stream.
+This chart change keeps the exact signed `v0.1.3` application image digest;
+existing source releases and image bytes are not rebuilt or replaced.
 
 ## Disposable executable proof
 
@@ -190,7 +204,10 @@ references with mutable tags. It proves two ready replicas on distinct workers,
 authenticated ingress, provider-shaped fake traffic, policy and
 metadata-only evidence persistence, ingress and egress denial, readiness-gated
 configuration/Secret replacement and rollback, and one graceful Pod deletion
-after sustained synthetic traffic has started. At each rollout boundary it
+after sustained synthetic traffic has started. The replacement probe still
+requires zero failed requests and never retries a failed request. On failure it
+prints successful/failed counts and fixed error categories, never exception
+messages, credentials, target URLs, or response bodies. At each rollout boundary it
 requires the Deployment's observed generation and replica counts to be complete
 and every ready, non-terminating Pod to reference the same expected immutable
 configuration and runtime Secret generation. The proof requires replacement

@@ -38,4 +38,7 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 {{- if ge (int .Values.podDisruptionBudget.minAvailable) (int .Values.replicaCount) -}}
 {{- fail "podDisruptionBudget.minAvailable must be lower than replicaCount" -}}
 {{- end -}}
+{{- if lt (int .Values.terminationGracePeriodSeconds) (add (int .Values.endpointDrainSeconds) 60) -}}
+{{- fail "terminationGracePeriodSeconds must reserve at least 60 seconds after endpointDrainSeconds for in-flight requests" -}}
+{{- end -}}
 {{- end -}}

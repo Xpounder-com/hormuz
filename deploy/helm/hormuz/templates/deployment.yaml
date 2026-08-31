@@ -92,6 +92,18 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           command: ["hormuz"]
           args: ["serve"]
+          # EndpointSlice withdrawal and kubelet termination run independently.
+          # Keep the listener serving while routing updates reach the dataplane;
+          # SIGTERM then performs Hormuz's existing in-flight request drain.
+          lifecycle:
+            preStop:
+              exec:
+                command:
+                  - /opt/hormuz/bin/python
+                  - -I
+                  - -c
+                  - "import sys, time; time.sleep(int(sys.argv[1]))"
+                  - {{ .Values.endpointDrainSeconds | quote }}
           env:
             - name: HORMUZ_CONFIG
               value: /etc/hormuz/hormuz.json

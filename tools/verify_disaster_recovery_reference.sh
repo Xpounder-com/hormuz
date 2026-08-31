@@ -1226,7 +1226,7 @@ python3 "${ROOT}/tools/verify_helm_profile.py" validate-chart \
 helm lint "${CHART_ROOT}" --values "${DR_ROOT}/helm-values.yaml" \
   --set-string "configuration.sha256=${config_sha}" >/dev/null
 helm package "${CHART_ROOT}" --destination "${WORK_ROOT}/chart" >/dev/null
-chart_package="${WORK_ROOT}/chart/hormuz-0.1.0.tgz"
+chart_package="${WORK_ROOT}/chart/hormuz-0.1.1.tgz"
 chart_sha256="$(sha256sum "${chart_package}" | awk '{print $1}')"
 helm template hormuz "${CHART_ROOT}" --namespace hormuz-system \
   --values "${DR_ROOT}/helm-values.yaml" \

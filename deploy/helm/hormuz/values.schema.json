@@ -11,6 +11,7 @@
     "runtimeSecret",
     "service",
     "resources",
+    "endpointDrainSeconds",
     "terminationGracePeriodSeconds",
     "podDisruptionBudget",
     "topologySpread",
@@ -106,6 +107,7 @@
         "limits": {"$ref": "#/definitions/resourcePair"}
       }
     },
+    "endpointDrainSeconds": {"type": "integer", "minimum": 5, "maximum": 300},
     "terminationGracePeriodSeconds": {"type": "integer", "minimum": 60, "maximum": 3600},
     "podDisruptionBudget": {
       "type": "object",
