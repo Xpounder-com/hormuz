@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-set -euo pipefail
+set -Eeuo pipefail
 umask 077
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -62,8 +62,20 @@ fail() {
   exit 1
 }
 
+report_command_failure() {
+  local status=$1
+  local line=$2
+  local function_name=$3
+  # Never emit BASH_COMMAND, arguments, or variable values: commands may carry
+  # generated credentials. Source locations identify the failing boundary.
+  printf 'kubernetes_reference_failure function=%s line=%s exit_status=%s\n' \
+    "${function_name}" "${line}" "${status}" >&2
+}
+trap 'report_command_failure "$?" "${LINENO}" "${FUNCNAME[0]:-main}"' ERR
+
 cleanup() {
   local status=$?
+  trap - ERR
   set +e
   if [[ "${CLUSTER_CREATED}" -eq 1 && -n "${WORK_ROOT}" && -x "${WORK_ROOT}/bin/kind" ]]; then
     "${WORK_ROOT}/bin/kind" delete cluster --name "${CLUSTER_NAME}" >/dev/null 2>&1
@@ -382,11 +394,17 @@ wait_for_service_exclusion() {
   local started_ms=$3
   local attempt
   for attempt in $(seq 1 30); do
-    local pod_ready="False"
-    if kubectl --namespace hormuz-system get pod "${pod}" >/dev/null 2>&1; then
-      pod_ready="$(kubectl --namespace hormuz-system get pod "${pod}" \
-        --output=jsonpath='{.status.conditions[?(@.type=="Ready")].status}')"
-    fi
+    local pod_ready
+    # One read: a terminating Pod can disappear between an existence check
+    # and a second GET. Ignore only NotFound, never an API/authentication error.
+    pod_ready="$(kubectl --namespace hormuz-system get pod "${pod}" \
+      --ignore-not-found --request-timeout=5s \
+      --output=jsonpath='{.status.conditions[?(@.type=="Ready")].status}')" \
+      || fail "terminating replica readiness could not be observed"
+    case "${pod_ready}" in
+      True|False|Unknown|"") ;;
+      *) fail "terminating replica readiness observation invalid" ;;
+    esac
     kubectl --namespace hormuz-system get endpointslices \
       --selector='kubernetes.io/service-name=hormuz-hormuz' --output=json \
       >"${ARTIFACT_ROOT}/service-endpoint-slices.json"
@@ -456,6 +474,25 @@ if len(nodes) != 2:
     raise SystemExit("gateway_topology_not_spread")
 print(len(nodes))
 PY
+}
+
+select_gateway_replacement_target() {
+  # A completed rollout may still list terminating Pods. Select only a ready,
+  # non-terminating target, and bind its name and UID from the same snapshot.
+  kubectl --namespace hormuz-system get pods \
+    --selector='app.kubernetes.io/instance=hormuz,app.kubernetes.io/component=gateway' \
+    --output=json \
+    | python3 -c 'import json,re,sys
+items=json.load(sys.stdin)["items"]
+ready=[item for item in items if item.get("metadata",{}).get("deletionTimestamp") is None
+       and item.get("status",{}).get("phase")=="Running"
+       and [c.get("status") for c in item.get("status",{}).get("conditions",[]) if c.get("type")=="Ready"]==["True"]]
+if len(ready)!=2: raise SystemExit("gateway_ready_replacement_target_invalid")
+metadata=sorted(ready,key=lambda item:item["metadata"]["name"])[0]["metadata"]
+name,uid=metadata["name"],metadata["uid"]
+if not re.fullmatch(r"[a-z0-9][a-z0-9.-]{0,252}",name) or not re.fullmatch(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}",uid):
+    raise SystemExit("gateway_ready_replacement_identity_invalid")
+print(name+"|"+uid)'
 }
 
 wait_for_gateway_replacement() {
@@ -796,10 +833,8 @@ SUCCESSFUL_REQUESTS=$((SUCCESSFUL_REQUESTS + 1))
 provider_stats "${ARTIFACT_ROOT}/provider-after-rollback.json"
 assert_provider_stats "${ARTIFACT_ROOT}/provider-after-rollback.json" "${SUCCESSFUL_REQUESTS}"
 
-old_pod="$(kubectl --namespace hormuz-system get pods \
-  --selector='app.kubernetes.io/instance=hormuz,app.kubernetes.io/component=gateway' \
-  --sort-by=.metadata.name --output=jsonpath='{.items[0].metadata.name}')"
-old_uid="$(kubectl --namespace hormuz-system get pod "${old_pod}" --output=jsonpath='{.metadata.uid}')"
+replacement_target="$(select_gateway_replacement_target)"
+IFS='|' read -r old_pod old_uid <<< "${replacement_target}"
 PROBE_SEQUENCE=$((PROBE_SEQUENCE + 1))
 replacement_job="replacement-traffic-${PROBE_SEQUENCE}"
 kubectl --namespace hormuz-ingress create job "${replacement_job}" \
