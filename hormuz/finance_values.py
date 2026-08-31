@@ -159,8 +159,9 @@ def decode_provider_json(data: bytes) -> dict:
     def fractional(value):
         if len(value) > 128:
             raise FinanceValueError("finance_source_limit_exceeded")
-        number = Decimal(value)
-        decimal_text(number)
+        with exact_context():
+            number = Decimal(value)
+            decimal_text(number)
         return number
 
     def nonfinite(_value):
@@ -169,7 +170,7 @@ def decode_provider_json(data: bytes) -> dict:
     try:
         value = json.loads(data.decode("utf-8"), object_pairs_hook=pairs, parse_int=integer,
                            parse_float=fractional, parse_constant=nonfinite)
-    except (ValueError, UnicodeError, RecursionError):
+    except (ValueError, UnicodeError, RecursionError, InvalidOperation):
         raise FinanceValueError("finance_invalid_source") from None
     if type(value) is not dict:
         raise FinanceValueError("finance_invalid_source")

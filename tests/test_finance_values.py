@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from decimal import Decimal, Inexact, Rounded, localcontext
+from decimal import Decimal, Inexact, InvalidOperation, Rounded, localcontext
 import json
 import unittest
 
@@ -72,6 +72,19 @@ class FinanceValueTests(unittest.TestCase):
                      json.dumps({"a": [0] * 65537}).encode()):
             with self.assertRaises(FinanceValueError):
                 decode_provider_json(body)
+
+    def test_extreme_json_exponents_keep_fixed_errors_and_do_not_mutate_caller_context(self):
+        for trapped in (False, True):
+            for exponent in (b"999999999999999999999999", b"-999999999999999999999999"):
+                with self.subTest(trapped=trapped), localcontext() as context:
+                    context.traps[InvalidOperation] = trapped
+                    context.clear_flags()
+                    flags = dict(context.flags)
+                    with self.assertRaises(FinanceValueError) as caught:
+                        decode_provider_json(b'{"SYNTHETIC_EXCLUDED":1e' + exponent + b'}')
+                    self.assertEqual(str(caught.exception), "finance_invalid_source")
+                    self.assertEqual(dict(context.flags), flags)
+                    self.assertNotIn("SYNTHETIC_EXCLUDED", repr(caught.exception))
 
     def test_json_exact_container_and_member_limits_are_accepted(self):
         nested = b'{"a":' + b'[' * 15 + b'0' + b']' * 15 + b'}'
