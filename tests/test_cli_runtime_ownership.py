@@ -166,7 +166,7 @@ class RuntimeCliOwnershipTests(unittest.TestCase):
         self.assertEqual(tree.pop("portfolio"), {
             "attribute": None, "attributions": None,
             "archive": None, "bind": None, "bindings": None, "create": None,
-            "list": None, "show": None, "tombstone": None, "version": None,
+            "list": None, "outcomes": None, "show": None, "tombstone": None, "version": None,
         })
         self.assertEqual(tree, EXPECTED_COMMAND_TREE)
 

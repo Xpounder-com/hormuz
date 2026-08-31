@@ -1,8 +1,9 @@
-"""Red-first #218 probes using real attribution/released-v1 predecessors."""
+"""Real #218 transitions using actual attribution/released-v1 predecessors."""
 
 from __future__ import annotations
 
 import copy
+from dataclasses import replace
 import os
 from pathlib import Path
 import sqlite3
@@ -11,16 +12,21 @@ import unittest
 from unittest import mock
 
 from hormuz.store import StorageSchemaError, UsageStore
+from hormuz._outcome_schema import TABLE_DDL, sqlite_statements
+from hormuz.portfolio_repository import create_portfolio_repository
+from hormuz.portfolio_service import PortfolioService
+from hormuz.portfolio_wire import OUTCOMES
 
 if __package__:
     from ._outcome_predecessor_fixture import attribution_predecessor_call
+    from ._outcome_fixture import replay_outcome_metadata, seed_outcome_metadata
+    from ._portfolio_fixture import ADMIN, registry_config
     from ._registry_transition_fixture import ledger_observation, released_v1_call, seed_registry_ledger, sqlite_backup, sqlite_snapshot
 else:
     from _outcome_predecessor_fixture import attribution_predecessor_call
+    from _outcome_fixture import replay_outcome_metadata, seed_outcome_metadata
+    from _portfolio_fixture import ADMIN, registry_config
     from _registry_transition_fixture import ledger_observation, released_v1_call, seed_registry_ledger, sqlite_backup, sqlite_snapshot
-
-
-PROBE = "outcome_transition_test_probe"
 
 
 @unittest.skipUnless(os.environ.get("HORMUZ_TEST_ATTRIBUTION_PYTHON"), "requires digest-pinned actual attribution predecessor")
@@ -30,7 +36,7 @@ class SQLiteOutcomeTransitionTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
         self.path = self.root / "usage.sqlite3"
-        self.assertEqual(UsageStore.schema_version, 6)
+        self.assertEqual(UsageStore.schema_version, 7)
         self.predecessor_request = {"backend": "sqlite", "path": str(self.path)}
         self.seeded = attribution_predecessor_call({**self.predecessor_request, "mode": "seed"})
         self.assertEqual(self.seeded["status"], "ready")
@@ -39,41 +45,45 @@ class SQLiteOutcomeTransitionTests(unittest.TestCase):
         self.assertEqual(len(self.before["rows"]), 20)
         self.assertTrue(all(rows for table, rows in self.before["rows"].items() if table.startswith("portfolio_")))
 
-    def probe(self, *, fail=False):
+    def upgrade(self, *, fail=False):
         original = UsageStore._apply_migration
 
         def apply(connection, version):
-            if version != 7:
-                return original(connection, version)
-            connection.execute(f"CREATE TABLE {PROBE} (organization_id TEXT NOT NULL, id TEXT PRIMARY KEY)")
+            self.assertEqual(version, 7)
             if fail:
+                connection.execute(sqlite_statements()[0])
                 raise RuntimeError("synthetic_outcome_migration_failure")
+            return original(connection, version)
 
-        with mock.patch.object(UsageStore, "schema_version", 7), mock.patch.object(UsageStore, "_apply_migration", side_effect=apply):
+        with mock.patch.object(UsageStore, "_apply_migration", side_effect=apply):
             UsageStore(self.path).verify_ready()
 
     def assert_prior_state_preserved(self):
         current = copy.deepcopy(sqlite_snapshot(self.path))
-        current["objects"] = [row for row in current["objects"] if row[2] != PROBE]
-        current["rows"].pop(PROBE, None)
+        current["objects"] = [row for row in current["objects"] if row[2] not in TABLE_DDL]
+        current["rows"] = {table: rows for table, rows in current["rows"].items() if table not in TABLE_DDL}
         current["rows"]["hormuz_schema_migrations"] = [row for row in current["rows"]["hormuz_schema_migrations"] if row[0] != 7]
         self.assertEqual(current, self.before)
 
-    def test_sqlite_outcome_migration_is_red_until_implementation(self):
-        with mock.patch.object(UsageStore, "schema_version", 7):
+    def test_sqlite_outcome_real_migration_and_missing_following_migration(self):
+        self.upgrade()
+        self.assert_prior_state_preserved()
+        self.assertEqual(len(sqlite_snapshot(self.path)["rows"]), 29)
+        before = sqlite_snapshot(self.path)
+        with mock.patch.object(UsageStore, "schema_version", 8):
             with self.assertRaises(StorageSchemaError) as caught:
                 UsageStore(self.path)
         self.assertEqual(caught.exception.code, "storage_schema_migration_unsupported")
-        self.assertEqual(sqlite_snapshot(self.path), self.before)
+        self.assertEqual(sqlite_snapshot(self.path), before)
 
-    def test_sqlite_outcome_probe_failure_retry_preserves_all_predecessor_state(self):
+    def test_sqlite_outcome_real_partial_ddl_failure_retry_preserves_all_predecessor_state(self):
         with self.assertRaisesRegex(RuntimeError, "synthetic_outcome_migration_failure"):
-            self.probe(fail=True)
+            self.upgrade(fail=True)
         self.assertEqual(sqlite_snapshot(self.path), self.before)
-        self.probe()
+        self.upgrade()
         self.assert_prior_state_preserved()
         current = sqlite_snapshot(self.path)
-        self.probe()
+        self.upgrade()
         self.assertEqual(sqlite_snapshot(self.path), current)
 
     def test_sqlite_outcome_partial_state_refuses_before_repair(self):
@@ -88,12 +98,10 @@ class SQLiteOutcomeTransitionTests(unittest.TestCase):
 
     @unittest.skipUnless(os.environ.get("HORMUZ_TEST_V1_PYTHON"), "requires digest-pinned released-v1 interpreter")
     def test_sqlite_outcome_actual_old_binaries_refuse_next_and_partial_schema(self):
-        self.probe()
+        self.upgrade()
         before = sqlite_snapshot(self.path)
         request = {**self.predecessor_request, "mode": "verify"}
-        with self.assertRaises(StorageSchemaError) as caught:
-            UsageStore(self.path)
-        self.assertEqual(caught.exception.code, "storage_schema_newer_than_binary")
+        UsageStore(self.path).verify_ready()
         for driver in (attribution_predecessor_call, released_v1_call):
             self.assertEqual(driver(request), {"status": "refused", "code": "storage_schema_newer_than_binary"})
         self.assertEqual(sqlite_snapshot(self.path), before)
@@ -107,7 +115,7 @@ class SQLiteOutcomeTransitionTests(unittest.TestCase):
     def test_sqlite_outcome_old_pair_restore_preserves_both_replays_cursors_and_facts(self):
         backup = self.root / "attribution-checkpoint.sqlite3"
         sqlite_backup(self.path, backup)
-        self.probe()
+        self.upgrade()
         retained = sqlite_snapshot(self.path)
         restored = self.root / "restored-attribution.sqlite3"
         sqlite_backup(backup, restored)
@@ -131,18 +139,28 @@ class SQLiteOutcomeTransitionTests(unittest.TestCase):
         self.assertEqual(sqlite_snapshot(self.path), retained)
 
     def test_sqlite_outcome_post_checkpoint_writes_require_forward_recovery(self):
-        self.probe()
-        with mock.patch.object(UsageStore, "schema_version", 7):
-            seed_registry_ledger(UsageStore(self.path))
-            with sqlite3.connect(self.path) as connection:
-                connection.execute(f"INSERT INTO {PROBE} VALUES ('acme', 'synthetic-post-checkpoint-write')")
-            after_write = sqlite_snapshot(self.path)
-            retained = self.root / "retained-next-state.sqlite3"
-            restored = self.root / "forward-recovered.sqlite3"
-            sqlite_backup(self.path, retained)
-            sqlite_backup(retained, restored)
-            self.assertEqual(ledger_observation(UsageStore(restored))["unknown_holds"], 2)
-            self.assertEqual(sqlite_snapshot(restored), after_write)
+        self.upgrade()
+        seed_registry_ledger(UsageStore(self.path))
+        config = replace(registry_config(self.root), database_path=self.path)
+        seeded = seed_outcome_metadata(config)
+        after_write = sqlite_snapshot(self.path)
+        self.assertTrue(all(after_write["rows"][table] for table in TABLE_DDL))
+        retained = self.root / "retained-next-state.sqlite3"
+        restored = self.root / "forward-recovered.sqlite3"
+        sqlite_backup(self.path, retained)
+        sqlite_backup(retained, restored)
+        self.assertEqual(ledger_observation(UsageStore(restored))["unknown_holds"], 2)
+        self.assertEqual(sqlite_snapshot(restored), after_write)
+        restored_config = replace(config, database_path=restored)
+        receipts, retention = replay_outcome_metadata(restored_config, seeded)
+        self.assertEqual(receipts, [item["receipt"] for item in seeded["deliveries"]])
+        self.assertEqual(retention, seeded["retention"])
+        self.assertEqual(sqlite_snapshot(restored), after_write)
+        service = PortfolioService(restored_config, create_portfolio_repository(restored_config))
+        page = service.dispatch(ADMIN, "GET", OUTCOMES, query="cursor=" + seeded["page"]["next_cursor"])[1]
+        self.assertEqual(page["as_of"], seeded["page"]["as_of"])
+        self.assertEqual(len(page["items"]), 1)
+        self.assertIsNone(page["next_cursor"])
         self.assertEqual(sqlite_snapshot(self.path), after_write)
         self.assertNotEqual(after_write, self.before)
         self.assertEqual(attribution_predecessor_call({"backend": "sqlite", "path": str(restored), "mode": "verify"}),

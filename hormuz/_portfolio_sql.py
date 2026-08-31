@@ -8,12 +8,14 @@ cannot race. This module never reads environment variables or owns a pool.
 from __future__ import annotations
 
 import sqlite3
+import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any, Iterator
 
 from ._portfolio_schema import TABLE_DDL, verify_postgres_registry
 from ._attribution_schema import TABLE_DDL as ATTRIBUTION_TABLES, verify_postgres_attribution
+from ._outcome_schema import TABLE_DDL as OUTCOME_TABLES, verify_postgres_outcomes
 from ._sqlite_schema import SQLITE_SCHEMA_VERSION, verify_sqlite_schema_ready
 from .config import GatewayConfig
 from .portfolio_wire import PortfolioError
@@ -55,7 +57,10 @@ def portfolio_transaction(
     config: GatewayConfig, organization_id: str, *, dsn: str,
     connection_pool: PostgresConnectionPool | None,
     tables=TABLE_DDL,
+    statement_timeout_ms: int = 10000,
 ) -> Iterator[PortfolioSQL]:
+    if type(statement_timeout_ms) is not int or not 1 <= statement_timeout_ms <= 10000:
+        raise PortfolioError("unavailable")
     storage = config.usage_storage
     try:
         if storage.backend == "sqlite":
@@ -67,6 +72,9 @@ def portfolio_transaction(
                 connection.execute("PRAGMA foreign_keys = ON")
                 with connection:
                     connection.execute("BEGIN IMMEDIATE")
+                    if statement_timeout_ms != 10000:
+                        deadline = time.monotonic() + statement_timeout_ms / 1000
+                        connection.set_progress_handler(lambda: int(time.monotonic() >= deadline), 1000)
                     verify_sqlite_schema_ready(
                         connection, schema_version=SQLITE_SCHEMA_VERSION,
                         maximum_supported_schema_version=SQLITE_SCHEMA_VERSION, error_factory=StorageSchemaError,
@@ -80,7 +88,10 @@ def portfolio_transaction(
                 organization_id=organization_id, connection_pool=connection_pool,
             ) as connection:
                 connection.execute("SET LOCAL lock_timeout = '5s'")
-                connection.execute("SET LOCAL statement_timeout = '10s'")
+                if statement_timeout_ms == 10000:
+                    connection.execute("SET LOCAL statement_timeout = '10s'")
+                else:
+                    connection.execute("SELECT set_config('statement_timeout', %s, true)", (str(statement_timeout_ms),))
                 role = connection.execute(
                     "SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname=current_user"
                 ).fetchone()
@@ -90,6 +101,8 @@ def portfolio_transaction(
                     verify_postgres_registry(cursor, storage.postgres_schema, PostgresStorageError)
                     if tables is ATTRIBUTION_TABLES:
                         verify_postgres_attribution(cursor, storage.postgres_schema, PostgresStorageError)
+                    if tables is OUTCOME_TABLES:
+                        verify_postgres_outcomes(cursor, storage.postgres_schema, PostgresStorageError)
                 for table in tables:
                     row = connection.execute(
                         "SELECT (has_table_privilege(current_user, %s, 'SELECT') AND "
