@@ -6,6 +6,8 @@ does not import Hormuz, contact an identity/model provider, accept credentials,
 create sessions, send email, or store customer data. Only GET/HEAD `/health`
 and `/robots.txt` return 200. All other routes, including `/ready`, `/console`
 and both callbacks, return a fixed 503 with `gateway_ready: false`.
+That is the container contract; a hosting edge may reject an HTTP method before
+it reaches the container, which must be verified separately.
 
 The image uses an inspected official Caddy digest and runs as UID/GID 65532.
 The unused low-port binding capability is removed from the Caddy binary.
@@ -82,6 +84,16 @@ After creation, use the actual assigned HTTPS origin, never a guessed service
 hostname. Run the probe against HTTPS with the deployed source commit and inspect
 the Events view. Check that HTTP redirects to HTTPS. Record only the content-free
 outcomes and commit; do not put future tenant IDs or credentials in this profile.
+
+The observed Render HTTPS edge rejects `TRACE` with 405 before the preflight
+response. For that deployment, add `--trace-response edge-405`. This explicitly
+requires a non-reflecting 405 with no redirect, cookie or CORS grant; the report
+labels it `edge_method_rejection`, without claiming application-header or
+revision verification for that request. The other fifteen checks retain their
+exact status, security-header and revision requirements. The default local mode
+still requires the container's 503 response to `TRACE`. A 404, timeout or any
+other unexpected result remains a failure; failed runs produce partial JSON
+evidence and exit nonzero. Do not retry silently or omit failed runs.
 
 If verification fails, keep the endpoint closed and do not configure clients to
 use it. Redeploy the previously verified preflight commit or keep the service
