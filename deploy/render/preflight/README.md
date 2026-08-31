@@ -50,6 +50,13 @@ preflight evidence, not real Okta, provider, Mac/Keychain or onboarding evidence
 The runtime revision is Render metadata, not a cryptographic image attestation;
 also confirm the actual deployed commit in Render's Events view.
 
+The **Closed Render HTTPS preflight** GitHub CI job builds this image and runs
+the same sixteen default-mode checks on loopback under the container restrictions
+above. It also verifies the unprivileged user, removed binary capability and
+absence of the synthetic request marker in container logs. It retains only the
+content-free HTTP report. The job has no cloud credentials and performs no
+deployment, public endpoint probe or identity/model-provider request.
+
 ## Manual Render setup
 
 The public repository path avoids installing Render's GitHub app or giving it
