@@ -14,10 +14,10 @@ Showcase submission are not implied.
 
 ## Start here
 
-- [Project website](https://xpounder-com.github.io/hormuz/)
-- [Real recorded demo and synthetic evidence](https://xpounder-com.github.io/hormuz/demo/)
-- [OSS / enterprise-service comparison](https://xpounder-com.github.io/hormuz/enterprise/)
-- [Buyer downloads](https://xpounder-com.github.io/hormuz/resources/)
+- [Project website](https://usehormuz.github.io/)
+- [Real recorded demo and synthetic evidence](https://usehormuz.github.io/demo/)
+- [OSS / enterprise-service comparison](https://usehormuz.github.io/enterprise/)
+- [Buyer downloads](https://usehormuz.github.io/resources/)
 - [Editable Figma marketing handoff](https://www.figma.com/design/Ax2HWqdWzVnMANEOmB5Z4z)
 
 ## Packet inventory
@@ -42,7 +42,8 @@ reviewable here without special software.
 
 ## Definition of ready
 
-Before amplification: all site paths work under `/hormuz/`; recordings retain
+Before amplification: all site paths work at the new origin root and the former
+`xpounder-com.github.io/hormuz/` pages redirect to their matching routes; recordings retain
 real output and provenance; the release/source/OCI distinction is visible;
 contact says draft, never sent; all claims resolve to current source; downloads
 render; required repository CI passes. Publishing a page does not establish

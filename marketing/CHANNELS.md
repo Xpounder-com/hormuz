@@ -20,8 +20,8 @@ production certification. I'm looking for useful feedback on the first-run
 experience and conversations with platform teams evaluating a single governed
 coding-client workflow.
 
-Project: https://xpounder-com.github.io/hormuz/
-Demo: https://xpounder-com.github.io/hormuz/demo/
+Project: https://usehormuz.github.io/
+Demo: https://usehormuz.github.io/demo/
 
 ## A narrow technical article outline
 
