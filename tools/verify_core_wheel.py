@@ -62,6 +62,7 @@ REQUIRED_HELM_SDIST_PATHS = (
     "deploy/kubernetes/conformance/postgres-ha/state_probe.py",
     "tools/verify_helm_profile.py",
     "tools/verify_helm_profile.sh",
+    "tests/test_helm_lifecycle_helpers.py",
     "tools/verify_multi_replica_operation.py",
     "tools/verify_postgres_ha_reference.py",
     "tools/verify_postgres_ha_reference.sh",
