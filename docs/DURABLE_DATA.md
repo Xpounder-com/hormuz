@@ -21,6 +21,8 @@ unregistered table.
 
 | Data class | SQLite tables | PostgreSQL tables | Content boundary |
 | --- | --- | --- | --- |
+| `portfolio_finance_rate_cards` | `portfolio_finance_rate_cards` | `portfolio_finance_rate_cards` | Immutable operator-configured canonical rate-card versions, explicit currency/rates/intervals, content digest and original registration receipt. No provider payload, automatic repricing or native request-cost capture. |
+| `portfolio_finance_audit` | `portfolio_finance_audit_events` | `portfolio_finance_audit_events` | Tenant-qualified register/read audit IDs, actor, card ID/version/digest, timestamp and sequence. Administrative reads commit audit before delivery; retries retain the original receipt. |
 | `portfolio_outcome_metadata` | `portfolio_outcome_contexts`, `portfolio_outcome_coverage_events`, `portfolio_outcome_events`, `portfolio_outcome_observations` | `portfolio_outcome_contexts`, `portfolio_outcome_coverage_events`, `portfolio_outcome_events`, `portfolio_outcome_observations` | Strict allowlisted source metadata; descriptive events; historical binding/use-case versions, source revision uncertainty and key-version references; coverage distinguishes source-event from delivery units. No webhook, title, body, comment, path, prompt, response, credential or source content. |
 | `portfolio_outcome_control` | `portfolio_outcome_audit_events`, `portfolio_outcome_cursors`, `portfolio_outcome_dead_letters`, `portfolio_outcome_receipts`, `portfolio_outcome_retention_events` | `portfolio_outcome_audit_events`, `portfolio_outcome_cursors`, `portfolio_outcome_dead_letters`, `portfolio_outcome_receipts`, `portfolio_outcome_retention_events` | Audited receipt/replay fingerprints, bounded fixed-code failure metadata, role/registration/retention-bound cursors and separate administrator tombstones. No key values, raw request bodies, fabricated provider receipts or destructive erasure. |
 | `portfolio_attribution_metadata` | `portfolio_attribution_events`, `portfolio_attribution_rejections` | `portfolio_attribution_events`, `portfolio_attribution_rejections` | Immutable tenant-qualified attempt/use-case version references, source confidence, append-only corrections, and fixed-class admission receipts. Rejections are separate from eligible attempts. No request header, prompt, response, filename, source/work content, or guessed model facts. |
@@ -44,7 +46,9 @@ The #215 source implementation adds the five registry tables above in SQLite
 migration 5 and PostgreSQL migration 9. The #216 source implementation adds five
 separate attribution tables in SQLite migration 6 / PostgreSQL migration 10.
 The #218 source implementation adds nine outcome tables in SQLite migration 7
-/ PostgreSQL migration 11. None is a v1.1.0 release. Budgets, live connectors, scorecards and
+/ PostgreSQL migration 11. The bounded #8 rate-card slice adds two finance tables
+in SQLite migration 8 / PostgreSQL migration 12. None is a v1.1.0 release.
+Full finance reconciliation, budgets, live connectors, scorecards and
 recommendations remain separately gated and have no tables in this inventory.
 #214 stays open for final-candidate
 transition proof. See [REGISTRY.md](REGISTRY.md) for the opt-in authority and
@@ -69,6 +73,14 @@ versus delivery units, rather than summing every historical status row.
 Eligibility is inconclusive until a separately versioned rule is approved.
 Injected key values are never stored, only key-version references and keyed
 digests. Customer operators retain the export/retention/deletion authority below.
+
+[FINANCE_RATE_CARDS.md](FINANCE_RATE_CARDS.md) describes internal administrative
+registration and exact-version reads, not a financial-report API. Both finance
+tables follow the same customer-owned export/backup/retention/deletion boundary.
+There is no row-deletion operation, automatic rate selection, retrospective
+native-usage backfill or change to existing request costs. A newer card must use
+a new version. Its content digest identifies bytes; it is not a keyed integrity
+proof against an operator rewriting the database and audit together.
 
 The [persistence composition boundary](ARCHITECTURE.md#usage-and-portfolio-persistence-composition)
 provides a fully declared v1 usage protocol and a typed factory slot for the

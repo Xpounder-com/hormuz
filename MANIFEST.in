@@ -21,6 +21,7 @@ include docs/attribution-transition-plan-v2.json
 include docs/outcome-transition-plan-v1.json
 include docs/outcome-transition-plan-v2.json
 include docs/finance-transition-plan-v1.json
+include docs/finance-transition-plan-v2.json
 include docs/finance-source-contract-v1.json
 include hormuz/portfolio-registry-wire-v1.json
 include hormuz/portfolio-attribution-wire-v1.json

@@ -1,5 +1,9 @@
 # v1.1.0 finance reconciliation checkpoint
 
+Historical preflight: the later [durable rate-card slice](FINANCE_RATE_CARDS.md)
+uses the reviewed [v2 successor](finance-transition-plan-v2.json) for schema 8/12.
+The v1 plan below remains frozen; it is not a claim that full finance is implemented.
+
 This is the pre-implementation compatibility checkpoint for #8 under #214.
 It does not implement finance reconciliation, grant provider access, accept a
 feature, or create a release. The [transition plan](finance-transition-plan-v1.json)
@@ -16,7 +20,7 @@ The intervening Kubernetes change does not alter the runtime or schema.
 
 ## Affected operators and compatibility
 
-| Boundary | Current outcome implementation | Finance target |
+| Boundary | Outcome implementation at preflight | Finance target at preflight |
 | --- | --- | --- |
 | SQLite schema | 7 | 8, not implemented here |
 | PostgreSQL schema | 11 | 12, not implemented here |

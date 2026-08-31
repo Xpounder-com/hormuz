@@ -100,7 +100,7 @@ jobs:
             > "$RUNNER_TEMP/context-pack.json"
           CONTEXT_PACK_PATH="$RUNNER_TEMP/context-pack.json" "$RUNNER_TEMP/hormuz-wheel/bin/python" -c 'import json, os, pathlib; value = json.loads(pathlib.Path(os.environ["CONTEXT_PACK_PATH"]).read_text()); assert value["schema_version"] == "hormuz.context-pack.v1"; assert value["items"]'
           "$RUNNER_TEMP/hormuz-wheel/bin/python" -m unittest discover -s experiments/context/tests -v
-      - name: Verify exact finance values from the installed core wheel
+      - name: Verify finance values and SQLite rate-card history from the installed core wheel
         run: |
           cd "$RUNNER_TEMP"
           "$RUNNER_TEMP/hormuz-wheel/bin/python" -I -m unittest discover \
@@ -109,6 +109,8 @@ jobs:
             -s "$GITHUB_WORKSPACE/tests" -p test_finance_usage.py -v
           "$RUNNER_TEMP/hormuz-wheel/bin/python" -I -m unittest discover \
             -s "$GITHUB_WORKSPACE/tests" -p test_finance_rate_cards.py -v
+          "$RUNNER_TEMP/hormuz-wheel/bin/python" -I -m unittest discover \
+            -s "$GITHUB_WORKSPACE/tests" -p test_sqlite_finance.py -v
       - name: Verify additive portfolio contracts from the source distribution
         run: |
           hormuz_extension_source="$(mktemp -d "$RUNNER_TEMP/hormuz-extensions.XXXXXX")"
@@ -250,7 +252,7 @@ jobs:
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" tools/verify_finance_transition_plan.py
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -m unittest -v \
             tests.test_registry_transition_plan tests.test_attribution_transition_plan tests.test_outcome_transition_plan \
-            tests.test_finance_transition_plan
+            tests.test_finance_transition_plan tests.test_finance_packaging
       - name: Prove PostgreSQL migration and repository compatibility
         env:
           HORMUZ_TEST_POSTGRES_DSN: postgresql://postgres:hormuz-test-password@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/hormuz_test
@@ -267,6 +269,10 @@ jobs:
           test -n "$HORMUZ_TEST_PG_CONTAINER"
           test -n "$HORMUZ_TEST_POSTGRES_DSN"
           cd "$RUNNER_TEMP"
+          for module in test_sqlite_finance test_postgres_finance; do
+            "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -I -m unittest discover \
+              -s "$GITHUB_WORKSPACE/tests" -p "${module}.py" -v
+          done
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -I -m unittest discover \
             -s "$GITHUB_WORKSPACE/tests" -p test_sqlite_finance_transition.py -v
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -I -m unittest discover \

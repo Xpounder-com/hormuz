@@ -14,6 +14,7 @@ from uuid import uuid4
 import hormuz.postgres as postgres_module
 from hormuz._attribution_schema import TABLE_DDL as ATTRIBUTION_TABLES
 from hormuz._outcome_schema import TABLE_DDL as OUTCOME_TABLES
+from hormuz._finance_schema import TABLE_DDL as FINANCE_TABLES
 from hormuz._portfolio_schema import TABLE_DDL as REGISTRY_TABLES
 from hormuz.config import GatewayConfig, Identity, PostgresPoolConfig
 from hormuz.policy_control import PolicyControlService
@@ -268,12 +269,12 @@ class PostgresTestCase(unittest.TestCase):
                 )
                 cursor.execute("SELECT tablename FROM pg_tables WHERE schemaname=%s", (self.schema,))
                 present = {row[0] for row in cursor.fetchall()}
-                portfolio_tables = tuple(table for table in (*REGISTRY_TABLES, *ATTRIBUTION_TABLES, *OUTCOME_TABLES) if table in present)
+                portfolio_tables = tuple(table for table in (*REGISTRY_TABLES, *ATTRIBUTION_TABLES, *OUTCOME_TABLES, *FINANCE_TABLES) if table in present)
                 # This class owns its unique disposable schema. Reset the exact
                 # FK-connected fixture tables together; never truncate a shared
                 # user schema or disable production runtime protections.
                 with connection.transaction():
-                    for table in (*ATTRIBUTION_TABLES, *OUTCOME_TABLES):
+                    for table in (*ATTRIBUTION_TABLES, *OUTCOME_TABLES, *FINANCE_TABLES):
                         if table in present:
                             cursor.execute(self.sql.SQL("ALTER TABLE {}.{} DISABLE TRIGGER {}").format(
                                 self.sql.Identifier(self.schema), self.sql.Identifier(table),
@@ -282,7 +283,7 @@ class PostgresTestCase(unittest.TestCase):
                         self.sql.SQL("{}.{}").format(self.sql.Identifier(self.schema), self.sql.Identifier(table))
                         for table in (*tables, *portfolio_tables)
                     )))
-                    for table in (*ATTRIBUTION_TABLES, *OUTCOME_TABLES):
+                    for table in (*ATTRIBUTION_TABLES, *OUTCOME_TABLES, *FINANCE_TABLES):
                         if table in present:
                             cursor.execute(self.sql.SQL("ALTER TABLE {}.{} ENABLE TRIGGER {}").format(
                                 self.sql.Identifier(self.schema), self.sql.Identifier(table),

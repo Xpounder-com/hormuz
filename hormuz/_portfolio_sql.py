@@ -16,6 +16,7 @@ from typing import Any, Iterator
 from ._portfolio_schema import TABLE_DDL, verify_postgres_registry
 from ._attribution_schema import TABLE_DDL as ATTRIBUTION_TABLES, verify_postgres_attribution
 from ._outcome_schema import TABLE_DDL as OUTCOME_TABLES, verify_postgres_outcomes
+from ._finance_schema import TABLE_DDL as FINANCE_TABLES, verify_postgres_finance
 from ._sqlite_schema import SQLITE_SCHEMA_VERSION, verify_sqlite_schema_ready
 from .config import GatewayConfig
 from .portfolio_wire import PortfolioError
@@ -103,6 +104,8 @@ def portfolio_transaction(
                         verify_postgres_attribution(cursor, storage.postgres_schema, PostgresStorageError)
                     if tables is OUTCOME_TABLES:
                         verify_postgres_outcomes(cursor, storage.postgres_schema, PostgresStorageError)
+                    if tables is FINANCE_TABLES:
+                        verify_postgres_finance(cursor, storage.postgres_schema, PostgresStorageError)
                 for table in tables:
                     row = connection.execute(
                         "SELECT (has_table_privilege(current_user, %s, 'SELECT') AND "

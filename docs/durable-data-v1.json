@@ -5,6 +5,20 @@
   "hosted_customer_data_service": false,
   "database_classes": [
     {
+      "id": "portfolio_finance_rate_cards",
+      "content_boundary": "metadata_only_evidence",
+      "contains_prompt_or_response_body": false,
+      "sqlite_tables": ["portfolio_finance_rate_cards"],
+      "postgresql_tables": ["portfolio_finance_rate_cards"]
+    },
+    {
+      "id": "portfolio_finance_audit",
+      "content_boundary": "operational_metadata",
+      "contains_prompt_or_response_body": false,
+      "sqlite_tables": ["portfolio_finance_audit_events"],
+      "postgresql_tables": ["portfolio_finance_audit_events"]
+    },
+    {
       "id": "portfolio_outcome_metadata",
       "content_boundary": "metadata_only_evidence",
       "contains_prompt_or_response_body": false,
