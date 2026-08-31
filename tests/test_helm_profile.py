@@ -545,6 +545,68 @@ class HelmChartContractTests(unittest.TestCase):
                 sleep.assert_not_called()
                 self.assertNotIn("private-response", output.getvalue())
 
+    def test_replacement_probe_summarizes_non_object_json_responses(self) -> None:
+        for value in ([], None, "private-response-body", 42, True):
+            with self.subTest(response_type=type(value).__name__):
+                probe = runpy.run_path(
+                    str(ROOT / "deploy" / "kubernetes" / "conformance" / "probe.py")
+                )
+                replacement = probe["_run_replacement_traffic"]
+                request = mock.Mock(
+                    return_value=(
+                        200,
+                        {"x-hormuz-policy-decision": "fallback+capped+redacted"},
+                        json.dumps(value).encode("utf-8"),
+                    )
+                )
+                output = io.StringIO()
+                with (
+                    mock.patch.dict(replacement.__globals__, {"_request": request}),
+                    mock.patch.object(probe["time"], "monotonic", side_effect=(0, 0)),
+                    mock.patch.object(probe["time"], "sleep") as sleep,
+                    contextlib.redirect_stdout(output),
+                    self.assertRaisesRegex(SystemExit, "^replacement_traffic_failed$"),
+                ):
+                    replacement(
+                        target="http://hormuz.invalid",
+                        headers={},
+                        expected_policy="fallback+capped+redacted",
+                        duration_seconds=15,
+                    )
+                self.assertEqual(
+                    json.loads(output.getvalue()),
+                    {
+                        "command": "replacement-traffic",
+                        "successful_requests": 0,
+                        "failed_requests": 1,
+                        "failure_counts": {"response_contract": 1},
+                    },
+                )
+                request.assert_called_once()
+                sleep.assert_not_called()
+                self.assertNotIn("private-response-body", output.getvalue())
+
+    def test_governed_probe_rejects_non_object_error_responses(self) -> None:
+        probe = runpy.run_path(
+            str(ROOT / "deploy" / "kubernetes" / "conformance" / "probe.py")
+        )
+        governed_request = probe["_governed_request"]
+        for status, failure in ((403, "deny_contract_invalid"), (503, "storage_denial_contract_invalid")):
+            for value in ([], None, {"error": None}, {"error": []}):
+                with self.subTest(status=status, value=value):
+                    request = mock.Mock(return_value=(status, {}, json.dumps(value).encode("utf-8")))
+                    expected_failure = failure if isinstance(value, dict) else "response_contract_invalid"
+                    with (
+                        mock.patch.dict(governed_request.__globals__, {"_request": request}),
+                        self.assertRaisesRegex(SystemExit, f"^{expected_failure}$"),
+                    ):
+                        governed_request(
+                            target="http://hormuz.invalid",
+                            headers={},
+                            expected_status=status,
+                            expected_policy=None,
+                        )
+
     def test_blocking_probe_distinguishes_graceful_completion_from_ambiguous_loss(self) -> None:
         probe = runpy.run_path(
             str(ROOT / "deploy" / "kubernetes" / "conformance" / "probe.py")

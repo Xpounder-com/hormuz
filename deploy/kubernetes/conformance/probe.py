@@ -162,17 +162,20 @@ def _governed_request(
     policy = response_headers.get("x-hormuz-policy-decision")
     if expected_policy is not None and policy != expected_policy:
         raise SystemExit("policy_decision_invalid")
-    if status == 200:
+    if status in {200, 403, 503}:
         value = json.loads(body)
+        if not isinstance(value, dict):
+            raise SystemExit("response_contract_invalid")
+    if status == 200:
         if value.get("model") != "gpt-kubernetes-proof":
             raise SystemExit("routed_model_invalid")
     elif status == 403:
-        value = json.loads(body)
-        if value.get("error", {}).get("code") != "hormuz_secret_detected":
+        error = value.get("error")
+        if not isinstance(error, dict) or error.get("code") != "hormuz_secret_detected":
             raise SystemExit("deny_contract_invalid")
     elif status == 503:
-        value = json.loads(body)
-        if value.get("error", {}).get("code") != "hormuz_storage_unavailable":
+        error = value.get("error")
+        if not isinstance(error, dict) or error.get("code") != "hormuz_storage_unavailable":
             raise SystemExit("storage_denial_contract_invalid")
     return {
         "command": "request",
