@@ -42,6 +42,7 @@ class _KeySet:
 class OIDCProviderMetadata:
     authorization_endpoint: str
     token_endpoint: str
+    userinfo_endpoint: str | None
 
 
 @dataclass(frozen=True)
@@ -139,16 +140,22 @@ class Authenticator:
         document = self._discovery_document(issuer, force_refresh=False)
         authorization_endpoint = document.get("authorization_endpoint")
         token_endpoint = document.get("token_endpoint")
+        userinfo_endpoint = document.get("userinfo_endpoint")
         if not isinstance(authorization_endpoint, str) or not isinstance(token_endpoint, str):
+            raise AuthenticationError("invalid_discovery_document")
+        if userinfo_endpoint is not None and not isinstance(userinfo_endpoint, str):
             raise AuthenticationError("invalid_discovery_document")
         _validate_remote_url(
             authorization_endpoint,
             allow_insecure_http=issuer.allow_insecure_http,
         )
         _validate_remote_url(token_endpoint, allow_insecure_http=issuer.allow_insecure_http)
+        if userinfo_endpoint is not None:
+            _validate_remote_url(userinfo_endpoint, allow_insecure_http=issuer.allow_insecure_http)
         return OIDCProviderMetadata(
             authorization_endpoint=authorization_endpoint,
             token_endpoint=token_endpoint,
+            userinfo_endpoint=userinfo_endpoint,
         )
 
 

@@ -55,7 +55,8 @@ def handle_session_request(handler: GatewayRequestHandler) -> None:
         _dispatch(handler)
     except (SessionBrokerError, SessionStoreError) as error:
         unavailable = error.code.startswith("session_store_") or error.code in {
-            "oidc_metadata_unavailable", "oidc_token_exchange_failed", "enrollment_capacity_reached",
+            "oidc_metadata_unavailable", "oidc_token_exchange_failed", "oidc_userinfo_failed",
+            "enrollment_capacity_reached",
         }
         status = HTTPStatus.SERVICE_UNAVAILABLE if unavailable else HTTPStatus.BAD_REQUEST
         if error.code == "enrollment_not_redeemable":

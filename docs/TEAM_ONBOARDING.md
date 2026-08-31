@@ -27,8 +27,13 @@ hosted service or give an employee session access to administrative APIs.
   Origins remain rejected.
 - Acceptance requires a signed ID token from the organization's trusted issuer,
   the expected audience and nonce, and an exact recipient email with boolean
-  `email_verified: true`. Email-domain case is ignored; local-part case and aliases
-  are not normalized. This preview supports bounded ASCII email addresses.
+  `email_verified: true`. If a code-flow ID token omits either scope-dependent
+  email claim, the broker makes one bounded request to the discovery-advertised
+  UserInfo endpoint with the ephemeral provider access token. UserInfo must return
+  the same subject as the signed ID token and cannot override a claim already in
+  that token. The provider token is then discarded. Email-domain case is ignored;
+  local-part case and aliases are not normalized. This preview supports bounded
+  ASCII email addresses.
 - On first acceptance the membership binds permanently to `(issuer, subject)`.
   Later login uses that stable identity, not the email. A reissued email address
   cannot take over a membership. A disabled member can receive an explicit new
@@ -56,9 +61,11 @@ The browser binding retains the protections described in
 Use the server checkout or installed package on Linux/macOS. Enable
 `authentication.session_broker.onboarding_enabled: true` alongside the existing
 broker configuration. Add `email` to the approved issuer's `login.scopes`; configure
-the IdP to include `email` and boolean `email_verified` in its signed ID token. The
-broker requests those claims explicitly when an invitation is attached, and rejects
-the join if they are absent. This preview does not call the UserInfo endpoint.
+the IdP to return `email` and boolean `email_verified` in its signed ID token or
+standard UserInfo response. The broker requests the ID-token claims explicitly
+when an invitation is attached. It consults UserInfo only when one is omitted,
+verifies the returned subject against the signed token, and rejects absent,
+conflicting or unverified identity data.
 An issuer used only for managed login may have an empty `subjects` array.
 
 ```sh

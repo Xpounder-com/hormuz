@@ -35,6 +35,7 @@ class LocalIdentityProvider(BaseHTTPRequestHandler):
             document = {
                 "issuer": state.origin, "jwks_uri": state.origin + "/jwks",
                 "authorization_endpoint": state.origin + "/authorize", "token_endpoint": state.origin + "/token",
+                "userinfo_endpoint": state.origin + "/userinfo",
                 "response_types_supported": ["code"], "response_modes_supported": ["form_post"],
                 "grant_types_supported": ["authorization_code"], "code_challenge_methods_supported": ["S256"],
                 "id_token_signing_alg_values_supported": ["RS256"], "token_endpoint_auth_methods_supported": ["client_secret_basic"],
@@ -43,6 +44,21 @@ class LocalIdentityProvider(BaseHTTPRequestHandler):
             self.reply(200, document)
         elif parsed.path == "/jwks":
             self.reply(200, {"keys": [state.jwk]})
+        elif parsed.path == "/userinfo":
+            state.userinfo_requests += 1
+            authorization = self.headers.get("Authorization", "")
+            token = authorization.removeprefix("Bearer ") if authorization.startswith("Bearer ") else ""
+            subject = state.valid_access_tokens.get(token)
+            if subject is None:
+                self.reply(401, {"error": "invalid_token"})
+                return
+            if state.userinfo_unavailable:
+                self.reply(503, {"error": "unavailable"})
+                return
+            claims = {"sub": subject, **state.claims_overrides}
+            if state.userinfo_claims_overrides is not None:
+                claims.update(state.userinfo_claims_overrides)
+            self.reply(200, claims)
         elif parsed.path == "/authorize":
             params = {key: values[0] for key, values in parse_qs(parsed.query).items()}
             if params.get("response_mode") != "form_post" or params.get("code_challenge_method") != "S256":
@@ -94,7 +110,9 @@ class LocalIdentityProvider(BaseHTTPRequestHandler):
             claims.pop(key, None)
         token = jwt.encode(claims, state.private_key, algorithm="RS256", headers={"kid": "fixture-key"})
         state.last_id_token = token
-        self.reply(200, {"id_token": token, "access_token": "idp-token-must-not-be-stored"})
+        access_token = "idp-token-must-not-be-stored"
+        state.valid_access_tokens[access_token] = state.subject
+        self.reply(200, {"id_token": token, "access_token": access_token})
 
     def reply(self, status, value):
         encoded = json.dumps(value).encode()
@@ -148,6 +166,10 @@ class SessionHTTPTestCase(unittest.TestCase):
         self.idp.jwk.update({"kid": "fixture-key", "alg": "RS256", "use": "sig"})
         self.idp.codes, self.idp.metadata_overrides, self.idp.claims_overrides = {}, {}, {}
         self.idp.omit_claims = set()
+        self.idp.userinfo_claims_overrides = None
+        self.idp.userinfo_unavailable = False
+        self.idp.userinfo_requests = 0
+        self.idp.valid_access_tokens = {}
         self.idp.subject = "alice-subject"
         self.idp.token_unavailable = False
         self.idp.model_requests = 0

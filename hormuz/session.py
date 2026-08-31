@@ -24,6 +24,7 @@ from .session_store import (
 
 LOGGER = logging.getLogger("hormuz.session")
 _MAX_TOKEN_RESPONSE_BYTES = 128 * 1024
+_MAX_USERINFO_RESPONSE_BYTES = 64 * 1024
 _TOKEN_EXCHANGE_TIMEOUT_SECONDS = 10
 _SUPPORTED_CLIENTS = {"codex", "claude-code"}
 
@@ -208,6 +209,12 @@ class SessionBroker:
             if self.directory.manages_organization(flow.organization_id):
                 if not self.config.session_broker.onboarding_enabled:
                     raise SessionBrokerError("onboarding_disabled")
+                claims = _complete_onboarding_claims(
+                    claims,
+                    token_response=token_response,
+                    userinfo_endpoint=metadata.userinfo_endpoint,
+                    allow_insecure_http=issuer.allow_insecure_http,
+                )
                 self.directory.authorize_enrollment(flow=flow, claims=claims)
                 return
             subject = claims["sub"]
@@ -363,6 +370,78 @@ def _exchange_code(
         raise SessionBrokerError("invalid_oidc_token_response") from error
     if not isinstance(value, dict):
         raise SessionBrokerError("invalid_oidc_token_response")
+    return value
+
+
+def _complete_onboarding_claims(
+    id_token_claims: dict[str, Any],
+    *,
+    token_response: dict[str, Any],
+    userinfo_endpoint: str | None,
+    allow_insecure_http: bool,
+) -> dict[str, Any]:
+    """Fill omitted scope claims from UserInfo without overriding ID-token claims."""
+    required = ("email", "email_verified")
+    if all(name in id_token_claims for name in required):
+        return id_token_claims
+    access_token = token_response.get("access_token")
+    if userinfo_endpoint is None or not isinstance(access_token, str):
+        return id_token_claims
+    if not access_token or len(access_token.encode("utf-8")) > 64 * 1024:
+        raise SessionBrokerError("invalid_oidc_token_response")
+    userinfo = _fetch_userinfo(
+        userinfo_endpoint,
+        access_token=access_token,
+        allow_insecure_http=allow_insecure_http,
+    )
+    subject = id_token_claims.get("sub")
+    if not isinstance(userinfo.get("sub"), str) or userinfo["sub"] != subject:
+        raise SessionBrokerError("oidc_userinfo_subject_mismatch")
+    completed = dict(id_token_claims)
+    for name in required:
+        if name in completed:
+            if name in userinfo and userinfo[name] != completed[name]:
+                raise SessionBrokerError("oidc_userinfo_claim_mismatch")
+        elif name in userinfo:
+            completed[name] = userinfo[name]
+    return completed
+
+
+def _fetch_userinfo(
+    endpoint: str,
+    *,
+    access_token: str,
+    allow_insecure_http: bool,
+) -> dict[str, Any]:
+    _validate_remote_url(endpoint, allow_insecure_http=allow_insecure_http)
+    request = urllib.request.Request(
+        endpoint,
+        headers={
+            "Accept": "application/json",
+            "Authorization": "Bearer " + access_token,
+            "User-Agent": "Hormuz-OIDC/0.1",
+        },
+        method="GET",
+    )
+    try:
+        opener = urllib.request.build_opener(_NoRedirect)
+        with opener.open(request, timeout=_TOKEN_EXCHANGE_TIMEOUT_SECONDS) as response:
+            _validate_remote_url(response.geturl(), allow_insecure_http=allow_insecure_http)
+            body = response.read(_MAX_USERINFO_RESPONSE_BYTES + 1)
+    except (urllib.error.URLError, TimeoutError, ValueError) as error:
+        LOGGER.warning(
+            "oidc_userinfo_failed endpoint_host=%s",
+            urllib.parse.urlparse(endpoint).hostname,
+        )
+        raise SessionBrokerError("oidc_userinfo_failed") from error
+    if len(body) > _MAX_USERINFO_RESPONSE_BYTES:
+        raise SessionBrokerError("oidc_userinfo_response_too_large")
+    try:
+        value = json.loads(body)
+    except (json.JSONDecodeError, UnicodeDecodeError, RecursionError) as error:
+        raise SessionBrokerError("invalid_oidc_userinfo_response") from error
+    if not isinstance(value, dict):
+        raise SessionBrokerError("invalid_oidc_userinfo_response")
     return value
 
 

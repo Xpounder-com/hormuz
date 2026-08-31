@@ -71,6 +71,7 @@ class OnboardingHTTPTests(SessionHTTPTestCase):
 
     def test_new_member_can_use_gateway_and_personal_stats_then_operator_removes_access(self):
         pair = self.join_team()
+        self.assertEqual(self.idp.userinfo_requests, 0)
         headers = {"Authorization": "Bearer " + pair["access_token"]}
         status, _, identity = self.request("GET", "/v1/gateway/whoami", headers=headers)
         self.assertEqual(status, 200)
@@ -89,6 +90,47 @@ class OnboardingHTTPTests(SessionHTTPTestCase):
         enrollment, _ = self.enroll(organization="customer-a")
         values, cookie = self.begin_browser(enrollment)
         self.assertEqual(self.callback(values, cookie)[0], 400)
+
+    def test_code_flow_gets_omitted_email_scope_claims_from_userinfo(self):
+        self.idp.omit_claims = {"email", "email_verified"}
+        pair = self.join_team()
+        self.assertEqual(self.idp.userinfo_requests, 1)
+        status, _, identity = self.request(
+            "GET", "/v1/gateway/whoami",
+            headers={"Authorization": "Bearer " + pair["access_token"]},
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(identity["actor_id"], self.invitation.membership_id)
+
+    def test_userinfo_outage_fails_closed_without_authorizing_invitation(self):
+        self.idp.omit_claims = {"email", "email_verified"}
+        self.idp.userinfo_unavailable = True
+        enrollment, secret = self.enroll(organization="customer-a")
+        values, cookie = self.accept_in_browser(enrollment)
+        self.assertEqual(self.callback(values, cookie)[0], 503)
+        self.assertEqual(self.idp.userinfo_requests, 1)
+        self.assertEqual(self.request(
+            "POST", "/v1/auth/enrollments/" + enrollment["enrollment_id"] + "/redeem",
+            {"enrollment_secret": secret},
+        )[0], 409)
+
+    def test_userinfo_cannot_change_subject_or_override_an_id_token_claim(self):
+        cases = (
+            ({"email", "email_verified"}, {"sub": "different-subject"}),
+            ({"email_verified"}, {"email": "wrong@example.test", "email_verified": True}),
+            ({"email", "email_verified"}, {"email": "new@example.test", "email_verified": False}),
+        )
+        for omitted, userinfo in cases:
+            with self.subTest(omitted=omitted, userinfo=userinfo):
+                self.idp.omit_claims = omitted
+                self.idp.userinfo_claims_overrides = userinfo
+                enrollment, secret = self.enroll(organization="customer-a")
+                values, cookie = self.accept_in_browser(enrollment)
+                self.assertEqual(self.callback(values, cookie)[0], 400)
+                self.assertEqual(self.request(
+                    "POST", "/v1/auth/enrollments/" + enrollment["enrollment_id"] + "/redeem",
+                    {"enrollment_secret": secret},
+                )[0], 409)
 
     def test_unmapped_user_without_invite_cannot_self_enroll_and_legacy_user_still_works(self):
         enrollment, _ = self.enroll(organization="customer-a")
@@ -177,11 +219,13 @@ class OnboardingHTTPTests(SessionHTTPTestCase):
                              force_refresh=True, store=secure_store)
 
     def test_invitation_and_idp_credentials_are_excluded_from_logs_and_usage(self):
+        self.idp.omit_claims = {"email", "email_verified"}
         with self.assertLogs("hormuz.session", level="INFO") as log:
             self.join_team()
             self.request("GET", "/v1/auth/invitations/accept?code=" + self.invitation.code)
+        self.assertEqual(self.idp.userinfo_requests, 1)
         data = "\n".join(log.output).encode()
         for pattern in ("sessions.sqlite3*", "usage.sqlite3*"):
             data += b"".join(path.read_bytes() for path in self.root.glob(pattern))
-        for value in (self.invitation.code, self.idp.last_id_token, "new@example.test"):
+        for value in (self.invitation.code, self.idp.last_id_token, "idp-token-must-not-be-stored", "new@example.test"):
             self.assertFalse(value.encode() in data, "invitation, email or ID token leaked")

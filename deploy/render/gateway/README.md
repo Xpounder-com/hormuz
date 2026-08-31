@@ -79,9 +79,13 @@ instructions for these credentials. See
 Register the exact `/v1/auth/callback` and `/v1/admin/auth/callback` URLs at the
 IdP. Require authorization code + PKCE, confidential `client_secret_basic`,
 `form_post`, and only `openid email` scopes. Keep owner-only assignment and the
-existing MFA policy during qualification. The app consumes ID tokens for verified
-identity, never stores IdP access/refresh tokens, and does not request
-`offline_access`. A successful real code exchange is a separate deployment gate.
+existing MFA policy during qualification. The app validates ID tokens for the
+authentication event. For an invited first login only, it may use the ephemeral
+access token once at the discovery-advertised UserInfo endpoint when the ID token
+omits an email scope claim. UserInfo must return the signed token's subject and
+`email_verified: true`; the provider token is never stored. The app does not
+request `offline_access`. A successful real code exchange is a separate
+deployment gate.
 
 Deploy **maintenance first**, keeping `HORMUZ_HOSTED_MODE=maintenance` (the
 default), manual deploys and no public enrollment invitations. Maintenance needs
