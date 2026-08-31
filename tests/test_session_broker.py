@@ -98,6 +98,19 @@ class SessionPortfolioIntegrationTests(SessionHTTPTestCase):
 
 
 class SessionBrokerTests(SessionHTTPTestCase):
+    def test_login_with_client_secret_post_uses_body_authentication(self):
+        issuer = self.config.oidc_issuers[self.idp.origin]
+        self.config.oidc_issuers[self.idp.origin] = replace(
+            issuer, login=replace(issuer.login, token_endpoint_auth_method="client_secret_post"),
+        )
+        self.idp.metadata_overrides["token_endpoint_auth_methods_supported"] = ["client_secret_post"]
+        pair = self.browser_login()
+        status, _, identity = self.request(
+            "GET", "/v1/gateway/whoami", headers={"Authorization": "Bearer " + pair["access_token"]},
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(identity["actor_id"], "alice")
+
     def test_login_governed_request_usage_refresh_and_logout(self):
         pair = self.browser_login()
         headers = {"Authorization": "Bearer " + pair["access_token"]}

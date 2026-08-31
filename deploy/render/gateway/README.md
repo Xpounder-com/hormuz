@@ -53,11 +53,13 @@ dump live Caddy configuration, or place credentials in command arguments.
 Copy [profile.example.json](profile.example.json) into a private operator file.
 Only its five documented fields are accepted. Use an exact HTTPS public origin,
 the registered issuer and confidential client ID, and an absolute state directory
-under the persistent disk, normally `/var/lib/hormuz/state`. No credential belongs
+under the persistent disk, normally `/var/lib/hormuz/private/state`. No credential belongs
 in this JSON. Do not commit real tenant URLs, client IDs, subjects or email addresses.
 
 Set the profile as the Render secret file `hormuz-hosted.json`, available at
-`/etc/secrets/hormuz-hosted.json`. Set the following as service-scoped secret
+`/etc/secrets/hormuz-hosted.json`. Set `HORMUZ_CONFIG` to
+`/var/lib/hormuz/operator/hormuz-runtime.json`; prepare that private regular file
+below before activation. Set the following as service-scoped secret
 environment values through the protected Render configuration UI:
 
 | Name | Required value |
@@ -87,16 +89,58 @@ no credential or initialized database: `/health` is 200 with status `maintenance
 while `/ready`, console, callbacks and every model route are 503. Do not interpret
 its health response as gateway readiness.
 
-After mounting the disk and injecting private configuration, use the Render
-service's Shell to initialize explicitly:
+Actual Render qualification found a root-owned, group-1000 disk mount with mode
+`0775`, and a secret-file symlink whose regular target is root-owned `0640`.
+The strict loader refuses symlinks, and the state lock refuses a foreign-owned
+or group-writable immediate parent. Keep those checks. In the service Shell,
+prepare new owner-only directories and a regular copy of the approved profile:
 
 ```sh
-python -I -m hormuz.hosted initialize
-python -I -m hormuz.hosted check
-python -I -m hormuz.hosted team organization create \
+python -I - <<'PY'
+import os
+import stat
+from pathlib import Path
+
+os.umask(0o077)
+with open("/etc/secrets/hormuz-hosted.json", "rb") as source:
+    info = os.fstat(source.fileno())
+    if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022:
+        raise RuntimeError("profile_source_unsafe")
+    data = source.read(16385)
+    if len(data) > 16384:
+        raise RuntimeError("profile_source_too_large")
+for name in ("operator", "private"):
+    Path("/var/lib/hormuz", name).mkdir(mode=0o700)
+target = Path("/var/lib/hormuz/operator/hormuz-runtime.json")
+fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+with os.fdopen(fd, "wb") as output:
+    output.write(data)
+    output.flush()
+    os.fsync(output.fileno())
+parent_fd = os.open(target.parent, os.O_RDONLY | os.O_DIRECTORY)
+os.fsync(parent_fd)
+os.close(parent_fd)
+print("Private profile prepared; state is not initialized.")
+PY
+```
+
+This one-time preparation refuses existing directories/files. Inspect any partial
+attempt instead of overwriting it. It copies only the five-field configuration,
+not environment credentials. Profile changes are explicit operator work: update
+both the saved Render profile and the private runtime copy, review state bindings,
+and check before deploying. A Render secret-file update alone does not replace
+the private copy. No application code or file-safety check is bypassed.
+
+After preparation, initialize explicitly. The path is supplied here even if the
+new `HORMUZ_CONFIG` environment setting has not yet reached the running shell:
+
+```sh
+python -I -m hormuz.hosted --config /var/lib/hormuz/operator/hormuz-runtime.json initialize
+python -I -m hormuz.hosted --config /var/lib/hormuz/operator/hormuz-runtime.json check
+python -I -m hormuz.hosted --config /var/lib/hormuz/operator/hormuz-runtime.json team organization create \
   --organization evaluation --name Evaluation \
   --issuer https://identity.example.com/oauth2/default
-python -I -m hormuz.hosted team create \
+python -I -m hormuz.hosted --config /var/lib/hormuz/operator/hormuz-runtime.json team create \
   --organization evaluation --team evaluation-eng --name Engineering
 ```
 
@@ -147,7 +191,7 @@ files or using a platform disk snapshot alone is not this procedure.
 
 ```sh
 python -I -m hormuz.hosted snapshot \
-  --output-directory /var/lib/hormuz/backup-001
+  --output-directory /var/lib/hormuz/private/backup-001
 ```
 
 The output is a new owner-only directory containing the two consistent SQLite
@@ -164,9 +208,9 @@ key. Do not rotate the master key to restore a managed directory: recipient hash
 also depend on it. Run:
 
 ```sh
-python -I -m hormuz.hosted --config /etc/secrets/hormuz-restored.json restore \
-  --snapshot-directory /var/lib/hormuz/backup-001
-python -I -m hormuz.hosted --config /etc/secrets/hormuz-restored.json check
+python -I -m hormuz.hosted --config /var/lib/hormuz/operator/hormuz-restored.json restore \
+  --snapshot-directory /var/lib/hormuz/private/backup-001
+python -I -m hormuz.hosted --config /var/lib/hormuz/operator/hormuz-restored.json check
 ```
 
 Restore verifies keyed bindings/digests and refuses unexpected sidecar files or an

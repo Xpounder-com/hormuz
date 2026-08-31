@@ -317,7 +317,6 @@ def _exchange_code(
         "grant_type": "authorization_code",
         "code": code,
         "redirect_uri": redirect_uri,
-        "client_id": client_id,
         "code_verifier": pkce_verifier,
     }
     headers = {
@@ -326,6 +325,8 @@ def _exchange_code(
         "User-Agent": "Hormuz-OIDC/0.1",
     }
     if auth_method == "client_secret_basic":
+        # Keep client authentication in one location. Strict providers reject
+        # even a duplicate client_id in the body alongside HTTP Basic.
         encoded_id = urllib.parse.quote_plus(client_id, safe="")
         encoded_secret = urllib.parse.quote_plus(client_secret, safe="")
         basic = base64.b64encode(
@@ -333,6 +334,7 @@ def _exchange_code(
         ).decode("ascii")
         headers["Authorization"] = "Basic " + basic
     elif auth_method == "client_secret_post":
+        fields["client_id"] = client_id
         fields["client_secret"] = client_secret
     else:
         raise SessionBrokerError("unsupported_token_endpoint_auth_method")

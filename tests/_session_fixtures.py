@@ -69,10 +69,22 @@ class LocalIdentityProvider(BaseHTTPRequestHandler):
             self.reply(503, {"error": "unavailable"})
             return
         params = {key: values[0] for key, values in parse_qs(body.decode()).items()}
+        authorization = self.headers.get("Authorization")
+        # Strict providers reject body credentials combined with HTTP Basic,
+        # including a duplicated client_id with no body client_secret.
+        if authorization is not None and {"client_id", "client_secret"}.intersection(params):
+            self.reply(401, {"error": "invalid_request"})
+            return
         flow = state.codes.pop(params.get("code", ""), None)
         challenge = base64.urlsafe_b64encode(hashlib.sha256(params.get("code_verifier", "").encode()).digest()).rstrip(b"=").decode()
         expected_auth = "Basic " + base64.b64encode(("fixture-login:" + CLIENT_SECRET).encode()).decode()
-        if flow is None or self.headers.get("Authorization") != expected_auth or challenge != flow["code_challenge"] or params.get("redirect_uri") != flow["redirect_uri"] or params.get("grant_type") != "authorization_code":
+        methods = state.metadata_overrides.get("token_endpoint_auth_methods_supported", ["client_secret_basic"])
+        authenticated = (
+            "client_secret_basic" in methods and authorization == expected_auth
+            or "client_secret_post" in methods and authorization is None
+            and params.get("client_id") == "fixture-login" and params.get("client_secret") == CLIENT_SECRET
+        )
+        if flow is None or not authenticated or challenge != flow["code_challenge"] or params.get("redirect_uri") != flow["redirect_uri"] or params.get("grant_type") != "authorization_code":
             self.reply(400, {"error": "invalid_grant"})
             return
         now = int(time.time())
