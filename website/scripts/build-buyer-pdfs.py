@@ -12,7 +12,7 @@ INK = colors.HexColor("#101b20")
 TEAL = colors.HexColor("#087f78")
 PAPER = colors.HexColor("#f4f4ef")
 LINE = colors.HexColor("#d9e1df")
-URL = "https://xpounder-com.github.io/hormuz/"
+URL = "https://usehormuz.github.io/"
 REPO = "https://github.com/Xpounder-com/hormuz/blob/main/"
 styles = {
     "label": ParagraphStyle("label", fontName="Helvetica-Bold", fontSize=9, leading=12, textColor=TEAL, spaceAfter=9),
@@ -39,7 +39,7 @@ def footer(canvas, doc):
     canvas.line(44, 46, 568, 46)
     canvas.setFont("Helvetica", 8)
     canvas.setFillColor(TEAL)
-    canvas.drawString(44, 32, "HORMUZ  /  Mehrdad Zaker  /  August 30, 2026")
+    canvas.drawString(44, 32, "HORMUZ  /  Mehrdad Zaker  /  August 31, 2026")
     canvas.drawRightString(568, 32, f"{doc.page}")
     canvas.linkURL(URL, (44, 24, 440, 43), relative=0)
     canvas.restoreState()
@@ -84,7 +84,7 @@ overview = [
     p(f'The <link href="{URL}demo/" color="#087f78">real provider-free recording</link> demonstrates allow, fallback/cap, redact, deny with no upstream call, and synthetic metadata evidence. The complete quickstart needs no provider account.'),
     p("Know the boundary", "h2"),
     p("v1.0.0 stabilizes source CLI/policy/evidence contracts; the signed OCI reference is separately v0.1.3 linux/amd64. No blanket production certification, managed service, 24/7 SLA, invoice reconciliation, independent security review, or customer endorsement is claimed.", "small"),
-    p('<b>Discuss one workflow:</b> Mehrdad Zaker · <link href="mailto:zaker.mehrdad@gmail.com" color="#087f78">zaker.mehrdad@gmail.com</link><br/>' + f'<link href="{URL}" color="#087f78">xpounder-com.github.io/hormuz</link>'),
+    p('<b>Discuss one workflow:</b> Mehrdad Zaker · <link href="mailto:zaker.mehrdad@gmail.com" color="#087f78">zaker.mehrdad@gmail.com</link><br/>' + f'<link href="{URL}" color="#087f78">usehormuz.github.io</link>'),
     p("Sources: " + link("Architecture", "docs/ARCHITECTURE.md") + " · " + link("Clients", "docs/CLIENTS.md") + " · " + link("Support", "SUPPORT.md") + " · " + link("Offer", "marketing/OFFER.md"), "small"),
 ]
 

@@ -10,7 +10,7 @@ await fs.mkdir(scratch, { recursive: true });
 await fs.mkdir(path.dirname(output), { recursive: true });
 const presentation = Presentation.create({ slideSize: { width: 1280, height: 720 } });
 const C = { night: '#07171a', ink: '#101b20', paper: '#f4f4ef', white: '#fbfcf8', teal: '#087f78', cyan: '#68e6dd', muted: '#607077', line: '#d9e1df' };
-const site = 'https://xpounder-com.github.io/hormuz/';
+const site = 'https://usehormuz.github.io/';
 const repo = 'https://github.com/Xpounder-com/hormuz/blob/main/';
 const sourceNotes = [];
 
@@ -25,7 +25,7 @@ function slide(kicker, title, number, sources, dark = false) {
   s.background.fill = dark ? C.night : C.paper;
   text(s, 'section', kicker.toUpperCase(), 64, 44, 1130, 30, 19, dark ? C.cyan : C.teal, true);
   if (title) text(s, 'takeaway', title, 64, 106, 1152, 124, 48, dark ? C.white : C.ink, true);
-  text(s, 'footer', `HORMUZ  /  Mehrdad Zaker  /  30 Aug 2026                                      ${String(number).padStart(2, '0')} / 07`, 64, 672, 1152, 24, 17, dark ? '#b9ccc7' : C.muted);
+  text(s, 'footer', `HORMUZ  /  Mehrdad Zaker  /  31 Aug 2026                                      ${String(number).padStart(2, '0')} / 07`, 64, 672, 1152, 24, 17, dark ? '#b9ccc7' : C.muted);
   const urls = sources.map(source => source.startsWith('https:') ? source : repo + source);
   s.speakerNotes.textFrame.setText(`[Sources]\n${urls.join('\n')}\n[/Sources]\nScope: public v1 source contracts and synthetic evidence. No customer outcome, certification, SLA, validated demand, or future software availability is implied.`);
   sourceNotes.push({ slide: number, sources: urls });
@@ -89,7 +89,7 @@ text(s, 'pilot-boundary', 'Start with fit and scope. A shorter evaluation may co
 s = slide('A bounded next step', 'Name one workflow worth governing.', 7, [site, 'marketing/PILOT.md', 'marketing/TRUST.md'], true);
 text(s, 'next-step', 'Which client? Which team?\nWhich control is missing?\nWho operates the route?', 64, 280, 1140, 198, 44, C.white);
 text(s, 'contact', 'Mehrdad Zaker\nzaker.mehrdad@gmail.com', 64, 510, 1140, 86, 31, C.cyan, true);
-text(s, 'website', 'xpounder-com.github.io/hormuz', 64, 613, 1140, 40, 25, '#d9e1df');
+text(s, 'website', 'usehormuz.github.io', 64, 613, 1140, 40, 25, '#d9e1df');
 
 await fs.writeFile(path.join(scratch, 'source-notes.txt'), JSON.stringify(sourceNotes, null, 2));
 for (const [i, item] of presentation.slides.items.entries()) {

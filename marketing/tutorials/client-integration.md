@@ -4,7 +4,7 @@ This tutorial is a navigation layer over the maintained [client guide](../../doc
 not a second configuration contract. Baselines at preparation: Codex 0.147.0
 and Claude Code 2.1.233; newer versions require verification.
 
-1. Complete the [provider-free quickstart](https://xpounder-com.github.io/hormuz/docs/).
+1. Complete the [provider-free quickstart](https://usehormuz.github.io/docs/).
    It does not require a provider account, employee tokens, or a shared server.
 2. Choose one non-production client path and a named gateway operator. Follow
    the root [README](../../README.md#configure-providers-and-clients) for

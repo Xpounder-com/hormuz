@@ -46,7 +46,7 @@ These report only captured gateway traffic in the current UTC month. Cost is a
 configured-rate-card estimate. Token volume is not productivity or work quality.
 Policy-admin events and generation-usage events are different evidence surfaces.
 
-The website's [synthetic JSONL sample](https://xpounder-com.github.io/hormuz/demo/#evidence)
+The website's [synthetic JSONL sample](https://usehormuz.github.io/demo/#evidence)
 comes from a separate provider-free gateway run. See [audit](../../docs/AUDIT.md),
 [usage](../../docs/USAGE.md), and [policy usability](../../docs/POLICY_ADMIN_USABILITY.md)
 for the precise contracts. Neither tutorial counts toward the independent,
