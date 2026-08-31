@@ -5,7 +5,9 @@ This is the first **non-durable implementation slice** of #8, under the
 accounting helpers. It is not an import/fetch CLI, a financial ledger, a
 reconciliation report, a gateway-native usage sidecar, or live provider proof.
 The v1 gateway parser, request-time estimates, report shapes and database
-schemas are unchanged.
+schemas are unchanged by these pure helpers. The separate
+[durable rate-card slice](FINANCE_RATE_CARDS.md) adds registration and audited
+exact-version reads without changing these value contracts or completing #8.
 
 ## Implemented boundary
 

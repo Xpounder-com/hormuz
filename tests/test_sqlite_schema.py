@@ -22,7 +22,7 @@ class SQLiteSchemaOwnershipTests(unittest.TestCase):
                 "SELECT version, state FROM hormuz_schema_migrations ORDER BY version"
             ).fetchall()
             connection.close()
-        self.assertEqual(migrations, [(1, "applied"), (2, "applied"), (3, "applied"), (4, "applied"), (5, "applied"), (6, "applied"), (7, "applied")])
+        self.assertEqual(migrations, [(1, "applied"), (2, "applied"), (3, "applied"), (4, "applied"), (5, "applied"), (6, "applied"), (7, "applied"), (8, "applied")])
 
     def test_gateway_ddl_is_owned_only_by_the_internal_schema_module(self) -> None:
         store_source = Path(store_module.__file__).read_text(encoding="utf-8")

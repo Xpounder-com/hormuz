@@ -18,6 +18,7 @@ from hormuz.portfolio_wire import SCOPES
 from hormuz.store import StorageSchemaError, UsageStore
 from hormuz._attribution_schema import TABLE_DDL
 from hormuz._outcome_schema import TABLE_DDL as OUTCOME_TABLES
+from hormuz._finance_schema import TABLE_DDL as FINANCE_TABLES
 from hormuz.portfolio_repository import create_portfolio_repository
 from hormuz.portfolio_wire import ATTRIBUTIONS, canonical
 
@@ -41,7 +42,7 @@ class SQLiteAttributionTransitionTests(unittest.TestCase):
         self.root = Path(temporary.name)
         self.config = registry_config(self.root)
         self.path = self.config.database_path
-        self.assertEqual(UsageStore.schema_version, 7)
+        self.assertEqual(UsageStore.schema_version, 8)
         seeded = registry_predecessor_call({"backend": "sqlite", "path": str(self.path), "mode": "seed"})
         self.assertEqual(seeded["status"], "ready")
         self.writes, self.page = seeded["writes"], seeded["page"]
@@ -53,7 +54,7 @@ class SQLiteAttributionTransitionTests(unittest.TestCase):
         original = UsageStore._apply_migration
 
         def apply(connection, version):
-            self.assertIn(version, (6, 7))
+            self.assertIn(version, (6, 7, 8))
             original(connection, version)
             if fail and version == 6:
                 raise RuntimeError("synthetic_attribution_migration_failure")
@@ -63,16 +64,16 @@ class SQLiteAttributionTransitionTests(unittest.TestCase):
 
     def assert_prior_state_preserved(self):
         current = copy.deepcopy(sqlite_snapshot(self.path))
-        added = set(TABLE_DDL) | set(OUTCOME_TABLES)
+        added = set(TABLE_DDL) | set(OUTCOME_TABLES) | set(FINANCE_TABLES)
         current["objects"] = [row for row in current["objects"] if row[2] not in added]
         current["rows"] = {table: rows for table, rows in current["rows"].items() if table not in added}
-        current["rows"]["hormuz_schema_migrations"] = [row for row in current["rows"]["hormuz_schema_migrations"] if row[0] not in {6, 7}]
+        current["rows"]["hormuz_schema_migrations"] = [row for row in current["rows"]["hormuz_schema_migrations"] if row[0] not in {6, 7, 8}]
         self.assertEqual(current, self.before)
 
     def test_sqlite_attribution_migration_is_additive_and_idempotent(self):
         for _ in range(2):
             self.probe()
-            self.assertEqual(len(sqlite_snapshot(self.path)["rows"]), 29)
+            self.assertEqual(len(sqlite_snapshot(self.path)["rows"]), 31)
             self.assert_prior_state_preserved()
 
     def test_sqlite_attribution_failure_and_retry_preserve_populated_registry(self):

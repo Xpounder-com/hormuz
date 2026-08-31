@@ -117,7 +117,7 @@ def _schema_tables(root: Path) -> tuple[set[str], set[str]]:
     sqlite = set(SQLITE_TABLE.findall(_read_text(root / SQLITE_SCHEMA_PATH)))
     # The new separate repository owns a literal table declaration catalogue.
     # Inspect literals without importing/executing a checkout under verification.
-    for path in ("hormuz/_portfolio_schema.py", "hormuz/_attribution_schema.py", "hormuz/_outcome_schema.py"):
+    for path in ("hormuz/_portfolio_schema.py", "hormuz/_attribution_schema.py", "hormuz/_outcome_schema.py", "hormuz/_finance_schema.py"):
         registry = ast.parse(_read_text(root / path))
         declarations = next((node.value for node in registry.body if isinstance(node, ast.Assign)
                              and any(isinstance(target, ast.Name) and target.id == "TABLE_DDL" for target in node.targets)), None)

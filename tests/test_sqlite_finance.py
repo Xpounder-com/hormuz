@@ -1,0 +1,86 @@
+from dataclasses import replace
+from pathlib import Path
+import sqlite3
+import tempfile
+import unittest
+
+from hormuz._finance_schema import TABLE_DDL, sqlite_statements
+from hormuz.finance_repository import create_finance_repository
+from hormuz.store import StorageSchemaError, UsageStore
+
+if __package__:
+    from ._finance_fixture import AUDIT, CARDS, FinanceAssertions
+    from ._portfolio_fixture import registry_config
+    from ._registry_transition_fixture import sqlite_snapshot
+else:
+    from _finance_fixture import AUDIT, CARDS, FinanceAssertions
+    from _portfolio_fixture import registry_config
+    from _registry_transition_fixture import sqlite_snapshot
+
+
+class SQLiteFinanceTests(FinanceAssertions, unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.config = registry_config(Path(temporary.name))
+        self.environment = None
+        self.store = UsageStore(self.config.database_path)
+        self.setup_finance()
+
+    def finance_rows(self):
+        with sqlite3.connect(self.config.database_path) as connection:
+            connection.row_factory = sqlite3.Row
+            return {table: [dict(row) for row in connection.execute(f"SELECT * FROM {table} ORDER BY organization_id, sequence")]
+                    for table in TABLE_DDL}
+
+    def legacy_rows(self):
+        return {name: rows for name, rows in sqlite_snapshot(self.config.database_path)["rows"].items() if name not in TABLE_DDL}
+
+    def test_sqlite_finance_real_schema_and_append_only_guards(self):
+        self.assertEqual(self.store.schema_version, 8)
+        self.assertEqual(len(sqlite_snapshot(self.config.database_path)["rows"]), 31)
+        self.register()
+        before = self.finance_rows()
+        with sqlite3.connect(self.config.database_path) as connection:
+            for table in TABLE_DDL:
+                for statement in (f"UPDATE {table} SET organization_id=organization_id", f"DELETE FROM {table}"):
+                    with self.assertRaisesRegex(sqlite3.IntegrityError, "portfolio_append_only"):
+                        connection.execute(statement)
+        self.assertEqual(self.finance_rows(), before)
+
+    def test_sqlite_finance_missing_guard_refuses_without_repair(self):
+        with sqlite3.connect(self.config.database_path) as connection:
+            connection.execute(f"DROP TRIGGER {CARDS}_no_delete")
+        before = sqlite_snapshot(self.config.database_path)
+        self.error("unavailable", self.register)
+        self.error("unavailable", self.get)
+        with self.assertRaisesRegex(StorageSchemaError, "storage_schema_partial_upgrade"):
+            UsageStore(self.config.database_path)
+        self.assertEqual(sqlite_snapshot(self.config.database_path), before)
+
+    def test_sqlite_finance_corrupted_card_or_receipt_never_replays(self):
+        self.register()
+        for column, replacement in (("content_digest", "a" * 64), ("card_json", "{}"),
+                                    ("receipt_id", "b" * 32), ("registered_by", "forged")):
+            with self.subTest(column=column):
+                with sqlite3.connect(self.config.database_path) as connection:
+                    original = connection.execute(f"SELECT {column} FROM {CARDS}").fetchone()[0]
+                    connection.execute(f"DROP TRIGGER {CARDS}_no_update")
+                    connection.execute(f"UPDATE {CARDS} SET {column}=?", (replacement,))
+                    connection.execute(next(sql for sql in sqlite_statements() if sql.startswith(f"CREATE TRIGGER {CARDS}_no_update ")))
+                before = self.finance_rows()
+                self.error("unavailable", self.register)
+                self.error("unavailable", self.get)
+                self.assertEqual(self.finance_rows(), before)
+                with sqlite3.connect(self.config.database_path) as connection:
+                    connection.execute(f"DROP TRIGGER {CARDS}_no_update")
+                    connection.execute(f"UPDATE {CARDS} SET {column}=?", (original,))
+                    connection.execute(next(sql for sql in sqlite_statements() if sql.startswith(f"CREATE TRIGGER {CARDS}_no_update ")))
+
+    def test_sqlite_finance_absent_database_is_not_created(self):
+        path = self.config.database_path.with_name("absent.sqlite3")
+        repository = create_finance_repository(replace(self.config, database_path=path))
+        self.error("unavailable", lambda: self.register(repository=repository))
+        self.error("unavailable", lambda: self.get(repository=repository))
+        self.assertFalse(path.exists())
+

@@ -15,10 +15,14 @@ from unittest import mock
 from tools.verify_finance_transition_plan import (
     ROOT, FinanceTransitionError, main, validate_finance_plan, validate_finance_sources,
     verify_finance_transition_plan, verify_outcome_archive,
+    validate_finance_implementation_plan, verify_finance_implementation_plan,
 )
 
 
 class FinanceTransitionPlanTests(unittest.TestCase):
+    def implementation(self):
+        return json.loads((ROOT / "docs/finance-transition-plan-v2.json").read_bytes())
+
     def plan(self):
         return json.loads((ROOT / "docs/finance-transition-plan-v1.json").read_bytes())
 
@@ -34,6 +38,38 @@ class FinanceTransitionPlanTests(unittest.TestCase):
         self.assertFalse(result["live_finance_verified"])
         self.assertFalse(result["final_candidate_accepted"])
         self.assertEqual(result["provider_count"], 2)
+
+    def test_successor_is_only_rate_card_history_not_full_finance_acceptance(self):
+        result = verify_finance_implementation_plan()
+        self.assertEqual(result["schema_version"], 2)
+        self.assertEqual(result["status"], "finance_rate_card_plan_verified")
+        self.assertEqual(result["finance_table_count"], 2)
+        self.assertEqual(result["sqlite_schema_version"], 8)
+        self.assertEqual(result["postgresql_schema_version"], 12)
+        self.assertTrue(result["rate_card_history_implemented"])
+        for field in ("finance_implemented", "provider_imports_implemented", "native_request_cost_capture_implemented",
+                      "reconciliation_implemented", "live_finance_verified", "final_candidate_accepted"):
+            self.assertFalse(result[field])
+
+    def test_successor_freezes_every_section_and_preserves_preflight_dependency(self):
+        for key in self.implementation():
+            with self.subTest(key=key):
+                value = {**self.implementation(), key: "SYNTHETIC_EXCLUDED"}
+                with self.assertRaisesRegex(FinanceTransitionError, "finance_implementation_contract_changed"):
+                    validate_finance_implementation_plan(value)
+        with mock.patch("tools.verify_finance_transition_plan.verify_finance_transition_plan", side_effect=FinanceTransitionError("finance_preflight_contract_changed")):
+            with self.assertRaisesRegex(FinanceTransitionError, "finance_preflight_contract_changed"):
+                verify_finance_implementation_plan()
+
+    def test_successor_rejects_unreadable_ambiguous_and_unbounded_source(self):
+        for payload in (b"{", b'{"schema_version":2,"schema_version":2}', b" " * 65537, b"[" * 5000 + b"]" * 5000):
+            with tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                (root / "docs").mkdir()
+                (root / "docs/finance-transition-plan-v2.json").write_bytes(payload)
+                with mock.patch("tools.verify_finance_transition_plan.verify_finance_transition_plan", return_value={}):
+                    with self.assertRaises(FinanceTransitionError):
+                        verify_finance_implementation_plan(root)
 
     def test_each_plan_section_is_frozen_not_only_version_label(self):
         for key in self.plan():
@@ -53,13 +89,14 @@ class FinanceTransitionPlanTests(unittest.TestCase):
                         validate_finance_sources(changed)
 
     def test_unknown_fields_and_wrong_primitive_versions_fail(self):
-        for validate, value in ((validate_finance_plan, self.plan()), (validate_finance_sources, self.sources())):
-            for changed in ({**value, "unexpected": True}, {**value, "schema_version": True}, {**value, "schema_version": 2}, []):
+        for validate, value in ((validate_finance_plan, self.plan()), (validate_finance_sources, self.sources()),
+                                (validate_finance_implementation_plan, self.implementation())):
+            for changed in ({**value, "unexpected": True}, {**value, "schema_version": True}, {**value, "schema_version": 99}, []):
                 with self.assertRaises(FinanceTransitionError):
                     validate(changed)
 
     def test_non_json_non_finite_and_invalid_unicode_are_fixed_errors(self):
-        for validate in (validate_finance_plan, validate_finance_sources):
+        for validate in (validate_finance_plan, validate_finance_sources, validate_finance_implementation_plan):
             for value in (object(), float("nan"), float("inf"), {"x": "\ud800"}):
                 with self.assertRaises(FinanceTransitionError) as caught:
                     validate(value)

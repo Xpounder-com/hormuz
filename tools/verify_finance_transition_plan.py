@@ -19,6 +19,7 @@ from tools.verify_registry_transition_plan import RegistryTransitionError, verif
 
 
 PLAN_CANONICAL_SHA256 = "0036081d73af0a7094506aca159fd0adfafb2b16f88a43ac260f9d8809d64ab1"
+IMPLEMENTATION_CANONICAL_SHA256 = "c308004778c4b48a1bbfa693daeeb4f2f0ca9520ae4ceb246ce0fff051cfefc2"
 SOURCES_CANONICAL_SHA256 = "290def8f2cd7026d4e0f0512db9254906f8592a026ee4beb9cac3623d7a1d9f4"
 OUTCOME_SOURCE_COMMIT = "aa648edf64df9f4a0c426ad73a95852f11561099"
 OUTCOME_ARCHIVE_SHA256 = "fbbe1178607a38c5f390b96c646f5a93414523b37f553abb7d830d42f30ff056"
@@ -43,6 +44,10 @@ def validate_finance_plan(value: object) -> None:
 
 def validate_finance_sources(value: object) -> None:
     _validate(value, SOURCES_CANONICAL_SHA256, "finance_source_contract_changed")
+
+
+def validate_finance_implementation_plan(value: object) -> None:
+    _validate(value, IMPLEMENTATION_CANONICAL_SHA256, "finance_implementation_contract_changed")
 
 
 def _read(root: Path, filename: str, validate) -> None:
@@ -92,6 +97,19 @@ def verify_outcome_archive(path: Path) -> None:
         raise FinanceTransitionError("finance_outcome_archive_invalid") from None
 
 
+def verify_finance_implementation_plan(root: Path = ROOT) -> dict[str, object]:
+    baseline = verify_finance_transition_plan(root)
+    _read(root, "finance-transition-plan-v2.json", validate_finance_implementation_plan)
+    return {
+        **baseline, "schema_version": 2, "status": "finance_rate_card_plan_verified",
+        "rate_card_history_implemented": True, "finance_table_count": 2,
+        "sqlite_schema_version": 8, "postgresql_schema_version": 12,
+        "provider_imports_implemented": False, "native_request_cost_capture_implemented": False,
+        "reconciliation_implemented": False, "finance_implemented": False,
+        "live_finance_verified": False, "final_candidate_accepted": False,
+    }
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--baseline-archive", type=Path)
@@ -101,7 +119,7 @@ def main(argv=None) -> int:
     try:
         if (args.baseline_archive is None) != (args.baseline_manifest is None):
             raise FinanceTransitionError("finance_baseline_pair_required")
-        result = verify_finance_transition_plan()
+        result = verify_finance_implementation_plan()
         if args.baseline_archive is not None:
             verify_released_baseline(args.baseline_archive, args.baseline_manifest)
         if args.outcome_archive is not None:

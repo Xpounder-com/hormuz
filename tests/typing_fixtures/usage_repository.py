@@ -8,6 +8,7 @@ from typing import Protocol
 
 from hormuz._persistence import UsageRepository
 from hormuz.config import GatewayConfig
+from hormuz.finance_repository import FinanceRateCardRepository, create_finance_repository
 from hormuz.postgres_usage_store import PostgresUsageStore
 from hormuz.store import UsageStore
 from hormuz.store_router import RepositoryBundle, RepositoryFactory, create_repository_bundle, create_usage_store
@@ -44,6 +45,14 @@ def composition_preserves_each_repository_type(
 
 def incomplete_factory(config: GatewayConfig) -> None:
     """Lacks the construction context required by RepositoryFactory."""
+
+
+def finance_composition_preserves_separate_owners(config: GatewayConfig) -> RepositoryBundle[FinanceRateCardRepository]:
+    factory: RepositoryFactory[FinanceRateCardRepository] = create_finance_repository
+    bundle = create_repository_bundle(config, portfolio_factory=factory)
+    bundle.portfolio.monthly_totals()  # type: ignore[attr-defined]
+    bundle.usage.register_rate_card()  # type: ignore[attr-defined]
+    return bundle
 
 
 def invalid_composition_remains_rejected(

@@ -170,6 +170,16 @@ REQUIRED_FINANCE_VALUES_SDIST_PATHS = (
     "tests/test_finance_rate_cards.py",
     "tests/test_finance_packaging.py",
 )
+REQUIRED_FINANCE_HISTORY_SDIST_PATHS = (
+    "docs/FINANCE_RATE_CARDS.md",
+    "docs/finance-transition-plan-v2.json",
+    "hormuz/_finance_schema.py",
+    "hormuz/finance_repository.py",
+    "hormuz/migrations/postgresql/0012_finance_rate_cards.sql",
+    "tests/_finance_fixture.py",
+    "tests/test_sqlite_finance.py",
+    "tests/test_postgres_finance.py",
+)
 REQUIRED_PORTFOLIO_EXTENSION_SDIST_PATHS = (
     "docs/portfolio-extension-contract-v1.json",
     "docs/work-budget-reports-wire-v1.json",
@@ -221,6 +231,7 @@ def main(argv: list[str] | None = None) -> int:
     _assert_outcome_preflight_sdist_boundary(sdist)
     _assert_finance_preflight_sdist_boundary(sdist)
     _assert_finance_values_sdist_boundary(sdist)
+    _assert_finance_history_sdist_boundary(sdist)
     _assert_portfolio_extension_sdist_boundary(sdist)
     _verify_isolated_install(wheel, config, python)
     print(
@@ -340,6 +351,16 @@ def _assert_finance_values_sdist_boundary(path: Path) -> None:
     ]
     if missing:
         raise RuntimeError(f"Finance values incomplete in {path.name}: {', '.join(sorted(missing))}")
+
+
+def _assert_finance_history_sdist_boundary(path: Path) -> None:
+    members = tuple(name.lstrip("./") for name in _sdist_members(path))
+    missing = [
+        required for required in REQUIRED_FINANCE_HISTORY_SDIST_PATHS
+        if not any(f"/{member}".endswith(f"/{required}") for member in members)
+    ]
+    if missing:
+        raise RuntimeError(f"Finance history incomplete in {path.name}: {', '.join(sorted(missing))}")
 
 
 def _assert_portfolio_extension_sdist_boundary(path: Path) -> None:
