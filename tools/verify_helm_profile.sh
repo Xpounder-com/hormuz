@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-set -euo pipefail
+set -Eeuo pipefail
 umask 077
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -62,8 +62,20 @@ fail() {
   exit 1
 }
 
+report_command_failure() {
+  local status=$1
+  local line=$2
+  local function_name=$3
+  # Never emit BASH_COMMAND, arguments, or variable values: commands may carry
+  # generated credentials. Source locations identify the failing boundary.
+  printf 'kubernetes_reference_failure function=%s line=%s exit_status=%s\n' \
+    "${function_name}" "${line}" "${status}" >&2
+}
+trap 'report_command_failure "$?" "${LINENO}" "${FUNCNAME[0]:-main}"' ERR
+
 cleanup() {
   local status=$?
+  trap - ERR
   set +e
   if [[ "${CLUSTER_CREATED}" -eq 1 && -n "${WORK_ROOT}" && -x "${WORK_ROOT}/bin/kind" ]]; then
     "${WORK_ROOT}/bin/kind" delete cluster --name "${CLUSTER_NAME}" >/dev/null 2>&1

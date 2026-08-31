@@ -217,6 +217,13 @@ preflight logs are captured and secret-scanned before each revision change or
 deletion and once more after replacement. The proof then removes the chart and
 cluster. It contacts no model provider or external IdP.
 
+Unexpected shell-command failures emit a bounded
+`kubernetes_reference_failure` marker with the function name, source line, and
+original exit status. The marker excludes command text, arguments, and
+variable values; it locates a failed harness boundary without exposing generated
+credentials or weakening the failure. Use the exact checked-out source revision
+to resolve its line number. A diagnostic marker is not successful proof evidence.
+
 The coordinated-operation extension also runs eight named tests against a
 disposable PostgreSQL backend. They exercise two independent gateway process
 pools, atomic organization budget reservations, immutable policy activation,
