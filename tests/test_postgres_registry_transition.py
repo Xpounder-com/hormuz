@@ -77,7 +77,7 @@ class PostgresRegistryTransitionTests(PostgresTestCase):
     def probe(self, *, fail=False):
         original = postgres_module._migration_sql
         def migration(version, schema, *roles):
-            self.assertIn(version, (9, 10))
+            self.assertIn(version, (9, 10, 11))
             ddl = original(version, schema, *roles)
             if fail and version == 9:
                 ddl += " SELECT 1 / 0;"
@@ -86,13 +86,13 @@ class PostgresRegistryTransitionTests(PostgresTestCase):
         with (
             mock.patch.object(postgres_module, "_migration_sql", side_effect=migration),
         ):
-            self.assertEqual(self.migrate().version, 10)
+            self.assertEqual(self.migrate().version, 11)
 
     def assert_v1_preserved(self):
         after = copy.deepcopy(self.snapshot())
         after["rows"] = {key: value for key, value in after["rows"].items() if not key.startswith("portfolio_")}
         after["rows"]["hormuz_schema_migrations"] = [
-            row for row in after["rows"]["hormuz_schema_migrations"] if json.loads(row[0])["version"] not in {9, 10}
+            row for row in after["rows"]["hormuz_schema_migrations"] if json.loads(row[0])["version"] not in {9, 10, 11}
         ]
         after["shape"] = [row for row in after["shape"] if not row[0].startswith("portfolio_")]
         self.assertEqual(after, self.before)
@@ -106,10 +106,10 @@ class PostgresRegistryTransitionTests(PostgresTestCase):
         }
 
     def test_registry_postgres_migration_is_additive_and_idempotent(self) -> None:
-        self.assertEqual(postgres_module.POSTGRES_SCHEMA_VERSION, 10)
+        self.assertEqual(postgres_module.POSTGRES_SCHEMA_VERSION, 11)
         for _ in range(2):
             self.migrate()
-            self.assertEqual(len(self.snapshot()["rows"]), 42)
+            self.assertEqual(len(self.snapshot()["rows"]), 51)
             self.assert_v1_preserved()
 
     def test_postgres_registry_failure_rolls_back_and_retry_preserves_v1_rows(self) -> None:

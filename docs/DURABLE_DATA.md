@@ -21,6 +21,8 @@ unregistered table.
 
 | Data class | SQLite tables | PostgreSQL tables | Content boundary |
 | --- | --- | --- | --- |
+| `portfolio_outcome_metadata` | `portfolio_outcome_contexts`, `portfolio_outcome_coverage_events`, `portfolio_outcome_events`, `portfolio_outcome_observations` | `portfolio_outcome_contexts`, `portfolio_outcome_coverage_events`, `portfolio_outcome_events`, `portfolio_outcome_observations` | Strict allowlisted source metadata; descriptive events; historical binding/use-case versions, source revision uncertainty and key-version references; coverage distinguishes source-event from delivery units. No webhook, title, body, comment, path, prompt, response, credential or source content. |
+| `portfolio_outcome_control` | `portfolio_outcome_audit_events`, `portfolio_outcome_cursors`, `portfolio_outcome_dead_letters`, `portfolio_outcome_receipts`, `portfolio_outcome_retention_events` | `portfolio_outcome_audit_events`, `portfolio_outcome_cursors`, `portfolio_outcome_dead_letters`, `portfolio_outcome_receipts`, `portfolio_outcome_retention_events` | Audited receipt/replay fingerprints, bounded fixed-code failure metadata, role/registration/retention-bound cursors and separate administrator tombstones. No key values, raw request bodies, fabricated provider receipts or destructive erasure. |
 | `portfolio_attribution_metadata` | `portfolio_attribution_events`, `portfolio_attribution_rejections` | `portfolio_attribution_events`, `portfolio_attribution_rejections` | Immutable tenant-qualified attempt/use-case version references, source confidence, append-only corrections, and fixed-class admission receipts. Rejections are separate from eligible attempts. No request header, prompt, response, filename, source/work content, or guessed model facts. |
 | `portfolio_attribution_control` | `portfolio_attribution_audit_events`, `portfolio_attribution_cursors`, `portfolio_attribution_idempotency` | `portfolio_attribution_audit_events`, `portfolio_attribution_cursors`, `portfolio_attribution_idempotency` | Safe read/mutation audit, role-bound frozen-window cursors, keyed request digests and immutable-result references. No copied v1 financial facts or raw JSON mutation bodies. |
 | `portfolio_registry_metadata` | `portfolio_binding_events`, `portfolio_work_scope_versions` | `portfolio_binding_events`, `portfolio_work_scope_versions` | Append-only tenant-qualified scope/binding IDs, pinned hierarchy/ownership/lifecycle versions, and bounded administrator-entered scope display names. No external work content. |
@@ -41,7 +43,8 @@ unregistered table.
 The #215 source implementation adds the five registry tables above in SQLite
 migration 5 and PostgreSQL migration 9. The #216 source implementation adds five
 separate attribution tables in SQLite migration 6 / PostgreSQL migration 10.
-Neither is a v1.1.0 release. Budgets, outcomes, connectors, scorecards and
+The #218 source implementation adds nine outcome tables in SQLite migration 7
+/ PostgreSQL migration 11. None is a v1.1.0 release. Budgets, live connectors, scorecards and
 recommendations remain separately gated and have no tables in this inventory.
 #214 stays open for final-candidate
 transition proof. See [REGISTRY.md](REGISTRY.md) for the opt-in authority and
@@ -55,6 +58,17 @@ predecessor, immutable released-v1 baseline, and retained-state recovery rules.
 All five attribution tables follow the customer-controlled export/retention/
 backup/deletion boundary below; a void supersedes an assignment and does not
 erase the original event, immutable v1 facts, or existing backups.
+
+[OUTCOMES.md](OUTCOMES.md) documents source-neutral ingestion, administrator
+reads and internal retention. A separate authorized tombstone removes an
+observation from new pages and invalidates old cursors; its original source,
+financial and audit facts remain. This does not delete backups/exports or stop
+an enabled source from sending new observations. Disable collection separately.
+Coverage is an event log: group by source identity and respect source-event
+versus delivery units, rather than summing every historical status row.
+Eligibility is inconclusive until a separately versioned rule is approved.
+Injected key values are never stored, only key-version references and keyed
+digests. Customer operators retain the export/retention/deletion authority below.
 
 The [persistence composition boundary](ARCHITECTURE.md#usage-and-portfolio-persistence-composition)
 provides a fully declared v1 usage protocol and a typed factory slot for the
