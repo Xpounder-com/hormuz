@@ -258,7 +258,11 @@ def _send(handler, status: int, body: bytes, *, content_type: str, cookies=(), l
     handler.send_header("Content-Length", str(len(body)))
     handler.send_header("Cache-Control", "no-store")
     handler.send_header("X-Content-Type-Options", "nosniff")
-    handler.send_header("Referrer-Policy", "no-referrer")
+    # no-referrer also makes native form POSTs send Origin: null. Preserve the
+    # browser's origin without disclosing URL paths, queries, or HTTPS downgrades.
+    # External identity-provider links separately use rel=noreferrer.
+    referrer_policy = "strict-origin" if content_type == "text/html; charset=utf-8" else "no-referrer"
+    handler.send_header("Referrer-Policy", referrer_policy)
     handler.send_header("X-Frame-Options", "DENY")
     handler.send_header("Content-Security-Policy", "default-src 'none'; style-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
     for cookie in cookies:

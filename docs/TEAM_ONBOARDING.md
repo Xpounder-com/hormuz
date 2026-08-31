@@ -20,6 +20,11 @@ hosted service or give an employee session access to administrative APIs.
   confirmation page optionally accepts the invitation code in a same-origin
   form POST. The code never belongs in a URL. The form is bound to the browser
   cookie, OAuth state and enrollment; callback PKCE and nonce checks still apply.
+- Invitation form pages use `Referrer-Policy: strict-origin` so browser form
+  posts retain the Origin required by that check without sending URL paths or
+  queries as referrers. Identity-provider links remain `rel=noreferrer`; browser
+  pages without the invitation form retain `no-referrer`. Null or foreign
+  Origins remain rejected.
 - Acceptance requires a signed ID token from the organization's trusted issuer,
   the expected audience and nonce, and an exact recipient email with boolean
   `email_verified: true`. Email-domain case is ignored; local-part case and aliases
@@ -151,8 +156,16 @@ not an externally anchored or tamper-proof audit service.
 
 ## Remaining production gates
 
-Real identity-provider claim configuration and browser testing, qualification of
-the new local administrator console, tenant-specific provider credentials and policies,
-distributed persistence/rate limits, signed client distribution, Render deployment
-and recovery evidence, service monitoring, and a real customer pilot remain separate
-work. A free hosting instance is not evidence of latency or availability guarantees.
+The local invitation form now passes in Chrome after correcting its form-page
+referrer policy. The simulated identity flow reaches Connected; the existing
+client enrollment redeems to the correct managed member, identity and usage are
+accessible, and removal rejects existing access and refresh credentials. The
+administrator console's separate local browser flow is also verified. These
+fixtures use no real Okta account or customer and do not qualify the final native
+Mac/Keychain invitation workflow.
+
+Real identity-provider claim configuration and HTTPS browser behavior,
+tenant-specific provider credentials and policies, distributed persistence/rate
+limits, signed client distribution, Render deployment and recovery evidence,
+service monitoring, and a real customer pilot remain separate work. A free hosting
+instance is not evidence of latency or availability guarantees.

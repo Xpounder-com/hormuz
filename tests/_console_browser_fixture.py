@@ -47,6 +47,9 @@ class ConsoleIdentitySimulator(LocalIdentityProvider):
 
 
 class ConsoleBoundaryObserver(GatewayRequestHandler):
+    # Bound idle/preconnected browser sockets in this disposable fixture only.
+    timeout = 5
+
     def do_POST(self):
         if self.path == "/v1/admin/auth/start":
             origins = self.headers.get_all("Origin", [])

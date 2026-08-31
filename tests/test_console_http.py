@@ -76,16 +76,24 @@ class ConsoleHTTPTests(ConsoleHTTPTestCase):
         self.assertIn("form-action 'self'", headers["Content-Security-Policy"])
         self.assertNotIn("unsafe-inline", headers["Content-Security-Policy"])
         self.assertEqual(headers["Cache-Control"], "no-store")
-        self.assertEqual(headers["Referrer-Policy"], "no-referrer")
+        self.assertEqual(headers["Referrer-Policy"], "strict-origin")
         status, headers, css = self.request("GET", "/console/styles.css")
         self.assertEqual(status, 200)
         self.assertEqual(headers["Content-Type"], "text/css; charset=utf-8")
+        self.assertEqual(headers["Referrer-Policy"], "no-referrer")
         self.assertIn("@media(max-width:600px)", css)
         self.assertEqual(self.idp.model_requests, 0)
 
     def test_console_is_opt_in_and_html_sign_in_accepts_no_claimed_role(self):
-        self.assertEqual(self.request("GET", "/console")[0], 200)
-        self.assertEqual(self.request("GET", "/v1/admin/me")[0], 401)
+        status, headers, _ = self.request("GET", "/console")
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["Referrer-Policy"], "strict-origin")
+        status, headers, _ = self.request("GET", "/v1/admin/me")
+        self.assertEqual(status, 401)
+        self.assertEqual(headers["Referrer-Policy"], "no-referrer")
+        for origin in ("null", "", "https://foreign.invalid"):
+            self.assertEqual(self.request("POST", "/v1/admin/auth/start", urlencode({"organization_id": "customer-a"}),
+                                          {"Origin": origin, "Content-Type": "application/x-www-form-urlencoded"})[0], 403)
         self.assertEqual(self.request("POST", "/v1/admin/auth/start", urlencode({"organization_id": "customer-a", "role": "member_admin"}),
                                       {"Origin": self.gateway_url, "Content-Type": "application/x-www-form-urlencoded"})[0], 400)
         self.gateway.config = replace(self.config, session_broker=replace(self.config.session_broker, console_enabled=False))

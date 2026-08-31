@@ -20,8 +20,14 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 from unittest import mock
 
+from hormuz.server import GatewayRequestHandler
 from tests._session_fixtures import LocalIdentityProvider
 from tests.test_onboarding_http import OnboardingHTTPTests
+
+
+class BrowserFixtureRequestHandler(GatewayRequestHandler):
+    # Bound idle/preconnected browser sockets in this disposable fixture only.
+    timeout = 5
 
 
 class BrowserIdentitySimulator(LocalIdentityProvider):
@@ -64,6 +70,7 @@ def main():
     try:
         with mock.patch("tests._session_fixtures.LocalIdentityProvider", BrowserIdentitySimulator):
             case.setUp()
+        case.gateway.RequestHandlerClass = BrowserFixtureRequestHandler
         case.idp.gateway_url = case.gateway_url
         enrollment, secret = case.enroll(organization="customer-a")
         descriptor = os.open(args.handoff_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
@@ -93,9 +100,11 @@ def main():
                               "usage_status": 200, "removed_access_status": 401, "removed_refresh_status": 401, "model_requests": 0}
             print(json.dumps(result), flush=True)
     finally:
-        case.doCleanups()
-        if handoff_created:
-            args.handoff_file.unlink(missing_ok=True)
+        try:
+            case.doCleanups()
+        finally:
+            if handoff_created:
+                args.handoff_file.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":

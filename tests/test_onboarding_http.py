@@ -34,6 +34,7 @@ class OnboardingHTTPTests(SessionHTTPTestCase):
         status, headers, page = self.request("GET", url.path + "?" + url.query)
         self.assertEqual(status, 200)
         self.assertIn("form-action 'self'", headers["Content-Security-Policy"])
+        self.assertEqual(headers["Referrer-Policy"], "strict-origin")
         self.assertIn("Path=/v1/auth;", headers["Set-Cookie"])
         self.assertIn('type="password"', page)
         state = html.unescape(re.search(r'name="state" value="([^"]+)"', page)[1])
@@ -47,8 +48,10 @@ class OnboardingHTTPTests(SessionHTTPTestCase):
 
     def accept_in_browser(self, enrollment):
         form, cookie = self.invitation_page(enrollment)
-        status, _, page = self.submit_invitation(form, cookie)
+        status, headers, page = self.submit_invitation(form, cookie)
         self.assertEqual(status, 200, page)
+        self.assertEqual(headers["Referrer-Policy"], "no-referrer")
+        self.assertIn('rel="noreferrer"', page)
         self.assertFalse(self.invitation.code in page)
         authorization = html.unescape(re.search(r'href="([^"]+)"', page)[1])
         parsed = urlsplit(authorization)

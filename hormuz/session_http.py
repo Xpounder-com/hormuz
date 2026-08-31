@@ -265,7 +265,9 @@ def _browser_page(handler: GatewayRequestHandler, title: str, message: str, *, c
     handler.send_header("Content-Type", "text/html; charset=utf-8")
     handler.send_header("Content-Length", str(len(body)))
     handler.send_header("Cache-Control", "no-store")
-    handler.send_header("Referrer-Policy", "no-referrer")
+    # Native form POSTs need a non-null Origin for the exact-origin check.
+    # strict-origin sends no URL path/query; external sign-in links remain noreferrer.
+    handler.send_header("Referrer-Policy", "strict-origin" if invitation_form is not None else "no-referrer")
     handler.send_header("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
     handler.send_header("X-Content-Type-Options", "nosniff")
     handler.send_header("Set-Cookie", f"{_cookie_name(handler)}={cookie}; Max-Age={max_age}{attrs}")

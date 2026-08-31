@@ -63,6 +63,14 @@ No endpoint accepts bearer credentials, caller-selected organization headers,
 redirect targets, credentials in queries, duplicate fields or extra fields.
 The only cross-origin POST is the OIDC callback, bound to its one-time flow cookie.
 
+Form pages use `Referrer-Policy: strict-origin`: browser form posts retain their
+Origin, while referrers contain no path/query and are suppressed on HTTPS
+downgrades. Identity-provider links additionally use `rel=noreferrer`. API and
+stylesheet responses retain `no-referrer`. Using `no-referrer` on a form page
+causes browsers to send `Origin: null`, which the exact-origin guard must reject;
+see the [Fetch Origin algorithm](https://fetch.spec.whatwg.org/#append-a-request-origin-header).
+Do not accept a null Origin as a workaround for a broken form.
+
 | Route | Authority | Behavior |
 | --- | --- | --- |
 | `GET /console` | Optional console cookie | Sign-in form or dashboard |
@@ -122,15 +130,22 @@ Events are transactional local records, not immutable externally anchored audit.
 Retention, master-key/public-origin migration, distributed enforcement and managed
 directory recovery remain production work.
 
-Local fixtures and automated HTTP tests do not qualify a real IdP, a successful
-browser interaction, native Keychain custody, or customer onboarding. The preceding
-Chrome invitation-form block remains open until verified without weakening browser
-protections. Render deployment, signed distribution, provider custody/policies,
-policy/budget administration, billing and a real customer pilot are separate gates.
+Chrome browser checks now cover console sign-in, organization/team reporting,
+foreign-team refusal, member removal and logout against the local simulator.
+The removed member's existing client credential was rejected, and the verified
+administrator was recorded as the actor. The authenticated layout was inspected
+at 1280- and 390-pixel widths, including keyboard access to the scrolling member
+table. The separate invitation browser flow also reached Connected and passed
+redemption, identity/usage and removal/refresh-rejection checks.
 
-The in-app browser's local console submission was observed sending `Origin: null`;
-the gateway correctly rejected it. Sign-in pages were inspected at desktop/mobile
-widths, but that does not qualify the authenticated dashboard or browser removal
-flow. Do not allow a null Origin to make this fixture pass. Recheck in a supported
-browser with the correct Origin and, separately, with real Okta over the intended
-gateway origin.
+The earlier `Origin: null` rejection was reproduced in Chrome and traced to
+`no-referrer` on native form pages. The form-page policy above corrects the
+browser-generated header; exact Origin and CSRF checks remain in force. No
+browser protection, request header or cookie was overridden to obtain the proof.
+
+These browser checks use disposable local identities and provider simulators;
+they do not qualify real Okta, the invited Mac/Keychain workflow, HTTPS cookie
+behavior on the intended public origin, or independent customer onboarding.
+Render deployment/recovery, signed distribution, provider custody/policies,
+policy/budget administration, billing and a real customer pilot remain separate
+gates.
