@@ -674,7 +674,7 @@ python3 "${ROOT}/tools/verify_helm_profile.py" validate-chart --chart "${CHART_R
 helm lint "${CHART_ROOT}" --values "${FIXTURE_ROOT}/helm-values.yaml" \
   --set-string "configuration.sha256=${config_v1_sha}" >/dev/null
 helm package "${CHART_ROOT}" --destination "${WORK_ROOT}/chart" >/dev/null
-chart_package="${WORK_ROOT}/chart/hormuz-0.1.0.tgz"
+chart_package="${WORK_ROOT}/chart/hormuz-0.1.1.tgz"
 chart_package_sha256="$(sha256sum "${chart_package}" | awk '{print $1}')"
 helm template hormuz "${CHART_ROOT}" --namespace hormuz-system \
   --values "${FIXTURE_ROOT}/helm-values.yaml" \
@@ -811,9 +811,11 @@ kubectl --namespace hormuz-system wait --for=delete "pod/${old_pod}" --timeout=5
 distinct_gateway_nodes="$(wait_for_gateway_replacement \
   "${old_uid}" "${ARTIFACT_ROOT}/gateway-topology-replacement.json")"
 kubectl --namespace hormuz-system rollout status deployment/hormuz-hormuz --timeout=10m >/dev/null
-[[ "$(kubectl --namespace hormuz-ingress get "job/${replacement_job}" \
-  --output=jsonpath='{.status.active}')" == "1" ]] \
-  || fail "synthetic traffic did not remain active through replica replacement"
+if [[ "$(kubectl --namespace hormuz-ingress get "job/${replacement_job}" \
+  --output=jsonpath='{.status.active}')" != "1" ]]; then
+  emit_job_diagnostics hormuz-ingress "${replacement_job}"
+  fail "synthetic traffic did not remain active through replica replacement"
+fi
 if ! kubectl --namespace hormuz-ingress wait --for=condition=complete \
   "job/${replacement_job}" --timeout=90s >/dev/null; then
   emit_job_diagnostics hormuz-ingress "${replacement_job}"

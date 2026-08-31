@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 from concurrent.futures import ThreadPoolExecutor
+from http.client import HTTPException
 import json
 import time
 from pathlib import Path
@@ -239,6 +240,7 @@ def _run_replacement_traffic(
     deadline = time.monotonic() + duration_seconds
     successful_requests = 0
     failed_requests = 0
+    failure_counts: dict[str, int] = {}
     started = False
     while time.monotonic() < deadline:
         try:
@@ -248,8 +250,17 @@ def _run_replacement_traffic(
                 expected_status=200,
                 expected_policy=expected_policy,
             )
-        except (URLError, TimeoutError, OSError):
+        except (URLError, TimeoutError, OSError) as error:
             failed_requests += 1
+            kind = _replacement_failure_kind(error)
+            failure_counts[kind] = failure_counts.get(kind, 0) + 1
+        except (SystemExit, HTTPException, ValueError) as error:
+            # A response/HTTP contract violation still stops the probe immediately.
+            # Never print exception messages: they can contain a URL or payload.
+            failed_requests += 1
+            kind = _replacement_failure_kind(error)
+            failure_counts[kind] = failure_counts.get(kind, 0) + 1
+            break
         else:
             successful_requests += 1
             if not started:
@@ -259,20 +270,42 @@ def _run_replacement_traffic(
                 )
                 started = True
         time.sleep(0.5)
+    summary: dict[str, object] = {
+        "command": "replacement-traffic",
+        "failed_requests": failed_requests,
+        "successful_requests": successful_requests,
+    }
+    if failure_counts:
+        summary["failure_counts"] = failure_counts
+    # Emit counts on failure as well as success; kubectl's failed-job diagnostic
+    # preserves these fixed categories without credentials, targets, or bodies.
+    print(
+        json.dumps(summary, sort_keys=True, separators=(",", ":")),
+        flush=True,
+    )
     if successful_requests < 2 or failed_requests:
         raise SystemExit("replacement_traffic_failed")
-    print(
-        json.dumps(
-            {
-                "command": "replacement-traffic",
-                "failed_requests": failed_requests,
-                "successful_requests": successful_requests,
-            },
-            sort_keys=True,
-            separators=(",", ":"),
-        )
-    )
     return 0
+
+
+def _replacement_failure_kind(error: BaseException) -> str:
+    if isinstance(error, URLError):
+        error = error.reason
+    if isinstance(error, ConnectionRefusedError):
+        return "connection_refused"
+    if isinstance(error, ConnectionResetError):
+        return "connection_reset"
+    if isinstance(error, TimeoutError):
+        return "timeout"
+    if isinstance(error, SystemExit):
+        if isinstance(error.code, str) and error.code.startswith("unexpected_status:"):
+            return "unexpected_status"
+        if error.code == "policy_decision_invalid":
+            return "policy_decision"
+        return "response_contract"
+    if isinstance(error, (HTTPException, ValueError)):
+        return "response_contract"
+    return "transport"
 
 
 def _run_storage_backpressure(

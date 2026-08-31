@@ -19,7 +19,7 @@ SCHEMA_VERSION = 1
 CONTRACT_SCHEMA = "hormuz.kubernetes-profile.v1"
 PROFILE = "multi-replica-kubernetes-reference"
 PLATFORM = "linux/amd64"
-CHART_VERSION = "0.1.0"
+CHART_VERSION = "0.1.1"
 HORMUZ_IMAGE = (
     "ghcr.io/xpounder-com/hormuz@"
     "sha256:8ac24f5c7afb8ce09ec133616de06702f568a2e70594d8034146a131d86e5b67"
@@ -297,6 +297,10 @@ def validate_chart(chart: Path) -> str:
         "not": {"pattern": PRIVILEGED_RUNTIME_ENV_SUFFIX_PATTERN}
     }:
         raise HelmProfileError("values_schema_privileged_runtime_env")
+    if properties.get("endpointDrainSeconds") != {
+        "type": "integer", "minimum": 5, "maximum": 300
+    }:
+        raise HelmProfileError("values_schema_endpoint_drain")
 
     values_text = (chart / "values.yaml").read_text(encoding="utf-8")
     if HORMUZ_IMAGE.partition("@")[2] not in values_text:
@@ -643,6 +647,29 @@ def _validate_deployment(
         raise HelmProfileError("configuration_preflight")
     if gateway.get("name") != "gateway" or gateway.get("args") != ["serve"]:
         raise HelmProfileError("gateway_command")
+    lifecycle = _mapping(gateway.get("lifecycle"), "endpoint_drain_lifecycle")
+    pre_stop = _mapping(lifecycle.get("preStop"), "endpoint_drain_pre_stop")
+    drain_command = _sequence(
+        _mapping(pre_stop.get("exec"), "endpoint_drain_exec").get("command"),
+        "endpoint_drain_command",
+    )
+    if (
+        len(drain_command) != 5
+        or drain_command[:4] != [
+            "/opt/hormuz/bin/python",
+            "-I",
+            "-c",
+            "import sys, time; time.sleep(int(sys.argv[1]))",
+        ]
+        or not isinstance(drain_command[4], str)
+        or not re.fullmatch(r"[0-9]{1,3}", drain_command[4])
+    ):
+        raise HelmProfileError("endpoint_drain_command")
+    drain_seconds = int(drain_command[4])
+    if not 5 <= drain_seconds <= 300:
+        raise HelmProfileError("endpoint_drain_window")
+    if pod_spec["terminationGracePeriodSeconds"] < drain_seconds + 60:
+        raise HelmProfileError("endpoint_drain_budget")
     for container, role in ((preflight, "preflight"), (gateway, "gateway")):
         if container.get("image") != HORMUZ_IMAGE:
             raise HelmProfileError(f"{role}_image")

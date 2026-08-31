@@ -6,10 +6,12 @@ import io
 import json
 import os
 import runpy
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
+from urllib.error import URLError
 
 from tools import verify_helm_profile as helm_profile
 from tools import verify_core_wheel as core_distribution
@@ -76,6 +78,19 @@ def _container(name: str, argument: str) -> dict[str, object]:
                 },
                 "readinessProbe": {
                     "exec": {"command": ["/opt/hormuz/bin/python", "-I", "-c", probe_code]}
+                },
+                "lifecycle": {
+                    "preStop": {
+                        "exec": {
+                            "command": [
+                                "/opt/hormuz/bin/python",
+                                "-I",
+                                "-c",
+                                "import sys, time; time.sleep(int(sys.argv[1]))",
+                                "10",
+                            ]
+                        }
+                    }
                 },
             }
         )
@@ -362,6 +377,16 @@ class HelmChartContractTests(unittest.TestCase):
         self.assertIn("    ANTHROPIC_API_KEY: anthropic-api-key", proof_values)
         self.assertIn("name: {{ $name | quote }}", deployment_template)
         self.assertIn("key: {{ $key | quote }}", deployment_template)
+        self.assertIn("endpointDrainSeconds: 10", chart_values)
+        self.assertIn(".Values.endpointDrainSeconds | quote", deployment_template)
+        self.assertIn("preStop:", deployment_template)
+        for runner_name in (
+            "verify_helm_profile.sh",
+            "verify_postgres_ha_reference.sh",
+            "verify_disaster_recovery_reference.sh",
+        ):
+            runner_source = (ROOT / "tools" / runner_name).read_text(encoding="utf-8")
+            self.assertIn(f"/chart/hormuz-{helm_profile.CHART_VERSION}.tgz", runner_source)
         self.assertLess(
             readme.index("kubectl create namespace hormuz-system"),
             readme.index("kubectl --namespace hormuz-system create configmap"),
@@ -437,6 +462,88 @@ class HelmChartContractTests(unittest.TestCase):
             },
         )
         self.assertEqual(request.call_count, 2)
+
+    def test_replacement_probe_reports_transport_failures_without_retry_or_secrets(self) -> None:
+        cases = (
+            (URLError(ConnectionRefusedError("private-target-and-credential")), "connection_refused"),
+            (ConnectionResetError("private-target-and-credential"), "connection_reset"),
+            (TimeoutError("private-target-and-credential"), "timeout"),
+            (URLError("private-target-and-credential"), "transport"),
+        )
+        for error, failure_kind in cases:
+            with self.subTest(failure_kind=failure_kind):
+                probe = runpy.run_path(
+                    str(ROOT / "deploy" / "kubernetes" / "conformance" / "probe.py")
+                )
+                replacement = probe["_run_replacement_traffic"]
+                request = mock.Mock(side_effect=({"status": 200}, error, {"status": 200}))
+                output = io.StringIO()
+                with (
+                    mock.patch.dict(replacement.__globals__, {"_governed_request": request}),
+                    mock.patch.object(probe["time"], "monotonic", side_effect=(0, 0, 1, 2, 15)),
+                    mock.patch.object(probe["time"], "sleep"),
+                    contextlib.redirect_stdout(output),
+                    self.assertRaisesRegex(SystemExit, "^replacement_traffic_failed$"),
+                ):
+                    replacement(
+                        target="http://private-target.invalid",
+                        headers={"Authorization": "private-target-and-credential"},
+                        expected_policy="fallback+capped+redacted",
+                        duration_seconds=15,
+                    )
+                lines = [json.loads(line) for line in output.getvalue().splitlines()]
+                self.assertEqual(lines[0], {"event": "traffic_started"})
+                self.assertEqual(
+                    lines[-1],
+                    {
+                        "command": "replacement-traffic",
+                        "successful_requests": 2,
+                        "failed_requests": 1,
+                        "failure_counts": {failure_kind: 1},
+                    },
+                )
+                self.assertEqual(request.call_count, 3)
+                self.assertNotIn("private-target", output.getvalue())
+
+    def test_replacement_probe_reports_contract_failure_and_stops_immediately(self) -> None:
+        for error, failure_kind in (
+            (SystemExit("unexpected_status:503"), "unexpected_status"),
+            (SystemExit("policy_decision_invalid"), "policy_decision"),
+            (SystemExit("private-response-body"), "response_contract"),
+            (ValueError("private-response-body"), "response_contract"),
+        ):
+            with self.subTest(failure_kind=failure_kind):
+                probe = runpy.run_path(
+                    str(ROOT / "deploy" / "kubernetes" / "conformance" / "probe.py")
+                )
+                replacement = probe["_run_replacement_traffic"]
+                request = mock.Mock(side_effect=error)
+                output = io.StringIO()
+                with (
+                    mock.patch.dict(replacement.__globals__, {"_governed_request": request}),
+                    mock.patch.object(probe["time"], "monotonic", side_effect=(0, 0)),
+                    mock.patch.object(probe["time"], "sleep") as sleep,
+                    contextlib.redirect_stdout(output),
+                    self.assertRaisesRegex(SystemExit, "^replacement_traffic_failed$"),
+                ):
+                    replacement(
+                        target="http://hormuz.invalid",
+                        headers={},
+                        expected_policy="fallback+capped+redacted",
+                        duration_seconds=15,
+                    )
+                self.assertEqual(
+                    json.loads(output.getvalue()),
+                    {
+                        "command": "replacement-traffic",
+                        "successful_requests": 0,
+                        "failed_requests": 1,
+                        "failure_counts": {failure_kind: 1},
+                    },
+                )
+                request.assert_called_once()
+                sleep.assert_not_called()
+                self.assertNotIn("private-response", output.getvalue())
 
     def test_blocking_probe_distinguishes_graceful_completion_from_ambiguous_loss(self) -> None:
         probe = runpy.run_path(
@@ -533,6 +640,53 @@ class HelmChartContractTests(unittest.TestCase):
             expected_configuration=CONFIGURATION,
             expected_runtime_secret=RUNTIME_SECRET,
         )
+
+    def test_endpoint_drain_window_is_required_and_preserves_shutdown_budget(self) -> None:
+        cases = (
+            (None, 660),
+            ("0", 660),
+            ("4", 660),
+            ("-1", 660),
+            ("301", 660),
+            ("10; echo private-data", 660),
+            ("10", 69),
+        )
+        for delay, grace in cases:
+            with self.subTest(delay=delay, grace=grace):
+                manifest = valid_manifest()
+                pod = manifest["items"][0]["spec"]["template"]["spec"]
+                gateway = pod["containers"][0]
+                pod["terminationGracePeriodSeconds"] = grace
+                if delay is None:
+                    gateway.pop("lifecycle")
+                else:
+                    gateway["lifecycle"]["preStop"]["exec"]["command"][-1] = delay
+                with self.assertRaisesRegex(helm_profile.HelmProfileError, "endpoint_drain"):
+                    helm_profile.validate_manifest(
+                        manifest,
+                        expected_configuration=CONFIGURATION,
+                        expected_runtime_secret=RUNTIME_SECRET,
+                    )
+
+        manifest = valid_manifest()
+        manifest["items"][0]["spec"]["template"]["spec"]["terminationGracePeriodSeconds"] = 70
+        helm_profile.validate_manifest(
+            manifest,
+            expected_configuration=CONFIGURATION,
+            expected_runtime_secret=RUNTIME_SECRET,
+        )
+
+    def test_endpoint_drain_hook_uses_the_pinned_python_without_a_shell(self) -> None:
+        gateway = valid_manifest()["items"][0]["spec"]["template"]["spec"]["containers"][0]
+        command = gateway["lifecycle"]["preStop"]["exec"]["command"]
+        self.assertEqual(command[:3], ["/opt/hormuz/bin/python", "-I", "-c"])
+        self.assertIn(command[3], (CHART / "templates" / "deployment.yaml").read_text(encoding="utf-8"))
+        with (
+            mock.patch.object(sys, "argv", ["-c", command[4]]),
+            mock.patch("time.sleep") as sleep,
+        ):
+            exec(command[3], {})
+        sleep.assert_called_once_with(10)
 
     def test_mutable_or_privileged_runtime_fails_closed(self) -> None:
         mutable = valid_manifest()
