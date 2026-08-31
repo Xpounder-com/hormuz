@@ -1,0 +1,570 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:hormuz:linear-context:v1",
+  "title": "Version 1 Linear parent/context records",
+  "description": "Owner-approved additive representation contract. Offline fixture checks do not implement auth, ingestion, persistence, recovery or live integrations.",
+  "$defs": {
+    "opaque_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*(?![\\s\\S])",
+      "description": "Registered metadata identifier; syntax never grants authority or permits encoded content."
+    },
+    "uuid": {
+      "type": "string",
+      "minLength": 36,
+      "maxLength": 36,
+      "pattern": "^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}(?![\\s\\S])",
+      "description": "Provider-native UUID, never a name, URL, credential or encoded work content."
+    },
+    "timestamp": {
+      "type": "string",
+      "minLength": 20,
+      "maxLength": 27,
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?Z(?![\\s\\S])"
+    },
+    "digest": {
+      "type": "string",
+      "minLength": 64,
+      "maxLength": 64,
+      "pattern": "^[0-9a-f]{64}(?![\\s\\S])"
+    },
+    "count": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "version_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/opaque_id"
+        },
+        "version": {
+          "$ref": "#/$defs/version"
+        },
+        "content_digest": {
+          "$ref": "#/$defs/digest"
+        }
+      },
+      "required": [
+        "id",
+        "version",
+        "content_digest"
+      ],
+      "description": "Immutable version identity; digest is not authorization or live-source proof."
+    },
+    "work_scope_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "work_scope_id": {
+          "$ref": "#/$defs/opaque_id"
+        },
+        "version": {
+          "$ref": "#/$defs/version"
+        }
+      },
+      "required": [
+        "work_scope_id",
+        "version"
+      ],
+      "description": "Exact event-time same-tenant registry version; no rebinding historical evidence."
+    },
+    "external_object": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "initiative",
+            "project",
+            "cycle",
+            "issue"
+          ]
+        },
+        "id": {
+          "$ref": "#/$defs/uuid"
+        }
+      },
+      "required": [
+        "kind",
+        "id"
+      ],
+      "description": "Provider-native typed identity in the authenticated workspace, separate from the Hormuz work hierarchy."
+    },
+    "relationship": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "initiative_project",
+            "project_issue",
+            "cycle_issue",
+            "initiative_parent"
+          ]
+        },
+        "parent": {
+          "$ref": "#/$defs/external_object"
+        }
+      },
+      "required": [
+        "kind",
+        "parent"
+      ],
+      "description": "Typed parent of the event object. No self-reference. Relationships are observations, never authority/AI attribution. Multiple initiative/project relations do not select a primary parent."
+    },
+    "revision": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "source_updated_at_v1",
+            "source_revision_counter_v1",
+            "unknown"
+          ]
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "pattern": "^[0-9TZ:.-]+(?![\\s\\S])"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "value"
+      ],
+      "description": "Only verified source counters/updated timestamps in one ordering domain are comparable. UUID, delivery ID or receipt time is not source order."
+    },
+    "binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "binding_event_id": {
+          "$ref": "#/$defs/opaque_id"
+        },
+        "work_scope": {
+          "$ref": "#/$defs/work_scope_ref"
+        },
+        "registry_sequence": {
+          "$ref": "#/$defs/count"
+        }
+      },
+      "required": [
+        "binding_event_id",
+        "work_scope",
+        "registry_sequence"
+      ],
+      "description": "Immutable binding as of known source time with independently authorized entity scope. Current parents never retarget old facts."
+    },
+    "hormuz.linear-context-event": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_id": {
+          "type": "string",
+          "const": "hormuz.linear-context-event"
+        },
+        "schema_version": {
+          "type": "integer",
+          "const": 1
+        },
+        "organization_id": {
+          "$ref": "#/$defs/opaque_id"
+        },
+        "connector_id": {
+          "$ref": "#/$defs/opaque_id"
+        },
+        "context_event_id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "source_workspace_id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "source_team_ids": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/uuid"
+              },
+              "minItems": 0,
+              "maxItems": 100,
+              "uniqueItems": true
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "object": {
+          "$ref": "#/$defs/external_object"
+        },
+        "capture_kind": {
+          "type": "string",
+          "enum": [
+            "webhook",
+            "authorized_snapshot"
+          ]
+        },
+        "source_delivery_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "authority_binding": {
+          "$ref": "#/$defs/version_ref"
+        },
+        "normalizer": {
+          "$ref": "#/$defs/version_ref"
+        },
+        "credential_version": {
+          "$ref": "#/$defs/opaque_id"
+        },
+        "source_authentication": {
+          "type": "string",
+          "const": "verified_connector"
+        },
+        "lifecycle": {
+          "type": "string",
+          "enum": [
+            "created",
+            "updated",
+            "archived",
+            "restored",
+            "deleted"
+          ]
+        },
+        "normalized_state": {
+          "type": "string",
+          "enum": [
+            "not_started",
+            "in_progress",
+            "completed",
+            "canceled",
+            "unknown"
+          ]
+        },
+        "relationships": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/relationship"
+          },
+          "minItems": 0,
+          "maxItems": 100,
+          "uniqueItems": true
+        },
+        "relationship_coverage": {
+          "type": "string",
+          "enum": [
+            "complete",
+            "partial",
+            "unknown",
+            "not_applicable"
+          ]
+        },
+        "revision": {
+          "$ref": "#/$defs/revision"
+        },
+        "ordering_state": {
+          "type": "string",
+          "enum": [
+            "current",
+            "late",
+            "incomparable",
+            "unknown"
+          ]
+        },
+        "scope_state": {
+          "type": "string",
+          "enum": [
+            "matched",
+            "unmatched",
+            "excluded"
+          ]
+        },
+        "binding": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/binding"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "supersedes_context_event_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/uuid"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "event_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "observed_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "ingested_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "provenance_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "evidence_level": {
+          "type": "string",
+          "const": "descriptive"
+        },
+        "association_eligibility": {
+          "type": "string",
+          "const": "inconclusive"
+        },
+        "reader_role": {
+          "type": "string",
+          "const": "portfolio_admin"
+        }
+      },
+      "required": [
+        "schema_id",
+        "schema_version",
+        "organization_id",
+        "connector_id",
+        "context_event_id",
+        "source_workspace_id",
+        "source_team_ids",
+        "object",
+        "capture_kind",
+        "source_delivery_id",
+        "authority_binding",
+        "normalizer",
+        "credential_version",
+        "source_authentication",
+        "lifecycle",
+        "normalized_state",
+        "relationships",
+        "relationship_coverage",
+        "revision",
+        "ordering_state",
+        "scope_state",
+        "binding",
+        "supersedes_context_event_id",
+        "event_at",
+        "observed_at",
+        "ingested_at",
+        "provenance_digest",
+        "evidence_level",
+        "association_eligibility",
+        "reader_role"
+      ],
+      "description": "Planned authenticated metadata-only source observation. Existing issue lifecycle outcomes remain in the frozen work-outcome record. Context neither replaces nor counts as an outcome; fixture validation is not source authentication."
+    },
+    "hormuz.linear-context-page": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_id": {
+          "type": "string",
+          "const": "hormuz.linear-context-page"
+        },
+        "schema_version": {
+          "type": "integer",
+          "const": 1
+        },
+        "organization_id": {
+          "$ref": "#/$defs/opaque_id"
+        },
+        "reader_role": {
+          "type": "string",
+          "const": "portfolio_admin"
+        },
+        "as_of": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "snapshot_sequence": {
+          "$ref": "#/$defs/count"
+        },
+        "authority_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "filter_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "retention_generation": {
+          "$ref": "#/$defs/count"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/hormuz.linear-context-event"
+          },
+          "minItems": 0,
+          "maxItems": 100
+        },
+        "has_more": {
+          "type": "boolean"
+        },
+        "next_cursor": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048,
+              "pattern": "^[A-Za-z0-9._~-]+(?![\\s\\S])"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "schema_id",
+        "schema_version",
+        "organization_id",
+        "reader_role",
+        "as_of",
+        "snapshot_sequence",
+        "authority_digest",
+        "filter_digest",
+        "retention_generation",
+        "items",
+        "has_more",
+        "next_cursor"
+      ],
+      "description": "Separate planned administrator collection. Cursor binds tenant, actor/roles, connector authority, filters, snapshot, schema/order and retention generation. No frozen outcome page/route change."
+    },
+    "hormuz.linear-context-retention": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_id": {
+          "type": "string",
+          "const": "hormuz.linear-context-retention"
+        },
+        "schema_version": {
+          "type": "integer",
+          "const": 1
+        },
+        "organization_id": {
+          "$ref": "#/$defs/opaque_id"
+        },
+        "connector_id": {
+          "$ref": "#/$defs/opaque_id"
+        },
+        "retention_event_id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "target_context_event_id": {
+          "$ref": "#/$defs/uuid"
+        },
+        "actor_id": {
+          "$ref": "#/$defs/opaque_id"
+        },
+        "reader_role": {
+          "type": "string",
+          "const": "portfolio_admin"
+        },
+        "reason_code": {
+          "type": "string",
+          "const": "tombstoned"
+        },
+        "observed_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "ingested_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "provenance_digest": {
+          "$ref": "#/$defs/digest"
+        }
+      },
+      "required": [
+        "schema_id",
+        "schema_version",
+        "organization_id",
+        "connector_id",
+        "retention_event_id",
+        "target_context_event_id",
+        "actor_id",
+        "reader_role",
+        "reason_code",
+        "observed_at",
+        "ingested_at",
+        "provenance_digest"
+      ],
+      "description": "Separate append-only operator retention marker, not a provider deletion or outcome. Invalidates cursors; never erases linked financial/audit facts or claims backup erasure."
+    }
+  },
+  "oneOf": [
+    {
+      "$ref": "#/$defs/hormuz.linear-context-event"
+    },
+    {
+      "$ref": "#/$defs/hormuz.linear-context-page"
+    },
+    {
+      "$ref": "#/$defs/hormuz.linear-context-retention"
+    }
+  ],
+  "x-hormuz-schema-ids": [
+    "hormuz.linear-context-event",
+    "hormuz.linear-context-page",
+    "hormuz.linear-context-retention"
+  ],
+  "x-hormuz-route-query-fields": {},
+  "x-hormuz-transport": {
+    "response_maximum_bytes": 1048576,
+    "runtime_enabled": false,
+    "new_http_routes": [],
+    "delivery": "separate_planned_cli_or_internal_records"
+  },
+  "x-hormuz-domain-rules": {
+    "compatibility": "Keep frozen issue/PR outcome event/page/receipt, project-binding configuration and route/CLI/manifest contracts unchanged. Initiative/project/cycle and relationship context use these new IDs; no entity relabeling or issue-only scope reduction.",
+    "authentication_gate": "#220 must freeze raw-byte HMAC, independently authenticated workspace/team/webhook and explicitly typed entity/container authority, permission checks, rotation and durable replay identity. Existing project-only enrollment is not permission for every initiative, cycle or team. Output fields are not credentials or authority.",
+    "provider_mapping_gate": "Normalized representation types are not proof of supported provider payload/actions. #220 must pin/test the actual entity/action/state/relationship mapping and API/schema revision. Unknown/malformed data causes no normalized mutation. All four entity types remain in scope.",
+    "relationships": "Typed parent sets stay separate from the Hormuz hierarchy. Never infer authority, AI attribution, ownership or primary initiative. Partial/missing coverage cannot remove earlier links; only complete comparable revisions may replace the current projection. Changes append facts; old context never retargets.",
+    "privacy": "Raw context/retention is portfolio_admin only. Finance/platform/team/self gain no raw source/peer access. #223 aggregate views must authorize before lookup/join and not leak private-team projects through public initiatives. Reader and source authority are independent.",
+    "ordering": "Preserve source/observed/commit times; unknown source time stays null and unmatched. Same authenticated identity/bytes replays original receipt; conflicts fail closed. UUID/delivery order is not source order. Compare only in the same trusted domain; late/equal-conflicting/incomparable facts never overwrite newer authoritative state. No provider-work replay.",
+    "retention": "Separate authorized append-only retention marker, audit and idempotency. Logical tombstone hides target and invalidates old cursor generations without resurrecting older state. Source deletion is distinct. Preserve linked finance/audit facts; no universal erasure.",
+    "pagination": "Default 50, max 100, one-hour cursor TTL; descending event_at with observed_at fallback, connector_id, context_event_id. Freeze sequence/as_of, filters, authority and retention generation. Reject scope/filter/order drift before query. Time fallback is ordering only, not source fact.",
+    "delivery_gate": "Maximum 1 MiB record/page, 100 relationships/teams; provider ingress depth 16 and 4096 JSON members. #220 must prove end-to-end durable acknowledgment within Linear's documented 5-second response limit including auth/read/parse/commit. Per-statement limits are not that proof; no ingress activated.",
+    "claims": "Descriptive metadata only, inconclusive association eligibility; no content, credentials, names, titles, URLs, rankings or causal claims. Synthetic verified_connector fixtures are not live proof. Live workspace/webhook authorization and #225 pilot consent are separate."
+  }
+}

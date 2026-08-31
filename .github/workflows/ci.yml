@@ -109,6 +109,15 @@ jobs:
             -s "$GITHUB_WORKSPACE/tests" -p test_finance_usage.py -v
           "$RUNNER_TEMP/hormuz-wheel/bin/python" -I -m unittest discover \
             -s "$GITHUB_WORKSPACE/tests" -p test_finance_rate_cards.py -v
+      - name: Verify additive portfolio contracts from the source distribution
+        run: |
+          hormuz_extension_source="$(mktemp -d "$RUNNER_TEMP/hormuz-extensions.XXXXXX")"
+          hormuz_extension_version="$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+          tar -xzf dist/hormuz-*.tar.gz -C "$hormuz_extension_source"
+          cd "$hormuz_extension_source/hormuz-$hormuz_extension_version"
+          "$RUNNER_TEMP/hormuz-wheel/bin/python" -I tools/verify_portfolio_extensions.py
+          "$RUNNER_TEMP/hormuz-wheel/bin/python" -m unittest -v \
+            tests.test_portfolio_extensions tests.test_portfolio_extension_packaging
       - name: Verify the resolved license boundary for every declared extra
         run: |
           python -m venv "$RUNNER_TEMP/hormuz-license"

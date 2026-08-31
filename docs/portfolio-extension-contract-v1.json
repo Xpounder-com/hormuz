@@ -1,0 +1,80 @@
+{
+  "schema_id": "hormuz.portfolio-extensions-contract",
+  "schema_version": 1,
+  "target_release": "1.1.0",
+  "status": "owner_approved_design_only",
+  "decision_records": {
+    "budget": "https://github.com/Xpounder-com/hormuz/issues/217#issuecomment-5482219903",
+    "linear": "https://github.com/Xpounder-com/hormuz/issues/220#issuecomment-5482220483"
+  },
+  "runtime_implemented": false,
+  "feature_preflight_accepted": false,
+  "live_integration_verified": false,
+  "final_candidate_accepted": false,
+  "new_http_routes": [],
+  "replaced_schemas": [],
+  "deprecated_surfaces": [],
+  "storage_migrations": [],
+  "current_schema_versions": {
+    "sqlite": 7,
+    "postgresql": 11
+  },
+  "frozen_file_sha256": {
+    "docs/portfolio-intelligence-contract-v1.json": "40c27f7555631d2ecaa004f6481eef07d565ccebcb5e206106c5820ee3586c49",
+    "docs/portfolio-intelligence-wire-v1.json": "26ef36b12d475d5b8354e45abfc92c76187ca6ff5aafb4b0ebce6fab439feb80",
+    "hormuz/portfolio-registry-wire-v1.json": "20a5253990169e80961671a8d9129bd88afcac065ec071a03766f259ef4ea092",
+    "hormuz/portfolio-attribution-wire-v1.json": "999c62ac8d3dde96b4fd961632cba0e2b196e2a9bce62d9693757c256ed8e3f4",
+    "hormuz/portfolio-outcome-wire-v1.json": "0716c5483b6be72736d357f4ff318c89eeac10fa3f3ae86d3f3bdb9eb99f53a2",
+    "docs/finance-transition-plan-v1.json": "452d9a533b8fd56118a892840fc48a7c6cf99b1be54efce34325a27c7ef0cf8d",
+    "docs/finance-source-contract-v1.json": "8926e2dc1913c0130421b5f2384e2c82fb2d738bcf85495ee1368b2bb2a8f01b",
+    "tests/fixtures/portfolio_intelligence/v1.0.0-contract-manifest.json": "6e7f264de74f8f998842b49001a61b3640a05927d74bb31e4eec5ff8ab89504f"
+  },
+  "wire_files": {
+    "budget": {
+      "path": "docs/work-budget-reports-wire-v1.json",
+      "sha256": "fedc765980a6b40e05dde9d08fd92b724f390d6d59feb217c70374c07c19ddf4",
+      "schema_ids": [
+        "hormuz.work-budget-preview",
+        "hormuz.work-budget-report"
+      ]
+    },
+    "linear": {
+      "path": "docs/linear-context-wire-v1.json",
+      "sha256": "80acbb06480e3b156d8bbb81fe2aad8bfb287b135c43f1770ec124ca8927d19e",
+      "schema_ids": [
+        "hormuz.linear-context-event",
+        "hormuz.linear-context-page",
+        "hormuz.linear-context-retention"
+      ]
+    }
+  },
+  "fixtures": {
+    "path": "tests/fixtures/portfolio_intelligence/extension-v1-examples.json",
+    "sha256": "44d92038776d2fcc53c4144d4e918b4b198070b6fab8f2790e82d072fd36e9da",
+    "count": 10,
+    "synthetic": true
+  },
+  "documentation": [
+    "docs/PORTFOLIO_EXTENSIONS.md",
+    "docs/decisions/0011-additive-budget-reports-and-linear-context.md"
+  ],
+  "remaining_checkpoints": {
+    "budget": [
+      "214_budget_atomic_reservation_and_transition_preflight",
+      "217_runtime_and_independent_replica_proof",
+      "8_finance_reconciliation",
+      "223_role_scoped_aggregate_views"
+    ],
+    "linear": [
+      "214_linear_typed_source_authority_and_transition_preflight",
+      "220_exact_provider_mapping_and_bounded_durable_ack",
+      "220_authorized_live_workspace_delivery_redelivery",
+      "221_association_evidence"
+    ],
+    "release": [
+      "214_exact_final_candidate_transition_and_recovery",
+      "225_real_preregistered_external_organization_pilot",
+      "owner_release_and_tag_authorization"
+    ]
+  }
+}
