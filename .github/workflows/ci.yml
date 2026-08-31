@@ -236,6 +236,10 @@ jobs:
             -s "$GITHUB_WORKSPACE/tests" -p test_sqlite_outcome_transition.py -v
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -m unittest discover \
             -s "$GITHUB_WORKSPACE/tests" -p test_postgres_outcome_transition.py -v
+          for module in test_outcome_contract test_outcome_ingest test_outcome_schema test_sqlite_outcomes test_postgres_outcomes; do
+            "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -m unittest discover \
+              -s "$GITHUB_WORKSPACE/tests" -p "${module}.py" -v
+          done
           for module in test_attribution_admission test_attribution_schema test_sqlite_attribution test_attribution_gateway test_postgres_attribution test_postgres_attribution_gateway; do
             "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -m unittest discover \
               -s "$GITHUB_WORKSPACE/tests" -p "${module}.py" -v

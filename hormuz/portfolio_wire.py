@@ -24,6 +24,7 @@ PREFIX = "/v1/admin/portfolio"
 SCOPES = PREFIX + "/work-scopes"
 BINDINGS = PREFIX + "/work-bindings"
 ATTRIBUTIONS = PREFIX + "/attributions"
+OUTCOMES = PREFIX + "/outcomes"
 ERRORS = {
     "invalid_request": (400, "invalid_shape"),
     "unauthenticated": (401, "unauthorized_scope"),
@@ -32,6 +33,7 @@ ERRORS = {
     "idempotency_conflict": (409, "conflicting_identity"),
     "version_conflict": (409, "stale_version"),
     "cursor_invalid": (400, "invalid_cursor"),
+    "rate_limited": (429, "capacity"),
     "unavailable": (503, "dependency_unavailable"),
 }
 
@@ -49,7 +51,7 @@ class PortfolioError(ValueError):
         return {
             "schema_id": "hormuz.portfolio-error", "schema_version": 1,
             "code": self.code, "request_id": uuid.uuid4().hex,
-            "retryable": self.code == "unavailable", "retry_after_seconds": None,
+            "retryable": self.code in {"unavailable", "rate_limited"}, "retry_after_seconds": None,
             "reason_code": self.reason,
         }
 
@@ -108,10 +110,17 @@ def attribution_catalogue() -> dict[str, Any]:
     return json.loads(resources.files("hormuz").joinpath("portfolio-attribution-wire-v1.json").read_text("utf-8"))
 
 
+@lru_cache(maxsize=1)
+def outcome_catalogue() -> dict[str, Any]:
+    return json.loads(resources.files("hormuz").joinpath("portfolio-outcome-wire-v1.json").read_text("utf-8"))
+
+
 def validate(value: object, name: str) -> None:
     definitions = catalogue()["$defs"]
     if name not in definitions:
         definitions = attribution_catalogue()["$defs"]
+    if name not in definitions:
+        definitions = outcome_catalogue()["$defs"]
     if name not in definitions:
         raise PortfolioError("invalid_request")
 
@@ -181,6 +190,8 @@ def validate(value: object, name: str) -> None:
 
 
 def route(method: str, path: str) -> tuple[str, str | None]:
+    if path == OUTCOMES and method == "GET":
+        return "list_outcomes", None
     if path == ATTRIBUTIONS and method in {"GET", "POST"}:
         return ("list_attributions" if method == "GET" else "attribute", None)
     if method == "GET" and path in {SCOPES, BINDINGS}:
@@ -204,9 +215,9 @@ def query_parameters(raw: str, operation: str) -> dict[str, Any]:
     except (ValueError, UnicodeError):
         raise PortfolioError("invalid_request") from None
     allowed = {"version"} if operation == "show_scope" else {"limit", "cursor", "start_at", "end_at", "work_scope_id"}
-    if operation == "list_bindings":
+    if operation in {"list_bindings", "list_outcomes"}:
         allowed.add("connector_id")
-    if operation not in {"show_scope", "list_scopes", "list_bindings", "list_attributions"}:
+    if operation not in {"show_scope", "list_scopes", "list_bindings", "list_attributions", "list_outcomes"}:
         allowed = set()
     result = {}
     for key, value in pairs:

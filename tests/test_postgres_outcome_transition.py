@@ -1,11 +1,13 @@
-"""Owned PostgreSQL preflight probes, actual predecessors, isolated restores."""
+"""Real PostgreSQL outcome migration, actual predecessors, isolated restores."""
 
 from __future__ import annotations
 
 import copy
+from dataclasses import replace
 import hashlib
 import json
 import os
+from pathlib import Path
 import subprocess
 import unittest
 from unittest import mock
@@ -14,18 +16,24 @@ from uuid import uuid4
 import hormuz.postgres as postgres_module
 from hormuz.postgres import PostgresStorageError, migrate_postgres
 from hormuz.postgres_usage_store import PostgresUsageStore
+from hormuz._outcome_schema import TABLE_DDL
+from hormuz.config import UsageStorageConfig
+from hormuz.portfolio_repository import create_portfolio_repository
+from hormuz.portfolio_service import PortfolioService
+from hormuz.portfolio_wire import OUTCOMES
 
 if __package__:
     from ._outcome_predecessor_fixture import attribution_predecessor_call
+    from ._outcome_fixture import replay_outcome_metadata, seed_outcome_metadata
+    from ._portfolio_fixture import ADMIN, registry_config
     from ._postgres_fixture import PostgresTestCase
     from ._registry_transition_fixture import ledger_observation, released_v1_call, seed_registry_ledger
 else:
     from _outcome_predecessor_fixture import attribution_predecessor_call
+    from _outcome_fixture import replay_outcome_metadata, seed_outcome_metadata
+    from _portfolio_fixture import ADMIN, registry_config
     from _postgres_fixture import PostgresTestCase
     from _registry_transition_fixture import ledger_observation, released_v1_call, seed_registry_ledger
-
-
-PROBE = "outcome_transition_test_probe"
 
 
 @unittest.skipUnless(os.environ.get("HORMUZ_TEST_ATTRIBUTION_PYTHON"), "requires digest-pinned actual attribution predecessor")
@@ -42,7 +50,7 @@ class PostgresOutcomeTransitionTests(PostgresTestCase):
                                   runtime_role=self.runtime_role, organization_ids=("acme", "beta"))
 
     def setUp(self):
-        self.assertEqual(postgres_module.POSTGRES_SCHEMA_VERSION, 10)
+        self.assertEqual(postgres_module.POSTGRES_SCHEMA_VERSION, 11)
         # The inherited fixture creates and owns this unique test schema/roles.
         self._drop_schema(self.schema)
         self.predecessor_request = {
@@ -71,22 +79,21 @@ class PostgresOutcomeTransitionTests(PostgresTestCase):
             ).fetchall()
         return {"rows": rows, "shape": shape}
 
-    def probe(self, *, fail=False):
+    def upgrade(self, *, fail=False):
         original = postgres_module._migration_sql
 
         def migration(version, schema, *roles):
-            if version != 11:
-                return original(version, schema, *roles)
-            ddl = f"CREATE TABLE {schema}.{PROBE} (organization_id TEXT NOT NULL, id TEXT PRIMARY KEY);"
-            return ddl + (" SELECT 1 / 0;" if fail else "")
+            self.assertEqual(version, 11)
+            ddl = original(version, schema, *roles)
+            return ddl.split(";", 1)[0] + "; SELECT 1 / 0;" if fail else ddl
 
-        with mock.patch.object(postgres_module, "POSTGRES_SCHEMA_VERSION", 11), mock.patch.object(postgres_module, "_migration_sql", side_effect=migration):
+        with mock.patch.object(postgres_module, "_migration_sql", side_effect=migration):
             self.assertEqual(self.migrate().version, 11)
 
     def assert_prior_state_preserved(self):
         current = copy.deepcopy(self.snapshot())
-        current["rows"].pop(PROBE, None)
-        current["shape"] = [row for row in current["shape"] if not row[0].startswith(PROBE)]
+        current["rows"] = {table: rows for table, rows in current["rows"].items() if table not in TABLE_DDL}
+        current["shape"] = [row for row in current["shape"] if not row[0].startswith("portfolio_outcome_")]
         current["rows"]["hormuz_schema_migrations"] = [row for row in current["rows"]["hormuz_schema_migrations"] if json.loads(row[0])["version"] != 11]
         self.assertEqual(current, self.before)
 
@@ -121,22 +128,26 @@ class PostgresOutcomeTransitionTests(PostgresTestCase):
         return (self.psycopg.conninfo.make_conninfo(self.owner_dsn, dbname=database),
                 self.psycopg.conninfo.make_conninfo(self.runtime_dsn, dbname=database))
 
-    def test_postgres_outcome_migration_is_red_until_implementation(self):
-        with mock.patch.object(postgres_module, "POSTGRES_SCHEMA_VERSION", 11):
+    def test_postgres_outcome_real_migration_and_missing_following_migration(self):
+        self.upgrade()
+        self.assert_prior_state_preserved()
+        self.assertEqual(len(self.snapshot()["rows"]), 51)
+        before = self.snapshot()
+        with mock.patch.object(postgres_module, "POSTGRES_SCHEMA_VERSION", 12):
             with self.assertRaises(PostgresStorageError) as caught:
                 self.migrate()
         self.assertEqual(caught.exception.code, "storage_schema_migration_unsupported")
-        self.assertEqual(self.snapshot(), self.before)
+        self.assertEqual(self.snapshot(), before)
 
-    def test_postgres_outcome_probe_failure_retry_preserves_all_predecessor_state(self):
+    def test_postgres_outcome_real_partial_ddl_failure_retry_preserves_all_predecessor_state(self):
         with self.assertRaises(PostgresStorageError) as caught:
-            self.probe(fail=True)
+            self.upgrade(fail=True)
         self.assertEqual(caught.exception.code, "storage_unavailable")
         self.assertEqual(self.snapshot(), self.before)
-        self.probe()
+        self.upgrade()
         self.assert_prior_state_preserved()
         current = self.snapshot()
-        self.probe()
+        self.upgrade()
         self.assertEqual(self.snapshot(), current)
 
     def test_postgres_outcome_partial_state_refuses_before_repair(self):
@@ -151,11 +162,9 @@ class PostgresOutcomeTransitionTests(PostgresTestCase):
 
     @unittest.skipUnless(os.environ.get("HORMUZ_TEST_V1_PYTHON"), "requires digest-pinned released-v1 interpreter")
     def test_postgres_outcome_actual_old_binaries_refuse_next_and_partial_schema(self):
-        self.probe()
+        self.upgrade()
         before = self.snapshot()
-        with self.assertRaises(PostgresStorageError) as caught:
-            self.runtime()
-        self.assertEqual(caught.exception.code, "storage_schema_newer_than_binary")
+        self.runtime()
         request = {**self.predecessor_request, "mode": "verify"}
         for driver in (attribution_predecessor_call, released_v1_call):
             self.assertEqual(driver(request), {"status": "refused", "code": "storage_schema_newer_than_binary"})
@@ -170,7 +179,7 @@ class PostgresOutcomeTransitionTests(PostgresTestCase):
     @unittest.skipUnless(os.environ.get("HORMUZ_TEST_PG_CONTAINER"), "requires disposable PostgreSQL matched backup tools")
     def test_postgres_outcome_old_pair_restore_preserves_both_replays_cursors_and_facts(self):
         backup = self.backup()
-        self.probe()
+        self.upgrade()
         retained = self.snapshot()
         owner, runtime = self.restore(backup)
         request = {**self.predecessor_request, "runtime_dsn": runtime, "mode": "replay",
@@ -194,15 +203,25 @@ class PostgresOutcomeTransitionTests(PostgresTestCase):
 
     @unittest.skipUnless(os.environ.get("HORMUZ_TEST_PG_CONTAINER"), "requires disposable PostgreSQL matched backup tools")
     def test_postgres_outcome_post_checkpoint_writes_require_forward_recovery(self):
-        self.probe()
-        with mock.patch.object(postgres_module, "POSTGRES_SCHEMA_VERSION", 11):
-            seed_registry_ledger(self.runtime())
-            with self.psycopg.connect(self.owner_dsn) as connection:
-                connection.execute(self.sql.SQL("INSERT INTO {}.{} VALUES ('acme', 'synthetic-post-checkpoint-write')").format(self.sql.Identifier(self.schema), self.sql.Identifier(PROBE)))
-            after_write = self.snapshot()
-            owner, runtime = self.restore(self.backup())
-            self.assertEqual(ledger_observation(self.runtime(runtime))["unknown_holds"], 2)
-            self.assertEqual(self.snapshot(owner), after_write)
+        self.upgrade()
+        seed_registry_ledger(self.runtime())
+        config = replace(registry_config(Path("/unused/outcome-recovery")), usage_storage=UsageStorageConfig(
+            backend="postgresql", postgres_schema=self.schema, postgres_runtime_role=self.runtime_role))
+        seeded = seed_outcome_metadata(config, environ={"HORMUZ_POSTGRES_DSN": self.runtime_dsn})
+        after_write = self.snapshot()
+        self.assertTrue(all(after_write["rows"][table] for table in TABLE_DDL))
+        owner, runtime = self.restore(self.backup())
+        self.assertEqual(ledger_observation(self.runtime(runtime))["unknown_holds"], 2)
+        self.assertEqual(self.snapshot(owner), after_write)
+        receipts, retention = replay_outcome_metadata(config, seeded, environ={"HORMUZ_POSTGRES_DSN": runtime})
+        self.assertEqual(receipts, [item["receipt"] for item in seeded["deliveries"]])
+        self.assertEqual(retention, seeded["retention"])
+        self.assertEqual(self.snapshot(owner), after_write)
+        service = PortfolioService(config, create_portfolio_repository(config, environ={"HORMUZ_POSTGRES_DSN": runtime}))
+        page = service.dispatch(ADMIN, "GET", OUTCOMES, query="cursor=" + seeded["page"]["next_cursor"])[1]
+        self.assertEqual(page["as_of"], seeded["page"]["as_of"])
+        self.assertEqual(len(page["items"]), 1)
+        self.assertIsNone(page["next_cursor"])
         self.assertEqual(self.snapshot(), after_write)
         self.assertNotEqual(after_write, self.before)
         self.assertEqual(attribution_predecessor_call({**self.predecessor_request, "runtime_dsn": runtime, "mode": "verify"}),

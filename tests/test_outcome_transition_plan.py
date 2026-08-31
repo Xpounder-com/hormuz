@@ -14,6 +14,7 @@ from tools.verify_attribution_transition_plan import AttributionTransitionError
 from tools.verify_outcome_transition_plan import (
     ROOT, OutcomeTransitionError, main, validate_outcome_transition_plan,
     verify_attribution_archive, verify_outcome_transition_plan,
+    verify_outcome_implementation_plan,
 )
 
 
@@ -29,6 +30,50 @@ class OutcomeTransitionPlanTests(unittest.TestCase):
         self.assertFalse(result["outcome_implemented"])
         self.assertFalse(result["final_candidate_accepted"])
         self.assertEqual(result["status"], "outcome_preflight_plan_verified")
+
+    def test_implementation_keeps_checkpoint_and_final_candidate_boundaries(self):
+        result = verify_outcome_implementation_plan()
+        self.assertEqual(result["schema_version"], 2)
+        self.assertTrue(result["outcome_implemented"])
+        self.assertFalse(result["final_candidate_accepted"])
+        self.assertEqual(result["connector_routes_activated"], 0)
+        self.assertEqual(result["outcome_table_count"], 9)
+        self.assertEqual(result["status"], "outcome_implementation_plan_verified")
+        with mock.patch("tools.verify_outcome_transition_plan.verify_outcome_transition_plan", side_effect=OutcomeTransitionError("synthetic-prerequisite")):
+            with self.assertRaisesRegex(OutcomeTransitionError, "synthetic-prerequisite"):
+                verify_outcome_implementation_plan()
+
+    def test_implementation_cannot_rewrite_any_frozen_leaf(self):
+        original = json.loads((ROOT / "docs/outcome-transition-plan-v2.json").read_bytes())
+        def leaves(value, path=()):
+            if isinstance(value, dict):
+                for key, child in value.items():
+                    yield from leaves(child, path + (key,))
+            elif isinstance(value, list):
+                for index, child in enumerate(value):
+                    yield from leaves(child, path + (index,))
+            else:
+                yield path, value
+        for path, old in leaves(original):
+            changed = copy.deepcopy(original)
+            parent = changed
+            for key in path[:-1]:
+                parent = parent[key]
+            parent[path[-1]] = not old if type(old) is bool else old + 1 if type(old) is int else str(old) + "_changed"
+            with self.subTest(path=path), self.assertRaises(OutcomeTransitionError):
+                validate_outcome_transition_plan(changed, schema_version=2)
+        with self.assertRaises(OutcomeTransitionError):
+            validate_outcome_transition_plan(original)
+
+    def test_implementation_rejects_bad_input_before_baseline(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "docs").mkdir()
+            for payload in (b'{"schema_version":2,"schema_version":2}', b" " * 32769, b"\xff", b"{}"):
+                (root / "docs/outcome-transition-plan-v2.json").write_bytes(payload)
+                with mock.patch("tools.verify_outcome_transition_plan.verify_outcome_transition_plan", side_effect=AssertionError("unexpected baseline")):
+                    with self.assertRaises(OutcomeTransitionError):
+                        verify_outcome_implementation_plan(root)
 
     def test_every_frozen_leaf_cannot_change(self):
         def leaves(value, path=()):
