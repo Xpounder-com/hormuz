@@ -251,6 +251,35 @@ class PortfolioExtensionContractTests(unittest.TestCase):
         value["coverage"]["reason_code"] = "known"
         self.rejected(value, "extension_coverage_unknown_invalid")
 
+    def test_partial_coverage_respects_known_population_and_ancestor_bounds(self):
+        cases = (
+            {"population_attempts": 20, "unattributed_attempts": 21},
+            {"population_attempts": 20, "unsupported_attempts": 21},
+            {"population_attempts": 20, "included_attempts": 12, "unattributed_attempts": 9},
+            {"population_attempts": 20, "pricing_eligible_attempts": 21},
+            {"population_attempts": 20, "priced_attempts": 21},
+            {"included_attempts": 10, "priced_attempts": 11},
+            {"population_attempts": 20, "pricing_eligible_attempts": 10, "unattributed_attempts": 11},
+            {"population_attempts": 20, "priced_attempts": 10, "unattributed_attempts": 11},
+        )
+        for known_counts in cases:
+            with self.subTest(known_counts=known_counts):
+                value = self.example("hormuz.work-budget-report", "minimal")
+                value["coverage"].update(known_counts)
+                self.rejected(value, "extension_coverage_counts_invalid")
+
+    def test_consistent_partial_coverage_preserves_unknown_counts(self):
+        for population in (None, 20):
+            with self.subTest(population=population):
+                value = self.example("hormuz.work-budget-report", "minimal")
+                value["coverage"].update(population_attempts=population,
+                                         unattributed_attempts=5, priced_attempts=10)
+                before = copy.deepcopy(value)
+                self.validate(value)
+                self.assertEqual(value, before)
+                self.assertIsNone(value["coverage"]["included_attempts"])
+                self.assertIsNone(value["coverage"]["pricing_eligible_attempts"])
+
     def test_windows_and_timestamps_are_valid_utc_and_ordered(self):
         for field, replacement in (("start_at", "2026-02-31T00:00:00Z"),
                                    ("start_at", "2026-09-01T00:00:00Z"),

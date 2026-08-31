@@ -208,10 +208,18 @@ def _coverage(value):
     if population is not None and all(item is not None for item in partition):
         if sum(partition) != population:
             _fail("extension_coverage_counts_invalid")
-    for smaller, larger in (("included_attempts", "population_attempts"),
-                            ("pricing_eligible_attempts", "included_attempts"),
-                            ("priced_attempts", "pricing_eligible_attempts")):
-        if value[smaller] is not None and value[larger] is not None and value[smaller] > value[larger]:
+    # Skip unknown intermediates, not known ancestor bounds. These checks never
+    # fill missing counters or turn an unknown denominator into zero.
+    descendants = [value[name] for name in
+                   ("included_attempts", "pricing_eligible_attempts", "priced_attempts")
+                   if value[name] is not None]
+    known_chain = ([population] if population is not None else []) + descendants
+    if any(smaller > larger for larger, smaller in zip(known_chain, known_chain[1:])):
+        _fail("extension_coverage_counts_invalid")
+    if population is not None:
+        minimum_included = max(descendants, default=0)
+        known_excluded = sum(item for item in partition[1:] if item is not None)
+        if minimum_included + known_excluded > population:
             _fail("extension_coverage_counts_invalid")
 
 
