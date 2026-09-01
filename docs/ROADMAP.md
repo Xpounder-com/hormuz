@@ -45,6 +45,13 @@ closes #214 before the v1.1.0 tag. Keep #214 open between those checkpoints and
 record acceptance with exact reviewed commits and test references. #213 itself
 remains feature-free and introduces no portfolio schema or migration.
 
+The #217 analytics-first preflight is accepted on merged main `b12966f` with
+exact-main CI run `33461691657`. Its version-2 successor now owns the bounded
+work-budget runtime implementation: additive SQLite 9/PostgreSQL 13 storage,
+atomic event-time attribution and reservation binding, conservative settlement,
+and a current management report. #217 remains open until the runtime PR passes
+exact-head review, protected checks, normal merge and exact merged-main CI.
+
 Every issue inherits the release gates in #226: authorization before access,
 strict versioned schemas, metadata-only persistence and evidence, tenant
 isolation, bounded resources, additive v1 compatibility, migration and

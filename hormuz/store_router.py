@@ -6,8 +6,14 @@ import os
 from dataclasses import dataclass
 from typing import Generic, Mapping, Protocol, TypeVar
 
-from ._persistence import UsageRepository
-from .config import GatewayConfig
+from ._persistence import (
+    RequestAttempt,
+    ReservationScope,
+    UsageRepository,
+    WorkBudgetContext,
+    WorkBudgetRequestRepository,
+)
+from .config import GatewayConfig, Identity
 from .postgres import PostgresConnectionPool, PostgresStorageError
 from .postgres_usage_store import PostgresUsageStore
 from .store import UsageStore
@@ -30,12 +36,90 @@ class RepositoryFactory(Protocol[RepositoryT_co]):
     ) -> RepositoryT_co: ...
 
 
+class _WorkBudgetRequestBegin(Protocol):
+    def __call__(
+        self,
+        *,
+        identity: Identity,
+        client: str,
+        protocol: str,
+        requested_model: str,
+        resolved_alias: str | None,
+        upstream_model: str | None,
+        policy_version: str,
+        policy_action: str,
+        redaction_count: int,
+        redaction_rules: tuple[str, ...],
+        scopes: tuple[ReservationScope, ...],
+        reserved_tokens: int,
+        reserved_cost_microusd: int,
+        ttl_seconds: int,
+        work_budget: WorkBudgetContext | None,
+    ) -> RequestAttempt: ...
+
+
+@dataclass(frozen=True, repr=False)
+class WorkBudgetRequestAdapter:
+    """Typed bridge to the adapters' private atomic v1.1 transaction."""
+
+    _begin: _WorkBudgetRequestBegin
+
+    def begin_request_attempt(
+        self,
+        *,
+        identity: Identity,
+        client: str,
+        protocol: str,
+        requested_model: str,
+        resolved_alias: str | None,
+        upstream_model: str | None,
+        policy_version: str,
+        policy_action: str,
+        redaction_count: int,
+        redaction_rules: tuple[str, ...],
+        scopes: tuple[ReservationScope, ...],
+        reserved_tokens: int,
+        reserved_cost_microusd: int,
+        ttl_seconds: int,
+        work_budget: WorkBudgetContext,
+    ) -> RequestAttempt:
+        return self._begin(
+            identity=identity,
+            client=client,
+            protocol=protocol,
+            requested_model=requested_model,
+            resolved_alias=resolved_alias,
+            upstream_model=upstream_model,
+            policy_version=policy_version,
+            policy_action=policy_action,
+            redaction_count=redaction_count,
+            redaction_rules=redaction_rules,
+            scopes=scopes,
+            reserved_tokens=reserved_tokens,
+            reserved_cost_microusd=reserved_cost_microusd,
+            ttl_seconds=ttl_seconds,
+            work_budget=work_budget,
+        )
+
+
 @dataclass(frozen=True, repr=False)
 class RepositoryBundle(Generic[RepositoryT]):
     """Separate typed owners; no cross-repository transaction or lifecycle."""
 
     usage: UsageRepository
     portfolio: RepositoryT
+
+
+def create_work_budget_request_repository(
+    usage: UsageRepository,
+) -> WorkBudgetRequestRepository | None:
+    """Compose only the built-in adapters' typed atomic budget capability."""
+
+    if type(usage) is UsageStore:
+        return WorkBudgetRequestAdapter(usage._begin_request_attempt_with_work_budget)
+    if type(usage) is PostgresUsageStore:
+        return WorkBudgetRequestAdapter(usage._begin_request_attempt_with_work_budget)
+    return None
 
 
 def create_usage_store(

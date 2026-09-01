@@ -32,8 +32,12 @@ EXPECTED_OWNERS = {
         {
             "test_postgres_native_success_bodies_models_and_header_stripping",
             "test_postgres_rejection_precedes_budget_policy_and_provider",
-            "test_postgres_failed_attribution_commit_retains_uncertain_hold",
-            "test_postgres_scope_change_after_reservation_never_egresses",
+            "test_postgres_failed_atomic_attribution_commit_rolls_back_before_egress",
+            "test_postgres_unbounded_output_never_egresses_under_active_work_budget",
+            "test_postgres_provider_side_input_never_egresses_under_active_work_budget",
+            "test_postgres_unbound_identity_cannot_bypass_an_active_work_budget",
+            "test_postgres_unbound_identity_uses_database_clock",
+            "test_postgres_scope_change_before_atomic_reservation_never_egresses",
             "test_postgres_unattributed_and_nonaccounted_behavior",
             "test_postgres_identity_cannot_gain_attribution_authority",
             "test_postgres_admin_http_correction_contract",
@@ -217,7 +221,7 @@ class PostgresTestBoundaryTests(unittest.TestCase):
             suite = unittest.defaultTestLoader.loadTestsFromName(f"{module_name}.{class_name}")
             self.assertEqual(suite.countTestCases(), len(expected_methods), module_name)
 
-        self.assertEqual(len(owned), 103)
+        self.assertEqual(len(owned), 107)
         self.assertFalse((ROOT / "tests" / "test_postgres.py").exists())
         self.assertFalse(
             any(name.startswith("test_") for name in PostgresTestCase.__dict__),

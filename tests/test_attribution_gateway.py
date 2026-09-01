@@ -22,11 +22,20 @@ class AttributionGatewayTests(AttributionGatewayAssertions, unittest.TestCase):
     def test_rejection_precedes_budget_policy_and_provider(self):
         self.check_rejection_precedes_budget_policy_and_provider()
 
-    def test_failed_attribution_commit_retains_uncertain_hold(self):
-        self.check_failed_attribution_commit_never_egresses_or_frees_uncertain_hold()
+    def test_failed_atomic_attribution_commit_rolls_back_before_egress(self):
+        self.check_failed_atomic_attribution_commit_rolls_back_before_egress()
 
-    def test_scope_change_after_reservation_never_egresses(self):
-        self.check_scope_change_after_reservation_never_egresses()
+    def test_unbounded_output_never_egresses_under_active_work_budget(self):
+        self.check_unbounded_output_never_egresses_under_active_work_budget()
+
+    def test_provider_side_input_never_egresses_under_active_work_budget(self):
+        self.check_provider_side_input_never_egresses_under_active_work_budget()
+
+    def test_unbound_identity_cannot_bypass_an_active_work_budget(self):
+        self.check_unbound_identity_cannot_bypass_an_active_work_budget()
+
+    def test_scope_change_before_atomic_reservation_never_egresses(self):
+        self.check_scope_change_before_atomic_reservation_never_egresses()
 
     def test_unattributed_and_nonaccounted_behavior(self):
         self.check_unattributed_default_and_nonaccounted_behavior()

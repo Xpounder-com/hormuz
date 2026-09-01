@@ -7,7 +7,12 @@ import unittest
 from pathlib import Path
 
 from hormuz.config import ConfigError, GatewayConfig
-from hormuz.policy_document import PolicyDocument, PolicyDocumentError
+from hormuz.policy_document import (
+    PolicyDocument,
+    PolicyDocumentError,
+    local_policy_content_sha256,
+    local_policy_snapshot,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -74,6 +79,12 @@ class PolicyDocumentTests(unittest.TestCase):
         self.assertNotIn("gpt-5.4-mini", summary)
         self.assertNotIn("10000", summary)
         self.assertNotIn("5000", summary)
+
+    def test_local_policy_digest_covers_the_complete_credential_free_fingerprint(self) -> None:
+        identity = next(iter(self.config.identities_by_token.values()))
+        digest = local_policy_content_sha256(self.config)
+        self.assertEqual(self.config.policy_version, f"local-config-{digest[:16]}")
+        self.assertEqual(local_policy_snapshot(self.config, identity).content_sha256, digest)
 
     def test_document_rejects_content_and_does_not_echo_it(self) -> None:
         value = _document()

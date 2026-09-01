@@ -280,7 +280,7 @@ def local_policy_snapshot(config: GatewayConfig, identity: Identity) -> PolicySn
 
     return PolicySnapshot(
         policy_version=config.policy_version,
-        content_sha256=None,
+        content_sha256=config.policy_content_sha256,
         organization_policy=config.organization_policy,
         team_policy=config.team_policies.get(identity.team_id),
         actor_policy=config.actor_policies.get(identity.actor_id),
@@ -291,6 +291,12 @@ def local_policy_snapshot(config: GatewayConfig, identity: Identity) -> PolicySn
         ),
         secret_mode=config.secret_controls.mode,
     )
+
+
+def local_policy_content_sha256(config: GatewayConfig) -> str:
+    """Identify the complete credential-free local policy configuration."""
+
+    return config.policy_content_sha256
 
 
 def _policy_map(value: object, path: str) -> dict[str, Policy]:

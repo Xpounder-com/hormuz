@@ -1,10 +1,14 @@
 # Work-budget transition checkpoint
 
-Hormuz 1.1.0 will keep exact immutable plan and activation facts internally,
-while presenting a current management report rather than making consumers
-reconstruct budget history. The implementation decision is frozen in
+Hormuz 1.1.0 keeps exact immutable plan and activation facts internally while
+presenting a current management report rather than making consumers reconstruct
+budget history. The accepted preflight remains frozen in
 [`budget-transition-plan-v1.json`](budget-transition-plan-v1.json), ADR 0012,
-and the separate version-2 report bundle.
+and the separate version-2 report bundle. The bounded source implementation is
+recorded in the reviewed successor
+[`budget-transition-plan-v2.json`](budget-transition-plan-v2.json) and
+[`WORK_BUDGETS.md`](WORK_BUDGETS.md); it does not rewrite the historical v1
+checkpoint or claim runtime acceptance.
 
 ## What this preflight changes
 
@@ -43,15 +47,16 @@ transaction. Rollback and ambiguous outcomes also require exact event-time
 facts. Those small metadata records support correctness without forcing a
 manager to browse a revision ledger.
 
-## Runtime boundary still required
+## Runtime implementation and acceptance boundary
 
-The implementation PR must replace the deliberately red missing-migration
-witnesses with real additive migrations and retain every transition guarantee.
-It must prove atomic pre-egress reservation, deny-wins hierarchy behavior,
-independent-replica concurrency, exact decimals, period boundaries, unknown
-holds, activation/replacement/rollback, populated recovery, and current report
-version 2. The first runtime role is `portfolio_admin`; broader role delivery
-remains #223.
+The implementation successor replaces the deliberately red missing-migration
+witnesses with real additive migrations while retaining every transition
+guarantee. Its executable cases cover atomic pre-egress reservation, deny-wins
+hierarchy behavior, independent-replica concurrency, exact decimals, period
+boundaries, unknown holds, activation/replacement/rollback, populated recovery,
+and current report version 2. The first runtime role is `portfolio_admin`;
+broader role delivery remains #223. Exact-head review, protected checks, normal
+merge, and exact merged-main CI still gate #217 acceptance.
 
 Finance-grade reconciliation remains #8. Scorecards, recommendations, external
 validation, release, tagging and deployment remain separately gated.
@@ -63,6 +68,7 @@ From the repository root:
 ```console
 python3 tools/verify_budget_transition_plan.py
 python3 -m unittest -v tests.test_budget_transition_plan
+python3 -m unittest -v tests.test_budget_schema tests.test_sqlite_budget
 python3 -m unittest -v tests.test_sqlite_budget_transition
 ```
 

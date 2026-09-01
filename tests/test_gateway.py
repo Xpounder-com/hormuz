@@ -15,7 +15,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest import mock
 
-from hormuz.config import GatewayConfig, Policy
+from hormuz.config import GatewayConfig, ModelRoute, Policy
+from hormuz.budget_runtime import configured_model_id
 from hormuz.contracts import relay_contract_header, validate_audit_event, validate_contract
 from hormuz.custody import KEY_PURPOSE_PROVIDER_CREDENTIAL, EnvelopeCipher, GeneratedDataKey
 from hormuz.custody_runtime import write_envelope_file
@@ -23,6 +24,7 @@ from hormuz.policy import PolicyEngine
 from hormuz.postgres import PostgresStorageError
 from hormuz.server import GatewayServer, serve_in_thread
 from hormuz.store import UsageStore
+from hormuz.usage import ResponseUsageParser
 
 
 GATEWAY_TOKEN = "company-user-token-never-forward"
@@ -72,6 +74,8 @@ class FakeProviderHandler(BaseHTTPRequestHandler):
                     "total_tokens": 150,
                 },
             }
+            if body.get("force_missing_usage") is True:
+                payload.pop("usage")
             if body.get("stream") is True:
                 self._send_openai_stream(payload)
                 return
@@ -144,7 +148,11 @@ class FakeProviderHandler(BaseHTTPRequestHandler):
                     {
                         "type": "message_delta",
                         "delta": {"stop_reason": "end_turn", "stop_sequence": None},
-                        "usage": {"output_tokens": 12},
+                        **(
+                            {}
+                            if body.get("force_missing_usage") is True
+                            else {"usage": {"output_tokens": 12}}
+                        ),
                     },
                 ),
                 ("message_stop", {"type": "message_stop"}),
@@ -250,6 +258,170 @@ class FakeProviderHandler(BaseHTTPRequestHandler):
 
     def log_message(self, format: str, *args: object) -> None:
         pass
+
+
+class ModelRouteCostTests(unittest.TestCase):
+    def test_reservation_covers_every_terminal_input_partition_and_rounds_up(self) -> None:
+        route = ModelRoute(
+            alias="premium-cache",
+            protocol="anthropic",
+            upstream_model="model",
+            input_cost_per_million=1,
+            cache_read_cost_per_million=25,
+            cache_write_cost_per_million=100,
+            output_cost_per_million=2,
+        )
+
+        reservation = route.estimate_reservation_cost_microusd(input_tokens=3, output_tokens=2)
+        terminal_costs = (
+            route.estimate_cost_microusd(
+                input_tokens=3, output_tokens=2, cache_read_tokens=0, cache_write_tokens=0,
+            ),
+            route.estimate_cost_microusd(
+                input_tokens=0, output_tokens=2, cache_read_tokens=3, cache_write_tokens=0,
+            ),
+            route.estimate_cost_microusd(
+                input_tokens=0, output_tokens=2, cache_read_tokens=0, cache_write_tokens=3,
+            ),
+        )
+
+        self.assertEqual(reservation, 304)
+        self.assertGreaterEqual(reservation, max(terminal_costs))
+        fractional = ModelRoute(
+            alias="fractional",
+            protocol="openai",
+            upstream_model="model",
+            input_cost_per_million=0.1,
+        )
+        self.assertEqual(
+            fractional.estimate_reservation_cost_microusd(input_tokens=1, output_tokens=0),
+            1,
+        )
+
+    def test_reservation_covers_large_terminal_rounding(self) -> None:
+        route = ModelRoute(
+            alias="large-bound",
+            protocol="openai",
+            upstream_model="model",
+            output_cost_per_million=4.316109535003818,
+        )
+        output_tokens = 7_760_635_130_464_772
+
+        reservation = route.estimate_reservation_cost_microusd(
+            input_tokens=0,
+            output_tokens=output_tokens,
+        )
+        terminal = route.estimate_cost_microusd(
+            input_tokens=0,
+            output_tokens=output_tokens,
+            cache_read_tokens=0,
+            cache_write_tokens=0,
+        )
+
+        self.assertGreaterEqual(reservation, terminal)
+
+
+class ConfiguredModelIdentityTests(unittest.TestCase):
+    def test_route_alias_is_preserved_or_deterministically_normalized(self) -> None:
+        self.assertEqual(
+            configured_model_id(
+                resolved_alias="managed-route",
+                upstream_model="vendor/model",
+                requested_model="requested",
+            ),
+            "managed-route",
+        )
+        normalized = configured_model_id(
+            resolved_alias="vendor/model",
+            upstream_model="provider/model",
+            requested_model="requested",
+        )
+        self.assertRegex(normalized, r"\Aconfigured-model-sha256:[0-9a-f]{64}\Z")
+        self.assertEqual(
+            normalized,
+            configured_model_id(
+                resolved_alias="vendor/model",
+                upstream_model="changed/provider-model",
+                requested_model="changed-request",
+            ),
+        )
+        reserved_alias = configured_model_id(
+            resolved_alias=normalized,
+            upstream_model="provider/model",
+            requested_model="requested",
+        )
+        self.assertRegex(
+            reserved_alias, r"\Aconfigured-model-sha256:[0-9a-f]{64}\Z",
+        )
+        self.assertNotEqual(reserved_alias, normalized)
+
+
+class ResponseUsageEvidenceTests(unittest.TestCase):
+    def test_success_evidence_requires_valid_input_and_output_tokens(self) -> None:
+        complete = ResponseUsageParser("openai", is_event_stream=False)
+        complete.feed(json.dumps({
+            "usage": {"input_tokens": 10, "output_tokens": 0},
+        }).encode())
+        self.assertTrue(complete.finish().evidence_complete)
+
+        incomplete_values = (
+            {"usage": {"input_tokens": 10}},
+            {"usage": {"input_tokens": 10, "output_tokens": True}},
+            {"usage": {"input_tokens": -1, "output_tokens": 2}},
+        )
+        for value in incomplete_values:
+            with self.subTest(value=value):
+                parser = ResponseUsageParser("openai", is_event_stream=False)
+                parser.feed(json.dumps(value).encode())
+                self.assertFalse(parser.finish().evidence_complete)
+
+        malformed = ResponseUsageParser("openai", is_event_stream=False)
+        malformed.feed(b'{"usage":{"input_tokens":10')
+        self.assertFalse(malformed.finish().evidence_complete)
+
+    def test_anthropic_stream_requires_terminal_output_usage(self) -> None:
+        message_start = {
+            "type": "message_start",
+            "message": {
+                "model": "synthetic-anthropic",
+                "usage": {"input_tokens": 10, "output_tokens": 0},
+            },
+        }
+        for terminal_usage in ({}, {"usage": {}}, {"usage": {"output_tokens": True}}):
+            with self.subTest(terminal_usage=terminal_usage):
+                parser = ResponseUsageParser("anthropic", is_event_stream=True)
+                parser.feed(
+                    (
+                        "data: " + json.dumps(message_start) + "\n\n"
+                        "data: " + json.dumps({"type": "message_delta", **terminal_usage}) + "\n\n"
+                    ).encode()
+                )
+                self.assertFalse(parser.finish().evidence_complete)
+
+        malformed_final = ResponseUsageParser("anthropic", is_event_stream=True)
+        malformed_final.feed(
+            (
+                "data: " + json.dumps(message_start) + "\n\n"
+                "data: " + json.dumps({
+                    "type": "message_delta", "usage": {"output_tokens": 12},
+                }) + "\n\n"
+                "data: " + json.dumps({"type": "message_delta"}) + "\n\n"
+            ).encode()
+        )
+        self.assertFalse(malformed_final.finish().evidence_complete)
+
+        complete = ResponseUsageParser("anthropic", is_event_stream=True)
+        complete.feed(
+            (
+                "data: " + json.dumps(message_start) + "\n\n"
+                "data: " + json.dumps({
+                    "type": "message_delta", "usage": {"output_tokens": 12},
+                }) + "\n\n"
+            ).encode()
+        )
+        usage = complete.finish()
+        self.assertTrue(usage.evidence_complete)
+        self.assertEqual((usage.input_tokens, usage.output_tokens), (10, 12))
 
 
 class GatewayIntegrationTests(unittest.TestCase):
@@ -556,6 +728,79 @@ class GatewayIntegrationTests(unittest.TestCase):
             [(1, "pending", None, None), (2, "outcome_unknown", "provider_transport_ambiguous", None)],
         )
 
+    def test_success_without_provider_usage_keeps_the_conservative_reservation(self) -> None:
+        status, headers, body = self._post(
+            "/v1/responses",
+            {
+                "model": "engineering-fast",
+                "input": "response without usable provider usage",
+                "max_output_tokens": 20,
+                "force_missing_usage": True,
+            },
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["x-hormuz-contract"], relay_contract_header())
+        self.assertNotIn("usage", json.loads(body))
+        self.assertEqual(self.gateway.store.monthly_totals(actor_id="alice").requests, 0)
+        self.assertEqual(self.gateway.store.active_budget_reservations(), 1)
+
+        connection = sqlite3.connect(self.gateway.store.path)
+        reserved = connection.execute(
+            "SELECT reserved_cost_microusd FROM gateway_request_attempts"
+        ).fetchone()[0]
+        events = connection.execute(
+            "SELECT sequence,state,reason_code,usage_event_id "
+            "FROM gateway_request_attempt_events ORDER BY sequence"
+        ).fetchall()
+        usage_count = connection.execute("SELECT COUNT(*) FROM gateway_usage_events").fetchone()[0]
+        connection.close()
+        self.assertGreater(reserved, 0)
+        self.assertEqual(usage_count, 0)
+        self.assertEqual(
+            events,
+            [(1, "pending", None, None), (2, "outcome_unknown", "provider_transport_ambiguous", None)],
+        )
+
+    def test_anthropic_attempt_reserves_the_most_expensive_input_partition(self) -> None:
+        with mock.patch(
+            "hormuz.server.urllib.request.urlopen",
+            side_effect=urllib.error.URLError("provider-connection-interrupted"),
+        ):
+            status, _, _ = self._post(
+                "/v1/messages",
+                {
+                    "model": "claude-standard",
+                    "messages": [{"role": "user", "content": "premium cache write"}],
+                    "max_tokens": 1,
+                },
+            )
+
+        self.assertEqual(status, 502)
+        connection = sqlite3.connect(self.gateway.store.path)
+        reserved_tokens, reserved_cost_microusd = connection.execute(
+            "SELECT reserved_tokens, reserved_cost_microusd FROM gateway_request_attempts"
+        ).fetchone()
+        connection.close()
+        reserved_input_tokens = reserved_tokens - 1
+        route = self.config.model_routes["claude-standard"]
+        self.assertEqual(
+            reserved_cost_microusd,
+            route.estimate_reservation_cost_microusd(
+                input_tokens=reserved_input_tokens,
+                output_tokens=1,
+            ),
+        )
+        self.assertGreater(
+            reserved_cost_microusd,
+            route.estimate_cost_microusd(
+                input_tokens=reserved_input_tokens,
+                output_tokens=1,
+                cache_read_tokens=0,
+                cache_write_tokens=0,
+            ),
+        )
+
     def test_interrupted_provider_response_becomes_unknown_without_replay(self) -> None:
         class InterruptedResponse:
             status = 200
@@ -678,6 +923,43 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertEqual(totals.output_tokens, 12)
         self.assertEqual(totals.cache_read_tokens, 20)
         self.assertEqual(totals.cache_write_tokens, 10)
+
+    def test_anthropic_stream_without_terminal_usage_keeps_the_reservation(self) -> None:
+        status, headers, response = self._post(
+            "/v1/messages",
+            {
+                "model": "claude-sonnet-5",
+                "messages": [{"role": "user", "content": "missing terminal usage"}],
+                "max_tokens": 50,
+                "stream": True,
+                "force_missing_usage": True,
+            },
+            extra_headers={"Anthropic-Version": "2023-06-01"},
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["content-type"], "text/event-stream")
+        self.assertIn(b"event: message_stop", response)
+        self.assertEqual(self.gateway.store.monthly_totals(actor_id="alice").requests, 0)
+        self.assertEqual(self.gateway.store.active_budget_reservations(), 1)
+
+        connection = sqlite3.connect(self.gateway.store.path)
+        events = connection.execute(
+            "SELECT sequence,state,reason_code,usage_event_id "
+            "FROM gateway_request_attempt_events ORDER BY sequence"
+        ).fetchall()
+        usage_count = connection.execute(
+            "SELECT COUNT(*) FROM gateway_usage_events"
+        ).fetchone()[0]
+        connection.close()
+        self.assertEqual(usage_count, 0)
+        self.assertEqual(
+            events,
+            [
+                (1, "pending", None, None),
+                (2, "outcome_unknown", "provider_transport_ambiguous", None),
+            ],
+        )
 
     def test_disallowed_client_is_rejected_before_provider_call(self) -> None:
         before = len(FakeProviderHandler.requests)

@@ -17,6 +17,11 @@ from ._portfolio_schema import TABLE_DDL, verify_postgres_registry
 from ._attribution_schema import TABLE_DDL as ATTRIBUTION_TABLES, verify_postgres_attribution
 from ._outcome_schema import TABLE_DDL as OUTCOME_TABLES, verify_postgres_outcomes
 from ._finance_schema import TABLE_DDL as FINANCE_TABLES, verify_postgres_finance
+from ._budget_schema import (
+    ACTIVE_TABLE as BUDGET_ACTIVE_TABLE,
+    TABLE_DDL as BUDGET_TABLES,
+    verify_postgres_budget,
+)
 from ._sqlite_schema import SQLITE_SCHEMA_VERSION, verify_sqlite_schema_ready
 from .config import GatewayConfig
 from .portfolio_wire import PortfolioError
@@ -59,6 +64,8 @@ def portfolio_transaction(
     connection_pool: PostgresConnectionPool | None,
     tables=TABLE_DDL,
     statement_timeout_ms: int = 10000,
+    budget_lock: bool = False,
+    mutable_tables: frozenset[str] = frozenset(),
 ) -> Iterator[PortfolioSQL]:
     if type(statement_timeout_ms) is not int or not 1 <= statement_timeout_ms <= 10000:
         raise PortfolioError("unavailable")
@@ -106,15 +113,42 @@ def portfolio_transaction(
                         verify_postgres_outcomes(cursor, storage.postgres_schema, PostgresStorageError)
                     if tables is FINANCE_TABLES:
                         verify_postgres_finance(cursor, storage.postgres_schema, PostgresStorageError)
+                    if tables is BUDGET_TABLES:
+                        verify_postgres_budget(cursor, storage.postgres_schema, PostgresStorageError)
                 for table in tables:
+                    qualified = f'"{storage.postgres_schema}".{table}'
+                    excessive_privileges = "DELETE,TRUNCATE" if table in mutable_tables else "UPDATE,DELETE,TRUNCATE"
                     row = connection.execute(
                         "SELECT (has_table_privilege(current_user, %s, 'SELECT') AND "
                         "has_table_privilege(current_user, %s, 'INSERT')) AS usable, "
-                        "has_table_privilege(current_user, %s, 'UPDATE,DELETE,TRUNCATE') AS excessive",
-                        (f'"{storage.postgres_schema}".{table}',) * 3,
+                        "has_table_privilege(current_user, %s, %s) AS excessive",
+                        (qualified, qualified, qualified, excessive_privileges),
                     ).fetchone()
                     if not row["usable"] or row["excessive"]:
                         raise PortfolioError("unavailable")
+                    if table == BUDGET_ACTIVE_TABLE:
+                        allowed = {
+                            "active_version", "activation_generation",
+                            "current_activation_event_id", "changed_at",
+                        }
+                        columns = connection.execute(
+                            "SELECT column_name FROM information_schema.columns "
+                            "WHERE table_schema=%s AND table_name=%s",
+                            (storage.postgres_schema, table),
+                        ).fetchall()
+                        for column in columns:
+                            name = column["column_name"]
+                            has_update = connection.execute(
+                                "SELECT has_column_privilege(current_user, %s, %s, 'UPDATE') AS allowed",
+                                (qualified, name),
+                            ).fetchone()["allowed"]
+                            if has_update != (name in allowed):
+                                raise PortfolioError("unavailable")
+                if budget_lock:
+                    connection.execute(
+                        "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                        (f"work-budget:{storage.postgres_schema}:{organization_id}",),
+                    )
                 connection.execute(
                     "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
                     (f"portfolio:{storage.postgres_schema}:{organization_id}",),

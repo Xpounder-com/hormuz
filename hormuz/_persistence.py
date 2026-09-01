@@ -94,6 +94,58 @@ class RequestAttempt:
 
     attempt_id: str
     reservation_id: str
+    attribution_event_id: str | None = None
+
+
+@dataclass(frozen=True)
+class WorkBudgetContext:
+    """Trusted server-resolved work scope for one atomic governed attempt.
+
+    Syntax is revalidated by each adapter and registry state is rechecked in
+    the reservation transaction.  This value never grants tenant authority.
+    """
+
+    work_scope_id: str | None
+    work_scope_version: int | None
+    confidence: str
+    reason_code: str
+    reserved_output_tokens: int
+    output_tokens_bounded: bool
+    input_tokens_bounded: bool
+    policy_version: str
+    policy_digest: str
+    rate_card_id: str
+    rate_card_version: int
+    rate_card_digest: str
+    rate_card_currency: str
+
+
+class WorkBudgetRequestRepository(Protocol):
+    """Explicit internal capability for atomic v1.1 request admission.
+
+    This is composed beside the frozen v1 :class:`UsageRepository` contract.
+    It does not add a public operation to either usage adapter.
+    """
+
+    def begin_request_attempt(
+        self,
+        *,
+        identity: Identity,
+        client: str,
+        protocol: str,
+        requested_model: str,
+        resolved_alias: str | None,
+        upstream_model: str | None,
+        policy_version: str,
+        policy_action: str,
+        redaction_count: int,
+        redaction_rules: tuple[str, ...],
+        scopes: tuple[ReservationScope, ...],
+        reserved_tokens: int,
+        reserved_cost_microusd: int,
+        ttl_seconds: int,
+        work_budget: WorkBudgetContext,
+    ) -> RequestAttempt: ...
 
 
 @dataclass(frozen=True)

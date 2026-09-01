@@ -5,6 +5,7 @@ import ipaddress
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from decimal import Context, Decimal, ROUND_CEILING, ROUND_HALF_EVEN, localcontext
 from pathlib import Path
 
 from ._config_input import (
@@ -22,6 +23,25 @@ class ConfigError(ValueError):
 
 
 MAX_TRUSTED_PROXY_CIDRS = 64
+_ROUTE_COST_CONTEXT = Context(prec=96, rounding=ROUND_HALF_EVEN)
+
+
+def _route_cost_microusd(
+    parts: tuple[tuple[int, Decimal], ...],
+    *,
+    rounding: str,
+) -> int:
+    """Price non-negative token partitions under one exact decimal rule."""
+
+    with localcontext(_ROUTE_COST_CONTEXT):
+        microusd = sum(
+            (
+                Decimal(max(0, tokens)) * max(Decimal(0), rate)
+                for tokens, rate in parts
+            ),
+            Decimal(0),
+        )
+        return max(0, int(microusd.to_integral_value(rounding=rounding)))
 
 
 @dataclass(frozen=True)
@@ -265,6 +285,31 @@ class ModelRoute:
     cache_write_cost_per_million: float = 0
     output_cost_per_million: float = 0
 
+    def estimate_reservation_cost_microusd(
+        self,
+        *,
+        input_tokens: int,
+        output_tokens: int,
+    ) -> int:
+        """Conservatively price bounded tokens before provider egress.
+
+        Provider usage can classify input as uncached, cache-read, or
+        cache-write only after the response. Reserve every bounded input token
+        at the route's most expensive input classification and round upward so
+        the eventual configured-rate charge cannot exceed the reservation.
+        """
+        input_rate = max(
+            Decimal(0),
+            Decimal(str(self.input_cost_per_million)),
+            Decimal(str(self.cache_read_cost_per_million)),
+            Decimal(str(self.cache_write_cost_per_million)),
+        )
+        output_rate = max(Decimal(0), Decimal(str(self.output_cost_per_million)))
+        return _route_cost_microusd(
+            ((input_tokens, input_rate), (output_tokens, output_rate)),
+            rounding=ROUND_CEILING,
+        )
+
     def estimate_cost_microusd(
         self,
         *,
@@ -280,13 +325,15 @@ class ModelRoute:
             if self.protocol == "anthropic"
             else max(0, input_tokens - cache_read_tokens - cache_write_tokens)
         )
-        usd = (
-            uncached_input * self.input_cost_per_million
-            + cache_read_tokens * self.cache_read_cost_per_million
-            + cache_write_tokens * self.cache_write_cost_per_million
-            + output_tokens * self.output_cost_per_million
-        ) / 1_000_000
-        return max(0, round(usd * 1_000_000))
+        return _route_cost_microusd(
+            (
+                (uncached_input, Decimal(str(self.input_cost_per_million))),
+                (cache_read_tokens, Decimal(str(self.cache_read_cost_per_million))),
+                (cache_write_tokens, Decimal(str(self.cache_write_cost_per_million))),
+                (output_tokens, Decimal(str(self.output_cost_per_million))),
+            ),
+            rounding=ROUND_HALF_EVEN,
+        )
 
 
 @dataclass(frozen=True)
@@ -496,7 +543,30 @@ class GatewayConfig:
         if self.policy_control.mode != "local":
             raise ConfigError("managed policy versions must be resolved through the policy control plane")
 
-        payload = {
+        canonical = json.dumps(
+            self._local_policy_payload(),
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+        return f"local-config-{hashlib.sha256(canonical).hexdigest()[:16]}"
+
+    @property
+    def policy_content_sha256(self) -> str:
+        """Return the full digest of credential-free local policy inputs."""
+
+        if self.policy_control.mode != "local":
+            raise ConfigError("managed policy versions must be resolved through the policy control plane")
+        canonical = json.dumps(
+            self._local_policy_payload(),
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+        return hashlib.sha256(canonical).hexdigest()
+
+    def _local_policy_payload(self) -> dict[str, object]:
+        return {
             "identities": {
                 "static": [
                     _identity_policy_payload(identity)
@@ -540,8 +610,6 @@ class GatewayConfig:
                 "custom_secret_envs": sorted(self.secret_controls.custom_secret_envs),
             },
         }
-        canonical = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
-        return f"local-config-{hashlib.sha256(canonical).hexdigest()[:16]}"
 
 
 def _policy_payload(policy: Policy) -> dict[str, object]:

@@ -7,6 +7,7 @@ import tempfile
 import unittest
 from unittest import mock
 
+from hormuz._persistence import UsageRepository
 from hormuz.config import GatewayConfig, UsageStorageConfig
 from hormuz.postgres import PostgresConnectionPool, PostgresStorageError
 from hormuz.store import UsageStore
@@ -50,6 +51,23 @@ class RepositoryCompositionTests(unittest.TestCase):
             factory.assert_called_once_with(config, environ=environ, connection_pool=None, read_only=False)
             with self.assertRaises(AttributeError):
                 bundle.portfolio = object()
+
+    def test_work_budget_request_capability_is_explicit_and_builtin_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            config = replace(self.config, database_path=Path(temporary) / "usage.sqlite3")
+            usage = router.create_usage_store(config)
+            capability = router.create_work_budget_request_repository(usage)
+
+        self.assertIsInstance(capability, router.WorkBudgetRequestAdapter)
+        self.assertNotEqual(capability, usage)
+        compatible_v1_only = mock.create_autospec(UsageRepository, instance=True)
+        self.assertIsNone(router.create_work_budget_request_repository(compatible_v1_only))
+
+        class CustomUsageStore(UsageStore):
+            pass
+
+        custom = object.__new__(CustomUsageStore)
+        self.assertIsNone(router.create_work_budget_request_repository(custom))
 
     def test_read_only_initialization_failure_precedes_the_optional_repository(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

@@ -23,6 +23,7 @@ from hormuz.postgres_usage_store import PostgresUsageStore
 from hormuz._attribution_schema import TABLE_DDL
 from hormuz._outcome_schema import TABLE_DDL as OUTCOME_TABLES
 from hormuz._finance_schema import TABLE_DDL as FINANCE_TABLES
+from hormuz._budget_schema import TABLE_DDL as BUDGET_TABLES
 from hormuz.portfolio_repository import create_portfolio_repository
 from hormuz.portfolio_wire import ATTRIBUTIONS, canonical
 
@@ -54,7 +55,7 @@ class PostgresAttributionTransitionTests(PostgresTestCase):
                                   runtime_role=self.runtime_role, organization_ids=("acme", "beta"))
 
     def setUp(self):
-        self.assertEqual(postgres_module.POSTGRES_SCHEMA_VERSION, 12)
+        self.assertEqual(postgres_module.POSTGRES_SCHEMA_VERSION, 13)
         self._drop_schema(self.schema)
         self.predecessor_request = {"backend": "postgresql", "schema": self.schema, "owner_dsn": self.owner_dsn,
                                     "runtime_dsn": self.runtime_dsn, "runtime_role": self.runtime_role,
@@ -86,19 +87,24 @@ class PostgresAttributionTransitionTests(PostgresTestCase):
         original = postgres_module._migration_sql
 
         def migration(version, schema, *roles):
-            self.assertIn(version, (10, 11, 12))
+            self.assertIn(version, (10, 11, 12, 13))
             ddl = original(version, schema, *roles)
             return ddl + (" SELECT 1 / 0;" if fail and version == 10 else "")
 
         with mock.patch.object(postgres_module, "_migration_sql", side_effect=migration):
-            self.assertEqual(self.migrate().version, 12)
+            self.assertEqual(self.migrate().version, 13)
 
     def assert_prior_state_preserved(self):
         current = copy.deepcopy(self.snapshot())
-        added = set(TABLE_DDL) | set(OUTCOME_TABLES) | set(FINANCE_TABLES)
+        added = (
+            set(TABLE_DDL)
+            | set(OUTCOME_TABLES)
+            | set(FINANCE_TABLES)
+            | set(BUDGET_TABLES)
+        )
         current["rows"] = {table: rows for table, rows in current["rows"].items() if table not in added}
-        current["shape"] = [row for row in current["shape"] if not row[0].startswith(("portfolio_attribution_", "portfolio_outcome_", "portfolio_finance_"))]
-        current["rows"]["hormuz_schema_migrations"] = [row for row in current["rows"]["hormuz_schema_migrations"] if json.loads(row[0])["version"] not in {10, 11, 12}]
+        current["shape"] = [row for row in current["shape"] if not row[0].startswith(("portfolio_attribution_", "portfolio_outcome_", "portfolio_finance_", "portfolio_work_budget_"))]
+        current["rows"]["hormuz_schema_migrations"] = [row for row in current["rows"]["hormuz_schema_migrations"] if json.loads(row[0])["version"] not in {10, 11, 12, 13}]
         self.assertEqual(current, self.before)
 
     def backup(self):
@@ -135,7 +141,7 @@ class PostgresAttributionTransitionTests(PostgresTestCase):
     def test_postgres_attribution_migration_is_additive_and_idempotent(self):
         for _ in range(2):
             self.probe()
-            self.assertEqual(len(self.snapshot()["rows"]), 53)
+            self.assertEqual(len(self.snapshot()["rows"]), 58)
             self.assert_prior_state_preserved()
 
     def test_postgres_attribution_failure_and_retry_preserve_populated_registry(self):

@@ -10,9 +10,11 @@ This document describes the accepted implementation boundary. The
 [#215 registry](REGISTRY.md) now exists in source with six additive routes and
 SQLite/PostgreSQL persistence. [#216 attribution](ATTRIBUTION.md) adds optional
 authorized request admission, append-only corrections and immutable fact joins
-in source. Budgets, connectors, scorecards, recommendations, exact-candidate
-verification and the external pilot remain separately gated. This is not
-a claim that v1.1.0 is released.
+in source. [#217 work budgets](WORK_BUDGETS.md) now add an internal owner,
+atomic request enforcement, and analytics-first current reporting in source;
+protected-main runtime acceptance and public delivery remain open. Connectors,
+scorecards, recommendations, exact-candidate verification and the external
+pilot remain separately gated. This is not a claim that v1.1.0 is released.
 
 ## Decision loop
 

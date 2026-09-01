@@ -18,6 +18,7 @@ from urllib.parse import urlsplit
 from . import __version__
 from .auth import AuthenticationError, Authenticator
 from .attribution_admission import AdmissionError, REQUEST_HEADER as ATTRIBUTION_REQUEST_HEADER, RESULT_HEADER as ATTRIBUTION_RESULT_HEADER, select_admission
+from .budget_runtime import configured_route_rate_card
 from .config import GatewayConfig, Identity, ModelRoute, UpstreamConfig
 from .contracts import (
     ALLOCATION_BASIS_DIRECT_GATEWAY_REQUEST,
@@ -35,6 +36,7 @@ from .custody_runtime import resolve_upstream_credentials
 from .custody_runtime_projection import CustodyRuntimeProjection, CustodyRuntimeProjectionError
 from .evidence import EvidenceStorageError
 from .policy import PolicyDecision, PolicyEngine
+from .policy_document import local_policy_content_sha256
 from .policy_runtime import PolicyRuntime
 from .portfolio_http import handle_registry
 from .portfolio_repository import create_portfolio_repository
@@ -42,14 +44,89 @@ from .portfolio_service import PortfolioService
 from .portfolio_wire import PREFIX as PORTFOLIO_PREFIX
 from .postgres import PostgresStorageError
 from .redaction import RedactionError, SecretRedactor
-from .store import RequestAttempt, ReservationDenied, StorageSchemaError, UsageRepository
-from .store_router import create_postgres_runtime_pool, create_repository_bundle, create_usage_store
+from .store import RequestAttempt, ReservationDenied, StorageSchemaError, UsageRepository, WorkBudgetContext
+from .store_router import (
+    create_postgres_runtime_pool,
+    create_repository_bundle,
+    create_usage_store,
+    create_work_budget_request_repository,
+)
 from .usage import ResponseUsageParser
 
 
 LOGGER = logging.getLogger("hormuz")
 _STORAGE_FAILURES = (sqlite3.Error, EvidenceStorageError, PostgresStorageError, StorageSchemaError)
 _INGRESS_CREDENTIAL_HEADER = "X-Hormuz-Ingress-Credential"
+_OPENAI_PROVIDER_STATE_FIELDS = frozenset({
+    "conversation", "previous_response_id", "prompt",
+})
+_ANTHROPIC_PROVIDER_STATE_FIELDS = frozenset({"container", "mcp_servers"})
+_OPENAI_INLINE_TOOL_TYPES = frozenset({"custom", "function"})
+_ANTHROPIC_INLINE_TOOL_TYPES = frozenset({"custom"})
+_INLINE_ANTHROPIC_SOURCE_TYPES = frozenset({"base64", "content", "text"})
+
+
+def _provider_input_tokens_bounded(protocol: str, request: Mapping[str, Any]) -> bool:
+    """Recognize request inputs whose billed content is self-contained.
+
+    Serialized bytes conservatively bound inline text/data, but cannot bound
+    content a provider resolves from stored state, a URL, a file identifier,
+    or a server-side tool. Unknown reference forms fail closed when a work
+    budget is active; this classifier never fetches or inspects content.
+    """
+
+    if protocol == "openai":
+        if any(request.get(field) is not None for field in _OPENAI_PROVIDER_STATE_FIELDS):
+            return False
+        inline_tool_types = _OPENAI_INLINE_TOOL_TYPES
+    elif protocol == "anthropic":
+        if any(request.get(field) is not None for field in _ANTHROPIC_PROVIDER_STATE_FIELDS):
+            return False
+        inline_tool_types = _ANTHROPIC_INLINE_TOOL_TYPES
+    else:
+        return False
+
+    tools = request.get("tools")
+    if tools is not None:
+        if type(tools) is not list:
+            return False
+        for tool in tools:
+            if type(tool) is not dict:
+                return False
+            tool_type = tool.get("type")
+            if protocol == "anthropic" and tool_type is None:
+                continue
+            if type(tool_type) is not str or tool_type not in inline_tool_types:
+                return False
+
+    pending: list[object] = [request]
+    while pending:
+        value = pending.pop()
+        if type(value) is list:
+            pending.extend(value)
+            continue
+        if type(value) is not dict:
+            continue
+        kind = value.get("type")
+        if kind == "item_reference":
+            return False
+        if kind == "input_image":
+            if value.get("file_id") is not None:
+                return False
+            if "image_url" in value:
+                image_url = value.get("image_url")
+                if type(image_url) is not str or not image_url.startswith("data:"):
+                    return False
+        if kind == "input_file" and (
+            value.get("file_id") is not None or value.get("file_url") is not None
+        ):
+            return False
+        if kind in {"image", "document"}:
+            source = value.get("source")
+            if type(source) is not dict or source.get("type") not in _INLINE_ANTHROPIC_SOURCE_TYPES:
+                return False
+        pending.extend(value.values())
+    return True
 
 
 class GatewayServer(ThreadingHTTPServer):
@@ -83,8 +160,14 @@ class GatewayServer(ThreadingHTTPServer):
                 self.store, portfolio = repositories.usage, repositories.portfolio
             self.portfolio_service = PortfolioService(config, portfolio, self.authenticator)
             self.attribution_repository = portfolio.attributions
+            self.budget_repository = portfolio.budgets
             policy_runtime = PolicyRuntime(config, connection_pool=self.postgres_pool)
-            self.policy_engine = PolicyEngine(config, self.store, policy_runtime=policy_runtime)
+            self.policy_engine = PolicyEngine(
+                config,
+                self.store,
+                policy_runtime=policy_runtime,
+                work_budget_requests=create_work_budget_request_repository(self.store),
+            )
             self.policy_engine.policy_runtime.verify_active_policies()
             recovered_attempts = self.store.sweep_stale_request_attempts()
             if recovered_attempts:
@@ -571,15 +654,34 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             return
         attempt: RequestAttempt | None = None
         if account_usage:
-            reserved_output_tokens = redaction.value.get(output_field, 0)
-            if not isinstance(reserved_output_tokens, int) or isinstance(reserved_output_tokens, bool):
+            # Absence is not a zero-token ceiling: without either a request or
+            # effective-policy bound, work-budget cost cannot be reserved.
+            reserved_output_tokens = redaction.value.get(output_field)
+            output_tokens_bounded = (
+                type(reserved_output_tokens) is int and reserved_output_tokens >= 0
+            )
+            if not output_tokens_bounded:
                 reserved_output_tokens = 0
             reserved_input_tokens = len(body)
-            reserved_cost_microusd = decision.route.estimate_cost_microusd(
+            input_tokens_bounded = _provider_input_tokens_bounded(
+                protocol, redaction.value,
+            )
+            reserved_cost_microusd = decision.route.estimate_reservation_cost_microusd(
                 input_tokens=reserved_input_tokens,
                 output_tokens=max(0, reserved_output_tokens),
-                cache_read_tokens=0,
-                cache_write_tokens=0,
+            )
+            route_rate_card = configured_route_rate_card(
+                alias=decision.resolved_alias or decision.route.alias,
+                protocol=decision.route.protocol,
+                upstream_model=decision.route.upstream_model,
+                input_cost_per_million=decision.route.input_cost_per_million,
+                cache_read_cost_per_million=decision.route.cache_read_cost_per_million,
+                cache_write_cost_per_million=decision.route.cache_write_cost_per_million,
+                output_cost_per_million=decision.route.output_cost_per_million,
+            )
+            policy_digest = (
+                decision.snapshot.content_sha256
+                or local_policy_content_sha256(self.server.config)
             )
             try:
                 attempt = self.server.policy_engine.begin_request_attempt(
@@ -593,7 +695,30 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                     reserved_tokens=reserved_input_tokens + max(0, reserved_output_tokens),
                     reserved_cost_microusd=reserved_cost_microusd,
                     ttl_seconds=self.server.config.upstream_timeout_seconds + 60,
+                    work_budget=(
+                        None
+                        if admission is None
+                        else WorkBudgetContext(
+                            work_scope_id=None if admission.work_scope is None else admission.work_scope.work_scope_id,
+                            work_scope_version=None if admission.work_scope is None else admission.work_scope.version,
+                            confidence=admission.confidence,
+                            reason_code=admission.reason,
+                            reserved_output_tokens=max(0, reserved_output_tokens),
+                            output_tokens_bounded=output_tokens_bounded,
+                            input_tokens_bounded=input_tokens_bounded,
+                            policy_version=decision.policy_version,
+                            policy_digest=policy_digest,
+                            rate_card_id=str(route_rate_card["id"]),
+                            rate_card_version=int(route_rate_card["version"]),
+                            rate_card_digest=str(route_rate_card["content_digest"]),
+                            rate_card_currency=str(route_rate_card["currency"]),
+                        )
+                    ),
                 )
+            except _STORAGE_FAILURES:
+                if admission is not None:
+                    raise AdmissionError("dependency_unavailable", 503) from None
+                raise
             except ReservationDenied as error:
                 self.server.store.record(
                     identity=identity,
@@ -624,7 +749,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                     code="hormuz_budget_denied",
                 )
                 return
-        if admission is not None and attempt is not None:
+        if admission is not None and attempt is not None and attempt.attribution_event_id is None:
             try:
                 self.server.attribution_repository.admit(identity, client, protocol, admission, attempt.attempt_id)
             except AdmissionError as error:
@@ -640,6 +765,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                     except _STORAGE_FAILURES:
                         raise AdmissionError("dependency_unavailable", 503) from None
                 raise
+        if admission is not None and attempt is not None:
             self._attribution_result = admission.result_header
         self._forward(
             identity=identity,
@@ -782,6 +908,22 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 return
             else:
                 request_status = "failed"
+            if successful and not usage.evidence_complete:
+                self.server.store.mark_request_attempt_outcome_unknown(
+                    attempt=attempt,
+                    organization_id=identity.organization_id,
+                    reason_code="provider_transport_ambiguous",
+                )
+                LOGGER.warning(
+                    "request_outcome_unknown actor=%s team=%s client=%s protocol=%s "
+                    "requested_model=%s reason=provider_usage_unavailable",
+                    identity.actor_id,
+                    identity.team_id,
+                    client,
+                    protocol,
+                    decision.requested_model,
+                )
+                return
             cost = route.estimate_cost_microusd(
                 input_tokens=usage.input_tokens,
                 output_tokens=usage.output_tokens,

@@ -321,7 +321,7 @@ Public TLS remains a customer-controlled ingress responsibility. Read
 | Codex and Claude Code setup | [docs/CLIENTS.md](docs/CLIENTS.md) |
 | Policy administration | [docs/POLICY_CONTROL.md](docs/POLICY_CONTROL.md) |
 | Usage, tokens, cost, and budgets | [docs/USAGE.md](docs/USAGE.md) |
-| v1.1.0 development: registry and governed-run attribution | [docs/REGISTRY.md](docs/REGISTRY.md) and [docs/ATTRIBUTION.md](docs/ATTRIBUTION.md) |
+| v1.1.0 source development: portfolio registry, attribution, outcomes, finance, and internal work budgets | [docs/PORTFOLIO_INTELLIGENCE.md](docs/PORTFOLIO_INTELLIGENCE.md) and [docs/WORK_BUDGETS.md](docs/WORK_BUDGETS.md) |
 | Secret-egress controls | [docs/SECRET_CONTROLS.md](docs/SECRET_CONTROLS.md) |
 | Audit contracts and export | [docs/AUDIT.md](docs/AUDIT.md) |
 | Persistence and migrations | [docs/STORAGE.md](docs/STORAGE.md) |
