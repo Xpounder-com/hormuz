@@ -14,10 +14,11 @@ from contextlib import ExitStack, closing, contextmanager
 from pathlib import Path
 
 from ._hosted_config import HostedError, at_directory
+from ._sqlite_schema import SQLITE_SCHEMA_VERSION, verify_sqlite_schema_ready
 from .config import GatewayConfig
 from .onboarding import TeamDirectory
 from .session_store import SQLiteSessionStore, SESSION_STORE_SCHEMA_VERSION, _isoformat
-from .store import UsageStore
+from .store import StorageSchemaError, UsageStore
 
 
 MARKER = "initialized.json"
@@ -116,7 +117,34 @@ def _marker(config: GatewayConfig, *, recovered: bool) -> dict:
     return {**document, "binding": _mac(config, "state/v1", document)}
 
 
-def check_initialized(config: GatewayConfig) -> tuple[tuple[int, int], ...]:
+def _usage_schema_version(path: Path) -> int:
+    try:
+        with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True, timeout=5)) as connection:
+            connection.row_factory = sqlite3.Row
+            row = connection.execute(
+                "SELECT max(version) FROM hormuz_schema_migrations"
+            ).fetchone()
+            version = None if row is None else row[0]
+            if type(version) is not int or not 1 <= version <= SQLITE_SCHEMA_VERSION:
+                raise HostedError("hosted_state_schema_mismatch")
+            verify_sqlite_schema_ready(
+                connection,
+                schema_version=version,
+                maximum_supported_schema_version=SQLITE_SCHEMA_VERSION,
+                error_factory=StorageSchemaError,
+            )
+            return version
+    except HostedError:
+        raise
+    except (sqlite3.Error, StorageSchemaError):
+        raise HostedError("hosted_state_schema_mismatch") from None
+
+
+def _check_initialized(
+    config: GatewayConfig,
+    *,
+    require_current_usage_schema: bool,
+) -> tuple[tuple[tuple[int, int], ...], int]:
     directory = config.database_path.parent
     _private(directory, directory=True)
     marker = _read(directory / MARKER)
@@ -141,8 +169,20 @@ def check_initialized(config: GatewayConfig) -> tuple[tuple[int, int], ...]:
         connection.execute("SELECT id FROM human_sessions LIMIT 0")
         connection.execute("SELECT id FROM onboarding_memberships LIMIT 0")
         connection.execute("SELECT id FROM console_grants LIMIT 0")
-    UsageStore(config.database_path, read_only=True).verify_ready()
-    return tuple(identities)
+    usage_schema_version = _usage_schema_version(config.database_path)
+    if require_current_usage_schema:
+        if usage_schema_version != SQLITE_SCHEMA_VERSION:
+            raise HostedError("hosted_state_schema_mismatch")
+        UsageStore(config.database_path, read_only=True).verify_ready()
+    return tuple(identities), usage_schema_version
+
+
+def check_initialized(config: GatewayConfig) -> tuple[tuple[int, int], ...]:
+    identities, _ = _check_initialized(
+        config,
+        require_current_usage_schema=True,
+    )
+    return identities
 
 
 def initialize(config: GatewayConfig) -> None:
@@ -198,11 +238,19 @@ def _destination(path: Path, active: Path) -> None:
     path.mkdir(mode=0o700)
 
 
-def snapshot(config: GatewayConfig, destination: Path) -> None:
-    with state_lock(config), ExitStack() as stack:
-        check_initialized(config)
-        directory = config.database_path.parent
-        _destination(destination, directory)
+def _snapshot_locked(
+    config: GatewayConfig,
+    destination: Path,
+    *,
+    require_current_usage_schema: bool,
+) -> int:
+    _, usage_schema_version = _check_initialized(
+        config,
+        require_current_usage_schema=require_current_usage_schema,
+    )
+    directory = config.database_path.parent
+    _destination(destination, directory)
+    with ExitStack() as stack:
         # Hold write reservations on BOTH databases before taking either copy.
         # Backup uses separate readers to avoid backing up a write transaction.
         for name in DATABASES:
@@ -226,6 +274,42 @@ def snapshot(config: GatewayConfig, destination: Path) -> None:
         _write(destination / MARKER, _read(directory / MARKER))
         document = {"version": 1, "files": {name: _sha256(destination / name) for name in (*DATABASES, MARKER)}}
         _write(destination / SNAPSHOT, {**document, "binding": _mac(config, "snapshot/v1", document)})
+    return usage_schema_version
+
+
+def snapshot(config: GatewayConfig, destination: Path) -> None:
+    with state_lock(config):
+        _snapshot_locked(
+            config,
+            destination,
+            require_current_usage_schema=True,
+        )
+
+
+def migrate_usage(config: GatewayConfig, snapshot_directory: Path) -> dict[str, int | bool]:
+    """Snapshot and explicitly migrate an offline hosted usage store."""
+
+    with state_lock(config):
+        _, source_version = _check_initialized(
+            config,
+            require_current_usage_schema=False,
+        )
+        if source_version == SQLITE_SCHEMA_VERSION:
+            raise HostedError("hosted_state_migration_not_required")
+        snapshot_version = _snapshot_locked(
+            config,
+            snapshot_directory,
+            require_current_usage_schema=False,
+        )
+        if snapshot_version != source_version:
+            raise HostedError("hosted_state_schema_mismatch")
+        UsageStore(config.database_path).verify_ready()
+        check_initialized(config)
+        return {
+            "snapshot_created": True,
+            "source_usage_schema_version": source_version,
+            "target_usage_schema_version": SQLITE_SCHEMA_VERSION,
+        }
 
 
 def restore(config: GatewayConfig, source: Path) -> dict[str, int | bool]:

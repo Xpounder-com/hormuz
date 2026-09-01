@@ -1,25 +1,30 @@
 from __future__ import annotations
 
+import io
 import json
 import os
 import secrets
+import sqlite3
 import subprocess
 import sys
 import tempfile
 import time
 import unittest
+from contextlib import closing, redirect_stderr, redirect_stdout
 from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
 from hormuz._hosted_config import HostedError, at_directory, load_profile
+from hormuz._sqlite_schema import initialize_sqlite_schema
 from hormuz._hosted_state import (
     DATABASES, MARKER, check_initialized, check_recovered_closed, initialize, restore, sessions,
     snapshot, state_lock,
 )
-from hormuz.hosted import proxy_settings, stop_child
+from hormuz.hosted import main, proxy_settings, stop_child
 from hormuz.onboarding import TeamDirectory
 from hormuz.session_store import SessionStoreError
+from hormuz.store import StorageSchemaError, UsageStore
 from tests._console_fixtures import activate_member
 from tests._hosted_fixtures import console_credential, directory_setup, profile
 
@@ -31,6 +36,46 @@ class HostedStateTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name).resolve()
         self.config, self.settings, self.document = profile(self.root)
+
+    def replace_usage_store(self, *, version: int) -> None:
+        path = self.config.database_path
+        for suffix in ("", "-shm", "-wal"):
+            path.with_name(path.name + suffix).unlink(missing_ok=True)
+        with closing(sqlite3.connect(path)) as connection, connection:
+            connection.row_factory = sqlite3.Row
+            initialize_sqlite_schema(
+                connection,
+                schema_version=version,
+                maximum_supported_schema_version=version,
+                apply_migration=UsageStore._apply_migration,
+                error_factory=StorageSchemaError,
+            )
+            connection.execute(
+                """
+                INSERT INTO gateway_budget_reservations (
+                    id, created_at, expires_at, organization_id, actor_id,
+                    team_id, reserved_tokens, reserved_cost_microusd, attempt_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)
+                """,
+                (
+                    "pre-migration-hold",
+                    "2026-09-01T00:00:00+00:00",
+                    "2026-09-02T00:00:00+00:00",
+                    "customer-a",
+                    "member-a",
+                    "customer-a-eng",
+                    1,
+                    1,
+                ),
+            )
+        path.chmod(0o600)
+
+    @staticmethod
+    def usage_schema_version(path: Path) -> int:
+        with closing(sqlite3.connect(path)) as connection:
+            return int(connection.execute(
+                "SELECT max(version) FROM hormuz_schema_migrations WHERE state = 'applied'"
+            ).fetchone()[0])
 
     def test_profile_is_provider_free_and_rejects_expansion(self):
         self.assertEqual(self.config.upstreams, {})
@@ -115,6 +160,75 @@ class HostedStateTests(unittest.TestCase):
                 snapshot(self.config, self.root / "blocked")
         self.assertFalse((self.root / "blocked").exists())
         snapshot(self.config, self.root / "snapshot")
+
+    def test_usage_migration_is_explicit_maintenance_only_and_snapshotted(self):
+        initialize(self.config)
+        self.replace_usage_store(version=6)
+        with self.assertRaisesRegex(HostedError, "schema_mismatch"):
+            check_initialized(self.config)
+
+        snapshot_directory = self.root / "pre-migration"
+        output, error = io.StringIO(), io.StringIO()
+        with (
+            patch.dict(os.environ, self.settings, clear=True),
+            patch("hormuz.hosted.logging.disable"),
+            redirect_stdout(output),
+            redirect_stderr(error),
+        ):
+            status = main([
+                "--config", str(self.config.source_path), "migrate",
+                "--snapshot-directory", str(snapshot_directory),
+            ])
+        self.assertEqual(status, 1)
+        self.assertEqual(json.loads(error.getvalue())["code"], "hosted_migration_requires_maintenance")
+        self.assertEqual(output.getvalue(), "")
+        self.assertFalse(snapshot_directory.exists())
+        self.assertEqual(self.usage_schema_version(self.config.database_path), 6)
+
+        output, error = io.StringIO(), io.StringIO()
+        maintenance = {**self.settings, "HORMUZ_HOSTED_MODE": "maintenance"}
+        with (
+            patch.dict(os.environ, maintenance, clear=True),
+            patch("hormuz.hosted.logging.disable"),
+            redirect_stdout(output),
+            redirect_stderr(error),
+        ):
+            status = main([
+                "--config", str(self.config.source_path), "migrate",
+                "--snapshot-directory", str(snapshot_directory),
+            ])
+        self.assertEqual((status, error.getvalue()), (0, ""))
+        event = json.loads(output.getvalue())
+        self.assertEqual(event["operation"], "migrate")
+        self.assertFalse(event["inference_enabled"])
+        self.assertTrue(event["snapshot_created"])
+        self.assertEqual(event["source_usage_schema_version"], 6)
+        self.assertEqual(event["target_usage_schema_version"], UsageStore.schema_version)
+        self.assertEqual(self.usage_schema_version(snapshot_directory / "usage.sqlite3"), 6)
+        self.assertEqual(self.usage_schema_version(self.config.database_path), UsageStore.schema_version)
+        for path in (snapshot_directory / "usage.sqlite3", self.config.database_path):
+            with closing(sqlite3.connect(path)) as connection:
+                self.assertEqual(connection.execute(
+                    "SELECT count(*) FROM gateway_budget_reservations WHERE id = ?",
+                    ("pre-migration-hold",),
+                ).fetchone()[0], 1)
+        check_initialized(self.config)
+
+        second = self.root / "unnecessary-migration"
+        output, error = io.StringIO(), io.StringIO()
+        with (
+            patch.dict(os.environ, maintenance, clear=True),
+            patch("hormuz.hosted.logging.disable"),
+            redirect_stdout(output),
+            redirect_stderr(error),
+        ):
+            status = main([
+                "--config", str(self.config.source_path), "migrate",
+                "--snapshot-directory", str(second),
+            ])
+        self.assertEqual(status, 1)
+        self.assertEqual(json.loads(error.getvalue())["code"], "hosted_state_migration_not_required")
+        self.assertFalse(second.exists())
 
     def test_restart_preserves_access_but_stale_restore_revokes_every_authority(self):
         initialize(self.config)

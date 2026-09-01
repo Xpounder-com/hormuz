@@ -191,6 +191,43 @@ scaling and zero-downtime deploys. These are explicit limitations of this stagin
 profile, not evidence for a latency/availability product promise. See
 [persistent disk limitations](https://render.com/docs/disks).
 
+## Explicit usage-schema upgrade
+
+The hosted process never changes a durable schema during startup. A reviewed
+image that requires a newer usage-evidence schema therefore refuses active mode
+until an operator performs an offline migration. Keep the last live deployment
+available and record its exact source revision before starting.
+
+Set `HORMUZ_HOSTED_MODE=maintenance`, deploy the target image, and require
+`/health` to report maintenance while `/ready`, console, callbacks and model
+routes remain unavailable. Then run the target image's explicit migration from
+the service Shell with a new absolute snapshot directory on the persistent disk:
+
+```sh
+python -I -m hormuz.hosted --config /var/lib/hormuz/operator/hormuz-runtime.json migrate \
+  --snapshot-directory /var/lib/hormuz/private/pre-usage-migration-001
+python -I -m hormuz.hosted --config /var/lib/hormuz/operator/hormuz-runtime.json check
+```
+
+`migrate` refuses active mode, an unavailable lifecycle lock, an existing
+snapshot destination, malformed or newer state, and a store already at the
+target schema. Under one exclusive hosted-state lock it validates the bound
+profile, exact current session schema and complete older usage ledger; takes one
+SQLite-consistent snapshot of both databases; migrates the usage ledger in a
+transaction; and rechecks the complete current state. Its output contains only
+the source and target schema numbers plus `snapshot_created: true`. It performs
+no provider call and does not enable inference.
+
+Keep maintenance active if any step fails. A migration error leaves the
+pre-migration snapshot for investigation and SQLite rolls back the uncommitted
+schema transaction. The snapshot is plaintext and on the same disk, so it is a
+rollback aid rather than a disaster-recovery copy. For a durable off-disk copy,
+use the encrypted export procedure below with the prior compatible image before
+the migration. Restoring an older snapshot requires that prior compatible image
+and the conservative recovery path, which revokes restored authority rather than
+promising login continuity. Only after `check` succeeds should the operator set
+`HORMUZ_HOSTED_MODE=active` and deploy the same reviewed target revision.
+
 ## Offline snapshot, encrypted export and conservative restore
 
 Switch to maintenance and confirm callbacks/console return 503 before lifecycle
