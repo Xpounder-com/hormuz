@@ -271,6 +271,31 @@ def validate_budget_activation_row(row: Mapping[str, Any]) -> dict[str, Any]:
     return dict(row)
 
 
+def validate_budget_activation_predecessor(
+    activation: Mapping[str, Any],
+    predecessor: Mapping[str, Any] | None,
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """Validate one activation's adjacency to its immediate predecessor."""
+
+    verified = validate_budget_activation_row(activation)
+    if predecessor is None:
+        if verified["activation_generation"] != 1:
+            raise BudgetActivationIntegrityError()
+        return verified, None
+    verified_predecessor = validate_budget_activation_row(predecessor)
+    if (
+        verified_predecessor["organization_id"] != verified["organization_id"]
+        or verified_predecessor["budget_plan_id"] != verified["budget_plan_id"]
+        or verified_predecessor["activation_generation"]
+        != verified["activation_generation"] - 1
+        or verified["previous_version"]
+        != verified_predecessor["current_version"]
+        or verified["committed_at"] < verified_predecessor["committed_at"]
+    ):
+        raise BudgetActivationIntegrityError()
+    return verified, verified_predecessor
+
+
 def validate_budget_pointer_row(row: Mapping[str, Any]) -> dict[str, Any]:
     """Validate the mutable active pointer before following its references."""
 
@@ -694,8 +719,9 @@ def verify_postgres_budget(cursor, schema: str, error_factory) -> None:
             "JOIN pg_attribute a ON a.attrelid=t.oid AND a.attnum=key.attnum "
             "WHERE n.nspname=%s AND t.relname=%s AND i.relname=%s "
             "AND x.indisvalid AND x.indisready AND NOT x.indisunique AND x.indpred IS NULL "
+            "AND x.indnkeyatts=%s "
             "GROUP BY i.relname",
-            (schema, table, index),
+            (schema, table, index, len(columns)),
         )
         index_row = cursor.fetchone()
         index_values = None if index_row is None else tuple(

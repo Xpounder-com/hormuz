@@ -329,7 +329,7 @@ class ConfiguredModelIdentityTests(unittest.TestCase):
             upstream_model="provider/model",
             requested_model="requested",
         )
-        self.assertRegex(normalized, r"\Aconfigured-model-[0-9a-f]{64}\Z")
+        self.assertRegex(normalized, r"\Aconfigured-model-sha256:[0-9a-f]{64}\Z")
         self.assertEqual(
             normalized,
             configured_model_id(
@@ -338,6 +338,15 @@ class ConfiguredModelIdentityTests(unittest.TestCase):
                 requested_model="changed-request",
             ),
         )
+        reserved_alias = configured_model_id(
+            resolved_alias=normalized,
+            upstream_model="provider/model",
+            requested_model="requested",
+        )
+        self.assertRegex(
+            reserved_alias, r"\Aconfigured-model-sha256:[0-9a-f]{64}\Z",
+        )
+        self.assertNotEqual(reserved_alias, normalized)
 
 
 class GatewayIntegrationTests(unittest.TestCase):

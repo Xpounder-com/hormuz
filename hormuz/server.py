@@ -598,7 +598,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 output_tokens=max(0, reserved_output_tokens),
             )
             route_rate_card = configured_route_rate_card(
-                alias=decision.route.alias,
+                alias=decision.resolved_alias or decision.route.alias,
                 protocol=decision.route.protocol,
                 upstream_model=decision.route.upstream_model,
                 input_cost_per_million=decision.route.input_cost_per_million,

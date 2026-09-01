@@ -210,9 +210,13 @@ class BudgetAssertions:
             self.config,
             model_routes={
                 "managed-route": ModelRoute(
-                    "managed-route", "openai", provider_model,
+                    "route-object-alias", "openai", provider_model,
                 ),
             },
+            organization_policy=replace(
+                self.config.organization_policy,
+                fallback_model="managed-route",
+            ),
         )
         suite = create_policy_scenario_suite(
             organization_id="acme",
@@ -227,7 +231,22 @@ class BudgetAssertions:
             preview = self.repository.preview_plan(
                 ADMIN, plan["budget_plan_id"], plan["version"], suite,
             )
+            fallback_suite = create_policy_scenario_suite(
+                organization_id="acme",
+                scenario_id="provider-native-model-name-fallback",
+                actor_id="alice",
+                client="codex",
+                protocol="openai",
+                requested_model="unknown-route",
+                requested_output_tokens=20,
+            )
+            fallback_preview = self.repository.preview_plan(
+                ADMIN, plan["budget_plan_id"], plan["version"], fallback_suite,
+            )
         self.assertNotIn("model_intersection", preview["restriction_reasons"])
+        self.assertNotIn(
+            "model_intersection", fallback_preview["restriction_reasons"],
+        )
 
     def check_plan_versions_activation_and_management_change(self):
         start, end = "2026-08-01T00:00:00Z", "2027-09-01T00:00:00Z"
@@ -797,6 +816,54 @@ class BudgetAssertions:
                 "unavailable",
                 lambda: self.repository.get_plan(ADMIN, first["budget_plan_id"]),
             )
+
+    def check_request_time_activation_predecessor_is_validated(self):
+        first = self.create(amount="10")
+        self.activate(first)
+        second = self.create(
+            amount="11", budget_plan_id=first["budget_plan_id"], expected_version=1,
+        )
+        third = self.create(
+            amount="12", budget_plan_id=first["budget_plan_id"], expected_version=2,
+        )
+        initial_activation = next(
+            row
+            for row in self.budget_rows()["portfolio_work_budget_activation_events"]
+            if row["budget_plan_id"] == first["budget_plan_id"]
+        )
+        third_created_at = next(
+            row["created_at"]
+            for row in self.budget_rows()["portfolio_work_budget_plan_versions"]
+            if row["budget_plan_id"] == first["budget_plan_id"]
+            and row["version"] == third["version"]
+        )
+        self.inject_nonpredecessor_activation(
+            plan_id=first["budget_plan_id"],
+            current_version=second["version"],
+            wrong_previous_version=third["version"],
+            committed_at=third_created_at,
+            template=initial_activation,
+        )
+
+        with self.assertRaises(ReservationDenied):
+            self.attempt(cost_microusd=1)
+        self.assertEqual(
+            self.budget_rows()["portfolio_work_budget_reservation_bindings"],
+            [],
+        )
+        self.assertEqual(self.attribution_rows(), [])
+        self.assertIn(
+            "attribution_invalid",
+            [
+                row["reason_code"]
+                for row in self.budget_rows()["portfolio_work_budget_audit_events"]
+                if row["operation"] == "reserve_denied"
+            ],
+        )
+        self.error(
+            "unavailable",
+            lambda: self.repository.current_report(ADMIN, first["budget_plan_id"]),
+        )
 
     def check_denial_audit_retains_evaluation_time(self):
         plan = self.create(amount="10")

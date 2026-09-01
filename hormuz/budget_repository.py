@@ -27,7 +27,7 @@ from ._budget_schema import (
     BudgetPlanIntegrityError,
     budget_amount_text,
     validate_active_budget_rows,
-    validate_budget_activation_row,
+    validate_budget_activation_predecessor,
     validate_budget_plan_row,
     validate_budget_pointer_row,
 )
@@ -440,8 +440,9 @@ class WorkBudgetRepository:
         activated_versions: set[int] = set()
         for raw in rows:
             activation = dict(raw)
+            prior = None if not result else result[-1][1]
             try:
-                validate_budget_activation_row(activation)
+                validate_budget_activation_predecessor(activation, prior)
             except BudgetIntegrityError:
                 raise BudgetRepositoryError("unavailable") from None
             plan = WorkBudgetRepository._plan(
@@ -463,24 +464,12 @@ class WorkBudgetRepository:
                 )
             except BudgetIntegrityError:
                 raise BudgetRepositoryError("unavailable") from None
-            prior = None if not result else result[-1][1]
-            expected_generation = len(result) + 1
             expected_reason = (
                 "reactivated"
                 if activation["current_version"] in activated_versions
                 else "accepted"
             )
-            if (
-                activation["activation_generation"] != expected_generation
-                or (
-                    prior is not None
-                    and (
-                        activation["previous_version"] != prior["current_version"]
-                        or activation["committed_at"] < prior["committed_at"]
-                    )
-                )
-                or activation["reason_code"] != expected_reason
-            ):
+            if activation["reason_code"] != expected_reason:
                 raise BudgetRepositoryError("unavailable")
             activated_versions.add(activation["current_version"])
             result.append((plan, activation))
@@ -1075,9 +1064,12 @@ class WorkBudgetRepository:
         policy = snapshot.effective_policy
         if policy.allowed_clients is not None and scenario.client not in policy.allowed_clients:
             return None
-        alias = scenario.requested_model
-        route = self.config.model_routes.get(alias)
-        allowed = policy.allowed_models is None or alias in policy.allowed_models
+        selected_alias = scenario.requested_model
+        route = self.config.model_routes.get(selected_alias)
+        allowed = (
+            policy.allowed_models is None
+            or selected_alias in policy.allowed_models
+        )
         if route is None or route.protocol != scenario.protocol or not allowed:
             fallback = (
                 (policy.fallback_models or {}).get(scenario.protocol)
@@ -1093,6 +1085,7 @@ class WorkBudgetRepository:
                 )
             ):
                 return None
+            selected_alias = fallback
         output_tokens = scenario.requested_output_tokens
         if policy.max_output_tokens is not None and (
             output_tokens is None or output_tokens > policy.max_output_tokens
@@ -1101,7 +1094,7 @@ class WorkBudgetRepository:
         return ({
             "provider_id": route.protocol,
             "model_id": configured_model_id(
-                resolved_alias=route.alias,
+                resolved_alias=selected_alias,
                 upstream_model=route.upstream_model,
                 requested_model=scenario.requested_model,
             ),

@@ -61,6 +61,10 @@ declared window contains the database time may activate. Emergency tightening
 and rollback are explicit activations and do not erase prior consumption or
 unknown holds. A tenant may retain at most 1,000 activated plan IDs in this
 runtime version; activation and request-time scans both enforce that bound.
+Every request validates the current event against the immediately preceding
+generation, including the prior active version and nondecreasing database
+timestamp. Management reads additionally validate the bounded full activation
+history.
 
 Preview is a dry run against a nonempty frozen policy scenario suite. It cannot
 activate a plan, reserve spend, or call a provider. It evaluates the effective
@@ -113,13 +117,16 @@ historical `as_of` reports never compare gateway-process and database clock
 domains. An `outcome_unknown` attempt uses the same database clock, retains the
 reserved amount, and is never automatically replayed.
 
-The bound model dimension uses the configured route alias when it already fits
-the frozen opaque-ID contract. A legacy-compatible alias outside that grammar
-is mapped deterministically to `configured-model-<sha256(alias)>`. The
-provider-native model name remains in request evidence and the exact rate-card
-digest, so names such as `vendor/model`—including names longer than the durable
-model-ID field—do not become runtime-only work-budget failures. Management
-previews use the same route-identity rule as request-time enforcement.
+The bound model dimension uses the selected `model_routes` mapping key when it
+fits the frozen opaque-ID contract and is outside the reserved generated-ID
+namespace. Any other key is mapped deterministically to
+`configured-model-sha256:<sha256(key)>`; a configured key already shaped like
+that generated form is re-encoded so it cannot impersonate another route's
+generated identity. The provider-native model name remains in request evidence
+and the exact rate-card digest, so names such as `vendor/model`—including names
+longer than the durable model-ID field—do not become runtime-only work-budget
+failures. Management previews use the same selected mapping key and identity
+rule as request-time enforcement, including fallback routing.
 
 Coverage counters form a declared partition: included, unattributed, and
 unsupported attempts sum exactly to the population. Numeric- or model-ceiling
@@ -139,8 +146,9 @@ activation, or active-pointer evidence is refused with a fixed error and is
 never repaired or reflected. Both adapters require the same tenant-plan-window
 binding index so request-time enforcement and reporting do not scan unrelated
 historical bindings. They also require a tenant/plan/operation/evaluation-time
-audit index, with version and reason as covering columns, so denial aggregation
-does not devolve into a tenant-wide audit scan. SQLite and PostgreSQL readiness
+audit index whose six declared columns are all true key attributes, so denial
+aggregation does not devolve into a tenant-wide audit scan. PostgreSQL
+`INCLUDE`-only copies do not satisfy that shape. SQLite and PostgreSQL readiness
 both reject a missing, malformed, partial, or invalid copy of either required
 index without repairing it in place.
 
@@ -159,7 +167,9 @@ same rules in SQLite. Runtime tests cover both adapters, exact decimals,
 hierarchy denial, settlement, uncertain holds, activation/replacement/rollback,
 mandatory auditing, process-clock skew, large-number reservation coverage,
 corruption refusal, indexed denial reporting and readiness refusal, configured
-provider-model names, and independent PostgreSQL replicas.
+provider-model names, immediate activation-predecessor integrity, generated
+model-namespace collision resistance, preview/runtime mapping-key parity, and
+independent PostgreSQL replicas.
 
 ## Remaining gates
 
