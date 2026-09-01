@@ -9,7 +9,7 @@ The proposed permanent identifier is `com.xpounder.hormuz`. Register and approve
 The release needs two Apple-controlled credentials:
 
 1. A **Developer ID Application** certificate and private key, exported as a password-protected PKCS#12 (`.p12`) file. This signs the app outside the Mac App Store.
-2. An App Store Connect API key authorized for notarization. Keep its `.p8` private key outside the repository and never put it in a workflow input, shell argument, issue, artifact, or log.
+2. An App Store Connect **team** API key authorized for notarization. Apple's [current API-key contract](https://developer.apple.com/documentation/appstoreconnectapi/creating-api-keys-for-app-store-connect-api) says individual keys cannot use `notarytool`. Team keys apply across every app in the account, so select the least privileged role that passes `notarytool store-credentials --validate`, dedicate the key to Hormuz notarization, and keep its one-time-download `.p8` private key outside the repository. Never put it in a workflow input, shell argument, issue, artifact, or log.
 
 The app uses hardened runtime and no custom entitlements. It is a universal `arm64`/`x86_64` binary for macOS 14 or later. Its only dynamic dependencies are Apple system frameworks and libraries. The same signed executable provides the window and the Keychain credential helper, avoiding a separately signed nested helper.
 
@@ -55,11 +55,13 @@ The manual **Mac signed distribution** workflow performs the same steps on a Git
 | --- | --- |
 | `MACOS_DEVELOPER_ID_P12_BASE64` | Base64 of the password-protected Developer ID `.p12` |
 | `MACOS_DEVELOPER_ID_P12_PASSWORD` | Export password for that `.p12` |
-| `APPLE_NOTARY_KEY_P8_BASE64` | Base64 of the App Store Connect API `.p8` |
+| `APPLE_NOTARY_KEY_P8_BASE64` | Base64 of the dedicated App Store Connect **team** API `.p8`; individual keys do not work with `notarytool` |
 | `APPLE_NOTARY_KEY_ID` | API key ID |
 | `APPLE_NOTARY_ISSUER_ID` | Team API issuer UUID |
 
 The job refuses to sign a feature branch: the checked-out commit must be the repository's exact default-branch commit selected by the workflow run. The protected environment should independently restrict deployment to that branch and require a reviewer. The job creates an ephemeral Keychain, imports only the supplied identity, validates notarization credentials, and deletes credential files and the Keychain before the step exits. It has read-only repository permission. It uploads the notarized archive, dSYM, and content-free proofs for 30 days; it cannot create a GitHub release or publish the artifact. Publication remains a separate digest-reviewed decision.
+
+Generate the team key with a dedicated name such as `Hormuz Notarization CI`. Apple makes the private half downloadable only once. Record the key ID and issuer ID separately, provision the five environment secrets through an encrypted secret-setting path, validate that the environment contains exactly those five names, then remove the downloaded `.p8` and exported `.p12` from ordinary working directories. Do not reuse an Admin key merely because it already exists: team keys are account-wide, and their role cannot be edited after creation.
 
 Apple's stapler adds `Hormuz.app/Contents/CodeResources` to the accepted app. The final archive verifier requires that ticket file only in notarized mode, compares its exact archived bytes with the stapled bundle, and rejects it from pre-notarization archives. This keeps the upload and customer archive shapes distinct while proving that the distributed ZIP retains the offline ticket.
 
