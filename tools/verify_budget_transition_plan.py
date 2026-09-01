@@ -34,7 +34,7 @@ REPORT_V1_PATH = "docs/work-budget-reports-wire-v1.json"
 REPORT_V2_PATH = "docs/work-budget-reports-wire-v2.json"
 FIXTURE_PATH = "tests/fixtures/portfolio_intelligence/budget-report-v2-examples.json"
 PLAN_CANONICAL_SHA256 = "a07f9bd1a42084ce361090e3c53f7c4540a1264b8cccce7264af81d633aefaa2"
-IMPLEMENTATION_CANONICAL_SHA256 = "510c1891a01083a150aeeb35807f078be68fd2b4a895cad3564f3450b47ce2c4"
+IMPLEMENTATION_CANONICAL_SHA256 = "3587208f682ce3dbf588771371fa86f39e4ac6d0e0a38307b8ede16b176eb1d9"
 REPORT_V1_SHA256 = "6a45a010de84273be45da85115d8d41267d5689addd29df592c47e8704a29cbf"
 REPORT_V2_SHA256 = "1e09eb42bedc8d91dc5ec230adb1f21360832940b237e38c8a88b86285a2c6d2"
 FIXTURE_SHA256 = "2a51eeadbe3d7cce38ee94ed3b23933672bbd5c29d40315010e5fecbb110e3d6"
@@ -62,9 +62,12 @@ RUNTIME_REQUIRED_FILES = (
     "hormuz/_budget_schema.py",
     "hormuz/budget_repository.py",
     "hormuz/budget_runtime.py",
+    "hormuz/server.py",
+    "hormuz/usage.py",
     "hormuz/migrations/postgresql/0013_work_budgets.sql",
     "tests/_budget_fixture.py",
     "tests/test_budget_schema.py",
+    "tests/test_gateway.py",
     "tests/test_sqlite_budget.py",
     "tests/test_postgres_budget.py",
 )

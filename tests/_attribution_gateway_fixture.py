@@ -15,7 +15,7 @@ from unittest import mock
 
 from hormuz._portfolio_sql import PortfolioSQL
 from hormuz._attribution_schema import TABLE_DDL
-from hormuz.attribution_admission import RESULT_HEADER
+from hormuz.attribution_admission import RESULT_HEADER, select_admission
 from hormuz.budget_runtime import RuntimeBudgetSQL
 from hormuz.config import ModelRoute, UpstreamConfig
 from hormuz.portfolio_repository import create_portfolio_repository
@@ -98,7 +98,7 @@ class AttributionGatewayAssertions:
         self.principal = self.server.portfolio_service.authenticate(ADMIN)
 
     def native(self, path="/v1/responses", *, headers=None, token=ADMIN,
-               stream=False, include_output_limit=True, body_changes=None):
+               stream=False, include_output_limit=True, request_changes=None):
         anthropic = path.startswith("/v1/messages")
         output_field = "max_tokens" if anthropic else "max_output_tokens"
         body = {"model": "synthetic-anthropic" if anthropic else "synthetic",
@@ -108,7 +108,8 @@ class AttributionGatewayAssertions:
             body.pop(output_field)
         if stream:
             body["stream"] = True
-        body.update(body_changes or {})
+        if request_changes is not None:
+            body.update(request_changes)
         payload = json.dumps(body).encode()
         connection = http.client.HTTPConnection("127.0.0.1", self.server.server_port, timeout=15)
         connection.putrequest("POST", path)
@@ -125,6 +126,32 @@ class AttributionGatewayAssertions:
 
     def events(self):
         return self.server.portfolio_service.dispatch(ADMIN, "GET", ATTRIBUTIONS)[1]["items"]
+
+    def activate_scope_budget(self, *, amount="10"):
+        now = datetime.now(timezone.utc)
+        budget = self.server.budget_repository
+        self.assertIsNotNone(budget)
+        plan = budget.create_plan(self.principal, {
+            "schema_id": "hormuz.work-budget-plan-request", "schema_version": 1,
+            "budget_plan_id": None, "expected_version": None,
+            "work_scope": {
+                "work_scope_id": self.scope["work_scope_id"],
+                "version": self.scope["version"],
+            },
+            "window": {
+                "start_at": (now - timedelta(days=1)).isoformat(timespec="microseconds").replace("+00:00", "Z"),
+                "end_at": (now + timedelta(days=1)).isoformat(timespec="microseconds").replace("+00:00", "Z"),
+            },
+            "currency": "USD", "amount": amount, "allowed_models": None,
+            "output_token_cap": None, "per_request_cost_cap": None,
+            "reason_code": "created",
+        })
+        budget.activate_plan(self.principal, plan["budget_plan_id"], {
+            "schema_id": "hormuz.work-budget-plan-activation-request", "schema_version": 1,
+            "version": 1, "expected_active_version": None,
+            "expected_activation_generation": 0, "reason_code": "accepted",
+        })
+        return budget, plan
 
     def check_native_success_bodies_models_and_header_stripping(self):
         for path in ("/v1/responses", "/v1/messages", "/v1/responses/compact"):
@@ -205,29 +232,7 @@ class AttributionGatewayAssertions:
         self.assertEqual(self.server.store.active_budget_reservations(organization_id="acme"), 0)
 
     def check_unbounded_output_never_egresses_under_active_work_budget(self):
-        now = datetime.now(timezone.utc)
-        budget = self.server.budget_repository
-        self.assertIsNotNone(budget)
-        plan = budget.create_plan(self.principal, {
-            "schema_id": "hormuz.work-budget-plan-request", "schema_version": 1,
-            "budget_plan_id": None, "expected_version": None,
-            "work_scope": {
-                "work_scope_id": self.scope["work_scope_id"],
-                "version": self.scope["version"],
-            },
-            "window": {
-                "start_at": (now - timedelta(days=1)).isoformat(timespec="microseconds").replace("+00:00", "Z"),
-                "end_at": (now + timedelta(days=1)).isoformat(timespec="microseconds").replace("+00:00", "Z"),
-            },
-            "currency": "USD", "amount": "10", "allowed_models": None,
-            "output_token_cap": None, "per_request_cost_cap": None,
-            "reason_code": "created",
-        })
-        budget.activate_plan(self.principal, plan["budget_plan_id"], {
-            "schema_id": "hormuz.work-budget-plan-activation-request", "schema_version": 1,
-            "version": 1, "expected_active_version": None,
-            "expected_activation_generation": 0, "reason_code": "accepted",
-        })
+        self.activate_scope_budget()
         before = list(NativeAttributionProvider.requests)
         for path in ("/v1/responses", "/v1/messages"):
             status, response_headers, data = self.native(
@@ -279,8 +284,8 @@ class AttributionGatewayAssertions:
             },
             "currency": "USD", "amount": "10",
             "allowed_models": [
-                {"provider_id": "openai", "model_id": "gpt-test-fast", "model_version": None},
-                {"provider_id": "openai", "model_id": "gpt-test-deep", "model_version": None},
+                {"provider_id": "openai", "model_id": "synthetic", "model_version": None},
+                {"provider_id": "openai", "model_id": "synthetic-failover", "model_version": None},
             ],
             "output_token_cap": None, "per_request_cost_cap": None,
             "reason_code": "created",
@@ -292,7 +297,7 @@ class AttributionGatewayAssertions:
         })
 
         status, headers, data = self.native(
-            body_changes={"force_primary_rate_limit": True},
+            request_changes={"force_primary_rate_limit": True},
         )
         self.assertEqual(status, 200, data)
         self.assertEqual(headers["X-Hormuz-Failover"], "v1;reason=provider_rate_limited")
@@ -325,10 +330,179 @@ class AttributionGatewayAssertions:
         for attempt_id in attempt_ids:
             self.assertEqual(bindings[attempt_id]["attribution_event_id"], event_by_attempt[attempt_id])
             self.assertEqual(bindings[attempt_id]["provider_id"], "openai")
-        self.assertEqual(bindings[failover["original_attempt_id"]]["model_id"], "gpt-test-fast")
-        self.assertEqual(bindings[failover["failover_attempt_id"]]["model_id"], "gpt-test-deep")
+        self.assertEqual(bindings[failover["original_attempt_id"]]["model_id"], "synthetic")
+        self.assertEqual(
+            bindings[failover["failover_attempt_id"]]["model_id"],
+            "synthetic-failover",
+        )
         self.assertEqual(failover["trigger_status"], 429)
         self.assertEqual(failover["reason_code"], "provider_rate_limited")
+
+    def check_provider_side_input_never_egresses_under_active_work_budget(self):
+        budget, plan = self.activate_scope_budget()
+        before = list(NativeAttributionProvider.requests)
+        remote_cases = (
+            ("/v1/responses", {
+                "input": [{
+                    "role": "user",
+                    "content": [{
+                        "type": "input_image",
+                        "image_url": "https://example.invalid/synthetic-image.png",
+                    }],
+                }],
+            }),
+            ("/v1/responses", {
+                "input": [{"type": "input_file", "file_id": "file-synthetic"}],
+            }),
+            ("/v1/responses", {"previous_response_id": "resp-synthetic"}),
+            ("/v1/responses", {"tools": [{"type": "web_search"}]}),
+            ("/v1/messages", {
+                "messages": [{
+                    "role": "user",
+                    "content": [{
+                        "type": "image",
+                        "source": {
+                            "type": "url",
+                            "url": "https://example.invalid/synthetic-image.png",
+                        },
+                    }],
+                }],
+            }),
+            ("/v1/messages", {
+                "messages": [{
+                    "role": "user",
+                    "content": [{
+                        "type": "document",
+                        "source": {"type": "file", "file_id": "file-synthetic"},
+                    }],
+                }],
+            }),
+            ("/v1/messages", {"container": "container-synthetic"}),
+            ("/v1/messages", {
+                "tools": [{"type": "web_search_20250305", "name": "web_search"}],
+            }),
+        )
+        for path, changes in remote_cases:
+            with self.subTest(path=path, changes=changes):
+                status, response_headers, data = self.native(
+                    path, request_changes=changes,
+                )
+                self.assertEqual(status, 403)
+                self.assertEqual(
+                    response_headers["X-Hormuz-Error-Code"],
+                    "hormuz_budget_denied",
+                )
+                self.assertIn("bounded input-token estimate", data.decode())
+        self.assertEqual(NativeAttributionProvider.requests, before)
+        self.assertEqual(self.events(), [])
+        self.assertEqual(
+            self.server.store.active_budget_reservations(organization_id="acme"),
+            0,
+        )
+        report = budget.current_report(self.principal, plan["budget_plan_id"])
+        self.assertEqual(report["enforcement"]["over_cap_attempts"], len(remote_cases))
+        self.assertEqual(report["coverage"]["population_attempts"], len(remote_cases))
+        self.assertEqual(report["coverage"]["included_attempts"], len(remote_cases))
+
+        inline_cases = (
+            ("/v1/responses", {
+                "input": [{
+                    "role": "user",
+                    "content": [{
+                        "type": "input_image",
+                        "image_url": "data:image/png;base64,iVBORw0KGgo=",
+                    }],
+                }],
+            }),
+            ("/v1/responses", {
+                "input": [{
+                    "type": "input_file",
+                    "filename": "synthetic.txt",
+                    "file_data": "U1lOVEhFVElDX0lOTElORQ==",
+                }],
+            }),
+            ("/v1/messages", {
+                "messages": [{
+                    "role": "user",
+                    "content": [{
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "image/png",
+                            "data": "iVBORw0KGgo=",
+                        },
+                    }],
+                }],
+            }),
+        )
+        for path, changes in inline_cases:
+            with self.subTest(path=path, inline=True):
+                self.assertEqual(
+                    self.native(path, request_changes=changes)[0],
+                    200,
+                )
+        self.assertEqual(len(NativeAttributionProvider.requests), len(before) + len(inline_cases))
+        self.assertEqual(len(self.events()), len(inline_cases))
+
+    def check_postgres_unbound_identity_uses_database_clock(self):
+        budget, plan = self.activate_scope_budget()
+        before = list(NativeAttributionProvider.requests)
+
+        class AheadProcessClock(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return datetime.now(timezone.utc) + timedelta(days=2)
+
+        with mock.patch("hormuz.postgres_usage_store.datetime", AheadProcessClock):
+            status, response_headers, data = self.native(
+                token=VIEWER, headers=[],
+            )
+
+        self.assertEqual(status, 403)
+        self.assertEqual(
+            response_headers["X-Hormuz-Error-Code"],
+            "hormuz_budget_denied",
+        )
+        self.assertIn("attribution is required", data.decode())
+        self.assertEqual(NativeAttributionProvider.requests, before)
+        self.assertEqual(self.events(), [])
+        self.assertEqual(
+            self.server.store.active_budget_reservations(organization_id="acme"),
+            0,
+        )
+        report = budget.current_report(self.principal, plan["budget_plan_id"])
+        self.assertEqual(report["coverage"]["population_attempts"], 1)
+        self.assertEqual(report["coverage"]["unattributed_attempts"], 1)
+
+    def check_unbound_identity_cannot_bypass_an_active_work_budget(self):
+        budget, plan = self.activate_scope_budget()
+        before = list(NativeAttributionProvider.requests)
+        unbound = self.config.identities_by_token[VIEWER]
+        self.assertIsNone(
+            select_admission(
+                self.config, unbound, "codex", [], account_usage=True,
+            )
+        )
+
+        status, response_headers, data = self.native(
+            token=VIEWER, headers=[],
+        )
+
+        self.assertEqual(status, 403)
+        self.assertEqual(
+            response_headers["X-Hormuz-Error-Code"],
+            "hormuz_budget_denied",
+        )
+        self.assertIn("attribution is required", data.decode())
+        self.assertEqual(NativeAttributionProvider.requests, before)
+        self.assertEqual(self.events(), [])
+        self.assertEqual(
+            self.server.store.active_budget_reservations(organization_id="acme"),
+            0,
+        )
+        report = budget.current_report(self.principal, plan["budget_plan_id"])
+        self.assertEqual(report["coverage"]["population_attempts"], 1)
+        self.assertEqual(report["coverage"]["unattributed_attempts"], 1)
 
     def check_scope_change_before_atomic_reservation_never_egresses(self):
         begin = self.server.policy_engine.begin_request_attempt

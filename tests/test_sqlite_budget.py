@@ -50,6 +50,33 @@ class SQLiteBudgetTests(BudgetAssertions, unittest.TestCase):
     def new_store(self):
         return UsageStore(self.config.database_path)
 
+    def inject_nonpredecessor_activation(
+        self, *, plan_id, current_version, wrong_previous_version,
+        committed_at, template,
+    ):
+        with closing(sqlite3.connect(self.config.database_path)) as connection:
+            connection.execute("PRAGMA foreign_keys=ON")
+            event_id = "f" * 32
+            connection.execute(
+                "INSERT INTO portfolio_work_budget_activation_events "
+                "(organization_id,activation_event_id,budget_plan_id,activation_generation,"
+                "previous_version,current_version,actor_id,reason_code,policy_version,"
+                "policy_digest,committed_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    "acme", event_id, plan_id, 2, wrong_previous_version,
+                    current_version, template["actor_id"], "accepted",
+                    template["policy_version"], template["policy_digest"],
+                    committed_at,
+                ),
+            )
+            connection.execute(
+                "UPDATE portfolio_work_budget_active_plans SET active_version=?, "
+                "activation_generation=2,current_activation_event_id=?,changed_at=? "
+                "WHERE organization_id='acme' AND budget_plan_id=?",
+                (current_version, event_id, committed_at, plan_id),
+            )
+            connection.commit()
+
     def test_plan_versions_activation_and_management_change(self):
         self.check_plan_versions_activation_and_management_change()
 
@@ -64,6 +91,9 @@ class SQLiteBudgetTests(BudgetAssertions, unittest.TestCase):
 
     def test_model_output_request_caps_and_missing_attribution_fail_closed(self):
         self.check_model_output_request_caps_and_missing_attribution_fail_closed()
+
+    def test_configured_route_identity_accepts_provider_model_names(self):
+        self.check_configured_route_identity_accepts_provider_model_names()
 
     def test_concurrent_instances_cannot_overspend(self):
         self.check_concurrent_instances_cannot_overspend()
@@ -92,6 +122,12 @@ class SQLiteBudgetTests(BudgetAssertions, unittest.TestCase):
     def test_missing_terminal_price_never_becomes_zero(self):
         self.check_missing_terminal_price_never_becomes_zero()
 
+    def test_denial_report_population_is_bounded(self):
+        self.check_denial_report_population_is_bounded()
+
+    def test_orphaned_denial_audits_fail_closed(self):
+        self.check_orphaned_denial_audits_fail_closed()
+
     def test_bounded_gateway_actor_is_never_silently_unaudited(self):
         self.check_bounded_gateway_actor_is_never_silently_unaudited()
 
@@ -103,6 +139,9 @@ class SQLiteBudgetTests(BudgetAssertions, unittest.TestCase):
 
     def test_activation_history_is_bounded_for_reads_and_writes(self):
         self.check_activation_history_is_bounded_for_reads_and_writes()
+
+    def test_request_time_activation_predecessor_is_validated(self):
+        self.check_request_time_activation_predecessor_is_validated()
 
     def test_denial_audit_retains_evaluation_time(self):
         self.check_denial_audit_retains_evaluation_time()

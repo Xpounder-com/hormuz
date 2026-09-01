@@ -39,6 +39,7 @@ from .budget_runtime import (
     RuntimeBudgetSQL,
     WorkBudgetDenied,
     audit_work_budget_denials,
+    configured_model_id,
     enforce_and_bind_work_budget,
     prepare_work_budget,
     record_work_budget_denial,
@@ -830,9 +831,14 @@ class PostgresUsageStore:
                     "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
                     (f"portfolio:{self.schema}:{organization_id}",),
                 )
+                budget_now = (
+                    self._database_now_in_cursor(cursor)
+                    if budget_schema_ready
+                    else now
+                )
                 if work_budget is not None:
-                    now = self._database_now_in_cursor(cursor)
-                    if now.replace(
+                    now = budget_now
+                    if budget_now.replace(
                         day=1, hour=0, minute=0, second=0, microsecond=0,
                     ) != locked_month:
                         # Do not acquire a later monthly lock while holding the
@@ -932,7 +938,7 @@ class PostgresUsageStore:
                         organization_id=organization_id,
                         attempt_id=attempt_id,
                         work_budget=work_budget,
-                        now=now,
+                        now=budget_now,
                     )
                     if budget_schema_ready
                     else None
@@ -955,10 +961,14 @@ class PostgresUsageStore:
                         organization_id=organization_id,
                         attempt_id=attempt_id,
                         provider_id=protocol,
-                        model_id=upstream_model or resolved_alias or requested_model,
+                        model_id=configured_model_id(
+                            resolved_alias=resolved_alias,
+                            upstream_model=upstream_model,
+                            requested_model=requested_model,
+                        ),
                         model_version=None,
                         reserved_cost_microusd=int(root["reserved_cost_microusd"]),
-                        now=now,
+                        now=budget_now,
                         work_budget=work_budget,
                     )
         return RequestAttempt(
