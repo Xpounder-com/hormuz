@@ -125,6 +125,9 @@ class SQLiteBudgetTests(BudgetAssertions, unittest.TestCase):
     def test_denial_report_population_is_bounded(self):
         self.check_denial_report_population_is_bounded()
 
+    def test_orphaned_denial_audits_fail_closed(self):
+        self.check_orphaned_denial_audits_fail_closed()
+
     def test_bounded_gateway_actor_is_never_silently_unaudited(self):
         self.check_bounded_gateway_actor_is_never_silently_unaudited()
 

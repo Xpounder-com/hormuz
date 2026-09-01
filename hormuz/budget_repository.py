@@ -843,6 +843,22 @@ class WorkBudgetRepository:
                 "committed_amount": committed, "pending_reservation_amount": pending,
                 "uncertain_reservation_amount": uncertain, "remaining_amount": remaining,
             }
+        orphaned_denial = sql.one(
+            "SELECT 1 AS orphaned FROM portfolio_work_budget_audit_events e "
+            "LEFT JOIN portfolio_work_budget_plan_versions v "
+            "ON v.organization_id=e.organization_id "
+            "AND v.budget_plan_id=e.entity_id AND v.version=e.entity_version "
+            "WHERE e.organization_id=? AND e.entity_id=? "
+            "AND e.operation='reserve_denied' "
+            "AND e.occurred_at>=? AND e.occurred_at<? AND e.occurred_at<=? "
+            "AND v.organization_id IS NULL LIMIT 1",
+            (
+                plan["organization_id"], plan["budget_plan_id"],
+                plan["window_start_at"], plan["window_end_at"], as_of,
+            ),
+        )
+        if orphaned_denial is not None:
+            raise BudgetRepositoryError("unavailable")
         denial_rows = [dict(row) for row in sql.execute(
             "SELECT e.reason_code FROM portfolio_work_budget_audit_events e "
             "JOIN portfolio_work_budget_plan_versions v ON v.organization_id=e.organization_id "

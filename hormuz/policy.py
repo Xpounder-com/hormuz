@@ -155,6 +155,8 @@ class PolicyEngine:
         upstream_model = decision.route.upstream_model if decision.route is not None else None
         scopes = self.budget_scopes(identity=identity, decision=decision)
         if work_budget is None:
+            # The built-in v1 method still enters the atomic budget transaction
+            # with missing attribution, so an effective work plan fails closed.
             return self.store.begin_request_attempt(
                 identity=identity,
                 client=client,

@@ -77,7 +77,20 @@ class ResponseUsageParser:
         elif self.protocol == "anthropic":
             if value.get("type") == "message_start" and isinstance(value.get("message"), dict):
                 self._apply_provider_model(value["message"].get("model"))
-                self._apply_anthropic_usage(value["message"].get("usage"))
+                self._apply_anthropic_usage(
+                    value["message"].get("usage"),
+                    observe_output=not self.is_event_stream,
+                )
+            elif self.is_event_stream:
+                self._apply_provider_model(value.get("model"))
+                if value.get("type") == "message_delta":
+                    # Anthropic's final cumulative output count is authoritative.
+                    # A later malformed delta must not inherit earlier evidence.
+                    self.usage.output_tokens = 0
+                    self._output_tokens_observed = False
+                    self._apply_anthropic_usage(
+                        value.get("usage"), observe_input=False,
+                    )
             else:
                 self._apply_provider_model(value.get("model"))
                 self._apply_anthropic_usage(value.get("usage"))
@@ -108,23 +121,31 @@ class ResponseUsageParser:
                 output_details.get("reasoning_tokens"), self.usage.reasoning_tokens
             )
 
-    def _apply_anthropic_usage(self, value: Any) -> None:
+    def _apply_anthropic_usage(
+        self,
+        value: Any,
+        *,
+        observe_input: bool = True,
+        observe_output: bool = True,
+    ) -> None:
         if not isinstance(value, dict):
             return
-        input_tokens = _observed_nonnegative_int(value.get("input_tokens"))
-        if input_tokens is not None:
-            self.usage.input_tokens = input_tokens
-            self._input_tokens_observed = True
-        output_tokens = _observed_nonnegative_int(value.get("output_tokens"))
-        if output_tokens is not None:
-            self.usage.output_tokens = output_tokens
-            self._output_tokens_observed = True
-        self.usage.cache_read_tokens = _nonnegative_int(
-            value.get("cache_read_input_tokens"), self.usage.cache_read_tokens
-        )
-        self.usage.cache_write_tokens = _nonnegative_int(
-            value.get("cache_creation_input_tokens"), self.usage.cache_write_tokens
-        )
+        if observe_input:
+            input_tokens = _observed_nonnegative_int(value.get("input_tokens"))
+            if input_tokens is not None:
+                self.usage.input_tokens = input_tokens
+                self._input_tokens_observed = True
+            self.usage.cache_read_tokens = _nonnegative_int(
+                value.get("cache_read_input_tokens"), self.usage.cache_read_tokens
+            )
+            self.usage.cache_write_tokens = _nonnegative_int(
+                value.get("cache_creation_input_tokens"), self.usage.cache_write_tokens
+            )
+        if observe_output:
+            output_tokens = _observed_nonnegative_int(value.get("output_tokens"))
+            if output_tokens is not None:
+                self.usage.output_tokens = output_tokens
+                self._output_tokens_observed = True
 
 
 def _nonnegative_int(value: Any, fallback: int) -> int:

@@ -11,6 +11,7 @@ from pathlib import Path
 import runpy
 import threading
 from unittest import mock
+from uuid import uuid4
 
 from hormuz._persistence import WorkBudgetContext
 from hormuz.budget_runtime import WorkBudgetDenied
@@ -752,6 +753,36 @@ class BudgetAssertions:
             ]),
             2,
         )
+
+    def check_orphaned_denial_audits_fail_closed(self):
+        for entity_version in (None, 2147483647):
+            with self.subTest(entity_version=entity_version):
+                plan = self.create(amount="1")
+                self.activate(plan)
+                with self.repository._transaction(ADMIN) as sql:
+                    maximum = sql.one(
+                        "SELECT COALESCE(MAX(sequence),0) AS sequence "
+                        "FROM portfolio_work_budget_audit_events "
+                        "WHERE organization_id=?",
+                        (ADMIN.organization_id,),
+                    )["sequence"]
+                    sql.insert("portfolio_work_budget_audit_events", {
+                        "organization_id": ADMIN.organization_id,
+                        "event_id": uuid4().hex,
+                        "sequence": maximum + 1,
+                        "actor_id": ADMIN.actor_id,
+                        "operation": "reserve_denied",
+                        "entity_id": plan["budget_plan_id"],
+                        "entity_version": entity_version,
+                        "reason_code": "budget_ceiling",
+                        "occurred_at": sql.now(),
+                    })
+                self.error(
+                    "unavailable",
+                    lambda: self.repository.current_report(
+                        ADMIN, plan["budget_plan_id"],
+                    ),
+                )
 
     def check_bounded_gateway_actor_is_never_silently_unaudited(self):
         plan = self.create(amount="0")

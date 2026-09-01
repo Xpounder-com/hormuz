@@ -15,7 +15,7 @@ from unittest import mock
 
 from hormuz._portfolio_sql import PortfolioSQL
 from hormuz._attribution_schema import TABLE_DDL
-from hormuz.attribution_admission import RESULT_HEADER
+from hormuz.attribution_admission import RESULT_HEADER, select_admission
 from hormuz.budget_runtime import RuntimeBudgetSQL
 from hormuz.config import ModelRoute, UpstreamConfig
 from hormuz.portfolio_repository import create_portfolio_repository
@@ -113,6 +113,32 @@ class AttributionGatewayAssertions:
     def events(self):
         return self.server.portfolio_service.dispatch(ADMIN, "GET", ATTRIBUTIONS)[1]["items"]
 
+    def activate_scope_budget(self, *, amount="10"):
+        now = datetime.now(timezone.utc)
+        budget = self.server.budget_repository
+        self.assertIsNotNone(budget)
+        plan = budget.create_plan(self.principal, {
+            "schema_id": "hormuz.work-budget-plan-request", "schema_version": 1,
+            "budget_plan_id": None, "expected_version": None,
+            "work_scope": {
+                "work_scope_id": self.scope["work_scope_id"],
+                "version": self.scope["version"],
+            },
+            "window": {
+                "start_at": (now - timedelta(days=1)).isoformat(timespec="microseconds").replace("+00:00", "Z"),
+                "end_at": (now + timedelta(days=1)).isoformat(timespec="microseconds").replace("+00:00", "Z"),
+            },
+            "currency": "USD", "amount": amount, "allowed_models": None,
+            "output_token_cap": None, "per_request_cost_cap": None,
+            "reason_code": "created",
+        })
+        budget.activate_plan(self.principal, plan["budget_plan_id"], {
+            "schema_id": "hormuz.work-budget-plan-activation-request", "schema_version": 1,
+            "version": 1, "expected_active_version": None,
+            "expected_activation_generation": 0, "reason_code": "accepted",
+        })
+        return budget, plan
+
     def check_native_success_bodies_models_and_header_stripping(self):
         for path in ("/v1/responses", "/v1/messages", "/v1/responses/compact"):
             status, headers, data = self.native(path)
@@ -192,29 +218,7 @@ class AttributionGatewayAssertions:
         self.assertEqual(self.server.store.active_budget_reservations(organization_id="acme"), 0)
 
     def check_unbounded_output_never_egresses_under_active_work_budget(self):
-        now = datetime.now(timezone.utc)
-        budget = self.server.budget_repository
-        self.assertIsNotNone(budget)
-        plan = budget.create_plan(self.principal, {
-            "schema_id": "hormuz.work-budget-plan-request", "schema_version": 1,
-            "budget_plan_id": None, "expected_version": None,
-            "work_scope": {
-                "work_scope_id": self.scope["work_scope_id"],
-                "version": self.scope["version"],
-            },
-            "window": {
-                "start_at": (now - timedelta(days=1)).isoformat(timespec="microseconds").replace("+00:00", "Z"),
-                "end_at": (now + timedelta(days=1)).isoformat(timespec="microseconds").replace("+00:00", "Z"),
-            },
-            "currency": "USD", "amount": "10", "allowed_models": None,
-            "output_token_cap": None, "per_request_cost_cap": None,
-            "reason_code": "created",
-        })
-        budget.activate_plan(self.principal, plan["budget_plan_id"], {
-            "schema_id": "hormuz.work-budget-plan-activation-request", "schema_version": 1,
-            "version": 1, "expected_active_version": None,
-            "expected_activation_generation": 0, "reason_code": "accepted",
-        })
+        self.activate_scope_budget()
         before = list(NativeAttributionProvider.requests)
         for path in ("/v1/responses", "/v1/messages"):
             status, response_headers, data = self.native(
@@ -228,6 +232,36 @@ class AttributionGatewayAssertions:
             self.assertIn("bounded output-token estimate", data.decode())
         self.assertEqual(NativeAttributionProvider.requests, before)
         self.assertEqual(self.events(), [])
+
+    def check_unbound_identity_cannot_bypass_an_active_work_budget(self):
+        budget, plan = self.activate_scope_budget()
+        before = list(NativeAttributionProvider.requests)
+        unbound = self.config.identities_by_token[VIEWER]
+        self.assertIsNone(
+            select_admission(
+                self.config, unbound, "codex", [], account_usage=True,
+            )
+        )
+
+        status, response_headers, data = self.native(
+            token=VIEWER, headers=[],
+        )
+
+        self.assertEqual(status, 403)
+        self.assertEqual(
+            response_headers["X-Hormuz-Error-Code"],
+            "hormuz_budget_denied",
+        )
+        self.assertIn("attribution is required", data.decode())
+        self.assertEqual(NativeAttributionProvider.requests, before)
+        self.assertEqual(self.events(), [])
+        self.assertEqual(
+            self.server.store.active_budget_reservations(organization_id="acme"),
+            0,
+        )
+        report = budget.current_report(self.principal, plan["budget_plan_id"])
+        self.assertEqual(report["coverage"]["population_attempts"], 1)
+        self.assertEqual(report["coverage"]["unattributed_attempts"], 1)
 
     def check_scope_change_before_atomic_reservation_never_egresses(self):
         begin = self.server.policy_engine.begin_request_attempt

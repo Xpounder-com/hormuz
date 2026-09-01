@@ -148,7 +148,11 @@ class FakeProviderHandler(BaseHTTPRequestHandler):
                     {
                         "type": "message_delta",
                         "delta": {"stop_reason": "end_turn", "stop_sequence": None},
-                        "usage": {"output_tokens": 12},
+                        **(
+                            {}
+                            if body.get("force_missing_usage") is True
+                            else {"usage": {"output_tokens": 12}}
+                        ),
                     },
                 ),
                 ("message_stop", {"type": "message_stop"}),
@@ -374,6 +378,50 @@ class ResponseUsageEvidenceTests(unittest.TestCase):
         malformed = ResponseUsageParser("openai", is_event_stream=False)
         malformed.feed(b'{"usage":{"input_tokens":10')
         self.assertFalse(malformed.finish().evidence_complete)
+
+    def test_anthropic_stream_requires_terminal_output_usage(self) -> None:
+        message_start = {
+            "type": "message_start",
+            "message": {
+                "model": "synthetic-anthropic",
+                "usage": {"input_tokens": 10, "output_tokens": 0},
+            },
+        }
+        for terminal_usage in ({}, {"usage": {}}, {"usage": {"output_tokens": True}}):
+            with self.subTest(terminal_usage=terminal_usage):
+                parser = ResponseUsageParser("anthropic", is_event_stream=True)
+                parser.feed(
+                    (
+                        "data: " + json.dumps(message_start) + "\n\n"
+                        "data: " + json.dumps({"type": "message_delta", **terminal_usage}) + "\n\n"
+                    ).encode()
+                )
+                self.assertFalse(parser.finish().evidence_complete)
+
+        malformed_final = ResponseUsageParser("anthropic", is_event_stream=True)
+        malformed_final.feed(
+            (
+                "data: " + json.dumps(message_start) + "\n\n"
+                "data: " + json.dumps({
+                    "type": "message_delta", "usage": {"output_tokens": 12},
+                }) + "\n\n"
+                "data: " + json.dumps({"type": "message_delta"}) + "\n\n"
+            ).encode()
+        )
+        self.assertFalse(malformed_final.finish().evidence_complete)
+
+        complete = ResponseUsageParser("anthropic", is_event_stream=True)
+        complete.feed(
+            (
+                "data: " + json.dumps(message_start) + "\n\n"
+                "data: " + json.dumps({
+                    "type": "message_delta", "usage": {"output_tokens": 12},
+                }) + "\n\n"
+            ).encode()
+        )
+        usage = complete.finish()
+        self.assertTrue(usage.evidence_complete)
+        self.assertEqual((usage.input_tokens, usage.output_tokens), (10, 12))
 
 
 class GatewayIntegrationTests(unittest.TestCase):
@@ -875,6 +923,43 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertEqual(totals.output_tokens, 12)
         self.assertEqual(totals.cache_read_tokens, 20)
         self.assertEqual(totals.cache_write_tokens, 10)
+
+    def test_anthropic_stream_without_terminal_usage_keeps_the_reservation(self) -> None:
+        status, headers, response = self._post(
+            "/v1/messages",
+            {
+                "model": "claude-sonnet-5",
+                "messages": [{"role": "user", "content": "missing terminal usage"}],
+                "max_tokens": 50,
+                "stream": True,
+                "force_missing_usage": True,
+            },
+            extra_headers={"Anthropic-Version": "2023-06-01"},
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["content-type"], "text/event-stream")
+        self.assertIn(b"event: message_stop", response)
+        self.assertEqual(self.gateway.store.monthly_totals(actor_id="alice").requests, 0)
+        self.assertEqual(self.gateway.store.active_budget_reservations(), 1)
+
+        connection = sqlite3.connect(self.gateway.store.path)
+        events = connection.execute(
+            "SELECT sequence,state,reason_code,usage_event_id "
+            "FROM gateway_request_attempt_events ORDER BY sequence"
+        ).fetchall()
+        usage_count = connection.execute(
+            "SELECT COUNT(*) FROM gateway_usage_events"
+        ).fetchone()[0]
+        connection.close()
+        self.assertEqual(usage_count, 0)
+        self.assertEqual(
+            events,
+            [
+                (1, "pending", None, None),
+                (2, "outcome_unknown", "provider_transport_ambiguous", None),
+            ],
+        )
 
     def test_disallowed_client_is_rejected_before_provider_call(self) -> None:
         before = len(FakeProviderHandler.requests)
