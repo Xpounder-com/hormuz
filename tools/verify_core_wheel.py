@@ -225,6 +225,18 @@ REQUIRED_BUDGET_PREFLIGHT_SDIST_PATHS = (
     "tests/test_budget_preflight_packaging.py",
     "tests/test_portfolio_wire_contract.py",
 )
+REQUIRED_BUDGET_RUNTIME_SDIST_PATHS = (
+    "docs/WORK_BUDGETS.md",
+    "docs/budget-transition-plan-v2.json",
+    "hormuz/_budget_schema.py",
+    "hormuz/budget_repository.py",
+    "hormuz/budget_runtime.py",
+    "hormuz/migrations/postgresql/0013_work_budgets.sql",
+    "tests/_budget_fixture.py",
+    "tests/test_budget_schema.py",
+    "tests/test_sqlite_budget.py",
+    "tests/test_postgres_budget.py",
+)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -257,6 +269,7 @@ def main(argv: list[str] | None = None) -> int:
     _assert_finance_history_sdist_boundary(sdist)
     _assert_portfolio_extension_sdist_boundary(sdist)
     _assert_budget_preflight_sdist_boundary(sdist)
+    _assert_budget_runtime_sdist_boundary(sdist)
     _verify_isolated_install(wheel, config, python)
     print(
         "verified core distribution boundary: no context/runtime data and complete deployment/usability assets"
@@ -405,6 +418,16 @@ def _assert_budget_preflight_sdist_boundary(path: Path) -> None:
     ]
     if missing:
         raise RuntimeError(f"Budget preflight incomplete in {path.name}: {', '.join(sorted(missing))}")
+
+
+def _assert_budget_runtime_sdist_boundary(path: Path) -> None:
+    members = tuple(name.lstrip("./") for name in _sdist_members(path))
+    missing = [
+        required for required in REQUIRED_BUDGET_RUNTIME_SDIST_PATHS
+        if not any(f"/{member}".endswith(f"/{required}") for member in members)
+    ]
+    if missing:
+        raise RuntimeError(f"Budget runtime incomplete in {path.name}: {', '.join(sorted(missing))}")
 
 
 def _verify_isolated_install(wheel: Path, config_template: Path, base_python: Path) -> None:

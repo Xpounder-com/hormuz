@@ -496,7 +496,30 @@ class GatewayConfig:
         if self.policy_control.mode != "local":
             raise ConfigError("managed policy versions must be resolved through the policy control plane")
 
-        payload = {
+        canonical = json.dumps(
+            self._local_policy_payload(),
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+        return f"local-config-{hashlib.sha256(canonical).hexdigest()[:16]}"
+
+    @property
+    def policy_content_sha256(self) -> str:
+        """Return the full digest of credential-free local policy inputs."""
+
+        if self.policy_control.mode != "local":
+            raise ConfigError("managed policy versions must be resolved through the policy control plane")
+        canonical = json.dumps(
+            self._local_policy_payload(),
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+        return hashlib.sha256(canonical).hexdigest()
+
+    def _local_policy_payload(self) -> dict[str, object]:
+        return {
             "identities": {
                 "static": [
                     _identity_policy_payload(identity)
@@ -540,8 +563,6 @@ class GatewayConfig:
                 "custom_secret_envs": sorted(self.secret_controls.custom_secret_envs),
             },
         }
-        canonical = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
-        return f"local-config-{hashlib.sha256(canonical).hexdigest()[:16]}"
 
 
 def _policy_payload(policy: Policy) -> dict[str, object]:

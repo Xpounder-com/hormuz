@@ -29,6 +29,14 @@ from .contracts import (
     validate_request_status,
 )
 from .evidence import EvidenceStorageError, security_audit_event, usage_audit_event
+from .budget_runtime import (
+    RuntimeBudgetSQL,
+    WorkBudgetDenied,
+    audit_work_budget_denials,
+    enforce_and_bind_work_budget,
+    prepare_work_budget,
+    record_work_budget_denial,
+)
 from .postgres import (
     PostgresConnectionPool,
     PostgresStorageError,
@@ -43,6 +51,7 @@ from ._persistence import (
     RequestAttemptStateError,
     ReservationDenied,
     ReservationScope,
+    WorkBudgetContext,
     SecretTotals,
     AuditChainSourceEventInput,
     AuditChainVerificationInputs,
@@ -607,6 +616,29 @@ class PostgresUsageStore:
                 )
         return reservation_id
 
+    def _record_work_budget_denial(self, identity: Identity, denial: WorkBudgetDenied) -> None:
+        organization_id = self._organization(identity.organization_id)
+        try:
+            with self._transaction(organization_id) as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                        (f"work-budget:{self.schema}:{organization_id}",),
+                    )
+                    cursor.execute(
+                        "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                        (f"portfolio:{self.schema}:{organization_id}",),
+                    )
+                    record_work_budget_denial(
+                        RuntimeBudgetSQL(cursor, postgres=True),
+                        organization_id=organization_id,
+                        actor_id=identity.actor_id,
+                        denial=denial,
+                        now=datetime.now(timezone.utc),
+                    )
+        except ReservationDenied:
+            raise PostgresStorageError("storage_unavailable") from None
+
     def begin_request_attempt(
         self,
         *,
@@ -624,6 +656,44 @@ class PostgresUsageStore:
         reserved_tokens: int,
         reserved_cost_microusd: int,
         ttl_seconds: int,
+    ) -> RequestAttempt:
+        return self._begin_request_attempt_with_work_budget(
+            identity=identity,
+            client=client,
+            protocol=protocol,
+            requested_model=requested_model,
+            resolved_alias=resolved_alias,
+            upstream_model=upstream_model,
+            policy_version=policy_version,
+            policy_action=policy_action,
+            redaction_count=redaction_count,
+            redaction_rules=redaction_rules,
+            scopes=scopes,
+            reserved_tokens=reserved_tokens,
+            reserved_cost_microusd=reserved_cost_microusd,
+            ttl_seconds=ttl_seconds,
+            work_budget=None,
+        )
+
+    @audit_work_budget_denials
+    def _begin_request_attempt_with_work_budget(
+        self,
+        *,
+        identity: Identity,
+        client: str,
+        protocol: str,
+        requested_model: str,
+        resolved_alias: str | None,
+        upstream_model: str | None,
+        policy_version: str,
+        policy_action: str,
+        redaction_count: int,
+        redaction_rules: tuple[str, ...],
+        scopes: tuple[ReservationScope, ...],
+        reserved_tokens: int,
+        reserved_cost_microusd: int,
+        ttl_seconds: int,
+        work_budget: WorkBudgetContext | None,
     ) -> RequestAttempt:
         """Atomically persist a pending pre-egress attempt and its budget hold."""
 
@@ -649,6 +719,32 @@ class PostgresUsageStore:
         )
         with self._transaction(organization_id) as connection:
             with connection.cursor() as cursor:
+                cursor.execute(
+                    f"SELECT EXISTS (SELECT 1 FROM "
+                    f"{self._table('hormuz_schema_migrations')} "
+                    "WHERE version=13 AND state='applied')"
+                )
+                budget_schema_row = cursor.fetchone()
+                budget_schema_ready = bool(
+                    next(iter(budget_schema_row.values()))
+                    if isinstance(budget_schema_row, dict)
+                    else budget_schema_row[0]
+                )
+                if work_budget is not None and not budget_schema_ready:
+                    raise PostgresStorageError("storage_schema_partial_upgrade")
+                month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+                cursor.execute(
+                    "SELECT pg_advisory_xact_lock(hashtext(%s))",
+                    (f"hormuz:budget:{organization_id}:{month_start.date().isoformat()}",),
+                )
+                cursor.execute(
+                    "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                    (f"work-budget:{self.schema}:{organization_id}",),
+                )
+                cursor.execute(
+                    "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                    (f"portfolio:{self.schema}:{organization_id}",),
+                )
                 self._sweep_stale_request_attempts_in_cursor(cursor, now=now, organization_id=organization_id)
                 cursor.execute(
                     f"""
@@ -698,6 +794,18 @@ class PostgresUsageStore:
                     reason_code=None,
                     usage_event_id=None,
                 )
+                budget_sql = RuntimeBudgetSQL(cursor, postgres=True)
+                prepared_budget = (
+                    prepare_work_budget(
+                        budget_sql,
+                        organization_id=organization_id,
+                        attempt_id=attempt_id,
+                        work_budget=work_budget,
+                        now=now,
+                    )
+                    if budget_schema_ready
+                    else None
+                )
                 self._reserve_budget_in_cursor(
                     cursor,
                     identity=identity,
@@ -709,7 +817,24 @@ class PostgresUsageStore:
                     attempt_id=attempt_id,
                     now=now,
                 )
-        return RequestAttempt(attempt_id=attempt_id, reservation_id=attempt_id)
+                if budget_schema_ready:
+                    enforce_and_bind_work_budget(
+                        budget_sql,
+                        prepared=prepared_budget,
+                        organization_id=organization_id,
+                        attempt_id=attempt_id,
+                        provider_id=protocol,
+                        model_id=upstream_model or resolved_alias or requested_model,
+                        model_version=None,
+                        reserved_cost_microusd=int(root["reserved_cost_microusd"]),
+                        now=now,
+                        work_budget=work_budget,
+                    )
+        return RequestAttempt(
+            attempt_id=attempt_id,
+            reservation_id=attempt_id,
+            attribution_event_id=None if prepared_budget is None else prepared_budget.attribution_event_id,
+        )
 
     def finalize_request_attempt(
         self,

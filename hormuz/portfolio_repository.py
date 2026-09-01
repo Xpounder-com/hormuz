@@ -24,6 +24,7 @@ from urllib.parse import urlencode
 from ._portfolio_sql import PortfolioSQL as _SQL, portfolio_transaction
 from .config import GatewayConfig
 from .attribution_repository import AttributionRepository
+from .budget_repository import WorkBudgetRepository, create_budget_repository
 from .outcome_repository import OutcomeRepository
 from .portfolio_config import PortfolioPrincipal
 from .portfolio_wire import PortfolioError, RESPONSE_BYTES, canonical, query_parameters, route, validate
@@ -324,6 +325,7 @@ class PortfolioRepositories:
     registry: RegistryRepository
     attributions: AttributionRepository
     outcomes: OutcomeRepository | None = None
+    budgets: WorkBudgetRepository | None = None
 
     def execute(self, principal: PortfolioPrincipal, operation: str, *, path: str,
                 scope_id: str | None, query: dict[str, Any], body: dict[str, Any] | None,
@@ -343,4 +345,6 @@ def create_portfolio_repository(config: GatewayConfig, *, environ: Mapping[str, 
         config, dsn=registry._dsn, connection_pool=connection_pool, read_only=read_only,
     ), OutcomeRepository(
         config, dsn=registry._dsn, connection_pool=connection_pool, read_only=read_only,
+    ), create_budget_repository(
+        config, environ=environ, connection_pool=connection_pool, read_only=read_only,
     ))

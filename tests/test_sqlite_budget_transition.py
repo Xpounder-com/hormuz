@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 from dataclasses import replace
 import os
 from pathlib import Path
@@ -11,6 +12,8 @@ import tempfile
 import unittest
 from unittest import mock
 
+import hormuz._portfolio_sql as portfolio_sql_module
+from hormuz._budget_schema import TABLE_DDL, sqlite_statements
 from hormuz.store import StorageSchemaError, UsageStore
 
 if __package__:
@@ -25,57 +28,70 @@ else:
     from _registry_transition_fixture import seed_registry_ledger, sqlite_backup, sqlite_snapshot
 
 
-PROBE_TABLE = "budget_transition_test_probe"
-
-
-class SQLiteBudgetRedFirstTests(unittest.TestCase):
+class SQLiteBudgetTransitionTests(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
         self.path = self.root / "usage.sqlite3"
-        self.assertEqual(UsageStore.schema_version, 8)
-        store = UsageStore(self.path)
-        seed_registry_ledger(store)
-        seed_finance(replace(registry_config(self.root), database_path=self.path))
+        self.assertEqual(UsageStore.schema_version, 9)
+        with (
+            mock.patch.object(UsageStore, "schema_version", 8),
+            mock.patch.object(portfolio_sql_module, "SQLITE_SCHEMA_VERSION", 8),
+            mock.patch("hormuz.store.prepare_work_budget", return_value=None),
+            mock.patch("hormuz.store.enforce_and_bind_work_budget", return_value=None),
+        ):
+            store = UsageStore(self.path)
+            seed_registry_ledger(store)
+            seed_finance(replace(registry_config(self.root), database_path=self.path))
         self.before = sqlite_snapshot(self.path)
+        self.assertEqual(len(self.before["rows"]), 31)
+        self.assertTrue(self.before["rows"]["gateway_usage_events"])
+        self.assertTrue(self.before["rows"]["portfolio_finance_rate_cards"])
 
-    def probe(self, *, fail=False, path=None):
+    def upgrade(self, *, fail=False, path=None):
         target = path or self.path
         original = UsageStore._apply_migration
 
         def apply(connection, version):
-            if version != 9:
-                return original(connection, version)
-            connection.execute(
-                f"CREATE TABLE {PROBE_TABLE} (id INTEGER PRIMARY KEY, marker TEXT NOT NULL)"
-            )
+            self.assertEqual(version, 9)
             if fail:
+                connection.execute(sqlite_statements()[0])
                 raise RuntimeError("synthetic_budget_migration_failure")
+            return original(connection, version)
 
-        with (
-            mock.patch.object(UsageStore, "schema_version", 9),
-            mock.patch.object(UsageStore, "_apply_migration", side_effect=apply),
-        ):
+        with mock.patch.object(UsageStore, "_apply_migration", side_effect=apply):
             UsageStore(target).verify_ready()
 
-    def test_missing_migration_is_red_and_transaction_leaves_no_partial_state(self):
-        with mock.patch.object(UsageStore, "schema_version", 9):
+    def assert_prior_state_preserved(self):
+        current = copy.deepcopy(sqlite_snapshot(self.path))
+        current["objects"] = [row for row in current["objects"] if row[2] not in TABLE_DDL]
+        current["rows"] = {table: rows for table, rows in current["rows"].items() if table not in TABLE_DDL}
+        current["rows"]["hormuz_schema_migrations"] = [
+            row for row in current["rows"]["hormuz_schema_migrations"] if row[0] != 9
+        ]
+        self.assertEqual(current, self.before)
+
+    def test_real_migration_preserves_predecessor_and_missing_following_migration_is_safe(self):
+        self.upgrade()
+        self.assert_prior_state_preserved()
+        current = sqlite_snapshot(self.path)
+        self.assertEqual(len(current["rows"]), 36)
+        self.assertTrue(all(not current["rows"][table] for table in TABLE_DDL))
+        with mock.patch.object(UsageStore, "schema_version", 10):
             with self.assertRaises(StorageSchemaError) as caught:
                 UsageStore(self.path)
         self.assertEqual(caught.exception.code, "storage_schema_migration_unsupported")
-        self.assertEqual(sqlite_snapshot(self.path), self.before)
-        UsageStore(self.path).verify_ready()
+        self.assertEqual(sqlite_snapshot(self.path), current)
 
-    def test_probe_failure_rolls_back_and_retry_is_idempotent(self):
+    def test_real_partial_ddl_failure_rolls_back_and_retry_is_idempotent(self):
         with self.assertRaisesRegex(RuntimeError, "synthetic_budget_migration_failure"):
-            self.probe(fail=True)
+            self.upgrade(fail=True)
         self.assertEqual(sqlite_snapshot(self.path), self.before)
-        self.probe()
+        self.upgrade()
+        self.assert_prior_state_preserved()
         after = sqlite_snapshot(self.path)
-        self.assertIn(PROBE_TABLE, after["rows"])
-        self.assertEqual(after["rows"][PROBE_TABLE], [])
-        self.probe()
+        self.upgrade()
         self.assertEqual(sqlite_snapshot(self.path), after)
 
     def test_partial_and_newer_states_fail_closed_without_repair(self):
@@ -88,7 +104,7 @@ class SQLiteBudgetRedFirstTests(unittest.TestCase):
             self.assertEqual(caught.exception.code, "storage_schema_partial_upgrade")
             self.assertEqual(sqlite_snapshot(self.path), partial)
         with sqlite3.connect(self.path) as connection:
-            connection.execute("UPDATE hormuz_schema_migrations SET state='applied' WHERE version=9")
+            connection.execute("UPDATE hormuz_schema_migrations SET version=10, state='applied' WHERE version=9")
         newer = sqlite_snapshot(self.path)
         with self.assertRaises(StorageSchemaError) as caught:
             UsageStore(self.path)
@@ -110,22 +126,8 @@ class SQLiteBudgetPredecessorTests(unittest.TestCase):
         self.before = sqlite_snapshot(self.path)
         self.assertTrue(self.seeded["finance_registration"]["receipt_id"])
 
-    def probe(self):
-        original = UsageStore._apply_migration
-
-        def apply(connection, version):
-            if version == 9:
-                connection.execute(
-                    f"CREATE TABLE {PROBE_TABLE} (id INTEGER PRIMARY KEY, marker TEXT NOT NULL)"
-                )
-                return
-            original(connection, version)
-
-        with (
-            mock.patch.object(UsageStore, "schema_version", 9),
-            mock.patch.object(UsageStore, "_apply_migration", side_effect=apply),
-        ):
-            UsageStore(self.path).verify_ready()
+    def upgrade(self, path=None):
+        UsageStore(path or self.path).verify_ready()
 
     def replay_request(self, path):
         return {
@@ -136,8 +138,8 @@ class SQLiteBudgetPredecessorTests(unittest.TestCase):
             "finance_registration": self.seeded["finance_registration"],
         }
 
-    def test_actual_predecessor_refuses_probe_state_and_partial_state(self):
-        self.probe()
+    def test_actual_predecessor_refuses_budget_state_and_partial_state(self):
+        self.upgrade()
         candidate = sqlite_snapshot(self.path)
         self.assertEqual(
             finance_predecessor_call({**self.request, "mode": "verify"}),
@@ -156,7 +158,7 @@ class SQLiteBudgetPredecessorTests(unittest.TestCase):
     def test_quiesced_old_pair_restore_preserves_replays_and_finance_receipt(self):
         backup = self.root / "finance-checkpoint.sqlite3"
         sqlite_backup(self.path, backup)
-        self.probe()
+        self.upgrade()
         retained = sqlite_snapshot(self.path)
         restored = self.root / "restored-finance.sqlite3"
         shutil.copyfile(backup, restored)
@@ -170,17 +172,21 @@ class SQLiteBudgetPredecessorTests(unittest.TestCase):
         self.assertEqual(sqlite_snapshot(restored), self.before)
         self.assertEqual(sqlite_snapshot(self.path), retained)
 
-    def test_post_checkpoint_probe_write_requires_forward_recovery(self):
-        self.probe()
+    def test_post_checkpoint_budget_write_requires_forward_recovery(self):
+        self.upgrade()
         with sqlite3.connect(self.path) as connection:
-            connection.execute(f"INSERT INTO {PROBE_TABLE} (id, marker) VALUES (1, 'candidate-write')")
+            connection.execute(
+                "INSERT INTO portfolio_work_budget_audit_events "
+                "(organization_id,event_id,sequence,actor_id,operation,entity_id,entity_version,reason_code,occurred_at) "
+                "VALUES ('acme',?,1,'alice','report','candidate-budget',1,'observed','2026-08-31T12:00:00Z')",
+                ("f" * 32,),
+            )
         after_write = sqlite_snapshot(self.path)
         retained = self.root / "retained-candidate.sqlite3"
         restored = self.root / "forward-recovered.sqlite3"
         sqlite_backup(self.path, retained)
         sqlite_backup(retained, restored)
-        with mock.patch.object(UsageStore, "schema_version", 9):
-            UsageStore(restored, read_only=True).verify_ready()
+        UsageStore(restored, read_only=True).verify_ready()
         self.assertEqual(sqlite_snapshot(restored), after_write)
         self.assertEqual(
             finance_predecessor_call({"backend": "sqlite", "path": str(restored), "mode": "verify"}),

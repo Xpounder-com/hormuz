@@ -32,11 +32,14 @@ class PostgresAttributionGatewayTests(AttributionGatewayAssertions, PostgresTest
     def test_postgres_rejection_precedes_budget_policy_and_provider(self):
         self.check_rejection_precedes_budget_policy_and_provider()
 
-    def test_postgres_failed_attribution_commit_retains_uncertain_hold(self):
-        self.check_failed_attribution_commit_never_egresses_or_frees_uncertain_hold()
+    def test_postgres_failed_atomic_attribution_commit_rolls_back_before_egress(self):
+        self.check_failed_atomic_attribution_commit_rolls_back_before_egress()
 
-    def test_postgres_scope_change_after_reservation_never_egresses(self):
-        self.check_scope_change_after_reservation_never_egresses()
+    def test_postgres_unbounded_output_never_egresses_under_active_work_budget(self):
+        self.check_unbounded_output_never_egresses_under_active_work_budget()
+
+    def test_postgres_scope_change_before_atomic_reservation_never_egresses(self):
+        self.check_scope_change_before_atomic_reservation_never_egresses()
 
     def test_postgres_unattributed_and_nonaccounted_behavior(self):
         self.check_unattributed_default_and_nonaccounted_behavior()

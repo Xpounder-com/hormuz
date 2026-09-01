@@ -19,6 +19,27 @@
       "postgresql_tables": ["portfolio_finance_audit_events"]
     },
     {
+      "id": "portfolio_work_budget_plans",
+      "content_boundary": "identity_and_policy_metadata",
+      "contains_prompt_or_response_body": false,
+      "sqlite_tables": ["portfolio_work_budget_activation_events", "portfolio_work_budget_active_plans", "portfolio_work_budget_plan_versions"],
+      "postgresql_tables": ["portfolio_work_budget_activation_events", "portfolio_work_budget_active_plans", "portfolio_work_budget_plan_versions"]
+    },
+    {
+      "id": "portfolio_work_budget_accounting",
+      "content_boundary": "metadata_only_evidence",
+      "contains_prompt_or_response_body": false,
+      "sqlite_tables": ["portfolio_work_budget_reservation_bindings"],
+      "postgresql_tables": ["portfolio_work_budget_reservation_bindings"]
+    },
+    {
+      "id": "portfolio_work_budget_audit",
+      "content_boundary": "operational_metadata",
+      "contains_prompt_or_response_body": false,
+      "sqlite_tables": ["portfolio_work_budget_audit_events"],
+      "postgresql_tables": ["portfolio_work_budget_audit_events"]
+    },
+    {
       "id": "portfolio_outcome_metadata",
       "content_boundary": "metadata_only_evidence",
       "contains_prompt_or_response_body": false,

@@ -117,17 +117,53 @@ def _schema_tables(root: Path) -> tuple[set[str], set[str]]:
     sqlite = set(SQLITE_TABLE.findall(_read_text(root / SQLITE_SCHEMA_PATH)))
     # The new separate repository owns a literal table declaration catalogue.
     # Inspect literals without importing/executing a checkout under verification.
-    for path in ("hormuz/_portfolio_schema.py", "hormuz/_attribution_schema.py", "hormuz/_outcome_schema.py", "hormuz/_finance_schema.py"):
+    for path in (
+        "hormuz/_portfolio_schema.py",
+        "hormuz/_attribution_schema.py",
+        "hormuz/_outcome_schema.py",
+        "hormuz/_finance_schema.py",
+        "hormuz/_budget_schema.py",
+    ):
         registry = ast.parse(_read_text(root / path))
+        declaration_name = (
+            "APPEND_ONLY_TABLE_DDL"
+            if path == "hormuz/_budget_schema.py"
+            else "TABLE_DDL"
+        )
         declarations = next((node.value for node in registry.body if isinstance(node, ast.Assign)
-                             and any(isinstance(target, ast.Name) and target.id == "TABLE_DDL" for target in node.targets)), None)
+                             and any(isinstance(target, ast.Name) and target.id == declaration_name for target in node.targets)), None)
         if declarations is None:
             raise DurableDataInventoryError("registry_schema_tables_missing")
         try:
             registry_tables = ast.literal_eval(declarations)
         except (ValueError, TypeError):
             raise DurableDataInventoryError("registry_schema_tables_invalid") from None
-        if not isinstance(registry_tables, dict) or not all(isinstance(name, str) and re.fullmatch(r"portfolio_[a-z_]+", name) for name in registry_tables):
+        if not isinstance(registry_tables, dict):
+            raise DurableDataInventoryError("registry_schema_tables_invalid")
+        if path == "hormuz/_budget_schema.py":
+            active = next(
+                (
+                    node.value
+                    for node in registry.body
+                    if isinstance(node, ast.Assign)
+                    and any(
+                        isinstance(target, ast.Name)
+                        and target.id == "ACTIVE_TABLE"
+                        for target in node.targets
+                    )
+                ),
+                None,
+            )
+            try:
+                active_table = ast.literal_eval(active)
+            except (ValueError, TypeError):
+                raise DurableDataInventoryError(
+                    "registry_schema_tables_invalid"
+                ) from None
+            if not isinstance(active_table, str):
+                raise DurableDataInventoryError("registry_schema_tables_invalid")
+            registry_tables[active_table] = "active_pointer"
+        if not all(isinstance(name, str) and re.fullmatch(r"portfolio_[a-z_]+", name) for name in registry_tables):
             raise DurableDataInventoryError("registry_schema_tables_invalid")
         if sqlite.intersection(registry_tables):
             raise DurableDataInventoryError("sqlite_table_owned_more_than_once")

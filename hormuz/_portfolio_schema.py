@@ -195,8 +195,11 @@ def verify_postgres_owned_tables(cursor, schema, error_factory, tables, indexes,
         if any(constraints.get(kind) != count for kind, count in required.items()):
             raise error_factory("storage_schema_partial_upgrade")
         # Read all owned columns under the checking role without enumerating data.
-        columns = [line.strip().split()[0] for line in tables[table].splitlines()
-                   if line.strip() and line.strip().split()[0] not in {"PRIMARY", "UNIQUE", "FOREIGN", "REFERENCES", "CHECK", "OR"}]
+        columns = []
+        for line in tables[table].splitlines():
+            parts = line.strip().split()
+            if len(parts) >= 2 and parts[1] in {"TEXT", "INTEGER", "BIGINT"}:
+                columns.append(parts[0])
         quoted = '"' + schema.replace('"', '""') + '"'
         cursor.execute(f"SELECT {', '.join(columns)} FROM {quoted}.{table} WHERE false")
     cursor.execute("SELECT indexname FROM pg_indexes WHERE schemaname=%s AND indexname LIKE 'portfolio_%%'", (schema,))

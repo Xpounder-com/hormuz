@@ -1,9 +1,11 @@
 # Budget reports and Linear context: v1.1.0 design contracts
 
-These are owner-approved, separately versioned **planned records**, not
-implemented budget enforcement, a running connector, or live/customer proof.
-The existing `hormuz contract manifest` describes the installed surface and is
-unchanged. No new route or CLI command is activated by these files.
+These began as owner-approved, separately versioned design records. #217 now
+implements the internal work-budget owner, atomic gateway enforcement, and the
+version-2 current report in source. The implementation is not yet a
+protected-main acceptance, public budget route or CLI command, running
+connector, or live/customer proof. The existing `hormuz contract manifest`
+describes the installed public surface and is unchanged.
 
 The separately gated #217 transition checkpoint now selects
 `hormuz.work-budget-report` version 2 as the first runtime management result.
@@ -43,6 +45,10 @@ and all current caps. Rejected or expired previews do not weaken any cap.
 `compatible` requires a complete, nonempty all-allowed simulation with no
 restriction reasons. `would_restrict` requires known denials and reasons;
 an empty simulation cannot establish compatibility.
+The frozen scenario input contains no request body, input-token reservation,
+or cost estimate. The current internal preview therefore reports otherwise-
+allowed monetary cases as `inconclusive` with `missing_evidence` instead of
+inventing a compatible cost result.
 
 Burn reporting keeps enforcement accounting separate from provider facts.
 Remaining amount is exactly plan ceiling minus committed estimates, pending
@@ -165,9 +171,9 @@ boundary. The existing small schema vocabulary is reused without modification.
 
 ## Remaining gates
 
-- #217: accepted #214 atomic-reservation and transition preflight, actual
-  enforcement and independent-replica tests, conservative failure/settlement,
-  audit, period/activation behavior, migration and populated recovery.
+- #217: internal enforcement, reporting, migration and recovery source now
+  exist; exact-head review, protected checks, normal merge and exact merged-main
+  CI still gate runtime acceptance and public delivery remains #223.
 - #220: accepted #214 source-authority/transport/storage preflight, exact
   provider mapping, bounded durable acknowledgment, typed relation/privacy
   enforcement, idempotency/late/move/delete/backfill behavior, runbooks and
@@ -180,7 +186,7 @@ boundary. The existing small schema vocabulary is reused without modification.
   owner release/tag authorization: still open. No deployment or integration
   credentials are provisioned or modified by this work.
 
-This frozen extension checkpoint itself reserves no migration. Finance history
-subsequently established SQLite 8 / PostgreSQL 12 on main. The #217 red-first
-budget checkpoint binds that exact predecessor and plans additive 9/13
-transitions; it does not implement or activate those migrations.
+The frozen extension checkpoint itself reserved no migration. Finance history
+subsequently established SQLite 8 / PostgreSQL 12 on main. The #217 successor
+implements additive SQLite 9 / PostgreSQL 13 transitions without modifying the
+historical checkpoint; merge and exact-main evidence still determine acceptance.

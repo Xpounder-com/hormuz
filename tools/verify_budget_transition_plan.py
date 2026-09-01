@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify #217's analytics-first preflight, never budget runtime acceptance."""
+"""Verify #217's frozen preflight and bounded runtime plan, never acceptance."""
 
 from __future__ import annotations
 
@@ -29,10 +29,12 @@ from tools.verify_portfolio_extensions import (
 
 
 PLAN_PATH = "docs/budget-transition-plan-v1.json"
+IMPLEMENTATION_PATH = "docs/budget-transition-plan-v2.json"
 REPORT_V1_PATH = "docs/work-budget-reports-wire-v1.json"
 REPORT_V2_PATH = "docs/work-budget-reports-wire-v2.json"
 FIXTURE_PATH = "tests/fixtures/portfolio_intelligence/budget-report-v2-examples.json"
 PLAN_CANONICAL_SHA256 = "a07f9bd1a42084ce361090e3c53f7c4540a1264b8cccce7264af81d633aefaa2"
+IMPLEMENTATION_CANONICAL_SHA256 = "906ef5d0b68b56dca05b9da30466dca0184a4c0e885210d9e9c13bed2864a29b"
 REPORT_V1_SHA256 = "6a45a010de84273be45da85115d8d41267d5689addd29df592c47e8704a29cbf"
 REPORT_V2_SHA256 = "1e09eb42bedc8d91dc5ec230adb1f21360832940b237e38c8a88b86285a2c6d2"
 FIXTURE_SHA256 = "2a51eeadbe3d7cce38ee94ed3b23933672bbd5c29d40315010e5fecbb110e3d6"
@@ -53,6 +55,18 @@ REQUIRED_FILES = (
     "tests/test_postgres_budget_transition.py",
     "tests/test_budget_preflight_packaging.py",
     "tests/test_portfolio_wire_contract.py",
+)
+RUNTIME_REQUIRED_FILES = (
+    IMPLEMENTATION_PATH,
+    "docs/WORK_BUDGETS.md",
+    "hormuz/_budget_schema.py",
+    "hormuz/budget_repository.py",
+    "hormuz/budget_runtime.py",
+    "hormuz/migrations/postgresql/0013_work_budgets.sql",
+    "tests/_budget_fixture.py",
+    "tests/test_budget_schema.py",
+    "tests/test_sqlite_budget.py",
+    "tests/test_postgres_budget.py",
 )
 
 
@@ -103,6 +117,11 @@ def _canonical_digest(value: object) -> str:
 def validate_budget_transition_plan(value: object) -> None:
     if _canonical_digest(value) != PLAN_CANONICAL_SHA256:
         _fail("budget_preflight_contract_changed")
+
+
+def validate_budget_implementation_plan(value: object) -> None:
+    if _canonical_digest(value) != IMPLEMENTATION_CANONICAL_SHA256:
+        _fail("budget_implementation_contract_changed")
 
 
 def _canonical_decimal(value: Decimal) -> str:
@@ -351,13 +370,38 @@ def verify_budget_transition_plan(root: Path = ROOT) -> dict[str, object]:
     }
 
 
+def verify_budget_implementation_plan(root: Path = ROOT) -> dict[str, object]:
+    baseline = verify_budget_transition_plan(root)
+    for path in RUNTIME_REQUIRED_FILES:
+        if not (Path(root) / path).is_file():
+            _fail("budget_runtime_source_kit_incomplete")
+    plan = _read(Path(root), IMPLEMENTATION_PATH)
+    validate_budget_implementation_plan(plan)
+    return {
+        **baseline,
+        "schema_version": 2,
+        "status": "budget_runtime_plan_verified",
+        "feature_preflight_accepted": True,
+        "budget_implemented": True,
+        "budget_runtime_accepted": False,
+        "sqlite_schema_version": 9,
+        "postgresql_schema_version": 13,
+        "budget_table_count": 5,
+        "report_schema_version": 2,
+        "new_http_routes": 0,
+        "new_cli_commands": 0,
+        "final_candidate_accepted": False,
+        "released": False,
+    }
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo-root", type=Path, default=ROOT)
     parser.add_argument("--finance-archive", type=Path)
     args = parser.parse_args(argv)
     try:
-        result = verify_budget_transition_plan(args.repo_root)
+        result = verify_budget_implementation_plan(args.repo_root)
         if args.finance_archive is not None:
             verify_finance_archive(args.finance_archive)
         result["finance_archive_verified"] = args.finance_archive is not None

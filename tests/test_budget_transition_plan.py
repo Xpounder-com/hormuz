@@ -22,6 +22,9 @@ class BudgetTransitionPlanTests(unittest.TestCase):
     def plan(self):
         return json.loads((ROOT / verifier.PLAN_PATH).read_bytes())
 
+    def implementation_plan(self):
+        return json.loads((ROOT / verifier.IMPLEMENTATION_PATH).read_bytes())
+
     def bundles(self):
         return (
             json.loads((ROOT / verifier.REPORT_V1_PATH).read_bytes()),
@@ -65,6 +68,33 @@ class BudgetTransitionPlanTests(unittest.TestCase):
         self.assertEqual(result["new_http_routes"], 0)
         for field in ("budget_implemented", "feature_preflight_accepted", "final_candidate_accepted"):
             self.assertFalse(result[field])
+
+    def test_successor_is_runtime_source_not_acceptance_or_release(self):
+        result = verifier.verify_budget_implementation_plan(ROOT)
+        self.assertEqual(result["status"], "budget_runtime_plan_verified")
+        self.assertEqual(result["schema_version"], 2)
+        self.assertTrue(result["feature_preflight_accepted"])
+        self.assertTrue(result["budget_implemented"])
+        self.assertFalse(result["budget_runtime_accepted"])
+        self.assertFalse(result["final_candidate_accepted"])
+        self.assertFalse(result["released"])
+        self.assertEqual(result["sqlite_schema_version"], 9)
+        self.assertEqual(result["postgresql_schema_version"], 13)
+        self.assertEqual(result["budget_table_count"], 5)
+        self.assertEqual(result["report_schema_version"], 2)
+        self.assertEqual(result["new_http_routes"], 0)
+        self.assertEqual(result["new_cli_commands"], 0)
+
+    def test_successor_freezes_every_implementation_section(self):
+        for key in self.implementation_plan():
+            with self.subTest(key=key):
+                changed = copy.deepcopy(self.implementation_plan())
+                changed[key] = "SYNTHETIC_EXCLUDED"
+                with self.assertRaisesRegex(
+                    BudgetTransitionError,
+                    "budget_implementation_contract_changed",
+                ):
+                    verifier.validate_budget_implementation_plan(changed)
 
     def test_every_plan_section_and_scope_limit_is_frozen(self):
         for key in self.plan():

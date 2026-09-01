@@ -5,7 +5,14 @@ from dataclasses import dataclass
 from .config import GatewayConfig, Identity, ModelRoute, PolicyAnalysisContext
 from .policy_document import PolicySnapshot
 from .policy_runtime import PolicyRuntime
-from .store import MonthlyTotals, RequestAttempt, ReservationScope, UsageRepository
+from .store import (
+    MonthlyTotals,
+    RequestAttempt,
+    ReservationScope,
+    StorageSchemaError,
+    UsageRepository,
+    WorkBudgetContext,
+)
 
 
 @dataclass(frozen=True)
@@ -140,8 +147,14 @@ class PolicyEngine:
         reserved_tokens: int,
         reserved_cost_microusd: int,
         ttl_seconds: int,
+        work_budget: WorkBudgetContext | None = None,
     ) -> RequestAttempt:
-        return self.store.begin_request_attempt(
+        begin = self.store.begin_request_attempt
+        if work_budget is not None:
+            begin = getattr(self.store, "_begin_request_attempt_with_work_budget", None)
+            if not callable(begin):
+                raise StorageSchemaError("storage_schema_partial_upgrade")
+        arguments = dict(
             identity=identity,
             client=client,
             protocol=protocol,
@@ -157,6 +170,9 @@ class PolicyEngine:
             reserved_cost_microusd=reserved_cost_microusd,
             ttl_seconds=ttl_seconds,
         )
+        if work_budget is not None:
+            arguments["work_budget"] = work_budget
+        return begin(**arguments)
 
     @staticmethod
     def budget_scopes(*, identity: Identity, decision: PolicyDecision) -> tuple[ReservationScope, ...]:

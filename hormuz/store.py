@@ -30,6 +30,14 @@ from .contracts import (
     validate_request_status,
 )
 from .evidence import EvidenceStorageError, security_audit_event, usage_audit_event
+from .budget_runtime import (
+    RuntimeBudgetSQL,
+    WorkBudgetDenied,
+    audit_work_budget_denials,
+    enforce_and_bind_work_budget,
+    prepare_work_budget,
+    record_work_budget_denial,
+)
 from ._persistence import (
     MonthlyTotals,
     RequestAttempt,
@@ -37,6 +45,7 @@ from ._persistence import (
     RequestAttemptStateError,
     ReservationDenied,
     ReservationScope,
+    WorkBudgetContext,
     SecretTotals,
     UsageRepository,
     AuditChainSourceEventInput,
@@ -584,6 +593,20 @@ class UsageStore:
             )
         return reservation_id
 
+    def _record_work_budget_denial(self, identity: Identity, denial: WorkBudgetDenied) -> None:
+        try:
+            with self._lock, self._connection() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                record_work_budget_denial(
+                    RuntimeBudgetSQL(connection, postgres=False),
+                    organization_id=identity.organization_id,
+                    actor_id=identity.actor_id,
+                    denial=denial,
+                    now=datetime.now(timezone.utc),
+                )
+        except ReservationDenied:
+            raise StorageSchemaError("storage_unavailable") from None
+
     def begin_request_attempt(
         self,
         *,
@@ -601,6 +624,44 @@ class UsageStore:
         reserved_tokens: int,
         reserved_cost_microusd: int,
         ttl_seconds: int,
+    ) -> RequestAttempt:
+        return self._begin_request_attempt_with_work_budget(
+            identity=identity,
+            client=client,
+            protocol=protocol,
+            requested_model=requested_model,
+            resolved_alias=resolved_alias,
+            upstream_model=upstream_model,
+            policy_version=policy_version,
+            policy_action=policy_action,
+            redaction_count=redaction_count,
+            redaction_rules=redaction_rules,
+            scopes=scopes,
+            reserved_tokens=reserved_tokens,
+            reserved_cost_microusd=reserved_cost_microusd,
+            ttl_seconds=ttl_seconds,
+            work_budget=None,
+        )
+
+    @audit_work_budget_denials
+    def _begin_request_attempt_with_work_budget(
+        self,
+        *,
+        identity: Identity,
+        client: str,
+        protocol: str,
+        requested_model: str,
+        resolved_alias: str | None,
+        upstream_model: str | None,
+        policy_version: str,
+        policy_action: str,
+        redaction_count: int,
+        redaction_rules: tuple[str, ...],
+        scopes: tuple[ReservationScope, ...],
+        reserved_tokens: int,
+        reserved_cost_microusd: int,
+        ttl_seconds: int,
+        work_budget: WorkBudgetContext | None,
     ) -> RequestAttempt:
         """Durably record a pending attempt and its budget hold before egress.
 
@@ -676,6 +737,24 @@ class UsageStore:
                 reason_code=None,
                 usage_event_id=None,
             )
+            budget_schema_ready = connection.execute(
+                "SELECT 1 FROM hormuz_schema_migrations "
+                "WHERE version=9 AND state='applied'"
+            ).fetchone() is not None
+            if work_budget is not None and not budget_schema_ready:
+                raise StorageSchemaError("storage_schema_partial_upgrade")
+            budget_sql = RuntimeBudgetSQL(connection, postgres=False)
+            prepared_budget = (
+                prepare_work_budget(
+                    budget_sql,
+                    organization_id=identity.organization_id,
+                    attempt_id=attempt_id,
+                    work_budget=work_budget,
+                    now=now,
+                )
+                if budget_schema_ready
+                else None
+            )
             self._reserve_budget_in_connection(
                 connection,
                 identity=identity,
@@ -687,7 +766,24 @@ class UsageStore:
                 attempt_id=attempt_id,
                 now=now,
             )
-        return RequestAttempt(attempt_id=attempt_id, reservation_id=attempt_id)
+            if budget_schema_ready:
+                enforce_and_bind_work_budget(
+                    budget_sql,
+                    prepared=prepared_budget,
+                    organization_id=identity.organization_id,
+                    attempt_id=attempt_id,
+                    provider_id=protocol,
+                    model_id=upstream_model or resolved_alias or requested_model,
+                    model_version=None,
+                    reserved_cost_microusd=root["reserved_cost_microusd"],
+                    now=now,
+                    work_budget=work_budget,
+                )
+        return RequestAttempt(
+            attempt_id=attempt_id,
+            reservation_id=attempt_id,
+            attribution_event_id=None if prepared_budget is None else prepared_budget.attribution_event_id,
+        )
 
     def finalize_request_attempt(
         self,

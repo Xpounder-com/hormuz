@@ -1,13 +1,15 @@
 # ADR 0012: Analytics-first budget management output
 
-- Status: Accepted product direction; preflight and runtime remain gated
+- Status: Accepted
 - Date: 2026-08-31
 - Target: Hormuz 1.1.0
 - Issues: #214, #217, #222, #223, #224
 - Supersedes: only the planned default budget-report output version in ADR 0011
 - Approval: owner-approved direction recorded in
   https://github.com/Xpounder-com/hormuz/issues/217#issuecomment-5487469699
-- Open gates: #214 preflight acceptance and #217 runtime acceptance
+- Preflight acceptance: merged-main evidence recorded in
+  https://github.com/Xpounder-com/hormuz/issues/214#issuecomment-5487882220
+- Open gates: #217 runtime acceptance and #214 final-candidate acceptance
 
 ## Context
 
@@ -75,5 +77,6 @@ is one explicit output version transition before runtime, plus deterministic
 rounding and non-comparability rules that implementation and client tests must
 honor.
 
-This ADR is not #214 preflight acceptance, #217 runtime acceptance, role-view
-acceptance, finance-grade reconciliation, an external pilot, or a release.
+This ADR and its accepted preflight are not #217 runtime acceptance, #214
+final-candidate acceptance, role-view acceptance, finance-grade reconciliation,
+an external pilot, or a release.

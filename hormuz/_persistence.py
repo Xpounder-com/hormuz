@@ -94,6 +94,29 @@ class RequestAttempt:
 
     attempt_id: str
     reservation_id: str
+    attribution_event_id: str | None = None
+
+
+@dataclass(frozen=True)
+class WorkBudgetContext:
+    """Trusted server-resolved work scope for one atomic governed attempt.
+
+    Syntax is revalidated by each adapter and registry state is rechecked in
+    the reservation transaction.  This value never grants tenant authority.
+    """
+
+    work_scope_id: str | None
+    work_scope_version: int | None
+    confidence: str
+    reason_code: str
+    reserved_output_tokens: int
+    output_tokens_bounded: bool
+    policy_version: str
+    policy_digest: str
+    rate_card_id: str
+    rate_card_version: int
+    rate_card_digest: str
+    rate_card_currency: str
 
 
 @dataclass(frozen=True)
