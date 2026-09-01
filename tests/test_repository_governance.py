@@ -485,6 +485,50 @@ class RepositoryGovernanceTests(unittest.TestCase):
             ):
                 validate_repository_governance(root)
 
+    def test_macos_distribution_credentials_must_remain_in_protected_job(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._copy_contract(root)
+            workflow = root / ".github/workflows/macos-distribution.yml"
+            value = workflow.read_text(encoding="utf-8")
+            workflow.write_text(
+                value.replace(
+                    "    environment: macos-distribution\n",
+                    "    environment: unprotected-macos-distribution\n",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                RepositoryGovernanceError,
+                "workflow environment contract changed",
+            ):
+                validate_repository_governance(root)
+
+    def test_macos_distribution_rejects_unapproved_secret(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._copy_contract(root)
+            workflow = root / ".github/workflows/macos-distribution.yml"
+            value = workflow.read_text(encoding="utf-8")
+            workflow.write_text(
+                value.replace(
+                    "        env:\n",
+                    (
+                        "        env:\n"
+                        "          UNAPPROVED_TOKEN: "
+                        "${{ secrets.UNAPPROVED_TOKEN }}\n"
+                    ),
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                RepositoryGovernanceError,
+                "workflow secret expression contract changed",
+            ):
+                validate_repository_governance(root)
+
     def test_candidate_environment_secret_inventory_check_is_required(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

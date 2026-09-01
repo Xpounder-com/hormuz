@@ -102,6 +102,13 @@ EXPECTED_WORKFLOW_SECRET_EXPRESSIONS = {
         "${{ secrets.HORMUZ_LIVE_ANTHROPIC_PROVIDER_KEY }}",
         "${{ secrets.HORMUZ_LIVE_OPENAI_PROVIDER_KEY }}",
     ),
+    "macos-distribution.yml": (
+        "${{ secrets.APPLE_NOTARY_ISSUER_ID }}",
+        "${{ secrets.APPLE_NOTARY_KEY_ID }}",
+        "${{ secrets.APPLE_NOTARY_KEY_P8_BASE64 }}",
+        "${{ secrets.MACOS_DEVELOPER_ID_P12_BASE64 }}",
+        "${{ secrets.MACOS_DEVELOPER_ID_P12_PASSWORD }}",
+    ),
     "release-oci.yml": (
         "${{ secrets.GITHUB_TOKEN }}",
         "${{ secrets.GITHUB_TOKEN }}",
@@ -116,6 +123,9 @@ EXPECTED_WORKFLOW_JOB_ENVIRONMENTS = {
     },
     "live-client-conformance.yml": {
         "live-clients": "live-provider-conformance"
+    },
+    "macos-distribution.yml": {
+        "sign-and-notarize": "macos-distribution"
     },
     "website.yml": {"deploy": "github-pages"},
 }
