@@ -15,7 +15,7 @@ from unittest import mock
 from hormuz._persistence import WorkBudgetContext
 from hormuz.budget_runtime import WorkBudgetDenied
 from hormuz.budget_repository import BudgetRepositoryError
-from hormuz.config import Policy
+from hormuz.config import ModelRoute, Policy
 from hormuz.policy_scenarios import create_policy_scenario_suite
 from hormuz.policy_document import local_policy_content_sha256
 from hormuz.portfolio_config import PortfolioPrincipal
@@ -159,12 +159,14 @@ class BudgetAssertions:
         )
 
     def attempt(self, *, cost_microusd, output_tokens=20,
-                output_tokens_bounded=True, store=None, scopes=None):
+                output_tokens_bounded=True, store=None, scopes=None,
+                requested_model="synthetic", resolved_alias="synthetic",
+                upstream_model="synthetic"):
         store = store or self.store
         return store._begin_request_attempt_with_work_budget(
             identity=self.identity, client="codex", protocol="openai",
-            requested_model="synthetic", resolved_alias="synthetic",
-            upstream_model="synthetic", policy_version="budget-policy-v1",
+            requested_model=requested_model, resolved_alias=resolved_alias,
+            upstream_model=upstream_model, policy_version="budget-policy-v1",
             policy_action="allowed", redaction_count=0, redaction_rules=(),
             scopes=(ReservationScope(name="organization"),) if scopes is None else scopes,
             reserved_tokens=output_tokens + 10,
@@ -174,6 +176,58 @@ class BudgetAssertions:
                 output_tokens_bounded=output_tokens_bounded,
             ),
         )
+
+    def check_configured_route_identity_accepts_provider_model_names(self):
+        plan = self.create(
+            amount="10",
+            allowed_models=[{
+                "provider_id": "openai",
+                "model_id": "managed-route",
+                "model_version": None,
+            }],
+        )
+        self.activate(plan)
+        provider_model = "vendor/" + "model" * 32
+
+        attempt = self.attempt(
+            cost_microusd=1,
+            requested_model="managed-route",
+            resolved_alias="managed-route",
+            upstream_model=provider_model,
+        )
+
+        binding = next(
+            row
+            for row in self.budget_rows()["portfolio_work_budget_reservation_bindings"]
+            if row["request_attempt_id"] == attempt.attempt_id
+        )
+        self.assertGreater(len(provider_model), 128)
+        self.assertEqual(binding["provider_id"], "openai")
+        self.assertEqual(binding["model_id"], "managed-route")
+        self.assertIsNone(binding["model_version"])
+
+        managed_config = replace(
+            self.config,
+            model_routes={
+                "managed-route": ModelRoute(
+                    "managed-route", "openai", provider_model,
+                ),
+            },
+        )
+        suite = create_policy_scenario_suite(
+            organization_id="acme",
+            scenario_id="provider-native-model-name",
+            actor_id="alice",
+            client="codex",
+            protocol="openai",
+            requested_model="managed-route",
+            requested_output_tokens=20,
+        )
+        with mock.patch.object(self.repository, "config", managed_config):
+            preview = self.repository.preview_plan(
+                ADMIN, plan["budget_plan_id"], plan["version"], suite,
+            )
+        self.assertNotIn("model_intersection", preview["restriction_reasons"])
 
     def check_plan_versions_activation_and_management_change(self):
         start, end = "2026-08-01T00:00:00Z", "2027-09-01T00:00:00Z"

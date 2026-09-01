@@ -114,6 +114,9 @@ class PostgresBudgetTests(BudgetAssertions, PostgresTestCase):
     def test_model_output_request_caps_and_missing_attribution_fail_closed(self):
         self.check_model_output_request_caps_and_missing_attribution_fail_closed()
 
+    def test_configured_route_identity_accepts_provider_model_names(self):
+        self.check_configured_route_identity_accepts_provider_model_names()
+
     def test_independent_replicas_cannot_overspend(self):
         self.check_concurrent_instances_cannot_overspend()
 
@@ -260,6 +263,61 @@ class PostgresBudgetTests(BudgetAssertions, PostgresTestCase):
         self.assertLessEqual(terminal, database_now)
         self.assertLessEqual(latest[unknown.attempt_id], database_now)
         self.assertLessEqual(latest[stale.attempt_id], database_now)
+
+    def test_malformed_budget_audit_report_index_fails_without_repair(self):
+        def restore_index():
+            with self.psycopg.connect(self.owner_dsn) as connection:
+                connection.execute(
+                    self.sql.SQL("DROP INDEX IF EXISTS {}.{}").format(
+                        self.sql.Identifier(self.schema),
+                        self.sql.Identifier(BUDGET_AUDIT_REPORT_INDEX),
+                    )
+                )
+                connection.execute(
+                    self.sql.SQL("CREATE INDEX {} ON {}.{} ({})").format(
+                        self.sql.Identifier(BUDGET_AUDIT_REPORT_INDEX),
+                        self.sql.Identifier(self.schema),
+                        self.sql.Identifier("portfolio_work_budget_audit_events"),
+                        self.sql.SQL(", ").join(
+                            self.sql.Identifier(column)
+                            for column in BUDGET_AUDIT_REPORT_COLUMNS
+                        ),
+                    )
+                )
+
+        self.addCleanup(restore_index)
+        with self.psycopg.connect(self.owner_dsn) as connection:
+            connection.execute(
+                self.sql.SQL("DROP INDEX {}.{}").format(
+                    self.sql.Identifier(self.schema),
+                    self.sql.Identifier(BUDGET_AUDIT_REPORT_INDEX),
+                )
+            )
+            connection.execute(
+                self.sql.SQL("CREATE INDEX {} ON {}.{} (organization_id, sequence)").format(
+                    self.sql.Identifier(BUDGET_AUDIT_REPORT_INDEX),
+                    self.sql.Identifier(self.schema),
+                    self.sql.Identifier("portfolio_work_budget_audit_events"),
+                )
+            )
+
+        with self.assertRaises(PostgresStorageError) as caught:
+            self.new_store()
+        self.assertEqual(caught.exception.code, "storage_schema_partial_upgrade")
+        with self.psycopg.connect(self.owner_dsn) as connection:
+            columns = tuple(
+                row[0]
+                for row in connection.execute(
+                    "SELECT a.attname FROM pg_class i "
+                    "JOIN pg_namespace n ON n.oid=i.relnamespace "
+                    "JOIN pg_index x ON x.indexrelid=i.oid "
+                    "JOIN unnest(x.indkey) WITH ORDINALITY k(attnum,ord) ON TRUE "
+                    "JOIN pg_attribute a ON a.attrelid=x.indrelid AND a.attnum=k.attnum "
+                    "WHERE n.nspname=%s AND i.relname=%s ORDER BY k.ord",
+                    (self.schema, BUDGET_AUDIT_REPORT_INDEX),
+                ).fetchall()
+            )
+        self.assertEqual(columns, ("organization_id", "sequence"))
 
     def test_reservation_paths_lock_month_before_sweeping_attempts(self):
         observed = []

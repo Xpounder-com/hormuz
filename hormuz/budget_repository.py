@@ -32,6 +32,7 @@ from ._budget_schema import (
     validate_budget_pointer_row,
 )
 from ._portfolio_sql import portfolio_transaction
+from .budget_runtime import configured_model_id
 from .config import GatewayConfig, Identity
 from .finance_values import FinanceValueError, currency_code, decimal_text, exact_context
 from .policy_document import PolicySnapshot, local_policy_content_sha256
@@ -1099,7 +1100,11 @@ class WorkBudgetRepository:
             output_tokens = policy.max_output_tokens
         return ({
             "provider_id": route.protocol,
-            "model_id": route.upstream_model,
+            "model_id": configured_model_id(
+                resolved_alias=route.alias,
+                upstream_model=route.upstream_model,
+                requested_model=scenario.requested_model,
+            ),
             "model_version": None,
         }, output_tokens)
 

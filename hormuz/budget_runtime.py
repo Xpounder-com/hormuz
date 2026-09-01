@@ -124,6 +124,22 @@ def configured_route_rate_card(*, alias: str, protocol: str, upstream_model: str
     }
 
 
+def configured_model_id(
+    *,
+    resolved_alias: str | None,
+    upstream_model: str | None,
+    requested_model: str,
+) -> str:
+    """Return one wire-safe identity for the configured route selection."""
+
+    candidate = resolved_alias or upstream_model or requested_model
+    if type(candidate) is not str or not candidate:
+        raise ReservationDenied("Work-budget model evidence is invalid.")
+    if _ID.fullmatch(candidate) is not None:
+        return candidate
+    return "configured-model-" + hashlib.sha256(candidate.encode("utf-8")).hexdigest()
+
+
 def _utc(value: datetime) -> str:
     return value.astimezone(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
 

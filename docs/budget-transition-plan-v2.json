@@ -38,6 +38,7 @@
     "budget_report_v2": "explicit_first_runtime_management_projection",
     "existing_v1_behavior": "unchanged",
     "configured_rate_arithmetic_fix": "future_terminal_estimates_share_the_reservation_decimal_rate_rule_while_historical_usage_facts_remain_immutable",
+    "configured_model_identity_fix": "future_work_budget_bindings_use_a_wire_safe_configured_route_identity_without_rejecting_provider_native_model_names_or_mutating_v1_configuration",
     "prior_durable_state": "all_usage_policy_attempt_audit_custody_registry_attribution_outcome_and_finance_rows_receipts_cursors_holds_and_replays_preserved",
     "historical_usage_repricing": false,
     "historical_attribution_rebinding": false,
@@ -89,6 +90,7 @@
     "attribution": "authenticated_authorized_current_use_case_required_before_budget_lookup_or_provider_egress_when_any_plan_is_effective",
     "valuation": "shared_96_digit_decimal_configured_route_microusd_rule_with_reservation_ceiling_terminal_half_even_exact_rate_identity_and_matching_usd_currency_only",
     "model_identity": ["provider_id", "model_id", "model_version"],
+    "model_identity_rule": "provider_protocol_plus_configured_route_alias_when_wire_safe_else_deterministic_sha256_opaque_id_with_provider_native_name_retained_in_request_and_rate_card_evidence",
     "policy_identity": "activation_and_request_policy_version_plus_content_digest",
     "binding_plan_dimensions": "composite_foreign_key_ties_window_and_currency_to_the_exact_plan_version",
     "denial_audit_time": "plan_evaluation_time_retained_across_reservation_rollback_and_later_audit_commit",
@@ -143,6 +145,7 @@
     "denial_audits_retain_the_plan_evaluation_window_across_rollback",
     "postgresql_terminal_attempt_usage_and_unknown_events_share_database_clock_under_process_skew",
     "denial_report_index_shape_and_large_token_reservation_upper_bound",
+    "postgresql_denial_report_index_readiness_refusal_and_provider_native_model_route_binding_preview_parity",
     "unchanged_v1_repository_signature_routes_cli_errors_and_frozen_wires",
     "source_distribution_isolated_wheel_and_content_free_inventory_proof",
     "protected_exact_head_review_and_exact_merged_main_ci"

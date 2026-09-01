@@ -113,6 +113,14 @@ historical `as_of` reports never compare gateway-process and database clock
 domains. An `outcome_unknown` attempt uses the same database clock, retains the
 reserved amount, and is never automatically replayed.
 
+The bound model dimension uses the configured route alias when it already fits
+the frozen opaque-ID contract. A legacy-compatible alias outside that grammar
+is mapped deterministically to `configured-model-<sha256(alias)>`. The
+provider-native model name remains in request evidence and the exact rate-card
+digest, so names such as `vendor/model`—including names longer than the durable
+model-ID field—do not become runtime-only work-budget failures. Management
+previews use the same route-identity rule as request-time enforcement.
+
 Coverage counters form a declared partition: included, unattributed, and
 unsupported attempts sum exactly to the population. Numeric- or model-ceiling
 denials remain included because their governing scope is known; missing
@@ -132,7 +140,9 @@ never repaired or reflected. Both adapters require the same tenant-plan-window
 binding index so request-time enforcement and reporting do not scan unrelated
 historical bindings. They also require a tenant/plan/operation/evaluation-time
 audit index, with version and reason as covering columns, so denial aggregation
-does not devolve into a tenant-wide audit scan.
+does not devolve into a tenant-wide audit scan. SQLite and PostgreSQL readiness
+both reject a missing, malformed, partial, or invalid copy of either required
+index without repairing it in place.
 
 Stop writers and pools before migration, serialize the operator action, and
 restart fresh processes. Old binaries refuse schema 9/13. Before any candidate
@@ -148,7 +158,8 @@ newer refusal, old-pair backup/restore, post-write forward recovery, and the
 same rules in SQLite. Runtime tests cover both adapters, exact decimals,
 hierarchy denial, settlement, uncertain holds, activation/replacement/rollback,
 mandatory auditing, process-clock skew, large-number reservation coverage,
-corruption refusal, indexed denial reporting, and independent PostgreSQL replicas.
+corruption refusal, indexed denial reporting and readiness refusal, configured
+provider-model names, and independent PostgreSQL replicas.
 
 ## Remaining gates
 

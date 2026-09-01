@@ -65,6 +65,9 @@ class SQLiteBudgetTests(BudgetAssertions, unittest.TestCase):
     def test_model_output_request_caps_and_missing_attribution_fail_closed(self):
         self.check_model_output_request_caps_and_missing_attribution_fail_closed()
 
+    def test_configured_route_identity_accepts_provider_model_names(self):
+        self.check_configured_route_identity_accepts_provider_model_names()
+
     def test_concurrent_instances_cannot_overspend(self):
         self.check_concurrent_instances_cannot_overspend()
 

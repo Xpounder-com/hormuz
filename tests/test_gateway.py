@@ -16,6 +16,7 @@ from pathlib import Path
 from unittest import mock
 
 from hormuz.config import GatewayConfig, ModelRoute, Policy
+from hormuz.budget_runtime import configured_model_id
 from hormuz.contracts import relay_contract_header, validate_audit_event, validate_contract
 from hormuz.custody import KEY_PURPOSE_PROVIDER_CREDENTIAL, EnvelopeCipher, GeneratedDataKey
 from hormuz.custody_runtime import write_envelope_file
@@ -311,6 +312,32 @@ class ModelRouteCostTests(unittest.TestCase):
         )
 
         self.assertGreaterEqual(reservation, terminal)
+
+
+class ConfiguredModelIdentityTests(unittest.TestCase):
+    def test_route_alias_is_preserved_or_deterministically_normalized(self) -> None:
+        self.assertEqual(
+            configured_model_id(
+                resolved_alias="managed-route",
+                upstream_model="vendor/model",
+                requested_model="requested",
+            ),
+            "managed-route",
+        )
+        normalized = configured_model_id(
+            resolved_alias="vendor/model",
+            upstream_model="provider/model",
+            requested_model="requested",
+        )
+        self.assertRegex(normalized, r"\Aconfigured-model-[0-9a-f]{64}\Z")
+        self.assertEqual(
+            normalized,
+            configured_model_id(
+                resolved_alias="vendor/model",
+                upstream_model="changed/provider-model",
+                requested_model="changed-request",
+            ),
+        )
 
 
 class GatewayIntegrationTests(unittest.TestCase):
