@@ -35,6 +35,13 @@ except ModuleNotFoundError:
         str(Path(__file__).resolve().parents[1] / "tools" / "_portfolio_wire_contract.py")
     )["validate_wire_payload"]
 
+try:
+    from tools.verify_portfolio_extensions import validate_extension_payload
+except ModuleNotFoundError:
+    validate_extension_payload = runpy.run_path(
+        str(Path(__file__).resolve().parents[1] / "tools" / "verify_portfolio_extensions.py")
+    )["validate_extension_payload"]
+
 if __package__:
     from ._portfolio_fixture import (
         ADMIN as ADMIN_TOKEN, VIEWER as VIEWER_TOKEN, create_request, version_request,
@@ -998,6 +1005,10 @@ class BudgetAssertions:
         }
         malformed = (
             {**base, "rate_card_id": "not/wire/safe"},
+            {
+                **base,
+                "rate_card_id": "hormuz-rate-card-overflow:" + TEST_DIGEST,
+            },
             {**base, "rate_card_version": 0},
             {**base, "rate_card_digest": "z" * 64},
         )
@@ -1012,6 +1023,18 @@ class BudgetAssertions:
                             ADMIN, plan["budget_plan_id"],
                         ),
                     )
+        unsupported = self.create(amount="10", currency="EUR")
+        self.activate(unsupported)
+        with mock.patch.object(
+            self.repository, "_attempt_rows",
+            return_value=[{**base, "rate_card_digest": "z" * 64}],
+        ):
+            self.error(
+                "unavailable",
+                lambda: self.repository.current_report(
+                    ADMIN, unsupported["budget_plan_id"],
+                ),
+            )
 
     def check_rate_card_diversity_is_bounded_without_losing_accounting(self):
         plan = self.create(amount="10")
@@ -1041,7 +1064,13 @@ class BudgetAssertions:
         observations = report["financial_observations"]
         self.assertEqual(len(observations), 100)
         self.assertTrue(all(item["rate_card"] is not None for item in observations[:99]))
-        self.assertIsNone(observations[-1]["rate_card"])
+        overflow_card = observations[-1]["rate_card"]
+        self.assertIsNotNone(overflow_card)
+        self.assertEqual(overflow_card["version"], 1)
+        self.assertEqual(
+            overflow_card["id"],
+            "hormuz-rate-card-overflow:" + overflow_card["content_digest"],
+        )
         self.assertEqual(observations[-1]["amount"], "0.000002")
         self.assertEqual(observations[-1]["currency"], "USD")
         self.assertEqual(observations[-1]["reason_code"], "known")
@@ -1051,3 +1080,4 @@ class BudgetAssertions:
             reversed_report["financial_observations"], observations,
         )
         validate_wire_payload(BUDGET_WIRE, "hormuz.work-budget-report", report)
+        validate_extension_payload(BUDGET_WIRE, "hormuz.work-budget-report", report)

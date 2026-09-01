@@ -48,11 +48,16 @@ rate-card ID, version, and digest and fails closed on malformed evidence. Up to
 100 distinct identities remain exact one-card observations. If a plan window
 contains more, the report keeps the first 99 identities in canonical order and
 combines the remainder into one deterministic overflow observation. That row
-has a null `rate_card` because no single card represents the group; its
-provenance digest binds every constituent row, and its amount remains the exact
-sum only when every terminal estimate is present. Enforcement totals and
+carries a `hormuz-rate-card-overflow:<digest>` composite reference rather than
+pretending one constituent card represents the group. The reference digest
+binds the exact ordered member-card identities, while the provenance digest
+binds every constituent row. Its amount remains the exact sum only when every
+terminal estimate is present. Consumers must treat this reserved prefix as a
+report aggregate identity, not a configured route card. Enforcement totals and
 coverage always include every binding, so reporting stays bounded without
 turning rate-card rotation into a gateway denial or silently dropping spend.
+The aggregate prefix is reserved and therefore refused if it appears in a
+persisted binding rather than being derived by the report.
 
 ## Plan lifecycle and preview
 

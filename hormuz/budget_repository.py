@@ -71,6 +71,7 @@ _FORECAST_RULE_ID = "linear-committed-projection-v1"
 _FORECAST_RULE_DIGEST = hashlib.sha256(_FORECAST_RULE_ID.encode()).hexdigest()
 _MAX_REPORT_ATTEMPTS = 10_000
 _MAX_RATE_CARD_OBSERVATIONS = 100
+_RATE_CARD_OVERFLOW_ID_PREFIX = "hormuz-rate-card-overflow:"
 _MAX_SAFE_COUNT = 9007199254740991
 _KIND_ORDER = {"portfolio": 0, "initiative": 1, "use_case": 2}
 
@@ -166,6 +167,7 @@ def _stored_rate_card(row: Mapping[str, Any]) -> tuple[str, int, str]:
     if (
         type(identifier) is not str
         or _ID.fullmatch(identifier) is None
+        or identifier.startswith(_RATE_CARD_OVERFLOW_ID_PREFIX)
         or type(version) is not int
         or not 1 <= version <= 2147483647
         or type(digest) is not str
@@ -177,20 +179,25 @@ def _stored_rate_card(row: Mapping[str, Any]) -> tuple[str, int, str]:
 
 def _rate_card_observation_groups(
     rows: list[dict[str, Any]],
-) -> list[tuple[tuple[str, int, str] | None, list[dict[str, Any]]]]:
+) -> list[tuple[tuple[str, int, str], list[dict[str, Any]]]]:
     """Keep the report bounded while retaining every binding in provenance."""
 
     grouped: dict[tuple[str, int, str], list[dict[str, Any]]] = {}
     for row in rows:
         grouped.setdefault(_stored_rate_card(row), []).append(row)
-    ordered: list[
-        tuple[tuple[str, int, str] | None, list[dict[str, Any]]]
-    ] = list(sorted(grouped.items()))
+    ordered = list(sorted(grouped.items()))
     if len(ordered) <= _MAX_RATE_CARD_OBSERVATIONS:
         return ordered
     exact = ordered[:_MAX_RATE_CARD_OBSERVATIONS - 1]
-    overflow = [row for _, group in ordered[_MAX_RATE_CARD_OBSERVATIONS - 1:] for row in group]
-    return [*exact, (None, overflow)]
+    overflow_groups = ordered[_MAX_RATE_CARD_OBSERVATIONS - 1:]
+    overflow = [row for _, group in overflow_groups for row in group]
+    overflow_digest = _sha256([
+        _version_ref(*card) for card, _ in overflow_groups
+    ])
+    overflow_card = (
+        f"{_RATE_CARD_OVERFLOW_ID_PREFIX}{overflow_digest}", 1, overflow_digest,
+    )
+    return [*exact, (overflow_card, overflow)]
 
 
 def _rule(identifier: str, digest: str) -> dict[str, object]:
@@ -962,6 +969,7 @@ class WorkBudgetRepository:
             "reason_code": coverage_reason,
         }
         observations: list[dict[str, Any]]
+        rate_card_groups = _rate_card_observation_groups(rows) if rows else []
         if not rows or plan["currency"] != "USD":
             observations = [{
                 "basis": "not_available", "amount": None, "currency": None,
@@ -973,7 +981,7 @@ class WorkBudgetRepository:
             }]
         else:
             observations = []
-            for card, group in _rate_card_observation_groups(rows):
+            for card, group in rate_card_groups:
                 terminal_group = [
                     row for row in group
                     if row["attempt_state"] in {"succeeded", "failed", "rate_limited"}
@@ -990,7 +998,7 @@ class WorkBudgetRepository:
                     "currency": plan["currency"] if complete else None,
                     "scope_status": "matches_work_scope",
                     "source_kind": "configured_rates", "finalization": "not_applicable",
-                    "rate_card": None if card is None else _version_ref(*card),
+                    "rate_card": _version_ref(*card),
                     "provenance_digest": _sha256(group),
                     "reason_code": "known" if complete else "missing_evidence",
                     "allocation_rule": None,
