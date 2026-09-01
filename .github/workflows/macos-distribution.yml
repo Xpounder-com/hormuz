@@ -14,7 +14,7 @@ on:
         default: "1"
         type: string
       bundle_identifier:
-        description: Registered Apple bundle identifier
+        description: Approved permanent bundle identifier
         required: true
         default: com.xpounder.hormuz
         type: string
