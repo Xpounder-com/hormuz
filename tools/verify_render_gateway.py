@@ -68,6 +68,21 @@ paths.update({'deploy/render/gateway/' + name: Path('/etc/hormuz/caddy') / name
     for name in ('active.Caddyfile', 'maintenance.Caddyfile')})
 print(json.dumps({name: hashlib.sha256(path.read_bytes()).hexdigest() for name, path in paths.items()}))
 '''
+SSH_ACCOUNT_BOUNDARY = '''
+import json, os, pwd, stat
+from pathlib import Path
+account = pwd.getpwuid(os.getuid())
+home = Path(account.pw_dir)
+ssh = home / '.ssh'
+def metadata(path):
+    value = path.stat()
+    return {'uid': value.st_uid, 'gid': value.st_gid,
+            'mode': stat.S_IMODE(value.st_mode), 'directory': stat.S_ISDIR(value.st_mode)}
+print(json.dumps({'name': account.pw_name, 'uid': account.pw_uid, 'gid': account.pw_gid,
+    'home': account.pw_dir, 'shell': account.pw_shell, 'environment_home': os.environ.get('HOME'),
+    'home_metadata': metadata(home), 'ssh_metadata': metadata(ssh),
+    'sshd_present': Path('/usr/sbin/sshd').exists()}))
+'''
 
 
 def docker(*arguments, input_text=None, timeout=45, expected=0):
@@ -151,6 +166,17 @@ def verify(image: str) -> dict:
                                               "-I", "-", input_text=IMAGE_SOURCES))
         passed("installed_sources_match_checkout", all(hashlib.sha256((ROOT / name).read_bytes()).hexdigest() == digest
                                                        for name, digest in installed_sources.items()))
+        ssh_account = json.loads(docker("run", "--rm", "-i", *common, "--entrypoint", PYTHON, image,
+                                        "-I", "-", input_text=SSH_ACCOUNT_BOUNDARY))
+        expected_private_directory = {"uid": 65532, "gid": 1000, "mode": 0o700, "directory": True}
+        passed("render_ssh_account_is_nonroot_and_private",
+               {name: ssh_account[name] for name in ("name", "uid", "gid", "home", "shell", "environment_home", "sshd_present")} == {
+                   "name": "hormuz", "uid": 65532, "gid": 1000, "home": "/home/hormuz",
+                   "shell": "/bin/sh", "environment_home": "/home/hormuz", "sshd_present": False,
+               }
+               and ssh_account["home_metadata"] == expected_private_directory
+               and ssh_account["ssh_metadata"] == expected_private_directory)
+        passed("render_ssh_home_is_outside_persistent_disk", not ssh_account["home"].startswith("/var/lib/hormuz"))
         docker("run", "--rm", "-i", *common, "--entrypoint", PYTHON, image, "-I", "-", input_text=SETUP)
         # Model Render's root-owned, group-1000 readable secret-file mount.
         # Elevated permissions apply ONLY to this disposable fixture setup.

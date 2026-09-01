@@ -24,10 +24,16 @@ No secret is written into its configuration file. The processes share one UID;
 this limits accidental environment inheritance, not a compromised process's OS
 authority within the container.
 
-The image runs as UID 65532, GID 1000, with no low-port file capability. Group 1000
-permits reading Render's mounted configuration file as described in
+The image runs as the named non-root `hormuz` account at UID 65532, GID 1000,
+with no low-port file capability. Group 1000 permits reading Render's mounted
+configuration file as described in
 [Render's Docker secret-file guidance](https://render.com/docs/docker-secrets).
 State directories are owner-only `0700`, and database/manifest files are `0600`.
+The account has `/bin/sh` and a private `0700` home and `~/.ssh` under
+`/home/hormuz` solely for Render's injected SSH/SFTP transport. The persistent
+disk at `/var/lib/hormuz` does not cover that home, and the image installs and
+runs no SSH server. Keep account-level operator SSH keys short-lived and remove
+them immediately after a transfer drill.
 Local verification additionally enforces a read-only root filesystem, no Linux
 capabilities, no new privileges, 512 MiB memory and a 128-task limit. These local
 Docker flags are not a claim about Render's platform-level container settings.
