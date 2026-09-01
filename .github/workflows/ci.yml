@@ -111,15 +111,18 @@ jobs:
             -s "$GITHUB_WORKSPACE/tests" -p test_finance_rate_cards.py -v
           "$RUNNER_TEMP/hormuz-wheel/bin/python" -I -m unittest discover \
             -s "$GITHUB_WORKSPACE/tests" -p test_sqlite_finance.py -v
-      - name: Verify additive portfolio contracts from the source distribution
+      - name: Verify additive portfolio contracts and budget preflight from the source distribution
         run: |
           hormuz_extension_source="$(mktemp -d "$RUNNER_TEMP/hormuz-extensions.XXXXXX")"
           hormuz_extension_version="$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
           tar -xzf dist/hormuz-*.tar.gz -C "$hormuz_extension_source"
           cd "$hormuz_extension_source/hormuz-$hormuz_extension_version"
           "$RUNNER_TEMP/hormuz-wheel/bin/python" -I tools/verify_portfolio_extensions.py
+          "$RUNNER_TEMP/hormuz-wheel/bin/python" -I tools/verify_budget_transition_plan.py
           "$RUNNER_TEMP/hormuz-wheel/bin/python" -m unittest -v \
-            tests.test_portfolio_extensions tests.test_portfolio_extension_packaging
+            tests.test_portfolio_extensions tests.test_portfolio_extension_packaging \
+            tests.test_budget_transition_plan tests.test_budget_preflight_packaging \
+            tests.test_portfolio_wire_contract
       - name: Verify the resolved license boundary for every declared extra
         run: |
           python -m venv "$RUNNER_TEMP/hormuz-license"
@@ -151,7 +154,7 @@ jobs:
   postgres-compatibility:
     name: PostgreSQL compatibility
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     services:
       postgres:
         image: postgres@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
@@ -230,6 +233,17 @@ jobs:
           python -m venv "$RUNNER_TEMP/hormuz-outcome-baseline"
           "$RUNNER_TEMP/hormuz-outcome-baseline/bin/python" -m pip install \
             "$RUNNER_TEMP/outcome-baseline-aa648ed.tar[postgres]"
+      - name: Verify and install the real finance predecessor
+        run: |
+          git fetch --no-tags origin 1dd6c9f561ee70880d6e68b7aa2d2ab17852d207
+          git -c tar.umask=0000 archive --format=tar --prefix=hormuz-finance-baseline/ \
+            --output="$RUNNER_TEMP/finance-baseline-1dd6c9f.tar" \
+            1dd6c9f561ee70880d6e68b7aa2d2ab17852d207
+          python tools/verify_budget_transition_plan.py \
+            --finance-archive "$RUNNER_TEMP/finance-baseline-1dd6c9f.tar"
+          python -m venv "$RUNNER_TEMP/hormuz-finance-baseline"
+          "$RUNNER_TEMP/hormuz-finance-baseline/bin/python" -m pip install \
+            "$RUNNER_TEMP/finance-baseline-1dd6c9f.tar[postgres]"
       - name: Build the candidate wheel
         run: |
           python -m pip install build==1.3.0
@@ -250,9 +264,12 @@ jobs:
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" tools/verify_attribution_transition_plan.py
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" tools/verify_outcome_transition_plan.py
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" tools/verify_finance_transition_plan.py
+          "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" tools/verify_budget_transition_plan.py
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -m unittest -v \
             tests.test_registry_transition_plan tests.test_attribution_transition_plan tests.test_outcome_transition_plan \
-            tests.test_finance_transition_plan tests.test_finance_packaging
+            tests.test_finance_transition_plan tests.test_finance_packaging \
+            tests.test_budget_transition_plan tests.test_budget_preflight_packaging \
+            tests.test_portfolio_wire_contract
       - name: Prove PostgreSQL migration and repository compatibility
         env:
           HORMUZ_TEST_POSTGRES_DSN: postgresql://postgres:hormuz-test-password@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/hormuz_test
@@ -261,11 +278,13 @@ jobs:
           HORMUZ_TEST_REGISTRY_PYTHON: ${{ runner.temp }}/hormuz-registry-baseline/bin/python
           HORMUZ_TEST_ATTRIBUTION_PYTHON: ${{ runner.temp }}/hormuz-attribution-baseline/bin/python
           HORMUZ_TEST_OUTCOME_PYTHON: ${{ runner.temp }}/hormuz-outcome-baseline/bin/python
+          HORMUZ_TEST_FINANCE_PYTHON: ${{ runner.temp }}/hormuz-finance-baseline/bin/python
         run: |
           test -x "$HORMUZ_TEST_V1_PYTHON"
           test -x "$HORMUZ_TEST_REGISTRY_PYTHON"
           test -x "$HORMUZ_TEST_ATTRIBUTION_PYTHON"
           test -x "$HORMUZ_TEST_OUTCOME_PYTHON"
+          test -x "$HORMUZ_TEST_FINANCE_PYTHON"
           test -n "$HORMUZ_TEST_PG_CONTAINER"
           test -n "$HORMUZ_TEST_POSTGRES_DSN"
           cd "$RUNNER_TEMP"
@@ -277,6 +296,10 @@ jobs:
             -s "$GITHUB_WORKSPACE/tests" -p test_sqlite_finance_transition.py -v
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -I -m unittest discover \
             -s "$GITHUB_WORKSPACE/tests" -p test_postgres_finance_transition.py -v
+          "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -I -m unittest discover \
+            -s "$GITHUB_WORKSPACE/tests" -p test_sqlite_budget_transition.py -v
+          "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -I -m unittest discover \
+            -s "$GITHUB_WORKSPACE/tests" -p test_postgres_budget_transition.py -v
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -m unittest discover \
             -s "$GITHUB_WORKSPACE/tests" -p test_sqlite_outcome_transition.py -v
           "$RUNNER_TEMP/hormuz-postgres-wheel/bin/python" -m unittest discover \

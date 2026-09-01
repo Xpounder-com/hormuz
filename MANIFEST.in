@@ -13,6 +13,7 @@ include docs/portfolio-intelligence-contract-v1.json
 include docs/portfolio-intelligence-wire-v1.json
 include docs/portfolio-extension-contract-v1.json
 include docs/work-budget-reports-wire-v1.json
+include docs/work-budget-reports-wire-v2.json
 include docs/linear-context-wire-v1.json
 include docs/registry-transition-plan-v1.json
 include docs/registry-transition-plan-v2.json
@@ -23,6 +24,7 @@ include docs/outcome-transition-plan-v2.json
 include docs/finance-transition-plan-v1.json
 include docs/finance-transition-plan-v2.json
 include docs/finance-source-contract-v1.json
+include docs/budget-transition-plan-v1.json
 include hormuz/portfolio-registry-wire-v1.json
 include hormuz/portfolio-attribution-wire-v1.json
 include hormuz/portfolio-outcome-wire-v1.json
@@ -47,6 +49,7 @@ include tools/verify_registry_transition_plan.py
 include tools/verify_attribution_transition_plan.py
 include tools/verify_outcome_transition_plan.py
 include tools/verify_finance_transition_plan.py
+include tools/verify_budget_transition_plan.py
 include tools/verify_core_wheel.py
 include tools/_portfolio_wire_contract.py
 include tools/oidc_reference_conformance.py

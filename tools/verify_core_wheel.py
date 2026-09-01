@@ -202,6 +202,29 @@ REQUIRED_PORTFOLIO_EXTENSION_SDIST_PATHS = (
     "docs/finance-source-contract-v1.json",
     "tests/fixtures/portfolio_intelligence/v1.0.0-contract-manifest.json",
 )
+REQUIRED_BUDGET_PREFLIGHT_SDIST_PATHS = (
+    "docs/BUDGET_TRANSITION.md",
+    "docs/budget-transition-plan-v1.json",
+    "docs/work-budget-reports-wire-v1.json",
+    "docs/work-budget-reports-wire-v2.json",
+    "docs/decisions/0012-analytics-first-budget-management-output.md",
+    "tests/fixtures/portfolio_intelligence/budget-report-v2-examples.json",
+    "tools/verify_budget_transition_plan.py",
+    "tools/verify_finance_transition_plan.py",
+    "tools/verify_portfolio_extensions.py",
+    "tools/_portfolio_wire_contract.py",
+    "tests/_budget_predecessor_fixture.py",
+    "tests/_finance_fixture.py",
+    "tests/_finance_values_fixture.py",
+    "tests/_portfolio_fixture.py",
+    "tests/_postgres_fixture.py",
+    "tests/_registry_transition_fixture.py",
+    "tests/test_budget_transition_plan.py",
+    "tests/test_sqlite_budget_transition.py",
+    "tests/test_postgres_budget_transition.py",
+    "tests/test_budget_preflight_packaging.py",
+    "tests/test_portfolio_wire_contract.py",
+)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -233,6 +256,7 @@ def main(argv: list[str] | None = None) -> int:
     _assert_finance_values_sdist_boundary(sdist)
     _assert_finance_history_sdist_boundary(sdist)
     _assert_portfolio_extension_sdist_boundary(sdist)
+    _assert_budget_preflight_sdist_boundary(sdist)
     _verify_isolated_install(wheel, config, python)
     print(
         "verified core distribution boundary: no context/runtime data and complete deployment/usability assets"
@@ -371,6 +395,16 @@ def _assert_portfolio_extension_sdist_boundary(path: Path) -> None:
     ]
     if missing:
         raise RuntimeError(f"Portfolio extensions incomplete in {path.name}: {', '.join(sorted(missing))}")
+
+
+def _assert_budget_preflight_sdist_boundary(path: Path) -> None:
+    members = tuple(name.lstrip("./") for name in _sdist_members(path))
+    missing = [
+        required for required in REQUIRED_BUDGET_PREFLIGHT_SDIST_PATHS
+        if not any(f"/{member}".endswith(f"/{required}") for member in members)
+    ]
+    if missing:
+        raise RuntimeError(f"Budget preflight incomplete in {path.name}: {', '.join(sorted(missing))}")
 
 
 def _verify_isolated_install(wheel: Path, config_template: Path, base_python: Path) -> None:

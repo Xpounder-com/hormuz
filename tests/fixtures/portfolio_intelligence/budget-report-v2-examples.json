@@ -1,0 +1,237 @@
+{
+  "schema_id": "hormuz.budget-report-v2-examples",
+  "schema_version": 1,
+  "synthetic": true,
+  "cases": [
+    {
+      "name": "hormuz.work-budget-report:first-activation",
+      "schema_id": "hormuz.work-budget-report",
+      "value": {
+        "schema_id": "hormuz.work-budget-report",
+        "schema_version": 2,
+        "organization_id": "tenant-test",
+        "report_id": "report-first-test",
+        "reader_role": "portfolio_admin",
+        "reader_scope_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "work_scope": {
+          "work_scope_id": "use-case-test",
+          "version": 1
+        },
+        "plan": {
+          "id": "budget-test",
+          "version": 1,
+          "content_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "activation_generation": 1,
+        "policy": {
+          "version": "policy-test",
+          "content_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "window": {
+          "start_at": "2026-08-01T00:00:00Z",
+          "end_at": "2026-09-01T00:00:00Z"
+        },
+        "as_of": "2026-08-16T12:00:00Z",
+        "generated_at": "2026-08-31T12:00:00Z",
+        "input_snapshot_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "plan_amount": "100",
+        "currency": "USD",
+        "plan_change": {
+          "kind": "established",
+          "changed_at": "2026-08-01T00:00:00Z",
+          "previous_plan": null,
+          "previous_amount": null,
+          "previous_currency": null,
+          "previous_work_scope": null,
+          "previous_window": null,
+          "amount_delta": null,
+          "percent_delta": null,
+          "percentage_scale": 6,
+          "percentage_rounding": "half_even",
+          "comparison_status": "first_activation",
+          "comparison_reasons": [],
+          "comparison_basis": "immediately_prior_active_plan"
+        },
+        "enforcement": {
+          "cost_basis": "configured_rate_card_estimate",
+          "valuation_rule": {
+            "id": "reservation-rule-test",
+            "version": 1,
+            "content_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          "committed_amount": null,
+          "pending_reservation_amount": null,
+          "uncertain_reservation_amount": null,
+          "remaining_amount": null,
+          "over_cap_attempts": null,
+          "reason_code": "missing_evidence"
+        },
+        "financial_observations": [
+          {
+            "basis": "not_available",
+            "amount": null,
+            "currency": null,
+            "scope_status": "not_available",
+            "source_kind": "not_available",
+            "finalization": "not_applicable",
+            "rate_card": null,
+            "provenance_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "reason_code": "missing_evidence",
+            "allocation_rule": null
+          }
+        ],
+        "observation_combination": "separate_bases_do_not_sum_overlapping_observations",
+        "forecast": {
+          "method": "not_available",
+          "rule": null,
+          "projected_amount": null,
+          "currency": null,
+          "cost_basis": "not_available",
+          "basis_amount": null,
+          "elapsed_seconds": null,
+          "period_seconds": null,
+          "excludes_reservations": true,
+          "reason_code": "missing_evidence"
+        },
+        "coverage": {
+          "population_attempts": null,
+          "included_attempts": null,
+          "unattributed_attempts": null,
+          "unsupported_attempts": null,
+          "pricing_eligible_attempts": null,
+          "priced_attempts": null,
+          "rule": {
+            "id": "coverage-test",
+            "version": 1,
+            "content_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          "reason_code": "missing_evidence"
+        }
+      }
+    },
+    {
+      "name": "hormuz.work-budget-report:increased",
+      "schema_id": "hormuz.work-budget-report",
+      "value": {
+        "schema_id": "hormuz.work-budget-report",
+        "schema_version": 2,
+        "organization_id": "tenant-test",
+        "report_id": "report-increased-test",
+        "reader_role": "portfolio_admin",
+        "reader_scope_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "work_scope": {
+          "work_scope_id": "use-case-test",
+          "version": 1
+        },
+        "plan": {
+          "id": "budget-test",
+          "version": 2,
+          "content_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        "activation_generation": 2,
+        "policy": {
+          "version": "policy-test",
+          "content_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "window": {
+          "start_at": "2026-08-01T00:00:00Z",
+          "end_at": "2026-09-01T00:00:00Z"
+        },
+        "as_of": "2026-08-16T12:00:00Z",
+        "generated_at": "2026-08-31T12:00:00Z",
+        "input_snapshot_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "plan_amount": "120",
+        "currency": "USD",
+        "plan_change": {
+          "kind": "increased",
+          "changed_at": "2026-08-15T09:30:00Z",
+          "previous_plan": {
+            "id": "budget-test",
+            "version": 1,
+            "content_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          "previous_amount": "100",
+          "previous_currency": "USD",
+          "previous_work_scope": {
+            "work_scope_id": "use-case-test",
+            "version": 1
+          },
+          "previous_window": {
+            "start_at": "2026-08-01T00:00:00Z",
+            "end_at": "2026-09-01T00:00:00Z"
+          },
+          "amount_delta": "20",
+          "percent_delta": "20",
+          "percentage_scale": 6,
+          "percentage_rounding": "half_even",
+          "comparison_status": "known",
+          "comparison_reasons": [],
+          "comparison_basis": "immediately_prior_active_plan"
+        },
+        "enforcement": {
+          "cost_basis": "configured_rate_card_estimate",
+          "valuation_rule": {
+            "id": "reservation-rule-test",
+            "version": 1,
+            "content_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          "committed_amount": "10",
+          "pending_reservation_amount": "1",
+          "uncertain_reservation_amount": "1",
+          "remaining_amount": "108",
+          "over_cap_attempts": 2,
+          "reason_code": "known"
+        },
+        "financial_observations": [
+          {
+            "basis": "configured_rate_card_estimate",
+            "amount": "10",
+            "currency": "USD",
+            "scope_status": "matches_work_scope",
+            "source_kind": "configured_rates",
+            "finalization": "not_applicable",
+            "rate_card": {
+              "id": "rate-card-test",
+              "version": 1,
+              "content_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "provenance_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "reason_code": "known",
+            "allocation_rule": null
+          }
+        ],
+        "observation_combination": "separate_bases_do_not_sum_overlapping_observations",
+        "forecast": {
+          "method": "linear_committed_projection",
+          "rule": {
+            "id": "linear-committed-projection-test",
+            "version": 1,
+            "content_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          "projected_amount": "20",
+          "currency": "USD",
+          "cost_basis": "configured_rate_card_estimate",
+          "basis_amount": "10",
+          "elapsed_seconds": 1339200,
+          "period_seconds": 2678400,
+          "excludes_reservations": true,
+          "reason_code": "known"
+        },
+        "coverage": {
+          "population_attempts": 20,
+          "included_attempts": 20,
+          "unattributed_attempts": 0,
+          "unsupported_attempts": 0,
+          "pricing_eligible_attempts": 20,
+          "priced_attempts": 20,
+          "rule": {
+            "id": "coverage-test",
+            "version": 1,
+            "content_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          "reason_code": "known"
+        }
+      }
+    }
+  ]
+}

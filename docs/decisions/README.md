@@ -26,6 +26,7 @@ An agent, test result, or convenient implementation detail cannot move a decisio
 | [0009](0009-v1-deployment-profiles-and-recovery-objectives.md) | Accepted | v1 Compose and Kubernetes profile boundaries, state ownership, and reference-rehearsal RPO/RTO objectives | [#100](https://github.com/Xpounder-com/hormuz/issues/100) |
 | [0010](0010-v1.1-portfolio-intelligence-contract.md) | Accepted | v1.1 additive portfolio, attribution, outcome, budget, scorecard, recommendation, privacy, and claim boundary | [#212](https://github.com/Xpounder-com/hormuz/issues/212) |
 | [0011](0011-additive-budget-reports-and-linear-context.md) | Accepted design; implementation gated | Separate versioned budget preview/report and metadata-only Linear parent/context records; frozen v1 preserved | [#217](https://github.com/Xpounder-com/hormuz/issues/217), [#220](https://github.com/Xpounder-com/hormuz/issues/220) |
+| [0012](0012-analytics-first-budget-management-output.md) | Accepted product direction; preflight and runtime gated | Launch the first budget runtime with an analytics-first version-2 current report and compact activation change fact | [#214](https://github.com/Xpounder-com/hormuz/issues/214), [#217](https://github.com/Xpounder-com/hormuz/issues/217) |
 
 ## Acceptance record
 
