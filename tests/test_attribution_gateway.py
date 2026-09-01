@@ -31,6 +31,12 @@ class AttributionGatewayTests(AttributionGatewayAssertions, unittest.TestCase):
     def test_failover_creates_distinct_attribution_and_work_budget_evidence(self):
         self.check_failover_creates_distinct_attribution_and_work_budget_evidence()
 
+    def test_provider_side_input_never_egresses_under_active_work_budget(self):
+        self.check_provider_side_input_never_egresses_under_active_work_budget()
+
+    def test_unbound_identity_cannot_bypass_an_active_work_budget(self):
+        self.check_unbound_identity_cannot_bypass_an_active_work_budget()
+
     def test_scope_change_before_atomic_reservation_never_egresses(self):
         self.check_scope_change_before_atomic_reservation_never_egresses()
 
