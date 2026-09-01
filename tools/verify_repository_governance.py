@@ -135,6 +135,7 @@ MACOS_DISTRIBUTION_SOURCE_GUARD = (
     'test "$(git rev-parse HEAD)" = "$GITHUB_SHA"',
     'test -z "$(git status --porcelain)"',
 )
+MACOS_DISTRIBUTION_SOURCE_GUARD_OCCURRENCES = 2
 PAGES_PUBLISH_CONDITION = (
     "github.repository == 'Xpounder-com/hormuz' && "
     "github.event_name != 'pull_request' && github.ref == 'refs/heads/main'"
@@ -1188,12 +1189,41 @@ def _validate_workflows(
             raise RepositoryGovernanceError(
                 f"workflow environment contract changed: {path.name}"
             )
-        if path.name == "macos-distribution.yml" and any(
-            text.count(marker) != 1 for marker in MACOS_DISTRIBUTION_SOURCE_GUARD
-        ):
-            raise RepositoryGovernanceError(
-                "macOS distribution source guard changed"
-            )
+        if path.name == "macos-distribution.yml":
+            if any(
+                text.count(marker)
+                != MACOS_DISTRIBUTION_SOURCE_GUARD_OCCURRENCES
+                for marker in MACOS_DISTRIBUTION_SOURCE_GUARD
+            ):
+                raise RepositoryGovernanceError(
+                    "macOS distribution source guard changed"
+                )
+            build_job = job_blocks.get("build-and-test")
+            signing_job = job_blocks.get("sign-and-notarize")
+            signing_fields = job_fields.get("sign-and-notarize", {})
+            if (
+                build_job is None
+                or signing_job is None
+                or signing_fields.get("needs") != "build-and-test"
+                or "${{ secrets." in build_job
+                or "swift test --package-path clients/macos" not in build_job
+                or "swift build --package-path clients/macos" not in build_job
+                or "actions/upload-artifact@" not in build_job
+                or "actions/download-artifact@" not in signing_job
+                or "swift test" in signing_job
+                or "swift build" in signing_job
+                or '--prebuilt-binary "$HORMUZ_UNSIGNED_PAYLOAD/Hormuz"'
+                not in signing_job
+                or any(
+                    expression not in signing_job
+                    for expression in EXPECTED_WORKFLOW_SECRET_EXPRESSIONS[
+                        "macos-distribution.yml"
+                    ]
+                )
+            ):
+                raise RepositoryGovernanceError(
+                    "macOS distribution build/sign isolation changed"
+                )
         if path.name == "website.yml":
             pages_workflow_seen = True
             _validate_pages_workflow(
