@@ -57,6 +57,76 @@ from .usage import ResponseUsageParser
 LOGGER = logging.getLogger("hormuz")
 _STORAGE_FAILURES = (sqlite3.Error, EvidenceStorageError, PostgresStorageError, StorageSchemaError)
 _INGRESS_CREDENTIAL_HEADER = "X-Hormuz-Ingress-Credential"
+_OPENAI_PROVIDER_STATE_FIELDS = frozenset({
+    "conversation", "previous_response_id", "prompt",
+})
+_ANTHROPIC_PROVIDER_STATE_FIELDS = frozenset({"container", "mcp_servers"})
+_OPENAI_INLINE_TOOL_TYPES = frozenset({"custom", "function"})
+_ANTHROPIC_INLINE_TOOL_TYPES = frozenset({"custom"})
+_INLINE_ANTHROPIC_SOURCE_TYPES = frozenset({"base64", "content", "text"})
+
+
+def _provider_input_tokens_bounded(protocol: str, request: Mapping[str, Any]) -> bool:
+    """Recognize request inputs whose billed content is self-contained.
+
+    Serialized bytes conservatively bound inline text/data, but cannot bound
+    content a provider resolves from stored state, a URL, a file identifier,
+    or a server-side tool. Unknown reference forms fail closed when a work
+    budget is active; this classifier never fetches or inspects content.
+    """
+
+    if protocol == "openai":
+        if any(request.get(field) is not None for field in _OPENAI_PROVIDER_STATE_FIELDS):
+            return False
+        inline_tool_types = _OPENAI_INLINE_TOOL_TYPES
+    elif protocol == "anthropic":
+        if any(request.get(field) is not None for field in _ANTHROPIC_PROVIDER_STATE_FIELDS):
+            return False
+        inline_tool_types = _ANTHROPIC_INLINE_TOOL_TYPES
+    else:
+        return False
+
+    tools = request.get("tools")
+    if tools is not None:
+        if type(tools) is not list:
+            return False
+        for tool in tools:
+            if type(tool) is not dict:
+                return False
+            tool_type = tool.get("type")
+            if protocol == "anthropic" and tool_type is None:
+                continue
+            if type(tool_type) is not str or tool_type not in inline_tool_types:
+                return False
+
+    pending: list[object] = [request]
+    while pending:
+        value = pending.pop()
+        if type(value) is list:
+            pending.extend(value)
+            continue
+        if type(value) is not dict:
+            continue
+        kind = value.get("type")
+        if kind == "item_reference":
+            return False
+        if kind == "input_image":
+            if value.get("file_id") is not None:
+                return False
+            if "image_url" in value:
+                image_url = value.get("image_url")
+                if type(image_url) is not str or not image_url.startswith("data:"):
+                    return False
+        if kind == "input_file" and (
+            value.get("file_id") is not None or value.get("file_url") is not None
+        ):
+            return False
+        if kind in {"image", "document"}:
+            source = value.get("source")
+            if type(source) is not dict or source.get("type") not in _INLINE_ANTHROPIC_SOURCE_TYPES:
+                return False
+        pending.extend(value.values())
+    return True
 
 
 class GatewayServer(ThreadingHTTPServer):
@@ -593,6 +663,9 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             if not output_tokens_bounded:
                 reserved_output_tokens = 0
             reserved_input_tokens = len(body)
+            input_tokens_bounded = _provider_input_tokens_bounded(
+                protocol, redaction.value,
+            )
             reserved_cost_microusd = decision.route.estimate_reservation_cost_microusd(
                 input_tokens=reserved_input_tokens,
                 output_tokens=max(0, reserved_output_tokens),
@@ -632,6 +705,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                             reason_code=admission.reason,
                             reserved_output_tokens=max(0, reserved_output_tokens),
                             output_tokens_bounded=output_tokens_bounded,
+                            input_tokens_bounded=input_tokens_bounded,
                             policy_version=decision.policy_version,
                             policy_digest=policy_digest,
                             rate_card_id=str(route_rate_card["id"]),

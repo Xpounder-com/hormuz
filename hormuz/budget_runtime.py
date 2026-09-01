@@ -166,6 +166,7 @@ def _context(value: WorkBudgetContext) -> WorkBudgetContext:
         type(value.reserved_output_tokens) is not int
         or not 0 <= value.reserved_output_tokens <= 9007199254740991
         or type(value.output_tokens_bounded) is not bool
+        or type(value.input_tokens_bounded) is not bool
     ):
         raise ReservationDenied("Work attribution is invalid for budget enforcement.")
     if (
@@ -529,6 +530,11 @@ def enforce_and_bind_work_budget(
     now_value = _utc(now)
     reserved = _reservation_amount(reserved_cost_microusd)
     plans = _plans(sql, organization_id, prepared.scope_chain, now_value)
+    if plans and not context.input_tokens_bounded:
+        raise WorkBudgetDenied(
+            "A bounded input-token estimate is required for work-budget enforcement.",
+            "request_cost_ceiling", _plan_refs(plans), evaluated_at=now_value,
+        )
     if plans and not context.output_tokens_bounded:
         raise WorkBudgetDenied(
             "A bounded output-token estimate is required for work-budget enforcement.",

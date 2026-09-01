@@ -28,6 +28,9 @@ class AttributionGatewayTests(AttributionGatewayAssertions, unittest.TestCase):
     def test_unbounded_output_never_egresses_under_active_work_budget(self):
         self.check_unbounded_output_never_egresses_under_active_work_budget()
 
+    def test_provider_side_input_never_egresses_under_active_work_budget(self):
+        self.check_provider_side_input_never_egresses_under_active_work_budget()
+
     def test_unbound_identity_cannot_bypass_an_active_work_budget(self):
         self.check_unbound_identity_cannot_bypass_an_active_work_budget()
 

@@ -151,6 +151,7 @@ class BudgetAssertions:
             reason_code="bound",
             reserved_output_tokens=output_tokens,
             output_tokens_bounded=True,
+            input_tokens_bounded=True,
             policy_version="budget-policy-v1",
             policy_digest=TEST_DIGEST,
             rate_card_id="synthetic-route-rate",
@@ -160,7 +161,8 @@ class BudgetAssertions:
         )
 
     def attempt(self, *, cost_microusd, output_tokens=20,
-                output_tokens_bounded=True, store=None, scopes=None,
+                output_tokens_bounded=True, input_tokens_bounded=True,
+                store=None, scopes=None,
                 requested_model="synthetic", resolved_alias="synthetic",
                 upstream_model="synthetic"):
         store = store or self.store
@@ -175,6 +177,7 @@ class BudgetAssertions:
             work_budget=replace(
                 self.context(output_tokens=output_tokens),
                 output_tokens_bounded=output_tokens_bounded,
+                input_tokens_bounded=input_tokens_bounded,
             ),
         )
 
@@ -462,8 +465,13 @@ class BudgetAssertions:
                 cost_microusd=0, output_tokens=0,
                 output_tokens_bounded=False,
             )
+        with self.assertRaises(ReservationDenied):
+            self.attempt(
+                cost_microusd=0, output_tokens=0,
+                input_tokens_bounded=False,
+            )
         bad = WorkBudgetContext(
-            None, None, "unattributed", "missing_evidence", 20, True,
+            None, None, "unattributed", "missing_evidence", 20, True, True,
             "budget-policy-v1", TEST_DIGEST,
             "synthetic-route-rate", 1, TEST_DIGEST, "USD",
         )
@@ -483,12 +491,12 @@ class BudgetAssertions:
         ]
         self.assertEqual(sorted(reasons), [
             "attribution_invalid", "output_token_ceiling",
-            "request_cost_ceiling", "request_cost_ceiling",
+            "request_cost_ceiling", "request_cost_ceiling", "request_cost_ceiling",
         ])
         report = self.repository.current_report(ADMIN, plan["budget_plan_id"])
-        self.assertEqual(report["enforcement"]["over_cap_attempts"], 3)
-        self.assertEqual(report["coverage"]["population_attempts"], 4)
-        self.assertEqual(report["coverage"]["included_attempts"], 3)
+        self.assertEqual(report["enforcement"]["over_cap_attempts"], 4)
+        self.assertEqual(report["coverage"]["population_attempts"], 5)
+        self.assertEqual(report["coverage"]["included_attempts"], 4)
         self.assertEqual(report["coverage"]["unattributed_attempts"], 1)
 
     def check_concurrent_instances_cannot_overspend(self):
@@ -635,7 +643,7 @@ class BudgetAssertions:
         with self.assertRaises(ReservationDenied):
             self.attempt(cost_microusd=1)
         ambiguous = WorkBudgetContext(
-            None, None, "ambiguous", "ambiguous", 20, True,
+            None, None, "ambiguous", "ambiguous", 20, True, True,
             "budget-policy-v1", TEST_DIGEST,
             "synthetic-route-rate", 1, TEST_DIGEST, "USD",
         )

@@ -105,7 +105,12 @@ work-budget tenant, then portfolio tenant. Independent runtime instances use
 the same order, so two replicas cannot both spend the same remaining amount.
 If neither the request nor effective policy supplies an output-token maximum,
 the reservation has no defensible upper cost bound and the request fails closed
-before provider egress.
+before provider egress. Serialized request bytes bound only self-contained
+input. A provider-resolved response/conversation/prompt, URL, file identifier,
+or server-side tool can add billed input that is absent from the body; an
+active work budget therefore rejects those forms until a reviewed
+modality-specific bound exists. Inline text, file data, and base64 media remain
+self-contained and retain the byte-based conservative reservation.
 
 Each accepted binding pins the attribution event, plan version and activation
 generation, work scope, window, currency, reserved amount/output tokens,
@@ -122,7 +127,11 @@ the final `message_delta`. PostgreSQL records a terminal attempt and its linked
 usage fact with one database timestamp, so current and historical `as_of`
 reports never compare gateway-process and database clock domains. An
 `outcome_unknown` attempt uses the same database clock, retains the reserved
-amount, and is never automatically replayed.
+amount, and is never automatically replayed. PostgreSQL also uses a database
+timestamp for work-plan eligibility when attribution is absent, so a skewed
+gateway clock cannot make a database-active plan disappear. The frozen process
+clock remains on the legacy attempt and monthly-accounting timestamps; it is
+not used for work-plan eligibility.
 
 The bound model dimension uses the selected `model_routes` mapping key when it
 fits the frozen opaque-ID contract and is outside the reserved generated-ID
@@ -183,7 +192,9 @@ provider-model names, immediate activation-predecessor integrity, generated
 model-namespace collision resistance, preview/runtime mapping-key parity, and
 independent PostgreSQL replicas. They also prove that incomplete successful
 provider usage retains its reservation, that an unbound identity without a
-scope header cannot bypass an effective plan, and that per-window denial
+scope header cannot bypass an effective plan even under process-clock skew,
+that provider-side URLs/files/state/tools cannot use request bytes as a false
+input bound while inline data remains supported, and that per-window denial
 reporting is bounded without dropping or hiding audit facts.
 
 ## Remaining gates

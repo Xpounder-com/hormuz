@@ -86,7 +86,7 @@ class AttributionGatewayAssertions:
         self.provider_thread.join(timeout=10)
 
     def native(self, path="/v1/responses", *, headers=None, token=ADMIN,
-               stream=False, include_output_limit=True):
+               stream=False, include_output_limit=True, request_changes=None):
         anthropic = path.startswith("/v1/messages")
         output_field = "max_tokens" if anthropic else "max_output_tokens"
         body = {"model": "synthetic-anthropic" if anthropic else "synthetic",
@@ -96,6 +96,8 @@ class AttributionGatewayAssertions:
             body.pop(output_field)
         if stream:
             body["stream"] = True
+        if request_changes is not None:
+            body.update(request_changes)
         payload = json.dumps(body).encode()
         connection = http.client.HTTPConnection("127.0.0.1", self.server.server_port, timeout=15)
         connection.putrequest("POST", path)
@@ -232,6 +234,142 @@ class AttributionGatewayAssertions:
             self.assertIn("bounded output-token estimate", data.decode())
         self.assertEqual(NativeAttributionProvider.requests, before)
         self.assertEqual(self.events(), [])
+
+    def check_provider_side_input_never_egresses_under_active_work_budget(self):
+        budget, plan = self.activate_scope_budget()
+        before = list(NativeAttributionProvider.requests)
+        remote_cases = (
+            ("/v1/responses", {
+                "input": [{
+                    "role": "user",
+                    "content": [{
+                        "type": "input_image",
+                        "image_url": "https://example.invalid/synthetic-image.png",
+                    }],
+                }],
+            }),
+            ("/v1/responses", {
+                "input": [{"type": "input_file", "file_id": "file-synthetic"}],
+            }),
+            ("/v1/responses", {"previous_response_id": "resp-synthetic"}),
+            ("/v1/responses", {"tools": [{"type": "web_search"}]}),
+            ("/v1/messages", {
+                "messages": [{
+                    "role": "user",
+                    "content": [{
+                        "type": "image",
+                        "source": {
+                            "type": "url",
+                            "url": "https://example.invalid/synthetic-image.png",
+                        },
+                    }],
+                }],
+            }),
+            ("/v1/messages", {
+                "messages": [{
+                    "role": "user",
+                    "content": [{
+                        "type": "document",
+                        "source": {"type": "file", "file_id": "file-synthetic"},
+                    }],
+                }],
+            }),
+            ("/v1/messages", {"container": "container-synthetic"}),
+            ("/v1/messages", {
+                "tools": [{"type": "web_search_20250305", "name": "web_search"}],
+            }),
+        )
+        for path, changes in remote_cases:
+            with self.subTest(path=path, changes=changes):
+                status, response_headers, data = self.native(
+                    path, request_changes=changes,
+                )
+                self.assertEqual(status, 403)
+                self.assertEqual(
+                    response_headers["X-Hormuz-Error-Code"],
+                    "hormuz_budget_denied",
+                )
+                self.assertIn("bounded input-token estimate", data.decode())
+        self.assertEqual(NativeAttributionProvider.requests, before)
+        self.assertEqual(self.events(), [])
+        self.assertEqual(
+            self.server.store.active_budget_reservations(organization_id="acme"),
+            0,
+        )
+        report = budget.current_report(self.principal, plan["budget_plan_id"])
+        self.assertEqual(report["enforcement"]["over_cap_attempts"], len(remote_cases))
+        self.assertEqual(report["coverage"]["population_attempts"], len(remote_cases))
+        self.assertEqual(report["coverage"]["included_attempts"], len(remote_cases))
+
+        inline_cases = (
+            ("/v1/responses", {
+                "input": [{
+                    "role": "user",
+                    "content": [{
+                        "type": "input_image",
+                        "image_url": "data:image/png;base64,iVBORw0KGgo=",
+                    }],
+                }],
+            }),
+            ("/v1/responses", {
+                "input": [{
+                    "type": "input_file",
+                    "filename": "synthetic.txt",
+                    "file_data": "U1lOVEhFVElDX0lOTElORQ==",
+                }],
+            }),
+            ("/v1/messages", {
+                "messages": [{
+                    "role": "user",
+                    "content": [{
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "image/png",
+                            "data": "iVBORw0KGgo=",
+                        },
+                    }],
+                }],
+            }),
+        )
+        for path, changes in inline_cases:
+            with self.subTest(path=path, inline=True):
+                self.assertEqual(
+                    self.native(path, request_changes=changes)[0],
+                    200,
+                )
+        self.assertEqual(len(NativeAttributionProvider.requests), len(before) + len(inline_cases))
+        self.assertEqual(len(self.events()), len(inline_cases))
+
+    def check_postgres_unbound_identity_uses_database_clock(self):
+        budget, plan = self.activate_scope_budget()
+        before = list(NativeAttributionProvider.requests)
+
+        class AheadProcessClock(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return datetime.now(timezone.utc) + timedelta(days=2)
+
+        with mock.patch("hormuz.postgres_usage_store.datetime", AheadProcessClock):
+            status, response_headers, data = self.native(
+                token=VIEWER, headers=[],
+            )
+
+        self.assertEqual(status, 403)
+        self.assertEqual(
+            response_headers["X-Hormuz-Error-Code"],
+            "hormuz_budget_denied",
+        )
+        self.assertIn("attribution is required", data.decode())
+        self.assertEqual(NativeAttributionProvider.requests, before)
+        self.assertEqual(self.events(), [])
+        self.assertEqual(
+            self.server.store.active_budget_reservations(organization_id="acme"),
+            0,
+        )
+        report = budget.current_report(self.principal, plan["budget_plan_id"])
+        self.assertEqual(report["coverage"]["population_attempts"], 1)
+        self.assertEqual(report["coverage"]["unattributed_attempts"], 1)
 
     def check_unbound_identity_cannot_bypass_an_active_work_budget(self):
         budget, plan = self.activate_scope_budget()
