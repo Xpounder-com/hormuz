@@ -32,7 +32,7 @@
     "prior_durable_state": "preserve_all_usage_policy_attempt_audit_custody_registry_attribution_outcome_and_finance_rows_receipts_cursors_holds_and_replays",
     "frozen_portfolio_wire_v1": "unchanged",
     "frozen_budget_report_v1_sha256": "6a45a010de84273be45da85115d8d41267d5689addd29df592c47e8704a29cbf",
-    "budget_report_v2_sha256": "52fea27383d044aca167f4bcf89138f96037b2be1587ae1ee41d808aa4fd94fa",
+    "budget_report_v2_sha256": "1e09eb42bedc8d91dc5ec230adb1f21360832940b237e38c8a88b86285a2c6d2",
     "budget_report_v2_fixture_sha256": "2a51eeadbe3d7cce38ee94ed3b23933672bbd5c29d40315010e5fecbb110e3d6",
     "report_version_selection": "new_budget_report_surface_emits_v2_from_first_runtime_output_v1_is_never_silently_upgraded",
     "new_http_routes": [],

@@ -49,7 +49,7 @@
       "minLength": 1,
       "maxLength": 47,
       "pattern": "^-?(?:0|[1-9][0-9]{0,38})(?:\\.[0-9]{1,6})?(?![\\s\\S])",
-      "description": "Signed percentage points rounded once to at most six fractional digits using decimal half-even. Exact amount facts remain the calculation authority."
+      "description": "Signed relative percent change, computed from the exact current and previous amounts and rounded once to at most six fractional digits using decimal half-even. Exact amount facts remain the calculation authority."
     },
     "currency": {
       "type": "string",

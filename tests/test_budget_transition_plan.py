@@ -141,6 +141,10 @@ class BudgetTransitionPlanTests(unittest.TestCase):
                 self.rejected(value, "budget_change_percentage_invalid")
 
     def test_percentage_rounding_is_half_even_to_six_places(self):
+        _v1, v2 = self.bundles()
+        description = v2["$defs"]["signed_percentage"]["description"]
+        self.assertIn("relative percent change", description)
+        self.assertNotIn("percentage points", description)
         value = self.report()
         value["plan_change"]["previous_amount"] = "3"
         value["plan_amount"] = "4"
