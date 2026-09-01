@@ -136,11 +136,14 @@ def _check_schema(
 def validate_wire_bundle(bundle: object, schema_ids: set[str]) -> None:
     """Check closed/bounded field definitions and complete local references."""
 
-    if not isinstance(bundle, dict) or set(bundle) != {
+    if not isinstance(bundle, dict):
+        _fail("wire_schema_bundle_fields_invalid")
+    base_fields = {
         "$schema", "$id", "title", "description", "$defs", "oneOf",
         "x-hormuz-schema-ids", "x-hormuz-route-query-fields",
         "x-hormuz-transport", "x-hormuz-domain-rules",
-    }:
+    }
+    if set(bundle) not in (base_fields, base_fields | {"x-hormuz-schema-versions"}):
         _fail("wire_schema_bundle_fields_invalid")
     if bundle["$schema"] != DIALECT:
         _fail("wire_schema_dialect_changed")
@@ -153,6 +156,13 @@ def validate_wire_bundle(bundle: object, schema_ids: set[str]) -> None:
         or bundle["oneOf"] != [{"$ref": f"#/$defs/{name}"} for name in sorted(schema_ids)]
     ):
         _fail("wire_schema_inventory_changed")
+    versions = bundle.get("x-hormuz-schema-versions", {name: 1 for name in schema_ids})
+    if (
+        not isinstance(versions, dict)
+        or set(versions) != schema_ids
+        or any(type(version) is not int or not 1 <= version <= 2147483647 for version in versions.values())
+    ):
+        _fail("wire_schema_version_inventory_changed")
     for name, schema in definitions.items():
         _check_schema(schema, definitions, (name,))
     for name in schema_ids:
@@ -163,7 +173,7 @@ def validate_wire_bundle(bundle: object, schema_ids: set[str]) -> None:
             if (
                 schema.get("x-hormuz-schema-id") != name
                 or type(schema.get("x-hormuz-schema-version")) is not int
-                or schema["x-hormuz-schema-version"] != 1
+                or schema["x-hormuz-schema-version"] != versions[name]
             ):
                 _fail("wire_schema_query_identity_changed")
         else:
@@ -171,7 +181,7 @@ def validate_wire_bundle(bundle: object, schema_ids: set[str]) -> None:
             if (
                 properties.get("schema_id", {}).get("const") != name
                 or type(properties.get("schema_version", {}).get("const")) is not int
-                or properties["schema_version"]["const"] != 1
+                or properties["schema_version"]["const"] != versions[name]
                 or not {"schema_id", "schema_version"}.issubset(schema["required"])
             ):
                 _fail("wire_schema_envelope_identity_changed")

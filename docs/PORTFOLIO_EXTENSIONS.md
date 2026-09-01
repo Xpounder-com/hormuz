@@ -5,12 +5,19 @@ implemented budget enforcement, a running connector, or live/customer proof.
 The existing `hormuz contract manifest` describes the installed surface and is
 unchanged. No new route or CLI command is activated by these files.
 
+The separately gated #217 transition checkpoint now selects
+`hormuz.work-budget-report` version 2 as the first runtime management result.
+ADR 0012 and [`BUDGET_TRANSITION.md`](BUDGET_TRANSITION.md) define that
+analytics-first successor. The digest-pinned version-1 bundle below remains
+unchanged and is never silently upgraded.
+
 ## Record map
 
 | Record | Purpose | Planned reader |
 | --- | --- | --- |
 | `hormuz.work-budget-preview` v1 | Bounded dry-run of an immutable candidate against all ceilings | Portfolio administrator |
 | `hormuz.work-budget-report` v1 | Work-scope burn, remaining budget, projection and coverage | Authorized role-scoped aggregates |
+| `hormuz.work-budget-report` v2 | The v1 current row plus the latest effective plan change, exact delta and comparable percentage | Portfolio administrator at first runtime; broader views remain #223 |
 | `hormuz.linear-context-event` v1 | Typed source lifecycle/parent metadata | Portfolio administrator |
 | `hormuz.linear-context-page` v1 | Frozen, scoped context collection | Portfolio administrator |
 | `hormuz.linear-context-retention` v1 | Separate operator logical-retention marker | Portfolio administrator |
@@ -173,6 +180,7 @@ boundary. The existing small schema vocabulary is reused without modification.
   owner release/tag authorization: still open. No deployment or integration
   credentials are provisioned or modified by this work.
 
-No new migration is reserved here. SQLite 7 / PostgreSQL 11 remain current;
-the frozen finance 8/12 preflight is unchanged. A real later predecessor must
-exist before transition proof can cite it.
+This frozen extension checkpoint itself reserves no migration. Finance history
+subsequently established SQLite 8 / PostgreSQL 12 on main. The #217 red-first
+budget checkpoint binds that exact predecessor and plans additive 9/13
+transitions; it does not implement or activate those migrations.

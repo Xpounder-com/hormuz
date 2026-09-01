@@ -1,0 +1,1036 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:hormuz:work-budget-reports:v2",
+  "title": "Version 1 budget preview and version 2 management report records",
+  "description": "Analytics-first successor contract. The preview stays at version 1; the report moves to version 2 so a current management row carries a compact activation-time change fact without mutating the digest-pinned version-1 report.",
+  "$defs": {
+    "opaque_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*(?![\\s\\S])",
+      "description": "Registered metadata identifier; syntax never grants authority or permits encoded content."
+    },
+    "uuid": {
+      "type": "string",
+      "minLength": 36,
+      "maxLength": 36,
+      "pattern": "^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}(?![\\s\\S])",
+      "description": "Provider-native UUID, never a name, URL, credential or encoded work content."
+    },
+    "timestamp": {
+      "type": "string",
+      "minLength": 20,
+      "maxLength": 27,
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?Z(?![\\s\\S])"
+    },
+    "digest": {
+      "type": "string",
+      "minLength": 64,
+      "maxLength": 64,
+      "pattern": "^[0-9a-f]{64}(?![\\s\\S])"
+    },
+    "decimal": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 37,
+      "pattern": "^(?:0|[1-9][0-9]{0,17})(?:\\.[0-9]{1,18})?(?![\\s\\S])",
+      "description": "Exact nonnegative decimal, at most 18 integer and fractional digits; no float, exponent, implicit rounding or FX."
+    },
+    "signed_decimal": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 38,
+      "pattern": "^-?(?:0|[1-9][0-9]{0,17})(?:\\.[0-9]{1,18})?(?![\\s\\S])"
+    },
+    "signed_percentage": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 47,
+      "pattern": "^-?(?:0|[1-9][0-9]{0,38})(?:\\.[0-9]{1,6})?(?![\\s\\S])",
+      "description": "Signed relative percent change, computed from the exact current and previous amounts and rounded once to at most six fractional digits using decimal half-even. Exact amount facts remain the calculation authority."
+    },
+    "currency": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 3,
+      "pattern": "^[A-Z]{3}(?![\\s\\S])"
+    },
+    "count": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "version_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/opaque_id"
+        },
+        "version": {
+          "$ref": "#/$defs/version"
+        },
+        "content_digest": {
+          "$ref": "#/$defs/digest"
+        }
+      },
+      "required": [
+        "id",
+        "version",
+        "content_digest"
+      ],
+      "description": "Immutable version identity; digest is not authorization or live-source proof."
+    },
+    "work_scope_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "work_scope_id": {
+          "$ref": "#/$defs/opaque_id"
+        },
+        "version": {
+          "$ref": "#/$defs/version"
+        }
+      },
+      "required": [
+        "work_scope_id",
+        "version"
+      ],
+      "description": "Exact event-time same-tenant registry version; no rebinding historical evidence."
+    },
+    "policy_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "version": {
+          "$ref": "#/$defs/opaque_id"
+        },
+        "content_digest": {
+          "$ref": "#/$defs/digest"
+        }
+      },
+      "required": [
+        "version",
+        "content_digest"
+      ],
+      "description": "Exact evaluated policy version/digest; activation must revalidate drift."
+    },
+    "window": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "start_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "end_at": {
+          "$ref": "#/$defs/timestamp"
+        }
+      },
+      "required": [
+        "start_at",
+        "end_at"
+      ],
+      "description": "Inclusive start, exclusive end, strictly ordered; no new restriction on existing plan periods."
+    },
+    "cost_basis": {
+      "type": "string",
+      "enum": [
+        "provider_final",
+        "provider_aggregate",
+        "configured_rate_card_estimate",
+        "allocated_estimate",
+        "credit_or_discount",
+        "not_available"
+      ]
+    },
+    "financial_observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "basis": {
+          "$ref": "#/$defs/cost_basis"
+        },
+        "amount": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/signed_decimal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "currency": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/currency"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "scope_status": {
+          "type": "string",
+          "enum": [
+            "matches_work_scope",
+            "broader_than_work_scope",
+            "unattributed",
+            "not_available"
+          ]
+        },
+        "source_kind": {
+          "type": "string",
+          "enum": [
+            "configured_rates",
+            "provider_api",
+            "customer_import",
+            "final_invoice",
+            "not_available",
+            "derived_allocation"
+          ]
+        },
+        "finalization": {
+          "type": "string",
+          "enum": [
+            "unconfirmed",
+            "finalized",
+            "not_applicable"
+          ]
+        },
+        "rate_card": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/version_ref"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "provenance_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "reason_code": {
+          "type": "string",
+          "enum": [
+            "known",
+            "missing_evidence",
+            "scope_mismatch",
+            "unsupported_currency",
+            "not_available"
+          ]
+        },
+        "allocation_rule": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/version_ref"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Exact separately owner-approved allocation rule/version for an allocated estimate. Presence is not algorithm approval; null for other bases."
+        }
+      },
+      "required": [
+        "basis",
+        "amount",
+        "currency",
+        "scope_status",
+        "source_kind",
+        "finalization",
+        "rate_card",
+        "provenance_digest",
+        "reason_code",
+        "allocation_rule"
+      ],
+      "description": "Separate observation, not an additive line item. Broader/unattributed amounts are withheld from work-scope reports; unknown amount/currency are null. A digest or provider API alone does not prove final invoice authority. Exact-scope observations retain known basis/source/provenance when amount and currency are null with missing_evidence, unsupported_currency or not_available; such a row is not a known monetary fact."
+    },
+    "enforcement": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cost_basis": {
+          "type": "string",
+          "const": "configured_rate_card_estimate"
+        },
+        "valuation_rule": {
+          "$ref": "#/$defs/version_ref"
+        },
+        "committed_amount": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/decimal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "pending_reservation_amount": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/decimal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "uncertain_reservation_amount": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/decimal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "remaining_amount": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/remaining_decimal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "over_cap_attempts": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/count"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reason_code": {
+          "type": "string",
+          "enum": [
+            "known",
+            "missing_evidence",
+            "unsupported_currency",
+            "storage_unavailable"
+          ]
+        }
+      },
+      "required": [
+        "cost_basis",
+        "valuation_rule",
+        "committed_amount",
+        "pending_reservation_amount",
+        "uncertain_reservation_amount",
+        "remaining_amount",
+        "over_cap_attempts",
+        "reason_code"
+      ],
+      "description": "Conservative enforcement accounting, not a sum of overlapping observations. Remaining equals plan minus committed, pending and uncertain amounts and stays signed; any unknown input makes it null. Unknown holds are not released."
+    },
+    "forecast": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "method": {
+          "type": "string",
+          "enum": [
+            "not_available",
+            "linear_committed_projection"
+          ]
+        },
+        "rule": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/version_ref"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "projected_amount": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/decimal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "currency": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/currency"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cost_basis": {
+          "type": "string",
+          "enum": [
+            "configured_rate_card_estimate",
+            "not_available"
+          ]
+        },
+        "basis_amount": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/decimal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "elapsed_seconds": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/count"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "period_seconds": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/count"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "excludes_reservations": {
+          "type": "boolean",
+          "const": true
+        },
+        "reason_code": {
+          "type": "string",
+          "enum": [
+            "known",
+            "missing_evidence",
+            "closed_period",
+            "incomplete_coverage",
+            "unsupported_currency",
+            "precision_exceeded"
+          ]
+        }
+      },
+      "required": [
+        "method",
+        "rule",
+        "projected_amount",
+        "currency",
+        "cost_basis",
+        "basis_amount",
+        "elapsed_seconds",
+        "period_seconds",
+        "excludes_reservations",
+        "reason_code"
+      ],
+      "description": "Explicit committed-estimate projection, not guaranteed spend/savings or statistical prediction. Excludes pending/uncertain reservations; unknown, closed-period, unrepresentable or incomplete inputs yield null and a fixed reason."
+    },
+    "budget_coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "population_attempts": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/count"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "included_attempts": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/count"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unattributed_attempts": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/count"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unsupported_attempts": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/count"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "pricing_eligible_attempts": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/count"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "priced_attempts": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/count"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "rule": {
+          "$ref": "#/$defs/version_ref"
+        },
+        "reason_code": {
+          "type": "string",
+          "enum": [
+            "known",
+            "missing_evidence",
+            "incomplete_coverage",
+            "scope_restricted",
+            "resource_limit"
+          ]
+        }
+      },
+      "required": [
+        "population_attempts",
+        "included_attempts",
+        "unattributed_attempts",
+        "unsupported_attempts",
+        "pricing_eligible_attempts",
+        "priced_attempts",
+        "rule",
+        "reason_code"
+      ],
+      "description": "Frozen non-overlapping declared population for the authorized work scope and window; missing population is not zero. No employee metric."
+    },
+    "simulation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "scenario_suite": {
+          "$ref": "#/$defs/version_ref"
+        },
+        "evaluated_attempts": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/count"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "allowed_attempts": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/count"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "denied_attempts": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/count"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "inconclusive_attempts": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/count"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "scenario_suite",
+        "evaluated_attempts",
+        "allowed_attempts",
+        "denied_attempts",
+        "inconclusive_attempts"
+      ],
+      "description": "Existing policy comparison/scenario boundary; counts partition evaluated scenarios. No provider request."
+    },
+    "budget_change": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "established",
+            "increased",
+            "decreased",
+            "unchanged",
+            "not_comparable"
+          ]
+        },
+        "changed_at": {
+          "$ref": "#/$defs/timestamp",
+          "description": "Commit time of the current active-pointer generation, not candidate-plan creation time or a client clock."
+        },
+        "previous_plan": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/version_ref"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "previous_amount": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/decimal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "previous_currency": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/currency"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Currency of the immediately prior active plan. Null only for first activation or missing comparison evidence."
+        },
+        "previous_work_scope": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/work_scope_ref"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "previous_window": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/window"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "amount_delta": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/signed_decimal"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Exact current plan amount minus the immediately prior active plan amount when scope, window and currency are comparable."
+        },
+        "percent_delta": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/signed_percentage"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Management display percentage derived from exact amounts. Null when there is no meaningful denominator or the activation pair is not comparable."
+        },
+        "percentage_scale": {
+          "type": "integer",
+          "const": 6
+        },
+        "percentage_rounding": {
+          "type": "string",
+          "const": "half_even"
+        },
+        "comparison_status": {
+          "type": "string",
+          "enum": [
+            "known",
+            "first_activation",
+            "previous_amount_zero",
+            "not_comparable",
+            "missing_evidence"
+          ]
+        },
+        "comparison_reasons": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "currency_changed",
+              "work_scope_changed",
+              "window_changed"
+            ]
+          },
+          "minItems": 0,
+          "maxItems": 3,
+          "uniqueItems": true,
+          "description": "Canonical-order reasons the immediately prior plan cannot produce a percentage. Empty for known, first, zero-denominator or missing-evidence states."
+        },
+        "comparison_basis": {
+          "type": "string",
+          "const": "immediately_prior_active_plan"
+        }
+      },
+      "required": [
+        "kind",
+        "changed_at",
+        "previous_plan",
+        "previous_amount",
+        "previous_currency",
+        "previous_work_scope",
+        "previous_window",
+        "amount_delta",
+        "percent_delta",
+        "percentage_scale",
+        "percentage_rounding",
+        "comparison_status",
+        "comparison_reasons",
+        "comparison_basis"
+      ],
+      "description": "Compact current-row change fact. It is derived from two immutable activated plans plus the activation event and is not a user-facing revision ledger."
+    },
+    "hormuz.work-budget-preview": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_id": {
+          "type": "string",
+          "const": "hormuz.work-budget-preview"
+        },
+        "schema_version": {
+          "type": "integer",
+          "const": 1
+        },
+        "organization_id": {
+          "$ref": "#/$defs/opaque_id"
+        },
+        "preview_id": {
+          "$ref": "#/$defs/opaque_id"
+        },
+        "reader_role": {
+          "type": "string",
+          "const": "portfolio_admin"
+        },
+        "work_scope": {
+          "$ref": "#/$defs/work_scope_ref"
+        },
+        "candidate_plan": {
+          "$ref": "#/$defs/version_ref"
+        },
+        "expected_active_version": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/version"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "expected_activation_generation": {
+          "$ref": "#/$defs/count"
+        },
+        "policy": {
+          "$ref": "#/$defs/policy_ref"
+        },
+        "as_of": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "expires_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "input_snapshot_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "ceiling_classes_evaluated": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "organization",
+              "team",
+              "actor",
+              "application",
+              "policy",
+              "portfolio",
+              "initiative",
+              "use_case"
+            ]
+          },
+          "minItems": 8,
+          "maxItems": 8,
+          "uniqueItems": true
+        },
+        "simulation": {
+          "$ref": "#/$defs/simulation"
+        },
+        "result": {
+          "type": "string",
+          "enum": [
+            "compatible",
+            "would_restrict",
+            "inconclusive"
+          ],
+          "description": "Compatible requires a complete nonempty simulation with zero denials/inconclusive attempts and no restriction reasons. Would-restrict requires known denied attempts and reasons. Unknown, empty or inconclusive evidence cannot claim compatibility."
+        },
+        "restriction_reasons": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "budget_ceiling",
+              "model_intersection",
+              "output_token_ceiling",
+              "request_cost_ceiling",
+              "attribution_invalid",
+              "missing_evidence",
+              "policy_drift",
+              "plan_drift"
+            ]
+          },
+          "minItems": 0,
+          "maxItems": 8,
+          "uniqueItems": true
+        },
+        "dry_run": {
+          "type": "boolean",
+          "const": true
+        },
+        "activation_permitted": {
+          "type": "boolean",
+          "const": false
+        },
+        "provider_egress_permitted": {
+          "type": "boolean",
+          "const": false
+        }
+      },
+      "required": [
+        "schema_id",
+        "schema_version",
+        "organization_id",
+        "preview_id",
+        "reader_role",
+        "work_scope",
+        "candidate_plan",
+        "expected_active_version",
+        "expected_activation_generation",
+        "policy",
+        "as_of",
+        "expires_at",
+        "input_snapshot_digest",
+        "ceiling_classes_evaluated",
+        "simulation",
+        "result",
+        "restriction_reasons",
+        "dry_run",
+        "activation_permitted",
+        "provider_egress_permitted"
+      ],
+      "description": "Planned administrator-only dry-run for an immutable candidate plan. No active-pointer, reservation, provider or policy changes. At most 15 minutes validity is not activation authorization."
+    },
+    "hormuz.work-budget-report": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_id": {
+          "type": "string",
+          "const": "hormuz.work-budget-report"
+        },
+        "schema_version": {
+          "type": "integer",
+          "const": 2
+        },
+        "organization_id": {
+          "$ref": "#/$defs/opaque_id"
+        },
+        "report_id": {
+          "$ref": "#/$defs/opaque_id"
+        },
+        "reader_role": {
+          "type": "string",
+          "enum": [
+            "portfolio_admin",
+            "finance_viewer",
+            "platform_viewer",
+            "team_lead"
+          ]
+        },
+        "reader_scope_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "work_scope": {
+          "$ref": "#/$defs/work_scope_ref"
+        },
+        "plan": {
+          "$ref": "#/$defs/version_ref"
+        },
+        "activation_generation": {
+          "$ref": "#/$defs/version"
+        },
+        "policy": {
+          "$ref": "#/$defs/policy_ref"
+        },
+        "window": {
+          "$ref": "#/$defs/window"
+        },
+        "as_of": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "generated_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "input_snapshot_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "plan_amount": {
+          "$ref": "#/$defs/decimal"
+        },
+        "currency": {
+          "$ref": "#/$defs/currency"
+        },
+        "plan_change": {
+          "$ref": "#/$defs/budget_change"
+        },
+        "enforcement": {
+          "$ref": "#/$defs/enforcement"
+        },
+        "financial_observations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/financial_observation"
+          },
+          "minItems": 1,
+          "maxItems": 100
+        },
+        "observation_combination": {
+          "type": "string",
+          "const": "separate_bases_do_not_sum_overlapping_observations"
+        },
+        "forecast": {
+          "$ref": "#/$defs/forecast"
+        },
+        "coverage": {
+          "$ref": "#/$defs/budget_coverage"
+        }
+      },
+      "required": [
+        "schema_id",
+        "schema_version",
+        "organization_id",
+        "report_id",
+        "reader_role",
+        "reader_scope_digest",
+        "work_scope",
+        "plan",
+        "activation_generation",
+        "policy",
+        "window",
+        "as_of",
+        "generated_at",
+        "input_snapshot_digest",
+        "plan_amount",
+        "currency",
+        "plan_change",
+        "enforcement",
+        "financial_observations",
+        "observation_combination",
+        "forecast",
+        "coverage"
+      ],
+      "description": "Planned immutable authorized work-scope aggregate with a current management change fact. Authority and team/role restrictions apply before data access/aggregation, not after raw peer rows are loaded. No new current runtime role capability."
+    },
+    "remaining_decimal": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 39,
+      "pattern": "^-?(?:0|[1-9][0-9]{0,18})(?:\\.[0-9]{1,18})?(?![\\s\\S])",
+      "description": "Exact derived signed remaining amount, up to 19 integer and 18 fractional digits so subtraction of three 18/18 charges is always representable. Not a wider money-input type."
+    }
+  },
+  "oneOf": [
+    {
+      "$ref": "#/$defs/hormuz.work-budget-preview"
+    },
+    {
+      "$ref": "#/$defs/hormuz.work-budget-report"
+    }
+  ],
+  "x-hormuz-schema-ids": [
+    "hormuz.work-budget-preview",
+    "hormuz.work-budget-report"
+  ],
+  "x-hormuz-schema-versions": {
+    "hormuz.work-budget-preview": 1,
+    "hormuz.work-budget-report": 2
+  },
+  "x-hormuz-route-query-fields": {},
+  "x-hormuz-transport": {
+    "response_maximum_bytes": 1048576,
+    "runtime_enabled": false,
+    "new_http_routes": [],
+    "delivery": "separate_planned_cli_or_internal_records"
+  },
+  "x-hormuz-domain-rules": {
+    "authorization": "Server-resolved tenant and current role before lookup, join, aggregation or expensive work; privileged read audit before delivery. Preview is portfolio_admin only. Viewer/team capabilities remain #223 implementation work; no raw peer/source access.",
+    "compatibility": "Frozen work-budget-plan/request/activation, version-1 report bundle, v1 manifest, routes, errors, CLI behavior and immutable usage remain unchanged. Report version 2 is a separately selected successor; no existing response gains a required field and no version-1 client is silently upgraded.",
+    "atomicity_gate": "Before #217 runtime acceptance, one transaction must cover every old and work-scope ceiling with deterministic organization/period/scope lock order. Preserve off-path facades and driver/pool ownership. Prove independent PostgreSQL replicas, failure/retry and unknown holds; shared helpers alone are not atomicity.",
+    "financial_evidence": "Never reveal or apportion broader provider-account totals through work-scope observations. Final cost needs authoritative finalized evidence matching exact scope. No allocation algorithm, FX, invoice settlement or automatic rate change is approved. Reservations remain separate from financial observations.",
+    "remaining": "Exact signed plan minus committed estimates minus pending and uncertain reservations; unknown input gives null. Replacement, hierarchy change and emergency tightening never reset spend or release unknown holds. The derived remaining field supports 19 integer digits; input monetary facts remain limited to 18 integer digits and 18 fractional digits.",
+    "forecast": "Optional linear committed-estimate projection: committed_amount * full_period_seconds / elapsed_seconds; complete covered/priced population, matching currency, 0 < elapsed < period. Pin rule/version and inputs. Exact 18/18 without implicit rounding; otherwise unavailable. Excludes reservations, promises no prediction/confidence and never activates policy.",
+    "preview": "Existing policy comparison/scenario boundary; candidate/policy/work-scope/input bindings, eight ceiling classes, maximum 900-second expiry, explicit counts/inconclusive evidence. Activation separately revalidates authority, digests, generation and caps; preview is not a permit. Compatible means a nonempty complete all-allowed simulation with no restriction reasons; would_restrict requires known denials and reasons. Reports require a positive historical activation generation; never-activated candidates belong to preview.",
+    "plan_change": "The first activation is established with no previous plan or percentage. Every complete prior comparison carries its exact work scope, window, currency and amount so an old amount is never mislabeled with current units. Comparable activations require identical work scope, window and currency, exact signed amount delta and a six-place decimal half-even display percentage. A zero prior amount keeps the exact amount delta but has no percentage. Changed_at is the activation commit time. All non-comparability reasons are explicit; missing evidence never becomes zero or a guessed percentage.",
+    "bounds": "One work-scope report, maximum 100 observations and 1 MiB output; no truncation disguised as complete coverage. Fixed resource-limit failure before delivery. Query/CLI activation and execution-time budgets remain #214/#217/#223 work.",
+    "claims": "No procurement, causal productivity, employee ranking, guaranteed savings, automatic policy activation, live finance verification, populated recovery or final-candidate proof."
+  }
+}

@@ -166,6 +166,36 @@ class PortfolioWireContractTests(unittest.TestCase):
         with self.assertRaisesRegex(PortfolioWireSchemaError, "wire_schema_envelope_identity_changed"):
             validate_wire_bundle(bundle, self.expected_ids)
 
+    def test_explicit_mixed_schema_version_inventory_is_closed_and_enforced(self) -> None:
+        bundle = copy.deepcopy(self.bundle)
+        schema_id = "hormuz.work-scope-create-request"
+        bundle["x-hormuz-schema-versions"] = {name: 1 for name in self.expected_ids}
+        bundle["x-hormuz-schema-versions"][schema_id] = 2
+        bundle["$defs"][schema_id]["properties"]["schema_version"]["const"] = 2
+        validate_wire_bundle(bundle, self.expected_ids)
+
+        query_bundle = copy.deepcopy(self.bundle)
+        query_bundle["x-hormuz-schema-versions"] = {name: 1 for name in self.expected_ids}
+        query_bundle["x-hormuz-schema-versions"]["hormuz.portfolio-query"] = 2
+        query_bundle["$defs"]["hormuz.portfolio-query"]["x-hormuz-schema-version"] = 2
+        validate_wire_bundle(query_bundle, self.expected_ids)
+        query_bundle["x-hormuz-schema-versions"]["hormuz.portfolio-query"] = 1
+        with self.assertRaisesRegex(PortfolioWireSchemaError, "wire_schema_query_identity_changed"):
+            validate_wire_bundle(query_bundle, self.expected_ids)
+
+        for mutation in ("missing", "extra", "boolean", "mismatch"):
+            changed = copy.deepcopy(bundle)
+            if mutation == "missing":
+                del changed["x-hormuz-schema-versions"][schema_id]
+            elif mutation == "extra":
+                changed["x-hormuz-schema-versions"]["hormuz.unknown"] = 1
+            elif mutation == "boolean":
+                changed["x-hormuz-schema-versions"][schema_id] = True
+            else:
+                changed["$defs"][schema_id]["properties"]["schema_version"]["const"] = 1
+            with self.subTest(mutation=mutation), self.assertRaises(PortfolioWireSchemaError):
+                validate_wire_bundle(changed, self.expected_ids)
+
     def test_remote_dangling_or_cyclic_references_fail_closed(self) -> None:
         for target in (
             "https://untrusted.invalid/schema.json", "#/$defs/missing", "#/$defs/work_scope_ref"

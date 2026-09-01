@@ -1,0 +1,162 @@
+{
+  "schema_id": "hormuz.budget-transition-plan",
+  "schema_version": 1,
+  "stage": "pre_implementation",
+  "target_release": "1.1.0",
+  "feature_issue": 217,
+  "gate_issue": 214,
+  "budget_implemented": false,
+  "feature_preflight_accepted": false,
+  "final_candidate_accepted": false,
+  "predecessor": {
+    "source_commit": "1dd6c9f561ee70880d6e68b7aa2d2ab17852d207",
+    "merged_main_commit": "30e9a8296707a73a1c8878459ae551b365b225a8",
+    "archive_sha256": "31622ab69ee74daa4be92b4f1a8d57808304d1c4916600a17f7afe499a721910",
+    "archive_kind": "deterministic_git_snapshot_not_published_release",
+    "archive_prefix": "hormuz-finance-baseline/",
+    "archive_tar_umask": "0000",
+    "verified_runtime_file_count": 111
+  },
+  "transitions": {
+    "sqlite": {
+      "from": 8,
+      "to": 9
+    },
+    "postgresql": {
+      "from": 12,
+      "to": 13
+    }
+  },
+  "compatibility": {
+    "existing_v1_behavior": "unchanged",
+    "prior_durable_state": "preserve_all_usage_policy_attempt_audit_custody_registry_attribution_outcome_and_finance_rows_receipts_cursors_holds_and_replays",
+    "frozen_portfolio_wire_v1": "unchanged",
+    "frozen_budget_report_v1_sha256": "6a45a010de84273be45da85115d8d41267d5689addd29df592c47e8704a29cbf",
+    "budget_report_v2_sha256": "1e09eb42bedc8d91dc5ec230adb1f21360832940b237e38c8a88b86285a2c6d2",
+    "budget_report_v2_fixture_sha256": "2a51eeadbe3d7cce38ee94ed3b23933672bbd5c29d40315010e5fecbb110e3d6",
+    "report_version_selection": "new_budget_report_surface_emits_v2_from_first_runtime_output_v1_is_never_silently_upgraded",
+    "new_http_routes": [],
+    "existing_route_changes": [],
+    "existing_error_changes": [],
+    "existing_cli_changes": [],
+    "provider_replay": "never_automatic",
+    "historical_usage_repricing": false,
+    "historical_attribution_rebinding": false,
+    "uncertain_reservations": "retain_until_explicit_reconciliation"
+  },
+  "implementation_decision": {
+    "primary_management_unit": "use_case_with_portfolio_and_initiative_rollups",
+    "internal_plan_model": "immutable_plan_versions_plus_compare_and_set_active_pointer",
+    "user_facing_model": "current_active_plan_report_with_compact_latest_activation_change_fact_and_explicit_prior_comparison_basis",
+    "change_storage": "store_plan_and_activation_facts_derive_delta_and_percentage_do_not_store_a_duplicated_user_facing_revision_ledger",
+    "changed_at_authority": "active_pointer_transaction_commit_time",
+    "comparison_pair": "current_and_immediately_prior_active_plan_for_same_plan_identity",
+    "comparable_dimensions": [
+      "work_scope",
+      "window",
+      "currency"
+    ],
+    "amount_delta": "exact_current_minus_previous_decimal",
+    "percentage": "amount_delta_times_100_divided_by_previous_amount_decimal_half_even_six_places",
+    "undefined_percentage": "null_for_first_activation_previous_zero_noncomparable_or_missing_evidence",
+    "first_runtime_reader_role": "portfolio_admin",
+    "broader_role_delivery_gate": 223,
+    "automatic_policy_or_budget_change": false
+  },
+  "planned_storage": {
+    "tables": [
+      "portfolio_work_budget_plan_versions",
+      "portfolio_work_budget_active_plans",
+      "portfolio_work_budget_activation_events",
+      "portfolio_work_budget_reservation_bindings",
+      "portfolio_work_budget_audit_events"
+    ],
+    "plan_versions": "immutable_canonical_exact_decimal_content_digest_actor_and_commit_time",
+    "active_pointer": "one_current_version_and_monotonic_generation_per_tenant_plan_identity",
+    "activation_events": "append_only_previous_current_generation_reason_actor_and_commit_time",
+    "reservation_binding": "immutable_attempt_to_event_time_work_scope_plan_policy_rate_card_exact_estimate_currency_and_window_sidecar",
+    "audit": "append_only_mutation_and_privileged_read_events",
+    "existing_reservations": "reuse_gateway_request_attempt_and_hold_lifecycle_without_deleting_unknown_holds",
+    "sqlite": "begin_immediate_existing_database_only_no_runtime_schema_creation",
+    "postgresql": "forced_rls_select_insert_update_only_for_owned_projection_no_superuser_or_bypassrls_runtime",
+    "retention": "append_only_customer_owned_backup_policy_no_delete_or_redaction_api"
+  },
+  "atomic_reservation": {
+    "boundary": "one_usage_repository_transaction_for_attempt_root_pending_event_all_existing_ceiling_checks_all_work_scope_ceiling_checks_hold_and_binding",
+    "postgres_lock": "one_tenant_period_advisory_transaction_lock_before_any_ceiling_read_then_deterministic_scope_order",
+    "scope_order": [
+      "organization",
+      "team",
+      "actor",
+      "application",
+      "policy",
+      "portfolio",
+      "initiative",
+      "use_case"
+    ],
+    "decision": "denies_win_model_allowlists_intersect_and_lowest_numeric_ceiling_wins",
+    "attribution": "authenticated_authorized_event_time_use_case_required_before_budget_lookup_or_provider_egress",
+    "estimate": "configured_rate_card_exact_decimal_in_matching_plan_currency_only_no_fx",
+    "unsupported_currency": "fail_closed_before_provider_egress",
+    "success_failure_rate_limit": "terminal_usage_fact_commits_and_releases_pending_hold_once",
+    "ambiguous_outcome": "append_unknown_state_and_retain_hold_without_replay",
+    "replacement": "new_activation_never_resets_period_spend_or_releases_existing_holds"
+  },
+  "rollback": {
+    "writers": "stop_all_writers_and_pools_serialize_migration_restart_fresh_processes",
+    "in_place_downgrade": false,
+    "old_binary_new_schema": "refuse",
+    "before_writes": "restore_verified_application_database_pair_into_separate_destination",
+    "after_writes": "retain_candidate_and_recover_forward",
+    "unknown_write_count": "retain_candidate_and_recover_forward",
+    "retain_candidate_snapshot": true
+  },
+  "required_preflight_cases": [
+    "exact_finance_predecessor_archive_and_installed_runtime_binding",
+    "missing_sqlite_9_and_postgresql_13_migrations_are_red_without_partial_state",
+    "synthetic_partial_ddl_rolls_back_and_retry_reaches_the_same_predecessor_state",
+    "partial_and_newer_state_refuse_current_and_predecessor_binaries",
+    "quiesced_old_pair_restore_preserves_replays_cursors_attempt_facts_rate_cards_and_unknown_holds",
+    "post_checkpoint_writes_require_preserved_candidate_and_forward_recovery",
+    "all_frozen_v1_contracts_and_report_v1_digest_unchanged",
+    "report_v2_requires_current_change_fact_prior_scope_window_currency_basis_and_rejects_guessed_or_incomparable_percentage",
+    "source_kit_and_isolated_wheel_proof"
+  ],
+  "required_implementation_cases": [
+    "real_additive_migrations_replace_red_missing_migration_witnesses",
+    "strict_plan_creation_activation_preview_and_current_report_contracts",
+    "compare_and_set_activation_schedule_replacement_rollback_expiry_and_emergency_tightening",
+    "all_old_and_work_scope_ceilings_in_one_pre_egress_transaction",
+    "independent_postgresql_replicas_cannot_overspend_one_active_plan",
+    "sqlite_postgresql_parity_for_period_boundaries_decimal_precision_retry_and_outage",
+    "missing_invalid_archived_ambiguous_or_unauthorized_attribution_fails_closed",
+    "model_intersection_output_token_and_per_request_cost_caps_never_weaken_parents",
+    "success_failure_rate_limit_and_ambiguous_outcome_reconcile_without_replay",
+    "unknown_holds_replacement_and_hierarchy_change_never_reset_spend",
+    "current_report_v2_change_fact_uses_activation_commit_time_and_exact_adjacent_plans",
+    "first_activation_zero_denominator_currency_scope_window_and_missing_evidence_cases",
+    "plan_actual_estimate_pending_uncertain_remaining_forecast_over_cap_and_coverage_are_distinct",
+    "portfolio_admin_authorization_before_io_and_privileged_read_audit_before_delivery",
+    "all_populated_budget_state_forward_restore_and_idempotent_replay",
+    "unchanged_v1_routes_errors_cli_and_frozen_wire_digests",
+    "source_kit_isolated_wheel_and_content_free_evidence"
+  ],
+  "remaining_release_gates": [
+    "8_finance_grade_reconciliation",
+    "222_evidence_qualified_model_scorecards",
+    "223_role_scoped_cli_and_api_views",
+    "224_reviewable_recommendations",
+    "214_exact_final_candidate_transition_and_recovery",
+    "225_real_preregistered_external_organization_pilot",
+    "owner_release_and_tag_authorization"
+  ],
+  "nonclaims": [
+    "procurement_authorization",
+    "invoice_settlement",
+    "employee_performance_evaluation",
+    "causal_value_or_productivity_proof",
+    "automatic_model_policy_or_budget_change",
+    "live_finance_or_customer_validation",
+    "release_or_deployment_readiness"
+  ]
+}
