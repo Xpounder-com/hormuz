@@ -908,15 +908,14 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         provider_bytes_read = 0
         downstream_bytes_sent = 0
         refresh_at = time.monotonic() + max(1, reservation_ttl_seconds // 2)
-        read_chunk = response.read
-        if is_event_stream:
-            read1 = getattr(response, "read1", None)
-            if callable(read1):
-                # ``HTTPResponse.read(size)`` waits for the requested byte
-                # count or EOF. Provider event streams are normally much
-                # smaller than the relay buffer, so use one underlying read
-                # and release each available event promptly.
-                read_chunk = read1
+        # ``HTTPResponse.read(size)`` waits for the requested byte count or
+        # EOF. Use at most one underlying read whenever the response exposes
+        # ``read1`` so both ordinary JSON and event streams release available
+        # bytes promptly and record first-byte latency when data actually
+        # arrives.
+        read_chunk = getattr(response, "read1", None)
+        if not callable(read_chunk):
+            read_chunk = response.read
         try:
             while True:
                 chunk = read_chunk(_RELAY_CHUNK_BYTES)
@@ -937,6 +936,22 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 downstream_bytes_sent += len(chunk)
         except (BrokenPipeError, ConnectionResetError):
             downstream_ok = False
+        except http.client.IncompleteRead as error:
+            partial = error.partial
+            if partial:
+                if first_body_byte_us is None:
+                    first_body_byte_us = self._elapsed_us(started_ns)
+                provider_bytes_read += len(partial)
+            downstream_ok = False
+            LOGGER.warning(
+                "upstream_stream_failed actor=%s team=%s client=%s protocol=%s requested_model=%s error=%s",
+                identity.actor_id,
+                identity.team_id,
+                client,
+                protocol,
+                decision.requested_model,
+                type(error).__name__,
+            )
         except (http.client.HTTPException, TimeoutError, OSError) as error:
             downstream_ok = False
             LOGGER.warning(
@@ -985,10 +1000,11 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             else:
                 request_status = "failed"
             if successful and not usage.evidence_complete:
-                self.server.store.mark_request_attempt_outcome_unknown(
+                self.server.provider_reliability_store.mark_request_attempt_outcome_unknown(
                     attempt=attempt,
                     organization_id=identity.organization_id,
                     reason_code="provider_transport_ambiguous",
+                    provider_metrics=provider_metrics,
                 )
                 LOGGER.warning(
                     "request_outcome_unknown actor=%s team=%s client=%s protocol=%s "
