@@ -123,6 +123,7 @@ def _schema_tables(root: Path) -> tuple[set[str], set[str]]:
         "hormuz/_outcome_schema.py",
         "hormuz/_finance_schema.py",
         "hormuz/_budget_schema.py",
+        "hormuz/_provider_reliability_schema.py",
     ):
         registry = ast.parse(_read_text(root / path))
         declaration_name = (
@@ -163,7 +164,15 @@ def _schema_tables(root: Path) -> tuple[set[str], set[str]]:
             if not isinstance(active_table, str):
                 raise DurableDataInventoryError("registry_schema_tables_invalid")
             registry_tables[active_table] = "active_pointer"
-        if not all(isinstance(name, str) and re.fullmatch(r"portfolio_[a-z_]+", name) for name in registry_tables):
+        table_pattern = (
+            r"gateway_provider_[a-z_]+"
+            if path == "hormuz/_provider_reliability_schema.py"
+            else r"portfolio_[a-z_]+"
+        )
+        if not all(
+            isinstance(name, str) and re.fullmatch(table_pattern, name)
+            for name in registry_tables
+        ):
             raise DurableDataInventoryError("registry_schema_tables_invalid")
         if sqlite.intersection(registry_tables):
             raise DurableDataInventoryError("sqlite_table_owned_more_than_once")

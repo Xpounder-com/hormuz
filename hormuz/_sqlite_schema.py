@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from typing import Protocol
 
 
-SQLITE_SCHEMA_VERSION = 9
+SQLITE_SCHEMA_VERSION = 10
 
 
 class StorageErrorFactory(Protocol):
@@ -437,6 +437,9 @@ def verify_applied_sqlite_schema_shape(
     if version >= 9:
         from ._budget_schema import verify_sqlite_budget
         verify_sqlite_budget(connection, error_factory)
+    if version >= 10:
+        from ._provider_reliability_schema import verify_sqlite_provider_reliability
+        verify_sqlite_provider_reliability(connection, error_factory)
 
     required = {
         "gateway_usage_events": {
@@ -684,6 +687,10 @@ def apply_sqlite_migration(
         return
     if version == 9:
         from ._budget_schema import sqlite_statements
+        _execute_statements(connection, sqlite_statements())
+        return
+    if version == 10:
+        from ._provider_reliability_schema import sqlite_statements
         _execute_statements(connection, sqlite_statements())
         return
     raise error_factory("storage_schema_migration_unsupported")

@@ -38,6 +38,9 @@ class PostgresAttributionGatewayTests(AttributionGatewayAssertions, PostgresTest
     def test_postgres_unbounded_output_never_egresses_under_active_work_budget(self):
         self.check_unbounded_output_never_egresses_under_active_work_budget()
 
+    def test_postgres_failover_creates_distinct_attribution_and_work_budget_evidence(self):
+        self.check_failover_creates_distinct_attribution_and_work_budget_evidence()
+
     def test_postgres_provider_side_input_never_egresses_under_active_work_budget(self):
         self.check_provider_side_input_never_egresses_under_active_work_budget()
 

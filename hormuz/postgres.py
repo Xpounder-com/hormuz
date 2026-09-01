@@ -16,7 +16,7 @@ from typing import Any, Iterator, Mapping
 from .config import PostgresPoolConfig
 
 
-POSTGRES_SCHEMA_VERSION = 13
+POSTGRES_SCHEMA_VERSION = 14
 _IDENTIFIER_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 _POOL_RECONNECT_TIMEOUT_SECONDS = 15
 
@@ -246,6 +246,9 @@ def migrate_postgres(
                     if max(states) >= 13:
                         from ._budget_schema import verify_postgres_budget
                         verify_postgres_budget(cursor, schema, PostgresStorageError)
+                    if max(states) >= 14:
+                        from ._provider_reliability_schema import verify_postgres_provider_reliability
+                        verify_postgres_provider_reliability(cursor, schema, PostgresStorageError)
                 for version in range(1, POSTGRES_SCHEMA_VERSION + 1):
                     if version in states:
                         continue
@@ -292,6 +295,9 @@ def migrate_postgres(
                 if POSTGRES_SCHEMA_VERSION >= 13:
                     from ._budget_schema import verify_postgres_budget
                     verify_postgres_budget(cursor, schema, PostgresStorageError)
+                if POSTGRES_SCHEMA_VERSION >= 14:
+                    from ._provider_reliability_schema import verify_postgres_provider_reliability
+                    verify_postgres_provider_reliability(cursor, schema, PostgresStorageError)
         return PostgresSchemaStatus(version=POSTGRES_SCHEMA_VERSION, complete=True)
     except PostgresStorageError:
         raise
@@ -412,6 +418,9 @@ def _schema_migration_rows(
                 if max(states) >= 13:
                     from ._budget_schema import verify_postgres_budget
                     verify_postgres_budget(cursor, schema, PostgresStorageError)
+                if max(states) >= 14:
+                    from ._provider_reliability_schema import verify_postgres_provider_reliability
+                    verify_postgres_provider_reliability(cursor, schema, PostgresStorageError)
             if (
                 verify_custody_schema
                 and states
@@ -1317,6 +1326,7 @@ def _migration_sql(
         11: "0011_work_outcomes.sql",
         12: "0012_finance_rate_cards.sql",
         13: "0013_work_budgets.sql",
+        14: "0014_provider_reliability.sql",
     }
     filename = filenames.get(version)
     if filename is None:

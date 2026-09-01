@@ -118,6 +118,7 @@ _MODEL_ROUTE_FIELDS = frozenset(
         "cache_read_cost_per_million",
         "cache_write_cost_per_million",
         "output_cost_per_million",
+        "failover_alias",
     }
 )
 _EGRESS_CONTROL_FIELDS = frozenset({"secrets"})

@@ -207,11 +207,16 @@ class GatewayPostgresPoolOwnershipTests(unittest.TestCase):
         pool.settings = PostgresPoolConfig()
         store = mock.Mock()
         store.sweep_stale_request_attempts.return_value = 0
+        reliability = mock.Mock()
         runtime = mock.Mock()
         engine = mock.Mock(policy_runtime=runtime)
         with (
             mock.patch("hormuz.server.create_postgres_runtime_pool", return_value=pool) as create_pool,
             mock.patch("hormuz.server.create_usage_store", return_value=store) as create_store,
+            mock.patch(
+                "hormuz.server.create_provider_reliability_repository",
+                return_value=reliability,
+            ) as create_reliability,
             mock.patch("hormuz.server.PolicyRuntime", return_value=runtime) as create_runtime,
             mock.patch("hormuz.server.PolicyEngine", return_value=engine),
             mock.patch("hormuz.server.resolve_upstream_credentials", return_value={}),
@@ -221,6 +226,7 @@ class GatewayPostgresPoolOwnershipTests(unittest.TestCase):
             server = GatewayServer(config)
             create_pool.assert_called_once_with(config)
             create_store.assert_called_once_with(config, connection_pool=pool)
+            create_reliability.assert_called_once_with(store)
             create_runtime.assert_called_once_with(config, connection_pool=pool)
             runtime.verify_active_policies.assert_called_once_with()
             server.server_close()

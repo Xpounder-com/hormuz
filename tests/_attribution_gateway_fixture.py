@@ -85,6 +85,18 @@ class AttributionGatewayAssertions:
         self.provider.server_close()
         self.provider_thread.join(timeout=10)
 
+    def restart_gateway(self, config):
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join(timeout=10)
+        self.config = config
+        self.server = GatewayServer(
+            self.config,
+            environ={"SYNTHETIC_PROVIDER_KEY": "synthetic-native-provider-key"},
+        )
+        self.thread = serve_in_thread(self.server)
+        self.principal = self.server.portfolio_service.authenticate(ADMIN)
+
     def native(self, path="/v1/responses", *, headers=None, token=ADMIN,
                stream=False, include_output_limit=True, request_changes=None):
         anthropic = path.startswith("/v1/messages")
@@ -234,6 +246,97 @@ class AttributionGatewayAssertions:
             self.assertIn("bounded output-token estimate", data.decode())
         self.assertEqual(NativeAttributionProvider.requests, before)
         self.assertEqual(self.events(), [])
+
+    def check_failover_creates_distinct_attribution_and_work_budget_evidence(self):
+        primary = replace(
+            self.config.model_routes["synthetic"],
+            upstream_model="gpt-test-fast",
+            input_cost_per_million=1,
+            output_cost_per_million=2,
+            failover_alias="synthetic-failover",
+        )
+        alternate = ModelRoute(
+            "synthetic-failover",
+            "openai",
+            "gpt-test-deep",
+            input_cost_per_million=2,
+            output_cost_per_million=4,
+        )
+        self.restart_gateway(replace(
+            self.config,
+            model_routes={**self.config.model_routes, "synthetic": primary,
+                          "synthetic-failover": alternate},
+        ))
+
+        now = datetime.now(timezone.utc)
+        budget = self.server.budget_repository
+        self.assertIsNotNone(budget)
+        plan = budget.create_plan(self.principal, {
+            "schema_id": "hormuz.work-budget-plan-request", "schema_version": 1,
+            "budget_plan_id": None, "expected_version": None,
+            "work_scope": {
+                "work_scope_id": self.scope["work_scope_id"],
+                "version": self.scope["version"],
+            },
+            "window": {
+                "start_at": (now - timedelta(days=1)).isoformat(timespec="microseconds").replace("+00:00", "Z"),
+                "end_at": (now + timedelta(days=1)).isoformat(timespec="microseconds").replace("+00:00", "Z"),
+            },
+            "currency": "USD", "amount": "10",
+            "allowed_models": [
+                {"provider_id": "openai", "model_id": "synthetic", "model_version": None},
+                {"provider_id": "openai", "model_id": "synthetic-failover", "model_version": None},
+            ],
+            "output_token_cap": None, "per_request_cost_cap": None,
+            "reason_code": "created",
+        })
+        budget.activate_plan(self.principal, plan["budget_plan_id"], {
+            "schema_id": "hormuz.work-budget-plan-activation-request", "schema_version": 1,
+            "version": 1, "expected_active_version": None,
+            "expected_activation_generation": 0, "reason_code": "accepted",
+        })
+
+        status, headers, data = self.native(
+            request_changes={"force_primary_rate_limit": True},
+        )
+        self.assertEqual(status, 200, data)
+        self.assertEqual(headers["X-Hormuz-Failover"], "v1;reason=provider_rate_limited")
+        self.assertEqual(
+            [request["body"]["model"] for request in NativeAttributionProvider.requests],
+            ["gpt-test-fast", "gpt-test-deep"],
+        )
+
+        events = self.events()
+        self.assertEqual(len(events), 2)
+        event_by_attempt = {
+            event["request_attempt_id"]: event["attribution_event_id"]
+            for event in events
+        }
+        with self.server.attribution_repository._transaction("acme") as sql:
+            failover = dict(sql.execute(
+                "SELECT original_attempt_id, failover_attempt_id, trigger_status, reason_code "
+                "FROM gateway_provider_failover_events"
+            ).fetchone())
+            bindings = {
+                row["request_attempt_id"]: dict(row)
+                for row in sql.execute(
+                    "SELECT request_attempt_id, attribution_event_id, provider_id, model_id "
+                    "FROM portfolio_work_budget_reservation_bindings"
+                ).fetchall()
+            }
+        attempt_ids = {failover["original_attempt_id"], failover["failover_attempt_id"]}
+        self.assertEqual(set(event_by_attempt), attempt_ids)
+        self.assertEqual(set(bindings), attempt_ids)
+        for attempt_id in attempt_ids:
+            self.assertEqual(bindings[attempt_id]["attribution_event_id"], event_by_attempt[attempt_id])
+            self.assertEqual(bindings[attempt_id]["provider_id"], "openai")
+        self.assertEqual(bindings[failover["original_attempt_id"]]["model_id"], "synthetic")
+        self.assertEqual(
+            bindings[failover["failover_attempt_id"]]["model_id"],
+            "synthetic-failover",
+        )
+        self.assertEqual(failover["trigger_status"], 429)
+        self.assertEqual(failover["reason_code"], "provider_rate_limited")
 
     def check_provider_side_input_never_egresses_under_active_work_budget(self):
         budget, plan = self.activate_scope_budget()

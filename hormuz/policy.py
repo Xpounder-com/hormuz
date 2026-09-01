@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ._persistence import WorkBudgetRequestRepository
+from ._persistence import ProviderReliabilityRepository, WorkBudgetRequestRepository
 from .config import GatewayConfig, Identity, ModelRoute, PolicyAnalysisContext
 from .policy_document import PolicySnapshot
 from .policy_runtime import PolicyRuntime
+from .provider_reliability import ProviderFailoverContext
 from .store import (
     MonthlyTotals,
     RequestAttempt,
@@ -37,10 +38,12 @@ class PolicyEngine:
         *,
         policy_runtime: PolicyRuntime | None = None,
         work_budget_requests: WorkBudgetRequestRepository | None = None,
+        provider_reliability_requests: ProviderReliabilityRepository | None = None,
     ):
         self.config = config
         self.store = store
         self._work_budget_requests = work_budget_requests
+        self._provider_reliability_requests = provider_reliability_requests
         # Explicit-snapshot analysis must not initialize managed policy
         # storage. The gateway still resolves this property during startup,
         # while compare/preview/evaluate paths can remain strictly read-only.
@@ -151,9 +154,31 @@ class PolicyEngine:
         reserved_cost_microusd: int,
         ttl_seconds: int,
         work_budget: WorkBudgetContext | None = None,
+        provider_failover: ProviderFailoverContext | None = None,
     ) -> RequestAttempt:
         upstream_model = decision.route.upstream_model if decision.route is not None else None
         scopes = self.budget_scopes(identity=identity, decision=decision)
+        if provider_failover is not None:
+            if self._provider_reliability_requests is None:
+                raise StorageSchemaError("storage_schema_partial_upgrade")
+            return self._provider_reliability_requests.begin_request_attempt(
+                identity=identity,
+                client=client,
+                protocol=protocol,
+                requested_model=decision.requested_model,
+                resolved_alias=decision.resolved_alias,
+                upstream_model=upstream_model,
+                policy_version=decision.policy_version,
+                policy_action=policy_action,
+                redaction_count=redaction_count,
+                redaction_rules=redaction_rules,
+                scopes=scopes,
+                reserved_tokens=reserved_tokens,
+                reserved_cost_microusd=reserved_cost_microusd,
+                ttl_seconds=ttl_seconds,
+                work_budget=work_budget,
+                provider_failover=provider_failover,
+            )
         if work_budget is None:
             # The built-in v1 method still enters the atomic budget transaction
             # with missing attribution, so an effective work plan fails closed.
@@ -191,6 +216,35 @@ class PolicyEngine:
             reserved_cost_microusd=reserved_cost_microusd,
             ttl_seconds=ttl_seconds,
             work_budget=work_budget,
+        )
+
+    def operational_failover(self, decision: PolicyDecision) -> PolicyDecision | None:
+        """Return the one configured alternate only when effective policy allows it."""
+
+        route = decision.route
+        if route is None or route.failover_alias is None:
+            return None
+        failover_route = self.config.model_routes.get(route.failover_alias)
+        if failover_route is None or failover_route.protocol != route.protocol:
+            # GatewayConfig rejects this, while the analysis projection keeps
+            # this guard so hand-constructed contexts still fail closed.
+            return None
+        allowed_models = decision.snapshot.effective_policy.allowed_models
+        if allowed_models is not None and failover_route.alias not in allowed_models:
+            return None
+        return PolicyDecision(
+            allowed=True,
+            action=decision.action,
+            reason=(
+                f"{decision.reason} Operational failover may route to "
+                f"{failover_route.alias} after an explicit capacity rejection."
+            ),
+            requested_model=decision.requested_model,
+            resolved_alias=failover_route.alias,
+            route=failover_route,
+            max_output_tokens=decision.max_output_tokens,
+            policy_version=decision.policy_version,
+            snapshot=decision.snapshot,
         )
 
     @staticmethod
