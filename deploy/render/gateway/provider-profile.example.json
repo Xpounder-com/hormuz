@@ -1,0 +1,112 @@
+{
+  "listen": {
+    "host": "127.0.0.1",
+    "port": 8787
+  },
+  "ingress": {
+    "mode": "external_tls_proxy",
+    "trusted_proxy_cidrs": ["127.0.0.1/32"],
+    "credential_env": "HORMUZ_INGRESS_CREDENTIAL"
+  },
+  "database": "/var/lib/hormuz/state/usage.sqlite3",
+  "max_request_bytes": 2097152,
+  "upstream_timeout_seconds": 600,
+  "upstreams": {
+    "openai": {
+      "base_url": "https://api.openai.com",
+      "api_key_env": "HORMUZ_OPENAI_PROVIDER_KEY",
+      "allow_response_storage": false,
+      "allow_background": false
+    },
+    "anthropic": {
+      "base_url": "https://api.anthropic.com",
+      "api_key_env": "HORMUZ_ANTHROPIC_PROVIDER_KEY",
+      "allow_response_storage": false,
+      "allow_background": false
+    }
+  },
+  "authentication": {
+    "session_broker": {
+      "enabled": true,
+      "public_base_url": "https://gateway.example.com",
+      "database": "/var/lib/hormuz/state/sessions.sqlite3",
+      "master_key_env": "HORMUZ_SESSION_MASTER_KEY",
+      "access_ttl_seconds": 600,
+      "absolute_ttl_seconds": 43200,
+      "enrollment_ttl_seconds": 300,
+      "onboarding_enabled": true,
+      "console_enabled": true
+    },
+    "oidc": {
+      "issuers": [
+        {
+          "issuer": "https://example.okta.com/oauth2/default",
+          "audiences": ["hormuz-staging-api"],
+          "login": {
+            "client_id": "replace-with-login-client-id",
+            "client_secret_env": "HORMUZ_OIDC_CLIENT_SECRET",
+            "scopes": ["openid", "email"],
+            "token_endpoint_auth_method": "client_secret_basic"
+          },
+          "subjects": []
+        }
+      ]
+    }
+  },
+  "identities": [],
+  "model_routes": {
+    "openai-primary": {
+      "protocol": "openai",
+      "upstream_model": "replace-with-approved-openai-primary",
+      "input_cost_per_million": 1,
+      "output_cost_per_million": 1,
+      "failover_alias": "openai-secondary"
+    },
+    "openai-secondary": {
+      "protocol": "openai",
+      "upstream_model": "replace-with-approved-openai-secondary",
+      "input_cost_per_million": 1,
+      "output_cost_per_million": 1
+    },
+    "anthropic-primary": {
+      "protocol": "anthropic",
+      "upstream_model": "replace-with-approved-anthropic-primary",
+      "input_cost_per_million": 1,
+      "output_cost_per_million": 1,
+      "failover_alias": "anthropic-secondary"
+    },
+    "anthropic-secondary": {
+      "protocol": "anthropic",
+      "upstream_model": "replace-with-approved-anthropic-secondary",
+      "input_cost_per_million": 1,
+      "output_cost_per_million": 1
+    }
+  },
+  "egress_controls": {
+    "secrets": {
+      "mode": "redact",
+      "builtins": true,
+      "custom_secret_envs": []
+    }
+  },
+  "policies": {
+    "organization": {
+      "allowed_clients": ["codex", "claude-code"],
+      "allowed_models": [
+        "openai-primary",
+        "openai-secondary",
+        "anthropic-primary",
+        "anthropic-secondary"
+      ],
+      "fallback_models": {
+        "openai": "openai-primary",
+        "anthropic": "anthropic-primary"
+      },
+      "max_output_tokens": 4096,
+      "monthly_budget_usd": 100,
+      "per_actor_monthly_budget_usd": 25
+    },
+    "teams": {},
+    "actors": {}
+  }
+}

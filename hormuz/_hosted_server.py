@@ -17,6 +17,9 @@ from .server import GatewayRequestHandler, GatewayServer
 MAX_CONNECTIONS = 32
 SOCKET_TIMEOUT = 5
 CONNECTION_LIFETIME = 30
+PROVIDER_MAX_CONNECTIONS = 8
+PROVIDER_SOCKET_TIMEOUT = 45
+PROVIDER_CONNECTION_LIFETIME_MARGIN = 30
 
 
 class StagingGatewayServer(GatewayServer):
@@ -76,10 +79,62 @@ class StagingGatewayServer(GatewayServer):
         pass
 
 
+class ProviderPilotGatewayServer(GatewayServer):
+    """A state-bound gateway with a small, fixed Render compute envelope."""
+
+    request_queue_size = PROVIDER_MAX_CONNECTIONS
+
+    def __init__(self, config, *, environ):
+        self._state_identity = check_initialized(config)
+        self._connection_slots = threading.BoundedSemaphore(PROVIDER_MAX_CONNECTIONS)
+        self.connection_lifetime = min(
+            config.upstream_timeout_seconds + PROVIDER_CONNECTION_LIFETIME_MARGIN,
+            630,
+        )
+        super().__init__(config, environ=environ)
+        self.RequestHandlerClass = ProviderPilotRequestHandler
+
+    state_intact = StagingGatewayServer.state_intact
+
+    def readiness_reason(self):
+        if not self.state_intact():
+            self.begin_drain()
+            return "state_unavailable"
+        return super().readiness_reason()
+
+    def get_request(self):
+        request, address = super().get_request()
+        request.settimeout(PROVIDER_SOCKET_TIMEOUT)
+        return request, address
+
+    def process_request(self, request, client_address):
+        if not self._connection_slots.acquire(blocking=False):
+            self.shutdown_request(request)
+            return
+        try:
+            super().process_request(request, client_address)
+        except BaseException:
+            self._connection_slots.release()
+            raise
+
+    def process_request_thread(self, request, client_address):
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self._connection_slots.release()
+
+    def handle_error(self, request, client_address):
+        # No exception traceback, peer address, request line or payload logging.
+        pass
+
+
 class StagingRequestHandler(GatewayRequestHandler):
     def setup(self):
         super().setup()
-        self._deadline = threading.Timer(CONNECTION_LIFETIME, self._expire_connection)
+        self._deadline = threading.Timer(
+            getattr(self.server, "connection_lifetime", CONNECTION_LIFETIME),
+            self._expire_connection,
+        )
         self._deadline.daemon = True
         self._deadline.start()
 
@@ -170,3 +225,89 @@ class StagingRequestHandler(GatewayRequestHandler):
 
     def log_message(self, format, *args):
         pass
+
+
+class ProviderPilotRequestHandler(StagingRequestHandler):
+    """Strict private-hop framing with only customer and generation routes."""
+
+    def _stage_response(self, status, state):
+        body = json.dumps({
+            "schema_id": "hormuz.hosted-provider-pilot",
+            "schema_version": 1,
+            "status": state,
+            "inference_enabled": True,
+        }, separators=(",", ":")).encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Connection", "close")
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(body)
+
+    def parse_request(self):
+        if not GatewayRequestHandler.parse_request(self):
+            return False
+        self.close_connection = True
+        origin = urlsplit(self.server.config.session_broker.public_base_url)
+        original_target = self.requestline.split()[1]
+        lengths = self.headers.get_all("Content-Length", [])
+        if (
+            self.headers.get_all("Host", []) != [origin.netloc]
+            or self.headers.get_all("Transfer-Encoding", [])
+            or any(len(self.headers.get_all(name, [])) > 1 for name in (
+                "Content-Type", "Authorization", "Origin", "Cookie",
+            ))
+            or len(lengths) > 1
+            or (self.command == "POST" and len(lengths) != 1)
+            or lengths and not re.fullmatch(r"0|[1-9][0-9]{0,7}", lengths[0])
+            or not original_target.startswith("/")
+            or original_target.startswith("//")
+            or "\\" in original_target
+        ):
+            self.send_error(HTTPStatus.BAD_REQUEST)
+            return False
+        length = int(lengths[0]) if lengths else 0
+        if length > self.server.config.max_request_bytes:
+            self.send_error(HTTPStatus.REQUEST_ENTITY_TOO_LARGE)
+            return False
+        if self.command != "POST" and length:
+            self.send_error(HTTPStatus.BAD_REQUEST)
+            return False
+        request = urlsplit(self.path)
+        if request.fragment:
+            self.send_error(HTTPStatus.BAD_REQUEST)
+            return False
+        allowed = request.path in {
+            "/health",
+            "/ready",
+            "/console",
+            "/v1/gateway/whoami",
+            "/v1/gateway/usage",
+            "/v1/responses",
+            "/v1/responses/compact",
+            "/v1/messages",
+            "/v1/messages/count_tokens",
+        } or request.path.startswith(("/v1/auth/", "/v1/admin/", "/console/"))
+        if not allowed:
+            self._stage_response(HTTPStatus.SERVICE_UNAVAILABLE, "route_disabled")
+            return False
+        if not self.server.state_intact() or not self.server._accepting_requests.is_set():
+            self.server.begin_drain()
+            self._stage_response(HTTPStatus.SERVICE_UNAVAILABLE, "not_ready")
+            return False
+        return True
+
+    def do_GET(self):  # noqa: N802
+        if urlsplit(self.path).path in {"/health", "/ready"}:
+            if self.path not in {"/health", "/ready"}:
+                self.send_error(HTTPStatus.BAD_REQUEST)
+                return
+            ready = self.server.readiness_reason() is None
+            self._stage_response(
+                HTTPStatus.OK if ready else HTTPStatus.SERVICE_UNAVAILABLE,
+                "provider_pilot" if ready else "not_ready",
+            )
+            return
+        GatewayRequestHandler.do_GET(self)

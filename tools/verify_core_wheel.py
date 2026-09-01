@@ -239,7 +239,11 @@ REQUIRED_BUDGET_RUNTIME_SDIST_PATHS = (
 )
 REQUIRED_PROVIDER_RELIABILITY_SDIST_PATHS = (
     "docs/PROVIDER_RELIABILITY.md",
+    "docs/RENDER_PROVIDER_PILOT.md",
     "docs/decisions/0013-policy-bounded-provider-failover.md",
+    "deploy/render/gateway/provider-pilot.Caddyfile",
+    "deploy/render/gateway/provider-profile.example.json",
+    "hormuz/_hosted_provider.py",
     "hormuz/provider_reliability.py",
     "hormuz/_provider_reliability_schema.py",
     "hormuz/migrations/postgresql/0014_provider_reliability.sql",
@@ -253,6 +257,7 @@ SESSION_PROOF_TEST_MODULES = (
     "tests.test_onboarding_migration", "tests.test_team_commands",
     "tests.test_console_store", "tests.test_console_http", "tests.test_console_migration",
     "tests.test_hosted_backup", "tests.test_hosted_state", "tests.test_hosted_http",
+    "tests.test_hosted_provider",
 )
 SESSION_PROOF_SDIST_PATHS = (
     "tests/__init__.py", "tests/_session_fixtures.py", "tests/fixtures/session-store-v2.json",

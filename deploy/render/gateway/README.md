@@ -1,10 +1,13 @@
-# Hosted authentication staging on Render
+# Hosted authentication and provider pilot on Render
 
-This opt-in profile exercises team login, native sessions and the administrator
-console on a persistent single-node gateway. **It cannot configure or forward
-model requests.** It is not the released runtime, a production hosted offering,
-an availability SLA, or the streaming/failover implementation. The separate
-[HTTPS preflight](../preflight/README.md) remains unchanged.
+The default and `active` profiles exercise team login, native sessions and the
+administrator console on a persistent single-node gateway. **`active` cannot
+configure or forward model requests.** A separate, explicit `provider-pilot`
+mode can compose that hosted identity state with the streaming/failover gateway
+under a strict small-compute envelope. Its design and activation gates are in
+the [Render provider pilot](../../../docs/RENDER_PROVIDER_PILOT.md). Neither mode
+is a production hosted offering or availability SLA. The separate [HTTPS
+preflight](../preflight/README.md) remains unchanged.
 
 ## Runtime boundary
 
@@ -17,10 +20,12 @@ portfolio, policy and custody routes. There are no upstreams or static identitie
 in the staging configuration.
 
 The proxy receives only its port, temporary Caddy paths and ingress secret. The
-backend receives only the three explicitly named credentials below. Neither
+authentication-staging backend receives only the three explicitly named
+credentials below; the provider backend receives those plus the two fixed
+provider credentials documented in the provider-pilot guide. Neither
 inherits unrelated deployment secrets or HTTP proxy settings. Caddy's admin
 endpoint, configuration persistence, retries and upstream keepalive are disabled.
-No secret is written into its configuration file. The processes share one UID;
+No secret is written into a configuration file. The processes share one UID;
 this limits accidental environment inheritance, not a compromised process's OS
 authority within the container.
 
@@ -46,7 +51,10 @@ retain the broker's bounded response sizes and socket timeouts; slow IdP work ca
 still occupy a worker after its client disconnects. These are staging resource
 limits, not a distributed abuse-control or total IdP-work deadline guarantee.
 Shutdown stops Caddy first, then drains the backend, with forced termination if
-necessary within the supervisor's budget. No paid inference runs in this profile.
+necessary within the supervisor's budget. No paid inference runs in `active`.
+The separate provider mode uses eight backend connections, an at-most-2-MiB
+body cap and streaming-safe timeouts; see its guide for compute limits and
+bottlenecks.
 
 Application output contains fixed lifecycle/error codes only; child stdout and
 stderr are suppressed. This makes private diagnostics deliberately limited.
@@ -76,7 +84,7 @@ environment values through the protected Render configuration UI:
 
 Retain the master key in an approved password/secret manager, separate from data
 backups. The application cannot recover it. Neither it nor the IdP secret is sent
-to Caddy. Do not inject provider keys. The Dockerfile declares no secret build
+to Caddy. Do not inject provider keys while using authentication staging. The Dockerfile declares no secret build
 arguments and its build-context allowlist excludes operator profiles and state.
 Render translates environment variables into build arguments; never add `ARG`
 instructions for these credentials. See
