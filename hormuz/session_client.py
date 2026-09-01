@@ -203,6 +203,7 @@ def access_token(
             profile,
             updated,
             gateway_client=gateway_client,
+            clear_profile_on_failure=True,
         )
         return updated.access_token
 
@@ -320,6 +321,7 @@ def _save_or_revoke(
     session: StoredSession,
     *,
     gateway_client: SessionGatewayClient,
+    clear_profile_on_failure: bool = False,
 ) -> None:
     try:
         store.set(profile, session)
@@ -331,4 +333,9 @@ def _save_or_revoke(
             )
         except SessionClientError:
             pass
+        if clear_profile_on_failure:
+            try:
+                store.delete(profile)
+            except CredentialStoreError as cleanup_error:
+                raise CredentialStoreError("secure_store_cleanup_failed") from cleanup_error
         raise

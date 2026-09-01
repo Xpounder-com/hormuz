@@ -102,6 +102,37 @@ class SessionStoreTests(unittest.TestCase):
             self.assertNotIn(secret.encode("utf-8"), database_bytes)
         self.assertEqual(os.stat(self.path).st_mode & 0o777, 0o600)
 
+    @unittest.skipIf(os.name == "nt", "POSIX directory ownership and mode check")
+    def test_insecure_ancestor_is_refused_before_database_creation(self) -> None:
+        shared = Path(self.temporary.name) / "shared"
+        private = shared / "private"
+        private.mkdir(parents=True, mode=0o700)
+        shared.chmod(0o777)
+        candidate = private / "new-sessions.sqlite3"
+        try:
+            with self.assertRaisesRegex(SessionStoreError, "session_store_insecure_parent"):
+                SQLiteSessionStore(
+                    candidate,
+                    master_key=b"m" * 32,
+                    audience="https://gateway.example",
+                    access_ttl_seconds=600,
+                    absolute_ttl_seconds=43_200,
+                    enrollment_ttl_seconds=300,
+                )
+        finally:
+            shared.chmod(0o700)
+        self.assertFalse(candidate.exists())
+
+    @unittest.skipIf(os.name == "nt", "POSIX directory ownership and mode check")
+    def test_parent_permissions_are_revalidated_before_each_database_open(self) -> None:
+        parent = self.path.parent
+        parent.chmod(0o777)
+        try:
+            with self.assertRaisesRegex(SessionStoreError, "session_store_insecure_parent"):
+                self.store.check_available()
+        finally:
+            parent.chmod(0o700)
+
     def test_refresh_rotates_both_credentials_and_replay_revokes_family(self) -> None:
         first = self.store.redeem_enrollment(
             enrollment_id=self._authorized_enrollment(),
