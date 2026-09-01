@@ -728,6 +728,31 @@ class BudgetAssertions:
             "content_digest": TEST_DIGEST,
         })
 
+    def check_denial_report_population_is_bounded(self):
+        plan = self.create(amount="0")
+        self.activate(plan)
+        with self.assertRaises(ReservationDenied):
+            self.attempt(cost_microusd=1)
+        with mock.patch("hormuz.budget_repository._MAX_REPORT_ATTEMPTS", 1):
+            report = self.repository.current_report(ADMIN, plan["budget_plan_id"])
+        self.assertEqual(report["coverage"]["population_attempts"], 1)
+
+        with self.assertRaises(ReservationDenied):
+            self.attempt(cost_microusd=1)
+        with mock.patch("hormuz.budget_repository._MAX_REPORT_ATTEMPTS", 1):
+            self.error(
+                "unavailable",
+                lambda: self.repository.current_report(ADMIN, plan["budget_plan_id"]),
+            )
+        self.assertEqual(
+            len([
+                row
+                for row in self.budget_rows()["portfolio_work_budget_audit_events"]
+                if row["operation"] == "reserve_denied"
+            ]),
+            2,
+        )
+
     def check_bounded_gateway_actor_is_never_silently_unaudited(self):
         plan = self.create(amount="0")
         self.activate(plan)

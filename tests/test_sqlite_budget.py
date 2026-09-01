@@ -122,6 +122,9 @@ class SQLiteBudgetTests(BudgetAssertions, unittest.TestCase):
     def test_missing_terminal_price_never_becomes_zero(self):
         self.check_missing_terminal_price_never_becomes_zero()
 
+    def test_denial_report_population_is_bounded(self):
+        self.check_denial_report_population_is_bounded()
+
     def test_bounded_gateway_actor_is_never_silently_unaudited(self):
         self.check_bounded_gateway_actor_is_never_silently_unaudited()
 

@@ -14,6 +14,7 @@ class Usage:
     cache_write_tokens: int = 0
     reasoning_tokens: int = 0
     provider_reported_model: str | None = None
+    evidence_complete: bool = False
 
 
 class ResponseUsageParser:
@@ -26,6 +27,8 @@ class ResponseUsageParser:
         self._decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
         self._line_buffer = ""
         self._json_buffer = bytearray()
+        self._input_tokens_observed = False
+        self._output_tokens_observed = False
 
     def feed(self, data: bytes) -> None:
         if self.is_event_stream:
@@ -46,6 +49,9 @@ class ResponseUsageParser:
                 self._parse_object(json.loads(self._json_buffer))
             except (json.JSONDecodeError, UnicodeDecodeError):
                 pass
+        self.usage.evidence_complete = (
+            self._input_tokens_observed and self._output_tokens_observed
+        )
         return self.usage
 
     def _parse_sse_line(self, line: str) -> None:
@@ -83,8 +89,14 @@ class ResponseUsageParser:
     def _apply_openai_usage(self, value: Any) -> None:
         if not isinstance(value, dict):
             return
-        self.usage.input_tokens = _nonnegative_int(value.get("input_tokens"), self.usage.input_tokens)
-        self.usage.output_tokens = _nonnegative_int(value.get("output_tokens"), self.usage.output_tokens)
+        input_tokens = _observed_nonnegative_int(value.get("input_tokens"))
+        if input_tokens is not None:
+            self.usage.input_tokens = input_tokens
+            self._input_tokens_observed = True
+        output_tokens = _observed_nonnegative_int(value.get("output_tokens"))
+        if output_tokens is not None:
+            self.usage.output_tokens = output_tokens
+            self._output_tokens_observed = True
         input_details = value.get("input_tokens_details")
         if isinstance(input_details, dict):
             self.usage.cache_read_tokens = _nonnegative_int(
@@ -99,8 +111,14 @@ class ResponseUsageParser:
     def _apply_anthropic_usage(self, value: Any) -> None:
         if not isinstance(value, dict):
             return
-        self.usage.input_tokens = _nonnegative_int(value.get("input_tokens"), self.usage.input_tokens)
-        self.usage.output_tokens = _nonnegative_int(value.get("output_tokens"), self.usage.output_tokens)
+        input_tokens = _observed_nonnegative_int(value.get("input_tokens"))
+        if input_tokens is not None:
+            self.usage.input_tokens = input_tokens
+            self._input_tokens_observed = True
+        output_tokens = _observed_nonnegative_int(value.get("output_tokens"))
+        if output_tokens is not None:
+            self.usage.output_tokens = output_tokens
+            self._output_tokens_observed = True
         self.usage.cache_read_tokens = _nonnegative_int(
             value.get("cache_read_input_tokens"), self.usage.cache_read_tokens
         )
@@ -110,6 +128,11 @@ class ResponseUsageParser:
 
 
 def _nonnegative_int(value: Any, fallback: int) -> int:
+    observed = _observed_nonnegative_int(value)
+    return fallback if observed is None else observed
+
+
+def _observed_nonnegative_int(value: Any) -> int | None:
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-        return fallback
+        return None
     return value

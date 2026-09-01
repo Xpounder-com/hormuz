@@ -231,9 +231,12 @@ REQUIRED_BUDGET_RUNTIME_SDIST_PATHS = (
     "hormuz/_budget_schema.py",
     "hormuz/budget_repository.py",
     "hormuz/budget_runtime.py",
+    "hormuz/server.py",
+    "hormuz/usage.py",
     "hormuz/migrations/postgresql/0013_work_budgets.sql",
     "tests/_budget_fixture.py",
     "tests/test_budget_schema.py",
+    "tests/test_gateway.py",
     "tests/test_sqlite_budget.py",
     "tests/test_postgres_budget.py",
 )

@@ -834,6 +834,22 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 return
             else:
                 request_status = "failed"
+            if successful and not usage.evidence_complete:
+                self.server.store.mark_request_attempt_outcome_unknown(
+                    attempt=attempt,
+                    organization_id=identity.organization_id,
+                    reason_code="provider_transport_ambiguous",
+                )
+                LOGGER.warning(
+                    "request_outcome_unknown actor=%s team=%s client=%s protocol=%s "
+                    "requested_model=%s reason=provider_usage_unavailable",
+                    identity.actor_id,
+                    identity.team_id,
+                    client,
+                    protocol,
+                    decision.requested_model,
+                )
+                return
             cost = route.estimate_cost_microusd(
                 input_tokens=usage.input_tokens,
                 output_tokens=usage.output_tokens,

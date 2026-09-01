@@ -111,11 +111,16 @@ Each accepted binding pins the attribution event, plan version and activation
 generation, work scope, window, currency, reserved amount/output tokens,
 effective provider/model reference, activation and request policy identities,
 configured route-rate identity, and valuation rule. Terminal settlement uses
-the immutable request usage estimate. PostgreSQL records the terminal attempt
-and its linked usage fact with one database timestamp, so current and
-historical `as_of` reports never compare gateway-process and database clock
-domains. An `outcome_unknown` attempt uses the same database clock, retains the
-reserved amount, and is never automatically replayed.
+the immutable request usage estimate only after the response parser observes
+valid nonnegative input- and output-token evidence. A successful response with
+missing, malformed, partial, or oversized usage metadata becomes
+`outcome_unknown` under the frozen provider-transport ambiguity class; it
+retains the conservative reservation and never fabricates a zero-cost usage
+fact. PostgreSQL records a terminal attempt and its linked usage fact with one
+database timestamp, so current and historical `as_of` reports never compare
+gateway-process and database clock domains. An `outcome_unknown` attempt uses
+the same database clock, retains the reserved amount, and is never
+automatically replayed.
 
 The bound model dimension uses the selected `model_routes` mapping key when it
 fits the frozen opaque-ID contract and is outside the reserved generated-ID
@@ -150,7 +155,10 @@ audit index whose six declared columns are all true key attributes, so denial
 aggregation does not devolve into a tenant-wide audit scan. PostgreSQL
 `INCLUDE`-only copies do not satisfy that shape. SQLite and PostgreSQL readiness
 both reject a missing, malformed, partial, or invalid copy of either required
-index without repairing it in place.
+index without repairing it in place. A report reads at most 10,001 matching
+denial facts in index order and fails closed when a plan window exceeds the
+supported 10,000-denial reporting bound. The immutable audit facts are neither
+deleted nor silently truncated.
 
 Stop writers and pools before migration, serialize the operator action, and
 restart fresh processes. Old binaries refuse schema 9/13. Before any candidate
@@ -169,7 +177,9 @@ mandatory auditing, process-clock skew, large-number reservation coverage,
 corruption refusal, indexed denial reporting and readiness refusal, configured
 provider-model names, immediate activation-predecessor integrity, generated
 model-namespace collision resistance, preview/runtime mapping-key parity, and
-independent PostgreSQL replicas.
+independent PostgreSQL replicas. They also prove that incomplete successful
+provider usage retains its reservation and that per-window denial reporting is
+bounded without dropping audit facts.
 
 ## Remaining gates
 

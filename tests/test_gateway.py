@@ -24,6 +24,7 @@ from hormuz.policy import PolicyEngine
 from hormuz.postgres import PostgresStorageError
 from hormuz.server import GatewayServer, serve_in_thread
 from hormuz.store import UsageStore
+from hormuz.usage import ResponseUsageParser
 
 
 GATEWAY_TOKEN = "company-user-token-never-forward"
@@ -73,6 +74,8 @@ class FakeProviderHandler(BaseHTTPRequestHandler):
                     "total_tokens": 150,
                 },
             }
+            if body.get("force_missing_usage") is True:
+                payload.pop("usage")
             if body.get("stream") is True:
                 self._send_openai_stream(payload)
                 return
@@ -347,6 +350,30 @@ class ConfiguredModelIdentityTests(unittest.TestCase):
             reserved_alias, r"\Aconfigured-model-sha256:[0-9a-f]{64}\Z",
         )
         self.assertNotEqual(reserved_alias, normalized)
+
+
+class ResponseUsageEvidenceTests(unittest.TestCase):
+    def test_success_evidence_requires_valid_input_and_output_tokens(self) -> None:
+        complete = ResponseUsageParser("openai", is_event_stream=False)
+        complete.feed(json.dumps({
+            "usage": {"input_tokens": 10, "output_tokens": 0},
+        }).encode())
+        self.assertTrue(complete.finish().evidence_complete)
+
+        incomplete_values = (
+            {"usage": {"input_tokens": 10}},
+            {"usage": {"input_tokens": 10, "output_tokens": True}},
+            {"usage": {"input_tokens": -1, "output_tokens": 2}},
+        )
+        for value in incomplete_values:
+            with self.subTest(value=value):
+                parser = ResponseUsageParser("openai", is_event_stream=False)
+                parser.feed(json.dumps(value).encode())
+                self.assertFalse(parser.finish().evidence_complete)
+
+        malformed = ResponseUsageParser("openai", is_event_stream=False)
+        malformed.feed(b'{"usage":{"input_tokens":10')
+        self.assertFalse(malformed.finish().evidence_complete)
 
 
 class GatewayIntegrationTests(unittest.TestCase):
@@ -648,6 +675,40 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertNotIn("input", root_columns)
         self.assertEqual(root[0], "engineering-fast")
         self.assertGreater(root[1], 0)
+        self.assertEqual(
+            events,
+            [(1, "pending", None, None), (2, "outcome_unknown", "provider_transport_ambiguous", None)],
+        )
+
+    def test_success_without_provider_usage_keeps_the_conservative_reservation(self) -> None:
+        status, headers, body = self._post(
+            "/v1/responses",
+            {
+                "model": "engineering-fast",
+                "input": "response without usable provider usage",
+                "max_output_tokens": 20,
+                "force_missing_usage": True,
+            },
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["x-hormuz-contract"], relay_contract_header())
+        self.assertNotIn("usage", json.loads(body))
+        self.assertEqual(self.gateway.store.monthly_totals(actor_id="alice").requests, 0)
+        self.assertEqual(self.gateway.store.active_budget_reservations(), 1)
+
+        connection = sqlite3.connect(self.gateway.store.path)
+        reserved = connection.execute(
+            "SELECT reserved_cost_microusd FROM gateway_request_attempts"
+        ).fetchone()[0]
+        events = connection.execute(
+            "SELECT sequence,state,reason_code,usage_event_id "
+            "FROM gateway_request_attempt_events ORDER BY sequence"
+        ).fetchall()
+        usage_count = connection.execute("SELECT COUNT(*) FROM gateway_usage_events").fetchone()[0]
+        connection.close()
+        self.assertGreater(reserved, 0)
+        self.assertEqual(usage_count, 0)
         self.assertEqual(
             events,
             [(1, "pending", None, None), (2, "outcome_unknown", "provider_transport_ambiguous", None)],
