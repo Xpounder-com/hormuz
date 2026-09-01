@@ -15,7 +15,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest import mock
 
-from hormuz.config import GatewayConfig, Policy
+from hormuz.config import GatewayConfig, ModelRoute, Policy
 from hormuz.contracts import relay_contract_header, validate_audit_event, validate_contract
 from hormuz.custody import KEY_PURPOSE_PROVIDER_CREDENTIAL, EnvelopeCipher, GeneratedDataKey
 from hormuz.custody_runtime import write_envelope_file
@@ -250,6 +250,45 @@ class FakeProviderHandler(BaseHTTPRequestHandler):
 
     def log_message(self, format: str, *args: object) -> None:
         pass
+
+
+class ModelRouteCostTests(unittest.TestCase):
+    def test_reservation_covers_every_terminal_input_partition_and_rounds_up(self) -> None:
+        route = ModelRoute(
+            alias="premium-cache",
+            protocol="anthropic",
+            upstream_model="model",
+            input_cost_per_million=1,
+            cache_read_cost_per_million=25,
+            cache_write_cost_per_million=100,
+            output_cost_per_million=2,
+        )
+
+        reservation = route.estimate_reservation_cost_microusd(input_tokens=3, output_tokens=2)
+        terminal_costs = (
+            route.estimate_cost_microusd(
+                input_tokens=3, output_tokens=2, cache_read_tokens=0, cache_write_tokens=0,
+            ),
+            route.estimate_cost_microusd(
+                input_tokens=0, output_tokens=2, cache_read_tokens=3, cache_write_tokens=0,
+            ),
+            route.estimate_cost_microusd(
+                input_tokens=0, output_tokens=2, cache_read_tokens=0, cache_write_tokens=3,
+            ),
+        )
+
+        self.assertEqual(reservation, 304)
+        self.assertGreaterEqual(reservation, max(terminal_costs))
+        fractional = ModelRoute(
+            alias="fractional",
+            protocol="openai",
+            upstream_model="model",
+            input_cost_per_million=0.1,
+        )
+        self.assertEqual(
+            fractional.estimate_reservation_cost_microusd(input_tokens=1, output_tokens=0),
+            1,
+        )
 
 
 class GatewayIntegrationTests(unittest.TestCase):
@@ -554,6 +593,45 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertEqual(
             events,
             [(1, "pending", None, None), (2, "outcome_unknown", "provider_transport_ambiguous", None)],
+        )
+
+    def test_anthropic_attempt_reserves_the_most_expensive_input_partition(self) -> None:
+        with mock.patch(
+            "hormuz.server.urllib.request.urlopen",
+            side_effect=urllib.error.URLError("provider-connection-interrupted"),
+        ):
+            status, _, _ = self._post(
+                "/v1/messages",
+                {
+                    "model": "claude-standard",
+                    "messages": [{"role": "user", "content": "premium cache write"}],
+                    "max_tokens": 1,
+                },
+            )
+
+        self.assertEqual(status, 502)
+        connection = sqlite3.connect(self.gateway.store.path)
+        reserved_tokens, reserved_cost_microusd = connection.execute(
+            "SELECT reserved_tokens, reserved_cost_microusd FROM gateway_request_attempts"
+        ).fetchone()
+        connection.close()
+        reserved_input_tokens = reserved_tokens - 1
+        route = self.config.model_routes["claude-standard"]
+        self.assertEqual(
+            reserved_cost_microusd,
+            route.estimate_reservation_cost_microusd(
+                input_tokens=reserved_input_tokens,
+                output_tokens=1,
+            ),
+        )
+        self.assertGreater(
+            reserved_cost_microusd,
+            route.estimate_cost_microusd(
+                input_tokens=reserved_input_tokens,
+                output_tokens=1,
+                cache_read_tokens=0,
+                cache_write_tokens=0,
+            ),
         )
 
     def test_interrupted_provider_response_becomes_unknown_without_replay(self) -> None:

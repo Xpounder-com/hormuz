@@ -583,11 +583,9 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             if not output_tokens_bounded:
                 reserved_output_tokens = 0
             reserved_input_tokens = len(body)
-            reserved_cost_microusd = decision.route.estimate_cost_microusd(
+            reserved_cost_microusd = decision.route.estimate_reservation_cost_microusd(
                 input_tokens=reserved_input_tokens,
                 output_tokens=max(0, reserved_output_tokens),
-                cache_read_tokens=0,
-                cache_write_tokens=0,
             )
             route_rate_card = configured_route_rate_card(
                 alias=decision.route.alias,

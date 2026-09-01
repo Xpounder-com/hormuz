@@ -5,6 +5,7 @@ import ipaddress
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from decimal import Decimal, ROUND_CEILING
 from pathlib import Path
 
 from ._config_input import (
@@ -264,6 +265,32 @@ class ModelRoute:
     cache_read_cost_per_million: float = 0
     cache_write_cost_per_million: float = 0
     output_cost_per_million: float = 0
+
+    def estimate_reservation_cost_microusd(
+        self,
+        *,
+        input_tokens: int,
+        output_tokens: int,
+    ) -> int:
+        """Conservatively price bounded tokens before provider egress.
+
+        Provider usage can classify input as uncached, cache-read, or
+        cache-write only after the response. Reserve every bounded input token
+        at the route's most expensive input classification and round upward so
+        the eventual configured-rate charge cannot exceed the reservation.
+        """
+        input_rate = max(
+            Decimal(0),
+            Decimal(str(self.input_cost_per_million)),
+            Decimal(str(self.cache_read_cost_per_million)),
+            Decimal(str(self.cache_write_cost_per_million)),
+        )
+        output_rate = max(Decimal(0), Decimal(str(self.output_cost_per_million)))
+        microusd = (
+            Decimal(max(0, input_tokens)) * input_rate
+            + Decimal(max(0, output_tokens)) * output_rate
+        )
+        return int(microusd.to_integral_value(rounding=ROUND_CEILING))
 
     def estimate_cost_microusd(
         self,
