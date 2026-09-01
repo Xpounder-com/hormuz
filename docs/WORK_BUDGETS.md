@@ -61,6 +61,10 @@ declared window contains the database time may activate. Emergency tightening
 and rollback are explicit activations and do not erase prior consumption or
 unknown holds. A tenant may retain at most 1,000 activated plan IDs in this
 runtime version; activation and request-time scans both enforce that bound.
+Every request validates the current event against the immediately preceding
+generation, including the prior active version and nondecreasing database
+timestamp. Management reads additionally validate the bounded full activation
+history.
 
 Preview is a dry run against a nonempty frozen policy scenario suite. It cannot
 activate a plan, reserve spend, or call a provider. It evaluates the effective
@@ -101,17 +105,44 @@ work-budget tenant, then portfolio tenant. Independent runtime instances use
 the same order, so two replicas cannot both spend the same remaining amount.
 If neither the request nor effective policy supplies an output-token maximum,
 the reservation has no defensible upper cost bound and the request fails closed
-before provider egress.
+before provider egress. Serialized request bytes bound only self-contained
+input. A provider-resolved response/conversation/prompt, URL, file identifier,
+or server-side tool can add billed input that is absent from the body; an
+active work budget therefore rejects those forms until a reviewed
+modality-specific bound exists. Inline text, file data, and base64 media remain
+self-contained and retain the byte-based conservative reservation.
 
 Each accepted binding pins the attribution event, plan version and activation
 generation, work scope, window, currency, reserved amount/output tokens,
 effective provider/model reference, activation and request policy identities,
 configured route-rate identity, and valuation rule. Terminal settlement uses
-the immutable request usage estimate. PostgreSQL records the terminal attempt
-and its linked usage fact with one database timestamp, so current and
-historical `as_of` reports never compare gateway-process and database clock
-domains. An `outcome_unknown` attempt uses the same database clock, retains the
-reserved amount, and is never automatically replayed.
+the immutable request usage estimate only after the response parser observes
+valid nonnegative input- and output-token evidence. A successful response with
+missing, malformed, partial, or oversized usage metadata becomes
+`outcome_unknown` under the frozen provider-transport ambiguity class; it
+retains the conservative reservation and never fabricates a zero-cost usage
+fact. For an Anthropic stream, the `message_start` output-token placeholder is
+not terminal evidence; settlement requires a valid cumulative output count in
+the final `message_delta`. PostgreSQL records a terminal attempt and its linked
+usage fact with one database timestamp, so current and historical `as_of`
+reports never compare gateway-process and database clock domains. An
+`outcome_unknown` attempt uses the same database clock, retains the reserved
+amount, and is never automatically replayed. PostgreSQL also uses a database
+timestamp for work-plan eligibility when attribution is absent, so a skewed
+gateway clock cannot make a database-active plan disappear. The frozen process
+clock remains on the legacy attempt and monthly-accounting timestamps; it is
+not used for work-plan eligibility.
+
+The bound model dimension uses the selected `model_routes` mapping key when it
+fits the frozen opaque-ID contract and is outside the reserved generated-ID
+namespace. Any other key is mapped deterministically to
+`configured-model-sha256:<sha256(key)>`; a configured key already shaped like
+that generated form is re-encoded so it cannot impersonate another route's
+generated identity. The provider-native model name remains in request evidence
+and the exact rate-card digest, so names such as `vendor/model`—including names
+longer than the durable model-ID field—do not become runtime-only work-budget
+failures. Management previews use the same selected mapping key and identity
+rule as request-time enforcement, including fallback routing.
 
 Coverage counters form a declared partition: included, unattributed, and
 unsupported attempts sum exactly to the population. Numeric- or model-ceiling
@@ -131,8 +162,16 @@ activation, or active-pointer evidence is refused with a fixed error and is
 never repaired or reflected. Both adapters require the same tenant-plan-window
 binding index so request-time enforcement and reporting do not scan unrelated
 historical bindings. They also require a tenant/plan/operation/evaluation-time
-audit index, with version and reason as covering columns, so denial aggregation
-does not devolve into a tenant-wide audit scan.
+audit index whose six declared columns are all true key attributes, so denial
+aggregation does not devolve into a tenant-wide audit scan. PostgreSQL
+`INCLUDE`-only copies do not satisfy that shape. SQLite and PostgreSQL readiness
+both reject a missing, malformed, partial, or invalid copy of either required
+index without repairing it in place. A report reads at most 10,001 matching
+denial facts in index order and fails closed when a plan window exceeds the
+supported 10,000-denial reporting bound. Before that bounded aggregation, it
+also fails closed if a denial in the reported window has a null or nonexistent
+plan-version coordinate; the join cannot silently remove damaged immutable
+evidence. The immutable audit facts are neither deleted nor silently truncated.
 
 Stop writers and pools before migration, serialize the operator action, and
 restart fresh processes. Old binaries refuse schema 9/13. Before any candidate
@@ -148,7 +187,15 @@ newer refusal, old-pair backup/restore, post-write forward recovery, and the
 same rules in SQLite. Runtime tests cover both adapters, exact decimals,
 hierarchy denial, settlement, uncertain holds, activation/replacement/rollback,
 mandatory auditing, process-clock skew, large-number reservation coverage,
-corruption refusal, indexed denial reporting, and independent PostgreSQL replicas.
+corruption refusal, indexed denial reporting and readiness refusal, configured
+provider-model names, immediate activation-predecessor integrity, generated
+model-namespace collision resistance, preview/runtime mapping-key parity, and
+independent PostgreSQL replicas. They also prove that incomplete successful
+provider usage retains its reservation, that an unbound identity without a
+scope header cannot bypass an effective plan even under process-clock skew,
+that provider-side URLs/files/state/tools cannot use request bytes as a false
+input bound while inline data remains supported, and that per-window denial
+reporting is bounded without dropping or hiding audit facts.
 
 ## Remaining gates
 

@@ -23,6 +23,7 @@ from ._budget_schema import (
     MAX_BUDGET_BINDINGS_PER_PLAN_WINDOW,
     BudgetIntegrityError,
     validate_active_budget_rows,
+    validate_budget_activation_predecessor,
 )
 from ._persistence import ReservationDenied, WorkBudgetContext
 from .attribution_admission import AdmissionError
@@ -30,6 +31,7 @@ from .finance_values import FinanceValueError, decimal_text, exact_context
 
 
 _ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
+_GENERATED_MODEL_ID = re.compile(r"configured-model-sha256:[0-9a-f]{64}\Z")
 _TIME = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{6}Z\Z")
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 _CURRENCY = re.compile(r"[A-Z]{3}\Z")
@@ -124,6 +126,25 @@ def configured_route_rate_card(*, alias: str, protocol: str, upstream_model: str
     }
 
 
+def configured_model_id(
+    *,
+    resolved_alias: str | None,
+    upstream_model: str | None,
+    requested_model: str,
+) -> str:
+    """Return one wire-safe identity for the configured route selection."""
+
+    candidate = resolved_alias or upstream_model or requested_model
+    if type(candidate) is not str or not candidate:
+        raise ReservationDenied("Work-budget model evidence is invalid.")
+    if (
+        _ID.fullmatch(candidate) is not None
+        and _GENERATED_MODEL_ID.fullmatch(candidate) is None
+    ):
+        return candidate
+    return "configured-model-sha256:" + hashlib.sha256(candidate.encode("utf-8")).hexdigest()
+
+
 def _utc(value: datetime) -> str:
     return value.astimezone(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
 
@@ -145,6 +166,7 @@ def _context(value: WorkBudgetContext) -> WorkBudgetContext:
         type(value.reserved_output_tokens) is not int
         or not 0 <= value.reserved_output_tokens <= 9007199254740991
         or type(value.output_tokens_bounded) is not bool
+        or type(value.input_tokens_bounded) is not bool
     ):
         raise ReservationDenied("Work attribution is invalid for budget enforcement.")
     if (
@@ -193,12 +215,27 @@ def _effective_plan_rows(sql: RuntimeBudgetSQL, organization_id: str, now: str) 
         "a.reason_code AS activation_reason_code,"
         "a.policy_version AS policy_version,"
         "a.policy_digest AS policy_digest,"
-        "a.committed_at AS activation_committed_at "
+        "a.committed_at AS activation_committed_at,"
+        "prior.organization_id AS prior_activation_organization_id,"
+        "prior.activation_event_id AS prior_activation_event_id,"
+        "prior.budget_plan_id AS prior_activation_budget_plan_id,"
+        "prior.activation_generation AS prior_activation_generation,"
+        "prior.previous_version AS prior_activation_previous_version,"
+        "prior.current_version AS prior_activation_current_version,"
+        "prior.actor_id AS prior_activation_actor_id,"
+        "prior.reason_code AS prior_activation_reason_code,"
+        "prior.policy_version AS prior_policy_version,"
+        "prior.policy_digest AS prior_policy_digest,"
+        "prior.committed_at AS prior_activation_committed_at "
         "FROM portfolio_work_budget_active_plans p "
         "LEFT JOIN portfolio_work_budget_activation_events a ON a.organization_id=p.organization_id "
         "AND a.budget_plan_id=p.budget_plan_id AND a.current_version=p.active_version "
         "AND a.activation_generation=p.activation_generation "
         "AND a.activation_event_id=p.current_activation_event_id "
+        "LEFT JOIN portfolio_work_budget_activation_events prior "
+        "ON prior.organization_id=p.organization_id "
+        "AND prior.budget_plan_id=p.budget_plan_id "
+        "AND prior.activation_generation=p.activation_generation-1 "
         "LEFT JOIN portfolio_work_budget_plan_versions v ON v.organization_id=p.organization_id "
         "AND v.budget_plan_id=p.budget_plan_id AND v.version=p.active_version "
         "WHERE p.organization_id=? ORDER BY p.budget_plan_id LIMIT ?",
@@ -248,6 +285,19 @@ def _effective_plan_rows(sql: RuntimeBudgetSQL, organization_id: str, now: str) 
             "policy_digest": row["policy_digest"],
             "committed_at": row["activation_committed_at"],
         }
+        prior_activation = {
+            "organization_id": row["prior_activation_organization_id"],
+            "activation_event_id": row["prior_activation_event_id"],
+            "budget_plan_id": row["prior_activation_budget_plan_id"],
+            "activation_generation": row["prior_activation_generation"],
+            "previous_version": row["prior_activation_previous_version"],
+            "current_version": row["prior_activation_current_version"],
+            "actor_id": row["prior_activation_actor_id"],
+            "reason_code": row["prior_activation_reason_code"],
+            "policy_version": row["prior_policy_version"],
+            "policy_digest": row["prior_policy_digest"],
+            "committed_at": row["prior_activation_committed_at"],
+        }
         reference = ()
         if (
             type(pointer["budget_plan_id"]) is str
@@ -258,6 +308,12 @@ def _effective_plan_rows(sql: RuntimeBudgetSQL, organization_id: str, now: str) 
             reference = ((pointer["budget_plan_id"], pointer["active_version"]),)
         try:
             validate_active_budget_rows(row, activation, pointer, observed_at=now)
+            validate_budget_activation_predecessor(
+                activation,
+                None
+                if prior_activation["activation_event_id"] is None
+                else prior_activation,
+            )
         except (BudgetIntegrityError, KeyError, TypeError):
             raise WorkBudgetDenied(
                 "The active work budget is unavailable.", "attribution_invalid", reference,
@@ -474,6 +530,11 @@ def enforce_and_bind_work_budget(
     now_value = _utc(now)
     reserved = _reservation_amount(reserved_cost_microusd)
     plans = _plans(sql, organization_id, prepared.scope_chain, now_value)
+    if plans and not context.input_tokens_bounded:
+        raise WorkBudgetDenied(
+            "A bounded input-token estimate is required for work-budget enforcement.",
+            "request_cost_ceiling", _plan_refs(plans), evaluated_at=now_value,
+        )
     if plans and not context.output_tokens_bounded:
         raise WorkBudgetDenied(
             "A bounded output-token estimate is required for work-budget enforcement.",
