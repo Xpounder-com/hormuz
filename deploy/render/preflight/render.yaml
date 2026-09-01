@@ -1,0 +1,17 @@
+# Optional Blueprint equivalent of the manual public-repository setup.
+# It does not provision any gateway, database, disk, secret or Okta application.
+services:
+  - type: web
+    name: hormuz-https-preflight
+    runtime: docker
+    plan: free
+    region: ohio
+    branch: mehrdad/render-https-preflight
+    dockerfilePath: ./deploy/render/preflight/Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    autoDeployTrigger: "off"
+    maxShutdownDelaySeconds: 15
+    envVars:
+      - key: PORT
+        value: "10000"

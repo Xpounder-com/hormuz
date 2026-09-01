@@ -1,0 +1,59 @@
+{
+	admin off
+	auto_https off
+	persist_config off
+	grace_period 5s
+	# No request, URI, body, cookie or credential logging in this placeholder.
+	log {
+		output discard
+	}
+	servers {
+		max_header_size 16KB
+		timeouts {
+			read_header 5s
+			read_body 5s
+			write 5s
+			idle 5s
+		}
+	}
+}
+
+# Render supplies public TLS. This container has no TLS keys, gateway process,
+# upstream routes, credential environment, static file server or writable state.
+:{$PORT:10000} {
+	bind 0.0.0.0
+	header {
+		-Server
+		Cache-Control "no-store"
+		Referrer-Policy "no-referrer"
+		X-Content-Type-Options "nosniff"
+		X-Robots-Tag "noindex, nofollow, noarchive"
+		Content-Security-Policy "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
+		X-Hormuz-Preflight-Revision "{env.HORMUZ_PREFLIGHT_REVISION}"
+	}
+	@health {
+		method GET HEAD
+		path /health
+	}
+	handle @health {
+		respond "{\"schema_id\":\"hormuz.https-preflight\",\"schema_version\":1,\"stage\":\"https_preflight_only\",\"source_commit\":\"{env.HORMUZ_PREFLIGHT_REVISION}\",\"gateway_ready\":false,\"sign_in_enabled\":false}" 200 {
+			close
+		}
+	}
+	@robots {
+		method GET HEAD
+		path /robots.txt
+	}
+	handle @robots {
+		respond "User-agent: *\nDisallow: /\n" 200 {
+			close
+		}
+	}
+	# Includes /ready, /console, both Okta callbacks and every model/API route.
+	# Never redirect, proxy, echo inputs, set cookies or accept credentials here.
+	handle {
+		respond "{\"schema_id\":\"hormuz.https-preflight\",\"schema_version\":1,\"stage\":\"https_preflight_only\",\"source_commit\":\"{env.HORMUZ_PREFLIGHT_REVISION}\",\"gateway_ready\":false,\"sign_in_enabled\":false,\"message\":\"HTTPS setup endpoint only. Hormuz sign-in and model access are not enabled.\"}" 503 {
+			close
+		}
+	}
+}

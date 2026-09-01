@@ -26,6 +26,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+client = [
+  "keyring>=25.6,<26"
+]
 postgres = [
   "psycopg[binary]>=3.3.4,<3.4",
   "psycopg-pool>=3.3.1,<3.4"
@@ -44,5 +47,5 @@ hormuz = "hormuz.cli:main"
 include = ["hormuz*"]
 
 [tool.setuptools.package-data]
-"hormuz" = ["secret-inventory-v1.json", "portfolio-registry-wire-v1.json", "portfolio-attribution-wire-v1.json", "portfolio-outcome-wire-v1.json"]
+"hormuz" = ["secret-inventory-v1.json", "portfolio-registry-wire-v1.json", "portfolio-attribution-wire-v1.json", "portfolio-outcome-wire-v1.json", "console.css"]
 "hormuz.migrations.postgresql" = ["*.sql"]

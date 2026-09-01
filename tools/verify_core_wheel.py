@@ -247,6 +247,20 @@ REQUIRED_PROVIDER_RELIABILITY_SDIST_PATHS = (
     "tests/test_gateway.py",
 )
 
+SESSION_PROOF_TEST_MODULES = (
+    "tests.test_session_config", "tests.test_session_store", "tests.test_credential_store",
+    "tests.test_session_broker", "tests.test_onboarding_store", "tests.test_onboarding_http",
+    "tests.test_onboarding_migration", "tests.test_team_commands",
+    "tests.test_console_store", "tests.test_console_http", "tests.test_console_migration",
+    "tests.test_hosted_backup", "tests.test_hosted_state", "tests.test_hosted_http",
+)
+SESSION_PROOF_SDIST_PATHS = (
+    "tests/__init__.py", "tests/_session_fixtures.py", "tests/fixtures/session-store-v2.json",
+    "tests/_console_fixtures.py", "tests/fixtures/session-store-v3.json",
+    "tests/_hosted_fixtures.py",
+    *(name.replace(".", "/") + ".py" for name in SESSION_PROOF_TEST_MODULES),
+)
+
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -280,7 +294,7 @@ def main(argv: list[str] | None = None) -> int:
     _assert_budget_preflight_sdist_boundary(sdist)
     _assert_budget_runtime_sdist_boundary(sdist)
     _assert_provider_reliability_sdist_boundary(sdist)
-    _verify_isolated_install(wheel, config, python)
+    _verify_isolated_install(wheel, config, python, sdist=sdist)
     print(
         "verified core distribution boundary: no context/runtime data and complete deployment/usability assets"
     )
@@ -369,7 +383,6 @@ def _assert_attribution_preflight_sdist_boundary(path: Path) -> None:
     if missing:
         raise RuntimeError(f"Attribution preflight incomplete in {path.name}: {', '.join(sorted(missing))}")
 
-
 def _assert_outcome_preflight_sdist_boundary(path: Path) -> None:
     members = tuple(name.lstrip("./") for name in _sdist_members(path))
     missing = [
@@ -452,7 +465,7 @@ def _assert_provider_reliability_sdist_boundary(path: Path) -> None:
         )
 
 
-def _verify_isolated_install(wheel: Path, config_template: Path, base_python: Path) -> None:
+def _verify_isolated_install(wheel: Path, config_template: Path, base_python: Path, *, sdist: Path) -> None:
     with tempfile.TemporaryDirectory(prefix="hormuz-core-wheel-") as temporary:
         root = Path(temporary)
         environment = dict(os.environ)
@@ -559,6 +572,39 @@ def _verify_isolated_install(wheel: Path, config_template: Path, base_python: Pa
             encoding="utf-8",
         )
         subprocess.run([python, "-I", str(runner)], check=True, cwd=root, env=environment)
+        _verify_session_wheel(sdist, python=python, root=root, environment=environment)
+
+
+def _verify_session_wheel(sdist: Path, *, python: Path, root: Path, environment: dict[str, str]) -> None:
+    # Copy only the reviewed proof assets, never source code or arbitrary tar
+    # paths. Tests must exercise site-packages, with no checkout on sys.path.
+    with tarfile.open(sdist, "r:gz") as archive:
+        for relative in SESSION_PROOF_SDIST_PATHS:
+            matches = [member for member in archive.getmembers() if member.name.endswith("/" + relative)]
+            if len(matches) != 1 or not matches[0].isfile():
+                raise RuntimeError(f"Session/onboarding proof asset missing or unsafe: {relative}")
+            source = archive.extractfile(matches[0])
+            if source is None:
+                raise RuntimeError(f"Session/onboarding proof asset unreadable: {relative}")
+            destination = root / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            with source:
+                destination.write_bytes(source.read())
+    runner = root / "verify_sessions.py"
+    runner.write_text(textwrap.dedent(f"""
+        import sys
+        import unittest
+        from pathlib import Path
+        import hormuz
+
+        root = Path({str(root)!r}).resolve()
+        assert Path(hormuz.__file__).resolve().is_relative_to(root / "venv")
+        sys.path.insert(0, str(root))
+        suite = unittest.defaultTestLoader.loadTestsFromNames({SESSION_PROOF_TEST_MODULES!r})
+        result = unittest.TextTestRunner(verbosity=1).run(suite)
+        raise SystemExit(0 if result.wasSuccessful() else 1)
+    """), encoding="utf-8")
+    subprocess.run([python, "-I", str(runner)], check=True, cwd=root, env=environment)
 
 
 def _available_port() -> int:

@@ -265,6 +265,32 @@ class Identity:
 
 
 @dataclass(frozen=True)
+class OIDCLoginConfig:
+    client_id: str
+    client_secret_env: str
+    scopes: tuple[str, ...] = ("openid",)
+    token_endpoint_auth_method: str = "client_secret_basic"
+    client_secret: str = field(default="", repr=False)
+
+
+@dataclass(frozen=True)
+class SessionBrokerConfig:
+    """Opt-in single-node browser login; credentials are never stored in JSON."""
+
+    enabled: bool = False
+    public_base_url: str | None = None
+    database_path: Path | None = None
+    master_key_env: str = "HORMUZ_SESSION_MASTER_KEY"
+    master_key: bytes = field(default=b"", repr=False)
+    access_ttl_seconds: int = 600
+    absolute_ttl_seconds: int = 43200
+    enrollment_ttl_seconds: int = 300
+    allow_insecure_http: bool = False
+    onboarding_enabled: bool = False
+    console_enabled: bool = False
+
+
+@dataclass(frozen=True)
 class OIDCIssuerConfig:
     issuer: str
     audiences: tuple[str, ...]
@@ -273,6 +299,7 @@ class OIDCIssuerConfig:
     clock_skew_seconds: int = 60
     discovery_cache_seconds: int = 3600
     allow_insecure_http: bool = False
+    login: OIDCLoginConfig | None = None
 
 
 @dataclass(frozen=True)
@@ -405,6 +432,7 @@ class GatewayConfig:
     ingress: IngressConfig = field(default_factory=IngressConfig)
     oidc_issuers: dict[str, OIDCIssuerConfig] = field(default_factory=dict)
     identities_by_subject: dict[tuple[str, str], Identity] = field(default_factory=dict)
+    session_broker: SessionBrokerConfig = field(default_factory=SessionBrokerConfig)
     secret_controls: SecretControls = field(default_factory=SecretControls)
     team_policies: dict[str, Policy] = field(default_factory=dict)
     actor_policies: dict[str, Policy] = field(default_factory=dict)

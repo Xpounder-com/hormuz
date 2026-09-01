@@ -32,6 +32,7 @@ from ._config_routing import build_model_route_domain, build_upstream_domain
 from ._config_values import _integer
 from .portfolio_config import build_portfolio_config
 from .attribution_config import build_attribution_config
+from ._config_session import build_session_broker, resolve_session_credentials, validate_session_references
 from .config import (
     ConfigError,
     GatewayConfig,
@@ -182,6 +183,7 @@ def _build_gateway_config(
         organization_policy=policy_domain.organization_policy,
         oidc_issuers=oidc_issuers,
         identities_by_subject=identities_by_subject,
+        session_broker=build_session_broker(raw, source_path=source_path),
         secret_controls=policy_domain.secret_controls,
         team_policies=policy_domain.team_policies,
         actor_policies=policy_domain.actor_policies,
@@ -212,6 +214,7 @@ def _build_gateway_config(
         audit_chain=external_custody_domain.audit_chain,
     )
     config.validate_references()
+    validate_session_references(config)
     validate_dedicated_ingress_credential_env(config)
     if not resolve_credentials:
         return config
@@ -220,9 +223,9 @@ def _build_gateway_config(
     resolved_ingress = resolve_ingress_credential(config.ingress, env)
     if resolved_ingress.credential and resolved_ingress.credential in identities_by_token:
         raise ConfigError("ingress credential must not equal a static identity token")
-    return replace(
+    return resolve_session_credentials(replace(
         config,
         ingress=resolved_ingress,
         identities_by_token=identities_by_token,
         secret_controls=resolve_secret_controls(config.secret_controls, env),
-    )
+    ), env)

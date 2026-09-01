@@ -8,78 +8,152 @@
       "id": "portfolio_finance_rate_cards",
       "content_boundary": "metadata_only_evidence",
       "contains_prompt_or_response_body": false,
-      "sqlite_tables": ["portfolio_finance_rate_cards"],
-      "postgresql_tables": ["portfolio_finance_rate_cards"]
+      "sqlite_tables": [
+        "portfolio_finance_rate_cards"
+      ],
+      "postgresql_tables": [
+        "portfolio_finance_rate_cards"
+      ]
     },
     {
       "id": "portfolio_finance_audit",
       "content_boundary": "operational_metadata",
       "contains_prompt_or_response_body": false,
-      "sqlite_tables": ["portfolio_finance_audit_events"],
-      "postgresql_tables": ["portfolio_finance_audit_events"]
+      "sqlite_tables": [
+        "portfolio_finance_audit_events"
+      ],
+      "postgresql_tables": [
+        "portfolio_finance_audit_events"
+      ]
     },
     {
       "id": "portfolio_work_budget_plans",
       "content_boundary": "identity_and_policy_metadata",
       "contains_prompt_or_response_body": false,
-      "sqlite_tables": ["portfolio_work_budget_activation_events", "portfolio_work_budget_active_plans", "portfolio_work_budget_plan_versions"],
-      "postgresql_tables": ["portfolio_work_budget_activation_events", "portfolio_work_budget_active_plans", "portfolio_work_budget_plan_versions"]
+      "sqlite_tables": [
+        "portfolio_work_budget_activation_events",
+        "portfolio_work_budget_active_plans",
+        "portfolio_work_budget_plan_versions"
+      ],
+      "postgresql_tables": [
+        "portfolio_work_budget_activation_events",
+        "portfolio_work_budget_active_plans",
+        "portfolio_work_budget_plan_versions"
+      ]
     },
     {
       "id": "portfolio_work_budget_accounting",
       "content_boundary": "metadata_only_evidence",
       "contains_prompt_or_response_body": false,
-      "sqlite_tables": ["portfolio_work_budget_reservation_bindings"],
-      "postgresql_tables": ["portfolio_work_budget_reservation_bindings"]
+      "sqlite_tables": [
+        "portfolio_work_budget_reservation_bindings"
+      ],
+      "postgresql_tables": [
+        "portfolio_work_budget_reservation_bindings"
+      ]
     },
     {
       "id": "portfolio_work_budget_audit",
       "content_boundary": "operational_metadata",
       "contains_prompt_or_response_body": false,
-      "sqlite_tables": ["portfolio_work_budget_audit_events"],
-      "postgresql_tables": ["portfolio_work_budget_audit_events"]
+      "sqlite_tables": [
+        "portfolio_work_budget_audit_events"
+      ],
+      "postgresql_tables": [
+        "portfolio_work_budget_audit_events"
+      ]
     },
     {
       "id": "portfolio_outcome_metadata",
       "content_boundary": "metadata_only_evidence",
       "contains_prompt_or_response_body": false,
-      "sqlite_tables": ["portfolio_outcome_contexts", "portfolio_outcome_coverage_events", "portfolio_outcome_events", "portfolio_outcome_observations"],
-      "postgresql_tables": ["portfolio_outcome_contexts", "portfolio_outcome_coverage_events", "portfolio_outcome_events", "portfolio_outcome_observations"]
+      "sqlite_tables": [
+        "portfolio_outcome_contexts",
+        "portfolio_outcome_coverage_events",
+        "portfolio_outcome_events",
+        "portfolio_outcome_observations"
+      ],
+      "postgresql_tables": [
+        "portfolio_outcome_contexts",
+        "portfolio_outcome_coverage_events",
+        "portfolio_outcome_events",
+        "portfolio_outcome_observations"
+      ]
     },
     {
       "id": "portfolio_outcome_control",
       "content_boundary": "operational_metadata",
       "contains_prompt_or_response_body": false,
-      "sqlite_tables": ["portfolio_outcome_audit_events", "portfolio_outcome_cursors", "portfolio_outcome_dead_letters", "portfolio_outcome_receipts", "portfolio_outcome_retention_events"],
-      "postgresql_tables": ["portfolio_outcome_audit_events", "portfolio_outcome_cursors", "portfolio_outcome_dead_letters", "portfolio_outcome_receipts", "portfolio_outcome_retention_events"]
+      "sqlite_tables": [
+        "portfolio_outcome_audit_events",
+        "portfolio_outcome_cursors",
+        "portfolio_outcome_dead_letters",
+        "portfolio_outcome_receipts",
+        "portfolio_outcome_retention_events"
+      ],
+      "postgresql_tables": [
+        "portfolio_outcome_audit_events",
+        "portfolio_outcome_cursors",
+        "portfolio_outcome_dead_letters",
+        "portfolio_outcome_receipts",
+        "portfolio_outcome_retention_events"
+      ]
     },
     {
       "id": "portfolio_attribution_metadata",
       "content_boundary": "metadata_only_evidence",
       "contains_prompt_or_response_body": false,
-      "sqlite_tables": ["portfolio_attribution_events", "portfolio_attribution_rejections"],
-      "postgresql_tables": ["portfolio_attribution_events", "portfolio_attribution_rejections"]
+      "sqlite_tables": [
+        "portfolio_attribution_events",
+        "portfolio_attribution_rejections"
+      ],
+      "postgresql_tables": [
+        "portfolio_attribution_events",
+        "portfolio_attribution_rejections"
+      ]
     },
     {
       "id": "portfolio_attribution_control",
       "content_boundary": "operational_metadata",
       "contains_prompt_or_response_body": false,
-      "sqlite_tables": ["portfolio_attribution_audit_events", "portfolio_attribution_cursors", "portfolio_attribution_idempotency"],
-      "postgresql_tables": ["portfolio_attribution_audit_events", "portfolio_attribution_cursors", "portfolio_attribution_idempotency"]
+      "sqlite_tables": [
+        "portfolio_attribution_audit_events",
+        "portfolio_attribution_cursors",
+        "portfolio_attribution_idempotency"
+      ],
+      "postgresql_tables": [
+        "portfolio_attribution_audit_events",
+        "portfolio_attribution_cursors",
+        "portfolio_attribution_idempotency"
+      ]
     },
     {
       "id": "portfolio_registry_metadata",
       "content_boundary": "identity_and_policy_metadata",
       "contains_prompt_or_response_body": false,
-      "sqlite_tables": ["portfolio_binding_events", "portfolio_work_scope_versions"],
-      "postgresql_tables": ["portfolio_binding_events", "portfolio_work_scope_versions"]
+      "sqlite_tables": [
+        "portfolio_binding_events",
+        "portfolio_work_scope_versions"
+      ],
+      "postgresql_tables": [
+        "portfolio_binding_events",
+        "portfolio_work_scope_versions"
+      ]
     },
     {
       "id": "portfolio_registry_control",
       "content_boundary": "metadata_only_evidence",
       "contains_prompt_or_response_body": false,
-      "sqlite_tables": ["portfolio_audit_events", "portfolio_cursors", "portfolio_idempotency"],
-      "postgresql_tables": ["portfolio_audit_events", "portfolio_cursors", "portfolio_idempotency"]
+      "sqlite_tables": [
+        "portfolio_audit_events",
+        "portfolio_cursors",
+        "portfolio_idempotency"
+      ],
+      "postgresql_tables": [
+        "portfolio_audit_events",
+        "portfolio_cursors",
+        "portfolio_idempotency"
+      ]
     },
     {
       "id": "schema_migration_state",
@@ -220,6 +294,75 @@
       "postgresql_tables": [
         "custody_deletion_events"
       ]
+    },
+    {
+      "id": "console_authorization",
+      "content_boundary": "identity_and_policy_metadata",
+      "contains_prompt_or_response_body": false,
+      "sqlite_tables": [
+        "console_grants"
+      ],
+      "postgresql_tables": []
+    },
+    {
+      "id": "console_sessions",
+      "content_boundary": "session_identity_and_encrypted_transient_auth",
+      "contains_prompt_or_response_body": false,
+      "sqlite_tables": [
+        "console_login_flows",
+        "console_sessions"
+      ],
+      "postgresql_tables": []
+    },
+    {
+      "id": "console_events",
+      "content_boundary": "metadata_only_evidence",
+      "contains_prompt_or_response_body": false,
+      "sqlite_tables": [
+        "console_events"
+      ],
+      "postgresql_tables": []
+    },
+    {
+      "id": "team_onboarding_identity",
+      "content_boundary": "identity_and_policy_metadata",
+      "contains_prompt_or_response_body": false,
+      "sqlite_tables": [
+        "onboarding_invitations",
+        "onboarding_memberships",
+        "onboarding_organizations",
+        "onboarding_teams"
+      ],
+      "postgresql_tables": []
+    },
+    {
+      "id": "team_onboarding_events",
+      "content_boundary": "metadata_only_evidence",
+      "contains_prompt_or_response_body": false,
+      "sqlite_tables": [
+        "onboarding_events"
+      ],
+      "postgresql_tables": []
+    },
+    {
+      "id": "browser_session_identity",
+      "content_boundary": "session_identity_and_encrypted_transient_auth",
+      "contains_prompt_or_response_body": false,
+      "sqlite_tables": [
+        "consumed_refresh_credentials",
+        "human_sessions",
+        "session_enrollments"
+      ],
+      "postgresql_tables": []
+    },
+    {
+      "id": "browser_session_security_events",
+      "content_boundary": "metadata_only_evidence",
+      "contains_prompt_or_response_body": false,
+      "sqlite_tables": [
+        "session_security_events"
+      ],
+      "postgresql_tables": []
     }
   ],
   "operator_artifacts": [
@@ -278,6 +421,78 @@
       "content_boundary": "public_source_image_sbom_provenance_and_release_metadata",
       "prompt_or_response_body_boundary": "not_customer_runtime_data",
       "customer_operator_authority": "not_customer_runtime_data"
+    },
+    {
+      "id": "hosted_profile_file",
+      "created_when": "operator_configures_opt_in_hosted_authentication_staging",
+      "storage_location": "operator_controlled_read_only_runtime_configuration_file",
+      "content_boundary": "public_origin_issuer_client_identifier_and_state_path_without_secret_values",
+      "prompt_or_response_body_boundary": "excluded_by_hormuz_contract",
+      "customer_operator_authority": "private_configuration_access_review_retention_and_deletion"
+    },
+    {
+      "id": "hosted_state_marker",
+      "created_when": "operator_explicitly_initializes_or_restores_hosted_staging_state",
+      "storage_location": "owner_only_initialized_json_and_sibling_empty_lifecycle_lock_file",
+      "content_boundary": "random_instance_identifier_recovery_flag_and_keyed_configuration_binding",
+      "prompt_or_response_body_boundary": "excluded_by_hormuz_contract",
+      "customer_operator_authority": "offline_backup_and_restore_with_key_origin_and_identity_binding_checks"
+    },
+    {
+      "id": "hosted_state_snapshot",
+      "created_when": "operator_runs_offline_hosted_staging_snapshot",
+      "storage_location": "new_owner_only_operator_selected_directory",
+      "content_boundary": "consistent_session_and_usage_database_copies_with_keyed_digest_manifest_no_raw_credentials",
+      "prompt_or_response_body_boundary": "excluded_by_hormuz_contract",
+      "customer_operator_authority": "same_disk_private_inspection_restore_and_deletion_never_plaintext_offsite_transfer"
+    },
+    {
+      "id": "hosted_offsite_backup_archive",
+      "created_when": "operator_runs_offline_hosted_backup_export",
+      "storage_location": "new_owner_only_authenticated_encrypted_file_then_operator_selected_off_disk_storage",
+      "content_boundary": "aes_256_gcm_ciphertext_of_consistent_hosted_state_snapshot_with_public_format_marker_and_nonce_only",
+      "prompt_or_response_body_boundary": "excluded_by_hormuz_contract",
+      "customer_operator_authority": "separate_key_custody_transfer_verification_retention_restore_and_deletion"
+    },
+    {
+      "id": "hosted_backup_key_file",
+      "created_when": "operator_generates_distinct_hosted_backup_key",
+      "storage_location": "owner_only_operator_secret_file_retained_separately_from_archive_render_disk_and_session_master_key",
+      "content_boundary": "base64_encoding_of_one_random_32_byte_backup_encryption_key",
+      "prompt_or_response_body_boundary": "excluded_by_hormuz_contract",
+      "customer_operator_authority": "secret_access_backup_rotation_retention_and_deletion"
+    },
+    {
+      "id": "console_browser_cookies",
+      "created_when": "operator_granted_member_starts_or_completes_console_login",
+      "storage_location": "browser_http_only_cookie_store",
+      "content_boundary": "opaque_short_lived_console_session_and_login_flow_credentials",
+      "prompt_or_response_body_boundary": "excluded_by_hormuz_contract",
+      "customer_operator_authority": "member_or_operator_revocation_browser_logout_and_expiry_no_credential_export"
+    },
+    {
+      "id": "team_invitation_file",
+      "created_when": "operator_issues_or_reissues_a_team_invitation",
+      "storage_location": "new_operator_selected_posix_owner_only_file",
+      "content_boundary": "one_time_invitation_code_and_gateway_organization_member_expiry_metadata",
+      "prompt_or_response_body_boundary": "excluded_by_hormuz_contract",
+      "customer_operator_authority": "private_manual_delivery_revocation_expiry_retention_and_deletion"
+    },
+    {
+      "id": "session_database_file",
+      "created_when": "opt_in_browser_session_broker_startup",
+      "storage_location": "operator_selected_separate_owner_only_sqlite_file",
+      "content_boundary": "identity_bindings_keyed_credential_hashes_and_encrypted_transient_oidc_state",
+      "prompt_or_response_body_boundary": "excluded_by_hormuz_contract",
+      "customer_operator_authority": "secure_backup_retention_and_offline_deletion_with_managed_directory_revocation_reconciliation_before_restore"
+    },
+    {
+      "id": "client_session_secure_store",
+      "created_when": "successful_browser_login_or_session_refresh",
+      "storage_location": "approved_operating_system_credential_store",
+      "content_boundary": "opaque_access_refresh_pair_and_gateway_client_expiry_metadata",
+      "prompt_or_response_body_boundary": "excluded_by_hormuz_contract",
+      "customer_operator_authority": "session_owner_logs_out_to_revoke_before_local_deletion"
     }
   ],
   "customer_operator_responsibilities": [

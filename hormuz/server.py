@@ -63,6 +63,11 @@ from .store_router import (
     create_usage_store,
     create_work_budget_request_repository,
 )
+from .session import SessionBroker
+from .session_http import SessionRequestLimit, handle_session_request
+from .session_store import SQLiteSessionStore, SessionStoreError
+from .console import ConsoleService
+from .console_http import handle_console_request
 from .usage import ResponseUsageParser
 
 
@@ -90,8 +95,22 @@ class GatewayServer(ThreadingHTTPServer):
         self.config = config
         self._accepting_requests = threading.Event()
         self.authenticator = Authenticator(config)
+        self.session_broker: SessionBroker | None = None
+        self.session_request_limit = SessionRequestLimit()
+        self.console_request_limit = SessionRequestLimit()
+        self.console: ConsoleService | None = None
         self.postgres_pool = create_postgres_runtime_pool(config)
         try:
+            if config.session_broker.enabled:
+                settings = config.session_broker
+                self.session_broker = SessionBroker(config, self.authenticator, SQLiteSessionStore(
+                    settings.database_path,
+                    master_key=settings.master_key,
+                    audience=settings.public_base_url,
+                    access_ttl_seconds=settings.access_ttl_seconds,
+                    absolute_ttl_seconds=settings.absolute_ttl_seconds,
+                    enrollment_ttl_seconds=settings.enrollment_ttl_seconds,
+                ))
             self.store: UsageRepository
             if config.portfolio_control is None:
                 self.store = create_usage_store(config, connection_pool=self.postgres_pool)
@@ -101,6 +120,8 @@ class GatewayServer(ThreadingHTTPServer):
                     config, portfolio_factory=create_portfolio_repository, connection_pool=self.postgres_pool,
                 )
                 self.store, portfolio = repositories.usage, repositories.portfolio
+            if self.session_broker is not None and config.session_broker.console_enabled:
+                self.console = ConsoleService(self.session_broker, self.store)
             self.portfolio_service = PortfolioService(config, portfolio, self.authenticator)
             self.attribution_repository = portfolio.attributions
             self.budget_repository = portfolio.budgets
@@ -138,6 +159,11 @@ class GatewayServer(ThreadingHTTPServer):
                 ("provider_credential", value)
                 for value in self.upstream_credentials.values()
                 if len(value) >= 8
+            )
+            protected_values.extend(
+                ("oidc_login_secret", issuer.login.client_secret)
+                for issuer in config.oidc_issuers.values()
+                if issuer.login is not None and len(issuer.login.client_secret) >= 8
             )
             self.secret_redactor = SecretRedactor(config.secret_controls, tuple(protected_values))
             super().__init__((config.listen.host, config.listen.port), GatewayRequestHandler)
@@ -207,11 +233,13 @@ class GatewayServer(ThreadingHTTPServer):
             return "draining"
         try:
             self.store.verify_ready()
+            if self.session_broker is not None:
+                self.session_broker.store.check_available()
             self.policy_engine.policy_runtime.verify_active_policies()
             if not self.custody_runtime_projection.readiness_healthy():
                 LOGGER.warning("readiness_custody_projection_stale")
                 return "dependency_unavailable"
-        except _STORAGE_FAILURES:
+        except (*_STORAGE_FAILURES, SessionStoreError):
             LOGGER.warning("readiness_dependency_unavailable")
             return "dependency_unavailable"
         # A shutdown may have started while the read-only checks ran. Never
@@ -278,6 +306,12 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         path = urlsplit(self.path).path
         if path.startswith(PORTFOLIO_PREFIX + "/"):
             handle_registry(self)
+            return
+        if path == "/console" or path.startswith(("/console/", "/v1/admin/")):
+            handle_console_request(self)
+            return
+        if path.startswith("/v1/auth/"):
+            handle_session_request(self)
             return
         if path == "/health":
             self._send_contract_json(
@@ -377,6 +411,12 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         path = urlsplit(self.path).path
         if path.startswith(PORTFOLIO_PREFIX + "/"):
             handle_registry(self)
+            return
+        if path == "/console" or path.startswith(("/console/", "/v1/admin/")):
+            handle_console_request(self)
+            return
+        if path.startswith("/v1/auth/"):
+            handle_session_request(self)
             return
         routes = {
             "/v1/responses": ("openai", "codex", True),
@@ -1159,9 +1199,20 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             candidates.append(api_key)
         for candidate in candidates:
             try:
-                return self.server.authenticator.authenticate(candidate)
+                if candidate.startswith("hox_a_") and self.server.session_broker is not None:
+                    return self.server.session_broker.authenticate(candidate)
+                identity = self.server.authenticator.authenticate(candidate)
+                if self.server.session_broker is not None and self.server.session_broker.directory.manages_organization(identity.organization_id):
+                    raise AuthenticationError("managed_organization_session_required")
+                return identity
             except AuthenticationError as error:
+                if error.code.startswith("session_store_"):
+                    self._send_error("hormuz_storage_unavailable", "Session authentication is unavailable", HTTPStatus.SERVICE_UNAVAILABLE)
+                    return None
                 LOGGER.info("authentication_denied reason=%s", error.code)
+            except SessionStoreError:
+                self._send_error("hormuz_storage_unavailable", "Session authentication is unavailable", HTTPStatus.SERVICE_UNAVAILABLE)
+                return None
         self._send_error("unauthorized", "Missing or invalid Hormuz identity credential", HTTPStatus.UNAUTHORIZED)
         return None
 
@@ -1313,12 +1364,9 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def log_message(self, format: str, *args: object) -> None:
-        # BaseHTTPRequestHandler otherwise logs the raw URL, including rejected
-        # free-text query fields. New registry diagnostics never reflect it.
-        if getattr(self, "path", "").startswith(PORTFOLIO_PREFIX):
-            LOGGER.debug("portfolio_http_request")
-            return
-        LOGGER.debug("http " + format, *args)
+        # BaseHTTPRequestHandler's arguments can contain the entire URL or a
+        # malformed request line. Never write OAuth callbacks or user input.
+        LOGGER.debug("http request_boundary")
 
 
 def serve_in_thread(server: GatewayServer) -> threading.Thread:
