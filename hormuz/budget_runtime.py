@@ -106,7 +106,7 @@ def configured_route_rate_card(*, alias: str, protocol: str, upstream_model: str
                                cache_read_cost_per_million: float,
                                cache_write_cost_per_million: float,
                                output_cost_per_million: float) -> dict[str, object]:
-    """Bind the exact v1 configured route valuation without changing its math."""
+    """Bind the exact configured rates used by reservation and settlement."""
 
     body = {
         "alias": alias, "protocol": protocol, "upstream_model": upstream_model,

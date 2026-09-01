@@ -34,6 +34,15 @@ BUDGET_BINDING_ACCOUNTING_COLUMNS = (
     "currency",
     "request_attempt_id",
 )
+BUDGET_AUDIT_REPORT_INDEX = "portfolio_work_budget_audit_report_idx"
+BUDGET_AUDIT_REPORT_COLUMNS = (
+    "organization_id",
+    "entity_id",
+    "operation",
+    "occurred_at",
+    "entity_version",
+    "reason_code",
+)
 
 
 class BudgetIntegrityError(ValueError):
@@ -504,6 +513,11 @@ def sqlite_statements() -> tuple[str, ...]:
         "portfolio_work_budget_reservation_bindings "
         f"({', '.join(BUDGET_BINDING_ACCOUNTING_COLUMNS)})"
     )
+    statements.append(
+        f"CREATE INDEX {BUDGET_AUDIT_REPORT_INDEX} ON "
+        "portfolio_work_budget_audit_events "
+        f"({', '.join(BUDGET_AUDIT_REPORT_COLUMNS)})"
+    )
     for table in APPEND_ONLY_TABLE_DDL:
         for operation in ("UPDATE", "DELETE"):
             statements.append(
@@ -572,6 +586,11 @@ def postgres_statements(schema: str, runtime_role: str) -> str:
         f"CREATE INDEX {BUDGET_BINDING_ACCOUNTING_INDEX} ON "
         f"{prefix}portfolio_work_budget_reservation_bindings "
         f"({', '.join(BUDGET_BINDING_ACCOUNTING_COLUMNS)});"
+    )
+    statements.append(
+        f"CREATE INDEX {BUDGET_AUDIT_REPORT_INDEX} ON "
+        f"{prefix}portfolio_work_budget_audit_events "
+        f"({', '.join(BUDGET_AUDIT_REPORT_COLUMNS)});"
     )
     statements.append(
         f"ALTER TABLE {prefix}portfolio_work_budget_reservation_bindings "

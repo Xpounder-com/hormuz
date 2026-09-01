@@ -5,7 +5,7 @@ import ipaddress
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from decimal import Decimal, ROUND_CEILING
+from decimal import Context, Decimal, ROUND_CEILING, ROUND_HALF_EVEN, localcontext
 from pathlib import Path
 
 from ._config_input import (
@@ -23,6 +23,25 @@ class ConfigError(ValueError):
 
 
 MAX_TRUSTED_PROXY_CIDRS = 64
+_ROUTE_COST_CONTEXT = Context(prec=96, rounding=ROUND_HALF_EVEN)
+
+
+def _route_cost_microusd(
+    parts: tuple[tuple[int, Decimal], ...],
+    *,
+    rounding: str,
+) -> int:
+    """Price non-negative token partitions under one exact decimal rule."""
+
+    with localcontext(_ROUTE_COST_CONTEXT):
+        microusd = sum(
+            (
+                Decimal(max(0, tokens)) * max(Decimal(0), rate)
+                for tokens, rate in parts
+            ),
+            Decimal(0),
+        )
+        return max(0, int(microusd.to_integral_value(rounding=rounding)))
 
 
 @dataclass(frozen=True)
@@ -286,11 +305,10 @@ class ModelRoute:
             Decimal(str(self.cache_write_cost_per_million)),
         )
         output_rate = max(Decimal(0), Decimal(str(self.output_cost_per_million)))
-        microusd = (
-            Decimal(max(0, input_tokens)) * input_rate
-            + Decimal(max(0, output_tokens)) * output_rate
+        return _route_cost_microusd(
+            ((input_tokens, input_rate), (output_tokens, output_rate)),
+            rounding=ROUND_CEILING,
         )
-        return int(microusd.to_integral_value(rounding=ROUND_CEILING))
 
     def estimate_cost_microusd(
         self,
@@ -307,13 +325,15 @@ class ModelRoute:
             if self.protocol == "anthropic"
             else max(0, input_tokens - cache_read_tokens - cache_write_tokens)
         )
-        usd = (
-            uncached_input * self.input_cost_per_million
-            + cache_read_tokens * self.cache_read_cost_per_million
-            + cache_write_tokens * self.cache_write_cost_per_million
-            + output_tokens * self.output_cost_per_million
-        ) / 1_000_000
-        return max(0, round(usd * 1_000_000))
+        return _route_cost_microusd(
+            (
+                (uncached_input, Decimal(str(self.input_cost_per_million))),
+                (cache_read_tokens, Decimal(str(self.cache_read_cost_per_million))),
+                (cache_write_tokens, Decimal(str(self.cache_write_cost_per_million))),
+                (output_tokens, Decimal(str(self.output_cost_per_million))),
+            ),
+            rounding=ROUND_HALF_EVEN,
+        )
 
 
 @dataclass(frozen=True)

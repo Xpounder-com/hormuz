@@ -290,6 +290,28 @@ class ModelRouteCostTests(unittest.TestCase):
             1,
         )
 
+    def test_reservation_covers_large_terminal_rounding(self) -> None:
+        route = ModelRoute(
+            alias="large-bound",
+            protocol="openai",
+            upstream_model="model",
+            output_cost_per_million=4.316109535003818,
+        )
+        output_tokens = 7_760_635_130_464_772
+
+        reservation = route.estimate_reservation_cost_microusd(
+            input_tokens=0,
+            output_tokens=output_tokens,
+        )
+        terminal = route.estimate_cost_microusd(
+            input_tokens=0,
+            output_tokens=output_tokens,
+            cache_read_tokens=0,
+            cache_write_tokens=0,
+        )
+
+        self.assertGreaterEqual(reservation, terminal)
+
 
 class GatewayIntegrationTests(unittest.TestCase):
     def setUp(self) -> None:

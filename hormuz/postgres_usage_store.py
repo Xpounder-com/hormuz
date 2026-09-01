@@ -448,6 +448,7 @@ class PostgresUsageStore:
         self,
         cursor: object,
         *,
+        occurred_at: datetime | None = None,
         identity: Identity,
         client: str,
         protocol: str,
@@ -477,6 +478,14 @@ class PostgresUsageStore:
         validate_request_status(status)
         organization_id = self._organization(identity.organization_id)
         event_id = str(uuid.uuid4())
+        timestamp = datetime.now(timezone.utc) if occurred_at is None else occurred_at
+        if (
+            type(timestamp) is not _DATETIME_TYPE
+            or timestamp.tzinfo is None
+            or timestamp.utcoffset() is None
+        ):
+            raise PostgresStorageError("storage_unavailable")
+        timestamp = timestamp.astimezone(timezone.utc)
         cursor.execute(
             f"""
             INSERT INTO {self._table('gateway_usage_events')} (
@@ -496,7 +505,7 @@ class PostgresUsageStore:
             """,
             (
                 event_id,
-                datetime.now(timezone.utc),
+                timestamp,
                 AUDIT_EVENT_SCHEMA_ID,
                 AUDIT_EVENT_SCHEMA_VERSION,
                 organization_id,
@@ -677,7 +686,12 @@ class PostgresUsageStore:
                     organization_id=organization_id,
                     observed_at=now,
                 )
-                self._sweep_stale_request_attempts_in_cursor(cursor, now=now, organization_id=organization_id)
+                self._sweep_stale_request_attempts_in_cursor(
+                    cursor,
+                    now=now,
+                    occurred_at=self._database_now_in_cursor(cursor),
+                    organization_id=organization_id,
+                )
                 self._reserve_budget_in_cursor(
                     cursor,
                     identity=identity,
@@ -835,7 +849,16 @@ class PostgresUsageStore:
                     reserved_tokens=reserved_tokens,
                     reserved_cost_microusd=reserved_cost_microusd,
                 )
-                self._sweep_stale_request_attempts_in_cursor(cursor, now=now, organization_id=organization_id)
+                self._sweep_stale_request_attempts_in_cursor(
+                    cursor,
+                    now=now,
+                    occurred_at=(
+                        now
+                        if work_budget is not None
+                        else self._database_now_in_cursor(cursor)
+                    ),
+                    organization_id=organization_id,
+                )
                 cursor.execute(
                     f"""
                     INSERT INTO {self._table('gateway_request_attempts')} (
@@ -951,8 +974,10 @@ class PostgresUsageStore:
                 latest = self._latest_request_attempt_state_in_cursor(cursor, attempt.attempt_id)
                 require_pending_request_attempt_state(latest.state)
                 result = normalize_request_attempt_result(root, error_factory=PostgresStorageError)
+                terminal_at = self._database_now_in_cursor(cursor)
                 usage_event_id = self._record_in_cursor(
                     cursor,
+                    occurred_at=terminal_at,
                     identity=result.identity,
                     client=result.client,
                     protocol=result.protocol,
@@ -977,7 +1002,7 @@ class PostgresUsageStore:
                     cursor,
                     attempt_id=attempt.attempt_id,
                     organization_id=organization,
-                    occurred_at=datetime.now(timezone.utc),
+                    occurred_at=terminal_at,
                     sequence=latest.sequence + 1,
                     state=status,
                     reason_code=None,
@@ -1009,11 +1034,12 @@ class PostgresUsageStore:
                 latest = self._latest_request_attempt_state_in_cursor(cursor, attempt.attempt_id)
                 if not should_mark_request_attempt_unknown(latest.state):
                     return False
+                terminal_at = self._database_now_in_cursor(cursor)
                 self._append_request_attempt_event_in_cursor(
                     cursor,
                     attempt_id=attempt.attempt_id,
                     organization_id=organization,
-                    occurred_at=datetime.now(timezone.utc),
+                    occurred_at=terminal_at,
                     sequence=latest.sequence + 1,
                     state="outcome_unknown",
                     reason_code=reason_code,
@@ -1025,12 +1051,19 @@ class PostgresUsageStore:
         """Convert only stale pending attempts to durable unknown outcomes."""
 
         organizations = (self._organization(organization_id),) if organization_id is not None else self.organization_ids
+        # Preserve the v1 injectable clock for deciding which holds are stale.
+        # Only the terminal event timestamp moves to PostgreSQL's clock domain.
         now = datetime.now(timezone.utc)
         count = 0
         for organization in organizations:
             with self._transaction(organization) as connection:
                 with connection.cursor() as cursor:
-                    count += self._sweep_stale_request_attempts_in_cursor(cursor, now=now, organization_id=organization)
+                    count += self._sweep_stale_request_attempts_in_cursor(
+                        cursor,
+                        now=now,
+                        occurred_at=self._database_now_in_cursor(cursor),
+                        organization_id=organization,
+                    )
         return count
 
     def _reserve_budget_in_cursor(
@@ -1147,6 +1180,7 @@ class PostgresUsageStore:
         cursor: object,
         *,
         now: datetime,
+        occurred_at: datetime,
         organization_id: str,
     ) -> int:
         cursor.execute(
@@ -1173,7 +1207,7 @@ class PostgresUsageStore:
                 cursor,
                 attempt_id=attempt_id,
                 organization_id=organization_id,
-                occurred_at=now,
+                occurred_at=occurred_at,
                 sequence=latest.sequence + 1,
                 state="outcome_unknown",
                 reason_code="stale_pending",

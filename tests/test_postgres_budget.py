@@ -6,7 +6,12 @@ from importlib import resources
 from pathlib import Path
 from unittest import mock
 
-from hormuz._budget_schema import TABLE_DDL, postgres_statements
+from hormuz._budget_schema import (
+    BUDGET_AUDIT_REPORT_COLUMNS,
+    BUDGET_AUDIT_REPORT_INDEX,
+    TABLE_DDL,
+    postgres_statements,
+)
 from hormuz.budget_runtime import WorkBudgetDenied
 from hormuz.config import UsageStorageConfig
 from hormuz.postgres import POSTGRES_SCHEMA_VERSION
@@ -75,7 +80,20 @@ class PostgresBudgetTests(BudgetAssertions, PostgresTestCase):
             count = connection.execute(
                 "SELECT COUNT(*) FROM pg_tables WHERE schemaname=%s", (self.schema,),
             ).fetchone()[0]
+            index_columns = tuple(
+                row[0]
+                for row in connection.execute(
+                    "SELECT a.attname FROM pg_class i "
+                    "JOIN pg_namespace n ON n.oid=i.relnamespace "
+                    "JOIN pg_index x ON x.indexrelid=i.oid "
+                    "JOIN unnest(x.indkey) WITH ORDINALITY k(attnum,ord) ON TRUE "
+                    "JOIN pg_attribute a ON a.attrelid=x.indrelid AND a.attnum=k.attnum "
+                    "WHERE n.nspname=%s AND i.relname=%s ORDER BY k.ord",
+                    (self.schema, BUDGET_AUDIT_REPORT_INDEX),
+                ).fetchall()
+            )
         self.assertEqual(count, 58)
+        self.assertEqual(index_columns, BUDGET_AUDIT_REPORT_COLUMNS)
         actual = resources.files("hormuz").joinpath(
             "migrations/postgresql/0013_work_budgets.sql"
         ).read_text()
@@ -177,6 +195,72 @@ class PostgresBudgetTests(BudgetAssertions, PostgresTestCase):
             [],
         )
 
+    def test_terminal_reporting_uses_one_database_clock(self):
+        plan = self.create(amount="10")
+        self.activate(plan)
+        succeeded = self.attempt(cost_microusd=1)
+        unknown = self.attempt(cost_microusd=2)
+        stale = self.attempt(cost_microusd=3)
+
+        class AheadProcessClock(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return datetime.now(timezone.utc) + timedelta(days=2)
+
+        with mock.patch("hormuz.postgres_usage_store.datetime", AheadProcessClock):
+            self.store.finalize_request_attempt(
+                attempt=succeeded,
+                organization_id="acme",
+                status="succeeded",
+                cost_microusd=1,
+            )
+            self.store.mark_request_attempt_outcome_unknown(
+                attempt=unknown,
+                organization_id="acme",
+                reason_code="provider_transport_ambiguous",
+            )
+            self.assertEqual(
+                self.store.sweep_stale_request_attempts(organization_id="acme"),
+                1,
+            )
+
+        report = self.repository.current_report(ADMIN, plan["budget_plan_id"])
+        self.assertEqual(report["enforcement"]["committed_amount"], "0.000001")
+        self.assertEqual(report["enforcement"]["pending_reservation_amount"], "0")
+        self.assertEqual(report["enforcement"]["uncertain_reservation_amount"], "0.000005")
+
+        with self.psycopg.connect(self.owner_dsn) as connection:
+            terminal, usage, database_now = connection.execute(
+                self.sql.SQL(
+                    "SELECT e.occurred_at,u.occurred_at,clock_timestamp() "
+                    "FROM {}.gateway_request_attempt_events e "
+                    "JOIN {}.gateway_usage_events u "
+                    "ON u.organization_id=e.organization_id AND u.id=e.usage_event_id "
+                    "WHERE e.organization_id='acme' AND e.attempt_id=%s "
+                    "AND e.state='succeeded'"
+                ).format(
+                    self.sql.Identifier(self.schema),
+                    self.sql.Identifier(self.schema),
+                ),
+                (succeeded.attempt_id,),
+            ).fetchone()
+            latest = {
+                row[0]: row[1]
+                for row in connection.execute(
+                    self.sql.SQL(
+                        "SELECT DISTINCT ON (attempt_id) attempt_id,occurred_at "
+                        "FROM {}.gateway_request_attempt_events "
+                        "WHERE organization_id='acme' AND attempt_id IN (%s,%s) "
+                        "ORDER BY attempt_id,sequence DESC"
+                    ).format(self.sql.Identifier(self.schema)),
+                    (unknown.attempt_id, stale.attempt_id),
+                ).fetchall()
+            }
+        self.assertEqual(terminal, usage)
+        self.assertLessEqual(terminal, database_now)
+        self.assertLessEqual(latest[unknown.attempt_id], database_now)
+        self.assertLessEqual(latest[stale.attempt_id], database_now)
+
     def test_reservation_paths_lock_month_before_sweeping_attempts(self):
         observed = []
         acquire = self.store._acquire_budget_month_in_cursor
@@ -190,9 +274,14 @@ class PostgresBudgetTests(BudgetAssertions, PostgresTestCase):
                 observed_at=observed_at,
             )
 
-        def record_sweep(cursor, *, now, organization_id):
+        def record_sweep(cursor, *, now, occurred_at, organization_id):
             observed.append("sweep")
-            return sweep(cursor, now=now, organization_id=organization_id)
+            return sweep(
+                cursor,
+                now=now,
+                occurred_at=occurred_at,
+                organization_id=organization_id,
+            )
 
         with (
             mock.patch.object(

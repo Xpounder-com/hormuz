@@ -139,6 +139,8 @@ CREATE TABLE {schema}.portfolio_work_budget_audit_events (
 
 CREATE INDEX portfolio_work_budget_bindings_accounting_idx ON {schema}.portfolio_work_budget_reservation_bindings (organization_id, budget_plan_id, window_start_at, window_end_at, currency, request_attempt_id);
 
+CREATE INDEX portfolio_work_budget_audit_report_idx ON {schema}.portfolio_work_budget_audit_events (organization_id, entity_id, operation, occurred_at, entity_version, reason_code);
+
 ALTER TABLE {schema}.portfolio_work_budget_reservation_bindings ADD CONSTRAINT portfolio_work_budget_binding_attempt_fk FOREIGN KEY (organization_id, request_attempt_id) REFERENCES {schema}.gateway_request_attempts (organization_id, attempt_id);
 
 CREATE FUNCTION {schema}.portfolio_work_budget_binding_guard() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NOT EXISTS (SELECT 1 FROM {schema}.portfolio_attribution_events e WHERE e.organization_id=NEW.organization_id AND e.attribution_event_id=NEW.attribution_event_id AND e.request_attempt_id=NEW.request_attempt_id) THEN RAISE EXCEPTION 'portfolio_budget_attempt_invalid' USING ERRCODE = '23514'; END IF; RETURN NEW; END; $$;

@@ -25,7 +25,12 @@ places; exact plan amounts remain authoritative. Managers do not need to browse
 a revision ledger, while enforcement retains the immutable facts needed to
 bind each attempt to the plan actually in force.
 
-Amounts retain their accounting states:
+Amounts retain their accounting states. Reservation and settlement both use
+the configured rate strings under one 96-digit decimal context: reservations
+round upward, while terminal estimates retain half-even integer-microusd
+rounding. This preserves the pre-egress upper bound even at the largest
+supported token and database-integer values; previously stored terminal facts
+remain immutable and are never repriced.
 
 - committed is the terminal request-time configured-rate estimate;
 - pending is a reservation for a request without a terminal outcome;
@@ -102,8 +107,11 @@ Each accepted binding pins the attribution event, plan version and activation
 generation, work scope, window, currency, reserved amount/output tokens,
 effective provider/model reference, activation and request policy identities,
 configured route-rate identity, and valuation rule. Terminal settlement uses
-the immutable request usage estimate. An `outcome_unknown` attempt retains the
-reserved amount and is never automatically replayed.
+the immutable request usage estimate. PostgreSQL records the terminal attempt
+and its linked usage fact with one database timestamp, so current and
+historical `as_of` reports never compare gateway-process and database clock
+domains. An `outcome_unknown` attempt uses the same database clock, retains the
+reserved amount, and is never automatically replayed.
 
 Coverage counters form a declared partition: included, unattributed, and
 unsupported attempts sum exactly to the population. Numeric- or model-ceiling
@@ -122,7 +130,9 @@ transaction verify the exact schema shape. Malformed persisted plan,
 activation, or active-pointer evidence is refused with a fixed error and is
 never repaired or reflected. Both adapters require the same tenant-plan-window
 binding index so request-time enforcement and reporting do not scan unrelated
-historical bindings.
+historical bindings. They also require a tenant/plan/operation/evaluation-time
+audit index, with version and reason as covering columns, so denial aggregation
+does not devolve into a tenant-wide audit scan.
 
 Stop writers and pools before migration, serialize the operator action, and
 restart fresh processes. Old binaries refuse schema 9/13. Before any candidate
@@ -137,7 +147,8 @@ then reach 58 tables. They cover transactional DDL failure/retry, partial and
 newer refusal, old-pair backup/restore, post-write forward recovery, and the
 same rules in SQLite. Runtime tests cover both adapters, exact decimals,
 hierarchy denial, settlement, uncertain holds, activation/replacement/rollback,
-mandatory auditing, corruption refusal, and independent PostgreSQL replicas.
+mandatory auditing, process-clock skew, large-number reservation coverage,
+corruption refusal, indexed denial reporting, and independent PostgreSQL replicas.
 
 ## Remaining gates
 
