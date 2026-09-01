@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Generic, Mapping, Protocol, TypeVar
 
 from ._persistence import (
+    ProviderReliabilityRepository,
     RequestAttempt,
     ReservationScope,
     UsageRepository,
@@ -16,6 +17,7 @@ from ._persistence import (
 from .config import GatewayConfig, Identity
 from .postgres import PostgresConnectionPool, PostgresStorageError
 from .postgres_usage_store import PostgresUsageStore
+from .provider_reliability import ProviderAttemptMetrics, ProviderFailoverContext
 from .store import UsageStore
 
 
@@ -56,6 +58,59 @@ class _WorkBudgetRequestBegin(Protocol):
         ttl_seconds: int,
         work_budget: WorkBudgetContext | None,
     ) -> RequestAttempt: ...
+
+
+class _ProviderReliabilityBegin(Protocol):
+    def __call__(
+        self,
+        *,
+        identity: Identity,
+        client: str,
+        protocol: str,
+        requested_model: str,
+        resolved_alias: str | None,
+        upstream_model: str | None,
+        policy_version: str,
+        policy_action: str,
+        redaction_count: int,
+        redaction_rules: tuple[str, ...],
+        scopes: tuple[ReservationScope, ...],
+        reserved_tokens: int,
+        reserved_cost_microusd: int,
+        ttl_seconds: int,
+        work_budget: WorkBudgetContext | None,
+        provider_failover: ProviderFailoverContext,
+    ) -> RequestAttempt: ...
+
+
+class _ProviderReliabilityFinalize(Protocol):
+    def __call__(
+        self,
+        *,
+        attempt: RequestAttempt,
+        organization_id: str,
+        status: str,
+        provider_reported_model: str | None = None,
+        input_tokens: int = 0,
+        output_tokens: int = 0,
+        cache_read_tokens: int = 0,
+        cache_write_tokens: int = 0,
+        reasoning_tokens: int = 0,
+        cost_microusd: int = 0,
+        provider_request_id: str | None = None,
+        provider_metrics: ProviderAttemptMetrics,
+    ) -> None: ...
+
+
+class _ProviderReliabilityMarkUnknown(Protocol):
+    def __call__(
+        self,
+        *,
+        attempt: RequestAttempt,
+        organization_id: str,
+        reason_code: str,
+        provider_metrics: ProviderAttemptMetrics,
+    ) -> bool: ...
 
 
 @dataclass(frozen=True, repr=False)
@@ -103,6 +158,100 @@ class WorkBudgetRequestAdapter:
 
 
 @dataclass(frozen=True, repr=False)
+class ProviderReliabilityAdapter:
+    """Typed bridge to built-in atomic provider-reliability transactions."""
+
+    _begin: _ProviderReliabilityBegin
+    _finalize: _ProviderReliabilityFinalize
+    _mark_unknown: _ProviderReliabilityMarkUnknown
+
+    def begin_request_attempt(
+        self,
+        *,
+        identity: Identity,
+        client: str,
+        protocol: str,
+        requested_model: str,
+        resolved_alias: str | None,
+        upstream_model: str | None,
+        policy_version: str,
+        policy_action: str,
+        redaction_count: int,
+        redaction_rules: tuple[str, ...],
+        scopes: tuple[ReservationScope, ...],
+        reserved_tokens: int,
+        reserved_cost_microusd: int,
+        ttl_seconds: int,
+        work_budget: WorkBudgetContext | None,
+        provider_failover: ProviderFailoverContext,
+    ) -> RequestAttempt:
+        return self._begin(
+            identity=identity,
+            client=client,
+            protocol=protocol,
+            requested_model=requested_model,
+            resolved_alias=resolved_alias,
+            upstream_model=upstream_model,
+            policy_version=policy_version,
+            policy_action=policy_action,
+            redaction_count=redaction_count,
+            redaction_rules=redaction_rules,
+            scopes=scopes,
+            reserved_tokens=reserved_tokens,
+            reserved_cost_microusd=reserved_cost_microusd,
+            ttl_seconds=ttl_seconds,
+            work_budget=work_budget,
+            provider_failover=provider_failover,
+        )
+
+    def finalize_request_attempt(
+        self,
+        *,
+        attempt: RequestAttempt,
+        organization_id: str,
+        status: str,
+        provider_reported_model: str | None = None,
+        input_tokens: int = 0,
+        output_tokens: int = 0,
+        cache_read_tokens: int = 0,
+        cache_write_tokens: int = 0,
+        reasoning_tokens: int = 0,
+        cost_microusd: int = 0,
+        provider_request_id: str | None = None,
+        provider_metrics: ProviderAttemptMetrics,
+    ) -> None:
+        self._finalize(
+            attempt=attempt,
+            organization_id=organization_id,
+            status=status,
+            provider_reported_model=provider_reported_model,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cache_read_tokens=cache_read_tokens,
+            cache_write_tokens=cache_write_tokens,
+            reasoning_tokens=reasoning_tokens,
+            cost_microusd=cost_microusd,
+            provider_request_id=provider_request_id,
+            provider_metrics=provider_metrics,
+        )
+
+    def mark_request_attempt_outcome_unknown(
+        self,
+        *,
+        attempt: RequestAttempt,
+        organization_id: str,
+        reason_code: str,
+        provider_metrics: ProviderAttemptMetrics,
+    ) -> bool:
+        return self._mark_unknown(
+            attempt=attempt,
+            organization_id=organization_id,
+            reason_code=reason_code,
+            provider_metrics=provider_metrics,
+        )
+
+
+@dataclass(frozen=True, repr=False)
 class RepositoryBundle(Generic[RepositoryT]):
     """Separate typed owners; no cross-repository transaction or lifecycle."""
 
@@ -119,6 +268,26 @@ def create_work_budget_request_repository(
         return WorkBudgetRequestAdapter(usage._begin_request_attempt_with_work_budget)
     if type(usage) is PostgresUsageStore:
         return WorkBudgetRequestAdapter(usage._begin_request_attempt_with_work_budget)
+    return None
+
+
+def create_provider_reliability_repository(
+    usage: UsageRepository,
+) -> ProviderReliabilityRepository | None:
+    """Compose only the built-in adapters' provider-reliability capability."""
+
+    if type(usage) is UsageStore:
+        return ProviderReliabilityAdapter(
+            usage._begin_request_attempt_with_work_budget,
+            usage._finalize_request_attempt_with_provider_metrics,
+            usage._mark_request_attempt_outcome_unknown_with_provider_metrics,
+        )
+    if type(usage) is PostgresUsageStore:
+        return ProviderReliabilityAdapter(
+            usage._begin_request_attempt_with_work_budget,
+            usage._finalize_request_attempt_with_provider_metrics,
+            usage._mark_request_attempt_outcome_unknown_with_provider_metrics,
+        )
     return None
 
 

@@ -6,7 +6,11 @@ their deliberately invalid calls must remain type errors, not widen to Any.
 
 from typing import Protocol
 
-from hormuz._persistence import UsageRepository, WorkBudgetRequestRepository
+from hormuz._persistence import (
+    ProviderReliabilityRepository,
+    UsageRepository,
+    WorkBudgetRequestRepository,
+)
 from hormuz.config import GatewayConfig
 from hormuz.finance_repository import FinanceRateCardRepository, create_finance_repository
 from hormuz.postgres_usage_store import PostgresUsageStore
@@ -15,6 +19,7 @@ from hormuz.store_router import (
     RepositoryBundle,
     RepositoryFactory,
     create_repository_bundle,
+    create_provider_reliability_repository,
     create_usage_store,
     create_work_budget_request_repository,
 )
@@ -53,6 +58,14 @@ def work_budget_request_capability_is_separate(
     repository: UsageRepository,
 ) -> WorkBudgetRequestRepository:
     capability = create_work_budget_request_repository(repository)
+    assert capability is not None
+    return capability
+
+
+def provider_reliability_capability_is_separate(
+    repository: UsageRepository,
+) -> ProviderReliabilityRepository:
+    capability = create_provider_reliability_repository(repository)
     assert capability is not None
     return capability
 

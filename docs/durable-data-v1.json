@@ -130,6 +130,19 @@
       ]
     },
     {
+      "id": "provider_reliability_evidence",
+      "content_boundary": "metadata_only_evidence",
+      "contains_prompt_or_response_body": false,
+      "sqlite_tables": [
+        "gateway_provider_attempt_metrics",
+        "gateway_provider_failover_events"
+      ],
+      "postgresql_tables": [
+        "gateway_provider_attempt_metrics",
+        "gateway_provider_failover_events"
+      ]
+    },
+    {
       "id": "audit_chain_state",
       "content_boundary": "metadata_only_evidence",
       "contains_prompt_or_response_body": false,

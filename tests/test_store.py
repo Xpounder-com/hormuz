@@ -306,13 +306,16 @@ class UsageStoreMigrationTests(unittest.TestCase):
                 elif version == 9:
                     self.assertIn("portfolio_finance_rate_cards", names)
                     self.assertFalse(any(name.startswith("portfolio_work_budget_") for name in names))
+                elif version == 10:
+                    self.assertIn("portfolio_work_budget_plan_versions", names)
+                    self.assertFalse(any(name.startswith("gateway_provider_") for name in names))
                 else:
                     self.fail(f"unexpected migration version: {version}")
                 original_apply_migration(connection, version)
 
             with mock.patch.object(UsageStore, "_apply_migration", side_effect=verify_then_apply) as applied:
                 store = UsageStore(path)
-            self.assertEqual([call.args[1] for call in applied.call_args_list], [3, 4, 5, 6, 7, 8, 9])
+            self.assertEqual([call.args[1] for call in applied.call_args_list], [3, 4, 5, 6, 7, 8, 9, 10])
             store.verify_ready()
             connection = sqlite3.connect(path)
             reservation_columns = {
@@ -330,7 +333,10 @@ class UsageStoreMigrationTests(unittest.TestCase):
             connection.close()
             self.assertIn("attempt_id", reservation_columns)
             self.assertEqual(tables, {"gateway_request_attempts", "gateway_request_attempt_events"})
-            self.assertEqual(migrations, [(1, "applied"), (2, "applied"), (3, "applied"), (4, "applied"), (5, "applied"), (6, "applied"), (7, "applied"), (8, "applied"), (9, "applied")])
+            self.assertEqual(
+                migrations,
+                [(version, "applied") for version in range(1, 11)],
+            )
             self.assertEqual(store.active_budget_reservations(organization_id="acme"), 1)
             self.assertEqual(
                 [(event["event_type"], event["requested_model"]) for event in store.audit_events(

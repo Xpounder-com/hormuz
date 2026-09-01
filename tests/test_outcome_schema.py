@@ -12,14 +12,14 @@ from hormuz.store import StorageSchemaError, UsageStore
 
 class OutcomeSchemaTests(unittest.TestCase):
     def test_outcome_seven_remains_exact_in_current_cumulative_schema(self):
-        self.assertEqual(UsageStore.schema_version, 9)
+        self.assertEqual(UsageStore.schema_version, 10)
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "usage.sqlite3"
             UsageStore(path).verify_ready()
             with sqlite3.connect(path) as connection:
                 names = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
                 self.assertTrue(set(TABLE_DDL).issubset(names))
-                self.assertEqual(len(names), 36)
+                self.assertEqual(len(names), 38)
                 self.assertNotIn("outcome_transition_test_probe", names)
                 before = list(connection.iterdump())
             UsageStore(path).verify_ready()

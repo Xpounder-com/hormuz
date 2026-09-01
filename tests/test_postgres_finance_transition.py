@@ -16,6 +16,7 @@ from uuid import uuid4
 import hormuz.postgres as postgres_module
 from hormuz._finance_schema import TABLE_DDL
 from hormuz._budget_schema import TABLE_DDL as BUDGET_TABLES
+from hormuz._provider_reliability_schema import TABLE_DDL as PROVIDER_TABLES
 from hormuz.config import UsageStorageConfig
 from hormuz.finance_repository import create_finance_repository
 from hormuz.postgres import PostgresStorageError, migrate_postgres
@@ -49,7 +50,7 @@ class PostgresFinanceTransitionTests(PostgresTestCase):
                                   runtime_role=self.runtime_role, organization_ids=("acme", "beta"))
 
     def setUp(self):
-        self.assertEqual(postgres_module.POSTGRES_SCHEMA_VERSION, 13)
+        self.assertEqual(postgres_module.POSTGRES_SCHEMA_VERSION, 14)
         # The inherited fixture creates and owns this unique test schema/roles.
         self._drop_schema(self.schema)
         self.predecessor_request = {
@@ -82,19 +83,19 @@ class PostgresFinanceTransitionTests(PostgresTestCase):
         original = postgres_module._migration_sql
 
         def migration(version, schema, *roles):
-            self.assertIn(version, (12, 13))
+            self.assertIn(version, (12, 13, 14))
             ddl = original(version, schema, *roles)
             return ddl.split(";", 1)[0] + "; SELECT 1 / 0;" if fail and version == 12 else ddl
 
         with mock.patch.object(postgres_module, "_migration_sql", side_effect=migration):
-            self.assertEqual(self.migrate().version, 13)
+            self.assertEqual(self.migrate().version, 14)
 
     def assert_prior_state_preserved(self):
         current = copy.deepcopy(self.snapshot())
-        added = set(TABLE_DDL) | set(BUDGET_TABLES)
+        added = set(TABLE_DDL) | set(BUDGET_TABLES) | set(PROVIDER_TABLES)
         current["rows"] = {table: rows for table, rows in current["rows"].items() if table not in added}
-        current["shape"] = [row for row in current["shape"] if not row[0].startswith(("portfolio_finance_", "portfolio_work_budget_"))]
-        current["rows"]["hormuz_schema_migrations"] = [row for row in current["rows"]["hormuz_schema_migrations"] if json.loads(row[0])["version"] not in {12, 13}]
+        current["shape"] = [row for row in current["shape"] if not row[0].startswith(("portfolio_finance_", "portfolio_work_budget_", "gateway_provider_"))]
+        current["rows"]["hormuz_schema_migrations"] = [row for row in current["rows"]["hormuz_schema_migrations"] if json.loads(row[0])["version"] not in {12, 13, 14}]
         self.assertEqual(current, self.before)
 
     def backup(self):
@@ -132,9 +133,9 @@ class PostgresFinanceTransitionTests(PostgresTestCase):
         self.upgrade()
         self.assert_prior_state_preserved()
         current = self.snapshot()
-        self.assertEqual(len(current["rows"]), 58)
+        self.assertEqual(len(current["rows"]), 60)
         self.assertTrue(all(not current["rows"][table] for table in TABLE_DDL))
-        with mock.patch.object(postgres_module, "POSTGRES_SCHEMA_VERSION", 14):
+        with mock.patch.object(postgres_module, "POSTGRES_SCHEMA_VERSION", 15):
             with self.assertRaises(PostgresStorageError) as caught:
                 self.migrate()
         self.assertEqual(caught.exception.code, "storage_schema_migration_unsupported")

@@ -29,6 +29,12 @@ from .contracts import (
     validate_request_status,
 )
 from .evidence import EvidenceStorageError, security_audit_event, usage_audit_event
+from .provider_reliability import (
+    ProviderAttemptMetrics,
+    ProviderFailoverContext,
+    build_provider_attempt_metrics_event,
+    build_provider_failover_event,
+)
 from .budget_runtime import (
     RuntimeBudgetSQL,
     WorkBudgetDenied,
@@ -783,6 +789,7 @@ class PostgresUsageStore:
         reserved_cost_microusd: int,
         ttl_seconds: int,
         work_budget: WorkBudgetContext | None,
+        provider_failover: ProviderFailoverContext | None = None,
     ) -> RequestAttempt:
         """Atomically persist a pending pre-egress attempt and its budget hold."""
 
@@ -913,6 +920,17 @@ class PostgresUsageStore:
                     reason_code=None,
                     usage_event_id=None,
                 )
+                if provider_failover is not None:
+                    self._append_provider_failover_in_cursor(
+                        cursor,
+                        organization_id=organization_id,
+                        failover_attempt_id=attempt_id,
+                        protocol=protocol,
+                        requested_model=requested_model,
+                        policy_version=policy_version,
+                        context=provider_failover,
+                        recorded_at=now,
+                    )
                 budget_sql = RuntimeBudgetSQL(cursor, postgres=True)
                 prepared_budget = (
                     prepare_work_budget(
@@ -976,6 +994,39 @@ class PostgresUsageStore:
     ) -> None:
         """Finalize a pending attempt once and retain the linked usage evidence."""
 
+        self._finalize_request_attempt_with_provider_metrics(
+            attempt=attempt,
+            organization_id=organization_id,
+            status=status,
+            provider_reported_model=provider_reported_model,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cache_read_tokens=cache_read_tokens,
+            cache_write_tokens=cache_write_tokens,
+            reasoning_tokens=reasoning_tokens,
+            cost_microusd=cost_microusd,
+            provider_request_id=provider_request_id,
+            provider_metrics=None,
+        )
+
+    def _finalize_request_attempt_with_provider_metrics(
+        self,
+        *,
+        attempt: RequestAttempt,
+        organization_id: str,
+        status: str,
+        provider_reported_model: str | None = None,
+        input_tokens: int = 0,
+        output_tokens: int = 0,
+        cache_read_tokens: int = 0,
+        cache_write_tokens: int = 0,
+        reasoning_tokens: int = 0,
+        cost_microusd: int = 0,
+        provider_request_id: str | None = None,
+        provider_metrics: ProviderAttemptMetrics | None,
+    ) -> None:
+        """Finalize an attempt and atomically append optional provider timing."""
+
         require_terminal_request_attempt_state(status)
         organization = self._organization(organization_id)
         with self._transaction(organization) as connection:
@@ -1018,6 +1069,13 @@ class PostgresUsageStore:
                     reason_code=None,
                     usage_event_id=usage_event_id,
                 )
+                if provider_metrics is not None:
+                    self._append_provider_metrics_in_cursor(
+                        cursor,
+                        attempt_id=attempt.attempt_id,
+                        organization_id=organization,
+                        metrics=provider_metrics,
+                    )
                 cursor.execute(
                     f"""
                     DELETE FROM {self._table('gateway_budget_reservations')}
@@ -1037,6 +1095,23 @@ class PostgresUsageStore:
     ) -> bool:
         """Record an ambiguous provider outcome without releasing its hold."""
 
+        return self._mark_request_attempt_outcome_unknown_with_provider_metrics(
+            attempt=attempt,
+            organization_id=organization_id,
+            reason_code=reason_code,
+            provider_metrics=None,
+        )
+
+    def _mark_request_attempt_outcome_unknown_with_provider_metrics(
+        self,
+        *,
+        attempt: RequestAttempt,
+        organization_id: str,
+        reason_code: str,
+        provider_metrics: ProviderAttemptMetrics | None,
+    ) -> bool:
+        """Record an unknown outcome and optional timing in one transaction."""
+
         organization = self._organization(organization_id)
         with self._transaction(organization) as connection:
             with connection.cursor() as cursor:
@@ -1055,6 +1130,13 @@ class PostgresUsageStore:
                     reason_code=reason_code,
                     usage_event_id=None,
                 )
+                if provider_metrics is not None:
+                    self._append_provider_metrics_in_cursor(
+                        cursor,
+                        attempt_id=attempt.attempt_id,
+                        organization_id=organization,
+                        metrics=provider_metrics,
+                    )
         return True
 
     def sweep_stale_request_attempts(self, *, organization_id: str | None = None) -> int:
@@ -1330,6 +1412,108 @@ class PostgresUsageStore:
             ),
         )
         return str(event["id"])
+
+    def _append_provider_failover_in_cursor(
+        self,
+        cursor: object,
+        *,
+        organization_id: str,
+        failover_attempt_id: str,
+        protocol: str,
+        requested_model: str,
+        policy_version: str,
+        context: ProviderFailoverContext,
+        recorded_at: datetime,
+    ) -> None:
+        original = self._request_attempt_root_in_cursor(
+            cursor,
+            context.original_attempt_id,
+            organization_id,
+            for_update=True,
+        )
+        latest = self._latest_request_attempt_state_in_cursor(
+            cursor,
+            context.original_attempt_id,
+        )
+        expected_state = "rate_limited" if context.trigger_status == 429 else "failed"
+        if (
+            latest.state != expected_state
+            or str(original["protocol"]) != protocol
+            or str(original["requested_model"]) != requested_model
+            or str(original["policy_version"]) != policy_version
+        ):
+            raise PostgresStorageError("provider_failover_predecessor_invalid")
+        try:
+            event = build_provider_failover_event(
+                organization_id=organization_id,
+                failover_attempt_id=failover_attempt_id,
+                recorded_at=recorded_at,
+                context=context,
+            )
+        except ValueError:
+            raise PostgresStorageError("provider_failover_evidence_invalid") from None
+        cursor.execute(
+            f"""
+            INSERT INTO {self._table('gateway_provider_failover_events')} (
+                event_id, event_schema_id, event_schema_version, organization_id,
+                original_attempt_id, failover_attempt_id, trigger_status,
+                reason_code, recorded_at
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                event["event_id"],
+                event["event_schema_id"],
+                event["event_schema_version"],
+                event["organization_id"],
+                event["original_attempt_id"],
+                event["failover_attempt_id"],
+                event["trigger_status"],
+                event["reason_code"],
+                event["recorded_at"],
+            ),
+        )
+
+    def _append_provider_metrics_in_cursor(
+        self,
+        cursor: object,
+        *,
+        attempt_id: str,
+        organization_id: str,
+        metrics: ProviderAttemptMetrics,
+    ) -> None:
+        try:
+            event = build_provider_attempt_metrics_event(
+                attempt_id=attempt_id,
+                organization_id=organization_id,
+                recorded_at=datetime.now(timezone.utc),
+                metrics=metrics,
+            )
+        except ValueError:
+            raise PostgresStorageError("provider_attempt_metrics_invalid") from None
+        cursor.execute(
+            f"""
+            INSERT INTO {self._table('gateway_provider_attempt_metrics')} (
+                event_id, event_schema_id, event_schema_version, organization_id,
+                attempt_id, recorded_at, provider_status, response_headers_us,
+                first_body_byte_us, total_us, provider_bytes_read,
+                downstream_bytes_sent
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            (
+                event["event_id"],
+                event["event_schema_id"],
+                event["event_schema_version"],
+                event["organization_id"],
+                event["attempt_id"],
+                event["recorded_at"],
+                event["provider_status"],
+                event["response_headers_us"],
+                event["first_body_byte_us"],
+                event["total_us"],
+                event["provider_bytes_read"],
+                event["downstream_bytes_sent"],
+            ),
+        )
 
     def release_budget_reservation(
         self,

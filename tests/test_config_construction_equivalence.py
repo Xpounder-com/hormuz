@@ -50,6 +50,11 @@ def _canonical(value: Any, *, config_directory: Path) -> object:
             "fields": {
                 field.name: _canonical(getattr(value, field.name), config_directory=config_directory)
                 for field in fields(value)
+                if not (
+                    type(value).__name__ == "ModelRoute"
+                    and field.name == "failover_alias"
+                    and getattr(value, field.name) is None
+                )
             },
         }
     if isinstance(value, Mapping):
@@ -78,8 +83,9 @@ def _canonical_bytes(config: GatewayConfig) -> bytes:
 
 
 def _snapshot_sha256(config: GatewayConfig) -> str:
-    # Freeze every v1 field, without treating the separately tested, opt-in
-    # portfolio extension as a change to the legacy configuration contract.
+    # Freeze every v1 field, without treating separately tested, opt-in
+    # portfolio or provider-failover extensions as changes to the legacy
+    # configuration contract.
     value = _canonical(config, config_directory=config.source_path.parent)
     assert isinstance(value, dict) and isinstance(value["fields"], dict)
     assert value["fields"].pop("portfolio_control") is None
