@@ -17,7 +17,13 @@ from urllib.parse import urlsplit
 
 from . import __version__
 from .auth import AuthenticationError, Authenticator
-from .attribution_admission import AdmissionError, REQUEST_HEADER as ATTRIBUTION_REQUEST_HEADER, RESULT_HEADER as ATTRIBUTION_RESULT_HEADER, select_admission
+from .attribution_admission import (
+    Admission,
+    AdmissionError,
+    REQUEST_HEADER as ATTRIBUTION_REQUEST_HEADER,
+    RESULT_HEADER as ATTRIBUTION_RESULT_HEADER,
+    select_admission,
+)
 from .budget_runtime import configured_route_rate_card
 from .config import GatewayConfig, Identity, ModelRoute, UpstreamConfig
 from .contracts import (
@@ -43,10 +49,16 @@ from .portfolio_repository import create_portfolio_repository
 from .portfolio_service import PortfolioService
 from .portfolio_wire import PREFIX as PORTFOLIO_PREFIX
 from .postgres import PostgresStorageError
+from .provider_reliability import (
+    ProviderAttemptMetrics,
+    ProviderFailoverContext,
+    failover_reason,
+)
 from .redaction import RedactionError, SecretRedactor
 from .store import RequestAttempt, ReservationDenied, StorageSchemaError, UsageRepository, WorkBudgetContext
 from .store_router import (
     create_postgres_runtime_pool,
+    create_provider_reliability_repository,
     create_repository_bundle,
     create_usage_store,
     create_work_budget_request_repository,
@@ -57,6 +69,7 @@ from .usage import ResponseUsageParser
 LOGGER = logging.getLogger("hormuz")
 _STORAGE_FAILURES = (sqlite3.Error, EvidenceStorageError, PostgresStorageError, StorageSchemaError)
 _INGRESS_CREDENTIAL_HEADER = "X-Hormuz-Ingress-Credential"
+_RELAY_CHUNK_BYTES = 16 * 1024
 
 
 class GatewayServer(ThreadingHTTPServer):
@@ -91,12 +104,17 @@ class GatewayServer(ThreadingHTTPServer):
             self.portfolio_service = PortfolioService(config, portfolio, self.authenticator)
             self.attribution_repository = portfolio.attributions
             self.budget_repository = portfolio.budgets
+            provider_reliability_store = create_provider_reliability_repository(self.store)
+            if provider_reliability_store is None:
+                raise StorageSchemaError("storage_schema_partial_upgrade")
+            self.provider_reliability_store = provider_reliability_store
             policy_runtime = PolicyRuntime(config, connection_pool=self.postgres_pool)
             self.policy_engine = PolicyEngine(
                 config,
                 self.store,
                 policy_runtime=policy_runtime,
                 work_budget_requests=create_work_budget_request_repository(self.store),
+                provider_reliability_requests=self.provider_reliability_store,
             )
             self.policy_engine.policy_runtime.verify_active_policies()
             recovered_attempts = self.store.sweep_stale_request_attempts()
@@ -551,7 +569,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         policy_action = decision.action
         if redaction.count:
             policy_action = f"{policy_action}+redacted"
-        body = json.dumps(redaction.value, separators=(",", ":")).encode("utf-8")
+        body = self._provider_body(redaction.value, decision.route)
         try:
             self.server.custody_runtime_projection.require_provider_usable(
                 organization_id=identity.organization_id,
@@ -584,34 +602,8 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             return
         attempt: RequestAttempt | None = None
         if account_usage:
-            # Absence is not a zero-token ceiling: without either a request or
-            # effective-policy bound, work-budget cost cannot be reserved.
-            reserved_output_tokens = redaction.value.get(output_field)
-            output_tokens_bounded = (
-                type(reserved_output_tokens) is int and reserved_output_tokens >= 0
-            )
-            if not output_tokens_bounded:
-                reserved_output_tokens = 0
-            reserved_input_tokens = len(body)
-            reserved_cost_microusd = decision.route.estimate_reservation_cost_microusd(
-                input_tokens=reserved_input_tokens,
-                output_tokens=max(0, reserved_output_tokens),
-            )
-            route_rate_card = configured_route_rate_card(
-                alias=decision.route.alias,
-                protocol=decision.route.protocol,
-                upstream_model=decision.route.upstream_model,
-                input_cost_per_million=decision.route.input_cost_per_million,
-                cache_read_cost_per_million=decision.route.cache_read_cost_per_million,
-                cache_write_cost_per_million=decision.route.cache_write_cost_per_million,
-                output_cost_per_million=decision.route.output_cost_per_million,
-            )
-            policy_digest = (
-                decision.snapshot.content_sha256
-                or local_policy_content_sha256(self.server.config)
-            )
             try:
-                attempt = self.server.policy_engine.begin_request_attempt(
+                attempt = self._begin_governed_attempt(
                     identity=identity,
                     decision=decision,
                     client=client,
@@ -619,86 +611,37 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                     policy_action=policy_action,
                     redaction_count=redaction.count,
                     redaction_rules=redaction.rules,
-                    reserved_tokens=reserved_input_tokens + max(0, reserved_output_tokens),
-                    reserved_cost_microusd=reserved_cost_microusd,
-                    ttl_seconds=self.server.config.upstream_timeout_seconds + 60,
-                    work_budget=(
-                        None
-                        if admission is None
-                        else WorkBudgetContext(
-                            work_scope_id=None if admission.work_scope is None else admission.work_scope.work_scope_id,
-                            work_scope_version=None if admission.work_scope is None else admission.work_scope.version,
-                            confidence=admission.confidence,
-                            reason_code=admission.reason,
-                            reserved_output_tokens=max(0, reserved_output_tokens),
-                            output_tokens_bounded=output_tokens_bounded,
-                            policy_version=decision.policy_version,
-                            policy_digest=policy_digest,
-                            rate_card_id=str(route_rate_card["id"]),
-                            rate_card_version=int(route_rate_card["version"]),
-                            rate_card_digest=str(route_rate_card["content_digest"]),
-                            rate_card_currency=str(route_rate_card["currency"]),
-                        )
-                    ),
+                    request_value=redaction.value,
+                    output_field=output_field,
+                    body=body,
+                    admission=admission,
                 )
-            except _STORAGE_FAILURES:
-                if admission is not None:
-                    raise AdmissionError("dependency_unavailable", 503) from None
-                raise
             except ReservationDenied as error:
-                self.server.store.record(
+                self._deny_budget_reservation(
                     identity=identity,
+                    decision=decision,
                     client=client,
                     protocol=protocol,
-                    requested_model=decision.requested_model,
-                    resolved_alias=decision.resolved_alias,
-                    upstream_model=decision.route.upstream_model,
-                    policy_version=decision.policy_version,
-                    policy_action="budget_reservation_denied",
-                    status="denied",
                     redaction_count=redaction.count,
                     redaction_rules=redaction.rules,
-                )
-                LOGGER.info(
-                    "budget_reservation_denied actor=%s team=%s client=%s protocol=%s requested_model=%s reason=%s",
-                    identity.actor_id,
-                    identity.team_id,
-                    client,
-                    protocol,
-                    decision.requested_model,
-                    str(error),
-                )
-                self._send_protocol_error(
-                    protocol,
-                    str(error),
-                    HTTPStatus.FORBIDDEN,
-                    code="hormuz_budget_denied",
+                    error=error,
                 )
                 return
-        if admission is not None and attempt is not None and attempt.attribution_event_id is None:
-            try:
-                self.server.attribution_repository.admit(identity, client, protocol, admission, attempt.attempt_id)
-            except AdmissionError as error:
-                if error.status < 500:
-                    # This handler has not called _forward: a known scope
-                    # rejection can settle at zero. Uncertain storage failures
-                    # keep their v1 hold; no cross-repository atomicity/replay.
-                    try:
-                        self.server.store.finalize_request_attempt(
-                            attempt=attempt, organization_id=identity.organization_id,
-                            status="failed", cost_microusd=0,
-                        )
-                    except _STORAGE_FAILURES:
-                        raise AdmissionError("dependency_unavailable", 503) from None
-                raise
-        if admission is not None and attempt is not None:
-            self._attribution_result = admission.result_header
+        failover_decision = self.server.policy_engine.operational_failover(decision)
+        if (
+            not account_usage
+            or self._request_precludes_failover(protocol, redaction.value)
+        ):
+            failover_decision = None
         self._forward(
             identity=identity,
             protocol=protocol,
             client=client,
             decision=decision,
             body=body,
+            request_value=redaction.value,
+            output_field=output_field,
+            admission=admission,
             account_usage=account_usage,
             policy_action=policy_action,
             redaction_count=redaction.count,
@@ -706,6 +649,8 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             attempt=attempt,
             upstream_key=upstream_key,
             reservation_ttl_seconds=self.server.config.upstream_timeout_seconds + 60,
+            failover_decision=failover_decision,
+            failover_applied_reason=None,
         )
 
     def _forward(
@@ -716,6 +661,9 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         client: str,
         decision: PolicyDecision,
         body: bytes,
+        request_value: dict[str, Any],
+        output_field: str,
+        admission: Admission | None,
         account_usage: bool,
         policy_action: str,
         redaction_count: int,
@@ -723,6 +671,8 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         attempt: RequestAttempt | None,
         upstream_key: str,
         reservation_ttl_seconds: int,
+        failover_decision: PolicyDecision | None,
+        failover_applied_reason: str | None,
     ) -> None:
         route = decision.route
         assert route is not None
@@ -731,16 +681,25 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         headers = self._upstream_headers(protocol, upstream_key)
         request = urllib.request.Request(request_url, data=body, headers=headers, method="POST")
 
+        started_ns = time.monotonic_ns()
         try:
             response = urllib.request.urlopen(request, timeout=self.server.config.upstream_timeout_seconds)
         except urllib.error.HTTPError as error:
             response = error
         except (urllib.error.URLError, http.client.HTTPException, TimeoutError, OSError) as error:
             if account_usage and attempt is not None:
-                self.server.store.mark_request_attempt_outcome_unknown(
+                self.server.provider_reliability_store.mark_request_attempt_outcome_unknown(
                     attempt=attempt,
                     organization_id=identity.organization_id,
                     reason_code="provider_transport_ambiguous",
+                    provider_metrics=self._provider_metrics(
+                        started_ns=started_ns,
+                        provider_status=None,
+                        response_headers_us=None,
+                        first_body_byte_us=None,
+                        provider_bytes_read=0,
+                        downstream_bytes_sent=0,
+                    ),
                 )
             self._send_protocol_error(
                 protocol,
@@ -750,11 +709,102 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             )
             return
 
+        response_headers_us = self._elapsed_us(started_ns)
         status = getattr(response, "status", response.getcode())
         content_type = response.headers.get("Content-Type", "application/json")
+        provider_request_id = response.headers.get("x-request-id") or response.headers.get("request-id")
+        reason = failover_reason(status)
+        if (
+            reason is not None
+            and failover_decision is not None
+            and account_usage
+            and attempt is not None
+        ):
+            response.close()
+            request_status = "rate_limited" if status == HTTPStatus.TOO_MANY_REQUESTS else "failed"
+            self.server.provider_reliability_store.finalize_request_attempt(
+                attempt=attempt,
+                organization_id=identity.organization_id,
+                status=request_status,
+                cost_microusd=0,
+                provider_request_id=provider_request_id,
+                provider_metrics=self._provider_metrics(
+                    started_ns=started_ns,
+                    provider_status=status,
+                    response_headers_us=response_headers_us,
+                    first_body_byte_us=None,
+                    provider_bytes_read=0,
+                    downstream_bytes_sent=0,
+                ),
+            )
+            failover_route = failover_decision.route
+            assert failover_route is not None
+            failover_body = self._provider_body(request_value, failover_route)
+            try:
+                failover_attempt = self._begin_governed_attempt(
+                    identity=identity,
+                    decision=failover_decision,
+                    client=client,
+                    protocol=protocol,
+                    policy_action=policy_action,
+                    redaction_count=redaction_count,
+                    redaction_rules=redaction_rules,
+                    request_value=request_value,
+                    output_field=output_field,
+                    body=failover_body,
+                    admission=admission,
+                    provider_failover=ProviderFailoverContext(
+                        original_attempt_id=attempt.attempt_id,
+                        trigger_status=status,
+                        reason_code=reason,
+                    ),
+                )
+            except ReservationDenied as error:
+                self._deny_budget_reservation(
+                    identity=identity,
+                    decision=failover_decision,
+                    client=client,
+                    protocol=protocol,
+                    redaction_count=redaction_count,
+                    redaction_rules=redaction_rules,
+                    error=error,
+                )
+                return
+            LOGGER.info(
+                "provider_failover actor=%s team=%s client=%s protocol=%s requested_model=%s "
+                "from_model=%s to_model=%s reason=%s",
+                identity.actor_id,
+                identity.team_id,
+                client,
+                protocol,
+                decision.requested_model,
+                route.upstream_model,
+                failover_route.upstream_model,
+                reason,
+            )
+            self._forward(
+                identity=identity,
+                protocol=protocol,
+                client=client,
+                decision=failover_decision,
+                body=failover_body,
+                request_value=request_value,
+                output_field=output_field,
+                admission=admission,
+                account_usage=account_usage,
+                policy_action=policy_action,
+                redaction_count=redaction_count,
+                redaction_rules=redaction_rules,
+                attempt=failover_attempt,
+                upstream_key=upstream_key,
+                reservation_ttl_seconds=reservation_ttl_seconds,
+                failover_decision=None,
+                failover_applied_reason=reason,
+            )
+            return
+
         is_event_stream = "text/event-stream" in content_type.lower()
         parser = ResponseUsageParser(protocol, is_event_stream=is_event_stream)
-        provider_request_id = response.headers.get("x-request-id") or response.headers.get("request-id")
 
         self._response_started = True
         self.send_response(status)
@@ -765,6 +815,12 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         self.send_header("X-Hormuz-Policy-Decision", policy_action)
         self.send_header("X-Hormuz-Requested-Model", decision.requested_model)
         self.send_header("X-Hormuz-Routed-Model", route.upstream_model)
+        self.send_header(
+            "Server-Timing",
+            f"hormuz_upstream_headers;dur={response_headers_us / 1000:.3f}",
+        )
+        if failover_applied_reason is not None:
+            self.send_header("X-Hormuz-Failover", f"v1;reason={failover_applied_reason}")
         self._send_attribution_header()
         if redaction_count:
             self.send_header("X-Hormuz-Redactions", str(redaction_count))
@@ -778,12 +834,27 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         self.close_connection = True
 
         downstream_ok = True
+        first_body_byte_us: int | None = None
+        provider_bytes_read = 0
+        downstream_bytes_sent = 0
         refresh_at = time.monotonic() + max(1, reservation_ttl_seconds // 2)
+        read_chunk = response.read
+        if is_event_stream:
+            read1 = getattr(response, "read1", None)
+            if callable(read1):
+                # ``HTTPResponse.read(size)`` waits for the requested byte
+                # count or EOF. Provider event streams are normally much
+                # smaller than the relay buffer, so use one underlying read
+                # and release each available event promptly.
+                read_chunk = read1
         try:
             while True:
-                chunk = response.read(16 * 1024)
+                chunk = read_chunk(_RELAY_CHUNK_BYTES)
                 if not chunk:
                     break
+                if first_body_byte_us is None:
+                    first_body_byte_us = self._elapsed_us(started_ns)
+                provider_bytes_read += len(chunk)
                 if attempt is not None and time.monotonic() >= refresh_at:
                     self.server.store.refresh_budget_reservation(
                         attempt.reservation_id,
@@ -792,8 +863,8 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                     )
                     refresh_at = time.monotonic() + max(1, reservation_ttl_seconds // 2)
                 parser.feed(chunk)
-                self.wfile.write(chunk)
-                self.wfile.flush()
+                self._write_downstream_chunk(chunk)
+                downstream_bytes_sent += len(chunk)
         except (BrokenPipeError, ConnectionResetError):
             downstream_ok = False
         except (http.client.HTTPException, TimeoutError, OSError) as error:
@@ -810,6 +881,14 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         finally:
             response.close()
 
+        provider_metrics = self._provider_metrics(
+            started_ns=started_ns,
+            provider_status=status,
+            response_headers_us=response_headers_us,
+            first_body_byte_us=first_body_byte_us,
+            provider_bytes_read=provider_bytes_read,
+            downstream_bytes_sent=downstream_bytes_sent,
+        )
         usage = parser.finish()
         if account_usage and attempt is not None:
             successful = 200 <= status < 300 and downstream_ok
@@ -818,10 +897,11 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
             elif status == HTTPStatus.TOO_MANY_REQUESTS:
                 request_status = "rate_limited"
             elif 200 <= status < 300:
-                self.server.store.mark_request_attempt_outcome_unknown(
+                self.server.provider_reliability_store.mark_request_attempt_outcome_unknown(
                     attempt=attempt,
                     organization_id=identity.organization_id,
                     reason_code="provider_stream_interrupted",
+                    provider_metrics=provider_metrics,
                 )
                 LOGGER.warning(
                     "request_outcome_unknown actor=%s team=%s client=%s protocol=%s requested_model=%s reason=provider_stream_interrupted",
@@ -840,7 +920,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 cache_read_tokens=usage.cache_read_tokens,
                 cache_write_tokens=usage.cache_write_tokens,
             )
-            self.server.store.finalize_request_attempt(
+            self.server.provider_reliability_store.finalize_request_attempt(
                 attempt=attempt,
                 organization_id=identity.organization_id,
                 status=request_status,
@@ -852,6 +932,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 reasoning_tokens=usage.reasoning_tokens,
                 cost_microusd=cost,
                 provider_request_id=provider_request_id,
+                provider_metrics=provider_metrics,
             )
             LOGGER.info(
                 "request_complete actor=%s team=%s client=%s protocol=%s action=%s requested_model=%s routed_model=%s status=%s input_tokens=%d output_tokens=%d cost_microusd=%d redactions=%d",
@@ -868,6 +949,205 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 cost,
                 redaction_count,
             )
+
+    def _begin_governed_attempt(
+        self,
+        *,
+        identity: Identity,
+        decision: PolicyDecision,
+        client: str,
+        protocol: str,
+        policy_action: str,
+        redaction_count: int,
+        redaction_rules: tuple[str, ...],
+        request_value: dict[str, Any],
+        output_field: str,
+        body: bytes,
+        admission: Admission | None,
+        provider_failover: ProviderFailoverContext | None = None,
+    ) -> RequestAttempt:
+        route = decision.route
+        assert route is not None
+        # Absence is not a zero-token ceiling: without either a request or
+        # effective-policy bound, work-budget cost cannot be reserved.
+        reserved_output_tokens = request_value.get(output_field)
+        output_tokens_bounded = (
+            type(reserved_output_tokens) is int and reserved_output_tokens >= 0
+        )
+        if not output_tokens_bounded:
+            reserved_output_tokens = 0
+        reserved_input_tokens = len(body)
+        reserved_cost_microusd = route.estimate_reservation_cost_microusd(
+            input_tokens=reserved_input_tokens,
+            output_tokens=max(0, reserved_output_tokens),
+        )
+        route_rate_card = configured_route_rate_card(
+            alias=route.alias,
+            protocol=route.protocol,
+            upstream_model=route.upstream_model,
+            input_cost_per_million=route.input_cost_per_million,
+            cache_read_cost_per_million=route.cache_read_cost_per_million,
+            cache_write_cost_per_million=route.cache_write_cost_per_million,
+            output_cost_per_million=route.output_cost_per_million,
+        )
+        policy_digest = (
+            decision.snapshot.content_sha256
+            or local_policy_content_sha256(self.server.config)
+        )
+        try:
+            attempt = self.server.policy_engine.begin_request_attempt(
+                identity=identity,
+                decision=decision,
+                client=client,
+                protocol=protocol,
+                policy_action=policy_action,
+                redaction_count=redaction_count,
+                redaction_rules=redaction_rules,
+                reserved_tokens=reserved_input_tokens + max(0, reserved_output_tokens),
+                reserved_cost_microusd=reserved_cost_microusd,
+                ttl_seconds=self.server.config.upstream_timeout_seconds + 60,
+                work_budget=(
+                    None
+                    if admission is None
+                    else WorkBudgetContext(
+                        work_scope_id=(
+                            None
+                            if admission.work_scope is None
+                            else admission.work_scope.work_scope_id
+                        ),
+                        work_scope_version=(
+                            None
+                            if admission.work_scope is None
+                            else admission.work_scope.version
+                        ),
+                        confidence=admission.confidence,
+                        reason_code=admission.reason,
+                        reserved_output_tokens=max(0, reserved_output_tokens),
+                        output_tokens_bounded=output_tokens_bounded,
+                        policy_version=decision.policy_version,
+                        policy_digest=policy_digest,
+                        rate_card_id=str(route_rate_card["id"]),
+                        rate_card_version=int(route_rate_card["version"]),
+                        rate_card_digest=str(route_rate_card["content_digest"]),
+                        rate_card_currency=str(route_rate_card["currency"]),
+                    )
+                ),
+                provider_failover=provider_failover,
+            )
+        except _STORAGE_FAILURES:
+            if admission is not None:
+                raise AdmissionError("dependency_unavailable", 503) from None
+            raise
+        if admission is not None and attempt.attribution_event_id is None:
+            try:
+                self.server.attribution_repository.admit(
+                    identity,
+                    client,
+                    protocol,
+                    admission,
+                    attempt.attempt_id,
+                )
+            except AdmissionError as error:
+                if error.status < 500:
+                    # No provider call has started. A known attribution
+                    # rejection can settle at zero; an uncertain storage
+                    # failure keeps its conservative hold.
+                    try:
+                        self.server.store.finalize_request_attempt(
+                            attempt=attempt,
+                            organization_id=identity.organization_id,
+                            status="failed",
+                            cost_microusd=0,
+                        )
+                    except _STORAGE_FAILURES:
+                        raise AdmissionError("dependency_unavailable", 503) from None
+                raise
+        if admission is not None:
+            self._attribution_result = admission.result_header
+        return attempt
+
+    def _deny_budget_reservation(
+        self,
+        *,
+        identity: Identity,
+        decision: PolicyDecision,
+        client: str,
+        protocol: str,
+        redaction_count: int,
+        redaction_rules: tuple[str, ...],
+        error: ReservationDenied,
+    ) -> None:
+        route = decision.route
+        assert route is not None
+        self.server.store.record(
+            identity=identity,
+            client=client,
+            protocol=protocol,
+            requested_model=decision.requested_model,
+            resolved_alias=decision.resolved_alias,
+            upstream_model=route.upstream_model,
+            policy_version=decision.policy_version,
+            policy_action="budget_reservation_denied",
+            status="denied",
+            redaction_count=redaction_count,
+            redaction_rules=redaction_rules,
+        )
+        LOGGER.info(
+            "budget_reservation_denied actor=%s team=%s client=%s protocol=%s "
+            "requested_model=%s reason=%s",
+            identity.actor_id,
+            identity.team_id,
+            client,
+            protocol,
+            decision.requested_model,
+            str(error),
+        )
+        self._send_protocol_error(
+            protocol,
+            str(error),
+            HTTPStatus.FORBIDDEN,
+            code="hormuz_budget_denied",
+        )
+
+    @staticmethod
+    def _provider_body(request_value: dict[str, Any], route: ModelRoute) -> bytes:
+        routed = dict(request_value)
+        routed["model"] = route.upstream_model
+        return json.dumps(routed, separators=(",", ":")).encode("utf-8")
+
+    @staticmethod
+    def _request_precludes_failover(protocol: str, request_value: dict[str, Any]) -> bool:
+        return protocol == "openai" and (
+            request_value.get("background") is True or request_value.get("store") is True
+        )
+
+    @staticmethod
+    def _elapsed_us(started_ns: int) -> int:
+        return max(0, (time.monotonic_ns() - started_ns) // 1_000)
+
+    @classmethod
+    def _provider_metrics(
+        cls,
+        *,
+        started_ns: int,
+        provider_status: int | None,
+        response_headers_us: int | None,
+        first_body_byte_us: int | None,
+        provider_bytes_read: int,
+        downstream_bytes_sent: int,
+    ) -> ProviderAttemptMetrics:
+        return ProviderAttemptMetrics(
+            provider_status=provider_status,
+            response_headers_us=response_headers_us,
+            first_body_byte_us=first_body_byte_us,
+            total_us=cls._elapsed_us(started_ns),
+            provider_bytes_read=provider_bytes_read,
+            downstream_bytes_sent=downstream_bytes_sent,
+        )
+
+    def _write_downstream_chunk(self, chunk: bytes) -> None:
+        self.wfile.write(chunk)
+        self.wfile.flush()
 
     def _authenticate(self) -> Identity | None:
         candidates: list[str] = []

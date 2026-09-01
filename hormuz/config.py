@@ -284,6 +284,7 @@ class ModelRoute:
     cache_read_cost_per_million: float = 0
     cache_write_cost_per_million: float = 0
     output_cost_per_million: float = 0
+    failover_alias: str | None = None
 
     def estimate_reservation_cost_microusd(
         self,
@@ -472,6 +473,24 @@ class GatewayConfig:
                     "use a tenant-scoped gateway configuration"
                 )
         policies = [self.organization_policy, *self.team_policies.values(), *self.actor_policies.values()]
+        for alias, route in self.model_routes.items():
+            if route.failover_alias is None:
+                continue
+            failover_route = self.model_routes.get(route.failover_alias)
+            if failover_route is None:
+                raise ConfigError(
+                    f"Model route {alias} references unknown failover alias: {route.failover_alias}"
+                )
+            if route.failover_alias == alias:
+                raise ConfigError(f"Model route {alias} cannot fail over to itself")
+            if failover_route.protocol != route.protocol:
+                raise ConfigError(
+                    f"Model route {alias} failover must use protocol {route.protocol}"
+                )
+            if failover_route.upstream_model == route.upstream_model:
+                raise ConfigError(
+                    f"Model route {alias} failover must use a distinct upstream model"
+                )
         for policy in policies:
             for alias in policy.allowed_models or ():
                 if alias not in self.model_routes:
@@ -589,6 +608,11 @@ class GatewayConfig:
                     "cache_read_cost_per_million": route.cache_read_cost_per_million,
                     "cache_write_cost_per_million": route.cache_write_cost_per_million,
                     "output_cost_per_million": route.output_cost_per_million,
+                    **(
+                        {"failover_alias": route.failover_alias}
+                        if route.failover_alias is not None
+                        else {}
+                    ),
                 }
                 for alias, route in sorted(self.model_routes.items())
             },

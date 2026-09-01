@@ -36,7 +36,7 @@ written to the usage database.
 | Benefit | What Hormuz provides |
 | --- | --- |
 | Preserve developer workflows | Codex and Claude Code continue to use their native OpenAI- and Anthropic-compatible protocols. |
-| Centralize AI policy | Enforce allowed clients and models, fallbacks, output caps, monthly token limits, and USD budgets at organization, team, and person scope. |
+| Centralize AI policy | Enforce allowed clients and models, policy-bounded one-hop capacity failover, output caps, monthly token limits, and USD budgets at organization, team, and person scope. |
 | Understand adoption and spend | Group current-month requests, tokens, and estimated cost by organization, team, person, model, client, or provider. |
 | Attribute usage responsibly | Bind each request to a unique human or workload identity and preserve event-time team attribution without storing prompts or responses. |
 | Reduce secret-egress risk | Detect, redact, or deny configured credentials and high-confidence secret formats before provider serialization. |
@@ -168,8 +168,11 @@ field semantics and coverage limits.
 - OpenAI-compatible `POST /v1/responses` proxying, including streaming.
 - Anthropic-compatible `POST /v1/messages`, `/v1/messages/count_tokens`, and
   streaming.
-- Provider model IDs by default, with optional organization aliases and
-  policy-driven fallback routing.
+- Provider model IDs by default, with optional organization aliases,
+  policy-driven fallback routing, and opt-in, policy-bounded one-hop failover
+  after explicit provider capacity rejection.
+- Incremental provider streaming plus content-free header, first-byte, total
+  latency, and byte-count evidence for each accounted egress.
 - Organization, team, and person policy overlays that can only become more
   restrictive.
 - Output-token caps, monthly token limits, USD budgets, and atomic reservations
@@ -321,6 +324,7 @@ Public TLS remains a customer-controlled ingress responsibility. Read
 | Codex and Claude Code setup | [docs/CLIENTS.md](docs/CLIENTS.md) |
 | Policy administration | [docs/POLICY_CONTROL.md](docs/POLICY_CONTROL.md) |
 | Usage, tokens, cost, and budgets | [docs/USAGE.md](docs/USAGE.md) |
+| Provider streaming, latency, failover, and compute boundaries | [docs/PROVIDER_RELIABILITY.md](docs/PROVIDER_RELIABILITY.md) |
 | v1.1.0 source development: portfolio registry, attribution, outcomes, finance, and internal work budgets | [docs/PORTFOLIO_INTELLIGENCE.md](docs/PORTFOLIO_INTELLIGENCE.md) and [docs/WORK_BUDGETS.md](docs/WORK_BUDGETS.md) |
 | Secret-egress controls | [docs/SECRET_CONTROLS.md](docs/SECRET_CONTROLS.md) |
 | Audit contracts and export | [docs/AUDIT.md](docs/AUDIT.md) |

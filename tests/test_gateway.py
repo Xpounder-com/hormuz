@@ -15,7 +15,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest import mock
 
-from hormuz.config import GatewayConfig, ModelRoute, Policy
+from hormuz.config import ConfigError, GatewayConfig, ModelRoute, Policy
 from hormuz.contracts import relay_contract_header, validate_audit_event, validate_contract
 from hormuz.custody import KEY_PURPOSE_PROVIDER_CREDENTIAL, EnvelopeCipher, GeneratedDataKey
 from hormuz.custody_runtime import write_envelope_file
@@ -35,6 +35,12 @@ class FakeProviderHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     requests: list[dict[str, object]] = []
     lock = threading.Lock()
+    delayed_stream_started = threading.Event()
+    delayed_stream_release = threading.Event()
+    delayed_stream_first_chunk = (
+        b"event: response.output_text.delta\n"
+        b'data: {"type":"response.output_text.delta","delta":"FIRST"}\n\n'
+    )
 
     def do_POST(self) -> None:  # noqa: N802
         request_path = self.path.partition("?")[0]
@@ -57,7 +63,37 @@ class FakeProviderHandler(BaseHTTPRequestHandler):
             )
             return
 
+        if body.get("force_primary_rate_limit") is True and body.get("model") == "gpt-test-fast":
+            self._send_json(
+                {"error": {"message": "Primary model rate limit", "type": "rate_limit_error"}},
+                status=429,
+                request_id="req_primary_rate_limited",
+            )
+            return
+
+        if (
+            body.get("force_primary_overload") is True
+            and body.get("model") in {"gpt-test-fast", "claude-test"}
+        ):
+            self._send_json(
+                {"error": {"message": "Primary model overloaded", "type": "overloaded_error"}},
+                status=529,
+                request_id="req_primary_overloaded",
+            )
+            return
+
+        if body.get("force_primary_bad_request") is True and body.get("model") == "gpt-test-fast":
+            self._send_json(
+                {"error": {"message": "Bad request", "type": "invalid_request_error"}},
+                status=400,
+                request_id="req_primary_bad_request",
+            )
+            return
+
         if request_path.endswith("/responses"):
+            if body.get("force_delayed_stream") is True:
+                self._send_delayed_openai_stream(body["model"])
+                return
             payload = {
                 "id": "resp_test",
                 "object": "response",
@@ -248,6 +284,36 @@ class FakeProviderHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body_bytes)
 
+    def _send_delayed_openai_stream(self, model: str) -> None:
+        completed_event = {
+            "type": "response.completed",
+            "response": {
+                "model": model,
+                "usage": {
+                    "input_tokens": 1,
+                    "output_tokens": 1,
+                    "input_tokens_details": {"cached_tokens": 0},
+                    "output_tokens_details": {"reasoning_tokens": 0},
+                },
+            },
+        }
+        final_chunk = (
+            "event: response.completed\n"
+            f"data: {json.dumps(completed_event, separators=(',', ':'))}\n\n"
+        ).encode("utf-8")
+        first_chunk = type(self).delayed_stream_first_chunk
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Content-Length", str(len(first_chunk) + len(final_chunk)))
+        self.send_header("x-request-id", "req_delayed_stream")
+        self.end_headers()
+        self.wfile.write(first_chunk)
+        self.wfile.flush()
+        type(self).delayed_stream_started.set()
+        type(self).delayed_stream_release.wait(timeout=5)
+        self.wfile.write(final_chunk)
+        self.wfile.flush()
+
     def log_message(self, format: str, *args: object) -> None:
         pass
 
@@ -318,6 +384,8 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)
         FakeProviderHandler.requests = []
+        FakeProviderHandler.delayed_stream_started.clear()
+        FakeProviderHandler.delayed_stream_release.clear()
         self.provider = ThreadingHTTPServer(("127.0.0.1", 0), FakeProviderHandler)
         self.provider_thread = threading.Thread(target=self.provider.serve_forever, daemon=True)
         self.provider_thread.start()
@@ -564,6 +632,202 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertEqual(audit[0]["status"], "rate_limited")
         validate_audit_event(audit[0])
 
+    def test_explicit_rate_limit_uses_one_policy_allowed_failover_with_separate_evidence(self) -> None:
+        self._restart_gateway(self._config_with_failover())
+
+        status, headers, body = self._post(
+            "/v1/responses",
+            {
+                "model": "engineering-fast",
+                "input": "bounded failover",
+                "force_primary_rate_limit": True,
+            },
+        )
+
+        self.assertEqual(status, 200, body)
+        self.assertEqual(headers["x-hormuz-routed-model"], "gpt-test-deep")
+        self.assertEqual(headers["x-hormuz-failover"], "v1;reason=provider_rate_limited")
+        self.assertIn("hormuz_upstream_headers;dur=", headers["server-timing"])
+        self.assertEqual(
+            [request["body"]["model"] for request in FakeProviderHandler.requests],
+            ["gpt-test-fast", "gpt-test-deep"],
+        )
+
+        audit = self.gateway.store.audit_events(since="2000-01-01T00:00:00+00:00")
+        self.assertEqual(
+            [(event["status"], event["routed_model"]) for event in audit],
+            [("rate_limited", "gpt-test-fast"), ("succeeded", "gpt-test-deep")],
+        )
+        connection = sqlite3.connect(self.gateway.store.path)
+        attempts = {
+            attempt_id: (resolved_alias, upstream_model)
+            for attempt_id, resolved_alias, upstream_model in connection.execute(
+                "SELECT attempt_id, resolved_alias, upstream_model FROM gateway_request_attempts"
+            ).fetchall()
+        }
+        link = connection.execute(
+            "SELECT original_attempt_id, failover_attempt_id, trigger_status, reason_code "
+            "FROM gateway_provider_failover_events"
+        ).fetchone()
+        metrics = connection.execute(
+            "SELECT a.upstream_model, m.provider_status, m.response_headers_us, "
+            "m.first_body_byte_us, m.total_us, m.provider_bytes_read, m.downstream_bytes_sent "
+            "FROM gateway_provider_attempt_metrics m "
+            "JOIN gateway_request_attempts a ON a.attempt_id=m.attempt_id "
+            "ORDER BY a.created_at"
+        ).fetchall()
+        connection.close()
+        self.assertIsNotNone(link)
+        assert link is not None
+        self.assertEqual(attempts[link[0]], ("engineering-fast", "gpt-test-fast"))
+        self.assertEqual(attempts[link[1]], ("engineering-deep", "gpt-test-deep"))
+        self.assertEqual(link[2:], (429, "provider_rate_limited"))
+        self.assertEqual([row[1] for row in metrics], [429, 200])
+        for row in metrics:
+            self.assertIsNotNone(row[2])
+            self.assertGreaterEqual(row[4], row[2])
+            self.assertGreaterEqual(row[5], row[6])
+
+    def test_explicit_overload_can_fail_over_but_never_more_than_one_hop(self) -> None:
+        self._restart_gateway(self._config_with_failover())
+        status, headers, _ = self._post(
+            "/v1/responses",
+            {
+                "model": "engineering-fast",
+                "input": "overload failover",
+                "force_primary_overload": True,
+            },
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["x-hormuz-failover"], "v1;reason=provider_overloaded")
+        self.assertEqual(len(FakeProviderHandler.requests), 2)
+
+        config_value = self._config_with_failover()
+        config_value["model_routes"]["engineering-deep"]["failover_alias"] = "engineering-fast"
+        self._restart_gateway(config_value)
+        before = len(FakeProviderHandler.requests)
+        status, headers, _ = self._post(
+            "/v1/responses",
+            {"model": "engineering-fast", "input": "one hop", "force_rate_limit": True},
+        )
+        self.assertEqual(status, 429)
+        self.assertEqual(headers["x-hormuz-failover"], "v1;reason=provider_rate_limited")
+        self.assertEqual(len(FakeProviderHandler.requests) - before, 2)
+
+    def test_anthropic_overload_uses_the_same_bounded_failover_contract(self) -> None:
+        config_value = self._config(self.provider.server_port, _free_port())
+        config_value["model_routes"]["claude-standard"]["failover_alias"] = "claude-haiku-4-5"
+        self._restart_gateway(config_value)
+
+        status, headers, body = self._post(
+            "/v1/messages",
+            {
+                "model": "claude-standard",
+                "messages": [{"role": "user", "content": "bounded failover"}],
+                "max_tokens": 20,
+                "force_primary_overload": True,
+            },
+        )
+
+        self.assertEqual(status, 200, body)
+        self.assertEqual(headers["x-hormuz-routed-model"], "claude-test-haiku")
+        self.assertEqual(headers["x-hormuz-failover"], "v1;reason=provider_overloaded")
+        self.assertEqual(
+            [request["body"]["model"] for request in FakeProviderHandler.requests],
+            ["claude-test", "claude-test-haiku"],
+        )
+        audit = self.gateway.store.audit_events(since="2000-01-01T00:00:00+00:00")
+        self.assertEqual(
+            [(event["status"], event["routed_model"]) for event in audit],
+            [("failed", "claude-test"), ("succeeded", "claude-test-haiku")],
+        )
+
+    def test_failover_stays_off_when_policy_or_request_semantics_do_not_allow_it(self) -> None:
+        config_value = self._config_with_failover()
+        config_value["policies"]["organization"]["allowed_models"].remove("engineering-deep")
+        self._restart_gateway(config_value)
+        before = len(FakeProviderHandler.requests)
+        status, headers, _ = self._post(
+            "/v1/responses",
+            {
+                "model": "engineering-fast",
+                "input": "policy blocks alternate",
+                "force_primary_rate_limit": True,
+            },
+        )
+        self.assertEqual(status, 429)
+        self.assertNotIn("x-hormuz-failover", headers)
+        self.assertEqual(len(FakeProviderHandler.requests) - before, 1)
+
+        before = len(FakeProviderHandler.requests)
+        status, headers, _ = self._post(
+            "/v1/responses",
+            {
+                "model": "engineering-fast",
+                "input": "stored work is not replay-safe",
+                "store": True,
+                "force_primary_rate_limit": True,
+            },
+        )
+        self.assertEqual(status, 429)
+        self.assertNotIn("x-hormuz-failover", headers)
+        self.assertEqual(len(FakeProviderHandler.requests) - before, 1)
+
+        config_value = self._config_with_failover()
+        config_value["upstreams"]["openai"]["allow_background"] = True
+        config_value["upstreams"]["openai"]["allow_response_storage"] = True
+        self._restart_gateway(config_value)
+        before = len(FakeProviderHandler.requests)
+        status, headers, _ = self._post(
+            "/v1/responses",
+            {
+                "model": "engineering-fast",
+                "input": "background is not replay-safe",
+                "background": True,
+                "force_primary_rate_limit": True,
+            },
+        )
+        self.assertEqual(status, 429)
+        self.assertNotIn("x-hormuz-failover", headers)
+        self.assertEqual(len(FakeProviderHandler.requests) - before, 1)
+
+        self._restart_gateway(self._config_with_failover())
+        before = len(FakeProviderHandler.requests)
+        status, headers, _ = self._post(
+            "/v1/responses",
+            {
+                "model": "engineering-fast",
+                "input": "client error",
+                "force_primary_bad_request": True,
+            },
+        )
+        self.assertEqual(status, 400)
+        self.assertNotIn("x-hormuz-failover", headers)
+        self.assertEqual(len(FakeProviderHandler.requests) - before, 1)
+
+    def test_failover_configuration_requires_a_distinct_same_protocol_route(self) -> None:
+        cases = (
+            ("unknown", "missing", "unknown failover alias"),
+            ("self", "engineering-fast", "cannot fail over to itself"),
+            ("cross-protocol", "claude-standard", "must use protocol openai"),
+        )
+        for name, failover_alias, message in cases:
+            with self.subTest(name=name):
+                config_value = self._config(self.provider.server_port, _free_port())
+                config_value["model_routes"]["engineering-fast"]["failover_alias"] = failover_alias
+                path = self.root / f"invalid-{name}.json"
+                path.write_text(json.dumps(config_value), encoding="utf-8")
+                with self.assertRaisesRegex(ConfigError, message):
+                    GatewayConfig.load(path)
+
+        config_value = self._config(self.provider.server_port, _free_port())
+        config_value["model_routes"]["engineering-fast"]["failover_alias"] = "engineering-deep"
+        config_value["model_routes"]["engineering-deep"]["upstream_model"] = "gpt-test-fast"
+        path = self.root / "invalid-same-model.json"
+        path.write_text(json.dumps(config_value), encoding="utf-8")
+        with self.assertRaisesRegex(ConfigError, "distinct upstream model"):
+            GatewayConfig.load(path)
+
     def test_missing_upstream_credential_fails_before_creating_an_attempt(self) -> None:
         self.gateway.upstream_credentials["openai"] = ""
         with mock.patch("hormuz.server.urllib.request.urlopen") as urlopen:
@@ -582,6 +846,7 @@ class GatewayIntegrationTests(unittest.TestCase):
         connection.close()
 
     def test_ambiguous_provider_transport_keeps_a_conservative_unknown_attempt(self) -> None:
+        self._restart_gateway(self._config_with_failover())
         before = len(FakeProviderHandler.requests)
         request_content = "must-not-enter-request-attempt-evidence"
         with mock.patch(
@@ -657,6 +922,7 @@ class GatewayIntegrationTests(unittest.TestCase):
         )
 
     def test_interrupted_provider_response_becomes_unknown_without_replay(self) -> None:
+        self._restart_gateway(self._config_with_failover())
         class InterruptedResponse:
             status = 200
             headers = {"Content-Type": "application/json", "x-request-id": "req_truncated"}
@@ -694,10 +960,118 @@ class GatewayIntegrationTests(unittest.TestCase):
             [(1, "pending", None, None), (2, "outcome_unknown", "provider_stream_interrupted", None)],
         )
 
+    def test_event_stream_releases_available_chunk_before_provider_completion(self) -> None:
+        connection = http.client.HTTPConnection("127.0.0.1", self.gateway.server_port, timeout=5)
+        connection.request(
+            "POST",
+            "/v1/responses",
+            body=json.dumps(
+                {
+                    "model": "engineering-fast",
+                    "input": "latency probe",
+                    "stream": True,
+                    "force_delayed_stream": True,
+                }
+            ),
+            headers={
+                "Authorization": f"Bearer {GATEWAY_TOKEN}",
+                "Content-Type": "application/json",
+            },
+        )
+        response = connection.getresponse()
+        expected = FakeProviderHandler.delayed_stream_first_chunk
+        first_read_finished = threading.Event()
+        first_read: list[bytes] = []
+
+        def read_first_chunk() -> None:
+            received = bytearray()
+            while len(received) < len(expected):
+                chunk = response.read(len(expected) - len(received))
+                if not chunk:
+                    break
+                received.extend(chunk)
+            first_read.append(bytes(received))
+            first_read_finished.set()
+
+        reader = threading.Thread(target=read_first_chunk, daemon=True)
+        reader.start()
+        try:
+            self.assertEqual(response.status, 200)
+            self.assertEqual(response.getheader("Content-Type"), "text/event-stream")
+            self.assertTrue(FakeProviderHandler.delayed_stream_started.wait(timeout=1))
+            self.assertTrue(
+                first_read_finished.wait(timeout=2),
+                "gateway held an available provider event until stream completion",
+            )
+            self.assertEqual(first_read, [expected])
+            self.assertFalse(FakeProviderHandler.delayed_stream_release.is_set())
+        finally:
+            FakeProviderHandler.delayed_stream_release.set()
+            reader.join(timeout=5)
+
+        remainder = response.read()
+        connection.close()
+        self.assertIn(b"event: response.completed", remainder)
+        self.assertEqual(self.gateway.store.monthly_totals(actor_id="alice").requests, 1)
+
+    def test_downstream_disconnect_closes_provider_stream_and_keeps_unknown_attempt(self) -> None:
+        self._restart_gateway(self._config_with_failover())
+        class CloseTrackedEventStream:
+            status = 200
+            headers = {"Content-Type": "text/event-stream", "x-request-id": "req_cancelled"}
+
+            def __init__(self) -> None:
+                self.closed = threading.Event()
+                self.read1_calls = 0
+
+            def getcode(self) -> int:
+                return self.status
+
+            def read(self, _size: int) -> bytes:
+                raise AssertionError("event streams must use read1 when the provider exposes it")
+
+            def read1(self, _size: int) -> bytes:
+                self.read1_calls += 1
+                return b'event: response.output_text.delta\ndata: {"delta":"cancel"}\n\n'
+
+            def close(self) -> None:
+                self.closed.set()
+
+        upstream_response = CloseTrackedEventStream()
+        with (
+            mock.patch("hormuz.server.urllib.request.urlopen", return_value=upstream_response),
+            mock.patch(
+                "hormuz.server.GatewayRequestHandler._write_downstream_chunk",
+                side_effect=BrokenPipeError,
+            ),
+        ):
+            status, headers, body = self._post(
+                "/v1/responses",
+                {"model": "engineering-fast", "input": "cancel provider work", "stream": True},
+            )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["content-type"], "text/event-stream")
+        self.assertEqual(body, b"")
+        self.assertTrue(upstream_response.closed.is_set())
+        self.assertEqual(upstream_response.read1_calls, 1)
+        self.assertEqual(self.gateway.store.monthly_totals(actor_id="alice").requests, 0)
+        self.assertEqual(self.gateway.store.active_budget_reservations(), 1)
+
+        connection = sqlite3.connect(self.gateway.store.path)
+        events = connection.execute(
+            "SELECT sequence, state, reason_code, usage_event_id FROM gateway_request_attempt_events ORDER BY sequence"
+        ).fetchall()
+        connection.close()
+        self.assertEqual(
+            events,
+            [(1, "pending", None, None), (2, "outcome_unknown", "provider_stream_interrupted", None)],
+        )
+
     def test_post_relay_finalization_failure_leaves_pending_evidence_without_buffering(self) -> None:
         before = len(FakeProviderHandler.requests)
         with mock.patch.object(
-            self.gateway.store,
+            type(self.gateway.provider_reliability_store),
             "finalize_request_attempt",
             side_effect=sqlite3.OperationalError("test-finalization-interruption"),
         ):
@@ -1084,6 +1458,11 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.config = GatewayConfig.load(self.config_path)
         self.gateway = GatewayServer(self.config)
         self.gateway_thread = serve_in_thread(self.gateway)
+
+    def _config_with_failover(self) -> dict:
+        config_value = self._config(self.provider.server_port, _free_port())
+        config_value["model_routes"]["engineering-fast"]["failover_alias"] = "engineering-deep"
+        return config_value
 
     def _config(self, provider_port: int, gateway_port: int) -> dict:
         return {

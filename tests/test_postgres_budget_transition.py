@@ -13,6 +13,7 @@ from uuid import uuid4
 
 import hormuz.postgres as postgres_module
 from hormuz._budget_schema import TABLE_DDL
+from hormuz._provider_reliability_schema import TABLE_DDL as PROVIDER_TABLES
 from hormuz.postgres import PostgresStorageError, migrate_postgres
 from hormuz.postgres_usage_store import PostgresUsageStore
 
@@ -49,7 +50,7 @@ class PostgresBudgetTransitionTests(PostgresTestCase):
         )
 
     def setUp(self):
-        self.assertEqual(postgres_module.POSTGRES_SCHEMA_VERSION, 13)
+        self.assertEqual(postgres_module.POSTGRES_SCHEMA_VERSION, 14)
         self._drop_schema(self.schema)
         self.request = {
             "backend": "postgresql",
@@ -100,31 +101,31 @@ class PostgresBudgetTransitionTests(PostgresTestCase):
         original = postgres_module._migration_sql
 
         def migration(version, schema, *roles):
-            self.assertEqual(version, 13)
+            self.assertIn(version, (13, 14))
             ddl = original(version, schema, *roles)
-            return ddl.split(";", 1)[0] + "; SELECT 1 / 0;" if fail else ddl
+            return ddl.split(";", 1)[0] + "; SELECT 1 / 0;" if fail and version == 13 else ddl
 
         with mock.patch.object(
             postgres_module, "_migration_sql", side_effect=migration
         ):
-            self.assertEqual(self.migrate().version, 13)
+            self.assertEqual(self.migrate().version, 14)
 
     def assert_prior_state_preserved(self):
         current = copy.deepcopy(self.snapshot())
         current["rows"] = {
             table: rows
             for table, rows in current["rows"].items()
-            if table not in TABLE_DDL
+            if table not in set(TABLE_DDL) | set(PROVIDER_TABLES)
         }
         current["shape"] = [
             row
             for row in current["shape"]
-            if not row[0].startswith("portfolio_work_budget_")
+            if not row[0].startswith(("portfolio_work_budget_", "gateway_provider_"))
         ]
         current["rows"]["hormuz_schema_migrations"] = [
             row
             for row in current["rows"]["hormuz_schema_migrations"]
-            if json.loads(row[0])["version"] != 13
+            if json.loads(row[0])["version"] not in {13, 14}
         ]
         self.assertEqual(current, self.before)
 
@@ -132,10 +133,10 @@ class PostgresBudgetTransitionTests(PostgresTestCase):
         self.upgrade()
         self.assert_prior_state_preserved()
         current = self.snapshot()
-        self.assertEqual(len(current["rows"]), 58)
+        self.assertEqual(len(current["rows"]), 60)
         self.assertTrue(all(not current["rows"][table] for table in TABLE_DDL))
         self.runtime().verify_ready()
-        with mock.patch.object(postgres_module, "POSTGRES_SCHEMA_VERSION", 14):
+        with mock.patch.object(postgres_module, "POSTGRES_SCHEMA_VERSION", 15):
             with self.assertRaises(PostgresStorageError) as caught:
                 self.migrate()
         self.assertEqual(
@@ -168,7 +169,7 @@ class PostgresBudgetTransitionTests(PostgresTestCase):
             connection.execute(
                 self.sql.SQL(
                     "UPDATE {}.hormuz_schema_migrations "
-                    "SET version=14 WHERE version=13"
+                    "SET version=15 WHERE version=14"
                 ).format(self.sql.Identifier(self.schema))
             )
         newer = self.snapshot()
@@ -187,7 +188,7 @@ class PostgresBudgetTransitionTests(PostgresTestCase):
             connection.execute(
                 self.sql.SQL(
                     "UPDATE {}.hormuz_schema_migrations "
-                    "SET version=13,state='applying' WHERE version=14"
+                    "SET version=14,state='applying' WHERE version=15"
                 ).format(self.sql.Identifier(self.schema))
             )
         partial = self.snapshot()

@@ -237,6 +237,15 @@ REQUIRED_BUDGET_RUNTIME_SDIST_PATHS = (
     "tests/test_sqlite_budget.py",
     "tests/test_postgres_budget.py",
 )
+REQUIRED_PROVIDER_RELIABILITY_SDIST_PATHS = (
+    "docs/PROVIDER_RELIABILITY.md",
+    "docs/decisions/0013-policy-bounded-provider-failover.md",
+    "hormuz/provider_reliability.py",
+    "hormuz/_provider_reliability_schema.py",
+    "hormuz/migrations/postgresql/0014_provider_reliability.sql",
+    "tests/test_provider_reliability_schema.py",
+    "tests/test_gateway.py",
+)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -270,6 +279,7 @@ def main(argv: list[str] | None = None) -> int:
     _assert_portfolio_extension_sdist_boundary(sdist)
     _assert_budget_preflight_sdist_boundary(sdist)
     _assert_budget_runtime_sdist_boundary(sdist)
+    _assert_provider_reliability_sdist_boundary(sdist)
     _verify_isolated_install(wheel, config, python)
     print(
         "verified core distribution boundary: no context/runtime data and complete deployment/usability assets"
@@ -428,6 +438,18 @@ def _assert_budget_runtime_sdist_boundary(path: Path) -> None:
     ]
     if missing:
         raise RuntimeError(f"Budget runtime incomplete in {path.name}: {', '.join(sorted(missing))}")
+
+
+def _assert_provider_reliability_sdist_boundary(path: Path) -> None:
+    members = tuple(name.lstrip("./") for name in _sdist_members(path))
+    missing = [
+        required for required in REQUIRED_PROVIDER_RELIABILITY_SDIST_PATHS
+        if not any(f"/{member}".endswith(f"/{required}") for member in members)
+    ]
+    if missing:
+        raise RuntimeError(
+            f"Provider reliability incomplete in {path.name}: {', '.join(sorted(missing))}"
+        )
 
 
 def _verify_isolated_install(wheel: Path, config_template: Path, base_python: Path) -> None:

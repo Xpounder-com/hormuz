@@ -22,6 +22,7 @@ from .audit_chain import (
     audit_chain_checkpoint_position,
 )
 from .config import Identity
+from .provider_reliability import ProviderAttemptMetrics, ProviderFailoverContext
 from .contracts import (
     ALLOCATION_BASIS_DIRECT_GATEWAY_REQUEST,
     AUDIT_CHAIN_ENTRY_LEGACY_SCHEMA_VERSION,
@@ -145,6 +146,62 @@ class WorkBudgetRequestRepository(Protocol):
         ttl_seconds: int,
         work_budget: WorkBudgetContext,
     ) -> RequestAttempt: ...
+
+
+class ProviderReliabilityRepository(Protocol):
+    """Internal capability for atomic provider-attempt reliability evidence.
+
+    This is composed beside the frozen v1 :class:`UsageRepository` contract.
+    It owns only the begin/finalize transitions that add failover or timing
+    evidence to the same transaction as the request-attempt ledger.
+    """
+
+    def begin_request_attempt(
+        self,
+        *,
+        identity: Identity,
+        client: str,
+        protocol: str,
+        requested_model: str,
+        resolved_alias: str | None,
+        upstream_model: str | None,
+        policy_version: str,
+        policy_action: str,
+        redaction_count: int,
+        redaction_rules: tuple[str, ...],
+        scopes: tuple[ReservationScope, ...],
+        reserved_tokens: int,
+        reserved_cost_microusd: int,
+        ttl_seconds: int,
+        work_budget: WorkBudgetContext | None,
+        provider_failover: ProviderFailoverContext,
+    ) -> RequestAttempt: ...
+
+    def finalize_request_attempt(
+        self,
+        *,
+        attempt: RequestAttempt,
+        organization_id: str,
+        status: str,
+        provider_reported_model: str | None = None,
+        input_tokens: int = 0,
+        output_tokens: int = 0,
+        cache_read_tokens: int = 0,
+        cache_write_tokens: int = 0,
+        reasoning_tokens: int = 0,
+        cost_microusd: int = 0,
+        provider_request_id: str | None = None,
+        provider_metrics: ProviderAttemptMetrics,
+    ) -> None: ...
+
+    def mark_request_attempt_outcome_unknown(
+        self,
+        *,
+        attempt: RequestAttempt,
+        organization_id: str,
+        reason_code: str,
+        provider_metrics: ProviderAttemptMetrics,
+    ) -> bool: ...
 
 
 @dataclass(frozen=True)

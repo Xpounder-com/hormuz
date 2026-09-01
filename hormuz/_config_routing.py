@@ -12,6 +12,7 @@ from ._config_values import (
     _environment_name,
     _number,
     _object,
+    _optional_string,
     _string,
 )
 from .config import ConfigError, KeyCustodyConfig, ModelRoute, UpstreamConfig
@@ -94,6 +95,22 @@ def build_model_route_domain(
         if not isinstance(alias, str) or not alias.strip():
             raise ConfigError("model_routes keys must be non-empty strings")
         item = _object(value, f"model_routes.{alias}")
+        unsupported_route_fields = set(item).difference(
+            {
+                "protocol",
+                "upstream_model",
+                "input_cost_per_million",
+                "cache_read_cost_per_million",
+                "cache_write_cost_per_million",
+                "output_cost_per_million",
+                "failover_alias",
+            }
+        )
+        if unsupported_route_fields:
+            raise ConfigError(
+                f"model_routes.{alias} contains unsupported fields: "
+                + ", ".join(sorted(str(field) for field in unsupported_route_fields))
+            )
         protocol = _string(item.get("protocol"), f"model_routes.{alias}.protocol")
         if protocol not in upstreams:
             raise ConfigError(f"model_routes.{alias}.protocol must be openai or anthropic")
@@ -116,6 +133,10 @@ def build_model_route_domain(
             output_cost_per_million=_number(
                 item.get("output_cost_per_million", 0),
                 f"model_routes.{alias}.output_cost_per_million",
+            ),
+            failover_alias=_optional_string(
+                item.get("failover_alias"),
+                f"model_routes.{alias}.failover_alias",
             ),
         )
     return model_routes

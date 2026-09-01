@@ -69,6 +69,23 @@ class RepositoryCompositionTests(unittest.TestCase):
         custom = object.__new__(CustomUsageStore)
         self.assertIsNone(router.create_work_budget_request_repository(custom))
 
+    def test_provider_reliability_capability_is_explicit_and_builtin_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            config = replace(self.config, database_path=Path(temporary) / "usage.sqlite3")
+            usage = router.create_usage_store(config)
+            capability = router.create_provider_reliability_repository(usage)
+
+        self.assertIsInstance(capability, router.ProviderReliabilityAdapter)
+        self.assertNotEqual(capability, usage)
+        compatible_v1_only = mock.create_autospec(UsageRepository, instance=True)
+        self.assertIsNone(router.create_provider_reliability_repository(compatible_v1_only))
+
+        class CustomUsageStore(UsageStore):
+            pass
+
+        custom = object.__new__(CustomUsageStore)
+        self.assertIsNone(router.create_provider_reliability_repository(custom))
+
     def test_read_only_initialization_failure_precedes_the_optional_repository(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             config = replace(self.config, database_path=Path(temporary) / "missing" / "usage.sqlite3")

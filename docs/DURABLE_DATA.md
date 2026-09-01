@@ -36,6 +36,7 @@ unregistered table.
 | `usage_and_secret_evidence` | `gateway_secret_events`, `gateway_usage_events` | `gateway_secret_events`, `gateway_usage_events` | Event-time identity/team, client/model/policy outcome, tokens, estimated cost, provider-request metadata, and rule IDs/counts. No prompt, response, or matched secret value. |
 | `budget_reservations` | `gateway_budget_reservations` | `gateway_budget_reservations` | Temporary conservative token/cost reservations bound to organization, team, actor, and attempt metadata. |
 | `request_attempt_ledger` | `gateway_request_attempt_events`, `gateway_request_attempts` | `gateway_request_attempt_events`, `gateway_request_attempts` | Content-free pre-egress attempt identity, routing/policy/redaction metadata, reservations, terminal/unknown state, and usage linkage. |
+| `provider_reliability_evidence` | `gateway_provider_attempt_metrics`, `gateway_provider_failover_events` | `gateway_provider_attempt_metrics`, `gateway_provider_failover_events` | Append-only per-egress monotonic header/first-byte/total timing, provider/downstream byte counts, provider status, and one-hop attempt linkage with fixed trigger reason. No prompt or response body. |
 | `audit_chain_state` | `gateway_audit_chain_checkpoints`, `gateway_audit_chain_entries`, `gateway_audit_chain_epochs`, `gateway_audit_chain_heads` | `gateway_audit_chain_checkpoints`, `gateway_audit_chain_entries`, `gateway_audit_chain_epochs`, `gateway_audit_chain_heads` | Tenant-qualified event references, sequence, timestamps, hashes, checkpoint receipts, and external object versions. |
 | `policy_control` | — | `policy_active_versions`, `policy_administrators`, `policy_control_events`, `policy_tenants`, `policy_versions` | Administrator identity keys, immutable policy JSON/documents, activation pointers, hashes, summaries, and control events. Policy documents are organization configuration, not request content. |
 | `custody_control` | — | `custody_administrators`, `custody_control_events`, `custody_operation_approvals`, `custody_operation_intents`, `custody_tenants` | Tenant/admin identities, fixed operation types, approvals, target/parameter fingerprints, retention configuration, and content-free control events. No plaintext protected input. |
@@ -55,6 +56,10 @@ adds five tables in SQLite migration 9 / PostgreSQL migration 13. None of these
 source changes is by itself a v1.1.0 release. Provider-invoice/general-ledger
 reconciliation, live connectors, scorecards and recommendations remain
 separately gated and have no tables in this inventory.
+The provider-reliability source slice adds two content-free, append-only tables
+in SQLite migration 10 / PostgreSQL migration 14. They store gateway-observed
+latency/byte counters and the exact one-hop failover relationship, never a
+prompt or response body. See [PROVIDER_RELIABILITY.md](PROVIDER_RELIABILITY.md).
 #214 stays open for final-candidate
 transition proof. See [REGISTRY.md](REGISTRY.md) for the opt-in authority and
 [REGISTRY_TRANSITION.md](REGISTRY_TRANSITION.md) for the application/database
