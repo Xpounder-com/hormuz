@@ -474,10 +474,25 @@ def _assert_provider_reliability_sdist_boundary(path: Path) -> None:
 
 
 def _verify_isolated_install(wheel: Path, config_template: Path, base_python: Path, *, sdist: Path) -> None:
-    with tempfile.TemporaryDirectory(prefix="hormuz-core-wheel-") as temporary:
+    # Session persistence rejects any database path beneath a group- or
+    # world-writable ancestor. Python's default temporary directory is /tmp on
+    # Linux, so use the reviewed checkout as the secure proof root instead of
+    # weakening the production storage boundary for test infrastructure.
+    with tempfile.TemporaryDirectory(
+        prefix=".hormuz-core-wheel-",
+        dir=config_template.parent,
+    ) as temporary:
         root = Path(temporary)
+        root.chmod(0o700)
+        process_temporary = root / "tmp"
+        process_temporary.mkdir(mode=0o700)
         environment = dict(os.environ)
         environment.pop("PYTHONPATH", None)
+        environment.update(
+            TMPDIR=str(process_temporary),
+            TEMP=str(process_temporary),
+            TMP=str(process_temporary),
+        )
         virtual_environment = root / "venv"
         subprocess.run(
             [base_python, "-m", "venv", str(virtual_environment)],
