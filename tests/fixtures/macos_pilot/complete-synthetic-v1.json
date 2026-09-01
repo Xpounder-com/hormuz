@@ -1,0 +1,161 @@
+{
+  "artifact": {
+    "archive_bytes": 59,
+    "archive_name": "Hormuz-0.1.0-notarized.zip",
+    "archive_sha256": "1ef88da25204c94007e474da5b88eb7761574668d4c61e11cbdef7e11c5a46d8",
+    "build": "2",
+    "bundle_identifier": "com.example.hormuzpilot",
+    "distribution_proof_sha256": "6d9a87e0a52dd9e4973daa03243094dd0255db94148af0472238c811a627ca4c",
+    "notarization_summary_sha256": "ca4086fbdf115cb260ead3b3a8ac8e8d89ffde294b9f89ab5cf57a160a82c3c6",
+    "source_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "submission_id": "11111111-1111-4111-8111-111111111111",
+    "team_identifier": "ABCDEFGHIJ",
+    "version": "0.1.0",
+    "workflow_run_url": "https://github.com/Xpounder-com/hormuz/actions/runs/1"
+  },
+  "claim_scope": "signed_macos_controlled_external_pilot_readiness",
+  "clean_machine_runs": [
+    {
+      "architecture": "arm64",
+      "artifact_sha256": "1ef88da25204c94007e474da5b88eb7761574668d4c61e11cbdef7e11c5a46d8",
+      "developer_tools_absent": true,
+      "gatekeeper_accepted": true,
+      "installed_in_applications": true,
+      "launch_succeeded": true,
+      "macos_major": 26,
+      "quarantine_present": true,
+      "run_id": "mcr:20000000-0000-4000-8000-000000000001",
+      "started_at": "2026-09-01T15:00:00Z"
+    },
+    {
+      "architecture": "x86_64",
+      "artifact_sha256": "1ef88da25204c94007e474da5b88eb7761574668d4c61e11cbdef7e11c5a46d8",
+      "developer_tools_absent": true,
+      "gatekeeper_accepted": true,
+      "installed_in_applications": true,
+      "launch_succeeded": true,
+      "macos_major": 15,
+      "quarantine_present": true,
+      "run_id": "mcr:20000000-0000-4000-8000-000000000002",
+      "started_at": "2026-09-01T16:00:00Z"
+    }
+  ],
+  "client_auth_recovery": [
+    {
+      "artifact_sha256": "1ef88da25204c94007e474da5b88eb7761574668d4c61e11cbdef7e11c5a46d8",
+      "automatic_replay_count": 1,
+      "client": "codex",
+      "client_version": "0.147.0",
+      "completed": true,
+      "explicit_retry_count": 0,
+      "first_status": 401,
+      "native_keychain_helper": true,
+      "provider_egress_after_success": 1,
+      "provider_egress_on_rejected_turn": 0,
+      "refresh_count": 1
+    },
+    {
+      "artifact_sha256": "1ef88da25204c94007e474da5b88eb7761574668d4c61e11cbdef7e11c5a46d8",
+      "automatic_replay_count": 0,
+      "client": "claude-code",
+      "client_version": "2.1.233",
+      "completed": true,
+      "explicit_retry_count": 1,
+      "first_status": 401,
+      "native_keychain_helper": true,
+      "provider_egress_after_success": 1,
+      "provider_egress_on_rejected_turn": 0,
+      "refresh_count": 1
+    }
+  ],
+  "evidence_kind": "synthetic_test_fixture",
+  "generated_at": "2026-09-01T17:00:00Z",
+  "hosted_gateway": {
+    "availability_sla_claimed": false,
+    "cancellation_outcome_unknown_recorded": true,
+    "cancellation_replay_count": 0,
+    "cancellation_upstream_closed": true,
+    "cancellation_verified": true,
+    "deployment_evidence_url": "https://github.com/Xpounder-com/hormuz/actions/runs/2",
+    "durable_sessions": true,
+    "failover_rehearsal_passed": true,
+    "failover_hop_limit": 1,
+    "failover_link_record_count": 1,
+    "https": true,
+    "identity_provider": "okta",
+    "inference_enabled": true,
+    "latency_measurement_verified": true,
+    "latency_first_body_byte_sample_count": 4,
+    "latency_header_sample_count": 5,
+    "latency_total_sample_count": 5,
+    "live_provider_request_count": 4,
+    "max_inflight_streams": 8,
+    "monitoring_configured": true,
+    "policy_bounded_same_protocol_failover_verified": true,
+    "postgresql_durable": true,
+    "postgresql_pool_wait_monitoring": true,
+    "profile": "external_pilot",
+    "provider_attempt_record_count": 5,
+    "provider_credentials_server_only": true,
+    "provider_protocols": [
+      "anthropic",
+      "openai"
+    ],
+    "recovery_drill_passed": true,
+    "recovery_evidence_url": "https://github.com/Xpounder-com/hormuz/actions/runs/3",
+    "single_region_acknowledged": true,
+    "source_commit": "dddddddddddddddddddddddddddddddddddddddd",
+    "streaming_verified": true,
+    "streaming_first_chunk_before_completion": true,
+    "support_path_published": true,
+    "tenant_rls": true,
+    "worker_saturation_monitoring": true
+  },
+  "lifecycle": {
+    "credential_file_absent": true,
+    "keychain_session_created": true,
+    "lock_unlock_preserved_session": true,
+    "native_helper_used": true,
+    "newer_build_update_verified": true,
+    "previous_build_rollback_verified": true,
+    "previous_notarized_archive_retained": true,
+    "real_oidc_login": true,
+    "refresh_rotated_session": true,
+    "restart_preserved_session": true,
+    "rollback_to_build": "1",
+    "same_build_reinstall_verified": true,
+    "server_revocation_denied_session": true,
+    "sign_out_removed_session": true,
+    "update_from_build": "1",
+    "update_to_build": "2"
+  },
+  "open_blockers": [],
+  "operator_attestations": {
+    "all_failed_runs_included": true,
+    "artifact_default_branch_source": true,
+    "artifact_download_digest_verified": true,
+    "artifact_workflow_head_matches_source": true,
+    "credentials_absent": true,
+    "customer_data_absent": true,
+    "evidence_content_free": true,
+    "existing_external_onboarding_counts_unchanged": true,
+    "no_availability_sla_claim": true,
+    "prompts_responses_absent": true
+  },
+  "reviews": {
+    "accessibility": {
+      "independent_reviewer": true,
+      "reference": "https://github.com/Xpounder-com/hormuz/issues/13",
+      "reference_type": "public_issue",
+      "status": "passed"
+    },
+    "security": {
+      "independent_reviewer": true,
+      "reference": "https://github.com/Xpounder-com/hormuz/issues/9",
+      "reference_type": "public_issue",
+      "status": "passed"
+    }
+  },
+  "schema_id": "hormuz.macos-pilot-qualification",
+  "schema_version": 1
+}

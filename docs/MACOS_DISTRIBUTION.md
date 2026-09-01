@@ -75,4 +75,9 @@ Notarization proves Apple scanned and accepted the submitted bytes. It does not 
 - Run a real hosted gateway with production tenant isolation, provider custody, durable sessions, monitoring, recovery, and a documented support path. Keep Render authentication staging inference-disabled until that separate gateway profile exists.
 - Complete security and accessibility review, then obtain independent initial and returning-user evidence. Internal and fixture runs do not change the `0/5 initial` or `0/1 returning` counts.
 
+The executable [signed Mac pilot qualification](MACOS_PILOT_QUALIFICATION.md)
+binds these gates to the exact notarized archive, distribution proof, and Apple
+notarization summary. Its synthetic fixture validates only the contract shape;
+it can never qualify a pilot or change the external-onboarding counts.
+
 There is no authenticated automatic updater yet. Distribute versioned archives manually during the pilot and retain the previous notarized archive and digest for controlled rollback. Do not promise an availability or latency SLA from signing, notarization, or a single-node Render staging deployment.

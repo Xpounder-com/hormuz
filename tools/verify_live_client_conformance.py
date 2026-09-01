@@ -36,14 +36,21 @@ from hormuz.contracts import (
     validate_audit_event,
 )
 from hormuz.server import GatewayRequestHandler, GatewayServer, serve_in_thread
+try:
+    from tools.client_release_versions import (
+        SUPPORTED_CLAUDE_CODE_VERSION,
+        SUPPORTED_CODEX_VERSION,
+    )
+except ModuleNotFoundError:  # Direct execution sets tools/ as sys.path[0].
+    from client_release_versions import (  # type: ignore[no-redef]
+        SUPPORTED_CLAUDE_CODE_VERSION,
+        SUPPORTED_CODEX_VERSION,
+    )
 
 
 SCHEMA_ID = "hormuz.live-client-conformance"
 SCHEMA_VERSION = 1
 ACKNOWLEDGEMENT = "I_UNDERSTAND_LIVE_PROVIDER_CALLS_HAVE_COST_AND_USE_DEDICATED_KEYS"
-SUPPORTED_CODEX_VERSION = "0.147.0"
-SUPPORTED_CLAUDE_CODE_VERSION = "2.1.233"
-
 _SINCE_ALL_EVENTS = "2000-01-01T00:00:00+00:00"
 _ORGANIZATION_ID = "hormuz-live-client-conformance"
 _TEAM_ID = "release-conformance"
