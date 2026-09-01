@@ -12,6 +12,10 @@ Options:
   --build NUMBER       Positive CFBundleVersion integer (default: 1)
   --identity NAME      Developer ID Application identity; may also be set with
                        HORMUZ_CODESIGN_IDENTITY
+  --prebuilt-binary PATH
+                       Package this previously built universal Hormuz binary
+                       instead of compiling on the signing machine.
+  --prebuilt-dsym PATH Optional dSYM directory paired with --prebuilt-binary.
   --ad-hoc             Build a distribution-shaped local validation archive.
                        This output is explicitly not distributable.
 EOF
@@ -24,6 +28,8 @@ HORMUZ_BUNDLE_ID="com.xpounder.hormuz"
 HORMUZ_VERSION="0.1.0"
 HORMUZ_BUILD_NUMBER="1"
 HORMUZ_IDENTITY="${HORMUZ_CODESIGN_IDENTITY:-}"
+HORMUZ_PREBUILT_BINARY=""
+HORMUZ_PREBUILT_DSYM=""
 HORMUZ_AD_HOC=0
 
 while [ "$#" -gt 0 ]; do
@@ -33,6 +39,8 @@ while [ "$#" -gt 0 ]; do
     --version) HORMUZ_VERSION="${2:-}"; shift 2 ;;
     --build) HORMUZ_BUILD_NUMBER="${2:-}"; shift 2 ;;
     --identity) HORMUZ_IDENTITY="${2:-}"; shift 2 ;;
+    --prebuilt-binary) HORMUZ_PREBUILT_BINARY="${2:-}"; shift 2 ;;
+    --prebuilt-dsym) HORMUZ_PREBUILT_DSYM="${2:-}"; shift 2 ;;
     --ad-hoc) HORMUZ_AD_HOC=1; shift ;;
     --help|-h) usage; exit 0 ;;
     *) usage; exit 2 ;;
@@ -55,6 +63,24 @@ if ! [[ "$HORMUZ_BUILD_NUMBER" =~ ^[1-9][0-9]*$ ]]; then
   echo "Build number must be a positive integer." >&2
   exit 2
 fi
+if [ -n "$HORMUZ_PREBUILT_DSYM" ] && [ -z "$HORMUZ_PREBUILT_BINARY" ]; then
+  echo "--prebuilt-dsym requires --prebuilt-binary." >&2
+  exit 2
+fi
+if [ -n "$HORMUZ_PREBUILT_BINARY" ]; then
+  if [ -L "$HORMUZ_PREBUILT_BINARY" ] || [ ! -f "$HORMUZ_PREBUILT_BINARY" ]; then
+    echo "The prebuilt Hormuz binary is not a regular file." >&2
+    exit 2
+  fi
+  HORMUZ_PREBUILT_BINARY="$(cd "$(dirname "$HORMUZ_PREBUILT_BINARY")" && pwd -P)/$(basename "$HORMUZ_PREBUILT_BINARY")"
+fi
+if [ -n "$HORMUZ_PREBUILT_DSYM" ]; then
+  if [ -L "$HORMUZ_PREBUILT_DSYM" ] || [ ! -d "$HORMUZ_PREBUILT_DSYM" ]; then
+    echo "The prebuilt Hormuz dSYM is not a directory." >&2
+    exit 2
+  fi
+  HORMUZ_PREBUILT_DSYM="$(cd "$(dirname "$HORMUZ_PREBUILT_DSYM")" && pwd -P)/$(basename "$HORMUZ_PREBUILT_DSYM")"
+fi
 if [ "$HORMUZ_AD_HOC" -eq 0 ]; then
   case "$HORMUZ_IDENTITY" in
     "Developer ID Application: "*) ;;
@@ -76,7 +102,9 @@ HORMUZ_OUTPUT_DIRECTORY="$(cd "$HORMUZ_OUTPUT_DIRECTORY" && pwd)"
 if [ -z "${DEVELOPER_DIR:-}" ] && [ -d /Applications/Xcode.app/Contents/Developer ]; then
   export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
 fi
-xcrun --find swift >/dev/null
+if [ -z "$HORMUZ_PREBUILT_BINARY" ]; then
+  xcrun --find swift >/dev/null
+fi
 xcrun --find codesign >/dev/null
 xcrun --find lipo >/dev/null
 
@@ -92,16 +120,36 @@ trap cleanup EXIT
 
 export CLANG_MODULE_CACHE_PATH="$HORMUZ_TEMPORARY/clang-module-cache"
 export SWIFTPM_MODULECACHE_OVERRIDE="$HORMUZ_TEMPORARY/swiftpm-module-cache"
-HORMUZ_SCRATCH="$HORMUZ_TEMPORARY/build"
-swift build --package-path "$HORMUZ_MAC_ROOT" --scratch-path "$HORMUZ_SCRATCH" \
-  --configuration release --arch arm64 --arch x86_64 --product Hormuz
-HORMUZ_BINARY_SOURCE="$(swift build --package-path "$HORMUZ_MAC_ROOT" --scratch-path "$HORMUZ_SCRATCH" \
-  --configuration release --arch arm64 --arch x86_64 --show-bin-path)/Hormuz"
+if [ -n "$HORMUZ_PREBUILT_BINARY" ]; then
+  HORMUZ_BINARY_SOURCE="$HORMUZ_PREBUILT_BINARY"
+  HORMUZ_DSYM_SOURCE="$HORMUZ_PREBUILT_DSYM"
+else
+  HORMUZ_SCRATCH="$HORMUZ_TEMPORARY/build"
+  swift build --package-path "$HORMUZ_MAC_ROOT" --scratch-path "$HORMUZ_SCRATCH" \
+    --configuration release --arch arm64 --arch x86_64 --product Hormuz
+  HORMUZ_BINARY_SOURCE="$(swift build --package-path "$HORMUZ_MAC_ROOT" --scratch-path "$HORMUZ_SCRATCH" \
+    --configuration release --arch arm64 --arch x86_64 --show-bin-path)/Hormuz"
+  HORMUZ_DSYM_SOURCE="$(dirname "$HORMUZ_BINARY_SOURCE")/Hormuz.dSYM"
+fi
+case "$(lipo -archs "$HORMUZ_BINARY_SOURCE")" in
+  "arm64 x86_64"|"x86_64 arm64") ;;
+  *)
+    echo "The Hormuz release binary must contain exactly arm64 and x86_64." >&2
+    exit 1
+    ;;
+esac
 
 HORMUZ_BUNDLE="$HORMUZ_OUTPUT_DIRECTORY/Hormuz.app"
 HORMUZ_BINARY="$HORMUZ_BUNDLE/Contents/MacOS/Hormuz"
 mkdir -p "$HORMUZ_BUNDLE/Contents/MacOS" "$HORMUZ_BUNDLE/Contents/Resources"
 cp "$HORMUZ_BINARY_SOURCE" "$HORMUZ_BINARY"
+case "$(lipo -archs "$HORMUZ_BINARY")" in
+  "arm64 x86_64"|"x86_64 arm64") ;;
+  *)
+    echo "The copied Hormuz release binary changed architecture." >&2
+    exit 1
+    ;;
+esac
 cp "$HORMUZ_MAC_ROOT/Resources/Info.plist" "$HORMUZ_BUNDLE/Contents/Info.plist"
 cp "$HORMUZ_MAC_ROOT/Resources/Hormuz.icns" "$HORMUZ_BUNDLE/Contents/Resources/Hormuz.icns"
 plutil -replace CFBundleIdentifier -string "$HORMUZ_BUNDLE_ID" "$HORMUZ_BUNDLE/Contents/Info.plist"
@@ -123,8 +171,7 @@ codesign --verify --strict --verbose=4 "$HORMUZ_BUNDLE"
 COPYFILE_DISABLE=1 ditto --norsrc --noextattr --noqtn --noacl -c -k --keepParent \
   "$HORMUZ_BUNDLE" "$HORMUZ_ARCHIVE"
 
-HORMUZ_DSYM_SOURCE="$(dirname "$HORMUZ_BINARY_SOURCE")/Hormuz.dSYM"
-if [ -d "$HORMUZ_DSYM_SOURCE" ]; then
+if [ -n "$HORMUZ_DSYM_SOURCE" ] && [ -d "$HORMUZ_DSYM_SOURCE" ]; then
   COPYFILE_DISABLE=1 ditto --norsrc --noextattr --noqtn --noacl -c -k --keepParent \
     "$HORMUZ_DSYM_SOURCE" "$HORMUZ_OUTPUT_DIRECTORY/Hormuz-$HORMUZ_VERSION.dSYM.zip"
 fi

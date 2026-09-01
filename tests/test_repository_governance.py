@@ -549,6 +549,58 @@ class RepositoryGovernanceTests(unittest.TestCase):
             ):
                 validate_repository_governance(root)
 
+    def test_macos_distribution_must_keep_build_off_signing_runner(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._copy_contract(root)
+            workflow = root / ".github/workflows/macos-distribution.yml"
+            value = workflow.read_text(encoding="utf-8")
+            workflow.write_text(
+                value.replace(
+                    "    needs: build-and-test\n",
+                    "    needs: unrelated-job\n",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                RepositoryGovernanceError,
+                "distribution build/sign isolation changed",
+            ):
+                validate_repository_governance(root)
+
+    def test_macos_distribution_build_cannot_receive_signing_secret(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._copy_contract(root)
+            workflow = root / ".github/workflows/macos-distribution.yml"
+            value = workflow.read_text(encoding="utf-8")
+            secret_line = (
+                "          HORMUZ_NOTARY_KEY_ID: "
+                "${{ secrets.APPLE_NOTARY_KEY_ID }}\n"
+            )
+            build_marker = "      - name: Record native toolchain\n"
+            self.assertEqual(value.count(secret_line), 1)
+            self.assertEqual(value.count(build_marker), 1)
+            value = value.replace(secret_line, "", 1)
+            value = value.replace(
+                build_marker,
+                (
+                    "      - name: Unsafe build credential\n"
+                    "        env:\n"
+                    + secret_line
+                    + "        run: 'true'\n"
+                    + build_marker
+                ),
+                1,
+            )
+            workflow.write_text(value, encoding="utf-8")
+            with self.assertRaisesRegex(
+                RepositoryGovernanceError,
+                "distribution build/sign isolation changed",
+            ):
+                validate_repository_governance(root)
+
     def test_candidate_environment_secret_inventory_check_is_required(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
