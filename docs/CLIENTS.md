@@ -86,7 +86,14 @@ The helper does not load server configuration and does not mint tokens. It re-re
 
 ## Deployment boundary
 
-For a company rollout, endpoint management should install the client configuration and provision a unique identity for each human or service account. Shared employee tokens make per-person attribution and revocation unreliable. OIDC JWT verification is available now; native browser login, refresh-token custody, opaque-token handling, and SCIM remain later milestones. Provider keys remain server-side in every design.
+For a company rollout, endpoint management should install the client configuration
+and provision a unique identity for each human or service account. Shared employee
+tokens make per-person attribution and revocation unreliable. OIDC JWT verification
+is available. The opt-in [local browser login preview](HOSTED_LOGIN_LOCAL.md) adds
+opaque, rotating client sessions, and [local team onboarding](TEAM_ONBOARDING.md)
+adds invitations and member removal. These previews still require real identity
+provider qualification, signed client distribution, and hosted recovery evidence
+before a managed rollout. SCIM remains future work. Provider keys remain server-side.
 
 Hormuz governs the model-provider request path. It does not govern Codex or
 Claude Code shell commands, MCP servers, Git traffic, browser requests, or

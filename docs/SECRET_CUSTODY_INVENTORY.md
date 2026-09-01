@@ -20,7 +20,7 @@ custody integration tests separately prove encryption and recovery behavior.
 
 ## Ownership boundary
 
-The active core has two different custody categories:
+The active core has four custody categories:
 
 1. **Hormuz-managed protected material.** Provider credentials may be stored
    in owner-only encrypted envelope files. Metadata-only audit artifacts use
@@ -32,6 +32,28 @@ The active core has two different custody categories:
    and S3-compatible credentials remain owned by the customer deployment
    secret manager or the authorized operator process.
    Hormuz holds them only in process memory for their configured consumer.
+3. **Opt-in local browser sessions.** A dedicated, externally injected master
+   key derives separate HMAC and AES-GCM keys for credential hashes and
+   transient OIDC flow state. OIDC client secrets are separately injected.
+   Client access/refresh pairs are held in the OS secure store; there is no
+   plaintext-file fallback. These local session keys do not use the managed
+   KMS envelope or custody-executor lifecycle. This is a local integration
+   slice, not a claim of hosted production custody.
+
+   Team invitation codes have a separate, explicit handoff boundary: the local
+   operator writes a new POSIX mode-0600 file for manual private delivery. The
+   session database stores only keyed invitation/recipient hashes. This is not a
+   plaintext fallback for access/refresh credentials or provider keys. The inventory
+   restricts this handoff mode to the invitation writer. Operators own delivery,
+   revocation and file retention; reinvitation never changes an established subject.
+   The shared master key cannot be rotated in place without a recipient-hash
+   migration plan; see [managed-directory recovery limits](TEAM_ONBOARDING.md).
+4. **Hosted off-disk backup.** The offline operator imports a distinct random
+   `data_encryption` key from an owner-only file and streams the fixed hosted
+   snapshot into an AES-256-GCM archive. The key is never an environment value,
+   command argument, log field or archive member. Keep the archive, backup key,
+   and session master key in separate custody locations. This path does not use
+   provider custody or the runtime session key, and the CLI rejects key reuse.
 
 The second category must not be recursively placed behind the same service it
 is needed to access. For example, Hormuz cannot use OpenBao Transit to decrypt
@@ -54,9 +76,9 @@ entrypoints without inspecting the credential selected by the SDK.
 | Key purpose | Status in active core | Current consumer |
 | --- | --- | --- |
 | `provider_credential` | Active | Gateway provider-credential envelopes |
-| `data_encryption` | Active | Metadata-only immutable audit artifacts |
-| `identity_connector_secret` | Reserved | No active-core managed material |
-| `session_material` | Reserved | Browser-session work remains deferred |
+| `data_encryption` | Active | Metadata-only immutable audit artifacts and offline authenticated hosted-state archives |
+| `identity_connector_secret` | Reserved managed-envelope purpose | OIDC login secrets are externally injected; no connector envelope migration |
+| `session_material` | Active when login enabled | Local session master key, keyed hashes, encrypted transient flow state, and OS-secured client credentials |
 | `approval_fingerprint` | Reserved | Approval workflow is outside the reduced core |
 
 Reserved means the name and separation requirement are retained, but the core
@@ -66,6 +88,21 @@ an implemented identity-connector envelope migration.
 
 ## Rotation and revocation ownership
 
+The opt-in [administrator console](ADMIN_CONSOLE_LOCAL.md) reuses the separately
+derived session hash/AEAD keys for its opaque cookie hashes and transient OIDC
+flow. Its `console-browser-cookies` entry narrowly permits the `_cookie_header`
+writer to hand a short-lived HttpOnly credential to the browser. That custody
+mode is rejected for environment reads, ambient credentials and other writers;
+it does not relax provider envelope custody. HTTPS cookies are host-only and
+Secure; explicit loopback HTTP is for local development only. Console cookies,
+flow cookies and CSRF tokens have built-in redaction patterns.
+
+Operator grant changes and revocation invalidate console sessions; member removal
+revokes both native and console sessions and the grant atomically. A new console
+login replaces prior console sessions for the grant. Console logout leaves native
+client sessions unchanged. Browser and server expiry enforce a bounded lifetime.
+The browser's own backup/retention behavior remains under user control.
+
 - Provider credential operators replace an environment-injected credential or
   use the custody operator path to seal and rewrap an envelope.
 - Database operators rotate the distinct runtime, migration, policy-control,
@@ -74,6 +111,22 @@ an implemented identity-connector envelope migration.
 - Identity operators rotate static or short-lived administrator credentials;
   the policy and custody services continue to authorize the resulting principal
   rather than trusting an actor name supplied to the CLI.
+- For configured-subject-only deployments, identity operators rotate the local session master key by replacing the
+  injected value and restarting the broker, invalidating all prior sessions
+  and pending flows. Rotate before restoring a session backup to avoid replay
+  or revocation rollback. OIDC client-secret rotation also requires a restart.
+- Once managed memberships are enabled, one-way recipient hashes and restored
+  access decisions require a directory migration/revocation reconciliation plan.
+  Simple key replacement is not a complete managed-directory recovery procedure;
+  see [team onboarding](TEAM_ONBOARDING.md). Console grants and revocations must
+  also be reconciled before a restored directory serves traffic.
+- Backup operators generate a new independent archive key under the applicable
+  retention policy, verify each transferred archive before deleting its source
+  copy, and keep at least one usable key separate from the retained ciphertext.
+  Key loss is unrecoverable; replacing a key applies only to new archives and
+  does not re-encrypt an existing archive.
+- Session owners log out to revoke the server credential family before local
+  deletion. The helper serializes refresh using a private metadata-only lock.
 - Policy-recovery operators separately protect and rotate the opt-in break-glass
   credential.
 - Custody operators rotate key-service authorization and purpose-specific key

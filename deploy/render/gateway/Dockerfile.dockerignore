@@ -1,0 +1,16 @@
+**
+!pyproject.toml
+!README.md
+!LICENSE
+!requirements/
+!requirements/oci-build-linux-amd64.lock
+!requirements/oci-runtime-linux-amd64.lock
+!hormuz/
+!hormuz/**
+!deploy/
+!deploy/render/
+!deploy/render/gateway/
+!deploy/render/gateway/Dockerfile
+!deploy/render/gateway/active.Caddyfile
+!deploy/render/gateway/maintenance.Caddyfile
+# No profile, credentials, state, tests or local artifacts enter any layer.

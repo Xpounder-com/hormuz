@@ -1,6 +1,6 @@
 # External OIDC resource-server conformance
 
-Hormuz is currently a JWT **resource server**. It verifies a provider-issued access token and maps the stable `(issuer, subject)` pair to an already configured Hormuz identity. It is not yet a browser-login or session-broker product.
+This checkpoint covers Hormuz as a JWT **resource server**. It verifies a provider-issued access token and maps the stable `(issuer, subject)` pair to an already configured Hormuz identity. The later [local browser-login](HOSTED_LOGIN_LOCAL.md) and [administrator-console](ADMIN_CONSOLE_LOCAL.md) drafts require separate browser/app-registration validation; this older proof does not qualify them.
 
 `tools/oidc_reference_conformance.py` is a one-time release-gate harness for proving that behavior against an external provider. It:
 
@@ -29,6 +29,14 @@ Do not grant the reference client a client secret, administrative APIs, offline 
 ## Okta Integrator Free Plan reference
 
 Okta is a reference profile, not a Hormuz product dependency. The generic contract remains usable with any conforming identity provider.
+
+The live Okta reference checkpoint was recorded in
+[PR #30](https://github.com/Xpounder-com/hormuz/pull/30), merged August 23, 2026.
+The harness remains in the current source. No credential was retained by that
+proof; its success does not establish that the old tenant or application remains
+active. The confidential browser client in the later local-login draft requires
+its own secret and registered gateway callbacks; do not reuse the public native
+reference app's assumptions as evidence of browser-login readiness.
 
 In an Okta Integrator Free Plan organization:
 

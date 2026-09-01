@@ -43,7 +43,8 @@ class SecretInventoryTests(unittest.TestCase):
         self.assertEqual(set(purposes), KEY_PURPOSES)
         self.assertEqual(purposes["provider_credential"], "active")
         self.assertEqual(purposes["data_encryption"], "active")
-        self.assertEqual(purposes["session_material"], "reserved")
+        self.assertEqual(purposes["session_material"], "active")
+        self.assertEqual(purposes["identity_connector_secret"], "reserved")
         self.assertEqual(purposes["approval_fingerprint"], "reserved")
 
     def test_missing_or_duplicate_inventory_entry_fails_closed(self) -> None:
@@ -58,6 +59,56 @@ class SecretInventoryTests(unittest.TestCase):
         with self.assertRaises(SecretInventoryError) as raised:
             validate_secret_inventory(duplicate, source_root=ROOT)
         self.assertEqual(raised.exception.code, "secret_inventory_duplicate_id")
+
+    def test_local_session_custody_does_not_relax_provider_envelope_requirements(self) -> None:
+        candidate = copy.deepcopy(self.inventory)
+        provider = next(item for item in candidate["managed_materials"] if item["id"] == "provider-credential-envelope")
+        provider["custody_mode"] = "keyed_hash"
+        with self.assertRaises(SecretInventoryError) as raised:
+            validate_secret_inventory(candidate, source_root=ROOT)
+        self.assertEqual(raised.exception.code, "secret_inventory_managed_custody_invalid")
+
+    def test_invitation_handoff_is_restricted_to_its_operator_writer(self) -> None:
+        candidate = copy.deepcopy(self.inventory)
+        candidate["environment_reads"][1]["custody_mode"] = "private_invitation_handoff"
+        with self.assertRaisesRegex(SecretInventoryError, "secret_inventory_secret_custody_invalid"):
+            validate_secret_inventory(candidate, source_root=ROOT)
+        candidate = copy.deepcopy(self.inventory)
+        handoff = next(item for item in candidate["managed_materials"] if item["id"] == "team-invitation-handoff")
+        handoff["source_module"] = "hormuz/session_store.py"
+        handoff["source_qualname"] = "SQLiteSessionStore._digest"
+        with self.assertRaisesRegex(SecretInventoryError, "secret_inventory_managed_custody_invalid"):
+            validate_secret_inventory(candidate, source_root=ROOT)
+
+    def test_console_cookie_custody_cannot_be_reused_for_other_secret_sources(self) -> None:
+        for field, value in (("source_qualname", "_cookie"), ("storage_owner", "customer_filesystem"),
+                             ("runtime_consumer", "gateway_runtime"), ("rotation_authority", "identity_operator"),
+                             ("key_purpose", "provider_credential")):
+            candidate = copy.deepcopy(self.inventory)
+            entry = next(item for item in candidate["managed_materials"] if item["id"] == "console-browser-cookies")
+            entry[field] = value
+            with self.subTest(field=field), self.assertRaises(SecretInventoryError):
+                validate_secret_inventory(candidate, source_root=ROOT)
+        candidate = copy.deepcopy(self.inventory)
+        candidate["environment_reads"][1]["custody_mode"] = "browser_http_only_cookie"
+        with self.assertRaisesRegex(SecretInventoryError, "secret_inventory_secret_custody_invalid"):
+            validate_secret_inventory(candidate, source_root=ROOT)
+
+    def test_hosted_backup_key_and_archive_custody_are_exact(self) -> None:
+        mutations = (
+            ("hosted-backup-key-import", "rotation_authority", "identity_operator"),
+            ("hosted-backup-key-import", "source_qualname", "_validated_key"),
+            ("hosted-offsite-backup-archive", "material_class", "data_encryption_key"),
+            ("hosted-offsite-backup-archive", "runtime_consumer", "gateway_runtime"),
+        )
+        for entry_id, field, value in mutations:
+            candidate = copy.deepcopy(self.inventory)
+            entry = next(item for item in candidate["managed_materials"] if item["id"] == entry_id)
+            entry[field] = value
+            with self.subTest(entry=entry_id, field=field), self.assertRaisesRegex(
+                SecretInventoryError, "secret_inventory_managed_custody_invalid"
+            ):
+                validate_secret_inventory(candidate, source_root=ROOT)
 
     def test_new_environment_read_requires_inventory_review(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

@@ -16,6 +16,7 @@ SCHEMA_VERSION = 1
 INVENTORY_PATH = Path("docs/durable-data-v1.json")
 DOCUMENT_PATH = Path("docs/DURABLE_DATA.md")
 SQLITE_SCHEMA_PATH = Path("hormuz/_sqlite_schema.py")
+SESSION_SCHEMA_PATH = Path("hormuz/session_store.py")
 POSTGRES_RUNTIME_PATH = Path("hormuz/postgres.py")
 POSTGRES_MIGRATION_PATH = Path("hormuz/migrations/postgresql")
 CONTENT_BOUNDARIES = {
@@ -24,6 +25,7 @@ CONTENT_BOUNDARIES = {
     "identity_and_policy_metadata",
     "custody_authorization_metadata",
     "custody_lifecycle_metadata",
+    "session_identity_and_encrypted_transient_auth",
 }
 EXPECTED_ARTIFACT_IDS = {
     "audit_chain_checkpoint",
@@ -33,6 +35,15 @@ EXPECTED_ARTIFACT_IDS = {
     "postgresql_schema",
     "public_release_artifacts",
     "sqlite_database_file",
+    "session_database_file",
+    "client_session_secure_store",
+    "team_invitation_file",
+    "console_browser_cookies",
+    "hosted_profile_file",
+    "hosted_backup_key_file",
+    "hosted_offsite_backup_archive",
+    "hosted_state_marker",
+    "hosted_state_snapshot",
 }
 EXPECTED_EXCLUDED_SYSTEM_IDS = {
     "client_local_history",
@@ -177,6 +188,15 @@ def _schema_tables(root: Path) -> tuple[set[str], set[str]]:
         if sqlite.intersection(registry_tables):
             raise DurableDataInventoryError("sqlite_table_owned_more_than_once")
         sqlite.update(registry_tables)
+    session_tables = set(SQLITE_TABLE.findall(_read_text(root / SESSION_SCHEMA_PATH)))
+    for path in ("hormuz/_onboarding_schema.py", "hormuz/_console_schema.py"):
+        additions = set(SQLITE_TABLE.findall(_read_text(root / path)))
+        if session_tables.intersection(additions):
+            raise DurableDataInventoryError("sqlite_table_owned_more_than_once")
+        session_tables.update(additions)
+    if sqlite.intersection(session_tables):
+        raise DurableDataInventoryError("sqlite_table_owned_more_than_once")
+    sqlite.update(session_tables)
     postgres_sources = [_read_text(root / POSTGRES_RUNTIME_PATH)]
     migration_root = root / POSTGRES_MIGRATION_PATH
     try:
