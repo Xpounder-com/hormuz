@@ -71,7 +71,7 @@ Notarization proves Apple scanned and accepted the submitted bytes. It does not 
 
 - Download the artifact through the intended delivery channel, apply normal quarantine, extract it, and confirm Gatekeeper acceptance on clean Apple Silicon and Intel Macs without developer tools.
 - Install in `/Applications`, complete real IdP login, restart, lock/unlock, refresh, sign out, revoke, reinstall the same build, update to a newer build, and test a supported rollback. Confirm the credential remains available only where intended.
-- Qualify the pinned Codex and Claude Code clients when a cached access token receives `401`: refresh and retry only the authentication exchange, never an ambiguous inference request.
+- Re-run the pinned-client `401` gate with the signed installed app. The provider-free protocol gate proves Codex refreshes and completes with one provider egress; Claude Code refreshes without egress on the rejected turn, then an explicit next request matches its clean-credential egress count. The signed-artifact run must compose those semantics with the native Keychain helper.
 - Run a real hosted gateway with production tenant isolation, provider custody, durable sessions, monitoring, recovery, and a documented support path. Keep Render authentication staging inference-disabled until that separate gateway profile exists.
 - Complete security and accessibility review, then obtain independent initial and returning-user evidence. Internal and fixture runs do not change the `0/5 initial` or `0/1 returning` counts.
 

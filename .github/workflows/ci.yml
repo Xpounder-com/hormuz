@@ -781,4 +781,6 @@ jobs:
         run: |
           python -m unittest -v \
             tests.test_gateway.GatewayIntegrationTests.test_installed_codex_routes_through_gateway \
-            tests.test_gateway.GatewayIntegrationTests.test_official_claude_code_routes_through_gateway
+            tests.test_gateway.GatewayIntegrationTests.test_installed_codex_command_auth_recovers_after_401_without_duplicate_provider_egress \
+            tests.test_gateway.GatewayIntegrationTests.test_official_claude_code_routes_through_gateway \
+            tests.test_gateway.GatewayIntegrationTests.test_official_claude_code_refreshes_after_401_and_requires_explicit_request_retry

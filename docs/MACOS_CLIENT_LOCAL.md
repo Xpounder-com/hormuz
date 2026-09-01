@@ -159,10 +159,15 @@ never be deployed or exposed beyond loopback.
 
 The settings mechanisms follow the pinned clients' behavior and the [Claude Code
 CLI reference](https://code.claude.com/docs/en/cli-reference) and [settings reference](https://code.claude.com/docs/en/settings).
-Client compatibility is version-specific. In particular, recovery from a cached
-old access token after another process rotates the session needs an explicit
-native-helper/official-client 401-retry qualification before a customer pilot;
-successful startup and a manually forced refresh do not prove that whole path.
+Client compatibility is version-specific. The blocking pinned-client gate gives
+each client a stale access token while the synthetic credential command already
+holds the rotated token. Codex reruns the command after `401` and completes with
+exactly one provider egress. Claude Code reruns the command but does not replay
+the rejected inference; the next explicit request succeeds with the same simulated
+generation-egress count as a clean-credential control. This qualifies the
+client-side retry semantics without a live provider. A signed installed-client
+run must still compose that behavior with the native Keychain helper after lock,
+restart, replacement, update, and rollback.
 
 ## Before any customer distribution
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import http.client
 import json
 import os
+import shlex
 import shutil
 import sqlite3
 import socket
@@ -29,6 +30,23 @@ GATEWAY_TOKEN = "company-user-token-never-forward"
 CLAUDE_ONLY_TOKEN = "company-claude-only-token-never-forward"
 OPENAI_KEY = "provider-openai-secret"
 ANTHROPIC_KEY = "provider-anthropic-secret"
+
+
+def _write_rotating_client_auth_helper(root: Path) -> tuple[Path, Path]:
+    """Return stale material once, then the current synthetic session token."""
+    count = root / "client-auth-helper-count"
+    helper = root / "client-auth-helper.py"
+    helper.write_text(
+        "#!/usr/bin/env python3\n"
+        "import pathlib, sys\n"
+        "path = pathlib.Path(sys.argv[1])\n"
+        "calls = int(path.read_text()) + 1 if path.exists() else 1\n"
+        "path.write_text(str(calls))\n"
+        "print('expired-session-token' if calls == 1 else sys.argv[2])\n",
+        encoding="utf-8",
+    )
+    helper.chmod(0o700)
+    return helper, count
 
 
 class FakeProviderHandler(BaseHTTPRequestHandler):
@@ -1367,6 +1385,56 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertIs(upstream["body"]["stream"], True)
         self.assertEqual(upstream["headers"]["authorization"], f"Bearer {OPENAI_KEY}")
 
+    @unittest.skipUnless(shutil.which("codex"), "Codex CLI is not installed")
+    def test_installed_codex_command_auth_recovers_after_401_without_duplicate_provider_egress(self) -> None:
+        helper, count = _write_rotating_client_auth_helper(self.root)
+        before = len(FakeProviderHandler.requests)
+        provider = (
+            "{name=\"Hormuz\",base_url=\"http://127.0.0.1:"
+            + str(self.gateway.server_port)
+            + "/v1\",wire_api=\"responses\",requires_openai_auth=false,auth={command="
+            + json.dumps(str(helper))
+            + ",args=["
+            + json.dumps(str(count))
+            + ","
+            + json.dumps(GATEWAY_TOKEN)
+            + "],refresh_interval_ms=0}}"
+        )
+        environment = os.environ.copy()
+        for name in ("OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_ORGANIZATION", "OPENAI_PROJECT", "CODEX_API_KEY"):
+            environment.pop(name, None)
+        result = subprocess.run(
+            [
+                "codex",
+                "exec",
+                "--ignore-user-config",
+                "--skip-git-repo-check",
+                "--ephemeral",
+                "--sandbox",
+                "read-only",
+                "-C",
+                str(self.root),
+                "-m",
+                "engineering-fast",
+                "-c",
+                'model_provider="hormuz_connector"',
+                "-c",
+                "model_providers.hormuz_connector=" + provider,
+                "Reply with exactly GATEWAY_OK and do not call tools.",
+            ],
+            env=environment,
+            text=True,
+            capture_output=True,
+            timeout=30,
+            check=False,
+        )
+        calls = int(count.read_text()) if count.exists() else 0
+        self.assertEqual(result.returncode, 0, msg=f"codex_401_recovery_failed:helper_calls={calls}")
+        self.assertEqual(calls, 2)
+        self.assertIn("GATEWAY_OK", result.stdout + result.stderr)
+        self.assertEqual(len(FakeProviderHandler.requests), before + 1)
+        self.assertTrue(str(FakeProviderHandler.requests[-1]["path"]).partition("?")[0].endswith("/responses"))
+
     @unittest.skipUnless(
         os.environ.get("HORMUZ_RUN_CLAUDE_CLIENT_TEST") == "1"
         and (shutil.which("claude") or shutil.which("npx")),
@@ -1426,6 +1494,100 @@ class GatewayIntegrationTests(unittest.TestCase):
         self.assertIs(upstream["body"]["stream"], True)
         self.assertEqual(upstream["headers"]["x-api-key"], ANTHROPIC_KEY)
         self.assertNotIn("authorization", upstream["headers"])
+
+    @unittest.skipUnless(
+        os.environ.get("HORMUZ_RUN_CLAUDE_CLIENT_TEST") == "1"
+        and (shutil.which("claude") or shutil.which("npx")),
+        "Set HORMUZ_RUN_CLAUDE_CLIENT_TEST=1 and install Claude Code or npx",
+    )
+    def test_official_claude_code_refreshes_after_401_and_requires_explicit_request_retry(self) -> None:
+        helper, count = _write_rotating_client_auth_helper(self.root)
+        settings_path = self.root / "claude-401-settings.json"
+        settings_path.write_text(
+            json.dumps(
+                {
+                    "apiKeyHelper": shlex.join([str(helper), str(count), GATEWAY_TOKEN]),
+                    "env": {
+                        "ANTHROPIC_BASE_URL": f"http://127.0.0.1:{self.gateway.server_port}",
+                        "CLAUDE_CODE_API_KEY_HELPER_TTL_MS": "60000",
+                        "ANTHROPIC_API_KEY": "",
+                        "ANTHROPIC_AUTH_TOKEN": "",
+                        "CLAUDE_CODE_OAUTH_TOKEN": "",
+                        "DISABLE_AUTOUPDATER": "1",
+                        "CLAUDE_CODE_DISABLE_UNKNOWN_MODEL_WINDOW_ENFORCEMENT": "1",
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+        environment = os.environ.copy()
+        for name in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"):
+            environment.pop(name, None)
+        claude = shutil.which("claude")
+        command = ([claude] if claude else ["npx", "-y", "@anthropic-ai/claude-code"]) + [
+            "-p",
+            "--bare",
+            "--no-session-persistence",
+            "--tools",
+            "",
+            "--settings",
+            str(settings_path),
+            "--model",
+            "claude-sonnet-5",
+            "Reply with exactly ok and do not call tools.",
+        ]
+        before = len(FakeProviderHandler.requests)
+        rejected = subprocess.run(
+            command,
+            cwd=self.root,
+            env=environment,
+            text=True,
+            capture_output=True,
+            timeout=45,
+            check=False,
+        )
+        calls_after_rejection = int(count.read_text()) if count.exists() else 0
+        self.assertNotEqual(rejected.returncode, 0)
+        self.assertEqual(calls_after_rejection, 2)
+        self.assertEqual(len(FakeProviderHandler.requests), before)
+
+        retried = subprocess.run(
+            command,
+            cwd=self.root,
+            env=environment,
+            text=True,
+            capture_output=True,
+            timeout=45,
+            check=False,
+        )
+        calls_after_retry = int(count.read_text()) if count.exists() else 0
+        self.assertEqual(retried.returncode, 0, msg=f"claude_401_recovery_failed:helper_calls={calls_after_retry}")
+        self.assertEqual(calls_after_retry, 3)
+        self.assertIn("ok", retried.stdout.lower())
+        retry_generation_requests = [
+            request
+            for request in FakeProviderHandler.requests[before:]
+            if str(request["path"]).partition("?")[0].endswith("/messages")
+        ]
+        self.assertTrue(retry_generation_requests)
+
+        control_before = len(FakeProviderHandler.requests)
+        control = subprocess.run(
+            command,
+            cwd=self.root,
+            env=environment,
+            text=True,
+            capture_output=True,
+            timeout=45,
+            check=False,
+        )
+        self.assertEqual(control.returncode, 0, msg="claude_clean_credential_control_failed")
+        control_generation_requests = [
+            request
+            for request in FakeProviderHandler.requests[control_before:]
+            if str(request["path"]).partition("?")[0].endswith("/messages")
+        ]
+        self.assertEqual(len(retry_generation_requests), len(control_generation_requests))
 
     def _post(self, path: str, body: dict, *, extra_headers: dict[str, str] | None = None, token: str = GATEWAY_TOKEN):
         connection = http.client.HTTPConnection("127.0.0.1", self.gateway.server_port, timeout=5)
