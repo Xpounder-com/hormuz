@@ -230,6 +230,15 @@ class PostgresBudgetTests(BudgetAssertions, PostgresTestCase):
     def test_denial_audit_retains_evaluation_time(self):
         self.check_denial_audit_retains_evaluation_time()
 
+    def test_attribution_sequence_exhaustion_is_audited(self):
+        self.check_attribution_sequence_exhaustion_is_audited()
+
+    def test_malformed_rate_card_coordinates_fail_report_closed(self):
+        self.check_malformed_rate_card_coordinates_fail_report_closed()
+
+    def test_rate_card_diversity_is_bounded_without_losing_accounting(self):
+        self.check_rate_card_diversity_is_bounded_without_losing_accounting()
+
     def test_denial_audit_failure_is_a_storage_failure(self):
         plan = self.create(amount="0")
         self.activate(plan)

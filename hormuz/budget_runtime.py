@@ -442,10 +442,18 @@ def prepare_work_budget(
                     evaluated_at=now_value,
                 ) from None
             raise
-    event_id = _attribution(
-        sql, organization_id=organization_id, attempt_id=attempt_id,
-        context=context, scope_chain=chain, now=now_value,
-    )
+    try:
+        event_id = _attribution(
+            sql, organization_id=organization_id, attempt_id=attempt_id,
+            context=context, scope_chain=chain, now=now_value,
+        )
+    except ReservationDenied as error:
+        if effective:
+            raise WorkBudgetDenied(
+                str(error), "attribution_invalid", _plan_refs(effective),
+                evaluated_at=now_value,
+            ) from None
+        raise
     return PreparedWorkBudget(event_id, chain)
 
 

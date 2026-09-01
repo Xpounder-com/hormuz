@@ -43,6 +43,17 @@ There is no implicit FX, allocation, repricing, procurement approval, or claim
 of savings. A configured-rate observation pins its exact rate identity and is
 never relabeled as provider-final spend.
 
+Before producing those observations, the report validates every persisted
+rate-card ID, version, and digest and fails closed on malformed evidence. Up to
+100 distinct identities remain exact one-card observations. If a plan window
+contains more, the report keeps the first 99 identities in canonical order and
+combines the remainder into one deterministic overflow observation. That row
+has a null `rate_card` because no single card represents the group; its
+provenance digest binds every constituent row, and its amount remains the exact
+sum only when every terminal estimate is present. Enforcement totals and
+coverage always include every binding, so reporting stays bounded without
+turning rate-card rotation into a gateway denial or silently dropping spend.
+
 ## Plan lifecycle and preview
 
 `WorkBudgetRepository` is an internal integration owner composed beside the
@@ -103,6 +114,9 @@ lock order; if that mandatory audit cannot commit, the outcome is a storage
 failure, not an unaudited success. PostgreSQL locks organization-month, then
 work-budget tenant, then portfolio tenant. Independent runtime instances use
 the same order, so two replicas cannot both spend the same remaining amount.
+An exhausted attribution-audit sequence under an effective plan follows this
+same coordinated denial path, ensuring the management population records the
+refusal; if that audit cannot commit, the adapter reports storage unavailable.
 If neither the request nor effective policy supplies an output-token maximum,
 the reservation has no defensible upper cost bound and the request fails closed
 before provider egress. Serialized request bytes bound only self-contained
