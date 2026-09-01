@@ -169,14 +169,43 @@ class OnboardingStoreTests(unittest.TestCase):
             events = connection.execute("SELECT decision_actor_id, decision_scope FROM session_security_events WHERE event_type = 'membership_disabled'").fetchall()
         self.assertEqual(events, [("server_local_operator", "server_local"), ("server_local_operator", "server_local")])
 
-    def test_reinvite_never_reassigns_subject_or_resurrects_old_credentials_and_flows(self):
+    def test_disabling_one_member_preserves_another_members_unbound_returning_login(self):
+        first = self.invite(email="first@example.test")
+        first_flow, first_secret = self.enrollment(first)
+        self.authorize(first_flow, sub="first-subject", email="first@example.test")
+        self.redeem(first_flow, first_secret)
+
+        second = self.invite(email="second@example.test")
+        second_flow, second_secret = self.enrollment(second)
+        self.authorize(second_flow, sub="second-subject", email="second@example.test")
+        self.redeem(second_flow, second_secret)
+
+        returning_flow, returning_secret = self.enrollment()
+        result = self.directory.disable_member(
+            organization_id="customer-a",
+            membership_id=first.membership_id,
+        )
+        self.assertEqual(result["enrollments_invalidated"], 0)
+
+        self.authorize(
+            returning_flow,
+            sub="second-subject",
+            email="changed@example.test",
+            email_verified=False,
+        )
+        principal = self.store.authenticate_access(
+            self.redeem(returning_flow, returning_secret).access_token
+        )
+        self.assertEqual(principal.membership_id, second.membership_id)
+
+    def test_reinvite_never_reassigns_subject_or_resurrects_old_credentials(self):
         invitation = self.invite()
         flow, secret = self.enrollment(invitation)
         self.authorize(flow)
         old_pair = self.redeem(flow, secret)
         pending, pending_secret = self.enrollment()
         self.authorize(pending)
-        unknown_subject_flow, _ = self.enrollment()
+        returning_flow, returning_secret = self.enrollment()
         self.directory.disable_member(organization_id="customer-a", membership_id=invitation.membership_id)
         self.clock.advance(1)
         reissued = self.directory.reinvite(organization_id="customer-a", membership_id=invitation.membership_id)
@@ -193,8 +222,9 @@ class OnboardingStoreTests(unittest.TestCase):
             self.store.refresh(old_pair.refresh_token)
         with self.assertRaises(SessionStoreError):
             self.redeem(pending, pending_secret)
-        with self.assertRaisesRegex(SessionStoreError, "enrollment_unavailable"):
-            self.authorize(unknown_subject_flow)
+        self.authorize(returning_flow)
+        returning_pair = self.redeem(returning_flow, returning_secret)
+        self.store.authenticate_access(returning_pair.access_token)
 
     def test_same_subject_cannot_accept_a_second_membership_after_email_change(self):
         first = self.invite()

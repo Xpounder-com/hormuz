@@ -39,7 +39,13 @@ jobs:
       - name: Verify active-core secret custody inventory
         run: python tools/verify_secret_inventory.py
       - name: Run unit and gateway integration tests
-        run: python -m unittest -v
+        env:
+          TMPDIR: ${{ github.workspace }}/.hormuz-test-tmp
+          TEMP: ${{ github.workspace }}/.hormuz-test-tmp
+          TMP: ${{ github.workspace }}/.hormuz-test-tmp
+        run: |
+          mkdir -m 700 "$TMPDIR"
+          python -m unittest -v
 
   package:
     name: Build and install package

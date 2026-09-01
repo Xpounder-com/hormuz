@@ -1037,13 +1037,87 @@ class GatewayIntegrationTests(unittest.TestCase):
             "FROM gateway_request_attempt_events ORDER BY sequence"
         ).fetchall()
         usage_count = connection.execute("SELECT COUNT(*) FROM gateway_usage_events").fetchone()[0]
+        metrics = connection.execute(
+            "SELECT provider_status, first_body_byte_us, total_us, "
+            "provider_bytes_read, downstream_bytes_sent "
+            "FROM gateway_provider_attempt_metrics"
+        ).fetchone()
         connection.close()
         self.assertGreater(reserved, 0)
         self.assertEqual(usage_count, 0)
+        self.assertIsNotNone(metrics)
+        assert metrics is not None
+        self.assertEqual(metrics[0], 200)
+        self.assertIsNotNone(metrics[1])
+        self.assertGreaterEqual(metrics[2], metrics[1])
+        self.assertEqual(metrics[3:], (len(body), len(body)))
         self.assertEqual(
             events,
             [(1, "pending", None, None), (2, "outcome_unknown", "provider_transport_ambiguous", None)],
         )
+
+    def test_non_event_stream_uses_available_reads_for_first_byte_metrics(self) -> None:
+        payload = json.dumps(
+            {
+                "id": "resp_incremental",
+                "object": "response",
+                "status": "completed",
+                "model": "gpt-test-fast",
+                "output": [],
+                "usage": {
+                    "input_tokens": 1,
+                    "output_tokens": 1,
+                    "total_tokens": 2,
+                },
+            },
+            separators=(",", ":"),
+        ).encode("utf-8")
+
+        class IncrementalJSONResponse:
+            status = 200
+            headers = {"Content-Type": "application/json", "x-request-id": "req_incremental"}
+
+            def __init__(self) -> None:
+                midpoint = len(payload) // 2
+                self.chunks = [payload[:midpoint], payload[midpoint:], b""]
+                self.read1_calls = 0
+
+            def getcode(self) -> int:
+                return self.status
+
+            def read(self, _size: int) -> bytes:
+                raise AssertionError("ordinary provider responses must use read1 when available")
+
+            def read1(self, _size: int) -> bytes:
+                self.read1_calls += 1
+                return self.chunks.pop(0)
+
+            def close(self) -> None:
+                return None
+
+        upstream_response = IncrementalJSONResponse()
+        with mock.patch("hormuz.server.urllib.request.urlopen", return_value=upstream_response):
+            status, _, body = self._post(
+                "/v1/responses",
+                {"model": "engineering-fast", "input": "incremental JSON response"},
+            )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(body, payload)
+        self.assertEqual(upstream_response.read1_calls, 3)
+        connection = sqlite3.connect(self.gateway.store.path)
+        metrics = connection.execute(
+            "SELECT provider_status, first_body_byte_us, total_us, "
+            "provider_bytes_read, downstream_bytes_sent "
+            "FROM gateway_provider_attempt_metrics"
+        ).fetchone()
+        connection.close()
+        self.assertIsNotNone(metrics)
+        assert metrics is not None
+        self.assertEqual(metrics[0], 200)
+        self.assertIsNotNone(metrics[1])
+        self.assertGreaterEqual(metrics[2], metrics[1])
+        self.assertEqual(metrics[3:], (len(payload), len(payload)))
 
     def test_anthropic_attempt_reserves_the_most_expensive_input_partition(self) -> None:
         with mock.patch(
@@ -1086,6 +1160,8 @@ class GatewayIntegrationTests(unittest.TestCase):
 
     def test_interrupted_provider_response_becomes_unknown_without_replay(self) -> None:
         self._restart_gateway(self._config_with_failover())
+        partial_body = b"{\"partial\": true"
+
         class InterruptedResponse:
             status = 200
             headers = {"Content-Type": "application/json", "x-request-id": "req_truncated"}
@@ -1094,7 +1170,7 @@ class GatewayIntegrationTests(unittest.TestCase):
                 return self.status
 
             def read(self, _size: int) -> bytes:
-                raise http.client.IncompleteRead(b"{\"partial\": true", 1)
+                raise http.client.IncompleteRead(partial_body, 1)
 
             def close(self) -> None:
                 return None
@@ -1117,7 +1193,18 @@ class GatewayIntegrationTests(unittest.TestCase):
         events = connection.execute(
             "SELECT sequence, state, reason_code, usage_event_id FROM gateway_request_attempt_events ORDER BY sequence"
         ).fetchall()
+        metrics = connection.execute(
+            "SELECT provider_status, first_body_byte_us, total_us, "
+            "provider_bytes_read, downstream_bytes_sent "
+            "FROM gateway_provider_attempt_metrics"
+        ).fetchone()
         connection.close()
+        self.assertIsNotNone(metrics)
+        assert metrics is not None
+        self.assertEqual(metrics[0], 200)
+        self.assertIsNotNone(metrics[1])
+        self.assertGreaterEqual(metrics[2], metrics[1])
+        self.assertEqual(metrics[3:], (len(partial_body), 0))
         self.assertEqual(
             events,
             [(1, "pending", None, None), (2, "outcome_unknown", "provider_stream_interrupted", None)],
