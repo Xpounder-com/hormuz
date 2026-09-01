@@ -70,6 +70,76 @@ LOGGER = logging.getLogger("hormuz")
 _STORAGE_FAILURES = (sqlite3.Error, EvidenceStorageError, PostgresStorageError, StorageSchemaError)
 _INGRESS_CREDENTIAL_HEADER = "X-Hormuz-Ingress-Credential"
 _RELAY_CHUNK_BYTES = 16 * 1024
+_OPENAI_PROVIDER_STATE_FIELDS = frozenset({
+    "conversation", "previous_response_id", "prompt",
+})
+_ANTHROPIC_PROVIDER_STATE_FIELDS = frozenset({"container", "mcp_servers"})
+_OPENAI_INLINE_TOOL_TYPES = frozenset({"custom", "function"})
+_ANTHROPIC_INLINE_TOOL_TYPES = frozenset({"custom"})
+_INLINE_ANTHROPIC_SOURCE_TYPES = frozenset({"base64", "content", "text"})
+
+
+def _provider_input_tokens_bounded(protocol: str, request: Mapping[str, Any]) -> bool:
+    """Recognize request inputs whose billed content is self-contained.
+
+    Serialized bytes conservatively bound inline text/data, but cannot bound
+    content a provider resolves from stored state, a URL, a file identifier,
+    or a server-side tool. Unknown reference forms fail closed when a work
+    budget is active; this classifier never fetches or inspects content.
+    """
+
+    if protocol == "openai":
+        if any(request.get(field) is not None for field in _OPENAI_PROVIDER_STATE_FIELDS):
+            return False
+        inline_tool_types = _OPENAI_INLINE_TOOL_TYPES
+    elif protocol == "anthropic":
+        if any(request.get(field) is not None for field in _ANTHROPIC_PROVIDER_STATE_FIELDS):
+            return False
+        inline_tool_types = _ANTHROPIC_INLINE_TOOL_TYPES
+    else:
+        return False
+
+    tools = request.get("tools")
+    if tools is not None:
+        if type(tools) is not list:
+            return False
+        for tool in tools:
+            if type(tool) is not dict:
+                return False
+            tool_type = tool.get("type")
+            if protocol == "anthropic" and tool_type is None:
+                continue
+            if type(tool_type) is not str or tool_type not in inline_tool_types:
+                return False
+
+    pending: list[object] = [request]
+    while pending:
+        value = pending.pop()
+        if type(value) is list:
+            pending.extend(value)
+            continue
+        if type(value) is not dict:
+            continue
+        kind = value.get("type")
+        if kind == "item_reference":
+            return False
+        if kind == "input_image":
+            if value.get("file_id") is not None:
+                return False
+            if "image_url" in value:
+                image_url = value.get("image_url")
+                if type(image_url) is not str or not image_url.startswith("data:"):
+                    return False
+        if kind == "input_file" and (
+            value.get("file_id") is not None or value.get("file_url") is not None
+        ):
+            return False
+        if kind in {"image", "document"}:
+            source = value.get("source")
+            if type(source) is not dict or source.get("type") not in _INLINE_ANTHROPIC_SOURCE_TYPES:
+                return False
+        pending.extend(value.values())
+    return True
 
 
 class GatewayServer(ThreadingHTTPServer):
@@ -914,6 +984,22 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                 return
             else:
                 request_status = "failed"
+            if successful and not usage.evidence_complete:
+                self.server.store.mark_request_attempt_outcome_unknown(
+                    attempt=attempt,
+                    organization_id=identity.organization_id,
+                    reason_code="provider_transport_ambiguous",
+                )
+                LOGGER.warning(
+                    "request_outcome_unknown actor=%s team=%s client=%s protocol=%s "
+                    "requested_model=%s reason=provider_usage_unavailable",
+                    identity.actor_id,
+                    identity.team_id,
+                    client,
+                    protocol,
+                    decision.requested_model,
+                )
+                return
             cost = route.estimate_cost_microusd(
                 input_tokens=usage.input_tokens,
                 output_tokens=usage.output_tokens,
@@ -977,12 +1063,13 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
         if not output_tokens_bounded:
             reserved_output_tokens = 0
         reserved_input_tokens = len(body)
+        input_tokens_bounded = _provider_input_tokens_bounded(protocol, request_value)
         reserved_cost_microusd = route.estimate_reservation_cost_microusd(
             input_tokens=reserved_input_tokens,
             output_tokens=max(0, reserved_output_tokens),
         )
         route_rate_card = configured_route_rate_card(
-            alias=route.alias,
+            alias=decision.resolved_alias or route.alias,
             protocol=route.protocol,
             upstream_model=route.upstream_model,
             input_cost_per_million=route.input_cost_per_million,
@@ -1024,6 +1111,7 @@ class GatewayRequestHandler(BaseHTTPRequestHandler):
                         reason_code=admission.reason,
                         reserved_output_tokens=max(0, reserved_output_tokens),
                         output_tokens_bounded=output_tokens_bounded,
+                        input_tokens_bounded=input_tokens_bounded,
                         policy_version=decision.policy_version,
                         policy_digest=policy_digest,
                         rate_card_id=str(route_rate_card["id"]),

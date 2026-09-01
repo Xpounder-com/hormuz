@@ -74,6 +74,68 @@ class PostgresBudgetTests(BudgetAssertions, PostgresTestCase):
             organization_ids=("acme", "beta"),
         )
 
+    def inject_nonpredecessor_activation(
+        self, *, plan_id, current_version, wrong_previous_version,
+        committed_at, template,
+    ):
+        with self.psycopg.connect(self.owner_dsn) as connection:
+            event_id = "f" * 32
+            connection.execute(
+                self.sql.SQL(
+                    "INSERT INTO {}.{} "
+                    "(organization_id,activation_event_id,budget_plan_id,activation_generation,"
+                    "previous_version,current_version,actor_id,reason_code,policy_version,"
+                    "policy_digest,committed_at) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
+                ).format(
+                    self.sql.Identifier(self.schema),
+                    self.sql.Identifier("portfolio_work_budget_activation_events"),
+                ),
+                (
+                    "acme", event_id, plan_id, 2, wrong_previous_version,
+                    current_version, template["actor_id"], "accepted",
+                    template["policy_version"], template["policy_digest"],
+                    committed_at,
+                ),
+            )
+            connection.execute(
+                self.sql.SQL(
+                    "UPDATE {}.{} SET active_version=%s,activation_generation=2,"
+                    "current_activation_event_id=%s,changed_at=%s "
+                    "WHERE organization_id='acme' AND budget_plan_id=%s"
+                ).format(
+                    self.sql.Identifier(self.schema),
+                    self.sql.Identifier("portfolio_work_budget_active_plans"),
+                ),
+                (current_version, event_id, committed_at, plan_id),
+            )
+
+    def _replace_budget_audit_index(self, key_columns, include_columns=()):
+        with self.psycopg.connect(self.owner_dsn) as connection:
+            connection.execute(
+                self.sql.SQL("DROP INDEX IF EXISTS {}.{}").format(
+                    self.sql.Identifier(self.schema),
+                    self.sql.Identifier(BUDGET_AUDIT_REPORT_INDEX),
+                )
+            )
+            statement = self.sql.SQL("CREATE INDEX {} ON {}.{} ({})").format(
+                self.sql.Identifier(BUDGET_AUDIT_REPORT_INDEX),
+                self.sql.Identifier(self.schema),
+                self.sql.Identifier("portfolio_work_budget_audit_events"),
+                self.sql.SQL(", ").join(
+                    self.sql.Identifier(column) for column in key_columns
+                ),
+            )
+            if include_columns:
+                statement += self.sql.SQL(" INCLUDE ({})").format(
+                    self.sql.SQL(", ").join(
+                        self.sql.Identifier(column) for column in include_columns
+                    )
+                )
+            connection.execute(statement)
+
+    def _restore_budget_audit_index(self):
+        self._replace_budget_audit_index(BUDGET_AUDIT_REPORT_COLUMNS)
+
     def test_real_schema_and_checked_in_migration(self):
         self.assertEqual(POSTGRES_SCHEMA_VERSION, 14)
         with self.psycopg.connect(self.owner_dsn) as connection:
@@ -114,6 +176,9 @@ class PostgresBudgetTests(BudgetAssertions, PostgresTestCase):
     def test_model_output_request_caps_and_missing_attribution_fail_closed(self):
         self.check_model_output_request_caps_and_missing_attribution_fail_closed()
 
+    def test_configured_route_identity_accepts_provider_model_names(self):
+        self.check_configured_route_identity_accepts_provider_model_names()
+
     def test_independent_replicas_cannot_overspend(self):
         self.check_concurrent_instances_cannot_overspend()
 
@@ -141,6 +206,12 @@ class PostgresBudgetTests(BudgetAssertions, PostgresTestCase):
     def test_missing_terminal_price_never_becomes_zero(self):
         self.check_missing_terminal_price_never_becomes_zero()
 
+    def test_denial_report_population_is_bounded(self):
+        self.check_denial_report_population_is_bounded()
+
+    def test_orphaned_denial_audits_fail_closed(self):
+        self.check_orphaned_denial_audits_fail_closed()
+
     def test_bounded_gateway_actor_is_never_silently_unaudited(self):
         self.check_bounded_gateway_actor_is_never_silently_unaudited()
 
@@ -152,6 +223,9 @@ class PostgresBudgetTests(BudgetAssertions, PostgresTestCase):
 
     def test_activation_history_is_bounded_for_reads_and_writes(self):
         self.check_activation_history_is_bounded_for_reads_and_writes()
+
+    def test_request_time_activation_predecessor_is_validated(self):
+        self.check_request_time_activation_predecessor_is_validated()
 
     def test_denial_audit_retains_evaluation_time(self):
         self.check_denial_audit_retains_evaluation_time()
@@ -260,6 +334,48 @@ class PostgresBudgetTests(BudgetAssertions, PostgresTestCase):
         self.assertLessEqual(terminal, database_now)
         self.assertLessEqual(latest[unknown.attempt_id], database_now)
         self.assertLessEqual(latest[stale.attempt_id], database_now)
+
+    def test_malformed_budget_audit_report_index_fails_without_repair(self):
+        self.addCleanup(self._restore_budget_audit_index)
+        self._replace_budget_audit_index(("organization_id", "sequence"))
+
+        with self.assertRaises(PostgresStorageError) as caught:
+            self.new_store()
+        self.assertEqual(caught.exception.code, "storage_schema_partial_upgrade")
+        with self.psycopg.connect(self.owner_dsn) as connection:
+            columns = tuple(
+                row[0]
+                for row in connection.execute(
+                    "SELECT a.attname FROM pg_class i "
+                    "JOIN pg_namespace n ON n.oid=i.relnamespace "
+                    "JOIN pg_index x ON x.indexrelid=i.oid "
+                    "JOIN unnest(x.indkey) WITH ORDINALITY k(attnum,ord) ON TRUE "
+                    "JOIN pg_attribute a ON a.attrelid=x.indrelid AND a.attnum=k.attnum "
+                    "WHERE n.nspname=%s AND i.relname=%s ORDER BY k.ord",
+                    (self.schema, BUDGET_AUDIT_REPORT_INDEX),
+                ).fetchall()
+            )
+        self.assertEqual(columns, ("organization_id", "sequence"))
+
+    def test_include_only_budget_audit_index_fails_without_repair(self):
+        self.addCleanup(self._restore_budget_audit_index)
+        self._replace_budget_audit_index(
+            BUDGET_AUDIT_REPORT_COLUMNS[:1],
+            BUDGET_AUDIT_REPORT_COLUMNS[1:],
+        )
+
+        with self.assertRaises(PostgresStorageError) as caught:
+            self.new_store()
+        self.assertEqual(caught.exception.code, "storage_schema_partial_upgrade")
+        with self.psycopg.connect(self.owner_dsn) as connection:
+            key_count = connection.execute(
+                "SELECT x.indnkeyatts FROM pg_class i "
+                "JOIN pg_namespace n ON n.oid=i.relnamespace "
+                "JOIN pg_index x ON x.indexrelid=i.oid "
+                "WHERE n.nspname=%s AND i.relname=%s",
+                (self.schema, BUDGET_AUDIT_REPORT_INDEX),
+            ).fetchone()[0]
+        self.assertEqual(key_count, 1)
 
     def test_reservation_paths_lock_month_before_sweeping_attempts(self):
         observed = []

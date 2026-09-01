@@ -271,6 +271,31 @@ def validate_budget_activation_row(row: Mapping[str, Any]) -> dict[str, Any]:
     return dict(row)
 
 
+def validate_budget_activation_predecessor(
+    activation: Mapping[str, Any],
+    predecessor: Mapping[str, Any] | None,
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """Validate one activation's adjacency to its immediate predecessor."""
+
+    verified = validate_budget_activation_row(activation)
+    if predecessor is None:
+        if verified["activation_generation"] != 1:
+            raise BudgetActivationIntegrityError()
+        return verified, None
+    verified_predecessor = validate_budget_activation_row(predecessor)
+    if (
+        verified_predecessor["organization_id"] != verified["organization_id"]
+        or verified_predecessor["budget_plan_id"] != verified["budget_plan_id"]
+        or verified_predecessor["activation_generation"]
+        != verified["activation_generation"] - 1
+        or verified["previous_version"]
+        != verified_predecessor["current_version"]
+        or verified["committed_at"] < verified_predecessor["committed_at"]
+    ):
+        raise BudgetActivationIntegrityError()
+    return verified, verified_predecessor
+
+
 def validate_budget_pointer_row(row: Mapping[str, Any]) -> dict[str, Any]:
     """Validate the mutable active pointer before following its references."""
 
@@ -672,29 +697,38 @@ def verify_postgres_budget(cursor, schema: str, error_factory) -> None:
     verify_postgres_owned_tables(
         cursor, schema, error_factory, APPEND_ONLY_TABLE_DDL, {}, expected, trigger_type=58,
     )
-    cursor.execute(
-        "SELECT array_agg(a.attname ORDER BY key.ordinality) "
-        "FROM pg_index x "
-        "JOIN pg_class t ON t.oid=x.indrelid "
-        "JOIN pg_namespace n ON n.oid=t.relnamespace "
-        "JOIN pg_class i ON i.oid=x.indexrelid "
-        "JOIN LATERAL unnest(x.indkey) WITH ORDINALITY AS key(attnum, ordinality) ON TRUE "
-        "JOIN pg_attribute a ON a.attrelid=t.oid AND a.attnum=key.attnum "
-        "WHERE n.nspname=%s AND t.relname=%s AND i.relname=%s "
-        "AND x.indisvalid AND x.indisready AND NOT x.indisunique AND x.indpred IS NULL "
-        "GROUP BY i.relname",
+    for table, index, columns in (
         (
-            schema,
             "portfolio_work_budget_reservation_bindings",
             BUDGET_BINDING_ACCOUNTING_INDEX,
+            BUDGET_BINDING_ACCOUNTING_COLUMNS,
         ),
-    )
-    index_row = cursor.fetchone()
-    index_values = None if index_row is None else tuple(
-        next(iter(index_row.values())) if isinstance(index_row, dict) else index_row[0]
-    )
-    if index_values != BUDGET_BINDING_ACCOUNTING_COLUMNS:
-        raise error_factory("storage_schema_partial_upgrade")
+        (
+            "portfolio_work_budget_audit_events",
+            BUDGET_AUDIT_REPORT_INDEX,
+            BUDGET_AUDIT_REPORT_COLUMNS,
+        ),
+    ):
+        cursor.execute(
+            "SELECT array_agg(a.attname ORDER BY key.ordinality) "
+            "FROM pg_index x "
+            "JOIN pg_class t ON t.oid=x.indrelid "
+            "JOIN pg_namespace n ON n.oid=t.relnamespace "
+            "JOIN pg_class i ON i.oid=x.indexrelid "
+            "JOIN LATERAL unnest(x.indkey) WITH ORDINALITY AS key(attnum, ordinality) ON TRUE "
+            "JOIN pg_attribute a ON a.attrelid=t.oid AND a.attnum=key.attnum "
+            "WHERE n.nspname=%s AND t.relname=%s AND i.relname=%s "
+            "AND x.indisvalid AND x.indisready AND NOT x.indisunique AND x.indpred IS NULL "
+            "AND x.indnkeyatts=%s "
+            "GROUP BY i.relname",
+            (schema, table, index, len(columns)),
+        )
+        index_row = cursor.fetchone()
+        index_values = None if index_row is None else tuple(
+            next(iter(index_row.values())) if isinstance(index_row, dict) else index_row[0]
+        )
+        if index_values != columns:
+            raise error_factory("storage_schema_partial_upgrade")
     cursor.execute(
         "SELECT c.relrowsecurity,c.relforcerowsecurity FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace "
         "WHERE n.nspname=%s AND c.relname=%s AND c.relkind='r'", (schema, ACTIVE_TABLE),
