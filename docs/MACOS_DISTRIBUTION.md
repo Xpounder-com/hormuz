@@ -59,7 +59,9 @@ The manual **Mac signed distribution** workflow performs the same steps on a Git
 | `APPLE_NOTARY_KEY_ID` | API key ID |
 | `APPLE_NOTARY_ISSUER_ID` | Team API issuer UUID |
 
-The job creates an ephemeral Keychain, imports only the supplied identity, validates notarization credentials, and deletes credential files and the Keychain before the step exits. It has read-only repository permission. It uploads the notarized archive, dSYM, and content-free proofs for 30 days; it cannot create a GitHub release or publish the artifact. Publication remains a separate digest-reviewed decision.
+The job refuses to sign a feature branch: the checked-out commit must be the repository's exact default-branch commit selected by the workflow run. The protected environment should independently restrict deployment to that branch and require a reviewer. The job creates an ephemeral Keychain, imports only the supplied identity, validates notarization credentials, and deletes credential files and the Keychain before the step exits. It has read-only repository permission. It uploads the notarized archive, dSYM, and content-free proofs for 30 days; it cannot create a GitHub release or publish the artifact. Publication remains a separate digest-reviewed decision.
+
+Apple's stapler adds `Hormuz.app/Contents/CodeResources` to the accepted app. The final archive verifier requires that ticket file only in notarized mode, compares its exact archived bytes with the stapled bundle, and rejects it from pre-notarization archives. This keeps the upload and customer archive shapes distinct while proving that the distributed ZIP retains the offline ticket.
 
 ## Pilot qualification after notarization
 

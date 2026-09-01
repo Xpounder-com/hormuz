@@ -129,6 +129,12 @@ EXPECTED_WORKFLOW_JOB_ENVIRONMENTS = {
     },
     "website.yml": {"deploy": "github-pages"},
 }
+MACOS_DISTRIBUTION_SOURCE_GUARD = (
+    "HORMUZ_EXPECTED_REF: refs/heads/${{ github.event.repository.default_branch }}",
+    'test "$GITHUB_REF" = "$HORMUZ_EXPECTED_REF"',
+    'test "$(git rev-parse HEAD)" = "$GITHUB_SHA"',
+    'test -z "$(git status --porcelain)"',
+)
 PAGES_PUBLISH_CONDITION = (
     "github.repository == 'Xpounder-com/hormuz' && "
     "github.event_name != 'pull_request' && github.ref == 'refs/heads/main'"
@@ -1181,6 +1187,12 @@ def _validate_workflows(
         if actual_environments != expected_environments:
             raise RepositoryGovernanceError(
                 f"workflow environment contract changed: {path.name}"
+            )
+        if path.name == "macos-distribution.yml" and any(
+            text.count(marker) != 1 for marker in MACOS_DISTRIBUTION_SOURCE_GUARD
+        ):
+            raise RepositoryGovernanceError(
+                "macOS distribution source guard changed"
             )
         if path.name == "website.yml":
             pages_workflow_seen = True

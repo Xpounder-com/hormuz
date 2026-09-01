@@ -19,12 +19,13 @@ from typing import BinaryIO
 
 
 MODES = {"ad-hoc", "developer-id", "notarized"}
-EXPECTED_FILES = {
+BASE_EXPECTED_FILES = {
     "Hormuz.app/Contents/Info.plist",
     "Hormuz.app/Contents/MacOS/Hormuz",
     "Hormuz.app/Contents/Resources/Hormuz.icns",
     "Hormuz.app/Contents/_CodeSignature/CodeResources",
 }
+STAPLED_TICKET = "Hormuz.app/Contents/CodeResources"
 EXPECTED_DIRECTORIES = {
     "Hormuz.app/",
     "Hormuz.app/Contents/",
@@ -57,6 +58,13 @@ def stream_digest(source: BinaryIO) -> str:
     return value.hexdigest()
 
 
+def expected_files(mode: str) -> set[str]:
+    files = set(BASE_EXPECTED_FILES)
+    if mode == "notarized":
+        files.add(STAPLED_TICKET)
+    return files
+
+
 def signing_details(bundle: Path, mode: str, expected_identifier: str) -> dict[str, object]:
     run("codesign", "--verify", "--strict", "--verbose=4", str(bundle))
     _, details = run("codesign", "-dvvv", str(bundle))
@@ -86,10 +94,13 @@ def signing_details(bundle: Path, mode: str, expected_identifier: str) -> dict[s
             raise VerificationError("developer_team_identifier_missing")
         if re.search(r"^Timestamp=.+$", details, re.MULTILINE) is None:
             raise VerificationError("secure_timestamp_missing")
+        if mode == "notarized" and "Notarization Ticket=stapled" not in details:
+            raise VerificationError("stapled_ticket_missing")
     return {"team_identifier": team_id or None, "authority": authorities[0] if authorities else None}
 
 
 def verify_archive(archive: Path, bundle: Path, mode: str, expected_identifier: str) -> None:
+    required_files = expected_files(mode)
     try:
         with zipfile.ZipFile(archive) as packaged:
             files: set[str] = set()
@@ -109,7 +120,7 @@ def verify_archive(archive: Path, bundle: Path, mode: str, expected_identifier: 
                     directories.add(entry.filename)
                     continue
                 files.add(entry.filename)
-                if entry.filename not in EXPECTED_FILES:
+                if entry.filename not in required_files:
                     continue
                 relative = path.relative_to("Hormuz.app")
                 with packaged.open(entry) as archived_file:
@@ -120,9 +131,10 @@ def verify_archive(archive: Path, bundle: Path, mode: str, expected_identifier: 
     except (FileNotFoundError, zipfile.BadZipFile) as error:
         raise VerificationError("invalid_distribution_archive") from error
 
-    if files != EXPECTED_FILES or directories != EXPECTED_DIRECTORIES:
-        missing = ",".join(sorted((EXPECTED_FILES | EXPECTED_DIRECTORIES) - (files | directories))) or "none"
-        extra = ",".join(sorted((files | directories) - (EXPECTED_FILES | EXPECTED_DIRECTORIES))) or "none"
+    if files != required_files or directories != EXPECTED_DIRECTORIES:
+        expected = required_files | EXPECTED_DIRECTORIES
+        missing = ",".join(sorted(expected - (files | directories))) or "none"
+        extra = ",".join(sorted((files | directories) - expected)) or "none"
         raise VerificationError(f"unexpected_archive_contents:missing={missing}:extra={extra}")
 
     with tempfile.TemporaryDirectory(prefix="hormuz-macos-archive-") as temporary:

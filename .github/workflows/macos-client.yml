@@ -9,6 +9,7 @@ on:
       - "script/notarize_macos_release.sh"
       - "tools/verify_macos_client.py"
       - "tools/verify_macos_distribution.py"
+      - "tests/test_macos_distribution_verifier.py"
       - "tools/verify_macos_installed_client.py"
       - "hormuz/**"
       - "tests/_session_fixtures.py"
@@ -24,6 +25,7 @@ on:
       - "script/notarize_macos_release.sh"
       - "tools/verify_macos_client.py"
       - "tools/verify_macos_distribution.py"
+      - "tests/test_macos_distribution_verifier.py"
       - "hormuz/**"
       - ".github/workflows/macos-client.yml"
   workflow_dispatch:
@@ -69,6 +71,8 @@ jobs:
           --version 0.1.0
           --build 1
           --output-directory "$RUNNER_TEMP/hormuz-macos-package"
+      - name: Test distribution archive contracts
+        run: python -m unittest tests.test_macos_distribution_verifier
       - name: Install gateway fixture dependencies
         run: python -m pip install --editable .
       - name: Verify native client against the local gateway

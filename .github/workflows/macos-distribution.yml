@@ -37,6 +37,13 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Require reviewed default-branch source
+        env:
+          HORMUZ_EXPECTED_REF: refs/heads/${{ github.event.repository.default_branch }}
+        run: |
+          test "$GITHUB_REF" = "$HORMUZ_EXPECTED_REF"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test -z "$(git status --porcelain)"
       - name: Record native toolchain
         run: |
           swift --version
@@ -80,7 +87,7 @@ jobs:
           security create-keychain -p "$HORMUZ_KEYCHAIN_PASSWORD" "$HORMUZ_KEYCHAIN"
           security set-keychain-settings -lut 21600 "$HORMUZ_KEYCHAIN"
           security unlock-keychain -p "$HORMUZ_KEYCHAIN_PASSWORD" "$HORMUZ_KEYCHAIN"
-          security import "$HORMUZ_CERTIFICATE" -k "$HORMUZ_KEYCHAIN" -P "$HORMUZ_CERTIFICATE_PASSWORD" -T /usr/bin/codesign -t cert -f pkcs12
+          security import "$HORMUZ_CERTIFICATE" -k "$HORMUZ_KEYCHAIN" -P "$HORMUZ_CERTIFICATE_PASSWORD" -T /usr/bin/codesign -f pkcs12
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$HORMUZ_KEYCHAIN_PASSWORD" "$HORMUZ_KEYCHAIN"
           security list-keychains -d user -s "$HORMUZ_KEYCHAIN"
           security default-keychain -d user -s "$HORMUZ_KEYCHAIN"

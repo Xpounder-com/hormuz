@@ -529,6 +529,26 @@ class RepositoryGovernanceTests(unittest.TestCase):
             ):
                 validate_repository_governance(root)
 
+    def test_macos_distribution_must_require_exact_default_branch_source(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._copy_contract(root)
+            workflow = root / ".github/workflows/macos-distribution.yml"
+            value = workflow.read_text(encoding="utf-8")
+            workflow.write_text(
+                value.replace(
+                    '          test "$GITHUB_REF" = "$HORMUZ_EXPECTED_REF"\n',
+                    "",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                RepositoryGovernanceError,
+                "distribution source guard changed",
+            ):
+                validate_repository_governance(root)
+
     def test_candidate_environment_secret_inventory_check_is_required(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
