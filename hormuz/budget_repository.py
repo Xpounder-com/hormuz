@@ -20,6 +20,7 @@ from uuid import uuid4
 
 from ._budget_schema import (
     ACTIVE_TABLE,
+    MAX_ACTIVE_BUDGET_PLANS,
     TABLE_DDL,
     BudgetIntegrityError,
     BudgetPlanIntegrityError,
@@ -67,7 +68,6 @@ _COVERAGE_RULE_DIGEST = hashlib.sha256(_COVERAGE_RULE_ID.encode()).hexdigest()
 _FORECAST_RULE_ID = "linear-committed-projection-v1"
 _FORECAST_RULE_DIGEST = hashlib.sha256(_FORECAST_RULE_ID.encode()).hexdigest()
 _MAX_REPORT_ATTEMPTS = 10_000
-_MAX_PREVIEW_PLANS = 1_000
 _MAX_SAFE_COUNT = 9007199254740991
 _KIND_ORDER = {"portfolio": 0, "initiative": 1, "use_case": 2}
 
@@ -327,9 +327,9 @@ class WorkBudgetRepository:
         pointers = sql.execute(
             "SELECT budget_plan_id FROM portfolio_work_budget_active_plans "
             "WHERE organization_id=? ORDER BY budget_plan_id LIMIT ?",
-            (organization, _MAX_PREVIEW_PLANS + 1),
+            (organization, MAX_ACTIVE_BUDGET_PLANS + 1),
         ).fetchall()
-        if len(pointers) > _MAX_PREVIEW_PLANS:
+        if len(pointers) > MAX_ACTIVE_BUDGET_PLANS:
             raise BudgetRepositoryError("unavailable")
         scope_refs = {
             (row["work_scope_id"], row["version"])
@@ -699,6 +699,14 @@ class WorkBudgetRepository:
                 raise BudgetRepositoryError("invalid_request")
             if current_version == request["version"]:
                 raise BudgetRepositoryError("version_conflict")
+            if pointer is None:
+                active_rows = sql.execute(
+                    "SELECT budget_plan_id FROM portfolio_work_budget_active_plans "
+                    "WHERE organization_id=? ORDER BY budget_plan_id LIMIT ?",
+                    (principal.organization_id, MAX_ACTIVE_BUDGET_PLANS),
+                ).fetchall()
+                if len(active_rows) >= MAX_ACTIVE_BUDGET_PLANS:
+                    raise BudgetRepositoryError("unavailable")
             sql.insert("portfolio_work_budget_activation_events", {
                 "organization_id": principal.organization_id, "activation_event_id": event_id,
                 "budget_plan_id": plan_id, "activation_generation": next_generation,
@@ -965,10 +973,11 @@ class WorkBudgetRepository:
             or coverage["pricing_eligible_attempts"] == 0
         ):
             return {**unavailable, "reason_code": "missing_evidence"}
-        elapsed_value, period_value = (current - start).total_seconds(), (end - start).total_seconds()
-        if not elapsed_value.is_integer() or not period_value.is_integer():
+        elapsed_delta, period_delta = current - start, end - start
+        if elapsed_delta.microseconds or period_delta.microseconds:
             return {**unavailable, "reason_code": "precision_exceeded"}
-        elapsed, period = int(elapsed_value), int(period_value)
+        elapsed = elapsed_delta.days * 86_400 + elapsed_delta.seconds
+        period = period_delta.days * 86_400 + period_delta.seconds
         try:
             with exact_context():
                 projected = Decimal(enforcement["committed_amount"]) * Decimal(period) / Decimal(elapsed)

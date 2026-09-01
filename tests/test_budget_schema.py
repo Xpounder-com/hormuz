@@ -7,7 +7,12 @@ import sqlite3
 import tempfile
 import unittest
 
-from hormuz._budget_schema import TABLE_DDL, postgres_statements
+from hormuz._budget_schema import (
+    BUDGET_BINDING_ACCOUNTING_COLUMNS,
+    BUDGET_BINDING_ACCOUNTING_INDEX,
+    TABLE_DDL,
+    postgres_statements,
+)
 from hormuz.store import StorageSchemaError, UsageStore
 
 
@@ -31,6 +36,15 @@ class BudgetSchemaTests(unittest.TestCase):
                         "SELECT state FROM hormuz_schema_migrations WHERE version=9"
                     ).fetchone(),
                     ("applied",),
+                )
+                self.assertEqual(
+                    tuple(
+                        row[2]
+                        for row in connection.execute(
+                            f"PRAGMA index_info({BUDGET_BINDING_ACCOUNTING_INDEX})"
+                        )
+                    ),
+                    BUDGET_BINDING_ACCOUNTING_COLUMNS,
                 )
                 before = list(connection.iterdump())
             UsageStore(path).verify_ready()
@@ -66,6 +80,19 @@ class BudgetSchemaTests(unittest.TestCase):
                 )
                 with closing(sqlite3.connect(path)) as connection:
                     self.assertEqual(list(connection.iterdump()), before)
+
+    def test_missing_budget_accounting_index_fails_without_automatic_repair(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "usage.sqlite3"
+            UsageStore(path)
+            with closing(sqlite3.connect(path)) as connection:
+                connection.execute(f"DROP INDEX {BUDGET_BINDING_ACCOUNTING_INDEX}")
+                before = list(connection.iterdump())
+            with self.assertRaises(StorageSchemaError) as caught:
+                UsageStore(path)
+            self.assertEqual(caught.exception.code, "storage_schema_partial_upgrade")
+            with closing(sqlite3.connect(path)) as connection:
+                self.assertEqual(list(connection.iterdump()), before)
 
     def test_packaged_postgres_migration_matches_owned_schema_source(self):
         actual = resources.files("hormuz").joinpath(

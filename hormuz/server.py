@@ -45,7 +45,12 @@ from .portfolio_wire import PREFIX as PORTFOLIO_PREFIX
 from .postgres import PostgresStorageError
 from .redaction import RedactionError, SecretRedactor
 from .store import RequestAttempt, ReservationDenied, StorageSchemaError, UsageRepository, WorkBudgetContext
-from .store_router import create_postgres_runtime_pool, create_repository_bundle, create_usage_store
+from .store_router import (
+    create_postgres_runtime_pool,
+    create_repository_bundle,
+    create_usage_store,
+    create_work_budget_request_repository,
+)
 from .usage import ResponseUsageParser
 
 
@@ -87,7 +92,12 @@ class GatewayServer(ThreadingHTTPServer):
             self.attribution_repository = portfolio.attributions
             self.budget_repository = portfolio.budgets
             policy_runtime = PolicyRuntime(config, connection_pool=self.postgres_pool)
-            self.policy_engine = PolicyEngine(config, self.store, policy_runtime=policy_runtime)
+            self.policy_engine = PolicyEngine(
+                config,
+                self.store,
+                policy_runtime=policy_runtime,
+                work_budget_requests=create_work_budget_request_repository(self.store),
+            )
             self.policy_engine.policy_runtime.verify_active_policies()
             recovered_attempts = self.store.sweep_stale_request_attempts()
             if recovered_attempts:

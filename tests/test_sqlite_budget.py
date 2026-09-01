@@ -94,6 +94,9 @@ class SQLiteBudgetTests(BudgetAssertions, unittest.TestCase):
     def test_bounded_gateway_actor_is_never_silently_unaudited(self):
         self.check_bounded_gateway_actor_is_never_silently_unaudited()
 
+    def test_active_plan_count_is_bounded_at_activation_and_request_time(self):
+        self.check_active_plan_count_is_bounded_at_activation_and_request_time()
+
     def test_denial_audit_failure_is_a_storage_failure(self):
         plan = self.create(amount="0")
         self.activate(plan)

@@ -22,6 +22,16 @@ _TIME = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 _EVENT_ID = re.compile(r"[0-9a-f]{32}\Z")
 _PLAN_DECIMAL = re.compile(r"(?:0|[1-9][0-9]{0,17})(?:\.[0-9]{1,9})?\Z")
+MAX_ACTIVE_BUDGET_PLANS = 1_000
+BUDGET_BINDING_ACCOUNTING_INDEX = "portfolio_work_budget_bindings_accounting_idx"
+BUDGET_BINDING_ACCOUNTING_COLUMNS = (
+    "organization_id",
+    "budget_plan_id",
+    "window_start_at",
+    "window_end_at",
+    "currency",
+    "request_attempt_id",
+)
 
 
 class BudgetIntegrityError(ValueError):
@@ -482,6 +492,11 @@ def sqlite_statements() -> tuple[str, ...]:
         f"CREATE TABLE {name} ({TABLE_DDL[name].format(prefix='')}) WITHOUT ROWID"
         for name in ordered
     ]
+    statements.append(
+        f"CREATE INDEX {BUDGET_BINDING_ACCOUNTING_INDEX} ON "
+        "portfolio_work_budget_reservation_bindings "
+        f"({', '.join(BUDGET_BINDING_ACCOUNTING_COLUMNS)})"
+    )
     for table in APPEND_ONLY_TABLE_DDL:
         for operation in ("UPDATE", "DELETE"):
             statements.append(
@@ -546,6 +561,11 @@ def postgres_statements(schema: str, runtime_role: str) -> str:
         "portfolio_work_budget_audit_events",
     )
     statements = [f"CREATE TABLE {prefix}{name} ({TABLE_DDL[name].format(prefix=prefix)});" for name in ordered]
+    statements.append(
+        f"CREATE INDEX {BUDGET_BINDING_ACCOUNTING_INDEX} ON "
+        f"{prefix}portfolio_work_budget_reservation_bindings "
+        f"({', '.join(BUDGET_BINDING_ACCOUNTING_COLUMNS)});"
+    )
     statements.append(
         f"ALTER TABLE {prefix}portfolio_work_budget_reservation_bindings "
         "ADD CONSTRAINT portfolio_work_budget_binding_attempt_fk "
@@ -626,6 +646,29 @@ def verify_postgres_budget(cursor, schema: str, error_factory) -> None:
     verify_postgres_owned_tables(
         cursor, schema, error_factory, APPEND_ONLY_TABLE_DDL, {}, expected, trigger_type=58,
     )
+    cursor.execute(
+        "SELECT array_agg(a.attname ORDER BY key.ordinality) "
+        "FROM pg_index x "
+        "JOIN pg_class t ON t.oid=x.indrelid "
+        "JOIN pg_namespace n ON n.oid=t.relnamespace "
+        "JOIN pg_class i ON i.oid=x.indexrelid "
+        "JOIN LATERAL unnest(x.indkey) WITH ORDINALITY AS key(attnum, ordinality) ON TRUE "
+        "JOIN pg_attribute a ON a.attrelid=t.oid AND a.attnum=key.attnum "
+        "WHERE n.nspname=%s AND t.relname=%s AND i.relname=%s "
+        "AND x.indisvalid AND x.indisready AND NOT x.indisunique AND x.indpred IS NULL "
+        "GROUP BY i.relname",
+        (
+            schema,
+            "portfolio_work_budget_reservation_bindings",
+            BUDGET_BINDING_ACCOUNTING_INDEX,
+        ),
+    )
+    index_row = cursor.fetchone()
+    index_values = None if index_row is None else tuple(
+        next(iter(index_row.values())) if isinstance(index_row, dict) else index_row[0]
+    )
+    if index_values != BUDGET_BINDING_ACCOUNTING_COLUMNS:
+        raise error_factory("storage_schema_partial_upgrade")
     cursor.execute(
         "SELECT c.relrowsecurity,c.relforcerowsecurity FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace "
         "WHERE n.nspname=%s AND c.relname=%s AND c.relkind='r'", (schema, ACTIVE_TABLE),

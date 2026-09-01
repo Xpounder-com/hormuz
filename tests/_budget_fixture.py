@@ -669,3 +669,29 @@ class BudgetAssertions:
             if row["operation"] == "reserve_denied"
         )
         self.assertEqual(denial["actor_id"], "user@example.com")
+
+    def check_active_plan_count_is_bounded_at_activation_and_request_time(self):
+        first = self.create(amount="10")
+        self.activate(first)
+        second = self.create(amount="10")
+        with mock.patch("hormuz.budget_repository.MAX_ACTIVE_BUDGET_PLANS", 1):
+            self.error("unavailable", lambda: self.activate(second))
+        self.activate(second)
+
+        with mock.patch("hormuz.budget_runtime.MAX_ACTIVE_BUDGET_PLANS", 1):
+            with self.assertRaises(ReservationDenied):
+                self.attempt(cost_microusd=1)
+
+        self.assertEqual(self.attribution_rows(), [])
+        self.assertEqual(
+            self.budget_rows()["portfolio_work_budget_reservation_bindings"],
+            [],
+        )
+        self.assertEqual(
+            [
+                row["reason_code"]
+                for row in self.budget_rows()["portfolio_work_budget_audit_events"]
+                if row["operation"] == "reserve_denied"
+            ],
+            ["attribution_invalid"],
+        )

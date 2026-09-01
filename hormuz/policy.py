@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from ._persistence import WorkBudgetRequestRepository
 from .config import GatewayConfig, Identity, ModelRoute, PolicyAnalysisContext
 from .policy_document import PolicySnapshot
 from .policy_runtime import PolicyRuntime
@@ -35,9 +36,11 @@ class PolicyEngine:
         store: UsageRepository,
         *,
         policy_runtime: PolicyRuntime | None = None,
+        work_budget_requests: WorkBudgetRequestRepository | None = None,
     ):
         self.config = config
         self.store = store
+        self._work_budget_requests = work_budget_requests
         # Explicit-snapshot analysis must not initialize managed policy
         # storage. The gateway still resolves this property during startup,
         # while compare/preview/evaluate paths can remain strictly read-only.
@@ -149,30 +152,44 @@ class PolicyEngine:
         ttl_seconds: int,
         work_budget: WorkBudgetContext | None = None,
     ) -> RequestAttempt:
-        begin = self.store.begin_request_attempt
-        if work_budget is not None:
-            begin = getattr(self.store, "_begin_request_attempt_with_work_budget", None)
-            if not callable(begin):
-                raise StorageSchemaError("storage_schema_partial_upgrade")
-        arguments = dict(
+        upstream_model = decision.route.upstream_model if decision.route is not None else None
+        scopes = self.budget_scopes(identity=identity, decision=decision)
+        if work_budget is None:
+            return self.store.begin_request_attempt(
+                identity=identity,
+                client=client,
+                protocol=protocol,
+                requested_model=decision.requested_model,
+                resolved_alias=decision.resolved_alias,
+                upstream_model=upstream_model,
+                policy_version=decision.policy_version,
+                policy_action=policy_action,
+                redaction_count=redaction_count,
+                redaction_rules=redaction_rules,
+                scopes=scopes,
+                reserved_tokens=reserved_tokens,
+                reserved_cost_microusd=reserved_cost_microusd,
+                ttl_seconds=ttl_seconds,
+            )
+        if self._work_budget_requests is None:
+            raise StorageSchemaError("storage_schema_partial_upgrade")
+        return self._work_budget_requests.begin_request_attempt(
             identity=identity,
             client=client,
             protocol=protocol,
             requested_model=decision.requested_model,
             resolved_alias=decision.resolved_alias,
-            upstream_model=decision.route.upstream_model if decision.route is not None else None,
+            upstream_model=upstream_model,
             policy_version=decision.policy_version,
             policy_action=policy_action,
             redaction_count=redaction_count,
             redaction_rules=redaction_rules,
-            scopes=self.budget_scopes(identity=identity, decision=decision),
+            scopes=scopes,
             reserved_tokens=reserved_tokens,
             reserved_cost_microusd=reserved_cost_microusd,
             ttl_seconds=ttl_seconds,
+            work_budget=work_budget,
         )
-        if work_budget is not None:
-            arguments["work_budget"] = work_budget
-        return begin(**arguments)
 
     @staticmethod
     def budget_scopes(*, identity: Identity, decision: PolicyDecision) -> tuple[ReservationScope, ...]:

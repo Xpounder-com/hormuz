@@ -119,6 +119,34 @@ class WorkBudgetContext:
     rate_card_currency: str
 
 
+class WorkBudgetRequestRepository(Protocol):
+    """Explicit internal capability for atomic v1.1 request admission.
+
+    This is composed beside the frozen v1 :class:`UsageRepository` contract.
+    It does not add a public operation to either usage adapter.
+    """
+
+    def begin_request_attempt(
+        self,
+        *,
+        identity: Identity,
+        client: str,
+        protocol: str,
+        requested_model: str,
+        resolved_alias: str | None,
+        upstream_model: str | None,
+        policy_version: str,
+        policy_action: str,
+        redaction_count: int,
+        redaction_rules: tuple[str, ...],
+        scopes: tuple[ReservationScope, ...],
+        reserved_tokens: int,
+        reserved_cost_microusd: int,
+        ttl_seconds: int,
+        work_budget: WorkBudgetContext,
+    ) -> RequestAttempt: ...
+
+
 @dataclass(frozen=True)
 class RequestAttemptState:
     """The latest immutable event position for a request attempt."""

@@ -147,6 +147,15 @@ Future portfolio repositories require the relevant #214 compatibility preflight
 and feature gates; they must own their own protocols, schemas, and SQL beside
 the unchanged usage ledger. See the [verification record](VERIFICATION.md#v1-usage-repository-composition-gate).
 
+The v1.1 work-budget runtime keeps that public boundary intact. Gateway startup
+explicitly composes a separate typed `WorkBudgetRequestRepository` adapter only
+for the two built-in usage stores. That adapter reaches the private
+adapter-owned transaction required to commit the request root, attribution,
+legacy hold, work-budget checks, and bindings atomically. A v1-only compatible
+repository continues to use `UsageRepository.begin_request_attempt`; no private
+method is discovered dynamically and no portfolio operation is added to the
+frozen protocol.
+
 ## Trust boundary
 
 Hormuz is trusted with plaintext requests and responses because it must inspect and relay them. The usage store is deliberately metadata-only. Redaction runs after authentication and policy selection but before upstream serialization. The core has no context retrieval, context lifecycle, context cache, provenance, memory, or content-storage path; the separately packaged experiment is not imported by normal gateway operation. See [CONTEXT_EXPERIMENT_MIGRATION.md](CONTEXT_EXPERIMENT_MIGRATION.md).

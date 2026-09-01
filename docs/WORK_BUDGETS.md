@@ -54,7 +54,8 @@ timestamp are protected by a composite foreign key. Reactivation appends a new
 generation; it never edits an earlier version or event. Only a plan whose
 declared window contains the database time may activate. Emergency tightening
 and rollback are explicit activations and do not erase prior consumption or
-unknown holds.
+unknown holds. A tenant may retain at most 1,000 activated plan IDs in this
+runtime version; activation and request-time scans both enforce that bound.
 
 Preview is a dry run against a nonempty frozen policy scenario suite. It cannot
 activate a plan, reserve spend, or call a provider. It evaluates the effective
@@ -119,7 +120,9 @@ security, a non-superuser/non-`BYPASSRLS` runtime, SELECT/INSERT on facts, and
 UPDATE only on the four pointer projection columns. Startup and every owner
 transaction verify the exact schema shape. Malformed persisted plan,
 activation, or active-pointer evidence is refused with a fixed error and is
-never repaired or reflected.
+never repaired or reflected. Both adapters require the same tenant-plan-window
+binding index so request-time enforcement and reporting do not scan unrelated
+historical bindings.
 
 Stop writers and pools before migration, serialize the operator action, and
 restart fresh processes. Old binaries refuse schema 9/13. Before any candidate

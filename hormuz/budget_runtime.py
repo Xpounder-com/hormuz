@@ -18,7 +18,11 @@ import re
 from typing import Any
 from uuid import uuid4
 
-from ._budget_schema import BudgetIntegrityError, validate_active_budget_rows
+from ._budget_schema import (
+    MAX_ACTIVE_BUDGET_PLANS,
+    BudgetIntegrityError,
+    validate_active_budget_rows,
+)
 from ._persistence import ReservationDenied, WorkBudgetContext
 from .attribution_admission import AdmissionError
 from .finance_values import FinanceValueError, decimal_text, exact_context
@@ -194,9 +198,28 @@ def _effective_plan_rows(sql: RuntimeBudgetSQL, organization_id: str, now: str) 
         "AND a.activation_event_id=p.current_activation_event_id "
         "LEFT JOIN portfolio_work_budget_plan_versions v ON v.organization_id=p.organization_id "
         "AND v.budget_plan_id=p.budget_plan_id AND v.version=p.active_version "
-        "WHERE p.organization_id=?",
-        (organization_id,),
+        "WHERE p.organization_id=? ORDER BY p.budget_plan_id LIMIT ?",
+        (organization_id, MAX_ACTIVE_BUDGET_PLANS + 1),
     ).fetchall()
+    if len(rows) > MAX_ACTIVE_BUDGET_PLANS:
+        reference: tuple[tuple[str, int], ...] = ()
+        for raw in rows:
+            candidate = dict(raw)
+            plan_id = candidate.get("pointer_budget_plan_id")
+            version = candidate.get("pointer_active_version")
+            if (
+                type(plan_id) is str
+                and _ID.fullmatch(plan_id) is not None
+                and type(version) is int
+                and 1 <= version <= 2147483647
+            ):
+                reference = ((plan_id, version),)
+                break
+        raise WorkBudgetDenied(
+            "The active work budget is unavailable.",
+            "attribution_invalid",
+            reference,
+        )
     result = []
     for raw in rows:
         row = dict(raw)
