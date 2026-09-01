@@ -20,7 +20,15 @@ from urllib.parse import urlsplit
 from urllib.request import ProxyHandler, Request, build_opener
 
 from ._hosted_config import BACKEND_PORT, SECRET_NAMES, HostedError, load_profile
-from ._hosted_state import check_initialized, check_recovered_closed, initialize, restore, snapshot, state_lock
+from ._hosted_state import (
+    check_initialized,
+    check_recovered_closed,
+    initialize,
+    migrate_usage,
+    restore,
+    snapshot,
+    state_lock,
+)
 
 
 def runtime_settings() -> dict[str, str]:
@@ -150,6 +158,7 @@ def main(argv=None) -> int:
     for name in ("serve", "backend", "initialize", "check", "recovery-check"):
         commands.add_parser(name)
     commands.add_parser("snapshot").add_argument("--output-directory", type=Path, required=True)
+    commands.add_parser("migrate").add_argument("--snapshot-directory", type=Path, required=True)
     commands.add_parser("restore").add_argument("--snapshot-directory", type=Path, required=True)
     for name in ("backup-export", "backup-verify", "backup-restore"):
         command = commands.add_parser(name)
@@ -177,6 +186,10 @@ def main(argv=None) -> int:
             initialize(config)
         elif args.command == "snapshot":
             snapshot(config, args.output_directory)
+        elif args.command == "migrate":
+            if settings["HORMUZ_HOSTED_MODE"] != "maintenance":
+                raise HostedError("hosted_migration_requires_maintenance")
+            result = migrate_usage(config, args.snapshot_directory)
         elif args.command == "restore":
             restore(config, args.snapshot_directory)
         elif args.command == "backup-export":
