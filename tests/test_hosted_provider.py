@@ -8,7 +8,7 @@ import sqlite3
 import tempfile
 import threading
 import unittest
-from contextlib import redirect_stderr, redirect_stdout
+from contextlib import closing, redirect_stderr, redirect_stdout
 from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
@@ -232,7 +232,7 @@ class HostedProviderHTTPTests(unittest.TestCase):
         self.assertEqual(sent_models, ["openai-primary-model", "openai-secondary-model"])
         self.assertTrue(limited.closed)
         self.assertTrue(success.closed)
-        with sqlite3.connect(self.config.database_path) as connection:
+        with closing(sqlite3.connect(self.config.database_path)) as connection:
             self.assertEqual(connection.execute(
                 "SELECT count(*) FROM gateway_provider_attempt_metrics"
             ).fetchone()[0], 2)
