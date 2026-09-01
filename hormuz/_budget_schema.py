@@ -23,6 +23,8 @@ _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 _EVENT_ID = re.compile(r"[0-9a-f]{32}\Z")
 _PLAN_DECIMAL = re.compile(r"(?:0|[1-9][0-9]{0,17})(?:\.[0-9]{1,9})?\Z")
 MAX_ACTIVE_BUDGET_PLANS = 1_000
+MAX_BUDGET_ACTIVATIONS_PER_PLAN = 1_000
+MAX_BUDGET_BINDINGS_PER_PLAN_WINDOW = 10_000
 BUDGET_BINDING_ACCOUNTING_INDEX = "portfolio_work_budget_bindings_accounting_idx"
 BUDGET_BINDING_ACCOUNTING_COLUMNS = (
     "organization_id",
@@ -361,6 +363,8 @@ APPEND_ONLY_TABLE_DDL = {
         PRIMARY KEY (organization_id, budget_plan_id, version),
         UNIQUE (organization_id, sequence),
         UNIQUE (organization_id, budget_plan_id, content_digest),
+        UNIQUE (organization_id, budget_plan_id, version,
+                window_start_at, window_end_at, currency),
         FOREIGN KEY (organization_id, work_scope_id, work_scope_version)
             REFERENCES {prefix}portfolio_work_scope_versions (organization_id, work_scope_id, version),
         FOREIGN KEY (organization_id, budget_plan_id, supersedes_version)
@@ -425,8 +429,11 @@ APPEND_ONLY_TABLE_DDL = {
         valuation_rule_digest TEXT NOT NULL CHECK (length(valuation_rule_digest) = 64),
         bound_at TEXT NOT NULL CHECK (length(bound_at) BETWEEN 20 AND 27),
         PRIMARY KEY (organization_id, request_attempt_id, budget_plan_id),
-        FOREIGN KEY (organization_id, budget_plan_id, budget_plan_version)
-            REFERENCES {prefix}portfolio_work_budget_plan_versions (organization_id, budget_plan_id, version),
+        FOREIGN KEY (organization_id, budget_plan_id, budget_plan_version,
+                     window_start_at, window_end_at, currency)
+            REFERENCES {prefix}portfolio_work_budget_plan_versions
+                (organization_id, budget_plan_id, version,
+                 window_start_at, window_end_at, currency),
         FOREIGN KEY (organization_id, attribution_event_id)
             REFERENCES {prefix}portfolio_attribution_events (organization_id, attribution_event_id),
         FOREIGN KEY (organization_id, budget_plan_id, budget_plan_version, activation_generation,

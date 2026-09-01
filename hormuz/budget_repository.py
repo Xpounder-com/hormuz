@@ -21,6 +21,7 @@ from uuid import uuid4
 from ._budget_schema import (
     ACTIVE_TABLE,
     MAX_ACTIVE_BUDGET_PLANS,
+    MAX_BUDGET_ACTIVATIONS_PER_PLAN,
     TABLE_DDL,
     BudgetIntegrityError,
     BudgetPlanIntegrityError,
@@ -429,9 +430,11 @@ class WorkBudgetRepository:
         rows = sql.execute(
             "SELECT * FROM portfolio_work_budget_activation_events "
             "WHERE organization_id=? AND budget_plan_id=? "
-            "ORDER BY activation_generation",
-            (organization, plan_id),
+            "ORDER BY activation_generation LIMIT ?",
+            (organization, plan_id, MAX_BUDGET_ACTIVATIONS_PER_PLAN + 1),
         ).fetchall()
+        if len(rows) > MAX_BUDGET_ACTIVATIONS_PER_PLAN:
+            raise BudgetRepositoryError("unavailable")
         result: list[tuple[dict[str, Any], dict[str, Any]]] = []
         activated_versions: set[int] = set()
         for raw in rows:
@@ -692,7 +695,7 @@ class WorkBudgetRepository:
             expected_reason = "reactivated" if previously_active else "accepted"
             if request["reason_code"] != expected_reason:
                 raise BudgetRepositoryError("invalid_request")
-            if generation >= 9007199254740991:
+            if generation >= MAX_BUDGET_ACTIVATIONS_PER_PLAN:
                 raise BudgetRepositoryError("version_conflict")
             next_generation, event_id, now = generation + 1, uuid4().hex, sql.now()
             if not row["window_start_at"] <= now < row["window_end_at"]:

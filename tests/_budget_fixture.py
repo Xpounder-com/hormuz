@@ -13,6 +13,7 @@ import threading
 from unittest import mock
 
 from hormuz._persistence import WorkBudgetContext
+from hormuz.budget_runtime import WorkBudgetDenied
 from hormuz.budget_repository import BudgetRepositoryError
 from hormuz.config import Policy
 from hormuz.policy_scenarios import create_policy_scenario_suite
@@ -695,3 +696,69 @@ class BudgetAssertions:
             ],
             ["attribution_invalid"],
         )
+
+    def check_request_time_accounting_history_is_bounded(self):
+        plan = self.create(amount="10")
+        self.activate(plan)
+        self.attempt(cost_microusd=1)
+        self.attempt(cost_microusd=1)
+
+        with mock.patch(
+            "hormuz.budget_runtime.MAX_BUDGET_BINDINGS_PER_PLAN_WINDOW", 2,
+        ):
+            with self.assertRaises(ReservationDenied):
+                self.attempt(cost_microusd=1)
+
+        self.assertEqual(
+            len(self.budget_rows()["portfolio_work_budget_reservation_bindings"]),
+            2,
+        )
+        self.assertEqual(
+            [
+                row["reason_code"]
+                for row in self.budget_rows()["portfolio_work_budget_audit_events"]
+                if row["operation"] == "reserve_denied"
+            ],
+            ["budget_ceiling"],
+        )
+
+    def check_activation_history_is_bounded_for_reads_and_writes(self):
+        first = self.create(amount="10")
+        self.activate(first)
+        second = self.create(
+            amount="11", budget_plan_id=first["budget_plan_id"], expected_version=1,
+        )
+        with mock.patch(
+            "hormuz.budget_repository.MAX_BUDGET_ACTIVATIONS_PER_PLAN", 1,
+        ):
+            self.error(
+                "version_conflict",
+                lambda: self.activate(second, active=1, generation=1),
+            )
+        self.activate(second, active=1, generation=1)
+        with mock.patch(
+            "hormuz.budget_repository.MAX_BUDGET_ACTIVATIONS_PER_PLAN", 1,
+        ):
+            self.error(
+                "unavailable",
+                lambda: self.repository.get_plan(ADMIN, first["budget_plan_id"]),
+            )
+
+    def check_denial_audit_retains_evaluation_time(self):
+        plan = self.create(amount="10")
+        self.activate(plan)
+        evaluated_at = _timestamp(datetime.now(timezone.utc))
+        self.store._record_work_budget_denial(
+            self.identity,
+            WorkBudgetDenied(
+                "synthetic evaluated denial",
+                "budget_ceiling",
+                ((plan["budget_plan_id"], plan["version"]),),
+                evaluated_at=evaluated_at,
+            ),
+        )
+        denial = next(
+            row for row in self.budget_rows()["portfolio_work_budget_audit_events"]
+            if row["operation"] == "reserve_denied"
+        )
+        self.assertEqual(denial["occurred_at"], evaluated_at)

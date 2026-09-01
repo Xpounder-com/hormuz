@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 from importlib import resources
 from pathlib import Path
 from unittest import mock
@@ -11,7 +12,7 @@ from hormuz.config import UsageStorageConfig
 from hormuz.postgres import POSTGRES_SCHEMA_VERSION
 from hormuz.postgres import PostgresStorageError
 from hormuz.postgres_usage_store import PostgresUsageStore
-from hormuz.store import ReservationDenied
+from hormuz.store import ReservationDenied, ReservationScope
 
 if __package__:
     from ._budget_fixture import ADMIN, BudgetAssertions
@@ -128,6 +129,15 @@ class PostgresBudgetTests(BudgetAssertions, PostgresTestCase):
     def test_active_plan_count_is_bounded_at_activation_and_request_time(self):
         self.check_active_plan_count_is_bounded_at_activation_and_request_time()
 
+    def test_request_time_accounting_history_is_bounded(self):
+        self.check_request_time_accounting_history_is_bounded()
+
+    def test_activation_history_is_bounded_for_reads_and_writes(self):
+        self.check_activation_history_is_bounded_for_reads_and_writes()
+
+    def test_denial_audit_retains_evaluation_time(self):
+        self.check_denial_audit_retains_evaluation_time()
+
     def test_denial_audit_failure_is_a_storage_failure(self):
         plan = self.create(amount="0")
         self.activate(plan)
@@ -143,9 +153,106 @@ class PostgresBudgetTests(BudgetAssertions, PostgresTestCase):
                 self.identity,
                 WorkBudgetDenied(
                     "synthetic uncoordinated denial", "attribution_invalid", (),
+                    evaluated_at=datetime.now(timezone.utc).isoformat(
+                        timespec="microseconds",
+                    ).replace("+00:00", "Z"),
                 ),
             )
         self.assertEqual(caught.exception.code, "storage_unavailable")
+
+    def test_gateway_work_budget_uses_database_clock(self):
+        plan = self.create(amount="0")
+        self.activate(plan)
+
+        class AheadProcessClock(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return datetime.now(timezone.utc) + timedelta(days=2)
+
+        with mock.patch("hormuz.postgres_usage_store.datetime", AheadProcessClock):
+            with self.assertRaises(ReservationDenied):
+                self.attempt(cost_microusd=1)
+        self.assertEqual(
+            self.budget_rows()["portfolio_work_budget_reservation_bindings"],
+            [],
+        )
+
+    def test_reservation_paths_lock_month_before_sweeping_attempts(self):
+        observed = []
+        acquire = self.store._acquire_budget_month_in_cursor
+        sweep = self.store._sweep_stale_request_attempts_in_cursor
+
+        def record_acquire(cursor, *, organization_id, observed_at):
+            observed.append("month")
+            return acquire(
+                cursor,
+                organization_id=organization_id,
+                observed_at=observed_at,
+            )
+
+        def record_sweep(cursor, *, now, organization_id):
+            observed.append("sweep")
+            return sweep(cursor, now=now, organization_id=organization_id)
+
+        with (
+            mock.patch.object(
+                self.store,
+                "_acquire_budget_month_in_cursor",
+                side_effect=record_acquire,
+            ),
+            mock.patch.object(
+                self.store,
+                "_sweep_stale_request_attempts_in_cursor",
+                side_effect=record_sweep,
+            ),
+        ):
+            self.store.reserve_budget(
+                identity=self.identity,
+                scopes=(ReservationScope(name="organization", cost_limit_microusd=10),),
+                reserved_tokens=1,
+                reserved_cost_microusd=1,
+                ttl_seconds=60,
+            )
+        self.assertEqual(observed[:2], ["month", "sweep"])
+
+        observed.clear()
+        plan = self.create(amount="10")
+        self.activate(plan)
+        with (
+            mock.patch.object(
+                self.store,
+                "_acquire_budget_month_in_cursor",
+                side_effect=record_acquire,
+            ),
+            mock.patch.object(
+                self.store,
+                "_sweep_stale_request_attempts_in_cursor",
+                side_effect=record_sweep,
+            ),
+        ):
+            self.attempt(cost_microusd=1)
+        self.assertEqual(observed[:2], ["month", "sweep"])
+
+    def test_binding_window_is_tied_to_plan_version(self):
+        plan = self.create(amount="10")
+        self.activate(plan)
+        self.attempt(cost_microusd=1)
+        with self.psycopg.connect(self.owner_dsn) as connection:
+            table = self.sql.SQL(
+                "{}.portfolio_work_budget_reservation_bindings"
+            ).format(self.sql.Identifier(self.schema))
+            connection.execute(
+                self.sql.SQL("ALTER TABLE {} DISABLE TRIGGER USER").format(table)
+            )
+            with self.assertRaises(self.psycopg.errors.ForeignKeyViolation):
+                connection.execute(
+                    self.sql.SQL(
+                        "UPDATE {} SET window_start_at=%s "
+                        "WHERE organization_id='acme' AND budget_plan_id=%s"
+                    ).format(table),
+                    ("2000-01-01T00:00:00.000000Z", plan["budget_plan_id"]),
+                )
+            connection.rollback()
 
     def test_malformed_persisted_plan_refuses_without_repair(self):
         plan = self.create()

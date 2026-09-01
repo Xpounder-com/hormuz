@@ -20,6 +20,7 @@ from uuid import uuid4
 
 from ._budget_schema import (
     MAX_ACTIVE_BUDGET_PLANS,
+    MAX_BUDGET_BINDINGS_PER_PLAN_WINDOW,
     BudgetIntegrityError,
     validate_active_budget_rows,
 )
@@ -29,6 +30,7 @@ from .finance_values import FinanceValueError, decimal_text, exact_context
 
 
 _ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
+_TIME = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{6}Z\Z")
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 _CURRENCY = re.compile(r"[A-Z]{3}\Z")
 _CONFIDENCE = frozenset({"explicit_authorized", "server_side_default", "unattributed", "ambiguous"})
@@ -76,10 +78,11 @@ class WorkBudgetDenied(ReservationDenied):
     """A content-free denial carrying only durable plan audit coordinates."""
 
     def __init__(self, message: str, reason_code: str,
-                 plans: tuple[tuple[str, int], ...]):
+                 plans: tuple[tuple[str, int], ...], *, evaluated_at: str):
         super().__init__(message)
         self.reason_code = reason_code
         self.plans = tuple(sorted(set(plans)))
+        self.evaluated_at = evaluated_at
 
 
 def audit_work_budget_denials(operation):
@@ -219,6 +222,7 @@ def _effective_plan_rows(sql: RuntimeBudgetSQL, organization_id: str, now: str) 
             "The active work budget is unavailable.",
             "attribution_invalid",
             reference,
+            evaluated_at=now,
         )
     result = []
     for raw in rows:
@@ -257,6 +261,7 @@ def _effective_plan_rows(sql: RuntimeBudgetSQL, organization_id: str, now: str) 
         except (BudgetIntegrityError, KeyError, TypeError):
             raise WorkBudgetDenied(
                 "The active work budget is unavailable.", "attribution_invalid", reference,
+                evaluated_at=now,
             ) from None
         if max(row["window_start_at"], activation["committed_at"]) <= now < row["window_end_at"]:
             result.append(row)
@@ -345,20 +350,23 @@ def prepare_work_budget(
         if effective:
             raise WorkBudgetDenied(
                 "A current use-case attribution is required for budget enforcement.",
-                "attribution_invalid", _plan_refs(effective),
+                "attribution_invalid", _plan_refs(effective), evaluated_at=now_value,
             )
         return None
     try:
         context = _context(work_budget)
     except ReservationDenied as error:
         if effective:
-            raise WorkBudgetDenied(str(error), "attribution_invalid", _plan_refs(effective)) from None
+            raise WorkBudgetDenied(
+                str(error), "attribution_invalid", _plan_refs(effective),
+                evaluated_at=now_value,
+            ) from None
         raise
     if context.work_scope_id is None:
         if effective:
             raise WorkBudgetDenied(
                 "A current use-case attribution is required for budget enforcement.",
-                "attribution_invalid", _plan_refs(effective),
+                "attribution_invalid", _plan_refs(effective), evaluated_at=now_value,
             )
         chain: tuple[dict[str, Any], ...] = ()
     else:
@@ -368,12 +376,15 @@ def prepare_work_budget(
             if effective:
                 raise WorkBudgetDenied(
                     "Work attribution is stale or inactive for budget enforcement.",
-                    "attribution_invalid", _plan_refs(effective),
+                    "attribution_invalid", _plan_refs(effective), evaluated_at=now_value,
                 ) from None
             raise
         except ReservationDenied as error:
             if effective:
-                raise WorkBudgetDenied(str(error), "attribution_invalid", _plan_refs(effective)) from None
+                raise WorkBudgetDenied(
+                    str(error), "attribution_invalid", _plan_refs(effective),
+                    evaluated_at=now_value,
+                ) from None
             raise
     event_id = _attribution(
         sql, organization_id=organization_id, attempt_id=attempt_id,
@@ -405,10 +416,12 @@ def _consumed(sql: RuntimeBudgetSQL, plan: dict[str, Any]) -> Decimal:
         "WHERE n.organization_id=e.organization_id AND n.attempt_id=e.attempt_id) "
         "LEFT JOIN gateway_usage_events u ON u.organization_id=e.organization_id AND u.id=e.usage_event_id "
         "WHERE b.organization_id=? AND b.budget_plan_id=? AND b.window_start_at=? AND b.window_end_at=? "
-        "AND b.currency=?",
+        "AND b.currency=? ORDER BY b.request_attempt_id LIMIT ?",
         (plan["organization_id"], plan["budget_plan_id"], plan["window_start_at"],
-         plan["window_end_at"], plan["currency"]),
+         plan["window_end_at"], plan["currency"], MAX_BUDGET_BINDINGS_PER_PLAN_WINDOW),
     ).fetchall()
+    if len(rows) >= MAX_BUDGET_BINDINGS_PER_PLAN_WINDOW:
+        raise ReservationDenied("Work-budget accounting is unavailable.")
     total = Decimal(0)
     try:
         with exact_context():
@@ -464,19 +477,22 @@ def enforce_and_bind_work_budget(
     if plans and not context.output_tokens_bounded:
         raise WorkBudgetDenied(
             "A bounded output-token estimate is required for work-budget enforcement.",
-            "request_cost_ceiling", _plan_refs(plans),
+            "request_cost_ceiling", _plan_refs(plans), evaluated_at=now_value,
         )
     for plan in plans:
         reference = ((plan["budget_plan_id"], plan["version"]),)
         if plan["currency"] != context.rate_card_currency or context.rate_card_currency != "USD":
             raise WorkBudgetDenied(
                 "The active work budget uses an unsupported currency.",
-                "unsupported_currency", reference,
+                "unsupported_currency", reference, evaluated_at=now_value,
             )
         try:
             allowed = None if plan["allowed_models_json"] is None else json.loads(plan["allowed_models_json"])
         except (TypeError, ValueError, RecursionError):
-            raise WorkBudgetDenied("The active work budget is unavailable.", "attribution_invalid", reference) from None
+            raise WorkBudgetDenied(
+                "The active work budget is unavailable.", "attribution_invalid", reference,
+                evaluated_at=now_value,
+            ) from None
         if allowed is not None and (
             type(allowed) is not list or len(allowed) > 100
             or len({json.dumps(item, sort_keys=True, separators=(",", ":")) for item in allowed}) != len(allowed)
@@ -490,32 +506,44 @@ def enforce_and_bind_work_budget(
                 for item in allowed
             )
         ):
-            raise WorkBudgetDenied("The active work budget is unavailable.", "attribution_invalid", reference)
+            raise WorkBudgetDenied(
+                "The active work budget is unavailable.", "attribution_invalid", reference,
+                evaluated_at=now_value,
+            )
         if allowed is not None and selected_model not in allowed:
-            raise WorkBudgetDenied("The active work budget does not allow this model.", "model_intersection", reference)
+            raise WorkBudgetDenied(
+                "The active work budget does not allow this model.", "model_intersection", reference,
+                evaluated_at=now_value,
+            )
         if plan["output_token_cap"] is not None and context.reserved_output_tokens > plan["output_token_cap"]:
             raise WorkBudgetDenied(
                 "The active work-budget output-token ceiling would be exceeded.",
-                "output_token_ceiling", reference,
+                "output_token_ceiling", reference, evaluated_at=now_value,
             )
         if plan["per_request_cost_cap"] is not None and Decimal(reserved) > Decimal(plan["per_request_cost_cap"]):
             raise WorkBudgetDenied(
                 "The active work-budget per-request cost ceiling would be exceeded.",
-                "request_cost_ceiling", reference,
+                "request_cost_ceiling", reference, evaluated_at=now_value,
             )
         try:
             with exact_context():
                 projected = _consumed(sql, plan) + Decimal(reserved)
                 ceiling = Decimal(plan["amount"])
-        except (ArithmeticError, ValueError):
-            raise WorkBudgetDenied("Work-budget accounting is unavailable.", "budget_ceiling", reference) from None
+        except (ArithmeticError, ValueError, ReservationDenied):
+            raise WorkBudgetDenied(
+                "Work-budget accounting is unavailable.", "budget_ceiling", reference,
+                evaluated_at=now_value,
+            ) from None
         if projected > ceiling:
             raise WorkBudgetDenied(
                 "The active work-budget ceiling would be exceeded by this request.",
-                "budget_ceiling", reference,
+                "budget_ceiling", reference, evaluated_at=now_value,
             )
         if prepared.attribution_event_id is None:
-            raise WorkBudgetDenied("Work-budget binding evidence is invalid.", "attribution_invalid", reference)
+            raise WorkBudgetDenied(
+                "Work-budget binding evidence is invalid.", "attribution_invalid", reference,
+                evaluated_at=now_value,
+            )
         sql.insert("portfolio_work_budget_reservation_bindings", {
             "organization_id": organization_id, "request_attempt_id": attempt_id,
             "attribution_event_id": prepared.attribution_event_id,
@@ -541,8 +569,7 @@ def enforce_and_bind_work_budget(
 
 
 def record_work_budget_denial(sql: RuntimeBudgetSQL, *, organization_id: str,
-                              actor_id: str, denial: WorkBudgetDenied,
-                              now: datetime) -> None:
+                              actor_id: str, denial: WorkBudgetDenied) -> None:
     """Persist one fixed audit fact per affected plan after the denied attempt rolls back."""
 
     if not denial.plans:
@@ -551,18 +578,25 @@ def record_work_budget_denial(sql: RuntimeBudgetSQL, *, organization_id: str,
         raise ReservationDenied("Work-budget denial evidence is unavailable.")
     if type(actor_id) is not str or not 1 <= len(actor_id) <= 128:
         raise ReservationDenied("Work-budget denial evidence is unavailable.")
+    if type(denial.evaluated_at) is not str or _TIME.fullmatch(denial.evaluated_at) is None:
+        raise ReservationDenied("Work-budget denial evidence is unavailable.")
+    try:
+        evaluated_at = datetime.fromisoformat(denial.evaluated_at)
+    except ValueError:
+        raise ReservationDenied("Work-budget denial evidence is unavailable.") from None
+    if evaluated_at.tzinfo != timezone.utc or _utc(evaluated_at) != denial.evaluated_at:
+        raise ReservationDenied("Work-budget denial evidence is unavailable.")
     maximum = sql.one(
         "SELECT COALESCE(MAX(sequence),0) AS sequence FROM portfolio_work_budget_audit_events "
         "WHERE organization_id=?", (organization_id,),
     )["sequence"]
     if type(maximum) is not int or maximum < 0 or maximum + len(denial.plans) > 9223372036854775807:
         raise ReservationDenied("Work-budget denial evidence is unavailable.")
-    occurred_at = _utc(now)
     for offset, (plan_id, version) in enumerate(denial.plans, 1):
         sql.insert("portfolio_work_budget_audit_events", {
             "organization_id": organization_id, "event_id": uuid4().hex,
             "sequence": maximum + offset, "actor_id": actor_id,
             "operation": "reserve_denied", "entity_id": plan_id,
             "entity_version": version, "reason_code": denial.reason_code,
-            "occurred_at": occurred_at,
+            "occurred_at": denial.evaluated_at,
         })

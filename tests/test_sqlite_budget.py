@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import closing
+from datetime import datetime, timezone
 from pathlib import Path
 import sqlite3
 import tempfile
@@ -97,6 +98,15 @@ class SQLiteBudgetTests(BudgetAssertions, unittest.TestCase):
     def test_active_plan_count_is_bounded_at_activation_and_request_time(self):
         self.check_active_plan_count_is_bounded_at_activation_and_request_time()
 
+    def test_request_time_accounting_history_is_bounded(self):
+        self.check_request_time_accounting_history_is_bounded()
+
+    def test_activation_history_is_bounded_for_reads_and_writes(self):
+        self.check_activation_history_is_bounded_for_reads_and_writes()
+
+    def test_denial_audit_retains_evaluation_time(self):
+        self.check_denial_audit_retains_evaluation_time()
+
     def test_denial_audit_failure_is_a_storage_failure(self):
         plan = self.create(amount="0")
         self.activate(plan)
@@ -112,9 +122,29 @@ class SQLiteBudgetTests(BudgetAssertions, unittest.TestCase):
                 self.identity,
                 WorkBudgetDenied(
                     "synthetic uncoordinated denial", "attribution_invalid", (),
+                    evaluated_at=datetime.now(timezone.utc).isoformat(
+                        timespec="microseconds",
+                    ).replace("+00:00", "Z"),
                 ),
             )
         self.assertEqual(caught.exception.code, "storage_unavailable")
+
+    def test_binding_window_is_tied_to_plan_version(self):
+        plan = self.create(amount="10")
+        self.activate(plan)
+        self.attempt(cost_microusd=1)
+        with closing(sqlite3.connect(self.config.database_path)) as connection:
+            connection.execute("PRAGMA foreign_keys=ON")
+            connection.execute("BEGIN")
+            connection.execute(
+                "DROP TRIGGER portfolio_work_budget_reservation_bindings_no_update"
+            )
+            with self.assertRaises(sqlite3.IntegrityError):
+                connection.execute(
+                    "UPDATE portfolio_work_budget_reservation_bindings "
+                    "SET window_start_at='2000-01-01T00:00:00.000000Z'"
+                )
+            connection.rollback()
 
 
 if __name__ == "__main__":

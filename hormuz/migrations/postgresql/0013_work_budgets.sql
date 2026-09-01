@@ -20,6 +20,8 @@ CREATE TABLE {schema}.portfolio_work_budget_plan_versions (
         PRIMARY KEY (organization_id, budget_plan_id, version),
         UNIQUE (organization_id, sequence),
         UNIQUE (organization_id, budget_plan_id, content_digest),
+        UNIQUE (organization_id, budget_plan_id, version,
+                window_start_at, window_end_at, currency),
         FOREIGN KEY (organization_id, work_scope_id, work_scope_version)
             REFERENCES {schema}.portfolio_work_scope_versions (organization_id, work_scope_id, version),
         FOREIGN KEY (organization_id, budget_plan_id, supersedes_version)
@@ -103,8 +105,11 @@ CREATE TABLE {schema}.portfolio_work_budget_reservation_bindings (
         valuation_rule_digest TEXT NOT NULL CHECK (length(valuation_rule_digest) = 64),
         bound_at TEXT NOT NULL CHECK (length(bound_at) BETWEEN 20 AND 27),
         PRIMARY KEY (organization_id, request_attempt_id, budget_plan_id),
-        FOREIGN KEY (organization_id, budget_plan_id, budget_plan_version)
-            REFERENCES {schema}.portfolio_work_budget_plan_versions (organization_id, budget_plan_id, version),
+        FOREIGN KEY (organization_id, budget_plan_id, budget_plan_version,
+                     window_start_at, window_end_at, currency)
+            REFERENCES {schema}.portfolio_work_budget_plan_versions
+                (organization_id, budget_plan_id, version,
+                 window_start_at, window_end_at, currency),
         FOREIGN KEY (organization_id, attribution_event_id)
             REFERENCES {schema}.portfolio_attribution_events (organization_id, attribution_event_id),
         FOREIGN KEY (organization_id, budget_plan_id, budget_plan_version, activation_generation,

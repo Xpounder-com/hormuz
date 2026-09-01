@@ -602,7 +602,6 @@ class UsageStore:
                     organization_id=identity.organization_id,
                     actor_id=identity.actor_id,
                     denial=denial,
-                    now=datetime.now(timezone.utc),
                 )
         except ReservationDenied:
             raise StorageSchemaError("storage_unavailable") from None

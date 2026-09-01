@@ -74,6 +74,9 @@ from ._persistence import (
 )
 
 
+_DATETIME_TYPE = datetime
+
+
 class PostgresUsageStore:
     """Tenant-scoped durable evidence store using PostgreSQL row security.
 
@@ -144,6 +147,71 @@ class PostgresUsageStore:
             organization_id=organization_id,
             connection_pool=self._connection_pool,
         )
+
+    @staticmethod
+    def _database_now_in_cursor(cursor: object) -> datetime:
+        """Read one PostgreSQL clock value for the current transaction step."""
+
+        cursor.execute("SELECT clock_timestamp() AS now")
+        row = cursor.fetchone()
+        value = None if row is None else (
+            row.get("now") if isinstance(row, dict) else row[0]
+        )
+        if (
+            type(value) is not _DATETIME_TYPE
+            or value.tzinfo is None
+            or value.utcoffset() is None
+        ):
+            raise PostgresStorageError("storage_unavailable")
+        return value.astimezone(timezone.utc)
+
+    @staticmethod
+    def _acquire_budget_month_in_cursor(
+        cursor: object,
+        *,
+        organization_id: str,
+        observed_at: datetime,
+    ) -> datetime:
+        """Lock the monthly reservation key selected by a trusted clock."""
+
+        month_start = observed_at.replace(
+            day=1, hour=0, minute=0, second=0, microsecond=0,
+        )
+        cursor.execute(
+            "SELECT pg_advisory_xact_lock(hashtext(%s))",
+            (f"hormuz:budget:{organization_id}:{month_start.date().isoformat()}",),
+        )
+        return month_start
+
+    def _acquire_current_budget_month_in_cursor(
+        self,
+        cursor: object,
+        *,
+        organization_id: str,
+    ) -> tuple[datetime, datetime]:
+        """Lock the database's current month before any request-attempt lock."""
+
+        observed = self._database_now_in_cursor(cursor)
+        prior_month: datetime | None = None
+        for _ in range(2):
+            month_start = observed.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            if prior_month is not None and month_start <= prior_month:
+                raise PostgresStorageError("storage_unavailable")
+            self._acquire_budget_month_in_cursor(
+                cursor,
+                organization_id=organization_id,
+                observed_at=observed,
+            )
+            confirmed = self._database_now_in_cursor(cursor)
+            confirmed_month = confirmed.replace(
+                day=1, hour=0, minute=0, second=0, microsecond=0,
+            )
+            if confirmed_month == month_start:
+                return month_start, confirmed
+            if confirmed_month < month_start:
+                raise PostgresStorageError("storage_unavailable")
+            prior_month, observed = month_start, confirmed
+        raise PostgresStorageError("storage_unavailable")
 
     def verify_ready(self) -> None:
         """Prove every configured tenant can use the restricted runtime path.
@@ -598,10 +666,17 @@ class PostgresUsageStore:
         )
         if not constrained:
             return None
+        # Preserve the v1 repository clock contract for legacy monthly holds.
+        # Work-budget enforcement below uses PostgreSQL's clock instead.
         now = datetime.now(timezone.utc)
         reservation_id = str(uuid.uuid4())
         with self._transaction(organization_id) as connection:
             with connection.cursor() as cursor:
+                self._acquire_budget_month_in_cursor(
+                    cursor,
+                    organization_id=organization_id,
+                    observed_at=now,
+                )
                 self._sweep_stale_request_attempts_in_cursor(cursor, now=now, organization_id=organization_id)
                 self._reserve_budget_in_cursor(
                     cursor,
@@ -634,7 +709,6 @@ class PostgresUsageStore:
                         organization_id=organization_id,
                         actor_id=identity.actor_id,
                         denial=denial,
-                        now=datetime.now(timezone.utc),
                     )
         except ReservationDenied:
             raise PostgresStorageError("storage_unavailable") from None
@@ -698,25 +772,7 @@ class PostgresUsageStore:
         """Atomically persist a pending pre-egress attempt and its budget hold."""
 
         organization_id = self._organization(identity.organization_id)
-        now = datetime.now(timezone.utc)
         attempt_id = str(uuid.uuid4())
-        root = build_request_attempt_root(
-            attempt_id=attempt_id,
-            created_at=now,
-            identity=identity,
-            organization_id=organization_id,
-            client=client,
-            protocol=protocol,
-            requested_model=requested_model,
-            resolved_alias=resolved_alias,
-            upstream_model=upstream_model,
-            policy_version=policy_version,
-            policy_action=policy_action,
-            redaction_count=redaction_count,
-            redaction_rules=redaction_rules,
-            reserved_tokens=reserved_tokens,
-            reserved_cost_microusd=reserved_cost_microusd,
-        )
         with self._transaction(organization_id) as connection:
             with connection.cursor() as cursor:
                 cursor.execute(
@@ -732,11 +788,19 @@ class PostgresUsageStore:
                 )
                 if work_budget is not None and not budget_schema_ready:
                     raise PostgresStorageError("storage_schema_partial_upgrade")
-                month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-                cursor.execute(
-                    "SELECT pg_advisory_xact_lock(hashtext(%s))",
-                    (f"hormuz:budget:{organization_id}:{month_start.date().isoformat()}",),
-                )
+                if work_budget is None:
+                    # Legacy callers retain the injectable v1 repository
+                    # clock; the lock still precedes every request row lock.
+                    now = datetime.now(timezone.utc)
+                    locked_month = self._acquire_budget_month_in_cursor(
+                        cursor,
+                        organization_id=organization_id,
+                        observed_at=now,
+                    )
+                else:
+                    locked_month, _locked_at = self._acquire_current_budget_month_in_cursor(
+                        cursor, organization_id=organization_id,
+                    )
                 cursor.execute(
                     "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
                     (f"work-budget:{self.schema}:{organization_id}",),
@@ -744,6 +808,32 @@ class PostgresUsageStore:
                 cursor.execute(
                     "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
                     (f"portfolio:{self.schema}:{organization_id}",),
+                )
+                if work_budget is not None:
+                    now = self._database_now_in_cursor(cursor)
+                    if now.replace(
+                        day=1, hour=0, minute=0, second=0, microsecond=0,
+                    ) != locked_month:
+                        # Do not acquire a later monthly lock while holding the
+                        # work/portfolio locks; that would invert the canonical
+                        # reservation order at a month boundary.
+                        raise PostgresStorageError("storage_unavailable")
+                root = build_request_attempt_root(
+                    attempt_id=attempt_id,
+                    created_at=now,
+                    identity=identity,
+                    organization_id=organization_id,
+                    client=client,
+                    protocol=protocol,
+                    requested_model=requested_model,
+                    resolved_alias=resolved_alias,
+                    upstream_model=upstream_model,
+                    policy_version=policy_version,
+                    policy_action=policy_action,
+                    redaction_count=redaction_count,
+                    redaction_rules=redaction_rules,
+                    reserved_tokens=reserved_tokens,
+                    reserved_cost_microusd=reserved_cost_microusd,
                 )
                 self._sweep_stale_request_attempts_in_cursor(cursor, now=now, organization_id=organization_id)
                 cursor.execute(
@@ -963,12 +1053,6 @@ class PostgresUsageStore:
             if scope.token_limit is not None or scope.cost_limit_microusd is not None
         )
         month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        cursor.execute(
-            f"""
-            SELECT pg_advisory_xact_lock(hashtext(%s))
-            """,
-            (f"hormuz:budget:{organization_id}:{month_start.date().isoformat()}",),
-        )
         cursor.execute(
             f"""
             DELETE FROM {self._table('gateway_budget_reservations')}
