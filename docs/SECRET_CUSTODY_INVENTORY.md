@@ -20,7 +20,7 @@ custody integration tests separately prove encryption and recovery behavior.
 
 ## Ownership boundary
 
-The active core has three custody categories:
+The active core has four custody categories:
 
 1. **Hormuz-managed protected material.** Provider credentials may be stored
    in owner-only encrypted envelope files. Metadata-only audit artifacts use
@@ -48,6 +48,12 @@ The active core has three custody categories:
    revocation and file retention; reinvitation never changes an established subject.
    The shared master key cannot be rotated in place without a recipient-hash
    migration plan; see [managed-directory recovery limits](TEAM_ONBOARDING.md).
+4. **Hosted off-disk backup.** The offline operator imports a distinct random
+   `data_encryption` key from an owner-only file and streams the fixed hosted
+   snapshot into an AES-256-GCM archive. The key is never an environment value,
+   command argument, log field or archive member. Keep the archive, backup key,
+   and session master key in separate custody locations. This path does not use
+   provider custody or the runtime session key, and the CLI rejects key reuse.
 
 The second category must not be recursively placed behind the same service it
 is needed to access. For example, Hormuz cannot use OpenBao Transit to decrypt
@@ -70,7 +76,7 @@ entrypoints without inspecting the credential selected by the SDK.
 | Key purpose | Status in active core | Current consumer |
 | --- | --- | --- |
 | `provider_credential` | Active | Gateway provider-credential envelopes |
-| `data_encryption` | Active | Metadata-only immutable audit artifacts |
+| `data_encryption` | Active | Metadata-only immutable audit artifacts and offline authenticated hosted-state archives |
 | `identity_connector_secret` | Reserved managed-envelope purpose | OIDC login secrets are externally injected; no connector envelope migration |
 | `session_material` | Active when login enabled | Local session master key, keyed hashes, encrypted transient flow state, and OS-secured client credentials |
 | `approval_fingerprint` | Reserved | Approval workflow is outside the reduced core |
@@ -114,6 +120,11 @@ The browser's own backup/retention behavior remains under user control.
   Simple key replacement is not a complete managed-directory recovery procedure;
   see [team onboarding](TEAM_ONBOARDING.md). Console grants and revocations must
   also be reconciled before a restored directory serves traffic.
+- Backup operators generate a new independent archive key under the applicable
+  retention policy, verify each transferred archive before deleting its source
+  copy, and keep at least one usable key separate from the retained ciphertext.
+  Key loss is unrecoverable; replacing a key applies only to new archives and
+  does not re-encrypt an existing archive.
 - Session owners log out to revoke the server credential family before local
   deletion. The helper serializes refresh using a private metadata-only lock.
 - Policy-recovery operators separately protect and rotate the opt-in break-glass

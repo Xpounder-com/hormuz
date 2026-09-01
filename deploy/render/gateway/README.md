@@ -185,7 +185,7 @@ scaling and zero-downtime deploys. These are explicit limitations of this stagin
 profile, not evidence for a latency/availability product promise. See
 [persistent disk limitations](https://render.com/docs/disks).
 
-## Offline snapshot and conservative restore
+## Offline snapshot, encrypted export and conservative restore
 
 Switch to maintenance and confirm callbacks/console return 503 before lifecycle
 work. The backend and operator commands hold shared lifecycle locks; snapshots
@@ -193,49 +193,117 @@ and restores require an exclusive lock. Snapshots also reserve writes on both
 SQLite databases before using SQLite backup readers. Copying live `.sqlite3`
 files or using a platform disk snapshot alone is not this procedure.
 
-```sh
-python -I -m hormuz.hosted snapshot \
-  --output-directory /var/lib/hormuz/private/backup-001
-```
-
-The output is a new owner-only directory containing the two consistent SQLite
-files, initialization marker and a keyed manifest of their digests. It contains
-sensitive identity metadata and is **not an encrypted export**. Encrypt and
-transfer it through an approved private backup channel before relying on it for
-disk-loss recovery. A copy on the same disk does not protect against disk loss.
-Never upload snapshots, invitation files or keys as CI artifacts.
-
-For recovery, keep maintenance active, preserve the damaged/original state for
-investigation, and point a private profile at a **new, absent** state directory
-on the persistent disk. Preserve the public origin, issuer, client ID and master
-key. Do not rotate the master key to restore a managed directory: recipient hashes
-also depend on it. Run:
+The low-level `snapshot --output-directory ...` command remains available for an
+isolated same-disk check. Its output is a plaintext owner-only directory and does
+not protect against disk loss. For an off-disk copy, create a separate 32-byte
+backup key on an operator workstation and retain it outside Render and apart from
+the session master key and archive. The command below creates the key without
+printing it:
 
 ```sh
-python -I -m hormuz.hosted --config /var/lib/hormuz/operator/hormuz-restored.json restore \
-  --snapshot-directory /var/lib/hormuz/private/backup-001
-python -I -m hormuz.hosted --config /var/lib/hormuz/operator/hormuz-restored.json check
+umask 077
+python3 - <<'PY'
+import base64
+import os
+import secrets
+
+fd = os.open("hormuz-backup.key", os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
+with os.fdopen(fd, "wb") as output:
+    output.write(base64.b64encode(secrets.token_bytes(32)) + b"\n")
+    output.flush()
+    os.fsync(output.fileno())
+PY
 ```
 
-Restore verifies keyed bindings/digests and refuses unexpected sidecar files or an
-existing destination. It disables **every restored membership**, revokes native
-sessions, pending enrollments/invitations, console grants/sessions and pending
-console flows, while preserving organizations, teams, recipient hashes and stable
-subject bindings. The activatable marker is written last. Interrupted restoration
-stays closed. Reinvite only currently approved members, require new login and
+Transfer that owner-only key temporarily to the running service through the
+approved SSH/SFTP path, then run in the service Shell while maintenance remains
+closed:
+
+```sh
+python -I -m hormuz.hosted --config /var/lib/hormuz/operator/hormuz-runtime.json backup-export \
+  --key-file /tmp/hormuz-backup.key \
+  --output-file /var/lib/hormuz/private/hormuz-offsite-001.hzb
+```
+
+`backup-export` refuses a key equal to the session master key, an existing or
+symlinked output, unsafe permissions, an active gateway, and paths inside the
+live state directory. It takes one SQLite-consistent snapshot and streams an
+uncompressed AES-256-GCM archive in 1 MiB chunks. The command has bounded memory,
+does no background work, and reports only the ciphertext byte count and SHA-256
+digest. The temporary plaintext snapshot is private and removed on normal exit;
+an interrupted process can leave a hidden owner-only staging directory that the
+operator must inspect and remove while maintenance remains closed.
+
+Download the `.hzb` file using Render's documented
+[SCP/SFTP transfer](https://render.com/docs/disks#transferring-files). Verify the
+download on the operator workstation without the service profile or live session
+credentials:
+
+```sh
+python -I -m hormuz.hosted backup-verify \
+  --key-file ./hormuz-backup.key \
+  --archive-file ./hormuz-offsite-001.hzb
+```
+
+Require the export and local-verification SHA-256 values to match. Verification
+performs a full authentication pass before parsing, then checks the fixed file
+set, declared sizes/digests, inner snapshot linkage, JSON framing and SQLite file
+headers without writing decrypted state. Keep at least one verified archive and
+its distinct key in separate approved off-disk locations. Delete the temporary
+service-side key and archive only after that retention check. Never upload a raw
+snapshot, encrypted backup, invitation file or key as a CI artifact.
+
+For recovery, keep maintenance active, preserve damaged/original state for
+investigation, and point a private profile at a **new, absent** state directory.
+Preserve the public origin, issuer, client ID and session master key. Do not
+rotate the master key to restore a managed directory: recipient hashes also
+depend on it. Run against the transferred encrypted archive:
+
+```sh
+python -I -m hormuz.hosted --config /var/lib/hormuz/operator/hormuz-restored.json backup-restore \
+  --key-file /tmp/hormuz-backup.key \
+  --archive-file /tmp/hormuz-offsite-001.hzb
+python -I -m hormuz.hosted --config /var/lib/hormuz/operator/hormuz-restored.json recovery-check
+```
+
+Archive restore authenticates before writing plaintext, verifies the original
+keyed configuration binding and database schemas, and refuses an existing
+destination. It disables **every restored membership**, revokes native sessions,
+pending enrollments/invitations, console grants/sessions and pending console
+flows, then requires a zero count for each authority class before writing the
+final marker. `recovery-check` repeats those content-free counts under an offline
+lock, while preserving organizations, teams, recipient hashes and stable subject
+bindings. The activatable marker is written last. Interrupted restoration stays
+closed, but a killed restore can leave a hidden owner-only decrypted staging
+directory beside the destination; inspect and remove it before leaving
+maintenance. Reinvite only currently approved members, require new login and
 explicitly regrant administrator roles. No removed user's old credential regains
 authority just because it appears in an old snapshot. Point `HORMUZ_CONFIG` at
 the reviewed restored profile before switching the service back to active mode.
 
 This deliberately sacrifices login continuity to avoid resurrecting stale access.
 It does not restore changes newer than the backup, implement online key migration,
-or replace operator access review. Remote encrypted backup transfer, actual Render
-disk replacement and recovery timing must still be qualified before a customer pilot.
+or replace operator access review. Render also warns against treating whole-disk
+snapshots as custom-database recovery; its automatic daily snapshot is therefore
+not a substitute for this SQLite-consistent archive. A disk is accessible only to
+its attached runtime, not builds or one-off jobs, so both export and restore run
+from the service Shell. See [Render's disk recovery and access limits](https://render.com/docs/disks).
+
+The least-risk fresh-disk qualification uses a temporary second maintenance-only
+service with the same reviewed image and a new smallest disk. Restore the verified
+archive there with the original origin/issuer/client/master-key binding, run
+`check`, and confirm all memberships, grants, native/console sessions, pending
+flows and invitations remain closed. Keep that service unreachable for customer
+traffic and delete it after retaining content-free evidence. This proves recovery
+onto an independent Render disk; it does not prove public hostname cutover. Render
+bills each paid instance and disk capacity, prorated by active time, so review the
+concrete quote immediately before creating the temporary resources. Deleting or
+restoring over the live disk remains destructive and is not part of this drill.
 
 ## Verification and remaining gates
 
 ```sh
-python -m unittest tests.test_hosted_state tests.test_hosted_http -v
+python -m unittest tests.test_hosted_backup tests.test_hosted_state tests.test_hosted_http -v
 docker build --platform linux/amd64 -f deploy/render/gateway/Dockerfile \
   -t hormuz-hosted-staging:development .
 python tools/verify_render_gateway.py --image hormuz-hosted-staging:development \
@@ -245,11 +313,12 @@ python tools/verify_render_gateway.py --image hormuz-hosted-staging:development 
 The tests use synthetic identities and disposable volumes. They check uninitialized
 startup, private ingress, framing/connection limits, closed provider routes,
 credential inheritance, Render-style file permissions, restart/removal behavior,
-stale restore and shutdown. The container verifier deletes only its own objects
-and emits content-free results. CI builds this profile separately from release
-images and runs no cloud deployment.
+encrypted export/authentication, stale restore and shutdown. The container verifier
+deletes only its own objects and emits content-free results. CI builds this profile
+separately from release images and runs no cloud deployment.
 
-Real public HTTPS/Okta code exchange, Safari cookie behavior, Mac Keychain login,
-an actual Render restart/disk recovery, provider streaming/failover qualification,
-signed client distribution and independent onboarding remain open. These tests do
-not increase external-onboarding counts or establish release/pilot readiness.
+Real public HTTPS/Okta code exchange, Safari cookie behavior and Mac Keychain login
+have separate staging evidence. Fresh independent Render-disk recovery, recovery
+timing, provider streaming/failover qualification, signed client distribution and
+independent onboarding remain open. These tests do not increase external-onboarding
+counts or establish release/pilot readiness.

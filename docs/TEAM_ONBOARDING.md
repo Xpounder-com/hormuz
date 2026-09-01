@@ -150,10 +150,12 @@ serving traffic.
 
 The master key also protects recipient hashes. Do not rotate it in place for a
 managed directory: existing pending invitations and reinvitation email checks
-cannot be rekeyed from a one-way hash. Managed-directory key migration and safe
-restore/revocation reconciliation remain production gates. The earlier
-session-only advice to rotate a key and force fresh logins is not a complete
-managed-directory recovery procedure.
+cannot be rekeyed from a one-way hash. The Render staging profile now has one
+bounded encrypted archive restore that disables all memberships and revokes all
+restored authority before writing its final marker. This is not scheduled backup,
+distributed persistence, key migration or a production recovery service. The
+earlier session-only advice to rotate a key and force fresh logins is not a
+complete managed-directory recovery procedure.
 
 This remains SQLite on one node with manual retention and private backups. Raw
 identity-provider tokens, invite codes, email addresses and AI request/response

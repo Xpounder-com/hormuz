@@ -27,7 +27,7 @@ SECRETS = {
 }
 PYTHON = "/opt/hormuz/bin/python"
 SETUP = '''
-import json
+import base64, json
 from pathlib import Path
 root = Path('/var/lib/hormuz')
 for filename, state in [('profile.json', 'state'), ('restored-profile.json', 'restored')]:
@@ -36,6 +36,9 @@ for filename, state in [('profile.json', 'state'), ('restored-profile.json', 're
         'public_origin': 'https://gateway.example.test', 'oidc_issuer': 'https://idp.example.test',
         'oidc_client_id': 'fixture-login', 'state_directory': str(root / state)}))
     path.chmod(0o600)
+key = root / 'backup.key'
+key.write_bytes(base64.b64encode(b'b' * 32) + b'\\n')
+key.chmod(0o600)
 '''
 PROCESS_BOUNDARY = '''
 import json
@@ -60,7 +63,7 @@ import hashlib, json, hormuz
 from pathlib import Path
 package = Path(hormuz.__file__).parent
 paths = {'hormuz/' + name: package / name for name in
-    ('hosted.py', '_hosted_config.py', '_hosted_server.py', '_hosted_state.py', 'secret-inventory-v1.json')}
+    ('hosted.py', '_hosted_backup.py', '_hosted_config.py', '_hosted_server.py', '_hosted_state.py', 'secret-inventory-v1.json')}
 paths.update({'deploy/render/gateway/' + name: Path('/etc/hormuz/caddy') / name
     for name in ('active.Caddyfile', 'maintenance.Caddyfile')})
 print(json.dumps({name: hashlib.sha256(path.read_bytes()).hexdigest() for name, path in paths.items()}))
@@ -201,10 +204,33 @@ def verify(image: str) -> dict:
         organizations = json.loads(execute(active, PYTHON, "-I", "-m", "hormuz.hosted", "team", "organization", "list"))
         passed("restart_preserves_operator_directory", "staging-fixture" in json.dumps(organizations))
         stop(active)
-        operator("snapshot", "--output-directory", "/var/lib/hormuz/snapshot")
-        operator("--config", "/var/lib/hormuz/restored-profile.json", "restore", "--snapshot-directory", "/var/lib/hormuz/snapshot")
-        operator("--config", "/var/lib/hormuz/restored-profile.json", "check")
-        passed("offline_snapshot_restores_and_checks")
+        exported = json.loads(operator("backup-export", "--key-file", "/var/lib/hormuz/backup.key",
+                                       "--output-file", "/var/lib/hormuz/offsite.hzb"))
+        verified = json.loads(operator("backup-verify", "--key-file", "/var/lib/hormuz/backup.key",
+                                       "--archive-file", "/var/lib/hormuz/offsite.hzb"))
+        passed("encrypted_archive_digest_matches", exported["archive_sha256"] == verified["archive_sha256"]
+               and exported["archive_bytes"] == verified["archive_bytes"])
+        ciphertext_only = docker(
+            "run", "--rm", "-i", *common, "--entrypoint", PYTHON, image, "-I", "-",
+            input_text="from pathlib import Path\nv=Path('/var/lib/hormuz/offsite.hzb').read_bytes()\nprint(int(b'SQLite format 3' not in v and b'staging-fixture' not in v))\n",
+        )
+        passed("encrypted_archive_hides_database_and_fixture_identity", ciphertext_only == "1")
+        recovery = json.loads(operator(
+            "--config", "/var/lib/hormuz/restored-profile.json", "backup-restore",
+            "--key-file", "/var/lib/hormuz/backup.key", "--archive-file", "/var/lib/hormuz/offsite.hzb",
+        ))
+        recovery_check = json.loads(operator(
+            "--config", "/var/lib/hormuz/restored-profile.json", "recovery-check",
+        ))
+        export_metadata = {"event", "operation", "inference_enabled", "archive_bytes",
+                           "archive_sha256", "backup_schema"}
+        command_metadata = {"event", "operation", "inference_enabled"}
+        restored_state = {name: value for name, value in recovery.items() if name not in export_metadata}
+        checked_state = {name: value for name, value in recovery_check.items() if name not in command_metadata}
+        passed("recovered_authority_counts_are_zero", restored_state == checked_state
+               and restored_state.pop("recovered_closed", None) is True
+               and all(value == 0 for value in restored_state.values()))
+        passed("encrypted_archive_restores_closed_and_checks")
         for name in containers:
             logs = docker("logs", name)
             passed("no_canary_or_secret_in_logs_" + name.rsplit("-", 1)[1], all(value not in logs for value in (CANARY, *SECRETS.values())))

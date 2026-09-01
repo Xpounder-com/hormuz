@@ -14,7 +14,8 @@ from unittest.mock import patch
 
 from hormuz._hosted_config import HostedError, at_directory, load_profile
 from hormuz._hosted_state import (
-    DATABASES, MARKER, check_initialized, initialize, restore, sessions, snapshot, state_lock,
+    DATABASES, MARKER, check_initialized, check_recovered_closed, initialize, restore, sessions,
+    snapshot, state_lock,
 )
 from hormuz.hosted import proxy_settings, stop_child
 from hormuz.onboarding import TeamDirectory
@@ -140,6 +141,9 @@ class HostedStateTests(unittest.TestCase):
         recovered = at_directory(self.config, self.root / "recovered")
         restore(recovered, backup)
         check_initialized(recovered)
+        recovery = check_recovered_closed(recovered)
+        self.assertTrue(recovery.pop("recovered_closed"))
+        self.assertEqual(set(recovery.values()), {0})
         restored_store = sessions(recovered)
         restored_directory = TeamDirectory(recovered, restored_store)
         restored_console = ConsoleStore(restored_store, restored_directory)
@@ -161,6 +165,8 @@ class HostedStateTests(unittest.TestCase):
         # Reinvitation preserves subject binding, requires a fresh login and does
         # not silently restore administrator privileges or old native tokens.
         invitation = restored_directory.reinvite(organization_id="customer-a", membership_id=admin.membership_id)
+        with self.assertRaisesRegex(HostedError, "recovery_authority_open"):
+            check_recovered_closed(recovered)
         _, fresh = activate_member(restored_store, restored_directory, invitation=invitation)
         self.assertEqual(restored_store.authenticate_access(fresh.access_token).membership_id, admin.membership_id)
         with restored_store._connection() as connection:

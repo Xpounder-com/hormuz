@@ -40,6 +40,8 @@ EXPECTED_ARTIFACT_IDS = {
     "team_invitation_file",
     "console_browser_cookies",
     "hosted_profile_file",
+    "hosted_backup_key_file",
+    "hosted_offsite_backup_archive",
     "hosted_state_marker",
     "hosted_state_snapshot",
 }
