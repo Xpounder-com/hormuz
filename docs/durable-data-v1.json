@@ -238,7 +238,23 @@
       "storage_location": "new_owner_only_operator_selected_directory",
       "content_boundary": "consistent_session_and_usage_database_copies_with_keyed_digest_manifest_no_raw_credentials",
       "prompt_or_response_body_boundary": "excluded_by_hormuz_contract",
-      "customer_operator_authority": "private_encrypted_offsite_transfer_retention_deletion_and_restore_with_all_authority_revoked"
+      "customer_operator_authority": "same_disk_private_inspection_restore_and_deletion_never_plaintext_offsite_transfer"
+    },
+    {
+      "id": "hosted_offsite_backup_archive",
+      "created_when": "operator_runs_offline_hosted_backup_export",
+      "storage_location": "new_owner_only_authenticated_encrypted_file_then_operator_selected_off_disk_storage",
+      "content_boundary": "aes_256_gcm_ciphertext_of_consistent_hosted_state_snapshot_with_public_format_marker_and_nonce_only",
+      "prompt_or_response_body_boundary": "excluded_by_hormuz_contract",
+      "customer_operator_authority": "separate_key_custody_transfer_verification_retention_restore_and_deletion"
+    },
+    {
+      "id": "hosted_backup_key_file",
+      "created_when": "operator_generates_distinct_hosted_backup_key",
+      "storage_location": "owner_only_operator_secret_file_retained_separately_from_archive_render_disk_and_session_master_key",
+      "content_boundary": "base64_encoding_of_one_random_32_byte_backup_encryption_key",
+      "prompt_or_response_body_boundary": "excluded_by_hormuz_contract",
+      "customer_operator_authority": "secret_access_backup_rotation_retention_and_deletion"
     },
     {
       "id": "console_browser_cookies",

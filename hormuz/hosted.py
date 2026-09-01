@@ -20,7 +20,7 @@ from urllib.parse import urlsplit
 from urllib.request import ProxyHandler, Request, build_opener
 
 from ._hosted_config import BACKEND_PORT, SECRET_NAMES, HostedError, load_profile
-from ._hosted_state import check_initialized, initialize, restore, snapshot, state_lock
+from ._hosted_state import check_initialized, check_recovered_closed, initialize, restore, snapshot, state_lock
 
 
 def runtime_settings() -> dict[str, str]:
@@ -139,6 +139,7 @@ def backend(config) -> None:
 
 def main(argv=None) -> int:
     from .commands.onboarding import add_onboarding_commands, run as run_team
+    from ._hosted_backup import export_backup, read_backup_key, restore_backup, verify_backup
 
     logging.disable(logging.CRITICAL)
     os.umask(0o077)
@@ -146,16 +147,30 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="Provider-free hosted authentication staging; defaults to maintenance.")
     parser.add_argument("--config", type=Path, default=Path(settings["HORMUZ_CONFIG"]))
     commands = parser.add_subparsers(dest="command")
-    for name in ("serve", "backend", "initialize", "check"):
+    for name in ("serve", "backend", "initialize", "check", "recovery-check"):
         commands.add_parser(name)
     commands.add_parser("snapshot").add_argument("--output-directory", type=Path, required=True)
     commands.add_parser("restore").add_argument("--snapshot-directory", type=Path, required=True)
+    for name in ("backup-export", "backup-verify", "backup-restore"):
+        command = commands.add_parser(name)
+        command.add_argument("--key-file", type=Path, required=True)
+        command.add_argument(
+            "--output-file" if name == "backup-export" else "--archive-file",
+            type=Path,
+            required=True,
+        )
     add_onboarding_commands(commands)
     args = parser.parse_args(argv)
     try:
         if args.command in {None, "serve"}:
             return supervise(settings, args.config)
+        if args.command == "backup-verify":
+            result = verify_backup(args.archive_file, read_backup_key(args.key_file))
+            print(json.dumps({"event": "hosted_operator_complete", "operation": args.command,
+                              "inference_enabled": False, **result}, sort_keys=True))
+            return 0
         config = load_profile(args.config, settings)
+        result = {}
         if args.command == "backend":
             backend(config)
         elif args.command == "initialize":
@@ -164,12 +179,21 @@ def main(argv=None) -> int:
             snapshot(config, args.output_directory)
         elif args.command == "restore":
             restore(config, args.snapshot_directory)
+        elif args.command == "backup-export":
+            key = read_backup_key(args.key_file, session_master_key=config.session_broker.master_key)
+            result = export_backup(config, args.output_file, key)
+        elif args.command == "backup-restore":
+            key = read_backup_key(args.key_file, session_master_key=config.session_broker.master_key)
+            result = restore_backup(config, args.archive_file, key)
+        elif args.command == "recovery-check":
+            result = check_recovered_closed(config)
         else:
             with state_lock(config, exclusive=False):
                 check_initialized(config)
                 if args.command == "team":
                     return run_team(config, args)
-        print(json.dumps({"event": "hosted_operator_complete", "operation": args.command, "inference_enabled": False}))
+        print(json.dumps({"event": "hosted_operator_complete", "operation": args.command,
+                          "inference_enabled": False, **result}, sort_keys=True))
         return 0
     except Exception as error:
         code = str(error) if isinstance(error, HostedError) else "hosted_operation_failed"

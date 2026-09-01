@@ -23,6 +23,20 @@ from .store import UsageStore
 MARKER = "initialized.json"
 SNAPSHOT = "snapshot.json"
 DATABASES = ("sessions.sqlite3", "usage.sqlite3")
+RECOVERY_AUTHORITY_QUERIES = {
+    "active_memberships": "SELECT count(*) FROM onboarding_memberships WHERE status != 'disabled'",
+    "pending_invitations": "SELECT count(*) FROM onboarding_invitations WHERE status = 'pending'",
+    "active_enrollments": (
+        "SELECT count(*) FROM session_enrollments "
+        "WHERE status IN ('pending', 'authorizing', 'exchanging', 'authorized')"
+    ),
+    "unrevoked_native_sessions": "SELECT count(*) FROM human_sessions WHERE revoked_at IS NULL",
+    "active_console_grants": "SELECT count(*) FROM console_grants WHERE status = 'active'",
+    "unrevoked_console_sessions": "SELECT count(*) FROM console_sessions WHERE revoked_at IS NULL",
+    "active_console_login_flows": (
+        "SELECT count(*) FROM console_login_flows WHERE status IN ('pending', 'exchanging')"
+    ),
+}
 
 
 def _private(path: Path, *, directory: bool = False) -> os.stat_result:
@@ -149,6 +163,34 @@ def _sha256(path: Path) -> str:
         return hashlib.file_digest(source, "sha256").hexdigest()
 
 
+def _recovery_authority_counts(config: GatewayConfig) -> dict[str, int]:
+    with closing(sqlite3.connect(
+        config.session_broker.database_path.as_uri() + "?mode=ro", uri=True, timeout=5,
+    )) as connection:
+        return {
+            name: int(connection.execute(query).fetchone()[0])
+            for name, query in RECOVERY_AUTHORITY_QUERIES.items()
+        }
+
+
+def _assert_recovery_closed(config: GatewayConfig) -> dict[str, int]:
+    counts = _recovery_authority_counts(config)
+    if any(counts.values()):
+        raise HostedError("hosted_recovery_authority_open")
+    return counts
+
+
+def check_recovered_closed(config: GatewayConfig) -> dict[str, int | bool]:
+    """Verify an offline recovered state cannot grant any restored authority."""
+
+    with state_lock(config):
+        check_initialized(config)
+        marker = _read(config.database_path.parent / MARKER)
+        if marker.get("recovered_closed") is not True:
+            raise HostedError("hosted_recovery_marker_required")
+        return {"recovered_closed": True, **_assert_recovery_closed(config)}
+
+
 def _destination(path: Path, active: Path) -> None:
     if path != path.resolve() or path == active or path.is_relative_to(active) or active.is_relative_to(path):
         raise HostedError("hosted_snapshot_path_invalid")
@@ -186,7 +228,7 @@ def snapshot(config: GatewayConfig, destination: Path) -> None:
         _write(destination / SNAPSHOT, {**document, "binding": _mac(config, "snapshot/v1", document)})
 
 
-def restore(config: GatewayConfig, source: Path) -> None:
+def restore(config: GatewayConfig, source: Path) -> dict[str, int | bool]:
     with state_lock(config):
         _private(source, directory=True)
         if {path.name for path in source.iterdir()} != {SNAPSHOT, MARKER, *DATABASES}:
@@ -226,6 +268,8 @@ def restore(config: GatewayConfig, source: Path) -> None:
             connection.execute("UPDATE console_grants SET status = 'revoked', authorization_version = authorization_version + 1, updated_at = ? WHERE status = 'active'", (now,))
             connection.execute("UPDATE console_sessions SET revoked_at = ? WHERE revoked_at IS NULL", (now,))
             connection.execute("UPDATE console_login_flows SET status = 'failed', state_hash = NULL, browser_cookie_hash = NULL, encrypted_flow = NULL WHERE status IN ('pending', 'exchanging')")
+        counts = _assert_recovery_closed(config)
         # A crash before this last write leaves an unactivatable partial restore.
         _write(destination / MARKER, _marker(config, recovered=True))
         check_initialized(config)
+        return {"recovered_closed": True, **counts}

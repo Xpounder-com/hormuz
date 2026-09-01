@@ -106,6 +106,11 @@ any portfolio store ships. See
 | `object_lock_audit_artifact` | An operator runs an audit anchor command. | Customer-operated S3-compatible Object Lock. The payload is metadata-only audit evidence; the selected adapter stores it directly with storage encryption or as an encrypted envelope. | Customer object-storage policy, retention, and legal hold are authoritative; the gateway runtime has no bypass or retention-shortening authority. |
 | `public_release_artifacts` | The protected release workflow runs. | Public GitHub/GHCR source, signed OCI image, SBOM, provenance, signature, and release metadata. These contain no customer runtime data. | They are public distribution artifacts, not tenant data. |
 | `console_browser_cookies` | A member starts or completes console login. | Opaque, short-lived HttpOnly flow/session cookies in the browser; HTTPS uses host-only Secure cookies. No browser local storage. | Member logout, operator/member revocation and expiry invalidate access. Do not export cookie credentials. Browser backups are controlled by the browser/user. |
+| `hosted_profile_file` | An operator configures hosted authentication staging. | Owner-only runtime JSON containing origin, issuer, client identifier and state path without credentials. | Operator owns access review, retention, replacement and deletion. |
+| `hosted_state_marker` | An operator initializes or restores hosted staging. | Owner-only random instance identifier, recovery flag and keyed configuration binding. | Operator owns offline backup/restore and must preserve the bound origin, issuer, client and session key. |
+| `hosted_state_snapshot` | An operator runs the low-level offline snapshot. | Owner-only plaintext directory containing consistent session/usage SQLite copies and a keyed digest manifest. | Same-disk inspection or restore only; never transfer or retain it offsite as plaintext. |
+| `hosted_offsite_backup_archive` | An operator runs `hormuz.hosted backup-export`. | Owner-only AES-256-GCM archive of the fixed hosted snapshot file set. The public header contains only a format marker and nonce. | Operator owns transfer, verification, off-disk retention, restore and deletion and must keep the key separate. |
+| `hosted_backup_key_file` | An operator independently generates a backup key. | Owner-only file containing base64 encoding of 32 random bytes, distinct from the session master key. | Operator owns secret custody, access, rotation, retention and deletion; loss makes the archive unrecoverable. |
 
 Configuration JSON, provider credentials supplied through environment or a
 customer secret manager, database backups/WAL/snapshots, and captured
@@ -164,12 +169,15 @@ a restored directory as if an old backup preserved current access decisions.
 The separate opt-in [hosted authentication staging profile](../deploy/render/gateway/README.md)
 adds `hosted_profile_file`, private origin/issuer/client/path configuration with no
 secret values; `hosted_state_marker`, a keyed configuration binding plus an empty
-advisory lifecycle lock; and `hosted_state_snapshot`, consistent copies of the
-session and usage databases with a keyed digest manifest. No database tables or
-request-content fields are added. The profile initializes only on an explicit
+advisory lifecycle lock; `hosted_state_snapshot`, consistent plaintext copies of
+the session and usage databases with a keyed digest manifest;
+`hosted_offsite_backup_archive`, their authenticated encrypted transfer form; and
+`hosted_backup_key_file`, its separately retained random key. No database tables
+or request-content fields are added. The profile initializes only on an explicit
 operator command and refuses missing state or changed key/identity bindings at
-startup. Its snapshot is owner-only but is not an encrypted export. Encrypt any
-offsite copy separately; a copy on the same disk is not disaster recovery.
+startup. Its low-level snapshot remains owner-only plaintext for same-disk checks.
+Use `backup-export` for authenticated encrypted transfer; a copy on the same disk
+is not disaster recovery, and the archive key must remain in separate custody.
 
 The staging restore command preserves subject/recipient bindings and the master
 key, disables all restored memberships, and revokes native and console sessions,

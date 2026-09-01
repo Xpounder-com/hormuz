@@ -127,8 +127,10 @@ No raw session cookie, CSRF token, IdP token, email address, or AI content enter
 the console tables. PKCE/nonce flow state is encrypted and removed on consumption;
 credentials are keyed hashes. Member names and IDs remain personal metadata.
 Events are transactional local records, not immutable externally anchored audit.
-Retention, master-key/public-origin migration, distributed enforcement and managed
-directory recovery remain production work.
+The Render staging profile's encrypted restore revokes all restored console grants,
+sessions and pending flows before activation. Scheduled retention, fresh-disk
+qualification, recovery timing, master-key/public-origin migration and distributed
+enforcement remain production work.
 
 Chrome browser checks now cover console sign-in, organization/team reporting,
 foreign-team refusal, member removal and logout against the local simulator.

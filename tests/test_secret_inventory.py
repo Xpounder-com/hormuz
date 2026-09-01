@@ -94,6 +94,22 @@ class SecretInventoryTests(unittest.TestCase):
         with self.assertRaisesRegex(SecretInventoryError, "secret_inventory_secret_custody_invalid"):
             validate_secret_inventory(candidate, source_root=ROOT)
 
+    def test_hosted_backup_key_and_archive_custody_are_exact(self) -> None:
+        mutations = (
+            ("hosted-backup-key-import", "rotation_authority", "identity_operator"),
+            ("hosted-backup-key-import", "source_qualname", "_validated_key"),
+            ("hosted-offsite-backup-archive", "material_class", "data_encryption_key"),
+            ("hosted-offsite-backup-archive", "runtime_consumer", "gateway_runtime"),
+        )
+        for entry_id, field, value in mutations:
+            candidate = copy.deepcopy(self.inventory)
+            entry = next(item for item in candidate["managed_materials"] if item["id"] == entry_id)
+            entry[field] = value
+            with self.subTest(entry=entry_id, field=field), self.assertRaisesRegex(
+                SecretInventoryError, "secret_inventory_managed_custody_invalid"
+            ):
+                validate_secret_inventory(candidate, source_root=ROOT)
+
     def test_new_environment_read_requires_inventory_review(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

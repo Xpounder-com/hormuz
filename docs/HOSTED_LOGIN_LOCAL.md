@@ -171,8 +171,10 @@ sessions and throttling, tenant-scoped provider custody, administrator web
 sessions/roles beyond local operator removal, directory synchronization, immutable session security evidence,
 real IdP and official-client refresh/401 behavior, and cross-platform secure
 storage. Restoring a session-only backup requires master-key rotation to prevent
-credential replay; a managed directory additionally needs the recovery work
-described in [team onboarding](TEAM_ONBOARDING.md). A signed/notarized Mac wrapper, customer dashboard,
-Render deployment, billing, operational recovery, and compatible provider
+credential replay. The separate Render staging profile instead provides an
+encrypted, origin-bound managed-directory archive that restores every authority
+closed; see its [recovery runbook](../deploy/render/gateway/README.md#offline-snapshot-encrypted-export-and-conservative-restore).
+A signed/notarized Mac wrapper, customer dashboard, fresh-disk qualification,
+recovery timing, billing, and compatible provider
 failover remain separate milestones. This slice makes no availability or
 latency guarantee and performs no deployment or billing operation.

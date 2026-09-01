@@ -131,7 +131,7 @@ SESSION_PROOF_TEST_MODULES = (
     "tests.test_session_broker", "tests.test_onboarding_store", "tests.test_onboarding_http",
     "tests.test_onboarding_migration", "tests.test_team_commands",
     "tests.test_console_store", "tests.test_console_http", "tests.test_console_migration",
-    "tests.test_hosted_state", "tests.test_hosted_http",
+    "tests.test_hosted_backup", "tests.test_hosted_state", "tests.test_hosted_http",
 )
 SESSION_PROOF_SDIST_PATHS = (
     "tests/__init__.py", "tests/_session_fixtures.py", "tests/fixtures/session-store-v2.json",
