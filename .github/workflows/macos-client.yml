@@ -1,0 +1,87 @@
+name: Mac client
+
+on:
+  pull_request:
+    paths:
+      - "clients/macos/**"
+      - "script/build_and_run.sh"
+      - "script/package_macos_release.sh"
+      - "script/notarize_macos_release.sh"
+      - "tools/verify_macos_client.py"
+      - "tools/verify_macos_distribution.py"
+      - "tools/verify_macos_installed_client.py"
+      - "hormuz/**"
+      - "tests/_session_fixtures.py"
+      - "tests/test_gateway.py"
+      - ".github/workflows/macos-client.yml"
+      - ".github/workflows/macos-distribution.yml"
+  push:
+    branches: [main]
+    paths:
+      - "clients/macos/**"
+      - "script/build_and_run.sh"
+      - "script/package_macos_release.sh"
+      - "script/notarize_macos_release.sh"
+      - "tools/verify_macos_client.py"
+      - "tools/verify_macos_distribution.py"
+      - "hormuz/**"
+      - ".github/workflows/macos-client.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-client-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  local-client:
+    name: Native Mac client and loopback contract
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Record native toolchain
+        run: |
+          swift --version
+          xcodebuild -version
+      - name: Test native session and storage contracts
+        run: swift test --package-path clients/macos
+      - name: Stage and inspect the local app bundle
+        run: |
+          ./script/build_and_run.sh --build-only
+          clients/macos/dist/Hormuz.app/Contents/MacOS/Hormuz --version
+          codesign --verify --strict clients/macos/dist/Hormuz.app
+          plutil -lint clients/macos/dist/Hormuz.app/Contents/Info.plist
+      - name: Prove the universal distribution-shaped package
+        run: >-
+          ./script/package_macos_release.sh
+          --ad-hoc
+          --bundle-id com.xpounder.hormuz
+          --version 0.1.0
+          --build 1
+          --output-directory "$RUNNER_TEMP/hormuz-macos-package"
+      - name: Install gateway fixture dependencies
+        run: python -m pip install --editable .
+      - name: Verify native client against the local gateway
+        run: >-
+          python tools/verify_macos_client.py
+          --probe clients/macos/.build/debug/HormuzFixtureProbe
+          --output "$RUNNER_TEMP/hormuz-macos-local-proof.json"
+      - name: Retain metadata-only verification evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hormuz-macos-local-proof
+          path: |
+            ${{ runner.temp }}/hormuz-macos-local-proof.json
+            ${{ runner.temp }}/hormuz-macos-package/package-metadata.json
+          if-no-files-found: error
+          retention-days: 7

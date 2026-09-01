@@ -1,0 +1,117 @@
+name: Mac signed distribution
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Three-component marketing version
+        required: true
+        default: 0.1.0
+        type: string
+      build_number:
+        description: Positive monotonically increasing build number
+        required: true
+        default: "1"
+        type: string
+      bundle_identifier:
+        description: Registered Apple bundle identifier
+        required: true
+        default: com.xpounder.hormuz
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-distribution-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  sign-and-notarize:
+    name: Sign, notarize, staple and verify
+    runs-on: macos-15
+    timeout-minutes: 45
+    environment: macos-distribution
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Record native toolchain
+        run: |
+          swift --version
+          xcodebuild -version
+      - name: Test native client before signing
+        run: swift test --package-path clients/macos
+      - name: Import protected Apple credentials, sign and notarize
+        env:
+          HORMUZ_CERTIFICATE_BASE64: ${{ secrets.MACOS_DEVELOPER_ID_P12_BASE64 }}
+          HORMUZ_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_DEVELOPER_ID_P12_PASSWORD }}
+          HORMUZ_NOTARY_KEY_BASE64: ${{ secrets.APPLE_NOTARY_KEY_P8_BASE64 }}
+          HORMUZ_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          HORMUZ_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+          HORMUZ_VERSION: ${{ inputs.version }}
+          HORMUZ_BUILD_NUMBER: ${{ inputs.build_number }}
+          HORMUZ_BUNDLE_ID: ${{ inputs.bundle_identifier }}
+        run: |
+          set -euo pipefail
+          umask 077
+          for name in HORMUZ_CERTIFICATE_BASE64 HORMUZ_CERTIFICATE_PASSWORD HORMUZ_NOTARY_KEY_BASE64 HORMUZ_NOTARY_KEY_ID HORMUZ_NOTARY_ISSUER_ID; do
+            test -n "${!name}"
+          done
+          HORMUZ_KEYCHAIN="$RUNNER_TEMP/hormuz-signing.keychain-db"
+          HORMUZ_CERTIFICATE="$RUNNER_TEMP/developer-id.p12"
+          HORMUZ_NOTARY_KEY="$RUNNER_TEMP/AuthKey_$HORMUZ_NOTARY_KEY_ID.p8"
+          export HORMUZ_CERTIFICATE HORMUZ_NOTARY_KEY
+          HORMUZ_KEYCHAIN_PASSWORD="$(openssl rand -base64 32)"
+          HORMUZ_NOTARY_PROFILE="hormuz-ci-$GITHUB_RUN_ID"
+          cleanup() {
+            security delete-keychain "$HORMUZ_KEYCHAIN" >/dev/null 2>&1 || true
+            rm -f "$HORMUZ_CERTIFICATE" "$HORMUZ_NOTARY_KEY"
+          }
+          trap cleanup EXIT
+          python3 - <<'PY'
+          import base64
+          import os
+          from pathlib import Path
+          Path(os.environ["HORMUZ_CERTIFICATE"]).write_bytes(base64.b64decode(os.environ["HORMUZ_CERTIFICATE_BASE64"], validate=True))
+          Path(os.environ["HORMUZ_NOTARY_KEY"]).write_bytes(base64.b64decode(os.environ["HORMUZ_NOTARY_KEY_BASE64"], validate=True))
+          PY
+          security create-keychain -p "$HORMUZ_KEYCHAIN_PASSWORD" "$HORMUZ_KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$HORMUZ_KEYCHAIN"
+          security unlock-keychain -p "$HORMUZ_KEYCHAIN_PASSWORD" "$HORMUZ_KEYCHAIN"
+          security import "$HORMUZ_CERTIFICATE" -k "$HORMUZ_KEYCHAIN" -P "$HORMUZ_CERTIFICATE_PASSWORD" -T /usr/bin/codesign -t cert -f pkcs12
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$HORMUZ_KEYCHAIN_PASSWORD" "$HORMUZ_KEYCHAIN"
+          security list-keychains -d user -s "$HORMUZ_KEYCHAIN"
+          security default-keychain -d user -s "$HORMUZ_KEYCHAIN"
+          HORMUZ_IDENTITIES="$(security find-identity -v -p codesigning "$HORMUZ_KEYCHAIN" | sed -n 's/.*"\(Developer ID Application: [^"]*\)"/\1/p')"
+          test "$(printf '%s\n' "$HORMUZ_IDENTITIES" | sed '/^$/d' | wc -l | tr -d ' ')" = 1
+          HORMUZ_CODESIGN_IDENTITY="$HORMUZ_IDENTITIES"
+          xcrun notarytool store-credentials "$HORMUZ_NOTARY_PROFILE" \
+            --key "$HORMUZ_NOTARY_KEY" \
+            --key-id "$HORMUZ_NOTARY_KEY_ID" \
+            --issuer "$HORMUZ_NOTARY_ISSUER_ID" \
+            --keychain "$HORMUZ_KEYCHAIN" \
+            --validate
+          HORMUZ_OUTPUT="$RUNNER_TEMP/hormuz-macos-release"
+          HORMUZ_CODESIGN_IDENTITY="$HORMUZ_CODESIGN_IDENTITY" ./script/package_macos_release.sh \
+            --output-directory "$HORMUZ_OUTPUT" \
+            --bundle-id "$HORMUZ_BUNDLE_ID" \
+            --version "$HORMUZ_VERSION" \
+            --build "$HORMUZ_BUILD_NUMBER"
+          ./script/notarize_macos_release.sh \
+            --bundle "$HORMUZ_OUTPUT/Hormuz.app" \
+            --upload-archive "$HORMUZ_OUTPUT/Hormuz-$HORMUZ_VERSION-notarization-upload.zip" \
+            --keychain-profile "$HORMUZ_NOTARY_PROFILE" \
+            --keychain "$HORMUZ_KEYCHAIN"
+      - name: Retain only the signed notarized archive and content-free evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hormuz-macos-${{ inputs.version }}-${{ inputs.build_number }}
+          path: |
+            ${{ runner.temp }}/hormuz-macos-release/Hormuz-*-notarized.zip
+            ${{ runner.temp }}/hormuz-macos-release/Hormuz-*.dSYM.zip
+            ${{ runner.temp }}/hormuz-macos-release/notarization.json
+            ${{ runner.temp }}/hormuz-macos-release/distribution-proof.json
+          if-no-files-found: error
+          retention-days: 30
