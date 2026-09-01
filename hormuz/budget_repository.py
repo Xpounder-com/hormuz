@@ -27,11 +27,12 @@ from ._budget_schema import (
     BudgetPlanIntegrityError,
     budget_amount_text,
     validate_active_budget_rows,
-    validate_budget_activation_row,
+    validate_budget_activation_predecessor,
     validate_budget_plan_row,
     validate_budget_pointer_row,
 )
 from ._portfolio_sql import portfolio_transaction
+from .budget_runtime import configured_model_id
 from .config import GatewayConfig, Identity
 from .finance_values import FinanceValueError, currency_code, decimal_text, exact_context
 from .policy_document import PolicySnapshot, local_policy_content_sha256
@@ -439,8 +440,9 @@ class WorkBudgetRepository:
         activated_versions: set[int] = set()
         for raw in rows:
             activation = dict(raw)
+            prior = None if not result else result[-1][1]
             try:
-                validate_budget_activation_row(activation)
+                validate_budget_activation_predecessor(activation, prior)
             except BudgetIntegrityError:
                 raise BudgetRepositoryError("unavailable") from None
             plan = WorkBudgetRepository._plan(
@@ -462,24 +464,12 @@ class WorkBudgetRepository:
                 )
             except BudgetIntegrityError:
                 raise BudgetRepositoryError("unavailable") from None
-            prior = None if not result else result[-1][1]
-            expected_generation = len(result) + 1
             expected_reason = (
                 "reactivated"
                 if activation["current_version"] in activated_versions
                 else "accepted"
             )
-            if (
-                activation["activation_generation"] != expected_generation
-                or (
-                    prior is not None
-                    and (
-                        activation["previous_version"] != prior["current_version"]
-                        or activation["committed_at"] < prior["committed_at"]
-                    )
-                )
-                or activation["reason_code"] != expected_reason
-            ):
+            if activation["reason_code"] != expected_reason:
                 raise BudgetRepositoryError("unavailable")
             activated_versions.add(activation["current_version"])
             result.append((plan, activation))
@@ -853,21 +843,42 @@ class WorkBudgetRepository:
                 "committed_amount": committed, "pending_reservation_amount": pending,
                 "uncertain_reservation_amount": uncertain, "remaining_amount": remaining,
             }
+        orphaned_denial = sql.one(
+            "SELECT 1 AS orphaned FROM portfolio_work_budget_audit_events e "
+            "LEFT JOIN portfolio_work_budget_plan_versions v "
+            "ON v.organization_id=e.organization_id "
+            "AND v.budget_plan_id=e.entity_id AND v.version=e.entity_version "
+            "WHERE e.organization_id=? AND e.entity_id=? "
+            "AND e.operation='reserve_denied' "
+            "AND e.occurred_at>=? AND e.occurred_at<? AND e.occurred_at<=? "
+            "AND v.organization_id IS NULL LIMIT 1",
+            (
+                plan["organization_id"], plan["budget_plan_id"],
+                plan["window_start_at"], plan["window_end_at"], as_of,
+            ),
+        )
+        if orphaned_denial is not None:
+            raise BudgetRepositoryError("unavailable")
         denial_rows = [dict(row) for row in sql.execute(
-            "SELECT e.reason_code,COUNT(*) AS count FROM portfolio_work_budget_audit_events e "
+            "SELECT e.reason_code FROM portfolio_work_budget_audit_events e "
             "JOIN portfolio_work_budget_plan_versions v ON v.organization_id=e.organization_id "
             "AND v.budget_plan_id=e.entity_id AND v.version=e.entity_version "
             "WHERE e.organization_id=? AND e.entity_id=? AND e.operation='reserve_denied' "
             "AND v.window_start_at=? AND v.window_end_at=? AND v.currency=? "
-            "AND e.occurred_at>=? AND e.occurred_at<? AND e.occurred_at<=? GROUP BY e.reason_code",
+            "AND e.occurred_at>=? AND e.occurred_at<? AND e.occurred_at<=? "
+            "ORDER BY e.occurred_at,e.entity_version,e.reason_code LIMIT ?",
             (plan["organization_id"], plan["budget_plan_id"], plan["window_start_at"],
              plan["window_end_at"], plan["currency"], plan["window_start_at"],
-             plan["window_end_at"], as_of),
+             plan["window_end_at"], as_of, _MAX_REPORT_ATTEMPTS + 1),
         ).fetchall()]
-        denials = {
-            row["reason_code"]: _stored_count(row["count"])
-            for row in denial_rows
-        }
+        if len(denial_rows) > _MAX_REPORT_ATTEMPTS:
+            raise BudgetRepositoryError("unavailable")
+        denials: dict[str, int] = {}
+        for row in denial_rows:
+            reason_code = row["reason_code"]
+            if type(reason_code) is not str:
+                raise BudgetRepositoryError("unavailable")
+            denials[reason_code] = _stored_count(denials.get(reason_code, 0) + 1)
         denied = _stored_count(sum(denials.get(reason, 0) for reason in (
             "budget_ceiling", "output_token_ceiling", "request_cost_ceiling",
         )))
@@ -1074,9 +1085,12 @@ class WorkBudgetRepository:
         policy = snapshot.effective_policy
         if policy.allowed_clients is not None and scenario.client not in policy.allowed_clients:
             return None
-        alias = scenario.requested_model
-        route = self.config.model_routes.get(alias)
-        allowed = policy.allowed_models is None or alias in policy.allowed_models
+        selected_alias = scenario.requested_model
+        route = self.config.model_routes.get(selected_alias)
+        allowed = (
+            policy.allowed_models is None
+            or selected_alias in policy.allowed_models
+        )
         if route is None or route.protocol != scenario.protocol or not allowed:
             fallback = (
                 (policy.fallback_models or {}).get(scenario.protocol)
@@ -1092,6 +1106,7 @@ class WorkBudgetRepository:
                 )
             ):
                 return None
+            selected_alias = fallback
         output_tokens = scenario.requested_output_tokens
         if policy.max_output_tokens is not None and (
             output_tokens is None or output_tokens > policy.max_output_tokens
@@ -1099,7 +1114,11 @@ class WorkBudgetRepository:
             output_tokens = policy.max_output_tokens
         return ({
             "provider_id": route.protocol,
-            "model_id": route.upstream_model,
+            "model_id": configured_model_id(
+                resolved_alias=selected_alias,
+                upstream_model=route.upstream_model,
+                requested_model=scenario.requested_model,
+            ),
             "model_version": None,
         }, output_tokens)
 

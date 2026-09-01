@@ -112,6 +112,7 @@ class WorkBudgetContext:
     reason_code: str
     reserved_output_tokens: int
     output_tokens_bounded: bool
+    input_tokens_bounded: bool
     policy_version: str
     policy_digest: str
     rate_card_id: str

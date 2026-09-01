@@ -180,6 +180,8 @@ class PolicyEngine:
                 provider_failover=provider_failover,
             )
         if work_budget is None:
+            # The built-in v1 method still enters the atomic budget transaction
+            # with missing attribution, so an effective work plan fails closed.
             return self.store.begin_request_attempt(
                 identity=identity,
                 client=client,

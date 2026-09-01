@@ -11,11 +11,12 @@ from pathlib import Path
 import runpy
 import threading
 from unittest import mock
+from uuid import uuid4
 
 from hormuz._persistence import WorkBudgetContext
 from hormuz.budget_runtime import WorkBudgetDenied
 from hormuz.budget_repository import BudgetRepositoryError
-from hormuz.config import Policy
+from hormuz.config import ModelRoute, Policy
 from hormuz.policy_scenarios import create_policy_scenario_suite
 from hormuz.policy_document import local_policy_content_sha256
 from hormuz.portfolio_config import PortfolioPrincipal
@@ -150,6 +151,7 @@ class BudgetAssertions:
             reason_code="bound",
             reserved_output_tokens=output_tokens,
             output_tokens_bounded=True,
+            input_tokens_bounded=True,
             policy_version="budget-policy-v1",
             policy_digest=TEST_DIGEST,
             rate_card_id="synthetic-route-rate",
@@ -159,12 +161,15 @@ class BudgetAssertions:
         )
 
     def attempt(self, *, cost_microusd, output_tokens=20,
-                output_tokens_bounded=True, store=None, scopes=None):
+                output_tokens_bounded=True, input_tokens_bounded=True,
+                store=None, scopes=None,
+                requested_model="synthetic", resolved_alias="synthetic",
+                upstream_model="synthetic"):
         store = store or self.store
         return store._begin_request_attempt_with_work_budget(
             identity=self.identity, client="codex", protocol="openai",
-            requested_model="synthetic", resolved_alias="synthetic",
-            upstream_model="synthetic", policy_version="budget-policy-v1",
+            requested_model=requested_model, resolved_alias=resolved_alias,
+            upstream_model=upstream_model, policy_version="budget-policy-v1",
             policy_action="allowed", redaction_count=0, redaction_rules=(),
             scopes=(ReservationScope(name="organization"),) if scopes is None else scopes,
             reserved_tokens=output_tokens + 10,
@@ -172,7 +177,79 @@ class BudgetAssertions:
             work_budget=replace(
                 self.context(output_tokens=output_tokens),
                 output_tokens_bounded=output_tokens_bounded,
+                input_tokens_bounded=input_tokens_bounded,
             ),
+        )
+
+    def check_configured_route_identity_accepts_provider_model_names(self):
+        plan = self.create(
+            amount="10",
+            allowed_models=[{
+                "provider_id": "openai",
+                "model_id": "managed-route",
+                "model_version": None,
+            }],
+        )
+        self.activate(plan)
+        provider_model = "vendor/" + "model" * 32
+
+        attempt = self.attempt(
+            cost_microusd=1,
+            requested_model="managed-route",
+            resolved_alias="managed-route",
+            upstream_model=provider_model,
+        )
+
+        binding = next(
+            row
+            for row in self.budget_rows()["portfolio_work_budget_reservation_bindings"]
+            if row["request_attempt_id"] == attempt.attempt_id
+        )
+        self.assertGreater(len(provider_model), 128)
+        self.assertEqual(binding["provider_id"], "openai")
+        self.assertEqual(binding["model_id"], "managed-route")
+        self.assertIsNone(binding["model_version"])
+
+        managed_config = replace(
+            self.config,
+            model_routes={
+                "managed-route": ModelRoute(
+                    "route-object-alias", "openai", provider_model,
+                ),
+            },
+            organization_policy=replace(
+                self.config.organization_policy,
+                fallback_model="managed-route",
+            ),
+        )
+        suite = create_policy_scenario_suite(
+            organization_id="acme",
+            scenario_id="provider-native-model-name",
+            actor_id="alice",
+            client="codex",
+            protocol="openai",
+            requested_model="managed-route",
+            requested_output_tokens=20,
+        )
+        with mock.patch.object(self.repository, "config", managed_config):
+            preview = self.repository.preview_plan(
+                ADMIN, plan["budget_plan_id"], plan["version"], suite,
+            )
+            fallback_suite = create_policy_scenario_suite(
+                organization_id="acme",
+                scenario_id="provider-native-model-name-fallback",
+                actor_id="alice",
+                client="codex",
+                protocol="openai",
+                requested_model="unknown-route",
+                requested_output_tokens=20,
+            )
+            fallback_preview = self.repository.preview_plan(
+                ADMIN, plan["budget_plan_id"], plan["version"], fallback_suite,
+            )
+        self.assertNotIn("model_intersection", preview["restriction_reasons"])
+        self.assertNotIn(
+            "model_intersection", fallback_preview["restriction_reasons"],
         )
 
     def check_plan_versions_activation_and_management_change(self):
@@ -388,8 +465,13 @@ class BudgetAssertions:
                 cost_microusd=0, output_tokens=0,
                 output_tokens_bounded=False,
             )
+        with self.assertRaises(ReservationDenied):
+            self.attempt(
+                cost_microusd=0, output_tokens=0,
+                input_tokens_bounded=False,
+            )
         bad = WorkBudgetContext(
-            None, None, "unattributed", "missing_evidence", 20, True,
+            None, None, "unattributed", "missing_evidence", 20, True, True,
             "budget-policy-v1", TEST_DIGEST,
             "synthetic-route-rate", 1, TEST_DIGEST, "USD",
         )
@@ -409,12 +491,12 @@ class BudgetAssertions:
         ]
         self.assertEqual(sorted(reasons), [
             "attribution_invalid", "output_token_ceiling",
-            "request_cost_ceiling", "request_cost_ceiling",
+            "request_cost_ceiling", "request_cost_ceiling", "request_cost_ceiling",
         ])
         report = self.repository.current_report(ADMIN, plan["budget_plan_id"])
-        self.assertEqual(report["enforcement"]["over_cap_attempts"], 3)
-        self.assertEqual(report["coverage"]["population_attempts"], 4)
-        self.assertEqual(report["coverage"]["included_attempts"], 3)
+        self.assertEqual(report["enforcement"]["over_cap_attempts"], 4)
+        self.assertEqual(report["coverage"]["population_attempts"], 5)
+        self.assertEqual(report["coverage"]["included_attempts"], 4)
         self.assertEqual(report["coverage"]["unattributed_attempts"], 1)
 
     def check_concurrent_instances_cannot_overspend(self):
@@ -561,7 +643,7 @@ class BudgetAssertions:
         with self.assertRaises(ReservationDenied):
             self.attempt(cost_microusd=1)
         ambiguous = WorkBudgetContext(
-            None, None, "ambiguous", "ambiguous", 20, True,
+            None, None, "ambiguous", "ambiguous", 20, True, True,
             "budget-policy-v1", TEST_DIGEST,
             "synthetic-route-rate", 1, TEST_DIGEST, "USD",
         )
@@ -655,6 +737,61 @@ class BudgetAssertions:
             "content_digest": TEST_DIGEST,
         })
 
+    def check_denial_report_population_is_bounded(self):
+        plan = self.create(amount="0")
+        self.activate(plan)
+        with self.assertRaises(ReservationDenied):
+            self.attempt(cost_microusd=1)
+        with mock.patch("hormuz.budget_repository._MAX_REPORT_ATTEMPTS", 1):
+            report = self.repository.current_report(ADMIN, plan["budget_plan_id"])
+        self.assertEqual(report["coverage"]["population_attempts"], 1)
+
+        with self.assertRaises(ReservationDenied):
+            self.attempt(cost_microusd=1)
+        with mock.patch("hormuz.budget_repository._MAX_REPORT_ATTEMPTS", 1):
+            self.error(
+                "unavailable",
+                lambda: self.repository.current_report(ADMIN, plan["budget_plan_id"]),
+            )
+        self.assertEqual(
+            len([
+                row
+                for row in self.budget_rows()["portfolio_work_budget_audit_events"]
+                if row["operation"] == "reserve_denied"
+            ]),
+            2,
+        )
+
+    def check_orphaned_denial_audits_fail_closed(self):
+        for entity_version in (None, 2147483647):
+            with self.subTest(entity_version=entity_version):
+                plan = self.create(amount="1")
+                self.activate(plan)
+                with self.repository._transaction(ADMIN) as sql:
+                    maximum = sql.one(
+                        "SELECT COALESCE(MAX(sequence),0) AS sequence "
+                        "FROM portfolio_work_budget_audit_events "
+                        "WHERE organization_id=?",
+                        (ADMIN.organization_id,),
+                    )["sequence"]
+                    sql.insert("portfolio_work_budget_audit_events", {
+                        "organization_id": ADMIN.organization_id,
+                        "event_id": uuid4().hex,
+                        "sequence": maximum + 1,
+                        "actor_id": ADMIN.actor_id,
+                        "operation": "reserve_denied",
+                        "entity_id": plan["budget_plan_id"],
+                        "entity_version": entity_version,
+                        "reason_code": "budget_ceiling",
+                        "occurred_at": sql.now(),
+                    })
+                self.error(
+                    "unavailable",
+                    lambda: self.repository.current_report(
+                        ADMIN, plan["budget_plan_id"],
+                    ),
+                )
+
     def check_bounded_gateway_actor_is_never_silently_unaudited(self):
         plan = self.create(amount="0")
         self.activate(plan)
@@ -743,6 +880,54 @@ class BudgetAssertions:
                 "unavailable",
                 lambda: self.repository.get_plan(ADMIN, first["budget_plan_id"]),
             )
+
+    def check_request_time_activation_predecessor_is_validated(self):
+        first = self.create(amount="10")
+        self.activate(first)
+        second = self.create(
+            amount="11", budget_plan_id=first["budget_plan_id"], expected_version=1,
+        )
+        third = self.create(
+            amount="12", budget_plan_id=first["budget_plan_id"], expected_version=2,
+        )
+        initial_activation = next(
+            row
+            for row in self.budget_rows()["portfolio_work_budget_activation_events"]
+            if row["budget_plan_id"] == first["budget_plan_id"]
+        )
+        third_created_at = next(
+            row["created_at"]
+            for row in self.budget_rows()["portfolio_work_budget_plan_versions"]
+            if row["budget_plan_id"] == first["budget_plan_id"]
+            and row["version"] == third["version"]
+        )
+        self.inject_nonpredecessor_activation(
+            plan_id=first["budget_plan_id"],
+            current_version=second["version"],
+            wrong_previous_version=third["version"],
+            committed_at=third_created_at,
+            template=initial_activation,
+        )
+
+        with self.assertRaises(ReservationDenied):
+            self.attempt(cost_microusd=1)
+        self.assertEqual(
+            self.budget_rows()["portfolio_work_budget_reservation_bindings"],
+            [],
+        )
+        self.assertEqual(self.attribution_rows(), [])
+        self.assertIn(
+            "attribution_invalid",
+            [
+                row["reason_code"]
+                for row in self.budget_rows()["portfolio_work_budget_audit_events"]
+                if row["operation"] == "reserve_denied"
+            ],
+        )
+        self.error(
+            "unavailable",
+            lambda: self.repository.current_report(ADMIN, first["budget_plan_id"]),
+        )
 
     def check_denial_audit_retains_evaluation_time(self):
         plan = self.create(amount="10")
