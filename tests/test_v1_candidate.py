@@ -1484,6 +1484,7 @@ class V1CandidateTests(unittest.TestCase):
             {},
             None,
         )
+        self.addCleanup(failure.close)
         with mock.patch.object(namespace["OPENER"], "open", side_effect=failure):
             with self.assertRaisesRegex(
                 credential_error,
@@ -1503,6 +1504,7 @@ class V1CandidateTests(unittest.TestCase):
             {},
             io.BytesIO(b'{"message":"Validation Failed"}'),
         )
+        self.addCleanup(failure.close)
 
         def reject_invalid_release(request: object, *, timeout: int) -> None:
             observed["method"] = request.get_method()

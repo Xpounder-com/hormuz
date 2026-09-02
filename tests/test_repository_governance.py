@@ -30,7 +30,7 @@ class RepositoryGovernanceTests(unittest.TestCase):
         self.assertEqual(result["status"], "passed")
         self.assertEqual(result["repository"], "Xpounder-com/hormuz")
         self.assertEqual(result["ruleset_count"], 4)
-        self.assertEqual(result["required_check_count"], 11)
+        self.assertEqual(result["required_check_count"], 12)
         self.assertGreaterEqual(result["workflow_count"], 4)
         self.assertGreater(result["pinned_action_use_count"], 0)
         self.assertEqual(result["public_transition_check_count"], 10)
@@ -484,6 +484,221 @@ class RepositoryGovernanceTests(unittest.TestCase):
                 "workflow environment contract changed",
             ):
                 validate_repository_governance(root)
+
+    def test_macos_distribution_credentials_must_remain_in_protected_job(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._copy_contract(root)
+            workflow = root / ".github/workflows/macos-distribution.yml"
+            value = workflow.read_text(encoding="utf-8")
+            workflow.write_text(
+                value.replace(
+                    "    environment: macos-distribution\n",
+                    "    environment: unprotected-macos-distribution\n",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                RepositoryGovernanceError,
+                "workflow environment contract changed",
+            ):
+                validate_repository_governance(root)
+
+    def test_macos_distribution_rejects_unapproved_secret(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._copy_contract(root)
+            workflow = root / ".github/workflows/macos-distribution.yml"
+            value = workflow.read_text(encoding="utf-8")
+            workflow.write_text(
+                value.replace(
+                    "        env:\n",
+                    (
+                        "        env:\n"
+                        "          UNAPPROVED_TOKEN: "
+                        "${{ secrets.UNAPPROVED_TOKEN }}\n"
+                    ),
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                RepositoryGovernanceError,
+                "workflow secret expression contract changed",
+            ):
+                validate_repository_governance(root)
+
+    def test_macos_distribution_must_require_exact_default_branch_source(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._copy_contract(root)
+            workflow = root / ".github/workflows/macos-distribution.yml"
+            value = workflow.read_text(encoding="utf-8")
+            workflow.write_text(
+                value.replace(
+                    '          test "$GITHUB_REF" = "$HORMUZ_EXPECTED_REF"\n',
+                    "",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                RepositoryGovernanceError,
+                "distribution source guard changed",
+            ):
+                validate_repository_governance(root)
+
+    def test_macos_distribution_must_keep_build_off_signing_runner(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._copy_contract(root)
+            workflow = root / ".github/workflows/macos-distribution.yml"
+            value = workflow.read_text(encoding="utf-8")
+            workflow.write_text(
+                value.replace(
+                    "    needs: build-and-test\n",
+                    "    needs: unrelated-job\n",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                RepositoryGovernanceError,
+                "distribution build/sign isolation changed",
+            ):
+                validate_repository_governance(root)
+
+    def test_macos_distribution_build_cannot_receive_signing_secret(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._copy_contract(root)
+            workflow = root / ".github/workflows/macos-distribution.yml"
+            value = workflow.read_text(encoding="utf-8")
+            secret_line = (
+                "          HORMUZ_NOTARY_KEY_ID: "
+                "${{ secrets.APPLE_NOTARY_KEY_ID }}\n"
+            )
+            build_marker = "      - name: Record native toolchain\n"
+            self.assertEqual(value.count(secret_line), 1)
+            self.assertEqual(value.count(build_marker), 1)
+            value = value.replace(secret_line, "", 1)
+            value = value.replace(
+                build_marker,
+                (
+                    "      - name: Unsafe build credential\n"
+                    "        env:\n"
+                    + secret_line
+                    + "        run: 'true'\n"
+                    + build_marker
+                ),
+                1,
+            )
+            workflow.write_text(value, encoding="utf-8")
+            with self.assertRaisesRegex(
+                RepositoryGovernanceError,
+                "distribution build/sign isolation changed",
+            ):
+                validate_repository_governance(root)
+
+    def test_macos_distribution_identity_cannot_be_dispatcher_controlled(self) -> None:
+        mutations = (
+            (
+                "          HORMUZ_BUNDLE_ID: com.xpounder.hormuz\n",
+                "          HORMUZ_BUNDLE_ID: ${{ inputs.bundle_identifier }}\n",
+            ),
+            (
+                (
+                    "          HORMUZ_BUILD_NUMBER=$((GITHUB_RUN_NUMBER * 1000 + "
+                    "GITHUB_RUN_ATTEMPT))\n"
+                ),
+                "          HORMUZ_BUILD_NUMBER=${{ inputs.build_number }}\n",
+            ),
+        )
+        for original, replacement in mutations:
+            with self.subTest(original=original), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                self._copy_contract(root)
+                workflow = root / ".github/workflows/macos-distribution.yml"
+                value = workflow.read_text(encoding="utf-8")
+                self.assertEqual(value.count(original), 2)
+                workflow.write_text(
+                    value.replace(original, replacement, 1), encoding="utf-8"
+                )
+                with self.assertRaisesRegex(
+                    RepositoryGovernanceError,
+                    "distribution release identity changed",
+                ):
+                    validate_repository_governance(root)
+
+    def test_macos_distribution_signing_job_cannot_execute_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._copy_contract(root)
+            workflow = root / ".github/workflows/macos-distribution.yml"
+            value = workflow.read_text(encoding="utf-8")
+            marker = "          HORMUZ_OUTPUT=\"$RUNNER_TEMP/hormuz-macos-release\"\n"
+            self.assertEqual(value.count(marker), 1)
+            workflow.write_text(
+                value.replace(
+                    marker,
+                    (
+                        '          "$HORMUZ_UNSIGNED_PAYLOAD/Hormuz" --version\n'
+                        + marker
+                    ),
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                RepositoryGovernanceError,
+                "distribution credential execution boundary changed",
+            ):
+                validate_repository_governance(root)
+
+    def test_macos_distribution_must_destroy_raw_secrets_before_packaging(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            self._copy_contract(root)
+            workflow = root / ".github/workflows/macos-distribution.yml"
+            value = workflow.read_text(encoding="utf-8")
+            marker = (
+                "          unset HORMUZ_CERTIFICATE_BASE64 "
+                "HORMUZ_CERTIFICATE_PASSWORD\n"
+            )
+            self.assertEqual(value.count(marker), 1)
+            workflow.write_text(value.replace(marker, "", 1), encoding="utf-8")
+            with self.assertRaisesRegex(
+                RepositoryGovernanceError,
+                "distribution credential execution boundary changed",
+            ):
+                validate_repository_governance(root)
+
+    def test_native_macos_required_gate_cannot_bypass_relevant_changes(self) -> None:
+        mutations = (
+            (
+                '          else\n            echo "macos=true" >> "$GITHUB_OUTPUT"\n',
+                '          else\n            echo "macos=false" >> "$GITHUB_OUTPUT"\n',
+            ),
+            (
+                '            test "$NATIVE_RESULT" = "success"\n',
+                '            test "$NATIVE_RESULT" = "skipped"\n',
+            ),
+        )
+        for original, replacement in mutations:
+            with self.subTest(original=original), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                self._copy_contract(root)
+                workflow = root / ".github/workflows/macos-client.yml"
+                value = workflow.read_text(encoding="utf-8")
+                self.assertEqual(value.count(original), 1)
+                workflow.write_text(
+                    value.replace(original, replacement, 1), encoding="utf-8"
+                )
+                with self.assertRaisesRegex(
+                    RepositoryGovernanceError, "native Mac required-check gate changed"
+                ):
+                    validate_repository_governance(root)
 
     def test_candidate_environment_secret_inventory_check_is_required(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

@@ -7,6 +7,10 @@ import unittest
 from hormuz._finance_schema import TABLE_DDL, sqlite_statements
 from hormuz.finance_repository import create_finance_repository
 from hormuz.store import StorageSchemaError, UsageStore
+if __package__:
+    from ._sqlite import managed_sqlite_connection
+else:
+    from _sqlite import managed_sqlite_connection
 
 if __package__:
     from ._finance_fixture import AUDIT, CARDS, FinanceAssertions
@@ -28,7 +32,7 @@ class SQLiteFinanceTests(FinanceAssertions, unittest.TestCase):
         self.setup_finance()
 
     def finance_rows(self):
-        with sqlite3.connect(self.config.database_path) as connection:
+        with managed_sqlite_connection(self.config.database_path) as connection:
             connection.row_factory = sqlite3.Row
             return {table: [dict(row) for row in connection.execute(f"SELECT * FROM {table} ORDER BY organization_id, sequence")]
                     for table in TABLE_DDL}
@@ -41,7 +45,7 @@ class SQLiteFinanceTests(FinanceAssertions, unittest.TestCase):
         self.assertEqual(len(sqlite_snapshot(self.config.database_path)["rows"]), 38)
         self.register()
         before = self.finance_rows()
-        with sqlite3.connect(self.config.database_path) as connection:
+        with managed_sqlite_connection(self.config.database_path) as connection:
             for table in TABLE_DDL:
                 for statement in (f"UPDATE {table} SET organization_id=organization_id", f"DELETE FROM {table}"):
                     with self.assertRaisesRegex(sqlite3.IntegrityError, "portfolio_append_only"):
@@ -49,7 +53,7 @@ class SQLiteFinanceTests(FinanceAssertions, unittest.TestCase):
         self.assertEqual(self.finance_rows(), before)
 
     def test_sqlite_finance_missing_guard_refuses_without_repair(self):
-        with sqlite3.connect(self.config.database_path) as connection:
+        with managed_sqlite_connection(self.config.database_path) as connection:
             connection.execute(f"DROP TRIGGER {CARDS}_no_delete")
         before = sqlite_snapshot(self.config.database_path)
         self.error("unavailable", self.register)
@@ -72,7 +76,7 @@ class SQLiteFinanceTests(FinanceAssertions, unittest.TestCase):
             for verb in ("INSERT OR REPLACE", "REPLACE"):
                 for table, selection, where in selections:
                     with self.subTest(recursive_triggers=recursive_triggers, verb=verb, table=table, selection=selection):
-                        with sqlite3.connect(self.config.database_path) as connection:
+                        with managed_sqlite_connection(self.config.database_path) as connection:
                             connection.execute("PRAGMA foreign_keys=ON")
                             connection.execute(f"PRAGMA recursive_triggers={recursive_triggers}")
                             with self.assertRaisesRegex(sqlite3.IntegrityError, "portfolio_append_only"):
@@ -83,7 +87,7 @@ class SQLiteFinanceTests(FinanceAssertions, unittest.TestCase):
         self.register()
         self.get()
         before = sqlite_snapshot(self.config.database_path)
-        with sqlite3.connect(self.config.database_path) as connection:
+        with managed_sqlite_connection(self.config.database_path) as connection:
             connection.execute("PRAGMA recursive_triggers=OFF")
             with self.assertRaisesRegex(sqlite3.IntegrityError, "portfolio_append_only"):
                 connection.execute(
@@ -97,7 +101,7 @@ class SQLiteFinanceTests(FinanceAssertions, unittest.TestCase):
 
     def test_sqlite_finance_has_no_hidden_rowid_replacement_key(self):
         self.register()
-        with sqlite3.connect(self.config.database_path) as connection:
+        with managed_sqlite_connection(self.config.database_path) as connection:
             for table in TABLE_DDL:
                 for alias in ("rowid", "_rowid_", "oid"):
                     with self.subTest(table=table, alias=alias):
@@ -107,7 +111,7 @@ class SQLiteFinanceTests(FinanceAssertions, unittest.TestCase):
     def test_sqlite_finance_missing_replacement_guards_refuse_without_repair(self):
         for table in TABLE_DDL:
             with self.subTest(table=table):
-                with sqlite3.connect(self.config.database_path) as connection:
+                with managed_sqlite_connection(self.config.database_path) as connection:
                     connection.execute(f"DROP TRIGGER {table}_no_replace")
                 before = sqlite_snapshot(self.config.database_path)
                 self.error("unavailable", self.register)
@@ -115,11 +119,11 @@ class SQLiteFinanceTests(FinanceAssertions, unittest.TestCase):
                 with self.assertRaisesRegex(StorageSchemaError, "storage_schema_partial_upgrade"):
                     UsageStore(self.config.database_path)
                 self.assertEqual(sqlite_snapshot(self.config.database_path), before)
-                with sqlite3.connect(self.config.database_path) as connection:
+                with managed_sqlite_connection(self.config.database_path) as connection:
                     connection.execute(next(sql for sql in sqlite_statements() if sql.startswith(f"CREATE TRIGGER {table}_no_replace ")))
 
     def test_sqlite_finance_hidden_rowid_schema_refuses_without_repair(self):
-        with sqlite3.connect(self.config.database_path) as connection:
+        with managed_sqlite_connection(self.config.database_path) as connection:
             for table in reversed(TABLE_DDL):
                 connection.execute(f"DROP TABLE {table}")
             for statement in sqlite_statements():
@@ -136,7 +140,7 @@ class SQLiteFinanceTests(FinanceAssertions, unittest.TestCase):
         for column, replacement in (("content_digest", "a" * 64), ("card_json", "{}"),
                                     ("receipt_id", "b" * 32), ("registered_by", "forged")):
             with self.subTest(column=column):
-                with sqlite3.connect(self.config.database_path) as connection:
+                with managed_sqlite_connection(self.config.database_path) as connection:
                     original = connection.execute(f"SELECT {column} FROM {CARDS}").fetchone()[0]
                     connection.execute(f"DROP TRIGGER {CARDS}_no_update")
                     connection.execute(f"UPDATE {CARDS} SET {column}=?", (replacement,))
@@ -145,7 +149,7 @@ class SQLiteFinanceTests(FinanceAssertions, unittest.TestCase):
                 self.error("unavailable", self.register)
                 self.error("unavailable", self.get)
                 self.assertEqual(self.finance_rows(), before)
-                with sqlite3.connect(self.config.database_path) as connection:
+                with managed_sqlite_connection(self.config.database_path) as connection:
                     connection.execute(f"DROP TRIGGER {CARDS}_no_update")
                     connection.execute(f"UPDATE {CARDS} SET {column}=?", (original,))
                     connection.execute(next(sql for sql in sqlite_statements() if sql.startswith(f"CREATE TRIGGER {CARDS}_no_update ")))
@@ -167,7 +171,7 @@ class SQLiteFinanceTests(FinanceAssertions, unittest.TestCase):
                 UsageStore(config.database_path)
                 repository = create_finance_repository(config)
                 self.register(repository=repository)
-                with sqlite3.connect(config.database_path) as connection:
+                with managed_sqlite_connection(config.database_path) as connection:
                     connection.execute(
                         f"INSERT INTO {AUDIT} SELECT organization_id, ?, ?, actor_id, 'read', "
                         f"rate_card_id, version, content_digest, occurred_at FROM {AUDIT} WHERE sequence=1",

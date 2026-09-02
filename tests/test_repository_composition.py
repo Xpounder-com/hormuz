@@ -12,6 +12,10 @@ from hormuz.config import GatewayConfig, UsageStorageConfig
 from hormuz.postgres import PostgresConnectionPool, PostgresStorageError
 from hormuz.store import UsageStore
 import hormuz.store_router as router
+if __package__:
+    from ._sqlite import managed_sqlite_connection
+else:
+    from _sqlite import managed_sqlite_connection
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -99,13 +103,13 @@ class RepositoryCompositionTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             config = replace(self.config, database_path=Path(temporary) / "usage.sqlite3")
             UsageStore(config.database_path)
-            with sqlite3.connect(config.database_path) as connection:
+            with managed_sqlite_connection(config.database_path) as connection:
                 before = list(connection.iterdump())
             factory = mock.Mock(return_value=object())
             bundle = router.create_repository_bundle(config, portfolio_factory=factory, read_only=True)
             self.assertTrue(bundle.usage.read_only)
             factory.assert_called_once_with(config, environ=None, connection_pool=None, read_only=True)
-            with sqlite3.connect(config.database_path) as connection:
+            with managed_sqlite_connection(config.database_path) as connection:
                 self.assertEqual(list(connection.iterdump()), before)
 
     def test_postgres_factories_share_configuration_and_borrow_the_same_pool(self) -> None:

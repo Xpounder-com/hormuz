@@ -7,6 +7,10 @@ import unittest
 
 from hormuz._attribution_schema import TABLE_DDL
 from hormuz.store import UsageStore
+if __package__:
+    from ._sqlite import managed_sqlite_connection
+else:
+    from _sqlite import managed_sqlite_connection
 
 if __package__:
     from ._attribution_fixture import AttributionAssertions
@@ -62,7 +66,7 @@ class SQLiteAttributionTests(AttributionAssertions, unittest.TestCase):
 
     def test_sqlite_attribution_append_only_and_attempt_binding(self):
         self.attempt()
-        with sqlite3.connect(self.config.database_path) as connection:
+        with managed_sqlite_connection(self.config.database_path) as connection:
             with self.assertRaisesRegex(sqlite3.IntegrityError, "portfolio_append_only"):
                 connection.execute("DELETE FROM portfolio_attribution_events")
             with self.assertRaisesRegex(sqlite3.IntegrityError, "attribution_attempt_invalid"):
