@@ -1,19 +1,26 @@
 # ADR 0001: OIDC login and Hormuz session architecture
 
-- Status: **Proposed — owner approval required**
+- Status: **Accepted; local implementation resumed, production gates open**
 - Date proposed: 2026-08-15
+- Date accepted: 2026-08-15; approval record verified 2026-08-30
 - Decision owner: Product owner
 - Tracking issue: [#2](https://github.com/Xpounder-com/hormuz/issues/2)
 - Unblocks after acceptance: [#13](https://github.com/Xpounder-com/hormuz/issues/13), part of [#7](https://github.com/Xpounder-com/hormuz/issues/7)
 
-## Decision requested
+## Accepted decision
 
 Choose how employees authenticate to Hormuz while continuing to use Codex and Claude Code:
 
 1. **Hormuz session broker — recommended.** Hormuz performs generic OIDC browser login, maps the verified issuer and subject to a Hormuz principal, and issues its own short-lived, revocable, opaque client credentials.
 2. **Customer-minted JWT access tokens only.** Keep the implemented resource-server path and require every customer to mint and continuously refresh a JWT access token whose audience is Hormuz.
 
-This ADR proposes option 1. It is not accepted and does not authorize implementation until the product owner approves it.
+The owner approved option 1 with 10-minute access credentials and a 12-hour
+absolute session limit in [issue #2](https://github.com/Xpounder-com/hormuz/issues/2#issuecomment-5304951246).
+An earlier implementation lived in the closed, unmerged PR #19 alongside the
+retired context experiment. That implementation is not a shipped-core claim.
+The 2026-08-30 hosted-login slice reuses reviewed session components and adapts
+them to the current gateway without restoring directory/context functionality.
+See [local implementation and remaining gates](../HOSTED_LOGIN_LOCAL.md).
 
 ## Background
 
@@ -23,7 +30,7 @@ It does not yet solve the general employee login problem. Some identity provider
 
 [OpenID Connect Core](https://openid.net/specs/openid-connect-core-1_0-final.html) defines authentication through the authorization-code flow and ID-token validation. [RFC 8252](https://www.rfc-editor.org/rfc/rfc8252.html) requires native apps to use an external user agent and PKCE. [RFC 9700](https://www.rfc-editor.org/rfc/rfc9700.html) requires PKCE for public clients and refresh-token rotation or sender constraining to detect replay.
 
-## Proposed decision
+## Decision and target behavior
 
 Hormuz will be a confidential OIDC relying party and a session broker for human CLI clients. The existing direct JWT resource-server path remains supported for workloads and customer-managed identity agents.
 
@@ -57,7 +64,7 @@ The proposed lifetimes are defaults, not a promise that all customers must use t
 - Windows stores them in Credential Manager.
 - Linux desktop stores them through Secret Service/libsecret.
 - The CLI uses a per-session local lock and atomic replacement so concurrent Codex and Claude helpers cannot race refresh-token rotation.
-- `hormuz auth token` reuses an unexpired access credential or rotates the session near expiry, then prints only the access credential for the calling client.
+- `hormuz auth session` reuses an unexpired access credential or rotates the session near expiry, then prints only the access credential for the calling client. The existing `auth token --env` workload helper remains unchanged.
 - If no supported secure store exists, persistent human login fails closed. A foreground, non-persistent credential or the workload/JWT path may be used instead; Hormuz will not silently write a refresh credential to a plaintext dotfile.
 - CI and service accounts do not use a human browser session. They use the existing audience-bound JWT path or a later approved workload-identity exchange with short-lived credentials.
 

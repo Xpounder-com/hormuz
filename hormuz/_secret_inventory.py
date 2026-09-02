@@ -41,6 +41,12 @@ _CUSTODY_MODES = frozenset(
         "external_workload_identity",
         "hormuz_encrypted_envelope",
         "external_service_encryption",
+        "session_flow_aead",
+        "keyed_hash",
+        "os_secure_store",
+        "private_invitation_handoff",
+        "browser_http_only_cookie",
+        "hosted_backup_aead",
     }
 )
 _STORAGE_OWNERS = frozenset(
@@ -53,6 +59,8 @@ _STORAGE_OWNERS = frozenset(
         "customer_key_service",
         "customer_cloud_identity",
         "customer_object_store",
+        "client_os_secure_store",
+        "client_browser",
     }
 )
 _RUNTIME_CONSUMERS = frozenset(
@@ -73,6 +81,10 @@ _RUNTIME_CONSUMERS = frozenset(
         "portfolio_control_cli",
         "storage_runtime",
         "storage_migration_cli",
+        "hosted_operator_cli",
+        "session_broker",
+        "team_operator_cli",
+        "admin_console",
         "not_in_active_core",
     }
 )
@@ -87,6 +99,8 @@ _ROTATION_AUTHORITIES = frozenset(
         "object_storage_operator",
         "cloud_identity_operator",
         "future_design_required",
+        "session_owner",
+        "backup_operator",
     }
 )
 _MATERIAL_CLASSES = frozenset(
@@ -109,6 +123,7 @@ _MATERIAL_CLASSES = frozenset(
         "session_material",
         "approval_fingerprint",
         "data_encryption_key",
+        "hosted_state_backup",
     }
 )
 
@@ -465,6 +480,8 @@ def _validate_sources(
             "secret_inventory_material_class_invalid",
         )
         custody_mode = _enum(entry, "custody_mode", _CUSTODY_MODES, "secret_inventory_custody_mode_invalid")
+        if custody_mode in {"private_invitation_handoff", "browser_http_only_cookie"}:
+            raise SecretInventoryError("secret_inventory_secret_custody_invalid")
         _enum(entry, "storage_owner", _STORAGE_OWNERS, "secret_inventory_storage_owner_invalid")
         _enum(entry, "runtime_consumer", _RUNTIME_CONSUMERS, "secret_inventory_consumer_invalid")
         _enum(entry, "rotation_authority", _ROTATION_AUTHORITIES, "secret_inventory_rotation_authority_invalid")
@@ -495,7 +512,51 @@ def _validate_managed_materials(
             raise SecretInventoryError("secret_inventory_managed_source_missing")
         _enum(entry, "material_class", _MATERIAL_CLASSES, "secret_inventory_material_class_invalid")
         mode = _enum(entry, "custody_mode", _CUSTODY_MODES, "secret_inventory_custody_mode_invalid")
-        if mode not in {"hormuz_encrypted_envelope", "external_service_encryption"}:
+        local_session_mode = mode in {"session_flow_aead", "keyed_hash", "os_secure_store", "private_invitation_handoff", "browser_http_only_cookie"}
+        if mode == "browser_http_only_cookie" and (
+            coordinate.source_module != "hormuz/console_http.py"
+            or coordinate.source_qualname != "_cookie_header"
+            or entry.get("storage_owner") != "client_browser"
+            or entry.get("runtime_consumer") != "admin_console"
+            or entry.get("rotation_authority") != "session_owner"
+        ):
+            raise SecretInventoryError("secret_inventory_managed_custody_invalid")
+        if mode == "private_invitation_handoff" and (
+            coordinate.source_module != "hormuz/commands/onboarding.py"
+            or coordinate.source_qualname != "_write_invitation"
+            or entry.get("storage_owner") != "customer_filesystem"
+            or entry.get("runtime_consumer") != "team_operator_cli"
+            or entry.get("rotation_authority") != "identity_operator"
+        ):
+            raise SecretInventoryError("secret_inventory_managed_custody_invalid")
+        if mode == "transient_import" and (
+            coordinate.source_module != "hormuz/_hosted_backup.py"
+            or coordinate.source_qualname != "read_backup_key"
+            or entry.get("material_class") != "data_encryption_key"
+            or entry.get("storage_owner") != "customer_filesystem"
+            or entry.get("runtime_consumer") != "hosted_operator_cli"
+            or entry.get("rotation_authority") != "backup_operator"
+            or entry.get("key_purpose") != "data_encryption"
+        ):
+            raise SecretInventoryError("secret_inventory_managed_custody_invalid")
+        if mode == "hosted_backup_aead" and (
+            coordinate.source_module != "hormuz/_hosted_backup.py"
+            or coordinate.source_qualname != "_encrypt_snapshot"
+            or entry.get("material_class") != "hosted_state_backup"
+            or entry.get("storage_owner") != "customer_filesystem"
+            or entry.get("runtime_consumer") != "hosted_operator_cli"
+            or entry.get("rotation_authority") != "backup_operator"
+            or entry.get("key_purpose") != "data_encryption"
+        ):
+            raise SecretInventoryError("secret_inventory_managed_custody_invalid")
+        if local_session_mode and (
+            entry.get("key_purpose") != "session_material" or entry.get("material_class") != "session_material"
+        ):
+            raise SecretInventoryError("secret_inventory_managed_custody_invalid")
+        if not local_session_mode and mode not in {
+            "hormuz_encrypted_envelope", "external_service_encryption",
+            "transient_import", "hosted_backup_aead",
+        }:
             raise SecretInventoryError("secret_inventory_managed_custody_invalid")
         _enum(entry, "storage_owner", _STORAGE_OWNERS, "secret_inventory_storage_owner_invalid")
         _enum(entry, "runtime_consumer", _RUNTIME_CONSUMERS, "secret_inventory_consumer_invalid")

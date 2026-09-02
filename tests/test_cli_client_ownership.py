@@ -77,7 +77,7 @@ class ClientCliOwnershipTests(unittest.TestCase):
     def test_client_and_auth_command_trees_remain_stable(self) -> None:
         commands = _subcommands(cli.build_parser())
         self.assertEqual(set(_subcommands(commands["client"])), {"config"})
-        self.assertEqual(set(_subcommands(commands["auth"])), {"token"})
+        self.assertEqual(set(_subcommands(commands["auth"])), {"token", "session"})
 
 
 if __name__ == "__main__":

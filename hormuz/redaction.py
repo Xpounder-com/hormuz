@@ -23,6 +23,9 @@ class RedactionResult:
 
 
 _BUILTIN_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("hormuz_console_credential", re.compile(r"(?<![A-Za-z0-9_-])hox_c(?:s|f)?_[A-Za-z0-9_-]{43}(?![A-Za-z0-9_-])")),
+    ("hormuz_invitation_credential", re.compile(r"(?<![A-Za-z0-9_-])hox_i_[A-Za-z0-9_-]{43}(?![A-Za-z0-9_-])")),
+    ("hormuz_session_credential", re.compile(r"(?<![A-Za-z0-9_-])hox_[ar]_[A-Za-z0-9_-]{43}(?![A-Za-z0-9_-])")),
     (
         "private_key",
         re.compile(

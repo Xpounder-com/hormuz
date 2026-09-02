@@ -107,9 +107,15 @@ _OIDC_ISSUER_FIELDS = frozenset(
         "discovery_cache_seconds",
         "allow_insecure_http",
         "subjects",
+        "login",
     }
 )
 _OIDC_SUBJECT_FIELDS = _IDENTITY_FIELDS.difference({"token_env"}).union({"subject"})
+_OIDC_LOGIN_FIELDS = frozenset({"client_id", "client_secret_env", "scopes", "token_endpoint_auth_method"})
+_SESSION_BROKER_FIELDS = frozenset({
+    "enabled", "public_base_url", "database", "master_key_env", "access_ttl_seconds",
+    "absolute_ttl_seconds", "enrollment_ttl_seconds", "allow_insecure_http", "onboarding_enabled", "console_enabled",
+})
 _MODEL_ROUTE_FIELDS = frozenset(
     {
         "protocol",
@@ -320,12 +326,14 @@ def _validate_configuration_schema(raw: dict[str, Any]) -> None:
     for value in _schema_optional_array(raw, "identities"):
         _schema_object(value, _IDENTITY_FIELDS)
 
-    authentication = _schema_optional_object(raw, "authentication", frozenset({"oidc"}))
+    authentication = _schema_optional_object(raw, "authentication", frozenset({"oidc", "session_broker"}))
     if authentication is not None:
+        _schema_optional_object(authentication, "session_broker", _SESSION_BROKER_FIELDS)
         oidc = _schema_optional_object(authentication, "oidc", frozenset({"issuers"}))
         if oidc is not None:
             for issuer in _schema_optional_array(oidc, "issuers"):
                 issuer_object = _schema_object(issuer, _OIDC_ISSUER_FIELDS)
+                _schema_optional_object(issuer_object, "login", _OIDC_LOGIN_FIELDS)
                 for subject in _schema_optional_array(issuer_object, "subjects"):
                     _schema_object(subject, _OIDC_SUBJECT_FIELDS)
 

@@ -32,6 +32,13 @@ unregistered table.
 | `portfolio_attribution_control` | `portfolio_attribution_audit_events`, `portfolio_attribution_cursors`, `portfolio_attribution_idempotency` | `portfolio_attribution_audit_events`, `portfolio_attribution_cursors`, `portfolio_attribution_idempotency` | Safe read/mutation audit, role-bound frozen-window cursors, keyed request digests and immutable-result references. No copied v1 financial facts or raw JSON mutation bodies. |
 | `portfolio_registry_metadata` | `portfolio_binding_events`, `portfolio_work_scope_versions` | `portfolio_binding_events`, `portfolio_work_scope_versions` | Append-only tenant-qualified scope/binding IDs, pinned hierarchy/ownership/lifecycle versions, and bounded administrator-entered scope display names. No external work content. |
 | `portfolio_registry_control` | `portfolio_audit_events`, `portfolio_cursors`, `portfolio_idempotency` | `portfolio_audit_events`, `portfolio_cursors`, `portfolio_idempotency` | Content-free audit IDs/change classes; actor/role-bound frozen-window cursor state; idempotency identities, keyed request digests, and references to immutable results. No duplicated display labels or raw request/response JSON. |
+| `browser_session_identity` | `session_enrollments`, `human_sessions`, `consumed_refresh_credentials` (separate opt-in database) | — | Exact issuer/subject, tenant/actor/team/client bindings and expiry, keyed credential hashes, and AEAD-encrypted transient nonce/PKCE verifier. No raw access/refresh credential, IdP token, authorization code, prompt, or response. |
+| `browser_session_security_events` | `session_security_events` (separate opt-in database) | — | Local metadata-only logout, refresh-replay, and mapping-removal events. These are not immutable audit-chain evidence. |
+| `team_onboarding_identity` | `onboarding_organizations`, `onboarding_teams`, `onboarding_memberships`, `onboarding_invitations` (session database) | — | Operator-assigned identity metadata, stable subject bindings, membership status/version and keyed recipient/code hashes. No raw email or invitation code. |
+| `team_onboarding_events` | `onboarding_events` (session database) | — | Transactional organization, team, invitation and member transitions with a truthful local-operator/member actor. Not immutable audit-chain evidence. |
+| `console_authorization` | `console_grants` (session database) | — | Operator-assigned, versioned usage-viewer/member-administrator grants. No implicit authority from employee sessions or IdP roles. |
+| `console_sessions` | `console_login_flows`, `console_sessions` (session database) | — | Separate keyed console-cookie hashes, encrypted transient nonce/PKCE state, membership/grant versions and bounded expiry. No raw browser cookie, CSRF token or IdP token. |
+| `console_events` | `console_events` (session database) | — | Transactional grant/session transitions and verified administrator actor IDs. Local metadata, not externally anchored audit evidence. |
 | `schema_migration_state` | `hormuz_schema_migrations` | `hormuz_schema_migrations` | Applied migration version and state; operational metadata only. |
 | `usage_and_secret_evidence` | `gateway_secret_events`, `gateway_usage_events` | `gateway_secret_events`, `gateway_usage_events` | Event-time identity/team, client/model/policy outcome, tokens, estimated cost, provider-request metadata, and rule IDs/counts. No prompt, response, or matched secret value. |
 | `budget_reservations` | `gateway_budget_reservations` | `gateway_budget_reservations` | Temporary conservative token/cost reservations bound to organization, team, actor, and attempt metadata. |
@@ -134,6 +141,12 @@ any portfolio store ships. See
 | `encrypted_custody_envelope` | An operator runs `custody seal` or `custody rewrap`. | Operator-selected `0600` file containing ciphertext plus tenant, purpose, algorithm, and key-reference metadata. `custody seal` accepts operator-supplied plaintext and does not inspect or constrain its data class. The encrypted payload may therefore be a credential, other secret material, or request content; Hormuz never classifies this artifact as metadata-only. | Customer secret/KMS operator owns its plaintext authorization, access, retention, backup, rotation, and deletion. |
 | `object_lock_audit_artifact` | An operator runs an audit anchor command. | Customer-operated S3-compatible Object Lock. The payload is metadata-only audit evidence; the selected adapter stores it directly with storage encryption or as an encrypted envelope. | Customer object-storage policy, retention, and legal hold are authoritative; the gateway runtime has no bypass or retention-shortening authority. |
 | `public_release_artifacts` | The protected release workflow runs. | Public GitHub/GHCR source, signed OCI image, SBOM, provenance, signature, and release metadata. These contain no customer runtime data. | They are public distribution artifacts, not tenant data. |
+| `console_browser_cookies` | A member starts or completes console login. | Opaque, short-lived HttpOnly flow/session cookies in the browser; HTTPS uses host-only Secure cookies. No browser local storage. | Member logout, operator/member revocation and expiry invalidate access. Do not export cookie credentials. Browser backups are controlled by the browser/user. |
+| `hosted_profile_file` | An operator configures hosted authentication staging. | Owner-only runtime JSON containing origin, issuer, client identifier and state path without credentials. | Operator owns access review, retention, replacement and deletion. |
+| `hosted_state_marker` | An operator initializes or restores hosted staging. | Owner-only random instance identifier, recovery flag and keyed configuration binding. | Operator owns offline backup/restore and must preserve the bound origin, issuer, client and session key. |
+| `hosted_state_snapshot` | An operator runs the low-level offline snapshot. | Owner-only plaintext directory containing consistent session/usage SQLite copies and a keyed digest manifest. | Same-disk inspection or restore only; never transfer or retain it offsite as plaintext. |
+| `hosted_offsite_backup_archive` | An operator runs `hormuz.hosted backup-export`. | Owner-only AES-256-GCM archive of the fixed hosted snapshot file set. The public header contains only a format marker and nonce. | Operator owns transfer, verification, off-disk retention, restore and deletion and must keep the key separate. |
+| `hosted_backup_key_file` | An operator independently generates a backup key. | Owner-only file containing base64 encoding of 32 random bytes, distinct from the session master key. | Operator owns secret custody, access, rotation, retention and deletion; loss makes the archive unrecoverable. |
 
 Configuration JSON, provider credentials supplied through environment or a
 customer secret manager, database backups/WAL/snapshots, and captured
@@ -143,6 +156,74 @@ or importing an audit export into another system creates a new
 customer-operated copy with its own obligations.
 
 ## Export, retention, backup, and deletion
+
+The team operator command creates `team_invitation_file`, a new POSIX owner-only
+file containing a one-time secret code and connection metadata for manual private
+delivery. Keep it out of repositories, logs and shared artifacts; delete it after
+delivery/expiry under your retention policy and revoke outstanding invitations
+before disposing of a lost file. The operator-supplied recipient-email input file
+also remains under the operator's retention/deletion control. This preview does
+not send email or automatically erase these files or their backups.
+
+The opt-in local login adapter also creates `session_database_file`, an
+owner-only SQLite file plus WAL/SHM sidecars at the configured session path,
+and `client_session_secure_store`, an access/refresh pair held by the approved
+OS credential store. The session file is separate from routine usage data;
+schema 3 introduced managed membership, invitation hashes and local transition
+events. Schema 4 adds the console tables above in the same transaction boundary.
+See [the console](ADMIN_CONSOLE_LOCAL.md) for v2/v3 upgrade and authority rules,
+and [team onboarding](TEAM_ONBOARDING.md) for the original schema 2 upgrade and
+offboarding/reinvite behavior. Membership tombstones prevent email reuse from
+reassigning an established account and must not be deleted to re-enable access.
+Its identity bindings are sensitive even though credential values are hashed.
+Only nonce/PKCE flow material is recoverably encrypted. Expired enrollment
+rows are removed on the next enrollment, and consumed refresh hashes expire
+after the session's absolute lifetime. Revoked/expired session rows and local
+security-event retention remain operator responsibilities. Logout revokes the
+server session before deleting the local credential record.
+
+Console sessions have a ten-minute idle limit and one-hour absolute lifetime.
+New console login replaces old console sessions for that grant; console logout
+does not revoke the native client. Member removal revokes both kinds of sessions
+and the console grant together. Console flow secrets are removed at callback
+consumption, failure, or the next login's expiry sweep. Expired/revoked console
+rows, grants and local events still require operator retention decisions.
+
+Backups must protect both the session database and the independently injected
+master key. Restoring an old session database can otherwise resurrect revoked
+or consumed credentials: rotate the master key before restoring the local
+broker, forcing fresh logins. Online key rotation, distributed session storage,
+immutable session events, and automated tenant erasure are not implemented by
+this adapter. See [local login](HOSTED_LOGIN_LOCAL.md).
+
+That session-only reset is insufficient once managed team onboarding is in use:
+recipient hashes also depend on the key, and restored membership decisions can
+be stale. Managed-directory key migration and revocation reconciliation are
+explicit deployment gates in [team onboarding](TEAM_ONBOARDING.md); do not serve
+a restored directory as if an old backup preserved current access decisions.
+
+The separate opt-in [hosted authentication staging profile](../deploy/render/gateway/README.md)
+adds `hosted_profile_file`, private origin/issuer/client/path configuration with no
+secret values; `hosted_state_marker`, a keyed configuration binding plus an empty
+advisory lifecycle lock; `hosted_state_snapshot`, consistent plaintext copies of
+the session and usage databases with a keyed digest manifest;
+`hosted_offsite_backup_archive`, their authenticated encrypted transfer form; and
+`hosted_backup_key_file`, its separately retained random key. No database tables
+or request-content fields are added. The profile initializes only on an explicit
+operator command and refuses missing state or changed key/identity bindings at
+startup. Its low-level snapshot remains owner-only plaintext for same-disk checks.
+Use `backup-export` for authenticated encrypted transfer; a copy on the same disk
+is not disaster recovery, and the archive key must remain in separate custody.
+
+The staging restore command preserves subject/recipient bindings and the master
+key, disables all restored memberships, and revokes native and console sessions,
+invitations, pending login flows and administrator grants before activation. Only
+explicit reinvitation and new login can restore member access; administrator
+roles require a new operator grant. This is a conservative single-node recovery
+procedure, not online key migration or restoration of decisions newer than the
+snapshot. Restoring raw files around that command is outside the supported path.
+Private transfer, backup retention, actual cloud disk recovery and access review
+remain operator responsibilities and production qualification gates.
 
 For the v1 self-hosted release, customer database and backup operators are responsible
 for export, retention, backup, restore, and deletion using their controlled

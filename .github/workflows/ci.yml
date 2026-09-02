@@ -39,7 +39,13 @@ jobs:
       - name: Verify active-core secret custody inventory
         run: python tools/verify_secret_inventory.py
       - name: Run unit and gateway integration tests
-        run: python -m unittest -v
+        env:
+          TMPDIR: ${{ github.workspace }}/.hormuz-test-tmp
+          TEMP: ${{ github.workspace }}/.hormuz-test-tmp
+          TMP: ${{ github.workspace }}/.hormuz-test-tmp
+        run: |
+          mkdir -m 700 "$TMPDIR"
+          python -m unittest -v
 
   package:
     name: Build and install package
@@ -460,6 +466,110 @@ jobs:
           persist-credentials: false
       - name: Build and smoke-test the non-root OCI reference runtime
         run: ./tools/verify_oci_reference.sh
+
+  render-https-preflight:
+    name: Closed Render HTTPS preflight
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Verify the stateless container without cloud credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          container_name="hormuz-preflight-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          export HORMUZ_PREFLIGHT_SOURCE_COMMIT="$(git rev-parse HEAD)"
+          export HORMUZ_PREFLIGHT_CONTAINER="$container_name"
+          mkdir -p "$RUNNER_TEMP/hormuz-render-preflight"
+          docker build --platform linux/amd64 \
+            -f deploy/render/preflight/Dockerfile -t hormuz-https-preflight:ci .
+          trap 'docker stop --time 8 "$container_name" >/dev/null 2>&1 || true' EXIT
+          docker run --detach --rm --platform linux/amd64 --name "$container_name" \
+            --read-only --cap-drop ALL --security-opt no-new-privileges \
+            --memory 128m --pids-limit 64 \
+            --tmpfs /tmp:rw,noexec,nosuid,size=16m \
+            --tmpfs /data:rw,noexec,nosuid,size=1m \
+            --tmpfs /config:rw,noexec,nosuid,size=1m \
+            -p 127.0.0.1::10000 \
+            -e RENDER_GIT_COMMIT="$HORMUZ_PREFLIGHT_SOURCE_COMMIT" \
+            hormuz-https-preflight:ci
+          export HORMUZ_PREFLIGHT_ORIGIN="http://$(docker port "$container_name" 10000/tcp)"
+          python3 - <<'PY'
+          import json, os, time, urllib.error, urllib.request
+          expected = os.environ["HORMUZ_PREFLIGHT_SOURCE_COMMIT"]
+          origin = os.environ["HORMUZ_PREFLIGHT_ORIGIN"]
+          for attempt in range(30):
+              try:
+                  with urllib.request.urlopen(origin + "/health", timeout=1) as response:
+                      data = json.loads(response.read(8192))
+                  if data.get("source_commit") == expected:
+                      break
+              except (OSError, ValueError, urllib.error.URLError):
+                  pass
+              time.sleep(0.2)
+          else:
+              raise SystemExit("preflight_startup_not_ready")
+          PY
+          python3 tools/verify_render_preflight.py \
+            --url "$HORMUZ_PREFLIGHT_ORIGIN" --allow-loopback-http \
+            --expected-source-commit "$HORMUZ_PREFLIGHT_SOURCE_COMMIT" \
+            > "$RUNNER_TEMP/hormuz-render-preflight/http.json"
+          python3 - <<'PY'
+          import os, subprocess
+          container = os.environ["HORMUZ_PREFLIGHT_CONTAINER"]
+          def output(*args):
+              return subprocess.check_output(["docker", *args], stderr=subprocess.STDOUT)
+          if output("exec", container, "id", "-u").strip() != b"65532":
+              raise SystemExit("preflight_user_mismatch")
+          if output("exec", container, "getcap", "/usr/bin/caddy").strip():
+              raise SystemExit("preflight_unexpected_file_capability")
+          if b"synthetic_hormuz_preflight_log_canary" in output("logs", container):
+              raise SystemExit("preflight_request_logged")
+          PY
+      - name: Preserve only content-free preflight evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hormuz-render-preflight
+          path: ${{ runner.temp }}/hormuz-render-preflight/http.json
+          if-no-files-found: warn
+          retention-days: 7
+
+  render-authentication-staging:
+    name: Render authentication staging container
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Build the isolated profile without cloud credentials
+        run: docker build --platform linux/amd64 -f deploy/render/gateway/Dockerfile -t hormuz-hosted-staging:ci .
+      - name: Check proxy boundaries, state lifecycle and shutdown
+        run: >-
+          python tools/verify_render_gateway.py
+          --image hormuz-hosted-staging:ci
+          --output "${{ runner.temp }}/hormuz-render-gateway.json"
+      - name: Preserve only content-free verification results
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hormuz-render-gateway
+          path: ${{ runner.temp }}/hormuz-render-gateway.json
+          if-no-files-found: warn
+          retention-days: 7
 
   compose-reference:
     name: Single-VM Compose pilot reference

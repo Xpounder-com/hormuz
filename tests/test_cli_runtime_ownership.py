@@ -37,7 +37,7 @@ EXPECTED_COMMAND_TREE = {
         },
         "export": None,
     },
-    "auth": {"token": None},
+    "auth": {"token": None, "session": None},
     "client": {"config": None},
     "contract": {"manifest": None},
     "custody": {
@@ -61,6 +61,8 @@ EXPECTED_COMMAND_TREE = {
     },
     "demo": None,
     "doctor": None,
+    "login": None,
+    "logout": None,
     "policy": {
         "activate": None,
         "administrator": {
@@ -167,6 +169,13 @@ class RuntimeCliOwnershipTests(unittest.TestCase):
             "attribute": None, "attributions": None,
             "archive": None, "bind": None, "bindings": None, "create": None,
             "list": None, "outcomes": None, "show": None, "tombstone": None, "version": None,
+        })
+        self.assertEqual(tree.pop("team"), {
+            "administrators": {"grant": None, "list": None, "revoke": None},
+            "organization": {"create": None, "list": None},
+            "create": None, "list": None, "invite": None,
+            "members": {"list": None, "disable": None, "reinvite": None},
+            "invitations": {"list": None, "revoke": None}, "events": None,
         })
         self.assertEqual(tree, EXPECTED_COMMAND_TREE)
 

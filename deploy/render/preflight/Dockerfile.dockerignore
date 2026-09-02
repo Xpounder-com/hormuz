@@ -1,0 +1,7 @@
+**
+!deploy/
+!deploy/render/
+!deploy/render/preflight/
+!deploy/render/preflight/Dockerfile
+!deploy/render/preflight/Caddyfile
+!deploy/render/preflight/entrypoint.sh

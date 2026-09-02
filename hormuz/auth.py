@@ -39,6 +39,13 @@ class _KeySet:
 
 
 @dataclass(frozen=True)
+class OIDCProviderMetadata:
+    authorization_endpoint: str
+    token_endpoint: str
+    userinfo_endpoint: str | None
+
+
+@dataclass(frozen=True)
 class ControlPrincipal:
     """Credential identity suitable for governed policy-control authorization.
 
@@ -62,6 +69,7 @@ class Authenticator:
         self._config = config
         self._lock = threading.Lock()
         self._jwks_uris: dict[str, tuple[float, str]] = {}
+        self._discovery_documents: dict[str, tuple[float, dict[str, Any]]] = {}
         self._key_sets: dict[str, _KeySet] = {}
         self._unknown_key_refreshes: dict[str, float] = {}
 
@@ -107,7 +115,215 @@ class Authenticator:
         result: dict[str, int] = {}
         for issuer in self._config.oidc_issuers.values():
             result[issuer.issuer] = len(self._key_set(issuer, force_refresh=False).keys_by_id)
+            if issuer.login is not None:
+                self.login_metadata(issuer.issuer)
         return result
+
+    def identity_for_subject(self, issuer: str, subject: str) -> Identity:
+        identity = self._config.identity_for_subject(issuer, subject)
+        if identity is None:
+            raise AuthenticationError("unmapped_subject")
+        return identity
+
+    def organizations_for_issuer(self, issuer: str) -> tuple[str, ...]:
+        return tuple(sorted({
+            identity.organization_id
+            for (configured_issuer, _subject), identity in self._config.identities_by_subject.items()
+            if configured_issuer == issuer
+        }))
+
+    def login_metadata(self, issuer_name: str) -> OIDCProviderMetadata:
+        issuer = self._config.oidc_issuers.get(issuer_name)
+        if issuer is None or issuer.login is None:
+            raise AuthenticationError("login_issuer_unavailable")
+        self._validate_login_capabilities(issuer)
+        document = self._discovery_document(issuer, force_refresh=False)
+        authorization_endpoint = document.get("authorization_endpoint")
+        token_endpoint = document.get("token_endpoint")
+        userinfo_endpoint = document.get("userinfo_endpoint")
+        if not isinstance(authorization_endpoint, str) or not isinstance(token_endpoint, str):
+            raise AuthenticationError("invalid_discovery_document")
+        if userinfo_endpoint is not None and not isinstance(userinfo_endpoint, str):
+            raise AuthenticationError("invalid_discovery_document")
+        _validate_remote_url(
+            authorization_endpoint,
+            allow_insecure_http=issuer.allow_insecure_http,
+        )
+        _validate_remote_url(token_endpoint, allow_insecure_http=issuer.allow_insecure_http)
+        if userinfo_endpoint is not None:
+            _validate_remote_url(userinfo_endpoint, allow_insecure_http=issuer.allow_insecure_http)
+        return OIDCProviderMetadata(
+            authorization_endpoint=authorization_endpoint,
+            token_endpoint=token_endpoint,
+            userinfo_endpoint=userinfo_endpoint,
+        )
+
+
+    def _validate_login_capabilities(self, issuer: OIDCIssuerConfig) -> None:
+        """Fail deployment preflight when discovery cannot support the login flow."""
+        if issuer.login is None:
+            return
+        document = self._discovery_document(issuer, force_refresh=False)
+        response_types = _metadata_string_set(document, "response_types_supported")
+        if "code" not in response_types:
+            raise AuthenticationError("oidc_authorization_code_unsupported")
+        grant_types = document.get("grant_types_supported")
+        if grant_types is not None and "authorization_code" not in _metadata_string_set(
+            document,
+            "grant_types_supported",
+        ):
+            raise AuthenticationError("oidc_authorization_code_unsupported")
+        if "S256" not in _metadata_string_set(
+            document,
+            "code_challenge_methods_supported",
+        ):
+            raise AuthenticationError("oidc_pkce_s256_unsupported")
+        signing_algorithms = _metadata_string_set(
+            document,
+            "id_token_signing_alg_values_supported",
+        )
+        if not signing_algorithms.intersection(issuer.algorithms):
+            raise AuthenticationError("oidc_id_token_signing_unsupported")
+        auth_methods = document.get("token_endpoint_auth_methods_supported")
+        if auth_methods is None:
+            supported_auth_methods = {"client_secret_basic"}
+        else:
+            supported_auth_methods = _metadata_string_set(
+                document,
+                "token_endpoint_auth_methods_supported",
+            )
+        if issuer.login.token_endpoint_auth_method not in supported_auth_methods:
+            raise AuthenticationError("oidc_token_endpoint_auth_unsupported")
+
+        if "form_post" not in _metadata_string_set(document, "response_modes_supported"):
+            raise AuthenticationError("oidc_form_post_unsupported")
+
+
+    def validate_login_id_token(
+        self,
+        token: str,
+        *,
+        issuer_name: str,
+        nonce: str,
+    ) -> str:
+        claims = self.validate_login_claims(token, issuer_name=issuer_name, nonce=nonce)
+        subject = claims["sub"]
+        self.identity_for_subject(issuer_name, subject)
+        return subject
+
+    def validate_login_claims(
+        self,
+        token: str,
+        *,
+        issuer_name: str,
+        nonce: str,
+    ) -> dict[str, Any]:
+        """Authenticate an ID token; the caller must separately authorize membership."""
+        issuer = self._config.oidc_issuers.get(issuer_name)
+        if issuer is None or issuer.login is None:
+            raise AuthenticationError("login_issuer_unavailable")
+        claims = self._validate_jwt(
+            token,
+            issuer=issuer,
+            audiences=(issuer.login.client_id,),
+            required_claims=("exp", "iat", "iss", "aud", "sub", "nonce"),
+        )
+        token_nonce = claims.get("nonce")
+        if not isinstance(token_nonce, str) or not token_nonce.isascii() or not hmac.compare_digest(token_nonce, nonce):
+            raise AuthenticationError("id_token_nonce_mismatch")
+        audience = claims.get("aud")
+        authorized_party = claims.get("azp")
+        if isinstance(audience, list) and len(audience) > 1:
+            if authorized_party != issuer.login.client_id:
+                raise AuthenticationError("id_token_authorized_party_mismatch")
+        elif authorized_party is not None and authorized_party != issuer.login.client_id:
+            raise AuthenticationError("id_token_authorized_party_mismatch")
+        subject = claims.get("sub")
+        if not isinstance(subject, str) or not subject:
+            raise AuthenticationError("invalid_subject")
+        return claims
+
+
+    def _validate_jwt(
+        self,
+        token: str,
+        *,
+        issuer: OIDCIssuerConfig,
+        audiences: tuple[str, ...],
+        required_claims: tuple[str, ...],
+        parsed_header: tuple[str, str] | None = None,
+    ) -> dict[str, Any]:
+        if not token or len(token.encode("utf-8")) > _MAX_TOKEN_BYTES or token.count(".") != 2:
+            raise AuthenticationError("malformed_jwt")
+        if parsed_header is None:
+            try:
+                header = jwt.get_unverified_header(token)
+                unverified = jwt.decode(
+                    token,
+                    options={
+                        "verify_signature": False,
+                        "verify_exp": False,
+                        "verify_nbf": False,
+                        "verify_iat": False,
+                        "verify_aud": False,
+                        "verify_iss": False,
+                    },
+                )
+            except jwt.PyJWTError as error:
+                raise AuthenticationError("malformed_jwt") from error
+            algorithm = header.get("alg")
+            key_id = header.get("kid")
+            if unverified.get("iss") != issuer.issuer:
+                raise AuthenticationError("untrusted_issuer")
+            if not isinstance(algorithm, str) or not isinstance(key_id, str):
+                raise AuthenticationError("invalid_jwt_header_or_issuer")
+        else:
+            algorithm, key_id = parsed_header
+        if algorithm not in issuer.algorithms:
+            raise AuthenticationError("disallowed_algorithm")
+        if not key_id:
+            raise AuthenticationError("missing_key_id")
+        key = self._signing_key(issuer, key_id)
+        try:
+            claims = jwt.decode(
+                token,
+                key,
+                algorithms=list(issuer.algorithms),
+                audience=list(audiences),
+                issuer=issuer.issuer,
+                leeway=issuer.clock_skew_seconds,
+                options={"require": list(required_claims)},
+            )
+        except jwt.PyJWTError as error:
+            raise AuthenticationError("jwt_validation_failed") from error
+        return claims
+
+
+    def _discovery_document(
+        self,
+        issuer: OIDCIssuerConfig,
+        *,
+        force_refresh: bool,
+    ) -> dict[str, Any]:
+        now = time.monotonic()
+        cached = self._discovery_documents.get(issuer.issuer)
+        if (
+            not force_refresh
+            and cached is not None
+            and now - cached[0] < issuer.discovery_cache_seconds
+        ):
+            return cached[1]
+        discovery_url = issuer.issuer.rstrip("/") + "/.well-known/openid-configuration"
+        document = _fetch_json(
+            discovery_url,
+            allow_insecure_http=issuer.allow_insecure_http,
+            maximum_bytes=_MAX_DISCOVERY_BYTES,
+        )
+        if document.get("issuer") != issuer.issuer:
+            raise AuthenticationError("invalid_discovery_document")
+        self._discovery_documents[issuer.issuer] = (now, document)
+        return document
+
 
     def _verify_oidc_subject(self, token: str) -> tuple[str, str]:
         if token.count(".") != 2:
@@ -266,8 +482,24 @@ def _fetch_json(url: str, *, allow_insecure_http: bool, maximum_bytes: int) -> d
     return document
 
 
+def _metadata_string_set(document: dict[str, Any], key: str) -> set[str]:
+    value = document.get(key)
+    if not isinstance(value, list) or not value or not all(
+        isinstance(item, str) and item for item in value
+    ):
+        raise AuthenticationError("invalid_discovery_document")
+    return set(value)
+
+
+
 def _validate_remote_url(url: str, *, allow_insecure_http: bool) -> None:
-    parsed = urlparse(url)
+    try:
+        parsed = urlparse(url)
+        parsed.port
+    except ValueError:
+        raise AuthenticationError("unsafe_oidc_metadata_url") from None
+    if parsed.fragment or any(ord(c) < 33 or ord(c) == 127 for c in url):
+        raise AuthenticationError("unsafe_oidc_metadata_url")
     if parsed.scheme == "https" and parsed.netloc and not parsed.username and not parsed.password:
         return
     if (
