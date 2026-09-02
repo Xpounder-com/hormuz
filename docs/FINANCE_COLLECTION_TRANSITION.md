@@ -85,10 +85,17 @@ unclassified and included in aggregate and coverage totals rather than being
 dropped or guessed to be a credit or discount. There is no implicit currency
 conversion.
 
-Refreshing a mutable provider window appends a new snapshot with an explicit
-supersession relationship. Reporting selects one snapshot by database commit
-sequence and never sums overlapping snapshots. Historical gateway attempts and
-rate-card estimates are not repriced or rebound.
+Refreshing the exact same binding version, profile, and query window may append
+a new snapshot with an explicit whole-snapshot supersession relationship. A
+partially overlapping window does not supersede either whole snapshot.
+Within one organization, binding version, and collection profile, reporting
+partitions observations by exact provider-native bucket start and end and
+selects the newest complete snapshot by database commit sequence for each exact
+interval. Thus a January 15 through January 31 refresh replaces duplicate
+daily buckets without dropping January 1 through January 14 or adding either
+interval twice. Overlapping buckets with non-identical boundaries remain
+separate evidence and cannot be silently summed or selected as one partition.
+Historical gateway attempts and rate-card estimates are not repriced or rebound.
 
 The initial coverage explicitly excludes ChatGPT seat/Work analytics, unmapped
 Scale Tier commitments, reseller invoices, Anthropic Priority Tier costs,
@@ -109,7 +116,13 @@ The runtime successor reserves additive SQLite schema 12 and PostgreSQL schema
 6. typed cost observations.
 
 Snapshot publication, source-binding changes, and collection terminal events
-become versioned sources in the existing commit audit chain. PostgreSQL must
+become the exact version-1 audit sources `hormuz.finance-snapshot`,
+`hormuz.finance-source-binding-version`, and
+`hormuz.finance-collection-event`. Each audit entry must match the source row's
+tenant, event identity, and canonical `evidence_json`. SQLite must rebuild its
+fixed source-union check transactionally while preserving every audit column,
+row, index, immutability trigger, and existing source guard. PostgreSQL must
+replace the corresponding fixed constraint and source-validation function and
 retain forced RLS, least-privilege
 runtime roles, and a new literal count/digest ACL boundary established from a
 clean reviewed migration. It may not accept multiple fingerprints or derive
@@ -134,7 +147,8 @@ whose canonical path-and-byte digest is
 
 The preflight must prove that the current runtime tree matches those exact
 predecessor bytes, the absent 12/16 migrations fail without partial state,
-representative six-table DDL rolls back and retries idempotently,
+representative six-table DDL plus the SQLite audit-table rebuild and PostgreSQL
+audit constraint/function changes roll back and retry idempotently,
 partial and newer states are refused by current and exact predecessor binaries,
 an old-pair restore preserves every accepted populated fact and audit byte, and
 post-checkpoint writes require retained-candidate forward recovery without

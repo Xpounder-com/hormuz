@@ -43,6 +43,7 @@ class FinanceCollectionTransitionPlanTests(unittest.TestCase):
         self.assertEqual(result["collection_profile_count"], 4)
         self.assertEqual(result["planned_table_count"], 6)
         self.assertEqual(result["planned_altered_table_count"], 1)
+        self.assertEqual(result["planned_audit_source_count"], 3)
         self.assertEqual(
             result["predecessor_runtime_tree_sha256"],
             verifier.PREDECESSOR_RUNTIME_TREE_SHA256,
@@ -163,6 +164,10 @@ class FinanceCollectionTransitionPlanTests(unittest.TestCase):
             "/v1/organization/costs",
         )
         self.assertEqual(
+            profiles["openai.organization-costs.v1"]["group_by"],
+            ["project_id", "line_item", "api_key_id"],
+        )
+        self.assertEqual(
             profiles["anthropic.organization-costs.v1"]["path"],
             "/v1/organizations/cost_report",
         )
@@ -228,13 +233,23 @@ class FinanceCollectionTransitionPlanTests(unittest.TestCase):
         self.assertIn("never_dropped_or_allocated", observation["unclassified_cost"])
         self.assertIn("pin_exact_snapshots", observation["later_reconciliation"])
 
-    def test_refreshes_supersede_and_file_import_never_claims_live_scope(self):
+    def test_refreshes_select_exact_buckets_and_file_import_never_claims_live_scope(self):
         snapshot = self.contract()["snapshot"]
         self.assertTrue(snapshot["immutable"])
         self.assertTrue(snapshot["published_only_when_complete"])
-        self.assertIn("never_sums_both", snapshot["overlap"])
+        self.assertIn(
+            "partial_overlap_never_supersedes",
+            snapshot["whole_snapshot_supersession"],
+        )
+        self.assertIn("exact_provider_native_bucket_start_and_end", snapshot["overlap"])
+        self.assertIn("never_sums_duplicate_intervals", snapshot["overlap"])
+        self.assertIn("nonidentical_bucket_intervals", snapshot["nonidentical_overlap"])
         self.assertIn("commit_sequence", snapshot["selection"])
         self.assertIn("never_live_verified", snapshot["file_evidence"])
+        self.assertIn(
+            "exact_provider_native_bucket_start_and_end",
+            self.contract()["observation"]["granularity"],
+        )
         idempotency = self.contract()["idempotency"]
         self.assertIn("without_new_snapshot_or_provider_io", idempotency["same_identity_same_canonical_content"])
         self.assertIn("fail_conflict", idempotency["same_identity_different_content"])
@@ -280,6 +295,14 @@ class FinanceCollectionTransitionPlanTests(unittest.TestCase):
         self.assertEqual(
             set(plan["planned_storage"]["altered_tables"]),
             {"gateway_audit_chain_entries"},
+        )
+        self.assertEqual(
+            plan["planned_storage"]["audit_source_schemas"],
+            self.contract()["audit_source_schemas"],
+        )
+        self.assertEqual(
+            plan["planned_storage"]["audit_source_schemas"],
+            verifier.AUDIT_SOURCE_SCHEMAS,
         )
         compatibility = plan["compatibility"]
         self.assertEqual(compatibility["new_http_routes"], [])

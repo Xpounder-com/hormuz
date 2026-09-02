@@ -27,9 +27,29 @@ from tools.verify_finance_transition_plan import (
 PLAN_PATH = "docs/finance-transition-plan-v5.json"
 CONTRACT_PATH = "docs/finance-collection-contract-v1.json"
 SOURCE_CONTRACT_PATH = "docs/finance-source-contract-v1.json"
-PLAN_CANONICAL_SHA256 = "02567fd5ddde964b78c3c01ac9a5cb700cc5d912032835791b6005f9976320bf"
-CONTRACT_CANONICAL_SHA256 = "1cedc9deb4c856dc1f8a67391df593e1f122610d6d4fa40008e8c23a440e09ff"
+PLAN_CANONICAL_SHA256 = "083088b6083c12a3496416b2eddb658537f2ebe3bba88d9172f45587bbc572f0"
+CONTRACT_CANONICAL_SHA256 = "792b0db1375bb814cefa519ae72681b4c5ea7732bbef6670377c2a3e3de271c1"
 SOURCE_CONTRACT_CANONICAL_SHA256 = "290def8f2cd7026d4e0f0512db9254906f8592a026ee4beb9cac3623d7a1d9f4"
+AUDIT_SOURCE_SCHEMAS = {
+    "hormuz.finance-source-binding-version": {
+        "schema_version": 1,
+        "table": "portfolio_finance_source_binding_versions",
+        "source_event_id_column": "binding_event_id",
+        "evidence_json_column": "evidence_json",
+    },
+    "hormuz.finance-collection-event": {
+        "schema_version": 1,
+        "table": "portfolio_finance_collection_events",
+        "source_event_id_column": "event_id",
+        "evidence_json_column": "evidence_json",
+    },
+    "hormuz.finance-snapshot": {
+        "schema_version": 1,
+        "table": "portfolio_finance_snapshots",
+        "source_event_id_column": "snapshot_id",
+        "evidence_json_column": "evidence_json",
+    },
+}
 PREDECESSOR_SOURCE_COMMIT = "38309f6984e336862d94cf35ed0b9e2605a5be81"
 PREDECESSOR_ARCHIVE_SHA256 = "f0c2fc86c1e6198bcf58a2476941d6584b1efcdcf33708aa485da04106ed8c65"
 PREDECESSOR_ARCHIVE_PREFIX = "hormuz-finance-native-runtime-baseline/"
@@ -213,6 +233,8 @@ def verify_finance_collection_transition_plan(
         dependencies = plan["dependencies"]
         storage = plan["planned_storage"]
         compatibility = plan["compatibility"]
+        snapshot = contract["snapshot"]
+        observation = contract["observation"]
         if (
             predecessor["source_commit"] != PREDECESSOR_SOURCE_COMMIT
             or predecessor["archive_sha256"] != PREDECESSOR_ARCHIVE_SHA256
@@ -234,6 +256,14 @@ def verify_finance_collection_transition_plan(
             or len(contract["collection_profiles"]) != 4
             or len(storage["tables"]) != 6
             or set(storage["altered_tables"]) != {"gateway_audit_chain_entries"}
+            or storage["audit_source_schemas"] != AUDIT_SOURCE_SCHEMAS
+            or contract["audit_source_schemas"] != AUDIT_SOURCE_SCHEMAS
+            or "partial_overlap_never_supersedes" not in snapshot["whole_snapshot_supersession"]
+            or "within_one_organization_binding_version_and_collection_profile"
+            not in snapshot["overlap"]
+            or "exact_provider_native_bucket_start_and_end" not in snapshot["overlap"]
+            or "nonidentical_bucket_intervals" not in snapshot["nonidentical_overlap"]
+            or "exact_provider_native_bucket_start_and_end" not in observation["granularity"]
             or compatibility["new_http_routes"]
             or compatibility["preflight_new_cli_commands"]
             or plan["provider_collection_implemented"] is not False
@@ -265,6 +295,7 @@ def verify_finance_collection_transition_plan(
         "collection_profile_count": 4,
         "planned_table_count": 6,
         "planned_altered_table_count": 1,
+        "planned_audit_source_count": 3,
         "native_attempt_runtime_source_verified": bool(
             native["native_request_cost_capture_implemented"]
         ),

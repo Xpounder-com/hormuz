@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 import shutil
+import sqlite3
 import tempfile
 import unittest
 from unittest import mock
@@ -40,52 +41,116 @@ PLANNED_TABLES = (
     "portfolio_finance_cost_observations",
 )
 
+AUDIT_SOURCE_SCHEMAS = (
+    "hormuz.finance-source-binding-version",
+    "hormuz.finance-collection-event",
+    "hormuz.finance-snapshot",
+)
+
+
+def _append_synthetic_audit_entry(
+    connection,
+    *,
+    source_schema_id,
+    source_event_id,
+    evidence_json,
+):
+    head = connection.execute(
+        "SELECT chain_version, chain_epoch FROM gateway_audit_chain_heads "
+        "WHERE organization_id=?",
+        ("acme",),
+    ).fetchone()
+    if head is None:
+        raise AssertionError("synthetic_finance_collection_audit_head_missing")
+    sequence = connection.execute(
+        "SELECT COALESCE(MAX(sequence), 0) + 1 "
+        "FROM gateway_audit_chain_entries WHERE organization_id=? "
+        "AND chain_epoch=?",
+        ("acme", head[1]),
+    ).fetchone()[0]
+    connection.execute(
+        "INSERT INTO gateway_audit_chain_entries "
+        "(organization_id, chain_version, chain_epoch, sequence, "
+        "entry_schema_id, entry_schema_version, event_id, previous_digest, "
+        "event_digest, event_json, appended_at, source_schema_id, "
+        "source_schema_version, source_event_id) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            "acme",
+            head[0],
+            head[1],
+            sequence,
+            "hormuz.commit-audit-chain-entry",
+            2,
+            source_event_id,
+            None,
+            "f" * 64,
+            evidence_json,
+            "2026-09-02T00:00:00Z",
+            source_schema_id,
+            1,
+            source_event_id,
+        ),
+    )
+
 
 def _synthetic_collection_migration(connection, *, fail=False):
     connection.execute(
         """
         CREATE TABLE portfolio_finance_source_binding_versions (
+            organization_id TEXT NOT NULL,
             binding_id TEXT NOT NULL,
             version INTEGER NOT NULL,
-            organization_id TEXT NOT NULL,
-            PRIMARY KEY (binding_id, version)
+            binding_event_id TEXT NOT NULL,
+            evidence_json TEXT NOT NULL,
+            PRIMARY KEY (organization_id, binding_id, version),
+            UNIQUE (organization_id, binding_event_id)
         )
         """
     )
     connection.execute(
         """
         CREATE TABLE portfolio_finance_collection_attempts (
-            attempt_id TEXT PRIMARY KEY,
             organization_id TEXT NOT NULL,
+            attempt_id TEXT NOT NULL,
             binding_id TEXT NOT NULL,
             binding_version INTEGER NOT NULL,
-            FOREIGN KEY (binding_id, binding_version)
+            PRIMARY KEY (organization_id, attempt_id),
+            FOREIGN KEY (organization_id, binding_id, binding_version)
                 REFERENCES portfolio_finance_source_binding_versions
-                    (binding_id, version)
+                    (organization_id, binding_id, version)
         )
         """
     )
     connection.execute(
         """
         CREATE TABLE portfolio_finance_collection_events (
-            event_id TEXT PRIMARY KEY,
-            attempt_id TEXT NOT NULL UNIQUE,
             organization_id TEXT NOT NULL,
+            event_id TEXT NOT NULL,
+            attempt_id TEXT NOT NULL,
             state TEXT NOT NULL,
-            FOREIGN KEY (attempt_id)
-                REFERENCES portfolio_finance_collection_attempts (attempt_id)
+            evidence_json TEXT NOT NULL,
+            PRIMARY KEY (organization_id, event_id),
+            UNIQUE (organization_id, attempt_id),
+            FOREIGN KEY (organization_id, attempt_id)
+                REFERENCES portfolio_finance_collection_attempts
+                    (organization_id, attempt_id)
         )
         """
     )
     connection.execute(
         """
         CREATE TABLE portfolio_finance_snapshots (
-            snapshot_id TEXT PRIMARY KEY,
-            attempt_id TEXT NOT NULL UNIQUE,
             organization_id TEXT NOT NULL,
+            snapshot_id TEXT NOT NULL,
+            attempt_id TEXT NOT NULL,
             content_digest TEXT NOT NULL,
-            FOREIGN KEY (attempt_id)
-                REFERENCES portfolio_finance_collection_attempts (attempt_id)
+            evidence_json TEXT NOT NULL,
+            PRIMARY KEY (organization_id, snapshot_id),
+            UNIQUE (organization_id, attempt_id),
+            FOREIGN KEY (organization_id, attempt_id)
+                REFERENCES portfolio_finance_collection_attempts
+                    (organization_id, attempt_id)
         )
         """
     )
@@ -96,19 +161,141 @@ def _synthetic_collection_migration(connection, *, fail=False):
         connection.execute(
             f"""
             CREATE TABLE {table} (
-                observation_id TEXT PRIMARY KEY,
-                snapshot_id TEXT NOT NULL,
                 organization_id TEXT NOT NULL,
-                FOREIGN KEY (snapshot_id)
-                    REFERENCES portfolio_finance_snapshots (snapshot_id)
+                observation_id TEXT NOT NULL,
+                snapshot_id TEXT NOT NULL,
+                bucket_start_at TEXT NOT NULL,
+                bucket_end_at TEXT NOT NULL,
+                PRIMARY KEY (organization_id, observation_id),
+                FOREIGN KEY (organization_id, snapshot_id)
+                    REFERENCES portfolio_finance_snapshots
+                        (organization_id, snapshot_id)
             )
             """
         )
+    for statement in (
+        "DROP TRIGGER gateway_audit_chain_entries_no_update",
+        "DROP TRIGGER gateway_audit_chain_entries_no_delete",
+        "DROP TRIGGER gateway_finance_attempt_audit_source_required",
+        "DROP INDEX idx_gateway_audit_chain_entries_event",
+        "DROP INDEX idx_gateway_audit_chain_entries_source_identity",
+    ):
+        connection.execute(statement)
     connection.execute(
-        "CREATE INDEX finance_collection_audit_source_probe "
-        "ON gateway_audit_chain_entries "
-        "(source_schema_id, source_schema_version, source_event_id)"
+        """
+        CREATE TABLE gateway_audit_chain_entries_v3 (
+            organization_id TEXT NOT NULL,
+            chain_version INTEGER NOT NULL,
+            chain_epoch INTEGER NOT NULL,
+            sequence INTEGER NOT NULL,
+            entry_schema_id TEXT NOT NULL,
+            entry_schema_version INTEGER NOT NULL,
+            event_id TEXT NOT NULL,
+            previous_digest TEXT,
+            event_digest TEXT NOT NULL,
+            event_json TEXT NOT NULL,
+            appended_at TEXT NOT NULL,
+            source_schema_id TEXT,
+            source_schema_version INTEGER,
+            source_event_id TEXT,
+            PRIMARY KEY (organization_id, chain_epoch, sequence),
+            UNIQUE (organization_id, event_id),
+            FOREIGN KEY (organization_id, chain_epoch)
+                REFERENCES gateway_audit_chain_epochs
+                    (organization_id, chain_epoch),
+            CHECK (chain_version = 1),
+            CHECK (chain_epoch >= 1),
+            CHECK (sequence >= 1),
+            CHECK (entry_schema_id = 'hormuz.commit-audit-chain-entry'),
+            CHECK (entry_schema_version IN (1,2)),
+            CHECK (
+                (entry_schema_version = 1 AND source_schema_id IS NULL AND source_schema_version IS NULL AND source_event_id IS NULL)
+                OR (
+                    entry_schema_version = 2 AND source_event_id IS NOT NULL AND (
+                        (source_schema_id = 'hormuz.custody-control-event' AND source_schema_version = 1)
+                        OR (source_schema_id = 'hormuz.custody-execution-attempt' AND source_schema_version = 2)
+                        OR (source_schema_id = 'hormuz.custody-execution-event' AND source_schema_version = 1)
+                        OR (source_schema_id = 'hormuz.custody-lifecycle-event' AND source_schema_version = 1)
+                        OR (source_schema_id = 'hormuz.custody-envelope-attestation' AND source_schema_version = 1)
+                        OR (source_schema_id = 'hormuz.custody-deletion-event' AND source_schema_version = 1)
+                        OR (source_schema_id = 'hormuz.finance-attempt-evidence' AND source_schema_version = 1)
+                        OR (source_schema_id = 'hormuz.finance-source-binding-version' AND source_schema_version = 1)
+                        OR (source_schema_id = 'hormuz.finance-collection-event' AND source_schema_version = 1)
+                        OR (source_schema_id = 'hormuz.finance-snapshot' AND source_schema_version = 1)
+                    )
+                )
+            )
+        )
+        """
     )
+    connection.execute(
+        """
+        INSERT INTO gateway_audit_chain_entries_v3 (
+            organization_id, chain_version, chain_epoch, sequence,
+            entry_schema_id, entry_schema_version, event_id, previous_digest,
+            event_digest, event_json, appended_at, source_schema_id,
+            source_schema_version, source_event_id
+        )
+        SELECT organization_id, chain_version, chain_epoch, sequence,
+               entry_schema_id, entry_schema_version, event_id, previous_digest,
+               event_digest, event_json, appended_at, source_schema_id,
+               source_schema_version, source_event_id
+        FROM gateway_audit_chain_entries
+        """
+    )
+    connection.execute("DROP TABLE gateway_audit_chain_entries")
+    connection.execute(
+        "ALTER TABLE gateway_audit_chain_entries_v3 "
+        "RENAME TO gateway_audit_chain_entries"
+    )
+    for statement in (
+        "CREATE INDEX idx_gateway_audit_chain_entries_event ON gateway_audit_chain_entries (organization_id, event_id)",
+        "CREATE UNIQUE INDEX idx_gateway_audit_chain_entries_source_identity ON gateway_audit_chain_entries (organization_id, source_schema_id, source_schema_version, source_event_id) WHERE entry_schema_version = 2",
+        "CREATE TRIGGER gateway_audit_chain_entries_no_update BEFORE UPDATE ON gateway_audit_chain_entries BEGIN SELECT RAISE(ABORT, 'audit_chain_entry_immutable'); END",
+        "CREATE TRIGGER gateway_audit_chain_entries_no_delete BEFORE DELETE ON gateway_audit_chain_entries BEGIN SELECT RAISE(ABORT, 'audit_chain_entry_immutable'); END",
+        "CREATE TRIGGER gateway_finance_attempt_audit_source_required BEFORE INSERT ON gateway_audit_chain_entries WHEN NEW.entry_schema_version=2 AND NEW.source_schema_id='hormuz.finance-attempt-evidence' AND NOT EXISTS (SELECT 1 FROM gateway_finance_attempt_evidence f WHERE f.organization_id=NEW.organization_id AND f.evidence_event_id=NEW.source_event_id AND f.evidence_json=NEW.event_json AND NEW.event_id=NEW.source_event_id) BEGIN SELECT RAISE(ABORT, 'finance_attempt_audit_source_missing'); END",
+        """CREATE TRIGGER gateway_finance_collection_audit_source_required
+        BEFORE INSERT ON gateway_audit_chain_entries
+        WHEN NEW.entry_schema_version=2
+          AND NEW.source_schema_id IN (
+              'hormuz.finance-source-binding-version',
+              'hormuz.finance-collection-event',
+              'hormuz.finance-snapshot'
+          )
+          AND NOT (
+              NEW.event_id=NEW.source_event_id AND (
+                  (
+                      NEW.source_schema_id='hormuz.finance-source-binding-version'
+                      AND EXISTS (
+                          SELECT 1 FROM portfolio_finance_source_binding_versions source
+                          WHERE source.organization_id=NEW.organization_id
+                            AND source.binding_event_id=NEW.source_event_id
+                            AND source.evidence_json=NEW.event_json
+                      )
+                  ) OR (
+                      NEW.source_schema_id='hormuz.finance-collection-event'
+                      AND EXISTS (
+                          SELECT 1 FROM portfolio_finance_collection_events source
+                          WHERE source.organization_id=NEW.organization_id
+                            AND source.event_id=NEW.source_event_id
+                            AND source.evidence_json=NEW.event_json
+                      )
+                  ) OR (
+                      NEW.source_schema_id='hormuz.finance-snapshot'
+                      AND EXISTS (
+                          SELECT 1 FROM portfolio_finance_snapshots source
+                          WHERE source.organization_id=NEW.organization_id
+                            AND source.snapshot_id=NEW.source_event_id
+                            AND source.evidence_json=NEW.event_json
+                      )
+                  )
+              )
+          )
+        BEGIN
+            SELECT RAISE(ABORT, 'finance_collection_audit_source_missing');
+        END""",
+    ):
+        connection.execute(statement)
     if fail:
         raise RuntimeError("synthetic_finance_collection_migration_failure")
 
@@ -122,6 +309,35 @@ class SQLiteFinanceCollectionTransitionTests(unittest.TestCase):
         self.assertEqual(UsageStore.schema_version, 11)
         self.seeded = seed_sqlite_collection_predecessor(self.path)
         self.before = sqlite_snapshot(self.path)
+
+    def assert_audit_transition(self, snapshot):
+        objects = {
+            (kind, name): sql
+            for kind, name, _, sql in snapshot["objects"]
+        }
+        audit_table = objects[("table", "gateway_audit_chain_entries")]
+        for source_schema in AUDIT_SOURCE_SCHEMAS:
+            self.assertIn(source_schema, audit_table)
+        for object_key in (
+            ("index", "idx_gateway_audit_chain_entries_event"),
+            ("index", "idx_gateway_audit_chain_entries_source_identity"),
+            ("trigger", "gateway_audit_chain_entries_no_update"),
+            ("trigger", "gateway_audit_chain_entries_no_delete"),
+            ("trigger", "gateway_finance_attempt_audit_source_required"),
+            ("trigger", "gateway_finance_collection_audit_source_required"),
+        ):
+            self.assertIn(object_key, objects)
+        self.assertEqual(
+            snapshot["rows"]["gateway_audit_chain_entries"],
+            self.before["rows"]["gateway_audit_chain_entries"],
+        )
+        for table in (
+            "portfolio_finance_usage_observations",
+            "portfolio_finance_cost_observations",
+        ):
+            table_sql = objects[("table", table)]
+            self.assertIn("bucket_start_at", table_sql)
+            self.assertIn("bucket_end_at", table_sql)
 
     def probe(self, *, fail=False, path=None):
         target = path or self.path
@@ -175,8 +391,98 @@ class SQLiteFinanceCollectionTransitionTests(unittest.TestCase):
         after = sqlite_snapshot(self.path)
         for table in PLANNED_TABLES:
             self.assertEqual(after["rows"][table], [])
+        self.assert_audit_transition(after)
         self.probe()
         self.assertEqual(sqlite_snapshot(self.path), after)
+
+    def test_audit_source_guard_requires_exact_source_identity_and_json(self):
+        self.probe()
+        with managed_sqlite_connection(self.path) as connection:
+            connection.execute(
+                "INSERT INTO portfolio_finance_source_binding_versions "
+                "(organization_id, binding_id, version, binding_event_id, "
+                "evidence_json) VALUES (?, ?, ?, ?, ?)",
+                ("acme", "binding", 1, "binding-event", '{"kind":"binding"}'),
+            )
+            connection.execute(
+                "INSERT INTO portfolio_finance_collection_attempts "
+                "(organization_id, attempt_id, binding_id, binding_version) "
+                "VALUES (?, ?, ?, ?)",
+                ("acme", "attempt", "binding", 1),
+            )
+            connection.execute(
+                "INSERT INTO portfolio_finance_collection_events "
+                "(organization_id, event_id, attempt_id, state, evidence_json) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (
+                    "acme",
+                    "collection-event",
+                    "attempt",
+                    "succeeded",
+                    '{"kind":"terminal"}',
+                ),
+            )
+            connection.execute(
+                "INSERT INTO portfolio_finance_snapshots "
+                "(organization_id, snapshot_id, attempt_id, content_digest, "
+                "evidence_json) VALUES (?, ?, ?, ?, ?)",
+                (
+                    "acme",
+                    "snapshot-event",
+                    "attempt",
+                    "a" * 64,
+                    '{"kind":"snapshot"}',
+                ),
+            )
+            for source_schema, event_id, evidence_json in (
+                (
+                    "hormuz.finance-source-binding-version",
+                    "binding-event",
+                    '{"kind":"binding"}',
+                ),
+                (
+                    "hormuz.finance-collection-event",
+                    "collection-event",
+                    '{"kind":"terminal"}',
+                ),
+                (
+                    "hormuz.finance-snapshot",
+                    "snapshot-event",
+                    '{"kind":"snapshot"}',
+                ),
+            ):
+                _append_synthetic_audit_entry(
+                    connection,
+                    source_schema_id=source_schema,
+                    source_event_id=event_id,
+                    evidence_json=evidence_json,
+                )
+            with self.assertRaisesRegex(
+                sqlite3.IntegrityError,
+                "finance_collection_audit_source_missing",
+            ):
+                _append_synthetic_audit_entry(
+                    connection,
+                    source_schema_id="hormuz.finance-snapshot",
+                    source_event_id="snapshot-event",
+                    evidence_json='{"kind":"wrong"}',
+                )
+            with self.assertRaises(sqlite3.IntegrityError):
+                _append_synthetic_audit_entry(
+                    connection,
+                    source_schema_id="hormuz.finance-unsupported",
+                    source_event_id="unsupported-event",
+                    evidence_json="{}",
+                )
+            observed = connection.execute(
+                "SELECT source_schema_id FROM gateway_audit_chain_entries "
+                "WHERE source_schema_id IN (?, ?, ?) ORDER BY source_schema_id",
+                AUDIT_SOURCE_SCHEMAS,
+            ).fetchall()
+            self.assertEqual(
+                [row[0] for row in observed],
+                sorted(AUDIT_SOURCE_SCHEMAS),
+            )
 
     def test_current_binary_refuses_newer_and_partial_state_without_repair(self):
         self.probe()
@@ -219,8 +525,15 @@ class SQLiteFinanceCollectionTransitionTests(unittest.TestCase):
         with managed_sqlite_connection(self.path) as connection:
             connection.execute(
                 "INSERT INTO portfolio_finance_source_binding_versions "
-                "(binding_id, version, organization_id) VALUES (?, ?, ?)",
-                ("synthetic-binding", 1, "acme"),
+                "(organization_id, binding_id, version, binding_event_id, "
+                "evidence_json) VALUES (?, ?, ?, ?, ?)",
+                (
+                    "acme",
+                    "synthetic-binding",
+                    1,
+                    "synthetic-binding-event",
+                    '{"kind":"binding"}',
+                ),
             )
         after_write = sqlite_snapshot(self.path)
         retained = self.root / "retained-candidate.sqlite3"

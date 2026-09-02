@@ -155,8 +155,10 @@
     "authenticated_evidence": "authenticated_query_pagination_complete_not_invoice_finality_account_ownership_or_point_in_time_consistency",
     "file_evidence": "customer_supplied_profile_bundle_contract_validated_scope_unverified_never_live_verified_from_file_fields",
     "mutable_source": true,
-    "overlap": "overlapping_or_same_window_refresh_appends_explicit_successor_relationship_and_reports_one_selected_snapshot_never_sums_both",
-    "selection": "deterministic_as_of_commit_sequence_not_wall_clock_last_write_wins",
+    "whole_snapshot_supersession": "only_exact_same_organization_binding_version_collection_profile_and_query_window_may_append_an_explicit_successor_relationship_partial_overlap_never_supersedes_a_whole_snapshot",
+    "overlap": "within_one_organization_binding_version_and_collection_profile_reporting_partitions_by_exact_provider_native_bucket_start_and_end_then_selects_the_newest_complete_snapshot_by_database_commit_sequence_for_each_exact_bucket_never_sums_duplicate_intervals",
+    "nonidentical_overlap": "overlapping_nonidentical_bucket_intervals_remain_separate_evidence_and_must_not_be_summed_or_silently_selected_as_one_partition",
+    "selection": "deterministic_per_exact_provider_native_bucket_interval_as_of_database_commit_sequence_not_wall_clock_last_write_wins",
     "no_historical_repricing": true
   },
   "observation": {
@@ -172,8 +174,28 @@
     "zero": "provider_explicitly_reported_zero",
     "native_usage": "retain_allowlisted_provider_counts_and_cache_TTL_categories_without_double_counting",
     "unclassified_cost": "included_in_provider_aggregate_and_unclassified_coverage_never_dropped_or_allocated",
-    "granularity": "provider_scope_and_model_dimensions_only_when_returned_and_allowed_no_inferred_team_actor_application_or_work_scope",
+    "granularity": "every_observation_carries_exact_provider_native_bucket_start_and_end_plus_provider_scope_and_model_dimensions_only_when_returned_and_allowed_no_inferred_team_actor_application_or_work_scope",
     "later_reconciliation": "must_pin_exact_snapshots_gateway_attempt_evidence_rate_cards_source_bindings_and_policy_versions"
+  },
+  "audit_source_schemas": {
+    "hormuz.finance-source-binding-version": {
+      "schema_version": 1,
+      "table": "portfolio_finance_source_binding_versions",
+      "source_event_id_column": "binding_event_id",
+      "evidence_json_column": "evidence_json"
+    },
+    "hormuz.finance-collection-event": {
+      "schema_version": 1,
+      "table": "portfolio_finance_collection_events",
+      "source_event_id_column": "event_id",
+      "evidence_json_column": "evidence_json"
+    },
+    "hormuz.finance-snapshot": {
+      "schema_version": 1,
+      "table": "portfolio_finance_snapshots",
+      "source_event_id_column": "snapshot_id",
+      "evidence_json_column": "evidence_json"
+    }
   },
   "privacy": {
     "stored": "typed_allowlisted_dimensions_exact_numbers_bounded_internal_identifiers_tenant_keyed_provider_scope_and_text_fingerprints_and_canonical_digests",
