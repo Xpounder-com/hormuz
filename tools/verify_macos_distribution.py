@@ -99,6 +99,12 @@ def signing_details(bundle: Path, mode: str, expected_identifier: str) -> dict[s
     return {"team_identifier": team_id or None, "authority": authorities[0] if authorities else None}
 
 
+def verify_reported_version(executable: Path, expected_version: str) -> None:
+    output, diagnostic = run(str(executable), "--version")
+    if output != f"Hormuz Mac {expected_version}\n" or diagnostic:
+        raise VerificationError("reported_release_version_mismatch")
+
+
 def verify_archive(archive: Path, bundle: Path, mode: str, expected_identifier: str) -> None:
     required_files = expected_files(mode)
     try:
@@ -191,6 +197,7 @@ def main() -> int:
     dependencies = [line.strip().split(" (", 1)[0] for line in dependency_output.splitlines() if line.startswith("\t")]
     if not dependencies or any(not item.startswith(("/System/Library/", "/usr/lib/")) for item in dependencies):
         raise VerificationError("non_system_runtime_dependency")
+    verify_reported_version(executable, args.expected_version)
 
     signature = signing_details(bundle, args.mode, args.expected_bundle_id)
     if args.mode == "notarized":

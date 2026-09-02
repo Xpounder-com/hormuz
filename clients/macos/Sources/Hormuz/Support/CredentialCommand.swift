@@ -5,7 +5,8 @@ import HormuzClientCore
 enum CredentialCommand {
     static func run(arguments: [String]) -> Never {
         if arguments == ["--version"] {
-            print("Hormuz Mac 0.1.0-local")
+            let packagedVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+            print("Hormuz Mac " + (packagedVersion ?? "0.1.0-local"))
             exit(0)
         }
         guard arguments.count == 5 || (arguments.count == 6 && arguments[5] == "--force-refresh"),

@@ -31,6 +31,7 @@ REQUIRED_CHECK_CONTEXTS = (
     "Python 3.12",
     "Python 3.13",
     "Python 3.14",
+    "Native Mac client and loopback contract",
 )
 DISCUSSION_CATEGORIES = (
     "Announcements",
@@ -1223,6 +1224,36 @@ def _validate_workflows(
             ):
                 raise RepositoryGovernanceError(
                     "macOS distribution build/sign isolation changed"
+                )
+        if path.name == "macos-client.yml":
+            change_job = job_blocks.get("changes")
+            native_job = job_blocks.get("native-client")
+            gate_job = job_blocks.get("native-client-gate")
+            if (
+                change_job is None
+                or native_job is None
+                or gate_job is None
+                or "pull_request:\n    paths:" in text
+                or 'git diff --quiet "$BASE_SHA" "$HEAD_SHA" --' not in change_job
+                or change_job.count('echo "macos=true" >> "$GITHUB_OUTPUT"') != 2
+                or change_job.count('echo "macos=false" >> "$GITHUB_OUTPUT"') != 1
+                or job_fields.get("native-client", {}).get("needs") != "changes"
+                or job_fields.get("native-client", {}).get("if")
+                != "needs.changes.outputs.macos == 'true'"
+                or job_fields.get("native-client", {}).get("name")
+                != "Native Mac client verification"
+                or job_fields.get("native-client-gate", {}).get("name")
+                != "Native Mac client and loopback contract"
+                or job_fields.get("native-client-gate", {}).get("if") != "always()"
+                or job_fields.get("native-client-gate", {}).get("needs")
+                != "[changes, native-client]"
+                or 'test "$CHANGES_RESULT" = "success"' not in gate_job
+                or 'test "$NATIVE_RESULT" = "success"' not in gate_job
+                or 'test "$NATIVE_RESULT" = "skipped"' not in gate_job
+                or "swift test --package-path clients/macos" not in native_job
+            ):
+                raise RepositoryGovernanceError(
+                    "native Mac required-check gate changed"
                 )
         if path.name == "website.yml":
             pages_workflow_seen = True

@@ -30,7 +30,7 @@ class RepositoryGovernanceTests(unittest.TestCase):
         self.assertEqual(result["status"], "passed")
         self.assertEqual(result["repository"], "Xpounder-com/hormuz")
         self.assertEqual(result["ruleset_count"], 4)
-        self.assertEqual(result["required_check_count"], 11)
+        self.assertEqual(result["required_check_count"], 12)
         self.assertGreaterEqual(result["workflow_count"], 4)
         self.assertGreater(result["pinned_action_use_count"], 0)
         self.assertEqual(result["public_transition_check_count"], 10)
@@ -600,6 +600,32 @@ class RepositoryGovernanceTests(unittest.TestCase):
                 "distribution build/sign isolation changed",
             ):
                 validate_repository_governance(root)
+
+    def test_native_macos_required_gate_cannot_bypass_relevant_changes(self) -> None:
+        mutations = (
+            (
+                '          else\n            echo "macos=true" >> "$GITHUB_OUTPUT"\n',
+                '          else\n            echo "macos=false" >> "$GITHUB_OUTPUT"\n',
+            ),
+            (
+                '            test "$NATIVE_RESULT" = "success"\n',
+                '            test "$NATIVE_RESULT" = "skipped"\n',
+            ),
+        )
+        for original, replacement in mutations:
+            with self.subTest(original=original), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                self._copy_contract(root)
+                workflow = root / ".github/workflows/macos-client.yml"
+                value = workflow.read_text(encoding="utf-8")
+                self.assertEqual(value.count(original), 1)
+                workflow.write_text(
+                    value.replace(original, replacement, 1), encoding="utf-8"
+                )
+                with self.assertRaisesRegex(
+                    RepositoryGovernanceError, "native Mac required-check gate changed"
+                ):
+                    validate_repository_governance(root)
 
     def test_candidate_environment_secret_inventory_check_is_required(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

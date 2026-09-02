@@ -14,6 +14,7 @@ from tools.verify_macos_distribution import (
     VerificationError,
     signing_details,
     verify_archive,
+    verify_reported_version,
 )
 
 
@@ -82,6 +83,24 @@ class MacOSDistributionArchiveTests(unittest.TestCase):
         ):
             with self.assertRaisesRegex(VerificationError, "stapled_ticket_missing"):
                 signing_details(Path("Hormuz.app"), "notarized", "com.xpounder.hormuz")
+
+    def test_packaged_executable_must_report_the_plist_release_version(self) -> None:
+        executable = Path("Hormuz.app/Contents/MacOS/Hormuz")
+        with patch(
+            "tools.verify_macos_distribution.run",
+            return_value=("Hormuz Mac 2.3.4\n", ""),
+        ) as command:
+            verify_reported_version(executable, "2.3.4")
+        command.assert_called_once_with(str(executable), "--version")
+
+        with patch(
+            "tools.verify_macos_distribution.run",
+            return_value=("Hormuz Mac 0.1.0-local\n", ""),
+        ):
+            with self.assertRaisesRegex(
+                VerificationError, "reported_release_version_mismatch"
+            ):
+                verify_reported_version(executable, "2.3.4")
 
 
 if __name__ == "__main__":
