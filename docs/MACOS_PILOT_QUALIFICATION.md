@@ -46,11 +46,13 @@ affected gate on a new build when artifact bytes change.
    artifact for that run and byte-binds the retained notarized ZIP, distribution
    proof, and notarization summary to its members. The proof build must equal the
    workflow run-number/run-attempt build identity. The authenticated Actions
-   artifact creation time becomes the lower bound for every clean-machine run
-   and completed review. Apple acceptance must contain zero issues and at least
-   two ticket entries. The CLI streams each supplied archive into a private,
-   owner-only snapshot before validation. It verifies that snapshot's digest
-   immediately before and after the macOS platform checks, so custody and
+   artifact must be created between its run's start and completion, and both
+   retained distribution runs must complete by the aggregate's `generated_at`.
+   The candidate artifact creation time becomes the lower bound for every
+   clean-machine run and completed review. Apple acceptance must contain zero
+   issues and at least two ticket entries. The CLI streams each supplied archive
+   into a private, owner-only snapshot before validation. It verifies that
+   snapshot's digest immediately before and after the macOS platform checks, so custody and
    platform verification cannot observe different pathname contents.
 3. **Exercise clean machines.** Use one Apple Silicon Mac and one Intel Mac
    without developer tools. Download through the intended delivery channel so
@@ -84,8 +86,12 @@ affected gate on a new build when artifact bytes change.
    run URLs, source commits, and archive digests, then reproduces the exact
    clean-machine, lifecycle, and official-client recovery records. The
    verifier downloads the artifact through the authenticated GitHub API and
-   exact-compares all three record groups. The operational workflow does not
-   exist yet, so caller-authored booleans cannot qualify a real pilot.
+   exact-compares all three record groups. Every clean-machine start must be no
+   later than this immutable artifact's creation time. While any of gates 3
+   through 5 is incomplete, `macos_operational_evidence_url` may be `none` and
+   the verifier reports not ready; once all three record groups qualify, a real
+   authenticated run URL is required. The operational workflow does not exist
+   yet, so caller-authored booleans cannot qualify a real pilot.
 6. **Qualify the hosted gateway.** Use a separately deployed
    `external_pilot` profile with HTTPS, real Okta login, server-only provider
    credentials, PostgreSQL durability and tenant RLS, durable sessions,
@@ -162,10 +168,12 @@ exact retained files occur in each run's final Actions artifact. Expired,
 duplicate, malformed, oversized, encrypted, path-bearing, or extra artifact
 members fail closed. It also requires consecutive distribution run numbers,
 rejects a rerun candidate, and binds clean-machine and independent-review
-chronology to the authenticated candidate artifact creation time. The exact
-clean-machine, lifecycle, and official-client records must also occur in the
-authenticated candidate-bound macOS operations artifact; copying them into the
-aggregate cannot qualify. Qualifying
+chronology to the authenticated candidate artifact creation time and requires
+both distribution workflows to finish before the declared evidence snapshot.
+The exact clean-machine, lifecycle, and official-client records must also occur
+in the authenticated candidate-bound macOS operations artifact; copying them into the
+aggregate cannot qualify, and a clean-machine start after that artifact was
+created is rejected. Qualifying
 public review comments are fetched through GitHub's API; their exact candidate
 attestation, reviewer identity boundary, and update time are checked without
 retaining the reviewer login. Authenticated gateway deployment and recovery

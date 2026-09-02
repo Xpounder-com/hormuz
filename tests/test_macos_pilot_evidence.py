@@ -54,6 +54,86 @@ class MacPilotEvidenceTests(unittest.TestCase):
             hashlib.sha256(previous_archive_payload).hexdigest(),
         )
 
+    def _production_inputs(
+        self,
+    ) -> tuple[
+        list[object],
+        dict[str, object],
+        dict[str, object],
+        dict[str, object],
+        str,
+    ]:
+        inputs = list(self._inputs())
+        evidence = copy.deepcopy(inputs[0])
+        proof = copy.deepcopy(inputs[1])
+        previous_proof = copy.deepcopy(inputs[7])
+        assert isinstance(evidence, dict)
+        assert isinstance(proof, dict)
+        assert isinstance(previous_proof, dict)
+        evidence["evidence_kind"] = "pilot_qualification"
+        artifact = evidence["artifact"]
+        previous_artifact = evidence["previous_artifact"]
+        gateway = evidence["hosted_gateway"]
+        reviews = evidence["reviews"]
+        assert isinstance(artifact, dict)
+        assert isinstance(previous_artifact, dict)
+        assert isinstance(gateway, dict)
+        assert isinstance(reviews, dict)
+        artifact["source_commit"] = "e" * 40
+        artifact["workflow_run_url"] = (
+            "https://github.com/Xpounder-com/hormuz/actions/runs/999999"
+        )
+        artifact["bundle_identifier"] = pilot.PRODUCTION_BUNDLE_IDENTIFIER
+        artifact["team_identifier"] = pilot.PRODUCTION_TEAM_IDENTIFIER
+        proof["bundle_identifier"] = pilot.PRODUCTION_BUNDLE_IDENTIFIER
+        proof["team_identifier"] = pilot.PRODUCTION_TEAM_IDENTIFIER
+        signing_authority = (
+            "Developer ID Application: Xpounder "
+            f"({pilot.PRODUCTION_TEAM_IDENTIFIER})"
+        )
+        proof["signing_authority"] = signing_authority
+        proof["source_commit"] = artifact["source_commit"]
+        proof["workflow_run_url"] = artifact["workflow_run_url"]
+        previous_artifact["source_commit"] = "f" * 40
+        previous_artifact["workflow_run_url"] = (
+            "https://github.com/Xpounder-com/hormuz/actions/runs/999998"
+        )
+        previous_artifact["bundle_identifier"] = pilot.PRODUCTION_BUNDLE_IDENTIFIER
+        previous_artifact["team_identifier"] = pilot.PRODUCTION_TEAM_IDENTIFIER
+        previous_proof["source_commit"] = previous_artifact["source_commit"]
+        previous_proof["workflow_run_url"] = previous_artifact["workflow_run_url"]
+        previous_proof["bundle_identifier"] = pilot.PRODUCTION_BUNDLE_IDENTIFIER
+        previous_proof["team_identifier"] = pilot.PRODUCTION_TEAM_IDENTIFIER
+        previous_proof["signing_authority"] = signing_authority
+        evidence["macos_operational_evidence_url"] = (
+            "https://github.com/Xpounder-com/hormuz/actions/runs/999995"
+        )
+        gateway["evidence_kind"] = "live_external_pilot"
+        gateway["source_commit"] = "1" * 40
+        gateway["deployment_evidence_url"] = (
+            "https://github.com/Xpounder-com/hormuz/actions/runs/999997"
+        )
+        gateway["recovery_evidence_url"] = (
+            "https://github.com/Xpounder-com/hormuz/actions/runs/999996"
+        )
+        for review in reviews.values():
+            assert isinstance(review, dict)
+            review["source_commit"] = artifact["source_commit"]
+        proof_payload = (json.dumps(proof, indent=2, sort_keys=True) + "\n").encode()
+        previous_proof_payload = (
+            json.dumps(previous_proof, indent=2, sort_keys=True) + "\n"
+        ).encode()
+        artifact["distribution_proof_sha256"] = hashlib.sha256(proof_payload).hexdigest()
+        previous_artifact["distribution_proof_sha256"] = hashlib.sha256(
+            previous_proof_payload
+        ).hexdigest()
+        inputs[0] = evidence
+        inputs[1] = proof
+        inputs[3] = proof_payload
+        inputs[7] = previous_proof
+        inputs[9] = previous_proof_payload
+        return inputs, evidence, artifact, gateway, signing_authority
+
     def _validate(
         self,
         evidence: dict[str, object],
@@ -136,66 +216,9 @@ class MacPilotEvidenceTests(unittest.TestCase):
             self._validate(*inputs)
 
     def test_production_shaped_complete_evidence_can_qualify(self) -> None:
-        inputs = list(self._inputs())
-        evidence = copy.deepcopy(inputs[0])
-        proof = copy.deepcopy(inputs[1])
-        previous_proof = copy.deepcopy(inputs[7])
-        evidence["evidence_kind"] = "pilot_qualification"
-        artifact = evidence["artifact"]  # type: ignore[assignment]
-        previous_artifact = evidence["previous_artifact"]  # type: ignore[assignment]
-        artifact["source_commit"] = "e" * 40
-        artifact["workflow_run_url"] = (
-            "https://github.com/Xpounder-com/hormuz/actions/runs/999999"
+        inputs, evidence, artifact, gateway, signing_authority = (
+            self._production_inputs()
         )
-        artifact["bundle_identifier"] = pilot.PRODUCTION_BUNDLE_IDENTIFIER
-        artifact["team_identifier"] = pilot.PRODUCTION_TEAM_IDENTIFIER
-        proof["bundle_identifier"] = pilot.PRODUCTION_BUNDLE_IDENTIFIER
-        proof["team_identifier"] = pilot.PRODUCTION_TEAM_IDENTIFIER
-        signing_authority = (
-            "Developer ID Application: Xpounder "
-            f"({pilot.PRODUCTION_TEAM_IDENTIFIER})"
-        )
-        proof["signing_authority"] = signing_authority
-        proof["source_commit"] = artifact["source_commit"]
-        proof["workflow_run_url"] = artifact["workflow_run_url"]
-        previous_artifact["source_commit"] = "f" * 40
-        previous_artifact["workflow_run_url"] = (
-            "https://github.com/Xpounder-com/hormuz/actions/runs/999998"
-        )
-        previous_artifact["bundle_identifier"] = pilot.PRODUCTION_BUNDLE_IDENTIFIER
-        previous_artifact["team_identifier"] = pilot.PRODUCTION_TEAM_IDENTIFIER
-        previous_proof["source_commit"] = previous_artifact["source_commit"]
-        previous_proof["workflow_run_url"] = previous_artifact["workflow_run_url"]
-        previous_proof["bundle_identifier"] = pilot.PRODUCTION_BUNDLE_IDENTIFIER
-        previous_proof["team_identifier"] = pilot.PRODUCTION_TEAM_IDENTIFIER
-        previous_proof["signing_authority"] = signing_authority
-        evidence["macos_operational_evidence_url"] = (
-            "https://github.com/Xpounder-com/hormuz/actions/runs/999995"
-        )
-        gateway = evidence["hosted_gateway"]  # type: ignore[assignment]
-        gateway["evidence_kind"] = "live_external_pilot"
-        gateway["source_commit"] = "1" * 40
-        gateway["deployment_evidence_url"] = (
-            "https://github.com/Xpounder-com/hormuz/actions/runs/999997"
-        )
-        gateway["recovery_evidence_url"] = (
-            "https://github.com/Xpounder-com/hormuz/actions/runs/999996"
-        )
-        for review in evidence["reviews"].values():  # type: ignore[union-attr]
-            review["source_commit"] = artifact["source_commit"]
-        proof_payload = (json.dumps(proof, indent=2, sort_keys=True) + "\n").encode()
-        previous_proof_payload = (
-            json.dumps(previous_proof, indent=2, sort_keys=True) + "\n"
-        ).encode()
-        artifact["distribution_proof_sha256"] = hashlib.sha256(proof_payload).hexdigest()
-        previous_artifact["distribution_proof_sha256"] = hashlib.sha256(
-            previous_proof_payload
-        ).hexdigest()
-        inputs[0] = evidence
-        inputs[1] = proof
-        inputs[3] = proof_payload
-        inputs[7] = previous_proof
-        inputs[9] = previous_proof_payload
 
         with (
             patch.object(
@@ -294,6 +317,76 @@ class MacPilotEvidenceTests(unittest.TestCase):
             ],
         )
 
+    def test_incomplete_production_operations_accept_no_run_url(self) -> None:
+        inputs, evidence, _artifact, gateway, signing_authority = (
+            self._production_inputs()
+        )
+        evidence["clean_machine_runs"] = []
+        evidence["macos_operational_evidence_url"] = "none"
+        inputs[0] = evidence
+        with (
+            patch.object(
+                pilot,
+                "verify_archive",
+                return_value={
+                    "team_identifier": pilot.PRODUCTION_TEAM_IDENTIFIER,
+                    "authority": signing_authority,
+                },
+            ),
+            patch.object(
+                pilot,
+                "_authenticate_distribution_artifact",
+                side_effect=(
+                    {
+                        "run_number": 12,
+                        "run_attempt": 1,
+                        "artifact_created_at": datetime(
+                            2026, 9, 1, 14, 0, tzinfo=timezone.utc
+                        ),
+                        "actor_logins": {"release-owner"},
+                    },
+                    {
+                        "run_number": 11,
+                        "run_attempt": 2,
+                        "artifact_created_at": datetime(
+                            2026, 9, 1, 13, 0, tzinfo=timezone.utc
+                        ),
+                        "actor_logins": {"release-owner"},
+                    },
+                ),
+            ),
+            patch.object(
+                pilot,
+                "_authenticate_github_run",
+                side_effect=(
+                    {
+                        "created_at": "2026-09-01T14:00:00Z",
+                        "run_started_at": "2026-09-01T14:01:00Z",
+                        "updated_at": "2026-09-01T14:30:00Z",
+                    },
+                    {
+                        "created_at": "2026-09-01T14:31:00Z",
+                        "run_started_at": "2026-09-01T14:32:00Z",
+                        "updated_at": "2026-09-01T15:00:00Z",
+                    },
+                ),
+            ),
+            patch.object(pilot, "_authenticate_review_reference"),
+            patch.object(pilot, "_authenticate_gateway_evidence_artifact"),
+            patch.object(
+                pilot, "_authenticate_macos_operational_evidence"
+            ) as operations_authenticator,
+        ):
+            result = self._validate(*inputs)
+
+        self.assertEqual(result["status"], "not_ready")
+        self.assertIn(
+            "clean_machine_architecture_coverage_incomplete", result["reasons"]
+        )
+        self.assertNotIn("macos_operational_evidence_missing", result["reasons"])
+        operations_authenticator.assert_not_called()
+        self.assertEqual(gateway["evidence_kind"], "live_external_pilot")
+
     def test_authenticated_distribution_artifact_binds_exact_retained_files(self) -> None:
         proof = self._json(PROOF_PATH)
         proof["build"] = "12001"
@@ -313,6 +406,9 @@ class MacPilotEvidenceTests(unittest.TestCase):
             "run_attempt": 1,
             "actor": {"login": "release-owner"},
             "triggering_actor": {"login": "release-owner"},
+            "created_at": "2026-09-01T13:55:00Z",
+            "run_started_at": "2026-09-01T13:56:00Z",
+            "updated_at": "2026-09-01T14:30:00Z",
         }
         artifact = {
             "id": 67890,
@@ -357,6 +453,7 @@ class MacPilotEvidenceTests(unittest.TestCase):
                 notarization_payload,
                 len(archive_payload),
                 hashlib.sha256(archive_payload).hexdigest(),
+                datetime(2026, 9, 1, 17, 0, tzinfo=timezone.utc),
                 "artifact",
             )
 
@@ -378,6 +475,25 @@ class MacPilotEvidenceTests(unittest.TestCase):
                 "artifact",
             ),
         )
+
+        late_run = dict(run, updated_at="2026-09-01T17:30:00Z")
+        with (
+            patch.object(pilot, "_authenticate_github_run", return_value=late_run),
+            self.assertRaisesRegex(
+                pilot.MacPilotEvidenceError, "artifact_chronology_invalid"
+            ),
+        ):
+            pilot._authenticate_distribution_artifact(
+                proof["workflow_run_url"],
+                proof["source_commit"],
+                proof,
+                proof_payload,
+                notarization_payload,
+                len(archive_payload),
+                hashlib.sha256(archive_payload).hexdigest(),
+                datetime(2026, 9, 1, 17, 0, tzinfo=timezone.utc),
+                "artifact",
+            )
 
     def test_authenticated_distribution_artifact_rejects_tampered_or_extra_files(self) -> None:
         proof = self._json(PROOF_PATH)
@@ -676,6 +792,7 @@ class MacPilotEvidenceTests(unittest.TestCase):
         inputs = list(self._inputs())
         evidence = copy.deepcopy(inputs[0])
         evidence["clean_machine_runs"] = []
+        evidence["macos_operational_evidence_url"] = "none"
         inputs[0] = evidence
 
         result = self._validate(*inputs)
@@ -1116,6 +1233,36 @@ class MacPilotEvidenceTests(unittest.TestCase):
                 artifact,
                 previous_artifact,
                 evidence["clean_machine_runs"],
+                evidence["lifecycle"],
+                evidence["client_auth_recovery"],
+                datetime(2026, 9, 1, 14, 0, tzinfo=timezone.utc),
+                datetime(2026, 9, 1, 17, 0, tzinfo=timezone.utc),
+            )
+
+        future_clean_machine_runs = copy.deepcopy(evidence["clean_machine_runs"])
+        future_clean_machine_runs[1]["started_at"] = "2026-09-01T16:20:00Z"
+        future_proof = copy.deepcopy(proof)
+        future_proof["clean_machine_runs"] = future_clean_machine_runs
+        with (
+            patch.object(pilot, "_authenticate_github_run", return_value=run),
+            patch.object(
+                pilot,
+                "_authenticate_run_json_artifact",
+                return_value=(
+                    future_proof,
+                    datetime(2026, 9, 1, 16, 15, tzinfo=timezone.utc),
+                ),
+            ),
+            self.assertRaisesRegex(
+                pilot.MacPilotEvidenceError,
+                "clean_machine_run_1_after_operations_artifact",
+            ),
+        ):
+            pilot._authenticate_macos_operational_evidence(
+                operations_url,
+                artifact,
+                previous_artifact,
+                future_clean_machine_runs,
                 evidence["lifecycle"],
                 evidence["client_auth_recovery"],
                 datetime(2026, 9, 1, 14, 0, tzinfo=timezone.utc),

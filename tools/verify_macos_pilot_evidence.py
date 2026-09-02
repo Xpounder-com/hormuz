@@ -889,7 +889,7 @@ def _authenticate_run_json_artifact(
     expected_name: str,
     member_name: str,
     label: str,
-) -> object:
+) -> tuple[object, datetime]:
     run_id, _, _ = _require_github_run_identity(run, label)
     response = _github_api_json(
         f"repos/Xpounder-com/hormuz/actions/runs/{run_id}/artifacts?per_page=100",
@@ -963,7 +963,7 @@ def _authenticate_run_json_artifact(
             member_name,
             label,
         )
-    return payload
+    return payload, artifact_created_at
 
 
 def _authenticate_gateway_evidence_artifact(
@@ -975,7 +975,7 @@ def _authenticate_gateway_evidence_artifact(
     if evidence_role not in {"deployment", "qualification"}:
         raise MacPilotEvidenceError(f"{label}_role_invalid")
     _, run_number, run_attempt = _require_github_run_identity(run, label)
-    payload = _authenticate_run_json_artifact(
+    payload, _ = _authenticate_run_json_artifact(
         run,
         gateway["source_commit"],
         f"hormuz-external-pilot-{evidence_role}-{run_number}-{run_attempt}",
@@ -1068,6 +1068,7 @@ def _authenticate_distribution_artifact(
     notarization_payload: bytes,
     archive_size: int,
     archive_sha256: str,
+    generated_at: datetime,
     label: str,
 ) -> dict[str, object]:
     run = _authenticate_github_run(
@@ -1075,6 +1076,9 @@ def _authenticate_distribution_artifact(
         source_commit,
         MACOS_DISTRIBUTION_WORKFLOW,
         label,
+    )
+    run_started_at, run_completed_at = _validate_github_run_timeline(
+        run, generated_at, label
     )
     run_id = run["id"]
     run_number = run.get("run_number")
@@ -1149,6 +1153,7 @@ def _authenticate_distribution_artifact(
         or workflow_run.get("id") != run_id
         or workflow_run.get("head_branch") != "main"
         or workflow_run.get("head_sha") != source_commit
+        or not run_started_at <= artifact_created_at <= run_completed_at
     ):
         raise MacPilotEvidenceError(f"{label}_github_artifact_not_trusted")
 
@@ -1523,7 +1528,7 @@ def _authenticate_macos_operational_evidence(
     if artifact_created_at is None or run_started_at < artifact_created_at:
         raise MacPilotEvidenceError("macos_operations_predates_artifact")
     _, run_number, run_attempt = _require_github_run_identity(run, label)
-    payload = _authenticate_run_json_artifact(
+    payload, operations_artifact_created_at = _authenticate_run_json_artifact(
         run,
         artifact["source_commit"],
         f"hormuz-macos-pilot-operations-{run_number}-{run_attempt}",
@@ -1539,6 +1544,19 @@ def _authenticate_macos_operational_evidence(
         lifecycle,
         client_auth_recovery,
     )
+    if not isinstance(clean_machine_runs, list):
+        raise MacPilotEvidenceError("clean_machine_runs_invalid")
+    for index, raw in enumerate(clean_machine_runs):
+        run_record = _require_fields(
+            raw, _CLEAN_MACHINE_FIELDS, f"clean_machine_run_{index}"
+        )
+        started_at = _require_timestamp(
+            run_record["started_at"], f"clean_machine_run_{index}_started_at"
+        )
+        if started_at > operations_artifact_created_at:
+            raise MacPilotEvidenceError(
+                f"clean_machine_run_{index}_after_operations_artifact"
+            )
 
 
 def _validate_hosted_gateway(
@@ -1843,11 +1861,15 @@ def validate_evidence(
         raise MacPilotEvidenceError("evidence_kind_invalid")
     if root["claim_scope"] != CLAIM_SCOPE:
         raise MacPilotEvidenceError("claim_scope_invalid")
-    operations_url = _require_pattern(
-        root["macos_operational_evidence_url"],
-        _ACTIONS_RUN_RE,
-        "macos_operational_evidence_url",
-    )
+    operations_url = root["macos_operational_evidence_url"]
+    if (
+        not isinstance(operations_url, str)
+        or (
+            operations_url != "none"
+            and _ACTIONS_RUN_RE.fullmatch(operations_url) is None
+        )
+    ):
+        raise MacPilotEvidenceError("macos_operational_evidence_url_invalid")
     generated_at = _require_timestamp(root["generated_at"], "generated_at")
     current = now or datetime.now(timezone.utc)
     if generated_at > current + _MAX_FUTURE_CLOCK_SKEW:
@@ -1902,6 +1924,7 @@ def validate_evidence(
             notarization_summary_payload,
             archive_size,
             archive_sha256,
+            generated_at,
             "artifact",
         )
         previous_authentication = _authenticate_distribution_artifact(
@@ -1912,6 +1935,7 @@ def validate_evidence(
             previous_notarization_summary_payload,
             previous_archive_size,
             previous_archive_sha256,
+            generated_at,
             "previous_artifact",
         )
         _validate_authenticated_distribution_history(
@@ -1941,16 +1965,19 @@ def validate_evidence(
         evidence_kind == "pilot_qualification"
         and len(reasons) == macos_operations_reason_count
     ):
-        _authenticate_macos_operational_evidence(
-            operations_url,
-            artifact,
-            previous_artifact,
-            root["clean_machine_runs"],
-            root["lifecycle"],
-            root["client_auth_recovery"],
-            artifact_created_at,
-            generated_at,
-        )
+        if operations_url == "none":
+            reasons.append("macos_operational_evidence_missing")
+        else:
+            _authenticate_macos_operational_evidence(
+                operations_url,
+                artifact,
+                previous_artifact,
+                root["clean_machine_runs"],
+                root["lifecycle"],
+                root["client_auth_recovery"],
+                artifact_created_at,
+                generated_at,
+            )
     gateway_reason_count = len(reasons)
     gateway = _validate_hosted_gateway(root["hosted_gateway"], evidence_kind, reasons)
     if evidence_kind == "pilot_qualification" and len(reasons) == gateway_reason_count:
