@@ -60,15 +60,21 @@ provider model request is made, and the existing bounded retry/deadline policy
 applies. The parser rejects duplicate JSON members, non-finite or inexact
 amounts, invalid Unicode, repeated cursors, inconsistent or out-of-window
 buckets, conflicting records, unsafe dimensions, and all size/count/depth
-overruns.
+overruns. Before any digest, idempotency comparison, or persistence, provider
+numeric lexemes are limited to 128 bytes; known usage counts must be integers
+from zero through `2^63 - 1`; and provider-native and canonical money values
+must each be finite, exact, strictly between `-10^18` and `10^18`, with at most
+18 integer digits, 18 fractional digits, and 36 significant digits. Booleans,
+out-of-range derived sums, exponent values outside the normalized `-18..17`
+range, and any required rounding fail closed.
 
-Only a complete page chain can publish. The snapshot, typed observations,
-receipt, append-only terminal attempt event, and audit-chain entries commit or
-roll back together. A failure stores only a fixed content-free terminal event,
-keeps the prior complete snapshot, and leaves an explicit stale or failed
-coverage gap. It never substitutes zero. Persistence retry may reuse already
-normalized in-memory evidence; it may not contact the provider or replay
-provider model work automatically.
+Only a complete page chain can publish. The snapshot, exact bucket-coverage
+rows, typed observations, receipt, append-only terminal attempt event, and
+audit-chain entries commit or roll back together. A failure stores only a fixed
+content-free terminal event, keeps the prior complete snapshot, and leaves an
+explicit stale or failed coverage gap. It never substitutes zero. Persistence
+retry may reuse already normalized in-memory evidence; it may not contact the
+provider or replay provider model work automatically.
 
 File import uses the same profile validation and complete page-chain rules, but
 its evidence remains customer-supplied and scope-unverified. File fields and
@@ -88,14 +94,18 @@ conversion.
 Refreshing the exact same binding version, profile, and query window may append
 a new snapshot with an explicit whole-snapshot supersession relationship. A
 partially overlapping window does not supersede either whole snapshot.
-Within one organization, binding version, and collection profile, reporting
-partitions observations by exact provider-native bucket start and end and
-selects the newest complete snapshot by database commit sequence for each exact
-interval. Thus a January 15 through January 31 refresh replaces duplicate
-daily buckets without dropping January 1 through January 14 or adding either
-interval twice. Overlapping buckets with non-identical boundaries remain
-separate evidence and cannot be silently summed or selected as one partition.
-The snapshot content digest covers canonical typed observations and stable
+Within one organization, binding ID and version, and collection profile,
+reporting partitions append-only coverage rows by exact provider-native bucket
+start and end and selects the newest complete snapshot by database commit
+sequence for each exact interval. Only observations owned by that selected
+snapshot are current. A selected `no_observation` coverage row suppresses an
+older value for the interval but yields no numeric value; it never becomes
+zero. Thus a January 15 through January 31 refresh replaces both populated and
+empty duplicate daily buckets without dropping January 1 through January 14,
+retaining stale January 20 usage, or adding either interval twice. Overlapping
+buckets with non-identical boundaries remain separate evidence and cannot be
+silently summed or selected as one partition. The snapshot content digest
+covers canonical typed coverage, canonical typed observations, and stable
 source identity: organization, binding ID and version, collection profile, and
 query window. Attempt identity, requested page size, page boundaries, raw
 cursors, and page-chain mechanics are excluded from that digest. A separate
@@ -114,14 +124,16 @@ exchange finalization. These remain visible coverage gaps.
 ## Planned storage and migration
 
 The runtime successor reserves additive SQLite schema 12 and PostgreSQL schema
-16 for six objects:
+16 for seven objects:
 
 1. immutable source-binding versions;
 2. immutable collection attempt roots;
 3. append-only collection terminal events, with pending derived from absence;
 4. complete immutable snapshots;
-5. typed usage observations; and
-6. typed cost observations.
+5. exact append-only snapshot bucket coverage, including non-numeric empty
+   markers;
+6. typed usage observations; and
+7. typed cost observations.
 
 Snapshot publication, source-binding changes, and collection terminal events
 become the exact version-1 audit sources `hormuz.finance-snapshot`,
@@ -138,7 +150,7 @@ the expected production fingerprint from the database under test. This
 preflight does not consume either migration number or alter the current 185-row
 schema-15 ACL boundary.
 
-All six collection tables are append-only. Their reviewed migrations must
+All seven collection tables are append-only. Their reviewed migrations must
 reject every update and delete, and PostgreSQL must reject `TRUNCATE`. SQLite
 must additionally reject `INSERT OR REPLACE` whenever any primary or unique
 identity would conflict, so replacement cannot delete a source row behind an
@@ -161,7 +173,7 @@ whose canonical path-and-byte digest is
 
 The preflight must prove that the current runtime tree matches those exact
 predecessor bytes, the absent 12/16 migrations fail without partial state,
-representative append-only six-table DDL plus the SQLite audit-table rebuild
+representative append-only seven-table DDL plus the SQLite audit-table rebuild
 and PostgreSQL audit constraint/function changes roll back and retry
 idempotently,
 partial and newer states are refused by current and exact predecessor binaries,

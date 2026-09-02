@@ -37,6 +37,7 @@ PLANNED_TABLES = (
     "portfolio_finance_collection_attempts",
     "portfolio_finance_collection_events",
     "portfolio_finance_snapshots",
+    "portfolio_finance_snapshot_bucket_coverage",
     "portfolio_finance_usage_observations",
     "portfolio_finance_cost_observations",
 )
@@ -62,6 +63,12 @@ SQLITE_APPEND_ONLY_IDENTITIES = {
     "portfolio_finance_snapshots": (
         "existing.snapshot_id=NEW.snapshot_id",
         "existing.attempt_id=NEW.attempt_id",
+    ),
+    "portfolio_finance_snapshot_bucket_coverage": (
+        "existing.coverage_id=NEW.coverage_id",
+        "(existing.snapshot_id=NEW.snapshot_id "
+        "AND existing.bucket_start_at=NEW.bucket_start_at "
+        "AND existing.bucket_end_at=NEW.bucket_end_at)",
     ),
     "portfolio_finance_usage_observations": (
         "existing.observation_id=NEW.observation_id",
@@ -155,6 +162,29 @@ def _seed_synthetic_collection_rows(connection):
             '{"kind":"snapshot"}',
         ),
     )
+    for coverage in (
+        (
+            "coverage-observed",
+            "2026-09-01T00:00:00Z",
+            "2026-09-02T00:00:00Z",
+            "observed",
+            2,
+        ),
+        (
+            "coverage-empty",
+            "2026-08-31T00:00:00Z",
+            "2026-09-01T00:00:00Z",
+            "no_observation",
+            0,
+        ),
+    ):
+        connection.execute(
+            "INSERT INTO portfolio_finance_snapshot_bucket_coverage "
+            "(organization_id, coverage_id, snapshot_id, bucket_start_at, "
+            "bucket_end_at, coverage_state, observation_count) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("acme", coverage[0], "snapshot-event", *coverage[1:]),
+        )
     for table, observation_id in (
         ("portfolio_finance_usage_observations", "usage-observation"),
         ("portfolio_finance_cost_observations", "cost-observation"),
@@ -247,6 +277,35 @@ def _synthetic_collection_migration(connection, *, fail=False):
             FOREIGN KEY (organization_id, attempt_id)
                 REFERENCES portfolio_finance_collection_attempts
                     (organization_id, attempt_id)
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE TABLE portfolio_finance_snapshot_bucket_coverage (
+            organization_id TEXT NOT NULL,
+            coverage_id TEXT NOT NULL,
+            snapshot_id TEXT NOT NULL,
+            bucket_start_at TEXT NOT NULL,
+            bucket_end_at TEXT NOT NULL,
+            coverage_state TEXT NOT NULL,
+            observation_count INTEGER NOT NULL,
+            PRIMARY KEY (organization_id, coverage_id),
+            UNIQUE (
+                organization_id,
+                snapshot_id,
+                bucket_start_at,
+                bucket_end_at
+            ),
+            FOREIGN KEY (organization_id, snapshot_id)
+                REFERENCES portfolio_finance_snapshots
+                    (organization_id, snapshot_id),
+            CHECK (coverage_state IN ('observed', 'no_observation')),
+            CHECK (observation_count BETWEEN 0 AND 4096),
+            CHECK (
+                (coverage_state='no_observation' AND observation_count=0)
+                OR (coverage_state='observed' AND observation_count>=1)
+            )
         )
         """
     )
@@ -587,6 +646,33 @@ class SQLiteFinanceCollectionTransitionTests(unittest.TestCase):
                             f"INSERT OR REPLACE INTO {table} "
                             f"SELECT * FROM {table} LIMIT 1"
                         )
+
+    def test_empty_bucket_coverage_is_durable_without_numeric_zero(self):
+        self.probe()
+        with managed_sqlite_connection(self.path) as connection:
+            _seed_synthetic_collection_rows(connection)
+            coverage = connection.execute(
+                "SELECT coverage_state, observation_count "
+                "FROM portfolio_finance_snapshot_bucket_coverage "
+                "WHERE organization_id=? AND coverage_id=?",
+                ("acme", "coverage-empty"),
+            ).fetchone()
+            self.assertEqual(coverage, ("no_observation", 0))
+            for table in (
+                "portfolio_finance_usage_observations",
+                "portfolio_finance_cost_observations",
+            ):
+                observed = connection.execute(
+                    f"SELECT COUNT(*) FROM {table} "
+                    "WHERE organization_id=? AND bucket_start_at=? "
+                    "AND bucket_end_at=?",
+                    (
+                        "acme",
+                        "2026-08-31T00:00:00Z",
+                        "2026-09-01T00:00:00Z",
+                    ),
+                ).fetchone()[0]
+                self.assertEqual(observed, 0)
 
     def test_current_binary_refuses_newer_and_partial_state_without_repair(self):
         self.probe()

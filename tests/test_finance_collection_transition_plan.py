@@ -41,7 +41,7 @@ class FinanceCollectionTransitionPlanTests(unittest.TestCase):
         self.assertEqual(result["planned_sqlite_schema_version"], 12)
         self.assertEqual(result["planned_postgresql_schema_version"], 16)
         self.assertEqual(result["collection_profile_count"], 4)
-        self.assertEqual(result["planned_table_count"], 6)
+        self.assertEqual(result["planned_table_count"], 7)
         self.assertEqual(result["planned_altered_table_count"], 1)
         self.assertEqual(result["planned_audit_source_count"], 3)
         self.assertEqual(
@@ -221,7 +221,8 @@ class FinanceCollectionTransitionPlanTests(unittest.TestCase):
         self.assertIn("never_success_or_zero", limits["coverage_on_failure"])
 
     def test_accounting_keeps_aggregate_invoice_and_granular_cost_distinct(self):
-        observation = self.contract()["observation"]
+        contract = self.contract()
+        observation = contract["observation"]
         self.assertEqual(observation["cost_basis"], "provider_reported_aggregate")
         self.assertFalse(observation["provider_final"])
         self.assertFalse(observation["invoice_final"])
@@ -232,6 +233,44 @@ class FinanceCollectionTransitionPlanTests(unittest.TestCase):
         self.assertIn("never_zero", observation["null"])
         self.assertIn("never_dropped_or_allocated", observation["unclassified_cost"])
         self.assertIn("pin_exact_snapshots", observation["later_reconciliation"])
+        numeric = contract["numeric_domains"]
+        self.assertEqual(
+            numeric["validation_order"],
+            "reject_before_canonical_digest_idempotency_comparison_or_persistence",
+        )
+        self.assertEqual(numeric["source_numeric_lexeme_maximum_bytes"], 128)
+        self.assertEqual(
+            numeric["money"],
+            {
+                "type": "finite_exact_decimal",
+                "minimum_exclusive": "-1000000000000000000",
+                "maximum_exclusive": "1000000000000000000",
+                "maximum_integer_digits": 18,
+                "maximum_fractional_digits": 18,
+                "maximum_significant_digits": 36,
+                "normalized_nonzero_exponent_minimum": -18,
+                "normalized_nonzero_exponent_maximum": 17,
+                "provider_native_and_canonical_major_value_must_each_fit": True,
+                "rounding": "forbidden",
+            },
+        )
+        self.assertEqual(
+            numeric["usage_count"],
+            {
+                "type": "integer_not_boolean",
+                "minimum": 0,
+                "maximum": 9223372036854775807,
+                "derived_sum_overflow": "reject",
+            },
+        )
+        self.assertEqual(
+            numeric["coverage_observation_count"],
+            {
+                "type": "integer_not_boolean",
+                "minimum": 0,
+                "maximum": 4096,
+            },
+        )
 
     def test_refreshes_select_exact_buckets_and_file_import_never_claims_live_scope(self):
         snapshot = self.contract()["snapshot"]
@@ -248,7 +287,13 @@ class FinanceCollectionTransitionPlanTests(unittest.TestCase):
             snapshot["overlap"],
         )
         self.assertIn("nonidentical_bucket_intervals", snapshot["nonidentical_overlap"])
+        self.assertIn("bucket_coverage", snapshot["selection"])
         self.assertIn("commit_sequence", snapshot["selection"])
+        self.assertIn(
+            "no_observation_coverage_suppresses",
+            snapshot["empty_bucket_selection"],
+        )
+        self.assertIn("never_zero", snapshot["empty_bucket_selection"])
         self.assertIn("never_live_verified", snapshot["file_evidence"])
         self.assertIn(
             "including_organization_binding_id_and_version_collection_profile_and_query_window",
@@ -266,6 +311,18 @@ class FinanceCollectionTransitionPlanTests(unittest.TestCase):
             "distinct_attempt_and_page_chain_provenance_with_a_distinct_page_chain_digest",
             self.contract()["idempotency"]["same_content_different_page_size"],
         )
+        coverage = self.contract()["bucket_coverage"]
+        self.assertEqual(
+            coverage["table"],
+            "portfolio_finance_snapshot_bucket_coverage",
+        )
+        self.assertEqual(coverage["states"], ["observed", "no_observation"])
+        self.assertIn(
+            "newest_complete_snapshot_from_coverage_first",
+            coverage["selection_authority"],
+        )
+        self.assertIn("no_observation_requires_count_zero", coverage["empty"])
+        self.assertFalse(coverage["numeric_zero_claim"])
         self.assertIn(
             "exact_provider_native_bucket_start_and_end",
             self.contract()["observation"]["granularity"],
@@ -311,7 +368,10 @@ class FinanceCollectionTransitionPlanTests(unittest.TestCase):
                 "postgresql": {"from": 15, "to": 16},
             },
         )
-        self.assertEqual(len(plan["planned_storage"]["tables"]), 6)
+        self.assertEqual(
+            plan["planned_storage"]["tables"],
+            list(verifier.PLANNED_TABLES),
+        )
         self.assertEqual(
             set(plan["planned_storage"]["altered_tables"]),
             {"gateway_audit_chain_entries"},
@@ -325,7 +385,7 @@ class FinanceCollectionTransitionPlanTests(unittest.TestCase):
             verifier.AUDIT_SOURCE_SCHEMAS,
         )
         self.assertIn(
-            "all_six_collection_tables_reject_update_and_delete",
+            "all_seven_collection_tables_reject_update_and_delete",
             plan["planned_storage"]["mutation_protection"],
         )
         self.assertIn(

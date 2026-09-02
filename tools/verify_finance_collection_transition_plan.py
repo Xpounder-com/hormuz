@@ -27,8 +27,8 @@ from tools.verify_finance_transition_plan import (
 PLAN_PATH = "docs/finance-transition-plan-v5.json"
 CONTRACT_PATH = "docs/finance-collection-contract-v1.json"
 SOURCE_CONTRACT_PATH = "docs/finance-source-contract-v1.json"
-PLAN_CANONICAL_SHA256 = "f934e19f6164e3c55663fd94ed109df87e624c1cd800be22a2d947c827c35a6c"
-CONTRACT_CANONICAL_SHA256 = "91f43e96b26cb93999687730640400a809007fdf0ce1bf029184adfe73a84b69"
+PLAN_CANONICAL_SHA256 = "48393a54400d5f36113f852d66fb6529d6c3d27b3fdfbc967c549b1d0593eff2"
+CONTRACT_CANONICAL_SHA256 = "1eeb1931fa00f50657f524ac088e1fc886fe6535e9d37f67a6fcfafa1926a61f"
 SOURCE_CONTRACT_CANONICAL_SHA256 = "290def8f2cd7026d4e0f0512db9254906f8592a026ee4beb9cac3623d7a1d9f4"
 AUDIT_SOURCE_SCHEMAS = {
     "hormuz.finance-source-binding-version": {
@@ -50,6 +50,15 @@ AUDIT_SOURCE_SCHEMAS = {
         "evidence_json_column": "evidence_json",
     },
 }
+PLANNED_TABLES = (
+    "portfolio_finance_source_binding_versions",
+    "portfolio_finance_collection_attempts",
+    "portfolio_finance_collection_events",
+    "portfolio_finance_snapshots",
+    "portfolio_finance_snapshot_bucket_coverage",
+    "portfolio_finance_usage_observations",
+    "portfolio_finance_cost_observations",
+)
 PREDECESSOR_SOURCE_COMMIT = "38309f6984e336862d94cf35ed0b9e2605a5be81"
 PREDECESSOR_ARCHIVE_SHA256 = "f0c2fc86c1e6198bcf58a2476941d6584b1efcdcf33708aa485da04106ed8c65"
 PREDECESSOR_ARCHIVE_PREFIX = "hormuz-finance-native-runtime-baseline/"
@@ -234,7 +243,14 @@ def verify_finance_collection_transition_plan(
         storage = plan["planned_storage"]
         compatibility = plan["compatibility"]
         snapshot = contract["snapshot"]
+        bucket_coverage = contract["bucket_coverage"]
         observation = contract["observation"]
+        numeric_domains = contract["numeric_domains"]
+        money_domain = numeric_domains["money"]
+        usage_count_domain = numeric_domains["usage_count"]
+        coverage_count_domain = numeric_domains[
+            "coverage_observation_count"
+        ]
         if (
             predecessor["source_commit"] != PREDECESSOR_SOURCE_COMMIT
             or predecessor["archive_sha256"] != PREDECESSOR_ARCHIVE_SHA256
@@ -254,7 +270,7 @@ def verify_finance_collection_transition_plan(
             or dependencies["source_contract"]["canonical_sha256"]
             != SOURCE_CONTRACT_CANONICAL_SHA256
             or len(contract["collection_profiles"]) != 4
-            or len(storage["tables"]) != 6
+            or storage["tables"] != list(PLANNED_TABLES)
             or set(storage["altered_tables"]) != {"gateway_audit_chain_entries"}
             or storage["audit_source_schemas"] != AUDIT_SOURCE_SCHEMAS
             or contract["audit_source_schemas"] != AUDIT_SOURCE_SCHEMAS
@@ -270,7 +286,47 @@ def verify_finance_collection_transition_plan(
             not in snapshot["content_digest"]
             or "including_requested_page_size_and_returned_page_boundaries_or_counts"
             not in snapshot["page_chain_digest"]
-            or "all_six_collection_tables_reject_update_and_delete"
+            or "typed_bucket_coverage_observations"
+            not in snapshot["content_digest"]
+            or "bucket_coverage"
+            not in snapshot["selection"]
+            or "no_observation_coverage_suppresses"
+            not in snapshot["empty_bucket_selection"]
+            or "never_zero" not in snapshot["empty_bucket_selection"]
+            or bucket_coverage["table"] != PLANNED_TABLES[4]
+            or bucket_coverage["states"] != ["observed", "no_observation"]
+            or "newest_complete_snapshot_from_coverage_first"
+            not in bucket_coverage["selection_authority"]
+            or "no_observation_requires_count_zero"
+            not in bucket_coverage["empty"]
+            or bucket_coverage["numeric_zero_claim"] is not False
+            or numeric_domains["validation_order"]
+            != "reject_before_canonical_digest_idempotency_comparison_or_persistence"
+            or numeric_domains["source_numeric_lexeme_maximum_bytes"] != 128
+            or money_domain != {
+                "type": "finite_exact_decimal",
+                "minimum_exclusive": "-1000000000000000000",
+                "maximum_exclusive": "1000000000000000000",
+                "maximum_integer_digits": 18,
+                "maximum_fractional_digits": 18,
+                "maximum_significant_digits": 36,
+                "normalized_nonzero_exponent_minimum": -18,
+                "normalized_nonzero_exponent_maximum": 17,
+                "provider_native_and_canonical_major_value_must_each_fit": True,
+                "rounding": "forbidden",
+            }
+            or usage_count_domain != {
+                "type": "integer_not_boolean",
+                "minimum": 0,
+                "maximum": 9223372036854775807,
+                "derived_sum_overflow": "reject",
+            }
+            or coverage_count_domain != {
+                "type": "integer_not_boolean",
+                "minimum": 0,
+                "maximum": 4096,
+            }
+            or "all_seven_collection_tables_reject_update_and_delete"
             not in storage["mutation_protection"]
             or "PostgreSQL_rejects_TRUNCATE"
             not in storage["mutation_protection"]
@@ -305,7 +361,7 @@ def verify_finance_collection_transition_plan(
         "planned_sqlite_schema_version": 12,
         "planned_postgresql_schema_version": 16,
         "collection_profile_count": 4,
-        "planned_table_count": 6,
+        "planned_table_count": len(PLANNED_TABLES),
         "planned_altered_table_count": 1,
         "planned_audit_source_count": 3,
         "native_attempt_runtime_source_verified": bool(

@@ -36,6 +36,7 @@ PLANNED_TABLES = (
     "portfolio_finance_collection_attempts",
     "portfolio_finance_collection_events",
     "portfolio_finance_snapshots",
+    "portfolio_finance_snapshot_bucket_coverage",
     "portfolio_finance_usage_observations",
     "portfolio_finance_cost_observations",
 )
@@ -101,6 +102,31 @@ def _synthetic_collection_migration(quoted_schema: str, *, fail=False) -> str:
         FOREIGN KEY (organization_id, attempt_id)
             REFERENCES {quoted_schema}.portfolio_finance_collection_attempts
                 (organization_id, attempt_id)
+    );
+    CREATE TABLE {quoted_schema}.portfolio_finance_snapshot_bucket_coverage (
+        organization_id TEXT NOT NULL,
+        coverage_id TEXT NOT NULL,
+        snapshot_id TEXT NOT NULL,
+        bucket_start_at TIMESTAMPTZ NOT NULL,
+        bucket_end_at TIMESTAMPTZ NOT NULL,
+        coverage_state TEXT NOT NULL,
+        observation_count BIGINT NOT NULL,
+        PRIMARY KEY (organization_id, coverage_id),
+        UNIQUE (
+            organization_id,
+            snapshot_id,
+            bucket_start_at,
+            bucket_end_at
+        ),
+        FOREIGN KEY (organization_id, snapshot_id)
+            REFERENCES {quoted_schema}.portfolio_finance_snapshots
+                (organization_id, snapshot_id),
+        CHECK (coverage_state IN ('observed', 'no_observation')),
+        CHECK (observation_count BETWEEN 0 AND 4096),
+        CHECK (
+            (coverage_state='no_observation' AND observation_count=0)
+            OR (coverage_state='observed' AND observation_count>=1)
+        )
     );
     CREATE TABLE {quoted_schema}.portfolio_finance_usage_observations (
         organization_id TEXT NOT NULL,
@@ -323,6 +349,7 @@ class PostgresFinanceCollectionTransitionTests(PostgresTestCase):
             self.before["rows"]["gateway_audit_chain_entries"],
         )
         for table in (
+            "portfolio_finance_snapshot_bucket_coverage",
             "portfolio_finance_usage_observations",
             "portfolio_finance_cost_observations",
         ):
@@ -430,6 +457,31 @@ class PostgresFinanceCollectionTransitionTests(PostgresTestCase):
                 '{"kind":"snapshot"}',
             ),
         )
+        for coverage in (
+            (
+                "coverage-observed",
+                "2026-09-01T00:00:00Z",
+                "2026-09-02T00:00:00Z",
+                "observed",
+                2,
+            ),
+            (
+                "coverage-empty",
+                "2026-08-31T00:00:00Z",
+                "2026-09-01T00:00:00Z",
+                "no_observation",
+                0,
+            ),
+        ):
+            connection.execute(
+                self.sql.SQL(
+                    "INSERT INTO {}.portfolio_finance_snapshot_bucket_coverage "
+                    "(organization_id, coverage_id, snapshot_id, "
+                    "bucket_start_at, bucket_end_at, coverage_state, "
+                    "observation_count) VALUES (%s, %s, %s, %s, %s, %s, %s)"
+                ).format(self.sql.Identifier(self.schema)),
+                ("acme", coverage[0], snapshot_event, *coverage[1:]),
+            )
         for table, observation_id in (
             (
                 "portfolio_finance_usage_observations",
@@ -718,7 +770,46 @@ class PostgresFinanceCollectionTransitionTests(PostgresTestCase):
                                 connection.execute(statement)
         snapshot = self.snapshot()
         for table in PLANNED_TABLES:
-            self.assertEqual(len(snapshot["rows"][table]), 1)
+            expected = (
+                2
+                if table == "portfolio_finance_snapshot_bucket_coverage"
+                else 1
+            )
+            self.assertEqual(len(snapshot["rows"][table]), expected)
+
+    def test_empty_bucket_coverage_is_durable_without_numeric_zero(self):
+        self.probe()
+        with self.psycopg.connect(self.owner_dsn) as connection:
+            self.seed_synthetic_collection_rows(connection)
+            coverage = connection.execute(
+                self.sql.SQL(
+                    "SELECT coverage_state, observation_count "
+                    "FROM {}.portfolio_finance_snapshot_bucket_coverage "
+                    "WHERE organization_id=%s AND coverage_id=%s"
+                ).format(self.sql.Identifier(self.schema)),
+                ("acme", "coverage-empty"),
+            ).fetchone()
+            self.assertEqual(coverage, ("no_observation", 0))
+            for table in (
+                "portfolio_finance_usage_observations",
+                "portfolio_finance_cost_observations",
+            ):
+                observed = connection.execute(
+                    self.sql.SQL(
+                        "SELECT COUNT(*) FROM {}.{} "
+                        "WHERE organization_id=%s AND bucket_start_at=%s "
+                        "AND bucket_end_at=%s"
+                    ).format(
+                        self.sql.Identifier(self.schema),
+                        self.sql.Identifier(table),
+                    ),
+                    (
+                        "acme",
+                        "2026-08-31T00:00:00Z",
+                        "2026-09-01T00:00:00Z",
+                    ),
+                ).fetchone()[0]
+                self.assertEqual(observed, 0)
 
     def test_current_binary_refuses_newer_and_partial_state_without_repair(self):
         self.probe()
