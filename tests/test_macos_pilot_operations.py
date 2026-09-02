@@ -366,9 +366,10 @@ class MacPilotOperationsTests(unittest.TestCase):
         clean_text = clean.read_text(encoding="utf-8")
         session_text = session.read_text(encoding="utf-8")
         for executable in ("python", "node", "jq"):
-            self.assertNotIn(f"/{executable}", clean_text)
+            for suffix in (" ", '"', "'", "\n"):
+                self.assertNotIn(f"/{executable}{suffix}", clean_text)
+                self.assertNotIn(f"/{executable}{suffix}", session_text)
             self.assertNotIn(f" {executable} ", clean_text)
-            self.assertNotIn(f"/{executable}", session_text)
             self.assertNotIn(f" {executable} ", session_text)
         for marker in (
             "com.apple.quarantine",
@@ -378,22 +379,34 @@ class MacPilotOperationsTests(unittest.TestCase):
             "TeamIdentifier=R267LZMUTY",
             'diff -qr "$DOWNLOADED_APP" "$ARCHIVE_APP"',
             "archive_contents_mismatch",
+            "PRELAUNCH_PIDS",
+            '/bin/ps -ww -p "$candidate_pid" -o command=',
+            '"$PRELAUNCH_PIDS" != *" $candidate_pid "*',
         ):
             self.assertIn(marker, clean_text)
         for marker in (
-            "IOConsoleLocked",
+            "-extract IOConsoleLocked",
+            "0.IOConsoleLocked",
             "0\\.147\\.0",
             "2\\.1\\.233",
             "pilot-evidence verify-denied",
+            "pilot-evidence session-store-empty",
             "provider_egress_on_rejected_turn",
             "EXPECTED_GATEWAY",
             '"$gateway" == "$EXPECTED_GATEWAY"',
             "EXPECTED_SERVICE_ID",
+            "EXPECTED_INSTANCE_FINGERPRINT",
+            '"$instance_fingerprint" == "$EXPECTED_INSTANCE_FINGERPRINT"',
             "deployment.sourceCommit",
             "deployment.serviceId",
             "TeamIdentifier=R267LZMUTY",
+            "134063e133f0b4244fa3b251acf973d4fe4b4aeeacbdc135211bf480f59f1477",
+            "19c4f144c5226a9f17c58e6f0fa854843b0f77a6eb420f40e2745a12f10f5d37",
+            "bc466b6cde63edafc773f471a1fb98787fabb31f52240c8616ce7e1f587b212d",
         ):
             self.assertIn(marker, session_text)
+        self.assertNotIn("command -v codex", session_text)
+        self.assertNotIn("command -v claude", session_text)
 
     def test_exclusive_output_refuses_existing_path(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

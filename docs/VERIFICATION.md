@@ -218,8 +218,12 @@ the clean-install, Keychain lifecycle, update/rollback, and pinned-client
 records. Its protected preparation job authenticates the two consecutive signed
 distribution runs and the exact-source gateway deployment; clean Apple Silicon
 and Intel self-hosted runners receive no checkout or repository token. A real
-run still requires both dedicated machines and operator interaction, so the
-workflow's presence alone is not pilot evidence.
+run still requires both dedicated machines and operator interaction. The Apple
+Silicon collector pins the npm release integrities and exact executed-file
+hashes for both official clients; it also requires a newly launched app process,
+an empty Keychain session before each login, and one unchanged Render instance
+fingerprint across reliability snapshots. The workflow's presence alone is not
+pilot evidence.
 
 Run the content-free synthetic contract check with:
 

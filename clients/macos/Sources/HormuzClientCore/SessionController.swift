@@ -187,6 +187,15 @@ public actor SessionController {
         guard try store.load() == nil else { throw ClientError.alreadySignedIn }
     }
 
+    /// Prove that the shared Keychain slot is empty before a controlled-pilot
+    /// login. This deliberately does not trust a profile file: a stale or
+    /// removed profile must not hide a retained session record.
+    public func verifySessionStoreEmpty() async throws {
+        let lock = try await directory.lock()
+        defer { lock.unlock() }
+        guard try store.load() == nil else { throw ClientError.alreadySignedIn }
+    }
+
     public func signOut() async throws {
         let lock = try await directory.lock()
         defer { lock.unlock() }

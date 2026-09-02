@@ -182,14 +182,44 @@ Archive Utility to create `~/Downloads/Hormuz.app`. On the Apple Silicon Mac,
 also retain the differently versioned previous notarized ZIP in `~/Downloads`.
 Leave `/Applications/Hormuz.app` absent on both machines. Install the official
 pinned Codex `0.147.0` and Claude Code `2.1.233` clients on the Apple Silicon Mac
-without installing Xcode or Command Line Tools.
+without installing Xcode or Command Line Tools. Use a private, fixed install
+root so the collector never resolves an arbitrary `PATH` wrapper:
+
+```sh
+install -d -m 0700 "$HOME/.hormuz-pilot-clients"
+npm install --prefix "$HOME/.hormuz-pilot-clients" --no-save --package-lock=false \
+  '@openai/codex@0.147.0' \
+  '@anthropic-ai/claude-code@2.1.233'
+chmod 0700 "$HOME/.hormuz-pilot-clients"
+```
+
+The reviewed collector invokes the authenticated native executables directly.
+It rejects changed bytes, a symlinked or shared install root, group/world
+writable files, another owner, a missing or ambiguous Codex runtime, or a
+version mismatch. The pinned provenance is:
+
+| Release object | npm SHA-512 integrity | Executed-file SHA-256 |
+| --- | --- | --- |
+| `@openai/codex@0.147.0` entrypoint | `sha512-EQLEXecAG2ptxI7UpBMo2TR/ga5596/c/OsYF/0LoUDh5JANZ7IoGqlzBEWbuEVQ76JePIbtTW/ihCkp1a7Z3w==` | `134063e133f0b4244fa3b251acf973d4fe4b4aeeacbdc135211bf480f59f1477` |
+| `@openai/codex@0.147.0-darwin-arm64` runtime | `sha512-BEUVkiOW7kLcRyrMLfAr/h9wF8sRVJyZDy6OHtVn6QGDXiv3BvAZVTY1Pu9xF7KdIdkYXbp4uayN0aDQQaAUJw==` | `19c4f144c5226a9f17c58e6f0fa854843b0f77a6eb420f40e2745a12f10f5d37` |
+| `@anthropic-ai/claude-code@2.1.233` wrapper | `sha512-WS0ZSsNu2zkQonC+rW7HdByMCkPQ2l+hO1G0LdvWTj40kiYr0qAiSJjCBNRIbi0foBol4IFTCKwLHAN83qxxUQ==` | not executed; postinstall copies the runtime below |
+| `@anthropic-ai/claude-code-darwin-arm64@2.1.233` runtime | `sha512-mB2FyJQ0a+FTWbBTSQ3ZTAmm6Qxr5fSU2jA8JpHQ7XslcoKzmDV+/zN8CdGkshwY3kRLx432kDiHcBoTQuc/Dg==` | `bc466b6cde63edafc773f471a1fb98787fabb31f52240c8616ce7e1f587b212d` |
+
+The npm wrapper package copies or hard-links Claude's authenticated native
+runtime into its command path during installation. The collector verifies those
+installed bytes against the SHA-256 derived from the registry-integrity-checked
+runtime tarball before every invocation. Embedded signature metadata is not a
+qualification input because these two published npm binaries do not pass local
+`codesign --verify`; the immutable registry and executed-file digests are the
+provenance boundary.
 
 The clean-machine collector hashes the Safari-downloaded ZIP, extracts that
 same ZIP into a private runner directory with `ditto`, byte-compares the bundle
 tree with Archive Utility's `~/Downloads/Hormuz.app`, and requires Apple team
-`R267LZMUTY` from `codesign` before installation. The lifecycle collector pins
-the same team on the retained previous build, candidate build, and each installed
-replacement.
+`R267LZMUTY` from `codesign` before installation. It captures every pre-launch
+Hormuz PID and accepts only a new, still-running process whose command path is
+the newly installed app executable. The lifecycle collector pins the same team
+on the retained previous build, candidate build, and each installed replacement.
 
 Dispatch **Mac controlled-pilot operations** from the exact candidate commit on
 `main`, supplying only:
@@ -205,7 +235,12 @@ in through the Hormuz app with a Codex profile, lock and unlock the Mac once,
 then sign in again with a Claude Code profile after the first session is
 revoked and removed. The collector never prints a session credential or client
 output. It rejects any session profile whose HTTPS gateway differs from the
-authenticated deployment origin.
+authenticated deployment origin. Immediately before each requested login, the
+signed app proves that its shared Keychain session slot is empty. Every
+authenticated reliability snapshot must also retain the first snapshot's exact
+Render instance fingerprint. The lock probe accepts the dictionary and legacy
+array encodings produced by supported `ioreg` versions, but only a literal
+Boolean lock state.
 
 The workflow is successful only when the final artifact contains exactly
 `macos-pilot-operations-evidence.json`. Use that workflow run URL as

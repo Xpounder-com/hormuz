@@ -106,7 +106,15 @@ final class SessionTests: PrivateStorageTestCase {
         let clock = TestClock(), store = MemorySessions(), transport = FixtureTransport(clock: TestClock())
         let controller = SessionController(directory: directory, store: store, transport: transport, now: { clock.now() })
         let profile = try profile()
+        try await controller.verifySessionStoreEmpty()
         try await controller.signIn(profile: profile) { _ in }
+
+        do {
+            try await controller.verifySessionStoreEmpty()
+            XCTFail("Expected a retained session to fail the clean-login preflight")
+        } catch {
+            XCTAssertEqual(error as? ClientError, .alreadySignedIn)
+        }
 
         try await controller.verifySession(profileID: profile.id)
         let reliability = try await controller.reliability(profileID: profile.id)
@@ -143,6 +151,7 @@ final class SessionTests: PrivateStorageTestCase {
         // locally retained record only after the second revocation succeeds.
         try await controller.signOut()
         try await controller.verifySessionAbsent(profileID: profile.id)
+        try await controller.verifySessionStoreEmpty()
         XCTAssertNil(try store.load())
         counts = await transport.counts()
         XCTAssertEqual(counts.1, 2)

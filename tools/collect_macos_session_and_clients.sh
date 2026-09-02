@@ -77,6 +77,68 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# These executable hashes are derived from the immutable npm releases recorded
+# in docs/MACOS_PILOT_QUALIFICATION.md. The collector invokes the authenticated
+# native binaries directly so PATH wrappers cannot satisfy official-client proof.
+readonly CODEX_ENTRYPOINT_SHA256=134063e133f0b4244fa3b251acf973d4fe4b4aeeacbdc135211bf480f59f1477
+readonly CODEX_RUNTIME_SHA256=19c4f144c5226a9f17c58e6f0fa854843b0f77a6eb420f40e2745a12f10f5d37
+readonly CLAUDE_RUNTIME_SHA256=bc466b6cde63edafc773f471a1fb98787fabb31f52240c8616ce7e1f587b212d
+readonly PILOT_CLIENT_ROOT="$HOME/.hormuz-pilot-clients"
+CODEX_COMMAND_PATH=""
+CLAUDE_COMMAND_PATH=""
+
+verify_client_file() {
+  local path="$1"
+  local expected_sha256="$2"
+  [[ -f "$path" && ! -L "$path" && -x "$path" ]] || fail client_file_unsafe
+  [[ "$(/usr/bin/stat -f '%Su' "$path")" == "$(/usr/bin/id -un)" ]] \
+    || fail client_file_owner_invalid
+  local mode
+  mode="$(/usr/bin/stat -f '%Lp' "$path")"
+  [[ "$mode" =~ ^[0-7]{3,4}$ ]] || fail client_file_mode_invalid
+  (( (8#$mode & 022) == 0 )) || fail client_file_mode_invalid
+  [[ "$(/usr/bin/shasum -a 256 "$path" | /usr/bin/awk '{print $1}')" == "$expected_sha256" ]] \
+    || fail client_file_digest_invalid
+}
+
+verify_client_binary() {
+  local path="$1"
+  local expected_sha256="$2"
+  verify_client_file "$path" "$expected_sha256"
+}
+
+authenticate_codex_client() {
+  [[ -d "$PILOT_CLIENT_ROOT" && ! -L "$PILOT_CLIENT_ROOT" \
+        && "$(/usr/bin/stat -f '%Lp' "$PILOT_CLIENT_ROOT")" == "700" \
+        && "$(/usr/bin/stat -f '%Su' "$PILOT_CLIENT_ROOT")" == "$(/usr/bin/id -un)" ]] \
+    || fail client_install_root_unsafe
+  local entrypoint="$PILOT_CLIENT_ROOT/node_modules/@openai/codex/bin/codex.js"
+  verify_client_file "$entrypoint" "$CODEX_ENTRYPOINT_SHA256"
+  local nested="$PILOT_CLIENT_ROOT/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex"
+  local hoisted="$PILOT_CLIENT_ROOT/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex"
+  local runtime=""
+  local candidate
+  for candidate in "$nested" "$hoisted"; do
+    if [[ -f "$candidate" && ! -L "$candidate" ]]; then
+      [[ -z "$runtime" ]] || fail codex_runtime_ambiguous
+      runtime="$candidate"
+    fi
+  done
+  [[ -n "$runtime" ]] || fail codex_runtime_missing
+  verify_client_binary "$runtime" "$CODEX_RUNTIME_SHA256"
+  CODEX_COMMAND_PATH="$runtime"
+}
+
+authenticate_claude_client() {
+  [[ -d "$PILOT_CLIENT_ROOT" && ! -L "$PILOT_CLIENT_ROOT" \
+        && "$(/usr/bin/stat -f '%Lp' "$PILOT_CLIENT_ROOT")" == "700" \
+        && "$(/usr/bin/stat -f '%Su' "$PILOT_CLIENT_ROOT")" == "$(/usr/bin/id -un)" ]] \
+    || fail client_install_root_unsafe
+  local runtime="$PILOT_CLIENT_ROOT/node_modules/@anthropic-ai/claude-code/bin/claude.exe"
+  verify_client_binary "$runtime" "$CLAUDE_RUNTIME_SHA256"
+  CLAUDE_COMMAND_PATH="$runtime"
+}
+
 check_archive() {
   local archive="$1"
   local expected_bytes="$2"
@@ -132,15 +194,34 @@ verify_bundle "$CANDIDATE_APP" "$CANDIDATE_VERSION" "$CANDIDATE_BUILD"
 verify_bundle "$PREVIOUS_APP" "$PREVIOUS_VERSION" "$PREVIOUS_BUILD"
 
 restart_app() {
+  local candidate_pid candidate_command
   /usr/bin/pkill -x Hormuz >/dev/null 2>&1 || true
-  /bin/sleep 1
+  local stopped=false
+  for _attempt in {1..10}; do
+    if ! /usr/bin/pgrep -x Hormuz >/dev/null 2>&1; then
+      stopped=true
+      break
+    fi
+    /bin/sleep 1
+  done
+  [[ "$stopped" == true ]] || fail app_process_not_stopped
+  local app_binary=/Applications/Hormuz.app/Contents/MacOS/Hormuz
   /usr/bin/open -n /Applications/Hormuz.app || fail app_launch_failed
   local running=false
   for _attempt in {1..30}; do
-    if /usr/bin/pgrep -x Hormuz >/dev/null 2>&1; then
-      running=true
-      break
-    fi
+    for candidate_pid in $(/usr/bin/pgrep -x Hormuz 2>/dev/null || true); do
+      [[ "$candidate_pid" =~ ^[1-9][0-9]*$ ]] || continue
+      candidate_command="$(/bin/ps -ww -p "$candidate_pid" -o command= 2>/dev/null || true)"
+      if [[ "$candidate_command" == "$app_binary" || "$candidate_command" == "$app_binary "* ]]; then
+        /bin/sleep 2
+        candidate_command="$(/bin/ps -ww -p "$candidate_pid" -o command= 2>/dev/null || true)"
+        if /bin/kill -0 "$candidate_pid" 2>/dev/null \
+            && [[ "$candidate_command" == "$app_binary" || "$candidate_command" == "$app_binary "* ]]; then
+          running=true
+          break 2
+        fi
+      fi
+    done
     /bin/sleep 1
   done
   [[ "$running" == true ]] || fail app_launch_failed
@@ -221,18 +302,37 @@ credential_files_absent() {
   fi
 }
 
-console_locked() {
-  /usr/sbin/ioreg -n Root -d1 -a \
-    | /usr/bin/plutil -extract IOConsoleLocked raw -o - - 2>/dev/null \
-    || fail console_lock_state_unavailable
+require_empty_session_store() {
+  /Applications/Hormuz.app/Contents/MacOS/Hormuz \
+    pilot-evidence session-store-empty --state-directory "$STATE_DIRECTORY" >/dev/null \
+    || fail preexisting_session_detected
 }
 
+console_locked() {
+  local lock_state
+  if lock_state="$(/usr/sbin/ioreg -n Root -d1 -a \
+      | /usr/bin/plutil -extract IOConsoleLocked raw -o - - 2>/dev/null)"; then
+    :
+  elif lock_state="$(/usr/sbin/ioreg -n Root -d1 -a \
+      | /usr/bin/plutil -extract 0.IOConsoleLocked raw -o - - 2>/dev/null)"; then
+    :
+  else
+    fail console_lock_state_unavailable
+  fi
+  [[ "$lock_state" == "true" || "$lock_state" == "false" ]] \
+    || fail console_lock_state_invalid
+  printf '%s\n' "$lock_state"
+}
+
+EXPECTED_INSTANCE_FINGERPRINT=""
 reliability_snapshot() {
   local output="$1"
   /Applications/Hormuz.app/Contents/MacOS/Hormuz \
     pilot-evidence reliability --profile "$ACTIVE_PROFILE_ID" \
     --state-directory "$STATE_DIRECTORY" >"$output" \
     || fail reliability_snapshot_failed
+  local instance_fingerprint
+  instance_fingerprint="$(/usr/bin/plutil -extract deployment.instanceFingerprint raw -o - "$output" 2>/dev/null || true)"
   [[ "$(/usr/bin/plutil -extract schemaId raw -o - "$output")" == "hormuz.provider-reliability-summary" \
         && "$(/usr/bin/plutil -extract schemaVersion raw -o - "$output")" == "1" \
         && "$(/usr/bin/plutil -extract scope raw -o - "$output")" == "current_actor" \
@@ -244,8 +344,14 @@ reliability_snapshot() {
         && "$(/usr/bin/plutil -extract deployment.webConcurrency raw -o - "$output")" == "1" \
         && "$(/usr/bin/plutil -extract deployment.externalOrigin raw -o - "$output")" == "$EXPECTED_GATEWAY" \
         && "$(/usr/bin/plutil -extract deployment.serviceId raw -o - "$output")" == "$EXPECTED_SERVICE_ID" \
-        && "$(/usr/bin/plutil -extract deployment.instanceFingerprint raw -o - "$output")" =~ ^[0-9a-f]{16}$ ]] \
+        && "$instance_fingerprint" =~ ^[0-9a-f]{16}$ ]] \
     || fail reliability_snapshot_invalid
+  if [[ -z "$EXPECTED_INSTANCE_FINGERPRINT" ]]; then
+    EXPECTED_INSTANCE_FINGERPRINT="$instance_fingerprint"
+  else
+    [[ "$instance_fingerprint" == "$EXPECTED_INSTANCE_FINGERPRINT" ]] \
+      || fail reliability_instance_changed
+  fi
 }
 
 live_count() {
@@ -342,11 +448,10 @@ write_client_record() {
 }
 
 run_codex_recovery() {
-  local command_path
-  command_path="$(command -v codex || true)"
-  [[ "$command_path" == /* && -x "$command_path" ]] || fail codex_not_installed
+  authenticate_codex_client
+  local command_path="$CODEX_COMMAND_PATH"
   local version_output
-  version_output="$($command_path --version 2>/dev/null || true)"
+  version_output="$("$command_path" --version 2>/dev/null || true)"
   [[ "$version_output" =~ (^|[^0-9])0\.147\.0([^0-9]|$) ]] || fail codex_version_invalid
   local client_root="$WORK_ROOT/codex"
   /bin/mkdir -m 700 "$client_root" "$client_root/home"
@@ -388,11 +493,10 @@ run_codex_recovery() {
 }
 
 run_claude_recovery() {
-  local command_path
-  command_path="$(command -v claude || true)"
-  [[ "$command_path" == /* && -x "$command_path" ]] || fail claude_not_installed
+  authenticate_claude_client
+  local command_path="$CLAUDE_COMMAND_PATH"
   local version_output
-  version_output="$($command_path --version 2>/dev/null || true)"
+  version_output="$("$command_path" --version 2>/dev/null || true)"
   [[ "$version_output" =~ (^|[^0-9])2\.1\.233([^0-9]|$) ]] || fail claude_version_invalid
   local client_root="$WORK_ROOT/claude"
   /bin/mkdir -m 700 "$client_root" "$client_root/home"
@@ -454,6 +558,7 @@ run_claude_recovery() {
 
 verify_bundle /Applications/Hormuz.app "$CANDIDATE_VERSION" "$CANDIDATE_BUILD"
 restart_app
+require_empty_session_store
 wait_for_active_profile codex
 verify_session
 credential_files_absent
@@ -517,6 +622,7 @@ run_codex_recovery
 credential_files_absent
 
 restart_app
+require_empty_session_store
 wait_for_active_profile claude-code
 verify_session
 run_claude_recovery

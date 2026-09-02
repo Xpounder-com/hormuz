@@ -117,13 +117,25 @@ verify_bundle "$DOWNLOADED_APP"
 /usr/bin/ditto "$DOWNLOADED_APP" /Applications/Hormuz.app \
   || fail applications_install_failed
 verify_bundle /Applications/Hormuz.app
+APP_BINARY=/Applications/Hormuz.app/Contents/MacOS/Hormuz
+PRELAUNCH_PIDS=" $(/usr/bin/pgrep -x Hormuz 2>/dev/null | /usr/bin/tr '\n' ' ' || true)"
 /usr/bin/open -n /Applications/Hormuz.app || fail launch_failed
 launched=false
 for _attempt in {1..30}; do
-  if /usr/bin/pgrep -x Hormuz >/dev/null 2>&1; then
-    launched=true
-    break
-  fi
+  for candidate_pid in $(/usr/bin/pgrep -x Hormuz 2>/dev/null || true); do
+    [[ "$candidate_pid" =~ ^[1-9][0-9]*$ ]] || continue
+    [[ "$PRELAUNCH_PIDS" != *" $candidate_pid "* ]] || continue
+    candidate_command="$(/bin/ps -ww -p "$candidate_pid" -o command= 2>/dev/null || true)"
+    if [[ "$candidate_command" == "$APP_BINARY" || "$candidate_command" == "$APP_BINARY "* ]]; then
+      /bin/sleep 2
+      candidate_command="$(/bin/ps -ww -p "$candidate_pid" -o command= 2>/dev/null || true)"
+      if /bin/kill -0 "$candidate_pid" 2>/dev/null \
+          && [[ "$candidate_command" == "$APP_BINARY" || "$candidate_command" == "$APP_BINARY "* ]]; then
+        launched=true
+        break 2
+      fi
+    fi
+  done
   /bin/sleep 1
 done
 [[ "$launched" == true ]] || fail launch_failed
